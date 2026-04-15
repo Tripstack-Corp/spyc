@@ -21,7 +21,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn from_dir_entry(dir_entry: std::fs::DirEntry) -> std::io::Result<Self> {
+    pub fn from_dir_entry(dir_entry: &std::fs::DirEntry) -> std::io::Result<Self> {
         let path = dir_entry.path();
         let name = dir_entry.file_name().to_string_lossy().into_owned();
         let md = dir_entry.metadata()?;

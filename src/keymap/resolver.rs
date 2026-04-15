@@ -55,27 +55,13 @@ impl Resolver {
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
-                KeyCode::Char('d') | KeyCode::Char('D') => {
-                    ResolverOutcome::Action(Action::Quit)
-                }
-                KeyCode::Char('l') | KeyCode::Char('L') => {
-                    ResolverOutcome::Action(Action::Redraw)
-                }
-                KeyCode::Char('b') | KeyCode::Char('B') => {
-                    ResolverOutcome::Action(Action::PageUp)
-                }
-                KeyCode::Char('f') | KeyCode::Char('F') => {
-                    ResolverOutcome::Action(Action::PageDown)
-                }
-                KeyCode::Char('t') | KeyCode::Char('T') => {
-                    ResolverOutcome::Action(Action::PickToggleAll)
-                }
-                KeyCode::Char('w') | KeyCode::Char('W') => {
-                    ResolverOutcome::Action(Action::ChmodAdd('w'))
-                }
-                KeyCode::Char('x') | KeyCode::Char('X') => {
-                    ResolverOutcome::Action(Action::ChmodAdd('x'))
-                }
+                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::Quit),
+                KeyCode::Char('l' | 'L') => ResolverOutcome::Action(Action::Redraw),
+                KeyCode::Char('b' | 'B') => ResolverOutcome::Action(Action::PageUp),
+                KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::PageDown),
+                KeyCode::Char('t' | 'T') => ResolverOutcome::Action(Action::PickToggleAll),
+                KeyCode::Char('w' | 'W') => ResolverOutcome::Action(Action::ChmodAdd('w')),
+                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -96,7 +82,7 @@ impl Resolver {
             // Count prefix. Leading zero is a motion (home column) in vi; here
             // we only accept digits after something non-zero.
             KeyCode::Char(c @ '0'..='9') => {
-                let digit = (c as u8 - b'0') as u32;
+                let digit = u32::from(c as u8 - b'0');
                 if digit == 0 && self.count.is_none() {
                     // Treat bare `0` as "start of line" — not meaningful yet; ignore.
                     ResolverOutcome::Ignored
@@ -115,7 +101,7 @@ impl Resolver {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Down(n))
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('d') => {
                 self.reset();
                 ResolverOutcome::Action(Action::EnterOrDisplay)
             }
@@ -123,7 +109,7 @@ impl Resolver {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Up(n))
             }
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+            KeyCode::Char('l' | ' ') | KeyCode::Right => {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Right(n))
             }
@@ -148,23 +134,15 @@ impl Resolver {
             }
 
             // Navigation.
-            KeyCode::Char('d') => {
-                self.reset();
-                ResolverOutcome::Action(Action::EnterOrDisplay)
-            }
-            KeyCode::Char('e') | KeyCode::Char('v') => {
+            KeyCode::Char('e' | 'v') => {
                 self.reset();
                 ResolverOutcome::Action(Action::EnterOrEdit)
             }
-            KeyCode::Char('u') | KeyCode::Char('-') => {
+            KeyCode::Char('u' | '-') => {
                 self.reset();
                 ResolverOutcome::Action(Action::Climb)
             }
-            KeyCode::Char('H') | KeyCode::Char('~') => {
-                self.reset();
-                ResolverOutcome::Action(Action::Home)
-            }
-            KeyCode::Home => {
+            KeyCode::Char('H' | '~') | KeyCode::Home => {
                 self.reset();
                 ResolverOutcome::Action(Action::Home)
             }
@@ -180,7 +158,7 @@ impl Resolver {
             }
 
             // Inventory (take / drop / view / empty).
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+            KeyCode::Char('y' | 'Y') => {
                 self.reset();
                 ResolverOutcome::Action(Action::Take)
             }
@@ -208,7 +186,7 @@ impl Resolver {
             }
 
             // Shell-out.
-            KeyCode::Char('!') | KeyCode::Char(';') => {
+            KeyCode::Char('!' | ';') => {
                 self.reset();
                 ResolverOutcome::Action(Action::ShellPrompt)
             }
@@ -231,8 +209,14 @@ impl Resolver {
                 ResolverOutcome::Action(Action::SearchPrev)
             }
 
+            // Help overlay.
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                self.reset();
+                ResolverOutcome::Action(Action::Help)
+            }
+
             // Quit.
-            KeyCode::Char('Q') | KeyCode::Char('q') => {
+            KeyCode::Char('Q' | 'q') => {
                 self.reset();
                 ResolverOutcome::Action(Action::Quit)
             }

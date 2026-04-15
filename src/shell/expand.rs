@@ -79,21 +79,21 @@ mod tests {
     #[test]
     fn expands_single_file() {
         let files = [p("foo bar.txt")];
-        let refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(expand_percent("ls -la %", &refs), "ls -la 'foo bar.txt'");
     }
 
     #[test]
     fn expands_multiple_files() {
         let files = [p("a.txt"), p("b c.txt")];
-        let refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(expand_percent("cat %", &refs), "cat 'a.txt' 'b c.txt'");
     }
 
     #[test]
     fn literal_percent_with_double() {
         let files = [p("x")];
-        let refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
             expand_percent("printf '%%s\\n' %", &refs),
             "printf '%s\\n' 'x'"
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn multiple_occurrences() {
         let files = [p("x")];
-        let refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(expand_percent("cp % %.bak", &refs), "cp 'x' 'x'.bak");
     }
 

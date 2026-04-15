@@ -36,7 +36,7 @@ pub fn resolve_pager() -> Vec<String> {
 /// whitespace. This is what git does. People who need shell features set
 /// `EDITOR` to a wrapper script.
 fn split_command(raw: &str) -> Vec<String> {
-    raw.split_whitespace().map(|s| s.to_string()).collect()
+    raw.split_whitespace().map(ToString::to_string).collect()
 }
 
 /// Heuristic text/binary detection: look for a NUL byte in the first 8 KiB.
@@ -46,9 +46,8 @@ pub fn looks_like_text(path: &Path) -> bool {
         return false;
     };
     let mut buf = [0u8; 8192];
-    let read = match f.read(&mut buf) {
-        Ok(n) => n,
-        Err(_) => return false,
+    let Ok(read) = f.read(&mut buf) else {
+        return false;
     };
     !buf[..read].contains(&0u8)
 }

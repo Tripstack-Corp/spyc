@@ -27,3 +27,47 @@ panic = "abort"
 
 [profile.release-static]
 inherits = "release"
+
+# Clippy lint configuration.
+#
+# We opt into `pedantic` and `nursery` to learn more idiomatic patterns, but
+# mute a small set of lints that are famously noisy or subjective for a
+# binary crate (as opposed to a published library). Each allow has a reason;
+# remove a line if you want to hear that voice again.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Short/long types with the module name baked in are fine; this lint flags
+# things like `fs::FsError` which we deliberately don't have.
+module_name_repetitions = "allow"
+
+# Binary crate — we don't need /// # Errors on every function returning Result.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Too noisy for a UI-heavy codebase full of u16/usize conversions between
+# terminal geometry and list indices.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+
+# We rarely need to mark public items #[must_use]; not useful here.
+must_use_candidate = "allow"
+
+# We intentionally use `if let Some(x) = y { ... } else { ... }` chains for
+# readability; this lint wants us to collapse to `match`.
+option_if_let_else = "allow"
+
+# Dispatch functions (handle_prompt_key, App::apply) are naturally long —
+# one match arm per supported action. Splitting them hurts navigation.
+too_many_lines = "allow"
+
+# "missing backticks in doc" is too eager — it flags things like trailing
+# periods after identifiers and is frequently wrong.
+doc_markdown = "allow"
+
+# `branches_sharing_code` is overly aggressive about "same last statement"
+# suggestions.
+branches_sharing_code = "allow"

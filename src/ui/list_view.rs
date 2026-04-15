@@ -44,7 +44,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn items_per_page(&self) -> usize {
+    pub const fn items_per_page(&self) -> usize {
         self.cols as usize * self.rows as usize
     }
 
@@ -67,16 +67,16 @@ const COL_GAP: u16 = 2;
 const MARKER_W: u16 = 2;
 const MIN_NAME_WIDTH: u16 = 8;
 
-impl<'a> ListView<'a> {
+impl ListView<'_> {
     /// Compute the grid for the page that starts at `self.view_top`.
     pub fn grid(&self, area: Rect) -> Grid {
-        let h = area.height.max(1) as usize;
-        let w = area.width as usize;
+        let height = area.height.max(1) as usize;
+        let width = area.width as usize;
 
         if self.rows.is_empty() {
             return Grid {
                 cols: 1,
-                rows: h as u16,
+                rows: height as u16,
                 col_widths: vec![MIN_NAME_WIDTH + MARKER_W],
             };
         }
@@ -84,46 +84,49 @@ impl<'a> ListView<'a> {
         // Columns are always R = screen_height rows deep. Walk columns
         // starting at view_top, adding columns while the total width still
         // fits on screen. What doesn't fit paginates.
-        let r = h;
+        let rows_per_col = height;
         let tail_start = self.view_top.min(self.rows.len());
         let tail = &self.rows[tail_start..];
-        let widths: Vec<usize> = tail.iter().map(|r| r.display.chars().count()).collect();
-        let n = widths.len();
+        let widths: Vec<usize> = tail.iter().map(|row| row.display.chars().count()).collect();
+        let count = widths.len();
 
         let mut col_widths: Vec<u16> = Vec::new();
         let mut total = 0usize;
-        let mut c = 0usize;
+        let mut col_idx = 0usize;
         loop {
-            let start = c * r;
-            if start >= n {
+            let start = col_idx * rows_per_col;
+            if start >= count {
                 break;
             }
-            let end = (start + r).min(n);
-            let col_w =
-                widths[start..end].iter().copied().max().unwrap_or(0) + MARKER_W as usize;
-            let addition = col_w + if c > 0 { COL_GAP as usize } else { 0 };
-            if total + addition > w {
+            let end = (start + rows_per_col).min(count);
+            let col_w = widths[start..end].iter().copied().max().unwrap_or(0) + MARKER_W as usize;
+            let addition = col_w + if col_idx > 0 { COL_GAP as usize } else { 0 };
+            if total + addition > width {
                 break;
             }
             total += addition;
             col_widths.push(col_w as u16);
-            c += 1;
+            col_idx += 1;
         }
-        if c == 0 {
+        if col_idx == 0 {
             // Screen narrower than one cell. Render one clamped column.
-            let widest = widths.iter().copied().max().unwrap_or(MIN_NAME_WIDTH as usize);
-            col_widths.push((widest + MARKER_W as usize).min(w.max(1)) as u16);
-            c = 1;
+            let widest = widths
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(MIN_NAME_WIDTH as usize);
+            col_widths.push((widest + MARKER_W as usize).min(width.max(1)) as u16);
+            col_idx = 1;
         }
         Grid {
-            cols: c as u16,
-            rows: r as u16,
+            cols: col_idx as u16,
+            rows: rows_per_col as u16,
             col_widths,
         }
     }
 }
 
-impl<'a> Widget for ListView<'a> {
+impl Widget for ListView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.rows.is_empty() {
             if self.empty_marker {
@@ -174,7 +177,9 @@ impl<'a> Widget for ListView<'a> {
                 // text remains legible on the saturated cursor bar and you
                 // can see the selected row from across the room.
                 (
-                    marker_style.bg(theme::CURSOR_BG).add_modifier(Modifier::BOLD),
+                    marker_style
+                        .bg(theme::CURSOR_BG)
+                        .add_modifier(Modifier::BOLD),
                     Style::default()
                         .fg(theme::CURSOR_FG)
                         .bg(theme::CURSOR_BG)
@@ -210,7 +215,6 @@ fn row_style(kind: EntryKind) -> Style {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,7 +248,7 @@ mod tests {
     fn rows_always_match_screen_height() {
         // 12 items on a 10-row screen → 2 columns of up to 10 each.
         let names: Vec<String> = (0..12).map(|i| format!("f{i}")).collect();
-        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let g = grid_for(&refs, 80, 10);
         assert_eq!(g.rows, 10);
         assert_eq!(g.cols, 2);

@@ -13,7 +13,7 @@ use crate::keymap::{Action, Resolver, ResolverOutcome};
 use crate::shell;
 use crate::state::{Cursor, IgnoreMasks, Inventory, Picks};
 use crate::ui::{
-    layout,
+    help, layout,
     list_view::{Grid, ListView, Row},
     prompt::PromptLine,
     status::StatusBar,
@@ -67,7 +67,9 @@ enum PromptKind {
     ShellCmd,
     /// Incremental search. `saved_cursor` is where the cursor was when `/`
     /// was pressed, so Esc can restore it.
-    Search { saved_cursor: usize },
+    Search {
+        saved_cursor: usize,
+    },
 }
 
 pub struct App {
@@ -79,6 +81,9 @@ pub struct App {
     cursor: Cursor,
     resolver: Resolver,
     mode: Mode,
+    /// When true, the key-bindings overlay is drawn on top of everything
+    /// and the next keypress dismisses it.
+    help_visible: bool,
     /// Most recent search term; `n` / `N` use this.
     last_search: Option<String>,
     user_host: String,
@@ -110,6 +115,7 @@ impl App {
             cursor: Cursor::new(),
             resolver: Resolver::new(),
             mode: Mode::Normal,
+            help_visible: false,
             last_search: None,
             user_host: user_host_string(),
             should_quit: false,
@@ -168,7 +174,7 @@ impl App {
             view_top: self.cursor.view_top,
             empty_marker: self.view == View::Dir,
         };
-        self.last_grid = probe.grid(panels.list).clone();
+        self.last_grid = probe.grid(panels.list);
         self.ensure_cursor_visible();
 
         frame.render_widget(
@@ -187,6 +193,11 @@ impl App {
                 buffer: &p.buffer,
             }
             .render(frame, panels.prompt);
+        }
+
+        // Help overlay is painted last so it sits on top of everything.
+        if self.help_visible {
+            help::render(frame, frame.area());
         }
     }
 
@@ -237,16 +248,23 @@ impl App {
     // --- Input handling ---------------------------------------------------
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
+        // While help is up, any keypress dismisses it and is then
+        // swallowed — so the user doesn't accidentally trigger an action.
+        if self.help_visible {
+            let _ = key;
+            self.help_visible = false;
+            return Ok(PostAction::None);
+        }
         if matches!(self.mode, Mode::Prompting(_)) {
-            return self.handle_prompt_key(key);
+            return Ok(self.handle_prompt_key(key));
         }
         if let ResolverOutcome::Action(action) = self.resolver.feed(key) {
-            return self.apply(action);
+            return self.apply(&action);
         }
         Ok(PostAction::None)
     }
 
-    fn handle_prompt_key(&mut self, key: KeyEvent) -> Result<PostAction> {
+    fn handle_prompt_key(&mut self, key: KeyEvent) -> PostAction {
         // Esc cancels; Backspace on an empty buffer cancels too (it's a
         // natural reach — when you've typed nothing and hit Backspace again
         // you clearly meant to back out).
@@ -254,19 +272,19 @@ impl App {
             && matches!(&self.mode, Mode::Prompting(p) if p.buffer.is_empty());
         if matches!(key.code, KeyCode::Esc) || backspace_on_empty {
             self.cancel_prompt();
-            return Ok(PostAction::None);
+            return PostAction::None;
         }
         if matches!(key.code, KeyCode::Enter) {
             let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
-                return Ok(PostAction::None);
+                return PostAction::None;
             };
-            return Ok(self.dispatch_prompt(p));
+            return self.dispatch_prompt(p);
         }
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
             let Mode::Prompting(prompt) = &mut self.mode else {
-                return Ok(PostAction::None);
+                return PostAction::None;
             };
             match key.code {
                 KeyCode::Backspace => {
@@ -318,7 +336,7 @@ impl App {
             self.cursor.clamp(self.rows.len());
         }
 
-        Ok(PostAction::None)
+        PostAction::None
     }
 
     /// Close the prompt without dispatching. For a Search prompt, also
@@ -389,7 +407,7 @@ impl App {
     fn selection_paths(&self) -> Vec<&Path> {
         // `%` expands to picks if any, else the cursor item.
         if self.view == View::Dir && !self.picks.is_empty() {
-            self.picks.iter().map(|p| p.as_path()).collect()
+            self.picks.iter().map(PathBuf::as_path).collect()
         } else if let Some(row) = self.rows.get(self.cursor.index) {
             vec![row.path.as_path()]
         } else {
@@ -399,17 +417,17 @@ impl App {
 
     // --- Action handlers --------------------------------------------------
 
-    fn apply(&mut self, action: Action) -> Result<PostAction> {
+    fn apply(&mut self, action: &Action) -> Result<PostAction> {
         let len = self.rows.len();
         // In a column-major grid, moving one column horizontally advances
         // the flat index by `rows_per_col`. Moving vertically is ±1.
         let rows_per_col = self.last_grid.rows as usize;
         let per_page = self.last_grid.items_per_page();
         match action {
-            Action::Up(n) => self.cursor.move_up(n),
-            Action::Down(n) => self.cursor.move_down(n, len),
-            Action::Left(n) => self.cursor.move_left(n * rows_per_col),
-            Action::Right(n) => self.cursor.move_right(n * rows_per_col, len),
+            Action::Up(n) => self.cursor.move_up(*n),
+            Action::Down(n) => self.cursor.move_down(*n, len),
+            Action::Left(n) => self.cursor.move_left(*n * rows_per_col),
+            Action::Right(n) => self.cursor.move_right(*n * rows_per_col, len),
             Action::PageUp => self.cursor.move_up(per_page),
             Action::PageDown => self.cursor.move_down(per_page, len),
             Action::GotoFirst => self.cursor.goto_first(),
@@ -453,9 +471,9 @@ impl App {
             }
 
             Action::ToggleMask(n) => {
-                if n == 1 {
+                if *n == 1 {
                     self.masks.toggle_mask1();
-                } else if n == 2 {
+                } else if *n == 2 {
                     self.masks.toggle_mask2();
                 }
                 self.rebuild_rows();
@@ -522,9 +540,12 @@ impl App {
                 }
             }
 
-            Action::Redraw => {}
+            Action::Help => {
+                self.help_visible = true;
+            }
+
+            Action::Redraw | Action::Noop => {}
             Action::Quit => self.should_quit = true,
-            Action::Noop => {}
         }
         self.cursor.clamp(self.rows.len());
         Ok(PostAction::None)
@@ -543,7 +564,8 @@ impl App {
             let target_dir = if kind == EntryKind::Dir {
                 path.clone()
             } else {
-                path.parent().map(Path::to_path_buf).unwrap_or(path.clone())
+                path.parent()
+                    .map_or_else(|| path.clone(), Path::to_path_buf)
             };
             self.chdir(&target_dir)?;
             self.view = View::Dir;
@@ -736,20 +758,20 @@ impl Matcher {
         let lower = query.to_lowercase();
         if is_glob {
             match Pattern::new(&lower) {
-                Ok(p) => Matcher::Glob(p),
-                Err(_) => Matcher::Never,
+                Ok(p) => Self::Glob(p),
+                Err(_) => Self::Never,
             }
         } else {
-            Matcher::Prefix(lower)
+            Self::Prefix(lower)
         }
     }
 
     fn matches(&self, name: &str) -> bool {
         let lower = name.to_lowercase();
         match self {
-            Matcher::Prefix(q) => lower.starts_with(q),
-            Matcher::Glob(p) => p.matches(&lower),
-            Matcher::Never => false,
+            Self::Prefix(q) => lower.starts_with(q),
+            Self::Glob(p) => p.matches(&lower),
+            Self::Never => false,
         }
     }
 }
@@ -811,7 +833,7 @@ fn detect_kind(p: &Path) -> EntryKind {
     }
 }
 
-fn on_off(b: bool) -> &'static str {
+const fn on_off(b: bool) -> &'static str {
     if b {
         "on"
     } else {
@@ -822,7 +844,7 @@ fn on_off(b: bool) -> &'static str {
 fn user_host_string() -> String {
     let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
     let host = hostname_best_effort();
-    format!("{}@{}", user, host)
+    format!("{user}@{host}")
 }
 
 fn hostname_best_effort() -> String {

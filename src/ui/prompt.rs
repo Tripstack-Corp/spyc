@@ -13,7 +13,7 @@ pub struct PromptLine<'a> {
     pub buffer: &'a str,
 }
 
-impl<'a> PromptLine<'a> {
+impl PromptLine<'_> {
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let line = Line::from(vec![
             Span::styled(

@@ -17,7 +17,7 @@ pub struct StatusBar<'a> {
 
 const ELLIPSIS: &str = "...";
 
-impl<'a> StatusBar<'a> {
+impl StatusBar<'_> {
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let avail = area.width as usize;
 
@@ -30,7 +30,10 @@ impl<'a> StatusBar<'a> {
 
         let path_budget = avail.saturating_sub(host_w + suffix_w);
         let (path_disp, suffix_disp) = if path_budget >= 8 {
-            (truncate_middle(self.path, path_budget), self.suffix.to_string())
+            (
+                truncate_middle(self.path, path_budget),
+                self.suffix.to_string(),
+            )
         } else {
             let budget = avail.saturating_sub(host_w);
             (truncate_middle(self.path, budget), String::new())

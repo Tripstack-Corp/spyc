@@ -35,14 +35,17 @@ pub enum Action {
     ToggleMask(u8), // a -> 1, o -> 2
 
     // Shell-out.
-    ShellPrompt,     // ! or ; — prompts for a command; `%` expands to selection
-    StartShell,      // $ — drops you into $SHELL in the current directory
-    ChmodAdd(char),  // ^W -> 'w', ^X -> 'x'
+    ShellPrompt,    // ! or ; — prompts for a command; `%` expands to selection
+    StartShell,     // $ — drops you into $SHELL in the current directory
+    ChmodAdd(char), // ^W -> 'w', ^X -> 'x'
 
     // Search.
-    SearchPrompt,    // / — start incremental search
-    SearchNext,      // n — repeat last search forward
-    SearchPrev,      // N — repeat last search backward
+    SearchPrompt, // / — start incremental search
+    SearchNext,   // n — repeat last search forward
+    SearchPrev,   // N — repeat last search backward
+
+    // Help.
+    Help, // ? or F1 — key bindings overlay
 
     // Meta.
     Redraw, // ^L

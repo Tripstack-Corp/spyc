@@ -72,10 +72,11 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
     Ok(())
 }
 
-/// Re-acquire the tty after the child has exited. `EnterAlternateScreen`
-/// is idempotent on most terminals; sending it here means that if the
-/// child's `rmcup` did drop us to the main screen we bounce right back
-/// before anything is visible.
+/// Re-acquire the tty after the child has exited.
+///
+/// `EnterAlternateScreen` is idempotent on most terminals; sending it
+/// here means that if the child's `rmcup` did drop us to the main screen
+/// we bounce right back before anything is visible.
 pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     enable_raw_mode()?;
     execute!(
