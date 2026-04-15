@@ -19,7 +19,7 @@ dist/
 # Package files
 *.jar
 
-# Maven
+# Maven / Rust build output
 target/
 dist/
 
@@ -48,3 +48,6 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Rust / editor
+Cargo.lock.bak
+*.swp
