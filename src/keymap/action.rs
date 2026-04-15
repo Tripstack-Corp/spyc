@@ -47,6 +47,14 @@ pub enum Action {
     // Navigation.
     JumpPrompt, // J — prompt for a path (~, $VAR expanded) and chdir
 
+    // File operations.
+    CopyPrompt,    // c — prompt for destination, cp -r selection
+    MovePrompt,    // m — prompt for destination, mv selection
+    RemovePrompt,  // R — confirm, rm -rf selection
+    MakeDirPrompt, // N — prompt for a directory name
+    LongList,      // L — ls -lh selection | $PAGER
+    FileType,      // f — file(1) on selection, paged output
+
     // Help.
     Help, // ? or F1 — key bindings overlay
 

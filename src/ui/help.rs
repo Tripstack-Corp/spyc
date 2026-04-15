@@ -102,6 +102,17 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "File operations",
+        rows: &[
+            ("c", "copy selection to a destination (prompt)"),
+            ("m", "move selection to a destination (prompt)"),
+            ("R", "remove selection (confirm with y/yes)"),
+            ("M", "make a new directory (prompt)"),
+            ("L", "ls -lh on selection through $PAGER"),
+            ("f", "file(1) on selection"),
+        ],
+    },
+    Section {
         title: "Shell-out",
         rows: &[
             ("!  ;", "prompt shell command (% = selection)"),

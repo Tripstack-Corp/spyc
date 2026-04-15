@@ -4,6 +4,7 @@
 pub mod help;
 pub mod layout;
 pub mod list_view;
+pub mod pager;
 pub mod prompt;
 pub mod status;
 pub mod theme;

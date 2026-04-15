@@ -8,13 +8,14 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use glob::Pattern;
 use ratatui::Frame;
 
-use crate::fs::{Entry, EntryKind, Listing};
+use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, Resolver, ResolverOutcome};
 use crate::shell;
 use crate::state::{Cursor, IgnoreMasks, Inventory, Picks};
 use crate::ui::{
     help, layout,
     list_view::{Grid, ListView, Row},
+    pager::{self, PagerView},
     prompt::PromptLine,
     status::StatusBar,
 };
@@ -56,6 +57,18 @@ enum ActivateIntent {
     Edit,    // $EDITOR
 }
 
+#[derive(Debug, Clone)]
+struct FlashMessage {
+    text: String,
+    kind: FlashKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FlashKind {
+    Info,
+    Error,
+}
+
 struct Prompt {
     kind: PromptKind,
     prefix: String,
@@ -71,6 +84,12 @@ enum PromptKind {
         saved_cursor: usize,
     },
     Jump,
+    CopyTo,
+    MoveTo,
+    MakeDir,
+    /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
+    /// anything else is treated as a cancel.
+    RemoveConfirm,
 }
 
 pub struct App {
@@ -85,8 +104,14 @@ pub struct App {
     /// When true, the key-bindings overlay is drawn on top of everything
     /// and the next keypress dismisses it.
     help_visible: bool,
+    /// When set, a scrollable text pager sits on top of the file list.
+    /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
+    pager: Option<PagerView>,
     /// Most recent search term; `n` / `N` use this.
     last_search: Option<String>,
+    /// Transient message shown in the prompt row when no prompt is active.
+    /// Cleared on the next keypress so it doesn't linger after you've read it.
+    flash: Option<FlashMessage>,
     user_host: String,
     should_quit: bool,
 
@@ -117,7 +142,9 @@ impl App {
             resolver: Resolver::new(),
             mode: Mode::Normal,
             help_visible: false,
+            pager: None,
             last_search: None,
+            flash: None,
             user_host: user_host_string(),
             should_quit: false,
             rows: Vec::new(),
@@ -194,6 +221,26 @@ impl App {
                 buffer: &p.buffer,
             }
             .render(frame, panels.prompt);
+        } else if let Some(flash) = &self.flash {
+            use ratatui::{
+                style::{Modifier, Style},
+                text::{Line, Span},
+                widgets::Paragraph,
+            };
+            let color = match flash.kind {
+                FlashKind::Info => crate::ui::theme::TAKE,
+                FlashKind::Error => crate::ui::theme::CURSOR_BG,
+            };
+            let line = Line::from(Span::styled(
+                flash.text.clone(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(line), panels.prompt);
+        }
+
+        // Pager comes after list but before help (help always wins).
+        if let Some(view) = &self.pager {
+            pager::render(frame, frame.area(), view);
         }
 
         // Help overlay is painted last so it sits on top of everything.
@@ -249,11 +296,19 @@ impl App {
     // --- Input handling ---------------------------------------------------
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
+        // Any keypress clears a lingering flash message.
+        self.flash = None;
+
         // While help is up, any keypress dismisses it and is then
         // swallowed — so the user doesn't accidentally trigger an action.
         if self.help_visible {
             let _ = key;
             self.help_visible = false;
+            return Ok(PostAction::None);
+        }
+        // Pager eats all keys until dismissed.
+        if self.pager.is_some() {
+            self.handle_pager_key(key);
             return Ok(PostAction::None);
         }
         if matches!(self.mode, Mode::Prompting(_)) {
@@ -266,6 +321,15 @@ impl App {
     }
 
     fn handle_prompt_key(&mut self, key: KeyEvent) -> PostAction {
+        // Destructive-confirm prompts are single-key: `y` / `Y` proceeds
+        // immediately, anything else cancels. No Enter needed.
+        if matches!(
+            &self.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::RemoveConfirm)
+        ) {
+            return self.handle_remove_confirm_key(key);
+        }
+
         // Esc cancels; Backspace on an empty buffer cancels too (it's a
         // natural reach — when you've typed nothing and hit Backspace again
         // you clearly meant to back out).
@@ -340,6 +404,26 @@ impl App {
         PostAction::None
     }
 
+    /// Single-key confirmation for `R`. `y` / `Y` triggers the delete;
+    /// anything else — including Enter, Esc, or any other letter — cancels.
+    /// The prompt closes in every case.
+    fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> PostAction {
+        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
+        self.mode = Mode::Normal;
+        if !confirmed {
+            return PostAction::None;
+        }
+        let paths = self.selection_paths();
+        if paths.is_empty() {
+            return PostAction::None;
+        }
+        let count = paths.len();
+        self.run_and_flash(fs::ops::remove_all(&paths), format!("removed {count} item(s)"));
+        self.picks.clear();
+        self.refresh_listing();
+        PostAction::None
+    }
+
     /// Close the prompt without dispatching. For a Search prompt, also
     /// restore the cursor position that was saved when `/` was pressed.
     fn cancel_prompt(&mut self) {
@@ -382,7 +466,88 @@ impl App {
                 }
                 PostAction::None
             }
+            PromptKind::CopyTo => {
+                self.run_selection_to(&prompt.buffer, fs::ops::copy_selection_to, "copied");
+                PostAction::None
+            }
+            PromptKind::MoveTo => {
+                self.run_selection_to(&prompt.buffer, fs::ops::move_selection_to, "moved");
+                PostAction::None
+            }
+            PromptKind::MakeDir => {
+                let name = prompt.buffer.trim();
+                if !name.is_empty() {
+                    let target = crate::paths::expand(name);
+                    let resolved = if target.is_absolute() {
+                        target
+                    } else {
+                        self.listing.dir.join(&target)
+                    };
+                    self.run_and_flash(
+                        std::fs::create_dir_all(&resolved),
+                        format!("created {}", resolved.display()),
+                    );
+                    self.refresh_listing();
+                }
+                PostAction::None
+            }
+            // RemoveConfirm never reaches dispatch — it's handled as a
+            // single-key confirm in `handle_remove_confirm_key`.
+            PromptKind::RemoveConfirm => PostAction::None,
         }
+    }
+
+    /// Resolve `raw_dest` and run a copy-like or move-like operation across
+    /// the current selection. Flash a success / error message afterwards
+    /// and refresh the listing so results are visible immediately.
+    fn run_selection_to(
+        &mut self,
+        raw_dest: &str,
+        op: fn(&[&Path], &Path) -> std::io::Result<()>,
+        verb: &str,
+    ) {
+        let dest_trim = raw_dest.trim();
+        if dest_trim.is_empty() {
+            return;
+        }
+        let paths = self.selection_paths();
+        if paths.is_empty() {
+            self.flash_error("nothing selected");
+            return;
+        }
+        let count = paths.len();
+        let expanded = crate::paths::expand(dest_trim);
+        let dest = if expanded.is_absolute() {
+            expanded
+        } else {
+            self.listing.dir.join(&expanded)
+        };
+        self.run_and_flash(op(&paths, &dest), format!("{verb} {count} item(s) to {}", dest.display()));
+        // Picks point at paths that may no longer exist after a move.
+        self.picks.clear();
+        self.refresh_listing();
+    }
+
+    /// Set the flash message based on the result of a mutating operation.
+    fn run_and_flash(&mut self, result: std::io::Result<()>, success_msg: String) {
+        match result {
+            Ok(()) => self.flash_info(success_msg),
+            Err(e) => self.flash_error(format!("error: {e}")),
+        }
+    }
+
+    fn flash_info<S: Into<String>>(&mut self, text: S) {
+        self.flash = Some(FlashMessage {
+            text: text.into(),
+            kind: FlashKind::Info,
+        });
+    }
+
+    fn flash_error<S: Into<String>>(&mut self, text: S) {
+        self.flash = Some(FlashMessage {
+            text: text.into(),
+            kind: FlashKind::Error,
+        });
     }
 
     /// Navigate to an arbitrary path. `target` is expanded for `~` and
@@ -448,6 +613,41 @@ impl App {
     /// Advance the cursor by `delta` entries in flat order, wrapping at
     /// both ends of the list. This is what `j` / `k` use so pressing `j`
     /// at the bottom jumps back to the top (and vice versa).
+    /// Route a key to the pager overlay. Also uses vi-like motion so the
+    /// pager feels native to the rest of the UI.
+    fn handle_pager_key(&mut self, key: KeyEvent) {
+        let Some(view) = &mut self.pager else {
+            return;
+        };
+        // Use the current list-panel height as the viewport — we render
+        // the pager within ~90% of the screen, so this is roughly right.
+        let viewport = self.last_grid.rows.max(4);
+        match key.code {
+            KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
+                self.pager = None;
+            }
+            KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
+            KeyCode::Char('k') | KeyCode::Up => view.scroll_by(-1, viewport),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                view.scroll_by(i32::from(viewport) / 2, viewport);
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                view.scroll_by(-i32::from(viewport) / 2, viewport);
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                view.scroll_by(i32::from(viewport), viewport);
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                view.scroll_by(-i32::from(viewport), viewport);
+            }
+            KeyCode::PageDown | KeyCode::Char(' ') => view.scroll_by(i32::from(viewport), viewport),
+            KeyCode::PageUp => view.scroll_by(-i32::from(viewport), viewport),
+            KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
+            KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
+            _ => {}
+        }
+    }
+
     fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
         if len == 0 {
             return;
@@ -595,9 +795,20 @@ impl App {
                 if paths.is_empty() {
                     return Ok(PostAction::None);
                 }
-                let template = format!("chmod +{mode_char} %");
-                let cmd = shell::expand_percent(&template, &paths);
-                return Ok(sh_c(&cmd, true));
+                // +w adds user-write (0o200); +x adds exec-for-all (0o111).
+                // Mirroring the common shell conventions without consulting
+                // umask — if the user wants finer control they can !chmod %.
+                let bits: u32 = match mode_char {
+                    'w' => 0o200,
+                    'x' => 0o111,
+                    _ => return Ok(PostAction::None),
+                };
+                let count = paths.len();
+                self.run_and_flash(
+                    fs::ops::chmod_add_bits(&paths, bits),
+                    format!("chmod +{mode_char} on {count} item(s)"),
+                );
+                self.refresh_listing();
             }
 
             Action::SearchPrompt => {
@@ -643,6 +854,80 @@ impl App {
                     buffer: String::new(),
                 });
             }
+
+            Action::CopyPrompt => {
+                if !self.selection_paths().is_empty() {
+                    self.mode = Mode::Prompting(Prompt {
+                        kind: PromptKind::CopyTo,
+                        prefix: "copy to: ".to_string(),
+                        buffer: String::new(),
+                    });
+                }
+            }
+            Action::MovePrompt => {
+                if !self.selection_paths().is_empty() {
+                    self.mode = Mode::Prompting(Prompt {
+                        kind: PromptKind::MoveTo,
+                        prefix: "move to: ".to_string(),
+                        buffer: String::new(),
+                    });
+                }
+            }
+            Action::MakeDirPrompt => {
+                self.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::MakeDir,
+                    prefix: "mkdir: ".to_string(),
+                    buffer: String::new(),
+                });
+            }
+            Action::RemovePrompt => {
+                let count = self.selection_paths().len();
+                if count > 0 {
+                    self.mode = Mode::Prompting(Prompt {
+                        kind: PromptKind::RemoveConfirm,
+                        prefix: format!("remove {count} file(s)? (y/N): "),
+                        buffer: String::new(),
+                    });
+                }
+            }
+            Action::LongList => {
+                // No selection → list the whole current directory.
+                let owned: Vec<PathBuf>;
+                let paths: Vec<&Path> = if self.selection_paths().is_empty() {
+                    owned = self.listing.entries.iter().map(|e| e.path.clone()).collect();
+                    owned.iter().map(PathBuf::as_path).collect()
+                } else {
+                    self.selection_paths()
+                };
+                let lines = fs::ops::format_long_listing(&paths);
+                let title = format!("long listing — {}", self.listing.dir.display());
+                self.pager = Some(PagerView::new(title, lines));
+            }
+            Action::FileType => {
+                let paths = self.selection_paths();
+                if paths.is_empty() {
+                    return Ok(PostAction::None);
+                }
+                if paths.len() == 1 {
+                    let label = fs::ops::file_type_label(paths[0]);
+                    let name = paths[0]
+                        .file_name()
+                        .map_or_else(|| paths[0].display().to_string(), |n| n.to_string_lossy().into_owned());
+                    self.flash_info(format!("{name}: {label}"));
+                } else {
+                    let lines: Vec<String> = paths
+                        .iter()
+                        .map(|p| {
+                            let name = p
+                                .file_name()
+                                .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned());
+                            format!("{name}: {}", fs::ops::file_type_label(p))
+                        })
+                        .collect();
+                    self.pager = Some(PagerView::new("file types", lines));
+                }
+            }
+
             Action::Help => {
                 self.help_visible = true;
             }

@@ -215,6 +215,34 @@ impl Resolver {
                 ResolverOutcome::Action(Action::JumpPrompt)
             }
 
+            // File operations.
+            KeyCode::Char('c') => {
+                self.reset();
+                ResolverOutcome::Action(Action::CopyPrompt)
+            }
+            KeyCode::Char('m') => {
+                self.reset();
+                ResolverOutcome::Action(Action::MovePrompt)
+            }
+            KeyCode::Char('R') => {
+                self.reset();
+                ResolverOutcome::Action(Action::RemovePrompt)
+            }
+            KeyCode::Char('M') => {
+                // Spy uses `N` for mkdir but we kept `N` for vi-style
+                // reverse search. `M` (mkdir) is the obvious mnemonic.
+                self.reset();
+                ResolverOutcome::Action(Action::MakeDirPrompt)
+            }
+            KeyCode::Char('L') => {
+                self.reset();
+                ResolverOutcome::Action(Action::LongList)
+            }
+            KeyCode::Char('f') => {
+                self.reset();
+                ResolverOutcome::Action(Action::FileType)
+            }
+
             // Help overlay.
             KeyCode::Char('?') | KeyCode::F(1) => {
                 self.reset();
