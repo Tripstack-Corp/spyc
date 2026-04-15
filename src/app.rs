@@ -9,7 +9,8 @@ use glob::Pattern;
 use ratatui::Frame;
 
 use crate::fs::{self, Entry, EntryKind, Listing};
-use crate::keymap::{Action, Resolver, ResolverOutcome};
+use crate::config::Config;
+use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::shell;
 use crate::state::{Cursor, IgnoreMasks, Inventory, Picks};
 use crate::ui::{
@@ -18,6 +19,7 @@ use crate::ui::{
     pager::{self, PagerView},
     prompt::PromptLine,
     status::StatusBar,
+    theme::Theme,
 };
 use crate::{resume_tui, suspend_tui, Tui};
 
@@ -100,6 +102,9 @@ pub struct App {
     view: View,
     cursor: Cursor,
     resolver: Resolver,
+    user_keymap: UserKeymap,
+    config: Config,
+    theme: Theme,
     mode: Mode,
     /// When true, the key-bindings overlay is drawn on top of everything
     /// and the next keypress dismisses it.
@@ -132,14 +137,34 @@ impl App {
     pub fn new() -> Result<Self> {
         let cwd = std::env::current_dir().context("getting current directory")?;
         let listing = Listing::read(&cwd)?;
+        let (config, load_note) = match Config::load_default(&cwd) {
+            Ok(c) => {
+                let note = if c.sources.is_empty() {
+                    None
+                } else {
+                    Some(format!("loaded {} config file(s)", c.sources.len()))
+                };
+                (c, note)
+            }
+            Err(e) => (Config::default(), Some(format!("config error: {e}"))),
+        };
+        let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
+        let theme = Theme::default().with_overrides(&config.colors);
         let mut app = Self {
             listing,
             picks: Picks::new(),
             inventory: Inventory::new(),
-            masks: IgnoreMasks::default(),
+            masks: {
+                let mut m = IgnoreMasks::default();
+                m.apply_config(&config.ignore_masks);
+                m
+            },
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),
+            user_keymap,
+            config,
+            theme,
             mode: Mode::Normal,
             help_visible: false,
             pager: None,
@@ -155,12 +180,86 @@ impl App {
             },
         };
         app.rebuild_rows();
+        if let Some(msg) = load_note {
+            app.flash_info(msg);
+        }
         Ok(app)
     }
 
+    /// Reload `.cspyrc.toml` and rebuild the user keymap. Leaves the old
+    /// config in place on failure and flashes the error.
+    pub fn reload_config(&mut self) {
+        match Config::load_default(&self.listing.dir) {
+            Ok(new_config) => {
+                self.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
+                self.theme = Theme::default().with_overrides(&new_config.colors);
+                // Reset to built-in mask defaults first, then apply config
+                // overrides — so removing `[[ignore_masks]]` entries from
+                // the rc file reverts the group to defaults on reload.
+                self.masks = IgnoreMasks::default();
+                self.masks.apply_config(&new_config.ignore_masks);
+                let count = new_config.sources.len();
+                self.config = new_config;
+                self.rebuild_rows();
+                self.flash_info(format!("reloaded {count} config file(s)"));
+            }
+            Err(e) => self.flash_error(format!("config error: {e}")),
+        }
+    }
+
+    /// Candidate config paths — used by the file watcher. We watch the
+    /// directories holding these even when the files don't exist yet so
+    /// that `touch ~/.cspyrc.toml` picks up immediately.
+    fn candidate_config_paths(&self) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if let Some(home) = std::env::var_os("HOME") {
+            out.push(PathBuf::from(home).join(".cspyrc.toml"));
+        }
+        out.push(self.listing.dir.join(".cspyrc.toml"));
+        out
+    }
+
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
+        use notify::{RecursiveMode, Watcher};
+        use std::sync::mpsc;
+
+        // File watcher: notify posts events into `rx`. We watch the
+        // directories containing our config files (not the files
+        // themselves) because many editors replace-on-save, which fires a
+        // Remove on the old inode — watching the directory catches the
+        // subsequent Create/Write.
+        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let mut fs_watcher: Option<notify::RecommendedWatcher> =
+            notify::recommended_watcher(tx).ok();
+        let mut already_watched: std::collections::HashSet<PathBuf> =
+            std::collections::HashSet::new();
+        if let Some(w) = fs_watcher.as_mut() {
+            for path in self.candidate_config_paths() {
+                if let Some(parent) = path.parent() {
+                    if parent.is_dir() && already_watched.insert(parent.to_path_buf()) {
+                        let _ = w.watch(parent, RecursiveMode::NonRecursive);
+                    }
+                }
+            }
+        }
+
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
+
+            // Drain any pending watcher events. Only reload once per poll
+            // iteration no matter how many events arrived.
+            let mut needs_reload = false;
+            while let Ok(result) = rx.try_recv() {
+                if let Ok(ev) = result {
+                    if ev.paths.iter().any(|p| self.is_config_path(p)) {
+                        needs_reload = true;
+                    }
+                }
+            }
+            if needs_reload {
+                self.reload_config();
+            }
+
             if event::poll(Duration::from_millis(250))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
@@ -182,6 +281,11 @@ impl App {
         Ok(())
     }
 
+    fn is_config_path(&self, path: &Path) -> bool {
+        self.candidate_config_paths().iter().any(|c| c == path)
+            || self.config.sources.iter().any(|c| c == path)
+    }
+
     // --- Rendering --------------------------------------------------------
 
     fn render(&mut self, frame: &mut Frame) {
@@ -192,6 +296,7 @@ impl App {
             user_host: &self.user_host,
             path: &path,
             suffix: &suffix,
+            theme: &self.theme,
         }
         .render(frame, panels.status);
 
@@ -201,6 +306,7 @@ impl App {
             cursor: self.cursor.index,
             view_top: self.cursor.view_top,
             empty_marker: self.view == View::Dir,
+            theme: &self.theme,
         };
         self.last_grid = probe.grid(panels.list);
         self.ensure_cursor_visible();
@@ -211,6 +317,7 @@ impl App {
                 cursor: self.cursor.index,
                 view_top: self.cursor.view_top,
                 empty_marker: self.view == View::Dir,
+                theme: &self.theme,
             },
             panels.list,
         );
@@ -219,6 +326,7 @@ impl App {
             PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
+                theme: &self.theme,
             }
             .render(frame, panels.prompt);
         } else if let Some(flash) = &self.flash {
@@ -228,8 +336,8 @@ impl App {
                 widgets::Paragraph,
             };
             let color = match flash.kind {
-                FlashKind::Info => crate::ui::theme::TAKE,
-                FlashKind::Error => crate::ui::theme::CURSOR_BG,
+                FlashKind::Info => self.theme.take,
+                FlashKind::Error => self.theme.cursor_bg,
             };
             let line = Line::from(Span::styled(
                 flash.text.clone(),
@@ -240,12 +348,12 @@ impl App {
 
         // Pager comes after list but before help (help always wins).
         if let Some(view) = &self.pager {
-            pager::render(frame, frame.area(), view);
+            pager::render(frame, frame.area(), view, &self.theme);
         }
 
         // Help overlay is painted last so it sits on top of everything.
         if self.help_visible {
-            help::render(frame, frame.area());
+            help::render(frame, frame.area(), &self.theme, &self.user_keymap);
         }
     }
 
@@ -314,9 +422,52 @@ impl App {
         if matches!(self.mode, Mode::Prompting(_)) {
             return Ok(self.handle_prompt_key(key));
         }
-        if let ResolverOutcome::Action(action) = self.resolver.feed(key) {
-            return self.apply(&action);
+        match self.resolver.feed(key, &self.user_keymap) {
+            ResolverOutcome::Action(action) => return self.apply(&action),
+            ResolverOutcome::User(bound) => return self.apply_user(&bound),
+            ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
         }
+        Ok(PostAction::None)
+    }
+
+    /// Dispatch a user-defined binding. Inline-data actions (unix command,
+    /// preset pattern, preset path) run through the same machinery as the
+    /// built-in prompts but skip the prompt UI.
+    fn apply_user(&mut self, bound: &BoundAction) -> Result<PostAction> {
+        match bound {
+            BoundAction::Plain(action) => return self.apply(action),
+            BoundAction::UnixCmd(template) => {
+                let cmd = shell::expand_percent(template, &self.selection_paths());
+                return Ok(sh_c(&cmd, true));
+            }
+            BoundAction::PatternPick(pattern) => {
+                if let Ok(pat) = glob::Pattern::new(pattern) {
+                    for e in &self.listing.entries {
+                        if pat.matches(&e.name) {
+                            self.picks.insert(&e.path);
+                        }
+                    }
+                }
+            }
+            BoundAction::Jump(path) => {
+                let _ = self.jump_to(path);
+            }
+            BoundAction::Copy(dest) => {
+                self.run_selection_to(dest, fs::ops::copy_selection_to, "copied");
+            }
+            BoundAction::Move(dest) => {
+                self.run_selection_to(dest, fs::ops::move_selection_to, "moved");
+            }
+            BoundAction::ToggleMaskFixed(n) => {
+                if *n == 1 {
+                    self.masks.toggle_mask1();
+                } else if *n == 2 {
+                    self.masks.toggle_mask2();
+                }
+                self.rebuild_rows();
+            }
+        }
+        self.cursor.clamp(self.rows.len());
         Ok(PostAction::None)
     }
 
@@ -931,6 +1082,8 @@ impl App {
             Action::Help => {
                 self.help_visible = true;
             }
+
+            Action::ReloadConfig => self.reload_config(),
 
             Action::Redraw | Action::Noop => {}
             Action::Quit => self.should_quit = true,

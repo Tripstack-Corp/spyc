@@ -13,7 +13,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::ui::theme;
+use crate::ui::theme::Theme;
 
 pub struct PagerView {
     pub title: String,
@@ -60,7 +60,7 @@ impl PagerView {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, view: &PagerView) {
+pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let inner_area = centered_rect(area, 90, 92);
 
     frame.render_widget(Clear, inner_area);
@@ -73,7 +73,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView) {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         title,
         Style::default()
-            .fg(theme::PROMPT_PREFIX)
+            .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD),
     ));
     let body_area = block.inner(inner_area);
@@ -85,7 +85,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView) {
         .map(|text| {
             Line::from(Span::styled(
                 text.clone(),
-                Style::default().fg(theme::STATUS_PATH),
+                Style::default().fg(theme.status_path),
             ))
         })
         .collect();

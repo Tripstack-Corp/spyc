@@ -6,6 +6,8 @@
 
 pub mod action;
 pub mod resolver;
+pub mod user;
 
 pub use action::Action;
 pub use resolver::{Resolver, ResolverOutcome};
+pub use user::{BoundAction, UserKeymap};

@@ -18,7 +18,7 @@ use ratatui::{
 };
 
 use crate::fs::EntryKind;
-use crate::ui::theme;
+use crate::ui::theme::Theme;
 
 pub struct Row {
     pub display: String,
@@ -32,6 +32,7 @@ pub struct ListView<'a> {
     pub cursor: usize,
     pub view_top: usize,
     pub empty_marker: bool,
+    pub theme: &'a Theme,
 }
 
 /// Geometry of the rendered grid for the currently visible page.
@@ -130,7 +131,7 @@ impl Widget for ListView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.rows.is_empty() {
             if self.empty_marker {
-                let style = Style::default().fg(theme::EMPTY_MARKER);
+                let style = Style::default().fg(self.theme.empty_marker);
                 buf.set_string(area.x, area.y, "<Empty>", style);
             }
             return;
@@ -163,14 +164,14 @@ impl Widget for ListView<'_> {
                 ' '
             };
             let marker_style = if row.picked {
-                theme::pick_style()
+                self.theme.pick_style()
             } else if row.taken {
-                theme::take_style()
+                self.theme.take_style()
             } else {
                 Style::default()
             };
 
-            let name_style = row_style(row.kind);
+            let name_style = row_style(row.kind, self.theme);
             let highlighted = (start + i) == self.cursor;
             let (marker_style, name_style) = if highlighted {
                 // On the cursor row, force a bright white foreground so the
@@ -178,11 +179,11 @@ impl Widget for ListView<'_> {
                 // can see the selected row from across the room.
                 (
                     marker_style
-                        .bg(theme::CURSOR_BG)
+                        .bg(self.theme.cursor_bg)
                         .add_modifier(Modifier::BOLD),
                     Style::default()
-                        .fg(theme::CURSOR_FG)
-                        .bg(theme::CURSOR_BG)
+                        .fg(self.theme.cursor_fg)
+                        .bg(self.theme.cursor_bg)
                         .add_modifier(Modifier::BOLD),
                 )
             } else {
@@ -205,13 +206,13 @@ impl Widget for ListView<'_> {
     }
 }
 
-fn row_style(kind: EntryKind) -> Style {
+fn row_style(kind: EntryKind, theme: &Theme) -> Style {
     match kind {
-        EntryKind::Dir => theme::dir_style(),
-        EntryKind::Executable => theme::exec_style(),
-        EntryKind::Symlink => theme::symlink_style(),
-        EntryKind::File => theme::file_style(),
-        EntryKind::Other => theme::other_style(),
+        EntryKind::Dir => theme.dir_style(),
+        EntryKind::Executable => theme.exec_style(),
+        EntryKind::Symlink => theme.symlink_style(),
+        EntryKind::File => theme.file_style(),
+        EntryKind::Other => theme.other_style(),
     }
 }
 
@@ -229,12 +230,14 @@ mod tests {
     }
 
     fn grid_for(names: &[&str], w: u16, h: u16) -> Grid {
+        let theme = Theme::default();
         let rows: Vec<Row> = names.iter().map(|n| row(n)).collect();
         let lv = ListView {
             rows: &rows,
             cursor: 0,
             view_top: 0,
             empty_marker: false,
+            theme: &theme,
         };
         lv.grid(Rect {
             x: 0,

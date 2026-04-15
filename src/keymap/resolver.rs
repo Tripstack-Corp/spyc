@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::action::Action;
+use super::user::{BoundAction, UserKeymap};
 
 /// State carried between keystrokes while we wait for a multi-key sequence
 /// to complete (count prefix, `gg`, future operator-pending, marks, search).
@@ -23,6 +24,8 @@ enum PendingSeq {
 pub enum ResolverOutcome {
     /// An action is ready to execute.
     Action(Action),
+    /// A user-defined binding carrying inline data (unix cmd, preset pattern, …).
+    User(BoundAction),
     /// Waiting for more input (e.g. count digits, or first `g` of `gg`).
     Pending,
     /// Unknown key, no effect.
@@ -49,7 +52,15 @@ impl Resolver {
         self.pending = PendingSeq::Normal;
     }
 
-    pub fn feed(&mut self, ev: KeyEvent) -> ResolverOutcome {
+    /// Feed a key through the resolver, first consulting the user keymap
+    /// and falling through to the built-in default bindings.
+    pub fn feed(&mut self, ev: KeyEvent, user: &UserKeymap) -> ResolverOutcome {
+        // User bindings always win. We still reset any pending multi-key
+        // state so `g` followed by a user-bound key doesn't trigger `gg`.
+        if let Some(action) = user.find(&ev) {
+            self.reset();
+            return ResolverOutcome::User(action.clone());
+        }
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
 
         // Control-codes take priority and reset any pending state.
@@ -62,6 +73,7 @@ impl Resolver {
                 KeyCode::Char('t' | 'T') => ResolverOutcome::Action(Action::PickToggleAll),
                 KeyCode::Char('w' | 'W') => ResolverOutcome::Action(Action::ChmodAdd('w')),
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),
+                KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::ReloadConfig),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

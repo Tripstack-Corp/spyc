@@ -6,13 +6,14 @@ use ratatui::{
     Frame,
 };
 
-use crate::ui::theme;
+use crate::ui::theme::Theme;
 
 pub struct StatusBar<'a> {
     pub user_host: &'a str,
     pub path: &'a str,
     /// Optional trailing state, e.g. `[picks:2 inv:5 m1:on m2:on]`.
     pub suffix: &'a str,
+    pub theme: &'a Theme,
 }
 
 const ELLIPSIS: &str = "...";
@@ -43,16 +44,16 @@ impl StatusBar<'_> {
             Span::styled(
                 format!("{}: ", self.user_host),
                 Style::default()
-                    .fg(theme::STATUS_USER)
+                    .fg(self.theme.status_user)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(path_disp, Style::default().fg(theme::STATUS_PATH)),
+            Span::styled(path_disp, Style::default().fg(self.theme.status_path)),
         ];
         if !suffix_disp.is_empty() {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
                 suffix_disp,
-                Style::default().fg(theme::STATUS_SUFFIX),
+                Style::default().fg(self.theme.status_suffix),
             ));
         }
         frame.render_widget(Paragraph::new(Line::from(spans)), area);

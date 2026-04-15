@@ -58,6 +58,9 @@ pub enum Action {
     // Help.
     Help, // ? or F1 — key bindings overlay
 
+    // Config reload.
+    ReloadConfig, // ^R — re-read ~/.cspyrc.toml + project config
+
     // Meta.
     Redraw, // ^L
     Quit,   // ^D / Q / q
@@ -65,4 +68,50 @@ pub enum Action {
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
     Noop,
+}
+
+impl Action {
+    /// Short, present-tense description for the help overlay.
+    pub const fn describe(&self) -> &'static str {
+        match self {
+            Self::Up(_) => "move up",
+            Self::Down(_) => "move down",
+            Self::Left(_) => "move left",
+            Self::Right(_) => "move right",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::GotoFirst => "top of column",
+            Self::GotoLast => "bottom of column",
+            Self::EnterOrDisplay => "enter dir / pager on text file",
+            Self::EnterOrEdit => "enter dir / editor on file",
+            Self::Climb => "climb to parent",
+            Self::Home => "home directory",
+            Self::TogglePick => "toggle pick",
+            Self::PickPatternPrompt => "pick by pattern (prompt)",
+            Self::PickToggleAll => "pick all / clear",
+            Self::Take => "take into inventory",
+            Self::Drop => "drop from inventory",
+            Self::ToggleInventoryView => "toggle inventory view",
+            Self::EmptyInventory => "empty inventory",
+            Self::ToggleMask(_) => "toggle ignore mask",
+            Self::ShellPrompt => "shell command prompt",
+            Self::StartShell => "start shell",
+            Self::ChmodAdd(_) => "chmod add bits",
+            Self::SearchPrompt => "search",
+            Self::SearchNext => "search next",
+            Self::SearchPrev => "search previous",
+            Self::JumpPrompt => "jump to path (prompt)",
+            Self::CopyPrompt => "copy (prompt)",
+            Self::MovePrompt => "move (prompt)",
+            Self::RemovePrompt => "remove (confirm)",
+            Self::MakeDirPrompt => "make directory (prompt)",
+            Self::LongList => "long listing",
+            Self::FileType => "file type",
+            Self::Help => "help",
+            Self::ReloadConfig => "reload config",
+            Self::Redraw => "redraw",
+            Self::Quit => "quit",
+            Self::Noop => "no-op",
+        }
+    }
 }

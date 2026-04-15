@@ -10,9 +10,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::ui::theme;
+use crate::keymap::UserKeymap;
+use crate::ui::theme::Theme;
 
-pub fn render(frame: &mut Frame, area: Rect) {
+pub fn render(frame: &mut Frame, area: Rect, theme: &Theme, user_keymap: &UserKeymap) {
     let inner_area = centered_rect(area, 78, 92);
 
     // Clear the region below the overlay so text beneath doesn't bleed
@@ -22,14 +23,14 @@ pub fn render(frame: &mut Frame, area: Rect) {
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         "  cspy — key bindings  (press any key to close)  ",
         Style::default()
-            .fg(theme::PROMPT_PREFIX)
+            .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD),
     ));
 
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
 
-    let lines = build_lines();
+    let lines = build_lines(theme, user_keymap);
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, body_area);
 }
@@ -140,14 +141,14 @@ const SECTIONS: &[Section] = &[
     },
 ];
 
-fn build_lines() -> Vec<Line<'static>> {
+fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     let key_style = Style::default()
-        .fg(theme::PICK)
+        .fg(theme.pick)
         .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(theme::STATUS_PATH);
+    let desc_style = Style::default().fg(theme.status_path);
     let section_style = Style::default()
-        .fg(theme::STATUS_USER)
+        .fg(theme.status_user)
         .add_modifier(Modifier::BOLD);
 
     for (i, section) in SECTIONS.iter().enumerate() {
@@ -164,5 +165,24 @@ fn build_lines() -> Vec<Line<'static>> {
             ]));
         }
     }
+
+    // Per-user bindings from .cspyrc.toml, if any.
+    let user_bindings: Vec<_> = user_keymap.iter().collect();
+    if !user_bindings.is_empty() {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled(
+            "Custom (.cspyrc.toml)",
+            section_style,
+        )));
+        for binding in user_bindings {
+            out.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{:<24}", binding.chord.display()), key_style),
+                Span::raw("  "),
+                Span::styled(binding.action.describe(), desc_style),
+            ]));
+        }
+    }
+
     out
 }

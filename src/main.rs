@@ -1,6 +1,7 @@
 //! cspy — a vi-keyboard-driven file commander inspired by SideFX's spy.
 
 mod app;
+mod config;
 mod fs;
 mod keymap;
 mod paths;

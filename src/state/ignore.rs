@@ -67,4 +67,32 @@ impl IgnoreMasks {
     pub fn toggle_mask2(&mut self) {
         self.mask2.enabled = !self.mask2.enabled;
     }
+
+    /// Replace a group's built-in patterns with the `[[ignore_masks]]`
+    /// entries from `.cspyrc.toml`. When multiple entries target the same
+    /// group, their patterns are unioned and `enabled = any(enabled)`.
+    /// Groups without any config entry keep their built-in defaults.
+    pub fn apply_config(&mut self, configs: &[crate::config::IgnoreMask]) {
+        let group1: Vec<&crate::config::IgnoreMask> =
+            configs.iter().filter(|m| m.group == 1).collect();
+        let group2: Vec<&crate::config::IgnoreMask> =
+            configs.iter().filter(|m| m.group == 2).collect();
+
+        if !group1.is_empty() {
+            let pats: Vec<&str> = group1
+                .iter()
+                .flat_map(|m| m.patterns.iter().map(String::as_str))
+                .collect();
+            let enabled = group1.iter().any(|m| m.enabled);
+            self.mask1 = Mask::new(&pats, enabled);
+        }
+        if !group2.is_empty() {
+            let pats: Vec<&str> = group2
+                .iter()
+                .flat_map(|m| m.patterns.iter().map(String::as_str))
+                .collect();
+            let enabled = group2.iter().any(|m| m.enabled);
+            self.mask2 = Mask::new(&pats, enabled);
+        }
+    }
 }
