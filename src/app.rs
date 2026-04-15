@@ -223,11 +223,15 @@ impl App {
         use notify::{RecursiveMode, Watcher};
         use std::sync::mpsc;
 
-        // File watcher: notify posts events into `rx`. We watch the
-        // directories containing our config files (not the files
-        // themselves) because many editors replace-on-save, which fires a
-        // Remove on the old inode — watching the directory catches the
-        // subsequent Create/Write.
+        // File watcher: notify posts events into `rx`. Two kinds of watch:
+        //
+        // 1. Config files — we watch their *parent* directories, not the
+        //    files, because editors that replace-on-save (vim, VS Code,
+        //    nvim) remove the old inode before creating the new one.
+        //
+        // 2. The current listing directory (non-recursive) — so external
+        //    changes (a build artifact dropping in, `git pull`, etc.) are
+        //    reflected without a manual refresh.
         let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
         let mut fs_watcher: Option<notify::RecommendedWatcher> =
             notify::recommended_watcher(tx).ok();
@@ -242,22 +246,35 @@ impl App {
                 }
             }
         }
+        // Which listing dir is currently watched. On chdir we'll unwatch
+        // this one and re-watch the new dir.
+        let mut watched_listing: Option<PathBuf> = None;
+        sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &self.listing.dir);
 
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
 
-            // Drain any pending watcher events. Only reload once per poll
-            // iteration no matter how many events arrived.
+            // Drain any pending watcher events. Refresh listing / reload
+            // config at most once per poll iteration — natural debounce.
             let mut needs_reload = false;
+            let mut needs_refresh = false;
             while let Ok(result) = rx.try_recv() {
                 if let Ok(ev) = result {
-                    if ev.paths.iter().any(|p| self.is_config_path(p)) {
-                        needs_reload = true;
+                    for p in &ev.paths {
+                        if self.is_config_path(p) {
+                            needs_reload = true;
+                        }
+                        if self.is_listing_path(p) {
+                            needs_refresh = true;
+                        }
                     }
                 }
             }
             if needs_reload {
                 self.reload_config();
+            }
+            if needs_refresh {
+                self.refresh_listing();
             }
 
             if event::poll(Duration::from_millis(250))? {
@@ -277,6 +294,10 @@ impl App {
                     }
                 }
             }
+
+            // chdir may have happened in the tick just finished — keep the
+            // watcher pointed at the current listing dir.
+            sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &self.listing.dir);
         }
         Ok(())
     }
@@ -284,6 +305,13 @@ impl App {
     fn is_config_path(&self, path: &Path) -> bool {
         self.candidate_config_paths().iter().any(|c| c == path)
             || self.config.sources.iter().any(|c| c == path)
+    }
+
+    /// True iff `path` is the listing directory or a direct child of it.
+    /// `notify` events sometimes include just the directory and sometimes
+    /// the affected child, so we accept both.
+    fn is_listing_path(&self, path: &Path) -> bool {
+        path == self.listing.dir || path.parent() == Some(self.listing.dir.as_path())
     }
 
     // --- Rendering --------------------------------------------------------
@@ -1314,6 +1342,31 @@ impl Matcher {
             Self::Glob(p) => p.matches(&lower),
             Self::Never => false,
         }
+    }
+}
+
+/// Point the FS watcher at `new_dir`, unwatching the previously-watched
+/// listing dir if any. No-op when the watcher failed to initialize or
+/// when the same dir is already being watched.
+fn sync_listing_watch(
+    fs_watcher: Option<&mut notify::RecommendedWatcher>,
+    active: &mut Option<PathBuf>,
+    new_dir: &Path,
+) {
+    use notify::{RecursiveMode, Watcher};
+    let Some(w) = fs_watcher else {
+        return;
+    };
+    if active.as_deref() == Some(new_dir) {
+        return;
+    }
+    if let Some(old) = active.as_ref() {
+        let _ = w.unwatch(old);
+    }
+    if w.watch(new_dir, RecursiveMode::NonRecursive).is_ok() {
+        *active = Some(new_dir.to_path_buf());
+    } else {
+        *active = None;
     }
 }
 
