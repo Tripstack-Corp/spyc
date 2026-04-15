@@ -3,6 +3,7 @@
 mod app;
 mod fs;
 mod keymap;
+mod paths;
 mod shell;
 mod state;
 mod ui;

@@ -209,6 +209,12 @@ impl Resolver {
                 ResolverOutcome::Action(Action::SearchPrev)
             }
 
+            // Jump.
+            KeyCode::Char('J') => {
+                self.reset();
+                ResolverOutcome::Action(Action::JumpPrompt)
+            }
+
             // Help overlay.
             KeyCode::Char('?') | KeyCode::F(1) => {
                 self.reset();

@@ -44,6 +44,9 @@ pub enum Action {
     SearchNext,   // n — repeat last search forward
     SearchPrev,   // N — repeat last search backward
 
+    // Navigation.
+    JumpPrompt, // J — prompt for a path (~, $VAR expanded) and chdir
+
     // Help.
     Help, // ? or F1 — key bindings overlay
 

@@ -70,6 +70,7 @@ enum PromptKind {
     Search {
         saved_cursor: usize,
     },
+    Jump,
 }
 
 pub struct App {
@@ -374,7 +375,36 @@ impl App {
                 }
                 PostAction::None
             }
+            PromptKind::Jump => {
+                let trimmed = prompt.buffer.trim();
+                if !trimmed.is_empty() {
+                    let _ = self.jump_to(trimmed);
+                }
+                PostAction::None
+            }
         }
+    }
+
+    /// Navigate to an arbitrary path. `target` is expanded for `~` and
+    /// `$VAR`; relative paths are resolved against the current directory.
+    /// If the expanded path points to a file, we chdir to its parent and
+    /// focus the cursor on it.
+    fn jump_to(&mut self, target: &str) -> Result<()> {
+        let expanded = crate::paths::expand(target);
+        let abs = if expanded.is_absolute() {
+            expanded
+        } else {
+            self.listing.dir.join(&expanded)
+        };
+        let canonical = std::fs::canonicalize(&abs)?;
+        let md = std::fs::metadata(&canonical)?;
+        if md.is_dir() {
+            self.chdir(&canonical)?;
+        } else if let Some(parent) = canonical.parent() {
+            self.chdir(parent)?;
+            self.focus_on_path(&canonical);
+        }
+        Ok(())
     }
 
     /// Search over visible rows. Case-insensitive.
@@ -415,6 +445,72 @@ impl App {
         }
     }
 
+    /// Advance the cursor by `delta` entries in flat order, wrapping at
+    /// both ends of the list. This is what `j` / `k` use so pressing `j`
+    /// at the bottom jumps back to the top (and vice versa).
+    fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
+        if len == 0 {
+            return;
+        }
+        let new_idx = (self.cursor.index as isize + delta).rem_euclid(len as isize);
+        self.cursor.index = new_idx as usize;
+    }
+
+    /// `gg` — jump to the first entry of the current column.
+    fn goto_col_top(&mut self) {
+        let rows_per_col = self.last_grid.rows as usize;
+        if rows_per_col == 0 {
+            self.cursor.index = 0;
+            return;
+        }
+        let current_col = self.cursor.index / rows_per_col;
+        self.cursor.index = current_col * rows_per_col;
+    }
+
+    /// `G` — jump to the last entry of the current column. For partial
+    /// columns (the rightmost column when it doesn't fill all rows) this
+    /// is the last entry in that column, not in the list.
+    fn goto_col_bottom(&mut self, len: usize) {
+        if len == 0 {
+            return;
+        }
+        let rows_per_col = self.last_grid.rows as usize;
+        if rows_per_col == 0 {
+            self.cursor.index = len - 1;
+            return;
+        }
+        let current_col = self.cursor.index / rows_per_col;
+        let col_end = ((current_col + 1) * rows_per_col).min(len);
+        self.cursor.index = col_end - 1;
+    }
+
+    /// Move the cursor by `delta` columns, preserving the row within each
+    /// column and wrapping around the grid. When only one column exists,
+    /// horizontal motion is a no-op — there is nowhere to go. When the
+    /// target column is partial (fewer rows than the current row), land
+    /// on its last valid entry so we never leave the target column.
+    fn cursor_move_columns(&mut self, delta: isize, rows_per_col: usize, len: usize) {
+        if rows_per_col == 0 || len == 0 {
+            return;
+        }
+        let num_cols = len.div_ceil(rows_per_col);
+        if num_cols <= 1 {
+            return;
+        }
+        let current_col = (self.cursor.index / rows_per_col) as isize;
+        let current_row = self.cursor.index % rows_per_col;
+        let target_col =
+            (current_col + delta).rem_euclid(num_cols as isize) as usize;
+        let target_idx = target_col * rows_per_col + current_row;
+        self.cursor.index = if target_idx < len {
+            target_idx
+        } else {
+            // Partial column — clamp to its last entry.
+            let col_end = ((target_col + 1) * rows_per_col).min(len);
+            col_end - 1
+        };
+    }
+
     // --- Action handlers --------------------------------------------------
 
     fn apply(&mut self, action: &Action) -> Result<PostAction> {
@@ -424,14 +520,14 @@ impl App {
         let rows_per_col = self.last_grid.rows as usize;
         let per_page = self.last_grid.items_per_page();
         match action {
-            Action::Up(n) => self.cursor.move_up(*n),
-            Action::Down(n) => self.cursor.move_down(*n, len),
-            Action::Left(n) => self.cursor.move_left(*n * rows_per_col),
-            Action::Right(n) => self.cursor.move_right(*n * rows_per_col, len),
-            Action::PageUp => self.cursor.move_up(per_page),
-            Action::PageDown => self.cursor.move_down(per_page, len),
-            Action::GotoFirst => self.cursor.goto_first(),
-            Action::GotoLast => self.cursor.goto_last(len),
+            Action::Up(n) => self.cursor_move_vertical(-(*n as isize), len),
+            Action::Down(n) => self.cursor_move_vertical(*n as isize, len),
+            Action::Left(n) => self.cursor_move_columns(-(*n as isize), rows_per_col, len),
+            Action::Right(n) => self.cursor_move_columns(*n as isize, rows_per_col, len),
+            Action::PageUp => self.cursor_move_vertical(-(per_page as isize), len),
+            Action::PageDown => self.cursor_move_vertical(per_page as isize, len),
+            Action::GotoFirst => self.goto_col_top(),
+            Action::GotoLast => self.goto_col_bottom(len),
 
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display)?;
@@ -540,6 +636,13 @@ impl App {
                 }
             }
 
+            Action::JumpPrompt => {
+                self.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::Jump,
+                    prefix: "jump to: ".to_string(),
+                    buffer: String::new(),
+                });
+            }
             Action::Help => {
                 self.help_visible = true;
             }

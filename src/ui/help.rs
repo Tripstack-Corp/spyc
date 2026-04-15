@@ -74,6 +74,7 @@ const SECTIONS: &[Section] = &[
             ("e  v", "enter dir / editor ($EDITOR) on file"),
             ("u  -", "climb to parent"),
             ("H  ~  Home", "go to home directory"),
+            ("J", "jump to a path (~, $VAR expanded)"),
         ],
     },
     Section {

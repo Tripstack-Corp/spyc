@@ -23,37 +23,11 @@ impl Cursor {
         }
     }
 
-    pub fn move_down(&mut self, n: usize, len: usize) {
-        if len == 0 {
-            return;
-        }
-        self.index = (self.index + n).min(len - 1);
-    }
-
-    pub fn move_up(&mut self, n: usize) {
-        self.index = self.index.saturating_sub(n);
-    }
-
-    /// Move across columns in a grid of `columns` columns laid out row-major.
-    /// Moving right by n advances index by n; moving left retreats by n;
-    /// cap at listing bounds.
-    pub fn move_right(&mut self, n: usize, len: usize) {
-        self.move_down(n, len);
-    }
-
-    pub fn move_left(&mut self, n: usize) {
-        self.move_up(n);
-    }
-
-    pub fn goto_first(&mut self) {
-        self.index = 0;
-    }
-
-    pub fn goto_last(&mut self, len: usize) {
-        if len == 0 {
-            self.index = 0;
-        } else {
-            self.index = len - 1;
-        }
-    }
+    // All motion now lives in `App` because it is grid-aware:
+    // - `j` / `k` wrap around the end of the flat list
+    // - `l` / `h` preserve the row across columns and wrap at the edges
+    // - `gg` / `G` jump to the top / bottom of the current column
+    //
+    // Keeping the math next to the `last_grid` value means we never use
+    // stale geometry to compute a motion.
 }
