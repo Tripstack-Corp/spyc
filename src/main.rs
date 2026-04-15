@@ -4,6 +4,7 @@ mod app;
 mod config;
 mod fs;
 mod keymap;
+mod pane;
 mod paths;
 mod shell;
 mod state;

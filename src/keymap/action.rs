@@ -72,6 +72,9 @@ pub enum Action {
     // Config reload.
     ReloadConfig, // ^R — re-read ~/.cspyrc.toml + project config
 
+    // Split pane (M8).
+    TogglePane, // \ — open/close the bottom pty pane
+
     // Meta.
     Redraw, // ^L
     Quit,   // ^D / Q / q
@@ -120,6 +123,7 @@ impl Action {
             Self::FileType => "file type",
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
+            Self::TogglePane => "toggle split pane",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::Date => "show date",

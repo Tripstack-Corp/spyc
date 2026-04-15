@@ -11,6 +11,7 @@ use ratatui::Frame;
 use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::config::Config;
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
+use crate::pane::{Pane, PaneWidget};
 use crate::shell;
 use crate::state::{Cursor, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::{
@@ -114,6 +115,14 @@ pub struct App {
     /// When set, a scrollable text pager sits on top of the file list.
     /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
     pager: Option<PagerView>,
+    /// Pty-hosted subprocess shown as a horizontal split under the list.
+    /// While set, all key input is forwarded to the pane until `\` is
+    /// pressed again to close it.
+    pane: Option<Pane>,
+    /// Set during render when the pane's subprocess has exited. We drop
+    /// the pane *after* the render loop finishes so the final frame is
+    /// drawn before the layout collapses.
+    pending_pane_close: bool,
     /// Most recent search term; `n` / `N` use this.
     last_search: Option<String>,
     /// Transient message shown in the prompt row when no prompt is active.
@@ -171,6 +180,8 @@ impl App {
             mode: Mode::Normal,
             help_visible: false,
             pager: None,
+            pane: None,
+            pending_pane_close: false,
             last_search: None,
             flash: None,
             user_host: user_host_string(),
@@ -257,6 +268,15 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
 
+            // If the pane's subprocess exited during the frame just drawn,
+            // tear the pane down now so the next frame is laid out without
+            // it. Also flash so the user knows why it vanished.
+            if self.pending_pane_close {
+                self.pending_pane_close = false;
+                self.pane = None;
+                self.flash_info("pane: subprocess exited");
+            }
+
             // Drain any pending watcher events. Refresh listing / reload
             // config at most once per poll iteration — natural debounce.
             let mut needs_reload = false;
@@ -280,7 +300,12 @@ impl App {
                 self.refresh_listing();
             }
 
-            if event::poll(Duration::from_millis(250))? {
+            // Short poll while the pane is active so child output
+            // (and cursor motion in e.g. claude's visual mode) feels
+            // snappy. Long poll otherwise to keep CPU near zero when
+            // the user is just browsing files.
+            let poll_ms = if self.pane.is_some() { 16 } else { 250 };
+            if event::poll(Duration::from_millis(poll_ms))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                         let post = self.handle_key(key)?;
@@ -331,6 +356,20 @@ impl App {
         }
         .render(frame, panels.status);
 
+        // When the pty pane is open, carve the middle rect into top
+        // (file list) and bottom (pane) with a 65/35 split. Otherwise
+        // the list takes the whole middle rect.
+        let (list_area, pane_area) = if self.pane.is_some() {
+            use ratatui::layout::{Constraint, Direction, Layout};
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+                .split(panels.list);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (panels.list, None)
+        };
+
         let rows = self.build_rows();
         let probe = ListView {
             rows: &rows,
@@ -339,7 +378,7 @@ impl App {
             empty_marker: self.view == View::Dir,
             theme: &self.theme,
         };
-        self.last_grid = probe.grid(panels.list);
+        self.last_grid = probe.grid(list_area);
         self.ensure_cursor_visible();
 
         frame.render_widget(
@@ -350,8 +389,27 @@ impl App {
                 empty_marker: self.view == View::Dir,
                 theme: &self.theme,
             },
-            panels.list,
+            list_area,
         );
+
+        if let (Some(pane), Some(rect)) = (self.pane.as_mut(), pane_area) {
+            // Keep the pty's view of its size matched to what we render.
+            let _ = pane.resize(rect.height, rect.width);
+            pane.drain_output();
+            if pane.is_closed() {
+                // Subprocess exited — drop the pane after drawing one
+                // final frame so users see the last output. We schedule
+                // the drop via `pending_pane_close` and act on it after
+                // rendering.
+                self.pending_pane_close = true;
+            }
+            frame.render_widget(
+                PaneWidget {
+                    screen: pane.screen(),
+                },
+                rect,
+            );
+        }
 
         if let Mode::Prompting(p) = &self.mode {
             PromptLine {
@@ -448,6 +506,27 @@ impl App {
         // Pager eats all keys until dismissed.
         if self.pager.is_some() {
             self.handle_pager_key(key);
+            return Ok(PostAction::None);
+        }
+        // When the split pane is open, forward keys to the subprocess
+        // except the toggle chord which closes the pane. Plain `\`
+        // passes through so the user can type literal backslashes.
+        //
+        // Toggle chord matches: Ctrl-\ (as either `Char('\\')`+CONTROL
+        // or the raw FS byte 0x1c), plus F10 as a universal fallback
+        // for terminals that swallow Ctrl-\.
+        if self.pane.is_some() {
+            let is_close = matches!(key.code, KeyCode::Char('\x1c') | KeyCode::F(10))
+                || (matches!(key.code, KeyCode::Char('\\'))
+                    && key.modifiers.contains(KeyModifiers::CONTROL));
+            if is_close {
+                self.pane = None;
+                self.flash_info("pane closed");
+                return Ok(PostAction::None);
+            }
+            if let Some(pane) = self.pane.as_mut() {
+                let _ = pane.send_key(key);
+            }
             return Ok(PostAction::None);
         }
         if matches!(self.mode, Mode::Prompting(_)) {
@@ -696,6 +775,42 @@ impl App {
                 PostAction::None
             }
         }
+    }
+
+    /// Open the split pane if it's closed, close it if it's open. The
+    /// pane command defaults to `$SHELL` for the spike; we'll swap in
+    /// `claude` (or a config-provided command) once the integration is
+    /// proven end to end.
+    fn toggle_pane(&mut self) {
+        if self.pane.take().is_some() {
+            self.flash_info("pane closed");
+            return;
+        }
+        let cmd = std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+        });
+        // Spawn at the real pane size so TUI subprocesses (which do
+        // their initial layout at startup and don't always repaint on
+        // SIGWINCH) get a correct first draw.
+        let (rows, cols) = Self::pane_spawn_size();
+        match Pane::spawn(&cmd, rows, cols) {
+            Ok(p) => {
+                self.pane = Some(p);
+                self.flash_info(format!("pane: {cmd}"));
+            }
+            Err(e) => self.flash_error(format!("pane spawn failed: {e}")),
+        }
+    }
+
+    /// Compute the (rows, cols) the pane will occupy right after it
+    /// opens, based on the current terminal size. The split is 35% of
+    /// the middle rect (= terminal height minus status and prompt rows).
+    fn pane_spawn_size() -> (u16, u16) {
+        let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        // status row + prompt row + at least a couple of list rows.
+        let middle = total_rows.saturating_sub(2);
+        let pane = (u32::from(middle) * 35 / 100) as u16;
+        (pane.max(1), cols.max(1))
     }
 
     fn show_session_info(&mut self) {
@@ -1195,6 +1310,8 @@ impl App {
             }
 
             Action::ReloadConfig => self.reload_config(),
+
+            Action::TogglePane => self.toggle_pane(),
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),

@@ -20,6 +20,8 @@ glob = "0.3"
 serde = { version = "1", features = ["derive"] }
 toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
 notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+portable-pty = "0.8"
+vt100 = "0.15"
 
 [dev-dependencies]
 tempfile = "3"

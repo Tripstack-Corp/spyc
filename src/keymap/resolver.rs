@@ -78,6 +78,11 @@ impl Resolver {
                 KeyCode::Char('w' | 'W') => ResolverOutcome::Action(Action::ChmodAdd('w')),
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),
                 KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::ReloadConfig),
+                // Ctrl-backslash toggles the split pane. Some terminals
+                // deliver this as `Char('\\')` with CONTROL (handled
+                // here); others as the raw 0x1c / FS byte (handled at
+                // the top-level match below).
+                KeyCode::Char('\\') => ResolverOutcome::Action(Action::TogglePane),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -107,6 +112,15 @@ impl Resolver {
             };
             self.reset();
             return out;
+        }
+
+        // Pane toggle alternate paths. Ctrl-\ on some terminals comes
+        // through as the raw FS byte 0x1c rather than `Char('\\')` with
+        // CONTROL, so we match both. F10 is an unambiguous fallback for
+        // terminals that swallow Ctrl-\ entirely.
+        if matches!(ev.code, KeyCode::Char('\x1c') | KeyCode::F(10)) {
+            self.reset();
+            return ResolverOutcome::Action(Action::TogglePane);
         }
 
         match ev.code {
