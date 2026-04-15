@@ -59,6 +59,13 @@ pub enum Action {
     SetMark(char),  // m{a-z}
     JumpMark(char), // '{a-z}
 
+    // Info commands.
+    Date,          // D — show date/time
+    Version,       // V — show cspy version
+    ShowMemory,    // I — session info pager (version, pid, rss, counts)
+    ColorToggle,   // C — toggle color theme on/off
+    SetEnvPrompt,  // s — NAME=VALUE prompt
+
     // Help.
     Help, // ? or F1 — key bindings overlay
 
@@ -115,6 +122,11 @@ impl Action {
             Self::ReloadConfig => "reload config",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
+            Self::Date => "show date",
+            Self::Version => "show version",
+            Self::ShowMemory => "session info",
+            Self::ColorToggle => "toggle colors",
+            Self::SetEnvPrompt => "set env var",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
             Self::Noop => "no-op",

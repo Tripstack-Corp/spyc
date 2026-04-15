@@ -291,6 +291,28 @@ impl Resolver {
                 ResolverOutcome::Action(Action::Help)
             }
 
+            // Info commands.
+            KeyCode::Char('D') => {
+                self.reset();
+                ResolverOutcome::Action(Action::Date)
+            }
+            KeyCode::Char('V') => {
+                self.reset();
+                ResolverOutcome::Action(Action::Version)
+            }
+            KeyCode::Char('I') => {
+                self.reset();
+                ResolverOutcome::Action(Action::ShowMemory)
+            }
+            KeyCode::Char('C') => {
+                self.reset();
+                ResolverOutcome::Action(Action::ColorToggle)
+            }
+            KeyCode::Char('s') => {
+                self.reset();
+                ResolverOutcome::Action(Action::SetEnvPrompt)
+            }
+
             // Quit.
             KeyCode::Char('Q' | 'q') => {
                 self.reset();

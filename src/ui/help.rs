@@ -121,6 +121,16 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Info",
+        rows: &[
+            ("D", "show date/time (UTC)"),
+            ("V", "show cspy version"),
+            ("I", "session info (pid, rss, counts)"),
+            ("C", "toggle colors / mono"),
+            ("s", "set environment variable (NAME=VALUE)"),
+        ],
+    },
+    Section {
         title: "Shell-out",
         rows: &[
             ("!  ;", "prompt shell command (% = selection)"),

@@ -30,6 +30,10 @@ pub struct Theme {
     pub status_suffix: Color,
     pub prompt_prefix: Color,
     pub empty_marker: Color,
+    /// When true, all colors fall back to terminal defaults. Used by the
+    /// `C` (colortoggle) action — the cursor row falls back to reverse
+    /// video so the selection is still visible.
+    pub mono: bool,
 }
 
 impl Default for Theme {
@@ -49,11 +53,20 @@ impl Default for Theme {
             status_suffix: Color::Rgb(0x56, 0x5f, 0x89),
             prompt_prefix: Color::Rgb(0xe0, 0xaf, 0x68),
             empty_marker: Color::Rgb(0x56, 0x5f, 0x89),
+            mono: false,
         }
     }
 }
 
 impl Theme {
+    /// Return a copy with `mono` flipped — flipping between the colored
+    /// palette and a terminal-defaults look.
+    pub fn toggled(&self) -> Self {
+        let mut copy = self.clone();
+        copy.mono = !self.mono;
+        copy
+    }
+
     /// Apply user overrides from the config. Invalid color strings are
     /// silently ignored (the default stays in place).
     pub fn with_overrides(mut self, overrides: &ColorOverrides) -> Self {
@@ -83,31 +96,59 @@ impl Theme {
     }
 
     pub fn dir_style(&self) -> Style {
-        Style::default().fg(self.dir).add_modifier(Modifier::BOLD)
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.dir).add_modifier(Modifier::BOLD)
+        }
     }
 
     pub fn exec_style(&self) -> Style {
-        Style::default().fg(self.exec).add_modifier(Modifier::BOLD)
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.exec).add_modifier(Modifier::BOLD)
+        }
     }
 
     pub fn symlink_style(&self) -> Style {
-        Style::default().fg(self.symlink)
+        if self.mono {
+            Style::default()
+        } else {
+            Style::default().fg(self.symlink)
+        }
     }
 
     pub fn file_style(&self) -> Style {
-        Style::default().fg(self.file)
+        if self.mono {
+            Style::default()
+        } else {
+            Style::default().fg(self.file)
+        }
     }
 
     pub fn other_style(&self) -> Style {
-        Style::default().fg(self.other)
+        if self.mono {
+            Style::default().add_modifier(Modifier::DIM)
+        } else {
+            Style::default().fg(self.other)
+        }
     }
 
     pub fn pick_style(&self) -> Style {
-        Style::default().fg(self.pick).add_modifier(Modifier::BOLD)
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.pick).add_modifier(Modifier::BOLD)
+        }
     }
 
     pub fn take_style(&self) -> Style {
-        Style::default().fg(self.take).add_modifier(Modifier::BOLD)
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.take).add_modifier(Modifier::BOLD)
+        }
     }
 }
 

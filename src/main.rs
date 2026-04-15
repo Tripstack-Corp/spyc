@@ -7,6 +7,7 @@ mod keymap;
 mod paths;
 mod shell;
 mod state;
+mod sysinfo;
 mod ui;
 
 use std::io;

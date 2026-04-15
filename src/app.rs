@@ -92,6 +92,7 @@ enum PromptKind {
     /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
     /// anything else is treated as a cancel.
     RemoveConfirm,
+    SetEnv,
 }
 
 pub struct App {
@@ -675,7 +676,48 @@ impl App {
             // RemoveConfirm never reaches dispatch — it's handled as a
             // single-key confirm in `handle_remove_confirm_key`.
             PromptKind::RemoveConfirm => PostAction::None,
+            PromptKind::SetEnv => {
+                let line = prompt.buffer.trim();
+                if let Some((name, value)) = line.split_once('=') {
+                    let name = name.trim();
+                    if name.is_empty() {
+                        self.flash_error("setenv: missing variable name");
+                    } else {
+                        // SAFETY: single-threaded TUI; no other thread is
+                        // reading env concurrently.
+                        unsafe {
+                            std::env::set_var(name, value);
+                        }
+                        self.flash_info(format!("setenv {name}={value}"));
+                    }
+                } else if !line.is_empty() {
+                    self.flash_error("setenv: expected NAME=VALUE");
+                }
+                PostAction::None
+            }
         }
+    }
+
+    fn show_session_info(&mut self) {
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(format!("cspy {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("pid      : {}", std::process::id()));
+        lines.push(format!("cwd      : {}", self.listing.dir.display()));
+        lines.push(format!("entries  : {}", self.listing.entries.len()));
+        lines.push(format!("visible  : {}", self.rows.len()));
+        lines.push(format!("picks    : {}", self.picks.len()));
+        lines.push(format!("inventory: {}", self.inventory.len()));
+        lines.push(format!("marks    : {}", self.marks.entries.len()));
+        lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
+        lines.push(format!("time     : {}", crate::sysinfo::format_now()));
+        if !self.config.sources.is_empty() {
+            lines.push(String::new());
+            lines.push("config sources:".into());
+            for src in &self.config.sources {
+                lines.push(format!("  {}", src.display()));
+            }
+        }
+        self.pager = Some(PagerView::new("session info", lines));
     }
 
     /// Resolve `raw_dest` and run a copy-like or move-like operation across
@@ -1156,6 +1198,27 @@ impl App {
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),
+
+            Action::Date => self.flash_info(crate::sysinfo::format_now()),
+            Action::Version => {
+                self.flash_info(format!("cspy {}", env!("CARGO_PKG_VERSION")));
+            }
+            Action::ShowMemory => self.show_session_info(),
+            Action::ColorToggle => {
+                self.theme = self.theme.toggled();
+                self.flash_info(if self.theme.mono {
+                    "colors off"
+                } else {
+                    "colors on"
+                });
+            }
+            Action::SetEnvPrompt => {
+                self.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::SetEnv,
+                    prefix: "setenv NAME=VALUE: ".to_string(),
+                    buffer: String::new(),
+                });
+            }
 
             Action::Redraw | Action::Noop => {}
             Action::Quit => self.should_quit = true,
