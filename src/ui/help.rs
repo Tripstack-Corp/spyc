@@ -106,11 +106,18 @@ const SECTIONS: &[Section] = &[
         title: "File operations",
         rows: &[
             ("c", "copy selection to a destination (prompt)"),
-            ("m", "move selection to a destination (prompt)"),
-            ("R", "remove selection (confirm with y/yes)"),
-            ("M", "make a new directory (prompt)"),
-            ("L", "ls -lh on selection through $PAGER"),
+            ("M", "move selection to a destination (prompt)"),
+            ("R", "remove selection (confirm with y)"),
+            ("+", "make a new directory (prompt)"),
+            ("L", "long listing through $PAGER"),
             ("f", "file(1) on selection"),
+        ],
+    },
+    Section {
+        title: "Marks",
+        rows: &[
+            ("m{a-z}", "set mark at current dir + cursor"),
+            ("'{a-z}", "jump to mark (chdir + focus)"),
         ],
     },
     Section {

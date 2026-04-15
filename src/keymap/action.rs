@@ -49,11 +49,15 @@ pub enum Action {
 
     // File operations.
     CopyPrompt,    // c — prompt for destination, cp -r selection
-    MovePrompt,    // m — prompt for destination, mv selection
+    MovePrompt,    // M — prompt for destination, mv selection
     RemovePrompt,  // R — confirm, rm -rf selection
-    MakeDirPrompt, // N — prompt for a directory name
+    MakeDirPrompt, // + — prompt for a directory name
     LongList,      // L — ls -lh selection | $PAGER
     FileType,      // f — file(1) on selection, paged output
+
+    // Marks (vi-style named bookmarks).
+    SetMark(char),  // m{a-z}
+    JumpMark(char), // '{a-z}
 
     // Help.
     Help, // ? or F1 — key bindings overlay
@@ -109,6 +113,8 @@ impl Action {
             Self::FileType => "file type",
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
+            Self::SetMark(_) => "set mark",
+            Self::JumpMark(_) => "jump to mark",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
             Self::Noop => "no-op",

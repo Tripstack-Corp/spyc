@@ -17,6 +17,10 @@ enum PendingSeq {
     Normal,
     /// Seen a `g`, waiting for a second one (`gg`).
     G,
+    /// Seen `m`, waiting for a letter `a-z` to set that mark.
+    Mark,
+    /// Seen `'`, waiting for a letter `a-z` to jump to that mark.
+    JumpMark,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -84,6 +88,21 @@ impl Resolver {
         if self.pending == PendingSeq::G {
             let out = match ev.code {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: `m` (set mark) or `'` (jump to mark) waiting for a letter.
+        if matches!(self.pending, PendingSeq::Mark | PendingSeq::JumpMark) {
+            let is_set = self.pending == PendingSeq::Mark;
+            let out = match ev.code {
+                KeyCode::Char(c @ 'a'..='z') => ResolverOutcome::Action(if is_set {
+                    Action::SetMark(c)
+                } else {
+                    Action::JumpMark(c)
+                }),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -233,16 +252,27 @@ impl Resolver {
                 ResolverOutcome::Action(Action::CopyPrompt)
             }
             KeyCode::Char('m') => {
-                self.reset();
-                ResolverOutcome::Action(Action::MovePrompt)
+                // Start of `m{a-z}` set-mark sequence.
+                self.pending = PendingSeq::Mark;
+                ResolverOutcome::Pending
+            }
+            KeyCode::Char('\'') => {
+                // Start of `'{a-z}` jump-to-mark sequence.
+                self.pending = PendingSeq::JumpMark;
+                ResolverOutcome::Pending
             }
             KeyCode::Char('R') => {
                 self.reset();
                 ResolverOutcome::Action(Action::RemovePrompt)
             }
             KeyCode::Char('M') => {
-                // Spy uses `N` for mkdir but we kept `N` for vi-style
-                // reverse search. `M` (mkdir) is the obvious mnemonic.
+                // `m` is the set-mark prefix (vi); move takes uppercase.
+                self.reset();
+                ResolverOutcome::Action(Action::MovePrompt)
+            }
+            KeyCode::Char('+') => {
+                // Spy uses `N` for mkdir but we reserve `N` for vi's
+                // reverse-search. `+` reads intuitively as "add a dir".
                 self.reset();
                 ResolverOutcome::Action(Action::MakeDirPrompt)
             }

@@ -12,7 +12,7 @@ use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::config::Config;
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::shell;
-use crate::state::{Cursor, IgnoreMasks, Inventory, Picks};
+use crate::state::{Cursor, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::{
     help, layout,
     list_view::{Grid, ListView, Row},
@@ -98,6 +98,7 @@ pub struct App {
     listing: Listing,
     picks: Picks,
     inventory: Inventory,
+    marks: Marks,
     masks: IgnoreMasks,
     view: View,
     cursor: Cursor,
@@ -154,6 +155,7 @@ impl App {
             listing,
             picks: Picks::new(),
             inventory: Inventory::new(),
+            marks: Marks::load(),
             masks: {
                 let mut m = IgnoreMasks::default();
                 m.apply_config(&config.ignore_masks);
@@ -751,6 +753,45 @@ impl App {
         Ok(())
     }
 
+    /// `ma` — remember the current directory and cursor entry under
+    /// letter `letter`. Saved to disk best-effort so marks survive
+    /// restarts; a disk failure flashes but doesn't block the in-memory
+    /// set.
+    fn set_mark(&mut self, letter: char) {
+        let focus = self
+            .rows
+            .get(self.cursor.index)
+            .map(|r| r.path.clone());
+        self.marks.set(
+            letter,
+            Mark {
+                dir: self.listing.dir.clone(),
+                focus,
+            },
+        );
+        match self.marks.save() {
+            Ok(()) => self.flash_info(format!("mark '{letter}' set")),
+            Err(e) => self.flash_error(format!("mark saved in-memory only: {e}")),
+        }
+    }
+
+    /// `'a` — chdir to the remembered directory and focus on the entry
+    /// if it still exists.
+    fn jump_to_mark(&mut self, letter: char) {
+        let Some(mark) = self.marks.get(letter).cloned() else {
+            self.flash_error(format!("mark '{letter}' not set"));
+            return;
+        };
+        if let Err(e) = self.chdir(&mark.dir) {
+            self.flash_error(format!("jump failed: {e}"));
+            return;
+        }
+        if let Some(focus) = mark.focus {
+            self.focus_on_path(&focus);
+        }
+        self.flash_info(format!("jumped to mark '{letter}'"));
+    }
+
     /// Search over visible rows. Case-insensitive.
     ///
     /// - If `query` contains no glob metacharacters (`*`, `?`, `[`), it is
@@ -1112,6 +1153,9 @@ impl App {
             }
 
             Action::ReloadConfig => self.reload_config(),
+
+            Action::SetMark(letter) => self.set_mark(*letter),
+            Action::JumpMark(letter) => self.jump_to_mark(*letter),
 
             Action::Redraw | Action::Noop => {}
             Action::Quit => self.should_quit = true,
