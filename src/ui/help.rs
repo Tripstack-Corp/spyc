@@ -111,6 +111,7 @@ const SECTIONS: &[Section] = &[
             ("+", "make a new directory (prompt)"),
             ("L", "long listing through $PAGER"),
             ("f", "file(1) on selection"),
+            ("^X", "chmod +x on selection"),
         ],
     },
     Section {
@@ -133,7 +134,7 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Split pane (M9 — multi-tab)",
+        title: "Split pane (multi-tab)",
         rows: &[
             ("^\\  F10  ^W \\  ^W c", "toggle the bottom pane (claude)"),
             ("F9", "open pane with claude --resume"),
@@ -148,6 +149,7 @@ const SECTIONS: &[Section] = &[
             ("^W 1..9", "switch to tab N"),
             ("^W [  ^W ]", "prev / next tab"),
             ("^W r", "rename active tab"),
+            ("Alt+Enter", "newline in pane (multi-line input)"),
             ("CSPY_PANE_CMD", "env var for pane command (default claude)"),
         ],
     },
@@ -157,7 +159,6 @@ const SECTIONS: &[Section] = &[
             ("!", "capture output → pager (colors preserved)"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
-            ("^X", "chmod +x on selection"),
         ],
     },
     Section {
@@ -173,8 +174,9 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("?  F1", "this help"),
             ("^L", "redraw"),
+            ("^R", "reload config"),
             ("q  Q  ^D", "quit"),
-            ("Esc  Backspace (empty)", "cancel an open prompt"),
+            ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
     },
 ];
