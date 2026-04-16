@@ -286,13 +286,19 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         (body_area, None)
     };
 
-    // Build display lines — highlight matches and apply whitespace markers.
-    let mut display_lines: Vec<Line<'static>> = view
-        .lines
+    // Only build the visible slice — O(viewport) instead of O(total_lines).
+    // This is critical for large outputs (27K+ lines from `!find`).
+    let viewport_h = content_area.height as usize;
+    let start = view.scroll as usize;
+    let content_end = view.lines.len();
+    let slice_end = (start + viewport_h).min(content_end);
+
+    let mut display_lines: Vec<Line<'static>> = view.lines[start..slice_end]
         .iter()
         .enumerate()
         .map(|(i, line)| {
-            let styled = styled_line_for_render(line, view, i, theme);
+            let abs_idx = start + i;
+            let styled = styled_line_for_render(line, view, abs_idx, theme);
             if view.show_whitespace {
                 apply_whitespace_markers(&styled, theme)
             } else {
@@ -301,24 +307,18 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         })
         .collect();
 
-    // EOF marker after the last content line.
+    // EOF + tilde markers only matter when we can see past the content.
     let eof_style = Style::default()
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
-    display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
-
-    // Fill remaining viewport rows with `~` markers.
-    let visible_start = usize::from(view.scroll);
-    let visible_content = display_lines.len().saturating_sub(visible_start);
-    let viewport_h = usize::from(content_area.height);
-    if visible_content < viewport_h {
-        let tilde_count = viewport_h - visible_content;
-        for _ in 0..tilde_count {
+    if slice_end >= content_end && display_lines.len() < viewport_h {
+        display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
+        while display_lines.len() < viewport_h {
             display_lines.push(Line::from(Span::styled("~", eof_style)));
         }
     }
 
-    let paragraph = Paragraph::new(display_lines).scroll((view.scroll, 0));
+    let paragraph = Paragraph::new(display_lines);
     frame.render_widget(paragraph, content_area);
 
     if let (Some(rect), Some(text)) = (search_area, view.status_text()) {

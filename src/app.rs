@@ -25,6 +25,16 @@ use crate::ui::{
 use crate::{resume_tui, suspend_tui, Tui};
 
 /// Precomputed rects for the current frame. Built by `App::compute_layout`.
+/// Background capture for a `!` command. The child runs with piped
+/// stdout; a reader thread feeds bytes into the channel. Ctrl+C from
+/// the user kills the child.
+struct PendingCapture {
+    child: std::process::Child,
+    output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    title: String,
+    cmd_display: String,
+}
+
 struct FrameLayout {
     status: ratatui::layout::Rect,
     list: ratatui::layout::Rect,
@@ -129,6 +139,15 @@ pub struct App {
     pager: Option<PagerView>,
     /// Pty-hosted subprocess shown as a horizontal split under the list.
     pane: Option<Pane>,
+    /// When set, an interactive `!` command has taken over the top pane.
+    /// cspy's list/status/prompt are hidden; this pty renders instead.
+    /// When the subprocess exits, cspy's file listing is restored and
+    /// the bottom pane (claude) is completely unaffected.
+    top_overlay: Option<Pane>,
+    pending_overlay_close: bool,
+    /// A `!` command running in the background with piped output. The
+    /// event loop stays alive so Ctrl+C can kill the child.
+    pending_capture: Option<PendingCapture>,
     /// Whether the pane (vs the file list) is the current keyboard focus.
     /// Most keys are forwarded to the pane when this is true, but the
     /// Ctrl-W prefix and Ctrl-\\ / F10 toggle are always caught by cspy.
@@ -198,6 +217,9 @@ impl App {
             help_visible: false,
             pager: None,
             pane: None,
+            top_overlay: None,
+            pending_overlay_close: false,
+            pending_capture: None,
             pane_focused: false,
             // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
@@ -294,7 +316,50 @@ impl App {
             if self.pending_pane_close {
                 self.pending_pane_close = false;
                 self.pane = None;
+                self.pane_focused = false;
                 self.flash_info("pane: subprocess exited");
+            }
+            if self.pending_overlay_close {
+                self.pending_overlay_close = false;
+                self.top_overlay = None;
+                self.flash_info("command finished");
+            }
+
+            // Check if a background `!` capture has finished.
+            if let Some(capture) = &mut self.pending_capture {
+                if let Ok(stdout) = capture.output_rx.try_recv() {
+                    // Collect stderr too.
+                    let mut bytes = stdout;
+                    if let Some(mut stderr) = capture.child.stderr.take() {
+                        use std::io::Read as _;
+                        let mut err = Vec::new();
+                        let _ = stderr.read_to_end(&mut err);
+                        if !err.is_empty() {
+                            if !bytes.is_empty() {
+                                bytes.push(b'\n');
+                            }
+                            bytes.extend_from_slice(&err);
+                        }
+                    }
+                    let status = capture.child.wait();
+                    let exit_info = match status {
+                        Ok(s) => {
+                            if s.success() {
+                                "exit 0".to_string()
+                            } else {
+                                format!(
+                                    "exit {}",
+                                    s.code()
+                                        .map_or_else(|| "?".to_string(), |c| c.to_string())
+                                )
+                            }
+                        }
+                        Err(e) => format!("error: {e}"),
+                    };
+                    let title = format!("{} — {exit_info}", capture.title);
+                    self.pending_capture = None;
+                    self.pager = Some(PagerView::new_ansi(title, &bytes));
+                }
             }
 
             // Drain any pending watcher events. Refresh listing / reload
@@ -484,6 +549,44 @@ impl App {
         //   than above the divider.
         let layout = Self::compute_layout(frame_area, self.pane.is_some(), self.pane_height_pct);
 
+        // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
+        // replaces the entire cspy area. Status, list, and prompt are
+        // hidden; only the overlay + divider + bottom pane render.
+        if let Some(overlay) = self.top_overlay.as_mut() {
+            // The overlay occupies status + list + prompt area.
+            let overlay_area = ratatui::layout::Rect {
+                x: layout.status.x,
+                y: layout.status.y,
+                width: layout.status.width,
+                height: layout.status.height + layout.list.height + layout.prompt.height,
+            };
+            let _ = overlay.resize(overlay_area.height, overlay_area.width);
+            overlay.drain_output();
+            if overlay.is_closed() {
+                self.pending_overlay_close = true;
+            }
+            frame.render_widget(
+                PaneWidget {
+                    screen: overlay.screen(),
+                },
+                overlay_area,
+            );
+
+            // Divider + bottom pane still render normally.
+            if let Some(divider_rect) = layout.divider {
+                self.render_divider(frame, divider_rect);
+            }
+            if let (Some(pane), Some(rect)) = (self.pane.as_mut(), layout.pane) {
+                let _ = pane.resize(rect.height, rect.width);
+                pane.drain_output();
+                if pane.is_closed() {
+                    self.pending_pane_close = true;
+                }
+                frame.render_widget(PaneWidget { screen: pane.screen() }, rect);
+            }
+            return;
+        }
+
         let (path, suffix) = self.header_parts();
         StatusBar {
             user_host: &self.user_host,
@@ -558,6 +661,20 @@ impl App {
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
             frame.render_widget(Paragraph::new(line), layout.prompt);
+        } else if let Some(capture) = &self.pending_capture {
+            // Persistent "running" indicator while a `!` capture is active.
+            use ratatui::{
+                style::{Modifier, Style},
+                text::{Line, Span},
+                widgets::Paragraph,
+            };
+            let line = Line::from(Span::styled(
+                format!("⏳ running: {}  (^C to cancel)", capture.cmd_display),
+                Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(line), layout.prompt);
         }
 
         // Pager comes after list but before help (help always wins).
@@ -620,6 +737,28 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
         // Any keypress clears a lingering flash message.
         self.flash = None;
+
+        // While a `!` capture is running, Ctrl+C kills it. All other
+        // keys are swallowed.
+        if let Some(capture) = &mut self.pending_capture {
+            if matches!(key.code, KeyCode::Char('c' | 'C'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                let _ = capture.child.kill();
+                let _ = capture.child.wait();
+                self.pending_capture = None;
+                self.flash_info("command interrupted");
+            }
+            return Ok(PostAction::None);
+        }
+
+        // Top overlay (interactive `;` command) owns all keys — it's a
+        // full takeover of the top area. The user exits by quitting the
+        // subprocess itself (q in top, :q in vim, etc.).
+        if let Some(overlay) = self.top_overlay.as_mut() {
+            let _ = overlay.send_key(key);
+            return Ok(PostAction::None);
+        }
 
         // While help is up, any keypress dismisses it and is then
         // swallowed — so the user doesn't accidentally trigger an action.
@@ -827,28 +966,33 @@ impl App {
                 PostAction::None
             }
             PromptKind::ShellCmd => {
+                // `;cmd` — run interactively in a top-overlay pty that
+                // replaces the cspy listing. Bottom pane (claude) stays
+                // untouched. When the command exits, cspy comes back.
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
-                sh_c(&expanded, true)
+                let (rows, cols) = Self::top_overlay_size(self.pane_height_pct, self.pane.is_some());
+                match Pane::spawn(&expanded, rows, cols) {
+                    Ok(p) => {
+                        self.top_overlay = Some(p);
+                    }
+                    Err(e) => self.flash_error(format!("spawn: {e}")),
+                }
+                PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
                 let title = format!("! {}", prompt.buffer);
-                let output = std::process::Command::new("sh")
-                    .args(["-c", &expanded])
-                    .env("CLICOLOR_FORCE", "1")
-                    .env("FORCE_COLOR", "1")
-                    .env("COLORTERM", "truecolor")
-                    .output();
-                match output {
-                    Ok(out) => {
-                        let mut bytes = out.stdout;
-                        if !out.stderr.is_empty() {
-                            if !bytes.is_empty() {
-                                bytes.extend_from_slice(b"\n");
-                            }
-                            bytes.extend_from_slice(&out.stderr);
-                        }
-                        self.pager = Some(PagerView::new_ansi(title, &bytes));
+                // Spawn non-blocking so the event loop stays alive and
+                // Ctrl+C can kill the child.
+                match spawn_capture(&expanded) {
+                    Ok((child, rx)) => {
+                        let cmd_display = prompt.buffer.clone();
+                        self.pending_capture = Some(PendingCapture {
+                            child,
+                            output_rx: rx,
+                            title,
+                            cmd_display,
+                        });
                     }
                     Err(e) => self.flash_error(format!("exec: {e}")),
                 }
@@ -1012,15 +1156,28 @@ impl App {
         self.pane_height_pct = new as u16;
     }
 
-    /// Compute the (rows, cols) the pane will occupy right after it
-    /// opens, based on the current terminal size and the configured
-    /// pane height percentage.
+    /// Compute the (rows, cols) the bottom pane will occupy.
     fn pane_spawn_size(height_pct: u16) -> (u16, u16) {
         let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        // status row + prompt row + at least a couple of list rows.
         let middle = total_rows.saturating_sub(2);
         let pane = (u32::from(middle) * u32::from(height_pct) / 100) as u16;
         (pane.max(1), cols.max(1))
+    }
+
+    /// Compute the (rows, cols) available for the top-overlay pty. This
+    /// is the top area: everything above the divider (or the whole
+    /// screen minus the prompt row if no bottom pane).
+    fn top_overlay_size(pane_height_pct: u16, has_bottom_pane: bool) -> (u16, u16) {
+        let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        if !has_bottom_pane {
+            // Full screen minus prompt row.
+            return (total_rows.saturating_sub(1).max(1), cols.max(1));
+        }
+        // With bottom pane: top region = total - divider(1) - bottom pane.
+        let usable = total_rows.saturating_sub(1); // minus divider
+        let bottom = (u32::from(usable) * u32::from(pane_height_pct) / 100) as u16;
+        let top = usable.saturating_sub(bottom);
+        (top.max(1), cols.max(1))
     }
 
     fn show_session_info(&mut self) {
@@ -1402,7 +1559,7 @@ impl App {
             Action::ShellForegroundPrompt => {
                 self.mode = Mode::Prompting(Prompt {
                     kind: PromptKind::ShellCmd,
-                    prefix: "!".to_string(),
+                    prefix: ";".to_string(),
                     buffer: String::new(),
                 });
             }
@@ -1884,6 +2041,49 @@ fn sync_listing_watch(
     } else {
         *active = None;
     }
+}
+
+/// Spawn a shell command with piped stdout/stderr. Returns the child handle
+/// and a channel that will deliver the collected stdout bytes when EOF.
+fn spawn_capture(
+    cmd: &str,
+) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
+    use std::io::Read as _;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+
+    // stdout is piped so isatty(1) returns false → programs switch to
+    // batch/non-interactive mode automatically (top, vim, less, etc.).
+    //
+    // We set COLUMNS/LINES so tools that format batch output (ls, ps,
+    // top -l) know our viewport width. We also set the color-force env
+    // vars so tools that check them emit ANSI even on a pipe.
+    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    let mut child = Command::new("sh")
+        .args(["-c", cmd])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("CLICOLOR_FORCE", "1")
+        .env("FORCE_COLOR", "1")
+        .env("COLORTERM", "truecolor")
+        .env("COLUMNS", cols.to_string())
+        .env("LINES", rows.to_string())
+        .spawn()?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = stdout;
+        let mut buf = Vec::new();
+        let _ = reader.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+
+    Ok((child, rx))
 }
 
 /// Build a PostAction that runs `cmd` through `sh -c` so shell features
