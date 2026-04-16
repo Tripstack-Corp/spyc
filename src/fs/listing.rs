@@ -12,6 +12,14 @@ pub struct Listing {
 }
 
 impl Listing {
+    /// An empty listing for a given directory (used when the dir isn't readable).
+    pub fn empty(dir: PathBuf) -> Self {
+        Self {
+            dir,
+            entries: Vec::new(),
+        }
+    }
+
     pub fn read<P: AsRef<Path>>(dir: P) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         let mut entries: Vec<Entry> = Vec::new();

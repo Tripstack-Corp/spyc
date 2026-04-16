@@ -252,15 +252,12 @@ struct RowData {
 impl App {
     pub fn new() -> Result<Self> {
         let cwd = std::env::current_dir().context("getting current directory")?;
-        let listing = match Listing::read(&cwd) {
-            Ok(l) => l,
-            Err(_) => {
-                // cwd not readable (e.g. /root without perms) — fall back to $HOME.
-                let home = std::env::var("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("/"));
-                Listing::read(&home).context("reading home directory")?
-            }
+        let (listing, start_error) = match Listing::read(&cwd) {
+            Ok(l) => (l, None),
+            Err(e) => (
+                Listing::empty(cwd.clone()),
+                Some(format!("{e}")),
+            ),
         };
         let git_info = crate::sysinfo::git_status(&cwd);
         let (config, load_note) = match Config::load_default(&cwd) {
@@ -311,7 +308,10 @@ impl App {
             quit_pending: None,
             history: History::load(),
             pane_history: History::load_file("pane_history"),
-            flash: None,
+            flash: start_error.map(|text| FlashMessage {
+                text,
+                kind: FlashKind::Error,
+            }),
             needs_full_repaint: false,
             user_host: user_host_string(),
             git_info,
