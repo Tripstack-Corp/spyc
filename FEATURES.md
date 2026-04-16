@@ -114,7 +114,10 @@ Three modes of running commands, each for a different use case:
 
 The shell prompt uses a vi-mode line editor with persistent history
 (shared across sessions), so you get `h/l/w/b/0/$` motion, `x/D/C`
-editing, and `i/a/I/A` mode switching — all within the one-line prompt.
+editing, operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`, etc.),
+and `i/a/I/A` mode switching — all within the one-line prompt.
+Alt+Enter inserts a newline in the pane (for Claude CLI multi-line
+input).
 
 ## Marks
 
@@ -145,6 +148,15 @@ The status bar uses powerline-style segments showing:
 - Active state: pick counts, inventory counts, mask status
 
 Falls back to a plain text layout in mono mode.
+
+## Focus indicators
+
+When switching between the file list and the pane, focus is
+unambiguous:
+
+- **File list cursor** dims to a muted color when the pane has focus
+- **Pane cursor** blinks when focused, shows as a static block when not
+- The divider rule brightens when the pane is focused
 
 ## Configuration
 
