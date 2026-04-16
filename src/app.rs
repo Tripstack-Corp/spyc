@@ -15,7 +15,7 @@ use crate::pane::{Pane, PaneWidget};
 use crate::shell;
 use crate::state::{Cursor, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::{
-    help, layout,
+    help,
     list_view::{Grid, ListView, Row},
     pager::{self, PagerView},
     prompt::PromptLine,
@@ -23,6 +23,15 @@ use crate::ui::{
     theme::Theme,
 };
 use crate::{resume_tui, suspend_tui, Tui};
+
+/// Precomputed rects for the current frame. Built by `App::compute_layout`.
+struct FrameLayout {
+    status: ratatui::layout::Rect,
+    list: ratatui::layout::Rect,
+    divider: Option<ratatui::layout::Rect>,
+    pane: Option<ratatui::layout::Rect>,
+    prompt: ratatui::layout::Rect,
+}
 
 /// Follow-up side effect a key handler asks the main loop to perform.
 ///
@@ -96,6 +105,7 @@ enum PromptKind {
     SetEnv,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct App {
     listing: Listing,
     picks: Picks,
@@ -116,9 +126,14 @@ pub struct App {
     /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
     pager: Option<PagerView>,
     /// Pty-hosted subprocess shown as a horizontal split under the list.
-    /// While set, all key input is forwarded to the pane until `\` is
-    /// pressed again to close it.
     pane: Option<Pane>,
+    /// Whether the pane (vs the file list) is the current keyboard focus.
+    /// Most keys are forwarded to the pane when this is true, but the
+    /// Ctrl-W prefix and Ctrl-\\ / F10 toggle are always caught by cspy.
+    pane_focused: bool,
+    /// The bottom pane's share of the middle rect, in percent. Resized
+    /// by `^W +` / `^W -`.
+    pane_height_pct: u16,
     /// Set during render when the pane's subprocess has exited. We drop
     /// the pane *after* the render loop finishes so the final frame is
     /// drawn before the layout collapses.
@@ -181,6 +196,9 @@ impl App {
             help_visible: false,
             pager: None,
             pane: None,
+            pane_focused: false,
+            // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
+            pane_height_pct: 70,
             pending_pane_close: false,
             last_search: None,
             flash: None,
@@ -344,8 +362,125 @@ impl App {
 
     // --- Rendering --------------------------------------------------------
 
+    /// Partition the frame into status/list/prompt rects — plus, when
+    /// the pane is open, a divider row and the pane rect below it.
+    ///
+    /// The **entire cspy unit** (status, list, prompt) lives above the
+    /// divider. That way the prompt row sits with the file list it's
+    /// about rather than attached to the bottom of the screen where the
+    /// pane's subprocess is typing.
+    fn compute_layout(area: ratatui::layout::Rect, pane_open: bool, pane_pct: u16) -> FrameLayout {
+        use ratatui::layout::Rect;
+        let w = area.width;
+        let h = area.height;
+
+        if !pane_open {
+            let status = Rect {
+                x: area.x,
+                y: area.y,
+                width: w,
+                height: 1.min(h),
+            };
+            let list = Rect {
+                x: area.x,
+                y: area.y + status.height,
+                width: w,
+                height: h.saturating_sub(2),
+            };
+            let prompt = Rect {
+                x: area.x,
+                y: area.y + h.saturating_sub(1),
+                width: w,
+                height: u16::from(h != 0),
+            };
+            return FrameLayout {
+                status,
+                list,
+                divider: None,
+                pane: None,
+                prompt,
+            };
+        }
+
+        // With pane: [status + list + prompt] (top unit) + divider + pane.
+        // Divider eats one row from whatever height is available.
+        let usable = h.saturating_sub(1); // minus divider
+        let pane_h = (u32::from(usable) * u32::from(pane_pct) / 100) as u16;
+        let top_h = usable.saturating_sub(pane_h);
+
+        // Inside the top region: status(1) + list(top_h - 2) + prompt(1).
+        // If top_h is too small (< 2), the list simply collapses to 0.
+        let status = Rect { x: area.x, y: area.y, width: w, height: 1.min(top_h) };
+        let list_h = top_h.saturating_sub(2);
+        let list = Rect {
+            x: area.x,
+            y: area.y + status.height,
+            width: w,
+            height: list_h,
+        };
+        let prompt = Rect {
+            x: area.x,
+            y: area.y + top_h.saturating_sub(1),
+            width: w,
+            height: u16::from(top_h >= 2),
+        };
+
+        let divider = Rect {
+            x: area.x,
+            y: area.y + top_h,
+            width: w,
+            height: 1,
+        };
+        let pane = Rect {
+            x: area.x,
+            y: divider.y + 1,
+            width: w,
+            height: pane_h,
+        };
+
+        FrameLayout {
+            status,
+            list,
+            divider: Some(divider),
+            pane: Some(pane),
+            prompt,
+        }
+    }
+
+    /// Draw a horizontal rule across the divider rect. The color reflects
+    /// which pane currently has focus, giving a clear visual cue without
+    /// needing labels.
+    fn render_divider(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::{
+            style::{Modifier, Style},
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+        let glyphs: String = "─".repeat(area.width as usize);
+        let style = if self.pane_focused {
+            Style::default()
+                .fg(self.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.theme.status_suffix)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(glyphs, style))),
+            area,
+        );
+    }
+
     fn render(&mut self, frame: &mut Frame) {
-        let panels = layout::split(frame.area());
+        let frame_area = frame.area();
+
+        // Layout:
+        //   - No pane: status (top row), list (middle), prompt (bottom row).
+        //   - With pane: status (top row of the top *pane*), list (rest of
+        //     top pane), divider row, pane, prompt (bottom row).
+        //   The status row is always at the top of the file-list region —
+        //   so when the pane is open it sits *inside* the top pane rather
+        //   than above the divider.
+        let layout = Self::compute_layout(frame_area, self.pane.is_some(), self.pane_height_pct);
 
         let (path, suffix) = self.header_parts();
         StatusBar {
@@ -354,21 +489,7 @@ impl App {
             suffix: &suffix,
             theme: &self.theme,
         }
-        .render(frame, panels.status);
-
-        // When the pty pane is open, carve the middle rect into top
-        // (file list) and bottom (pane) with a 65/35 split. Otherwise
-        // the list takes the whole middle rect.
-        let (list_area, pane_area) = if self.pane.is_some() {
-            use ratatui::layout::{Constraint, Direction, Layout};
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-                .split(panels.list);
-            (chunks[0], Some(chunks[1]))
-        } else {
-            (panels.list, None)
-        };
+        .render(frame, layout.status);
 
         let rows = self.build_rows();
         let probe = ListView {
@@ -378,7 +499,7 @@ impl App {
             empty_marker: self.view == View::Dir,
             theme: &self.theme,
         };
-        self.last_grid = probe.grid(list_area);
+        self.last_grid = probe.grid(layout.list);
         self.ensure_cursor_visible();
 
         frame.render_widget(
@@ -389,18 +510,16 @@ impl App {
                 empty_marker: self.view == View::Dir,
                 theme: &self.theme,
             },
-            list_area,
+            layout.list,
         );
 
-        if let (Some(pane), Some(rect)) = (self.pane.as_mut(), pane_area) {
+        if let (Some(pane), Some(rect)) = (self.pane.as_mut(), layout.pane) {
             // Keep the pty's view of its size matched to what we render.
             let _ = pane.resize(rect.height, rect.width);
             pane.drain_output();
             if pane.is_closed() {
                 // Subprocess exited — drop the pane after drawing one
-                // final frame so users see the last output. We schedule
-                // the drop via `pending_pane_close` and act on it after
-                // rendering.
+                // final frame so users see the last output.
                 self.pending_pane_close = true;
             }
             frame.render_widget(
@@ -411,13 +530,17 @@ impl App {
             );
         }
 
+        if let Some(divider_rect) = layout.divider {
+            self.render_divider(frame, divider_rect);
+        }
+
         if let Mode::Prompting(p) = &self.mode {
             PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
                 theme: &self.theme,
             }
-            .render(frame, panels.prompt);
+            .render(frame, layout.prompt);
         } else if let Some(flash) = &self.flash {
             use ratatui::{
                 style::{Modifier, Style},
@@ -432,7 +555,7 @@ impl App {
                 flash.text.clone(),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
-            frame.render_widget(Paragraph::new(line), panels.prompt);
+            frame.render_widget(Paragraph::new(line), layout.prompt);
         }
 
         // Pager comes after list but before help (help always wins).
@@ -508,22 +631,14 @@ impl App {
             self.handle_pager_key(key);
             return Ok(PostAction::None);
         }
-        // When the split pane is open, forward keys to the subprocess
-        // except the toggle chord which closes the pane. Plain `\`
-        // passes through so the user can type literal backslashes.
-        //
-        // Toggle chord matches: Ctrl-\ (as either `Char('\\')`+CONTROL
-        // or the raw FS byte 0x1c), plus F10 as a universal fallback
-        // for terminals that swallow Ctrl-\.
-        if self.pane.is_some() {
-            let is_close = matches!(key.code, KeyCode::Char('\x1c') | KeyCode::F(10))
-                || (matches!(key.code, KeyCode::Char('\\'))
-                    && key.modifiers.contains(KeyModifiers::CONTROL));
-            if is_close {
-                self.pane = None;
-                self.flash_info("pane closed");
-                return Ok(PostAction::None);
-            }
+        // When the pane is open *and focused*, forward keys to the
+        // subprocess — except cspy meta keys, which are always caught
+        // by cspy so the user can toggle / resize / focus-switch / send
+        // selection from inside the pane.
+        if self.pane.is_some()
+            && self.pane_focused
+            && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
+        {
             if let Some(pane) = self.pane.as_mut() {
                 let _ = pane.send_key(key);
             }
@@ -783,6 +898,7 @@ impl App {
     /// proven end to end.
     fn toggle_pane(&mut self) {
         if self.pane.take().is_some() {
+            self.pane_focused = false;
             self.flash_info("pane closed");
             return;
         }
@@ -792,24 +908,92 @@ impl App {
         // Spawn at the real pane size so TUI subprocesses (which do
         // their initial layout at startup and don't always repaint on
         // SIGWINCH) get a correct first draw.
-        let (rows, cols) = Self::pane_spawn_size();
+        let (rows, cols) = Self::pane_spawn_size(self.pane_height_pct);
         match Pane::spawn(&cmd, rows, cols) {
             Ok(p) => {
                 self.pane = Some(p);
-                self.flash_info(format!("pane: {cmd}"));
+                // New pane opens focused: you almost always want to type
+                // at it immediately after invoking it.
+                self.pane_focused = true;
+                self.flash_info(format!("pane: {cmd} (^W k for list)"));
             }
             Err(e) => self.flash_error(format!("pane spawn failed: {e}")),
         }
     }
 
+    /// ^W j / ^W k — flip keyboard focus between the list and the pane.
+    fn toggle_pane_focus(&mut self) {
+        if self.pane.is_none() {
+            return;
+        }
+        self.pane_focused = !self.pane_focused;
+        self.flash_info(if self.pane_focused {
+            "focus: pane"
+        } else {
+            "focus: list"
+        });
+    }
+
+    /// ^W s — write the current selection as shell-quoted paths to the
+    /// pane's stdin. A trailing space is appended so the user can keep
+    /// typing without concatenating against the last path. No newline
+    /// — let the user decide when to submit.
+    fn send_selection_to_pane(&mut self) {
+        if self.pane.is_none() {
+            self.flash_error("no pane open (Ctrl-\\ to open one)");
+            return;
+        }
+        // Build the payload before grabbing the pane mut-borrow, so we
+        // can still call self.flash_* below without overlapping borrows.
+        let (payload, count) = {
+            let paths = self.selection_paths();
+            if paths.is_empty() {
+                self.flash_error("nothing selected");
+                return;
+            }
+            let count = paths.len();
+            let mut out = String::new();
+            for (i, p) in paths.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&shell::shell_quote(&p.to_string_lossy()));
+            }
+            out.push(' ');
+            (out, count)
+        };
+        let result = {
+            let pane = self
+                .pane
+                .as_mut()
+                .expect("pane existence already checked");
+            pane.send_bytes(payload.as_bytes())
+        };
+        match result {
+            Ok(()) => self.flash_info(format!("sent {count} path(s) to pane")),
+            Err(e) => self.flash_error(format!("send failed: {e}")),
+        }
+    }
+
+    /// ^W + / ^W - — change the bottom pane's share of the middle rect
+    /// in 5% steps, clamped to [10%, 90%].
+    fn resize_pane(&mut self, delta_pct: i32) {
+        if self.pane.is_none() {
+            return;
+        }
+        let current = i32::from(self.pane_height_pct);
+        let new = (current + delta_pct).clamp(10, 90);
+        self.pane_height_pct = new as u16;
+    }
+
     /// Compute the (rows, cols) the pane will occupy right after it
-    /// opens, based on the current terminal size. The split is 35% of
-    /// the middle rect (= terminal height minus status and prompt rows).
-    fn pane_spawn_size() -> (u16, u16) {
+    /// opens, based on the current terminal size and the configured
+    /// pane height percentage.
+    fn pane_spawn_size(height_pct: u16) -> (u16, u16) {
         let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
         // status row + prompt row + at least a couple of list rows.
         let middle = total_rows.saturating_sub(2);
-        let pane = (u32::from(middle) * 35 / 100) as u16;
+        let pane = (u32::from(middle) * u32::from(height_pct) / 100) as u16;
         (pane.max(1), cols.max(1))
     }
 
@@ -1312,6 +1496,10 @@ impl App {
             Action::ReloadConfig => self.reload_config(),
 
             Action::TogglePane => self.toggle_pane(),
+            Action::PaneFocusToggle => self.toggle_pane_focus(),
+            Action::PaneSendSelection => self.send_selection_to_pane(),
+            Action::PaneGrow => self.resize_pane(5),
+            Action::PaneShrink => self.resize_pane(-5),
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),
@@ -1572,6 +1760,25 @@ impl Matcher {
 /// Point the FS watcher at `new_dir`, unwatching the previously-watched
 /// listing dir if any. No-op when the watcher failed to initialize or
 /// when the same dir is already being watched.
+/// Keys we intercept even when the pane is focused.
+const fn is_cspy_meta_when_pane_focused(
+    key: crossterm::event::KeyEvent,
+    resolver_pending: bool,
+) -> bool {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    // Continuation of a multi-key cspy sequence must stay with cspy.
+    if resolver_pending {
+        return true;
+    }
+    // Raw FS byte or F10 — always the pane toggle.
+    if matches!(key.code, KeyCode::F(10) | KeyCode::Char('\x1c')) {
+        return true;
+    }
+    // Ctrl-\ (toggle) and Ctrl-W (pane-command prefix).
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W'))
+}
+
 fn sync_listing_watch(
     fs_watcher: Option<&mut notify::RecommendedWatcher>,
     active: &mut Option<PathBuf>,

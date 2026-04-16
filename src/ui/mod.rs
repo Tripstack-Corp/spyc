@@ -2,7 +2,6 @@
 //! `list_view`, `status`, and `prompt`. Shared colors in `theme`.
 
 pub mod help;
-pub mod layout;
 pub mod list_view;
 pub mod pager;
 pub mod prompt;

@@ -131,6 +131,16 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Split pane (M8)",
+        rows: &[
+            ("^\\  F10  ^W \\  ^W c", "toggle the bottom pty pane"),
+            ("^W j  ^W k", "switch focus between list and pane"),
+            ("^W s", "send selection paths to pane stdin"),
+            ("^W +  ^W -", "grow / shrink the pane"),
+            ("CSPY_PANE_CMD", "env var for pane command (default $SHELL)"),
+        ],
+    },
+    Section {
         title: "Shell-out",
         rows: &[
             ("!  ;", "prompt shell command (% = selection)"),

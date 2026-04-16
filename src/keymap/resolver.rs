@@ -21,6 +21,9 @@ enum PendingSeq {
     Mark,
     /// Seen `'`, waiting for a letter `a-z` to jump to that mark.
     JumpMark,
+    /// Seen `Ctrl-W`, waiting for a pane-command letter
+    /// (`j`/`k`/`s`/`+`/`-`/`\\`/`c`).
+    W,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -56,6 +59,13 @@ impl Resolver {
         self.pending = PendingSeq::Normal;
     }
 
+    /// True while a multi-key sequence (gg, ma, 'a, Ctrl-W…) is in progress.
+    /// Used by the App to decide whether to intercept or forward keys when
+    /// the pty pane is focused.
+    pub const fn is_pending(&self) -> bool {
+        !matches!(self.pending, PendingSeq::Normal)
+    }
+
     /// Feed a key through the resolver, first consulting the user keymap
     /// and falling through to the built-in default bindings.
     pub fn feed(&mut self, ev: KeyEvent, user: &UserKeymap) -> ResolverOutcome {
@@ -75,7 +85,14 @@ impl Resolver {
                 KeyCode::Char('b' | 'B') => ResolverOutcome::Action(Action::PageUp),
                 KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::PageDown),
                 KeyCode::Char('t' | 'T') => ResolverOutcome::Action(Action::PickToggleAll),
-                KeyCode::Char('w' | 'W') => ResolverOutcome::Action(Action::ChmodAdd('w')),
+                // Ctrl-W starts the pane-command prefix. We used to bind
+                // it to `chmod +w`; that went to `!chmod +w %` to free the
+                // key for split-nav. Note the match arm below starts the
+                // pending sequence and falls through after resetting.
+                KeyCode::Char('w' | 'W') => {
+                    self.pending = PendingSeq::W;
+                    return ResolverOutcome::Pending;
+                }
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),
                 KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::ReloadConfig),
                 // Ctrl-backslash toggles the split pane. Some terminals
@@ -93,6 +110,26 @@ impl Resolver {
         if self.pending == PendingSeq::G {
             let out = match ev.code {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: Ctrl-W prefix waiting for a pane command.
+        if self.pending == PendingSeq::W {
+            let out = match ev.code {
+                KeyCode::Char('j' | 'J' | 'k' | 'K') => {
+                    ResolverOutcome::Action(Action::PaneFocusToggle)
+                }
+                KeyCode::Char('s' | 'S') => {
+                    ResolverOutcome::Action(Action::PaneSendSelection)
+                }
+                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
+                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+                KeyCode::Char('\\' | 'c' | 'C') => {
+                    ResolverOutcome::Action(Action::TogglePane)
+                }
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

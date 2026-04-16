@@ -73,7 +73,11 @@ pub enum Action {
     ReloadConfig, // ^R — re-read ~/.cspyrc.toml + project config
 
     // Split pane (M8).
-    TogglePane, // \ — open/close the bottom pty pane
+    TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
+    PaneFocusToggle,    // ^W j / ^W k — switch focus between list and pane
+    PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
+    PaneGrow,           // ^W + — bottom pane takes more height
+    PaneShrink,         // ^W - — bottom pane takes less height
 
     // Meta.
     Redraw, // ^L
@@ -124,6 +128,10 @@ impl Action {
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
             Self::TogglePane => "toggle split pane",
+            Self::PaneFocusToggle => "focus pane / list",
+            Self::PaneSendSelection => "send selection to pane",
+            Self::PaneGrow => "grow pane",
+            Self::PaneShrink => "shrink pane",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::Date => "show date",
