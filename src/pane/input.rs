@@ -42,7 +42,14 @@ pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
                 out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
             }
         }
-        K::Enter => out.push(b'\r'),
+        K::Enter => {
+            if alt {
+                // Alt+Enter → newline (used by Claude CLI for multi-line input).
+                out.push(b'\n');
+            } else {
+                out.push(b'\r');
+            }
+        }
         K::Tab => out.push(b'\t'),
         K::BackTab => out.extend_from_slice(b"\x1b[Z"),
         K::Backspace => out.push(0x7f),

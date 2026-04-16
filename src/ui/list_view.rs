@@ -247,6 +247,7 @@ mod tests {
             cursor: 0,
             view_top: 0,
             empty_marker: false,
+            focused: true,
             theme: &theme,
         };
         lv.grid(Rect {

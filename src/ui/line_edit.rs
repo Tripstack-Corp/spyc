@@ -31,10 +31,18 @@ pub enum EditResult {
     HistoryNext,
 }
 
+/// Pending operator waiting for a motion (d, c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingOp {
+    Delete, // d{motion}
+    Change, // c{motion} — delete then enter Insert
+}
+
 pub struct LineEditor {
     pub buf: Vec<char>,
     pub cursor: usize,
     pub mode: Mode,
+    pending_op: Option<PendingOp>,
 }
 
 impl LineEditor {
@@ -43,6 +51,7 @@ impl LineEditor {
             buf: Vec::new(),
             cursor: 0,
             mode: Mode::Insert,
+            pending_op: None,
         }
     }
 
@@ -107,9 +116,6 @@ impl LineEditor {
                 }
             }
             KeyCode::Backspace => {
-                if self.cursor == 0 && self.buf.is_empty() {
-                    return EditResult::Cancel;
-                }
                 if self.cursor > 0 {
                     self.cursor -= 1;
                     self.buf.remove(self.cursor);
@@ -157,6 +163,63 @@ impl LineEditor {
     // ---- Normal mode --------------------------------------------------------
 
     fn feed_normal(&mut self, key: KeyEvent) -> EditResult {
+        // If an operator (d/c) is pending, the next key is a motion.
+        if let Some(op) = self.pending_op.take() {
+            match key.code {
+                KeyCode::Char('w') => {
+                    let end = self.next_word_start_delete();
+                    self.delete_range(self.cursor, end);
+                    if op == PendingOp::Change {
+                        self.mode = Mode::Insert;
+                    }
+                }
+                KeyCode::Char('b') => {
+                    let start = self.prev_word_start();
+                    self.delete_range(start, self.cursor);
+                    self.cursor = start;
+                    if op == PendingOp::Change {
+                        self.mode = Mode::Insert;
+                    }
+                }
+                KeyCode::Char('e') => {
+                    let end = (self.word_end() + 1).min(self.buf.len());
+                    self.delete_range(self.cursor, end);
+                    if op == PendingOp::Change {
+                        self.mode = Mode::Insert;
+                    }
+                }
+                KeyCode::Char('$') => {
+                    self.buf.truncate(self.cursor);
+                    if op == PendingOp::Change {
+                        self.mode = Mode::Insert;
+                    } else if self.cursor > 0 {
+                        self.cursor -= 1;
+                    }
+                }
+                KeyCode::Char('0') => {
+                    self.delete_range(0, self.cursor);
+                    self.cursor = 0;
+                    if op == PendingOp::Change {
+                        self.mode = Mode::Insert;
+                    }
+                }
+                KeyCode::Char('d') if op == PendingOp::Delete => {
+                    // dd — delete entire line.
+                    self.buf.clear();
+                    self.cursor = 0;
+                }
+                KeyCode::Char('c') if op == PendingOp::Change => {
+                    // cc — change entire line.
+                    self.buf.clear();
+                    self.cursor = 0;
+                    self.mode = Mode::Insert;
+                }
+                KeyCode::Esc => {} // cancel pending op
+                _ => {}            // unknown motion, discard
+            }
+            return EditResult::Continue;
+        }
+
         match key.code {
             // Movement.
             KeyCode::Char('h') | KeyCode::Left => {
@@ -176,7 +239,6 @@ impl LineEditor {
                 }
             }
             KeyCode::Char('^') => {
-                // First non-whitespace.
                 self.cursor = self
                     .buf
                     .iter()
@@ -186,6 +248,10 @@ impl LineEditor {
             KeyCode::Char('w') => self.cursor = self.next_word_start(),
             KeyCode::Char('b') => self.cursor = self.prev_word_start(),
             KeyCode::Char('e') => self.cursor = self.word_end(),
+
+            // Operators — wait for a motion key.
+            KeyCode::Char('d') => self.pending_op = Some(PendingOp::Delete),
+            KeyCode::Char('c') => self.pending_op = Some(PendingOp::Change),
 
             // Editing.
             KeyCode::Char('x') => {
@@ -197,19 +263,16 @@ impl LineEditor {
                 }
             }
             KeyCode::Char('D') => {
-                // Delete to end of line.
                 self.buf.truncate(self.cursor);
                 if self.cursor > 0 {
                     self.cursor -= 1;
                 }
             }
             KeyCode::Char('C') => {
-                // Change to end of line.
                 self.buf.truncate(self.cursor);
                 self.mode = Mode::Insert;
             }
-            KeyCode::Char('S' | 'c') if key.code == KeyCode::Char('S') => {
-                // Substitute whole line.
+            KeyCode::Char('S') => {
                 self.buf.clear();
                 self.cursor = 0;
                 self.mode = Mode::Insert;
@@ -233,7 +296,6 @@ impl LineEditor {
             }
 
             KeyCode::Esc => {
-                // Second Esc (already in Normal) cancels the prompt.
                 return EditResult::Cancel;
             }
             _ => {}
@@ -241,7 +303,32 @@ impl LineEditor {
         EditResult::Continue
     }
 
-    // ---- Word helpers -------------------------------------------------------
+    // ---- Helpers ------------------------------------------------------------
+
+    /// Delete characters in `[start..end)` and clamp cursor.
+    fn delete_range(&mut self, start: usize, end: usize) {
+        let end = end.min(self.buf.len());
+        if start < end {
+            self.buf.drain(start..end);
+        }
+        if self.cursor >= self.buf.len() && !self.buf.is_empty() {
+            self.cursor = self.buf.len() - 1;
+        }
+    }
+
+    /// Like `next_word_start` but for `dw`: includes trailing whitespace
+    /// after the word (vim's delete-word semantics).
+    fn next_word_start_delete(&self) -> usize {
+        let n = self.buf.len();
+        let mut i = self.cursor;
+        while i < n && !self.buf[i].is_whitespace() {
+            i += 1;
+        }
+        while i < n && self.buf[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
 
     fn delete_word_back(&mut self) {
         // Delete trailing whitespace, then the word.
@@ -404,9 +491,9 @@ mod tests {
     }
 
     #[test]
-    fn backspace_on_empty_cancels() {
+    fn backspace_on_empty_is_noop() {
         let mut e = LineEditor::new();
-        assert_eq!(e.feed(k(KeyCode::Backspace)), EditResult::Cancel);
+        assert_eq!(e.feed(k(KeyCode::Backspace)), EditResult::Continue);
     }
 
     #[test]
