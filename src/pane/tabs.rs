@@ -162,6 +162,10 @@ impl PaneTabs {
     }
 
     /// Slice of all tab entries (for rendering the tab bar).
+    pub fn tabs_mut(&mut self) -> &mut [TabEntry] {
+        &mut self.tabs
+    }
+
     pub fn tabs(&self) -> &[TabEntry] {
         &self.tabs
     }

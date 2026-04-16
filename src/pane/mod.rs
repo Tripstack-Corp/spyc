@@ -72,6 +72,10 @@ impl Pane {
         cmd.args(["-c", command]);
         // Use the caller-specified working directory.
         cmd.cwd(cwd);
+        // Ensure the child sees correct terminal type and dimensions.
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLUMNS", cols.to_string());
+        cmd.env("LINES", rows.to_string());
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // We don't need our own handle on the slave.

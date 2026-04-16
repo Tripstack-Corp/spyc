@@ -537,6 +537,31 @@ impl App {
                             pane.send_bytes(&buf)?;
                         }
                     }
+                    Event::Resize(cols, rows) => {
+                        // Terminal resized — immediately resize all pty tabs
+                        // so the child shells re-render their prompts at the
+                        // correct width.
+                        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+                        if let Some(tabs) = self.pane_tabs.as_mut() {
+                            let layout = Self::compute_layout(
+                                area,
+                                true,
+                                self.pane_height_pct,
+                            );
+                            if let Some(pane_rect) = layout.pane {
+                                for entry in tabs.tabs_mut() {
+                                    let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
+                                }
+                            }
+                        }
+                        if let Some(overlay) = self.top_overlay.as_mut() {
+                            let (r, c) = Self::top_overlay_size(
+                                self.pane_height_pct,
+                                self.pane_tabs.is_some(),
+                            );
+                            let _ = overlay.resize(r, c);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1821,10 +1846,13 @@ impl App {
 
     /// Compute the (rows, cols) the bottom pane will occupy.
     fn pane_spawn_size(height_pct: u16) -> (u16, u16) {
-        let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let middle = total_rows.saturating_sub(2);
-        let pane = (u32::from(middle) * u32::from(height_pct) / 100) as u16;
-        (pane.max(1), cols.max(1))
+        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+        let layout = Self::compute_layout(area, true, height_pct);
+        match layout.pane {
+            Some(r) => (r.height.max(1), r.width.max(1)),
+            None => (rows.saturating_sub(3).max(1), cols.max(1)),
+        }
     }
 
     /// Compute the (rows, cols) available for the top-overlay pty. This
@@ -2206,7 +2234,10 @@ impl App {
         }
         let current_col = (self.cursor.index / rows_per_col) as isize;
         let current_row = self.cursor.index % rows_per_col;
-        let target_col = (current_col + delta).rem_euclid(num_cols as isize) as usize;
+        let target_col = (current_col + delta).clamp(0, num_cols as isize - 1) as usize;
+        if target_col == current_col as usize {
+            return; // already at the edge
+        }
         let target_idx = target_col * rows_per_col + current_row;
         self.cursor.index = if target_idx < len {
             target_idx
@@ -2702,8 +2733,20 @@ impl App {
             self.rebuild_rows();
             return Ok(());
         }
+        // Remember the directory we're leaving so we can focus it after chdir.
+        let prev_name = self
+            .listing
+            .dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
         if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
             self.chdir(&parent)?;
+            // Place cursor on the directory we just came from.
+            if let Some(name) = prev_name {
+                if let Some(idx) = self.rows.iter().position(|r| r.display == name || r.display == format!("{name}/")) {
+                    self.cursor.index = idx;
+                }
+            }
         }
         Ok(())
     }
