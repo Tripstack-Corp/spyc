@@ -10,7 +10,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -359,7 +359,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         }
     }
 
-    let paragraph = Paragraph::new(display_lines);
+    let paragraph = Paragraph::new(display_lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, content_area);
 
     if let (Some(rect), Some(text)) = (search_area, view.status_text()) {

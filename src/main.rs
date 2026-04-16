@@ -16,7 +16,9 @@ use std::io;
 use anyhow::Result;
 use crossterm::{
     cursor::MoveTo,
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    },
     execute,
     terminal::{
         disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
@@ -39,7 +41,12 @@ pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -50,7 +57,8 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
     Ok(())
@@ -71,6 +79,7 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
         Clear(ClearType::All),
         MoveTo(0, 0),
         DisableMouseCapture,
+        DisableBracketedPaste,
     )?;
     terminal.show_cursor()?;
     Ok(())
@@ -86,7 +95,8 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         EnterAlternateScreen,
-        EnableMouseCapture
+        EnableMouseCapture,
+        EnableBracketedPaste
     )?;
     terminal.hide_cursor()?;
     terminal.clear()?;

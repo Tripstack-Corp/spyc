@@ -443,20 +443,34 @@ impl App {
             // the user is just browsing files.
             let poll_ms = if self.pane.is_some() { 16 } else { 250 };
             if event::poll(Duration::from_millis(poll_ms))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
-                        let post = self.handle_key(key)?;
-                        if let PostAction::Spawn {
-                            program,
-                            args,
-                            pause_after,
-                        } = post
-                        {
-                            run_child_in_foreground(terminal, &program, &args, pause_after)?;
-                            // The listing may have changed (mv, rm, chmod, etc).
-                            self.refresh_listing();
+                match event::read()? {
+                    Event::Key(key) => {
+                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
+                            let post = self.handle_key(key)?;
+                            if let PostAction::Spawn {
+                                program,
+                                args,
+                                pause_after,
+                            } = post
+                            {
+                                run_child_in_foreground(terminal, &program, &args, pause_after)?;
+                                // The listing may have changed (mv, rm, chmod, etc).
+                                self.refresh_listing();
+                            }
                         }
                     }
+                    Event::Paste(text) => {
+                        if let Some(pane) = self.pane.as_mut() {
+                            // Wrap in bracketed paste so the child app (e.g. claude)
+                            // receives the block as a single paste, not line-by-line.
+                            let mut buf = Vec::with_capacity(text.len() + 12);
+                            buf.extend_from_slice(b"\x1b[200~");
+                            buf.extend_from_slice(text.as_bytes());
+                            buf.extend_from_slice(b"\x1b[201~");
+                            pane.send_bytes(&buf)?;
+                        }
+                    }
+                    _ => {}
                 }
             }
 
