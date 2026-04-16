@@ -141,6 +141,41 @@ deploy-fika: release-linux-x86 ## Build Linux x86_64 and scp to fika-vm
 	scp target/x86_64-unknown-linux-musl/release/$(BINARY) $(FIKA_HOST):~/bin/$(BINARY)
 	@echo "deployed: $(FIKA_HOST):~/bin/$(BINARY)"
 
+# ---------- Doctor (preflight checks) ----------------------------------------
+
+.PHONY: doctor
+doctor: ## Check build prerequisites
+	@echo "=== cspy doctor ==="
+	@echo ""
+	@printf "  %-24s" "rustc:" && (rustc --version 2>/dev/null || echo "MISSING — install via rustup")
+	@printf "  %-24s" "cargo:" && (cargo --version 2>/dev/null || echo "MISSING — install via rustup")
+	@printf "  %-24s" "rustup:" && (rustup --version 2>/dev/null | head -1 || echo "MISSING — https://rustup.rs")
+	@printf "  %-24s" "zig:" && (zig version 2>/dev/null || echo "MISSING — brew install zig")
+	@printf "  %-24s" "cargo-zigbuild:" && (cargo zigbuild --help >/dev/null 2>&1 && echo "ok" || echo "MISSING — cargo install cargo-zigbuild")
+	@echo ""
+	@echo "  Installed targets:"
+	@rustup target list --installed 2>/dev/null | sed 's/^/    /' || echo "    (rustup not available)"
+	@echo ""
+	@NEED_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"; \
+	INSTALLED=$$(rustup target list --installed 2>/dev/null); \
+	MISSING=""; \
+	for t in $$NEED_TARGETS; do \
+		echo "$$INSTALLED" | grep -q "$$t" || MISSING="$$MISSING $$t"; \
+	done; \
+	if [ -n "$$MISSING" ]; then \
+		echo "  Missing targets:$$MISSING"; \
+		echo "  Fix: rustup target add$$MISSING"; \
+	else \
+		echo "  All cross-compile targets installed ✓"; \
+	fi
+	@echo ""
+	@printf "  %-24s" "sysroot:" && rustc --print sysroot 2>/dev/null
+	@echo ""
+	@# Check for homebrew rust conflict
+	@if [ -f /opt/homebrew/Cellar/rust/*/bin/rustc ] 2>/dev/null; then \
+		echo "  ⚠  Homebrew rust detected — may shadow rustup. Run: brew uninstall rust"; \
+	fi
+
 # ---------- Clean ------------------------------------------------------------
 
 .PHONY: clean
