@@ -53,6 +53,19 @@ pub struct PagerView {
 impl PagerView {
     /// Build a pager from plain strings. Each string becomes one
     /// unstyled line.
+    /// Build a pager from pre-styled lines (e.g. the help overlay).
+    pub fn new_styled(title: impl Into<String>, lines: Vec<Line<'static>>) -> Self {
+        Self {
+            title: title.into(),
+            lines,
+            scroll: 0,
+            search: Search::Off,
+            show_whitespace: false,
+            saveable: false,
+            full_width: false,
+        }
+    }
+
     pub fn new_plain(title: impl Into<String>, lines: Vec<String>) -> Self {
         Self {
             title: title.into(),

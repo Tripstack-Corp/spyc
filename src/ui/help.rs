@@ -1,52 +1,14 @@
-//! Help overlay — the `?` screen. Hardcoded so it always reflects what
-//! the resolver actually binds. When we implement `.cspyrc` in M4 we can
-//! regenerate this from the live keymap.
+//! Help content — the `?` screen. Rendered via the pager so it scrolls
+//! and supports search. Content is hardcoded so it always reflects what
+//! the resolver actually binds; user bindings from `.cspyrc` are appended.
 
 use ratatui::{
-    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 use crate::keymap::UserKeymap;
 use crate::ui::theme::Theme;
-
-pub fn render(frame: &mut Frame, area: Rect, theme: &Theme, user_keymap: &UserKeymap) {
-    let inner_area = centered_rect(area, 78, 92);
-
-    // Clear the region below the overlay so text beneath doesn't bleed
-    // through wherever our content is shorter than the frame.
-    frame.render_widget(Clear, inner_area);
-
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        "  cspy — key bindings  (press any key to close)  ",
-        Style::default()
-            .fg(theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD),
-    ));
-
-    let body_area = block.inner(inner_area);
-    frame.render_widget(block, inner_area);
-
-    let lines = build_lines(theme, user_keymap);
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, body_area);
-}
-
-const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
-    let w = area.width * percent_w / 100;
-    let h = area.height * percent_h / 100;
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    }
-}
 
 struct Section {
     title: &'static str,
@@ -181,7 +143,7 @@ const SECTIONS: &[Section] = &[
     },
 ];
 
-fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {
+pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     let key_style = Style::default().fg(theme.pick).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(theme.status_path);

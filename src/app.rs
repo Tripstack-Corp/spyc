@@ -165,7 +165,6 @@ pub struct App {
     mode: Mode,
     /// When true, the key-bindings overlay is drawn on top of everything
     /// and the next keypress dismisses it.
-    help_visible: bool,
     /// When set, a scrollable text pager sits on top of the file list.
     /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
     pager: Option<PagerView>,
@@ -266,7 +265,6 @@ impl App {
             config,
             theme,
             mode: Mode::Normal,
-            help_visible: false,
             pager: None,
             pane_tabs: None,
             top_overlay: None,
@@ -885,10 +883,6 @@ impl App {
             pager::render(frame, frame.area(), view, &self.theme);
         }
 
-        // Help overlay is painted last so it sits on top of everything.
-        if self.help_visible {
-            help::render(frame, frame.area(), &self.theme, &self.user_keymap);
-        }
     }
 
     fn header_parts(&self) -> (String, String) {
@@ -996,13 +990,6 @@ impl App {
             return Ok(PostAction::None);
         }
 
-        // While help is up, any keypress dismisses it and is then
-        // swallowed — so the user doesn't accidentally trigger an action.
-        if self.help_visible {
-            let _ = key;
-            self.help_visible = false;
-            return Ok(PostAction::None);
-        }
         // Pager eats all keys until dismissed.
         if self.pager.is_some() {
             self.handle_pager_key(key);
@@ -2207,7 +2194,8 @@ impl App {
             }
 
             Action::Help => {
-                self.help_visible = true;
+                let lines = help::build_lines(&self.theme, &self.user_keymap);
+                self.pager = Some(pager::PagerView::new_styled("cspy — key bindings", lines));
             }
 
             Action::ReloadConfig => self.reload_config(),
