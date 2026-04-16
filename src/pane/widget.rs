@@ -13,6 +13,10 @@ use ratatui::{
 
 pub struct PaneWidget<'a> {
     pub screen: &'a vt100::Screen,
+    pub focused: bool,
+    /// When focused: toggles on/off to produce a blink effect.
+    /// When unfocused: ignored (cursor is always a static dim block).
+    pub blink_on: bool,
 }
 
 impl Widget for PaneWidget<'_> {
@@ -35,9 +39,16 @@ impl Widget for PaneWidget<'_> {
             }
         }
 
-        // Overlay the pty cursor, if shown, with a reverse-video block so
-        // the user can see where input will land.
-        if !self.screen.hide_cursor() {
+        // Overlay a cursor block at the pty cursor position.
+        //  - Focused + blink_on: bright reverse-video block (visible phase).
+        //  - Focused + blink_off: no overlay (hidden phase → blink effect).
+        //  - Unfocused: static dim reverse-video block (always visible).
+        let show_cursor = if self.focused {
+            self.blink_on
+        } else {
+            true
+        };
+        if show_cursor {
             let (cy, cx) = self.screen.cursor_position();
             if cy < draw_rows && cx < draw_cols {
                 let x = area.x + cx;

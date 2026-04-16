@@ -22,6 +22,7 @@ pub struct Theme {
     pub file: Color,
     pub other: Color,
     pub cursor_bg: Color,
+    pub cursor_bg_dim: Color,
     pub cursor_fg: Color,
     pub pick: Color,
     pub take: Color,
@@ -45,6 +46,7 @@ impl Default for Theme {
             file: Color::Rgb(0xc0, 0xca, 0xf5),        // near-white
             other: Color::Rgb(0x54, 0x5c, 0x7e),       // dim slate
             cursor_bg: Color::Rgb(0xb8, 0x5c, 0x4a),   // warm terracotta
+            cursor_bg_dim: Color::Rgb(0x3b, 0x40, 0x61), // muted indigo (unfocused)
             cursor_fg: Color::Rgb(0xff, 0xff, 0xff),   // pure white
             pick: Color::Rgb(0xe0, 0xaf, 0x68),        // amber
             take: Color::Rgb(0x73, 0xda, 0xca),        // teal

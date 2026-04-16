@@ -32,6 +32,7 @@ pub struct ListView<'a> {
     pub cursor: usize,
     pub view_top: usize,
     pub empty_marker: bool,
+    pub focused: bool,
     pub theme: &'a Theme,
 }
 
@@ -177,14 +178,23 @@ impl Widget for ListView<'_> {
                 // On the cursor row, force a bright white foreground so the
                 // text remains legible on the saturated cursor bar and you
                 // can see the selected row from across the room.
+                // When unfocused (pane has focus), dim the cursor bar.
+                let bg = if self.focused {
+                    self.theme.cursor_bg
+                } else {
+                    self.theme.cursor_bg_dim
+                };
+                let bold = if self.focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                };
                 (
-                    marker_style
-                        .bg(self.theme.cursor_bg)
-                        .add_modifier(Modifier::BOLD),
+                    marker_style.bg(bg).add_modifier(bold),
                     Style::default()
                         .fg(self.theme.cursor_fg)
-                        .bg(self.theme.cursor_bg)
-                        .add_modifier(Modifier::BOLD),
+                        .bg(bg)
+                        .add_modifier(bold),
                 )
             } else {
                 (marker_style, name_style)

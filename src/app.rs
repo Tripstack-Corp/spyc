@@ -213,6 +213,9 @@ pub struct App {
     user_host: String,
     /// Cached git branch + dirty flag, refreshed on chdir.
     git_info: Option<String>,
+    /// Pane cursor blink state: toggles every ~530ms for a visible blink.
+    cursor_blink_on: bool,
+    cursor_blink_instant: std::time::Instant,
     should_quit: bool,
 
     /// Rebuilt on chdir / mask toggle / inventory change.
@@ -283,6 +286,8 @@ impl App {
             needs_full_repaint: false,
             user_host: user_host_string(),
             git_info,
+            cursor_blink_on: true,
+            cursor_blink_instant: std::time::Instant::now(),
             should_quit: false,
             rows: Vec::new(),
             last_grid: Grid {
@@ -369,6 +374,11 @@ impl App {
             if self.needs_full_repaint {
                 self.needs_full_repaint = false;
                 terminal.clear()?;
+            }
+            // Tick the pane cursor blink (~530ms cycle).
+            if self.cursor_blink_instant.elapsed() >= Duration::from_millis(530) {
+                self.cursor_blink_on = !self.cursor_blink_on;
+                self.cursor_blink_instant = std::time::Instant::now();
             }
             terminal.draw(|frame| self.render(frame))?;
 
@@ -728,6 +738,8 @@ impl App {
             frame.render_widget(
                 PaneWidget {
                     screen: overlay.screen(),
+                    focused: true,
+                    blink_on: self.cursor_blink_on,
                 },
                 overlay_area,
             );
@@ -767,6 +779,8 @@ impl App {
                 frame.render_widget(
                     PaneWidget {
                         screen: tabs.active().screen(),
+                        focused: false,
+                        blink_on: false,
                     },
                     rect,
                 );
@@ -785,11 +799,13 @@ impl App {
         .render(frame, layout.status);
 
         let rows = self.build_rows();
+        let list_focused = !self.pane_focused;
         let probe = ListView {
             rows: &rows,
             cursor: self.cursor.index,
             view_top: self.cursor.view_top,
             empty_marker: self.view == View::Dir,
+            focused: list_focused,
             theme: &self.theme,
         };
         self.last_grid = probe.grid(layout.list);
@@ -801,6 +817,7 @@ impl App {
                 cursor: self.cursor.index,
                 view_top: self.cursor.view_top,
                 empty_marker: self.view == View::Dir,
+                focused: list_focused,
                 theme: &self.theme,
             },
             layout.list,
@@ -812,6 +829,8 @@ impl App {
             frame.render_widget(
                 PaneWidget {
                     screen: tabs.active().screen(),
+                    focused: self.pane_focused,
+                    blink_on: self.cursor_blink_on,
                 },
                 rect,
             );
