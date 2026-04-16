@@ -32,6 +32,8 @@ onboarding new users or recording screencasts. Details TBD.
 
 - Separate pane command history with move-to-end dedup; `j`/`k` in
   normal mode cycle history without leaving normal mode
+- Git file status colors in the listing (modified, added, untracked,
+  deleted, renamed, conflicted) — refreshes on chdir and fs events
 - Cursor returns to previous directory on climb (`u`/`-`)
 - h/l at column edges clamp instead of wrapping
 - Terminal resize handler: pty tabs resize immediately on `SIGWINCH`

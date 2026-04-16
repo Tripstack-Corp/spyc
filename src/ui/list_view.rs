@@ -20,11 +20,25 @@ use ratatui::{
 use crate::fs::EntryKind;
 use crate::ui::theme::Theme;
 
+/// Git status for a single file in the listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GitFileStatus {
+    #[default]
+    Clean,
+    Modified,
+    Added,
+    Untracked,
+    Deleted,
+    Renamed,
+    Conflicted,
+}
+
 pub struct Row {
     pub display: String,
     pub kind: EntryKind,
     pub picked: bool,
     pub taken: bool,
+    pub git_status: GitFileStatus,
 }
 
 pub struct ListView<'a> {
@@ -172,7 +186,7 @@ impl Widget for ListView<'_> {
                 Style::default()
             };
 
-            let name_style = row_style(row.kind, self.theme);
+            let name_style = row_style(row.kind, row.git_status, self.theme);
             let highlighted = (start + i) == self.cursor;
             let (marker_style, name_style) = if highlighted {
                 // On the cursor row, force a bright white foreground so the
@@ -216,13 +230,22 @@ impl Widget for ListView<'_> {
     }
 }
 
-fn row_style(kind: EntryKind, theme: &Theme) -> Style {
-    match kind {
+fn row_style(kind: EntryKind, git: GitFileStatus, theme: &Theme) -> Style {
+    let base = match kind {
         EntryKind::Dir => theme.dir_style(),
         EntryKind::Executable => theme.exec_style(),
         EntryKind::Symlink => theme.symlink_style(),
         EntryKind::File => theme.file_style(),
         EntryKind::Other => theme.other_style(),
+    };
+    // Tint based on git status — override fg for modified/new files.
+    match git {
+        GitFileStatus::Clean => base,
+        GitFileStatus::Modified => base.fg(theme.pick),  // amber
+        GitFileStatus::Added | GitFileStatus::Untracked => base.fg(theme.exec), // green
+        GitFileStatus::Deleted => base.fg(theme.cursor_bg).add_modifier(Modifier::DIM), // red-ish dim
+        GitFileStatus::Renamed => base.fg(theme.symlink), // lavender
+        GitFileStatus::Conflicted => base.fg(theme.cursor_bg).add_modifier(Modifier::BOLD), // red bold
     }
 }
 
@@ -236,6 +259,7 @@ mod tests {
             kind: EntryKind::File,
             picked: false,
             taken: false,
+            git_status: GitFileStatus::Clean,
         }
     }
 

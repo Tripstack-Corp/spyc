@@ -231,6 +231,8 @@ pub struct App {
     user_host: String,
     /// Cached git branch + dirty flag, refreshed on chdir.
     git_info: Option<String>,
+    /// Per-file git status for the current directory listing.
+    git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
     /// Pane cursor blink state: toggles every ~530ms for a visible blink.
     cursor_blink_on: bool,
     cursor_blink_instant: std::time::Instant,
@@ -270,6 +272,7 @@ impl App {
             ),
         };
         let git_info = crate::sysinfo::git_status(&cwd);
+        let git_files = crate::sysinfo::git_file_statuses(&cwd);
         let (config, load_note) = match Config::load_default(&cwd) {
             Ok(c) => {
                 let note = if c.sources.is_empty() {
@@ -325,6 +328,7 @@ impl App {
             needs_full_repaint: false,
             user_host: user_host_string(),
             git_info,
+            git_files,
             cursor_blink_on: true,
             cursor_blink_instant: std::time::Instant::now(),
             should_quit: false,
@@ -1023,13 +1027,22 @@ impl App {
     }
 
     fn build_rows(&self) -> Vec<Row> {
+        use crate::ui::list_view::GitFileStatus;
         self.rows
             .iter()
-            .map(|rd| Row {
-                display: rd.display.clone(),
-                kind: rd.kind,
-                picked: self.view == View::Dir && self.picks.contains(&rd.path),
-                taken: self.inventory.contains(&rd.path),
+            .map(|rd| {
+                let git_status = self
+                    .git_files
+                    .get(&rd.display)
+                    .copied()
+                    .unwrap_or(GitFileStatus::Clean);
+                Row {
+                    display: rd.display.clone(),
+                    kind: rd.kind,
+                    picked: self.view == View::Dir && self.picks.contains(&rd.path),
+                    taken: self.inventory.contains(&rd.path),
+                    git_status,
+                }
             })
             .collect()
     }
@@ -2782,6 +2795,7 @@ impl App {
     fn refresh_listing(&mut self) {
         if let Ok(new) = Listing::read(&self.listing.dir) {
             self.listing = new;
+            self.git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
             self.rebuild_rows();
         }
     }
@@ -2828,6 +2842,7 @@ impl App {
         let _ = std::env::set_current_dir(&canonical);
         self.listing = new_listing;
         self.git_info = crate::sysinfo::git_status(&canonical);
+        self.git_files = crate::sysinfo::git_file_statuses(&canonical);
         self.picks.clear();
         self.cursor = Cursor::new();
         self.view = View::Dir;

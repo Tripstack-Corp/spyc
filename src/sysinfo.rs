@@ -70,6 +70,64 @@ pub fn git_status(dir: &std::path::Path) -> Option<String> {
     })
 }
 
+/// Per-file git status for the current directory. Returns a map from
+/// filename (not full path) to status. Only includes files that are
+/// modified, new, deleted, etc. — clean files are omitted.
+pub fn git_file_statuses(
+    dir: &std::path::Path,
+) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
+    use crate::ui::list_view::GitFileStatus;
+    let mut map = std::collections::HashMap::new();
+    let output = std::process::Command::new("git")
+        .args(["status", "--porcelain", "-uall"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else { return map };
+    if !output.status.success() {
+        return map;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let xy = &line[..2];
+        let path_str = &line[3..];
+        // For renames ("R  old -> new"), take the new name.
+        let filename = path_str
+            .rsplit(" -> ")
+            .next()
+            .unwrap_or(path_str);
+        // We only care about the filename relative to the listing dir.
+        // `git status` gives repo-relative paths, so extract the last component.
+        let name = std::path::Path::new(filename)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // Also track directory names for changed files inside subdirs.
+        let top_component = filename.split('/').next().unwrap_or(filename).to_string();
+        let status = match xy {
+            "??" => GitFileStatus::Untracked,
+            "!!" => continue, // ignored
+            s if s.contains('U') || s == "DD" || s == "AA" => GitFileStatus::Conflicted,
+            s if s.starts_with('R') || s.ends_with('R') => GitFileStatus::Renamed,
+            s if s.starts_with('A') || s.ends_with('A') => GitFileStatus::Added,
+            s if s.starts_with('D') || s.ends_with('D') => GitFileStatus::Deleted,
+            _ => GitFileStatus::Modified,
+        };
+        if !name.is_empty() {
+            map.entry(name).or_insert(status);
+        }
+        // Mark parent directories as modified too.
+        if top_component != filename && !top_component.is_empty() {
+            map.entry(format!("{top_component}/")).or_insert(GitFileStatus::Modified);
+        }
+    }
+    map
+}
+
 // ---- Git worktree helpers ---------------------------------------------------
 
 /// A parsed git worktree entry.

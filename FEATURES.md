@@ -31,6 +31,9 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **J** jump to any path (with `~` and `$VAR` expansion)
 - Multi-column layout that adapts to terminal width
 - Color-coded entries: directories, executables, symlinks, files
+- **Git status colors** — modified files show amber, untracked/added
+  show green, deleted show dim, renamed show lavender, conflicted
+  show bold red. Directories containing changes are tinted too.
 
 ## Picks and inventory
 
