@@ -529,7 +529,19 @@ impl App {
                         }
                     }
                     Event::Paste(text) => {
-                        if let Some(pane) = self.pane_tabs.as_mut().map(|t| t.active_mut()) {
+                        if let Mode::Prompting(ref mut p) = self.mode {
+                            // Paste into the active prompt buffer.
+                            // Strip newlines (prompts are single-line).
+                            let clean = text.replace(['\n', '\r'], " ");
+                            if let Some(ed) = p.editor.as_mut() {
+                                for ch in clean.chars() {
+                                    p.buffer.push(ch);
+                                }
+                                ed.set_content(&p.buffer);
+                            } else {
+                                p.buffer.push_str(&clean);
+                            }
+                        } else if let Some(pane) = self.pane_tabs.as_mut().map(|t| t.active_mut()) {
                             // Wrap in bracketed paste so the child app (e.g. claude)
                             // receives the block as a single paste, not line-by-line.
                             let mut buf = Vec::with_capacity(text.len() + 12);
