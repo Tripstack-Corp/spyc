@@ -251,12 +251,22 @@ struct RowData {
 
 impl App {
     pub fn new() -> Result<Self> {
-        let cwd = std::env::current_dir().context("getting current directory")?;
+        let (cwd, start_error) = match std::env::current_dir() {
+            Ok(d) => (d, None),
+            Err(_) => {
+                // cwd not accessible — fall back to $HOME.
+                let home = std::env::var("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| PathBuf::from("/tmp"));
+                let _ = std::env::set_current_dir(&home);
+                (home, Some("cwd not accessible, started in $HOME".to_string()))
+            }
+        };
         let (listing, start_error) = match Listing::read(&cwd) {
-            Ok(l) => (l, None),
+            Ok(l) => (l, start_error),
             Err(e) => (
                 Listing::empty(cwd.clone()),
-                Some(format!("{e}")),
+                Some(start_error.unwrap_or_default() + &format!("{e}")),
             ),
         };
         let git_info = crate::sysinfo::git_status(&cwd);
