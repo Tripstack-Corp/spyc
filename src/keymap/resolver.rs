@@ -125,6 +125,7 @@ impl Resolver {
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
                 KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
                 KeyCode::Char('\\' | 'c' | 'C') => ResolverOutcome::Action(Action::TogglePane),
                 _ => ResolverOutcome::Ignored,
             };

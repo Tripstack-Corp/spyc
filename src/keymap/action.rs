@@ -82,6 +82,8 @@ pub enum Action {
     PaneSendSelection, // ^W s — send shell-quoted selection to pane stdin
     PaneGrow,          // ^W + — bottom pane takes more height
     PaneShrink,        // ^W - — bottom pane takes less height
+    PaneScrollEnter,   // ^W v — enter scroll mode (browse scrollback)
+    PaneScrollSave,    // s (while in scroll mode) — save scrollback to file
 
     // Meta.
     Redraw, // ^L
@@ -138,6 +140,8 @@ impl Action {
             Self::PaneSendSelection => "send selection to pane",
             Self::PaneGrow => "grow pane",
             Self::PaneShrink => "shrink pane",
+            Self::PaneScrollEnter => "scroll pane history",
+            Self::PaneScrollSave => "save pane scrollback",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",

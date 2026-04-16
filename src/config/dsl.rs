@@ -200,6 +200,9 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
             Ok(BoundAction::Jump(path.to_string()))
         }
 
+        "panescroll" => Ok(BoundAction::Plain(Action::PaneScrollEnter)),
+        "panesave" => Ok(BoundAction::Plain(Action::PaneScrollSave)),
+
         other => Err(format!("unknown action `{other}`")),
     }
 }

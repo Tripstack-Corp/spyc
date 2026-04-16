@@ -203,6 +203,9 @@ pub struct App {
     /// Transient message shown in the prompt row when no prompt is active.
     /// Cleared on the next keypress so it doesn't linger after you've read it.
     flash: Option<FlashMessage>,
+    /// Set when a pane or overlay closes — triggers one `terminal.clear()`
+    /// so ratatui repaints every cell instead of diffing against stale state.
+    needs_full_repaint: bool,
     user_host: String,
     should_quit: bool,
 
@@ -270,6 +273,7 @@ impl App {
             quit_pending: None,
             history: History::load(),
             flash: None,
+            needs_full_repaint: false,
             user_host: user_host_string(),
             should_quit: false,
             rows: Vec::new(),
@@ -352,6 +356,12 @@ impl App {
         sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &self.listing.dir);
 
         while !self.should_quit {
+            // One-shot full repaint after a pane or overlay closes (or any
+            // other event that leaves ratatui's diff buffer stale).
+            if self.needs_full_repaint {
+                self.needs_full_repaint = false;
+                terminal.clear()?;
+            }
             terminal.draw(|frame| self.render(frame))?;
 
             // If the pane's subprocess exited during the frame just drawn,
@@ -361,6 +371,7 @@ impl App {
                 self.pending_pane_close = false;
                 self.pane = None;
                 self.pane_focused = false;
+                self.needs_full_repaint = true;
                 self.flash_info("pane: subprocess exited");
             }
             // pending_overlay_close is no longer used — the overlay stays
@@ -569,7 +580,12 @@ impl App {
             text::{Line, Span},
             widgets::Paragraph,
         };
-        let glyphs: String = "─".repeat(area.width as usize);
+        let is_scrolling = self
+            .pane
+            .as_ref()
+            .is_some_and(|p| p.is_scrolling());
+        let tag = if is_scrolling { " [SCROLL] " } else { "" };
+        let rule_width = (area.width as usize).saturating_sub(tag.len());
         let style = if self.pane_focused {
             Style::default()
                 .fg(self.theme.prompt_prefix)
@@ -577,10 +593,16 @@ impl App {
         } else {
             Style::default().fg(self.theme.status_suffix)
         };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(glyphs, style))),
-            area,
-        );
+        let mut spans = vec![Span::styled("─".repeat(rule_width), style)];
+        if is_scrolling {
+            spans.push(Span::styled(
+                tag,
+                Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     fn render(&mut self, frame: &mut Frame) {
@@ -858,6 +880,7 @@ impl App {
         if self.overlay_awaiting_dismiss {
             self.top_overlay = None;
             self.overlay_awaiting_dismiss = false;
+            self.needs_full_repaint = true;
             self.flash_info("command finished");
             return Ok(PostAction::None);
         }
@@ -881,6 +904,18 @@ impl App {
         if self.pager.is_some() {
             self.handle_pager_key(key);
             return Ok(PostAction::None);
+        }
+        // When the pane is in scroll mode, navigation keys are handled
+        // here instead of being forwarded to the child subprocess.
+        // Let cspy meta keys (^W prefix, ^\\, F10) fall through so
+        // pane commands still work from scroll mode.
+        if let Some(pane) = self.pane.as_mut() {
+            if pane.is_scrolling()
+                && self.pane_focused
+                && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
+            {
+                return self.handle_pane_scroll_key(key);
+            }
         }
         // When the pane is open *and focused*, forward keys to the
         // subprocess — except cspy meta keys, which are always caught
@@ -1261,6 +1296,7 @@ impl App {
         if self.pane.is_some() {
             self.pane = None;
             self.pane_focused = false;
+            self.needs_full_repaint = true;
             self.flash_info("pane closed");
             return;
         }
@@ -1295,6 +1331,45 @@ impl App {
         } else {
             "focus: list"
         });
+    }
+
+    /// Handle keys while the pane is in scroll mode. Vi-style navigation
+    /// through the scrollback buffer; `Esc`/`q` exit back to live view.
+    fn handle_pane_scroll_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Result<PostAction> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let pane = self.pane.as_mut().unwrap();
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('k') | KeyCode::Up => pane.scroll_up(1),
+            KeyCode::Char('j') | KeyCode::Down => pane.scroll_down_or_exit(1),
+            KeyCode::PageUp | KeyCode::Char('b') if ctrl => pane.scroll_up(20),
+            KeyCode::Char('u') if ctrl => pane.scroll_up(10),
+            KeyCode::PageDown | KeyCode::Char('f') if ctrl => pane.scroll_down_or_exit(20),
+            KeyCode::Char('d') if ctrl => pane.scroll_down_or_exit(10),
+            KeyCode::Char('g') => {
+                // Single 'g' — we don't track gg state here, just go to top.
+                pane.scroll_to_top();
+            }
+            KeyCode::Char('G') => pane.scroll_to_bottom(),
+            KeyCode::Char('s') => {
+                match pane.save_to_file() {
+                    Ok(path) => {
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        self.flash_info(&format!("saved: {name}"));
+                    }
+                    Err(e) => self.flash_info(&format!("save error: {e}")),
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                pane.exit_scroll_mode();
+                self.flash_info("scroll: off");
+            }
+            _ => {} // Swallow all other keys while scrolling.
+        }
+        Ok(PostAction::None)
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
@@ -1892,6 +1967,24 @@ impl App {
             Action::PaneSendSelection => self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
             Action::PaneShrink => self.resize_pane(-5),
+            Action::PaneScrollEnter => {
+                if let Some(pane) = self.pane.as_mut() {
+                    pane.enter_scroll_mode();
+                    self.pane_focused = true;
+                    self.flash_info("scroll: on (j/k nav, s save, Esc exit)");
+                }
+            }
+            Action::PaneScrollSave => {
+                if let Some(pane) = self.pane.as_mut() {
+                    match pane.save_to_file() {
+                        Ok(path) => {
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            self.flash_info(&format!("saved: {name}"));
+                        }
+                        Err(e) => self.flash_info(&format!("save error: {e}")),
+                    }
+                }
+            }
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),
@@ -1929,7 +2022,10 @@ impl App {
                     Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
             }
 
-            Action::Redraw | Action::Noop => {}
+            Action::Redraw => {
+                self.needs_full_repaint = true;
+            }
+            Action::Noop => {}
             Action::Quit => {
                 let now = std::time::Instant::now();
                 if self

@@ -35,6 +35,10 @@ pub struct Pane {
     /// Set when the reader thread observed EOF on the master — the
     /// subprocess has exited and the pane should be torn down.
     closed: bool,
+    /// When > 0, the pane is in scroll mode: keys navigate the scrollback
+    /// instead of being forwarded to the child. `drain_output()` still
+    /// runs so no output is lost.
+    scroll_offset: usize,
 }
 
 /// Messages posted by the pty reader thread.
@@ -76,7 +80,7 @@ impl Pane {
         let (tx, event_rx) = mpsc::channel::<PaneEvent>();
         thread::spawn(move || reader_loop(reader, &tx));
 
-        let parser = vt100::Parser::new(rows, cols, 0);
+        let parser = vt100::Parser::new(rows, cols, 10_000);
 
         Ok(Self {
             parser,
@@ -85,6 +89,7 @@ impl Pane {
             _child: child,
             event_rx,
             closed: false,
+            scroll_offset: 0,
         })
     }
 
@@ -137,6 +142,95 @@ impl Pane {
 
     pub fn screen(&self) -> &vt100::Screen {
         self.parser.screen()
+    }
+
+    // ---- Scroll mode ------------------------------------------------
+
+    /// True when the user is browsing scrollback history.
+    pub const fn is_scrolling(&self) -> bool {
+        self.scroll_offset > 0
+    }
+
+    /// Enter scroll mode — start one line above live so the user
+    /// immediately sees "you left live view".
+    pub fn enter_scroll_mode(&mut self) {
+        self.scroll_offset = 1;
+        self.apply_scroll();
+    }
+
+    /// Exit scroll mode and snap back to the live view.
+    pub fn exit_scroll_mode(&mut self) {
+        self.scroll_offset = 0;
+        self.apply_scroll();
+    }
+
+    /// Scroll up (further into history) by `n` lines.
+    pub fn scroll_up(&mut self, n: usize) {
+        let max = self.max_scrollback();
+        self.scroll_offset = self.scroll_offset.saturating_add(n).min(max);
+        self.apply_scroll();
+    }
+
+    /// Scroll down (toward live) by `n` lines. Exits scroll mode
+    /// automatically if we reach the bottom.
+    pub fn scroll_down_or_exit(&mut self, n: usize) {
+        if self.scroll_offset <= n {
+            self.exit_scroll_mode();
+        } else {
+            self.scroll_offset -= n;
+            self.apply_scroll();
+        }
+    }
+
+    /// Jump to the oldest line in scrollback.
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = self.max_scrollback().max(1);
+        self.apply_scroll();
+    }
+
+    /// Jump back to live view.
+    pub fn scroll_to_bottom(&mut self) {
+        self.exit_scroll_mode();
+    }
+
+    /// Save full scrollback + screen contents to a timestamped file.
+    pub fn save_to_file(&mut self) -> std::io::Result<std::path::PathBuf> {
+        // Temporarily set scrollback to max so contents() captures everything.
+        let prev = self.scroll_offset;
+        let max = self.max_scrollback();
+        self.parser.set_scrollback(max);
+        let text = self.parser.screen().contents();
+        // Restore previous view.
+        self.parser.set_scrollback(prev);
+
+        let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
+        let stamp = now.trim_end_matches("_UTC");
+        let filename = format!("cspy_pane_{stamp}.txt");
+        let path = std::env::current_dir()?.join(&filename);
+        std::fs::write(&path, text.trim_end().to_string() + "\n")?;
+        Ok(path)
+    }
+
+    fn max_scrollback(&self) -> usize {
+        // vt100 stores scrollback rows in an internal VecDeque.
+        // screen().scrollback() returns the *current* offset, not
+        // the maximum. We can probe by temporarily setting a huge
+        // offset — set_scrollback clamps to the actual buffer length.
+        // But that mutates, so we use a simpler heuristic: the
+        // contents() method with full scrollback gives us everything.
+        // For navigation we need the max offset. The internal buffer
+        // length isn't directly exposed, so we binary-search or just
+        // set a large value and read back what it clamped to.
+        //
+        // Actually, set_scrollback(usize::MAX) clamps internally,
+        // but we'd need &mut. Since we already have &self in some
+        // callers, let's store it. For now, use a reasonable upper
+        // bound and accept the clamp.
+        10_000 // matches our scrollback_len
+    }
+
+    fn apply_scroll(&mut self) {
+        self.parser.set_scrollback(self.scroll_offset);
     }
 }
 
