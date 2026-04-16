@@ -39,9 +39,12 @@ pub struct PagerView {
     /// Top line currently shown in the viewport (0-indexed).
     pub scroll: u16,
     search: Search,
-    /// When true, show whitespace markers like vim's `:set list`:
-    /// `^I` for tab, `$` for EOL, `^M` for CR.
+    /// When true, show whitespace markers + line numbers.
     pub show_whitespace: bool,
+    /// When true, `s` saves the content to a file. Only for command
+    /// output — not for files the user opened with `d`/Enter (they
+    /// already exist on disk).
+    pub saveable: bool,
 }
 
 impl PagerView {
@@ -54,11 +57,13 @@ impl PagerView {
             scroll: 0,
             search: Search::Off,
             show_whitespace: false,
+            saveable: false,
         }
     }
 
     /// Build a pager from raw bytes that may contain ANSI escape
     /// sequences. Colors, bold, underline etc. are preserved.
+    /// Saveable by default (command output).
     pub fn new_ansi(title: impl Into<String>, bytes: &[u8]) -> Self {
         let text = bytes.into_text().unwrap_or_default();
         Self {
@@ -67,7 +72,26 @@ impl PagerView {
             scroll: 0,
             search: Search::Off,
             show_whitespace: false,
+            saveable: true,
         }
+    }
+
+    /// Save the plain-text content to a timestamped file in the current
+    /// directory. Returns the path on success.
+    pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
+        let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
+        // Strip "UTC" and clean up for a filename.
+        let stamp = now.trim_end_matches("_UTC");
+        let filename = format!("cspy_output_{stamp}.txt");
+        let path = std::env::current_dir()?.join(&filename);
+        let text: String = self
+            .lines
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, text + "\n")?;
+        Ok(path)
     }
 
     pub fn toggle_whitespace(&mut self) {
@@ -293,14 +317,35 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let content_end = view.lines.len();
     let slice_end = (start + viewport_h).min(content_end);
 
+    // Width of the line-number gutter (only shown when whitespace mode is on).
+    let total_lines = view.lines.len();
+    let gutter_w = if view.show_whitespace {
+        // Enough digits for the largest line number + one space.
+        total_lines.max(1).ilog10() as usize + 2
+    } else {
+        0
+    };
+    let ln_style = Style::default()
+        .fg(theme.status_suffix)
+        .add_modifier(Modifier::DIM);
+
     let mut display_lines: Vec<Line<'static>> = view.lines[start..slice_end]
         .iter()
         .enumerate()
         .map(|(i, line)| {
             let abs_idx = start + i;
             let styled = styled_line_for_render(line, view, abs_idx, theme);
-            if view.show_whitespace {
+            let styled = if view.show_whitespace {
                 apply_whitespace_markers(&styled, theme)
+            } else {
+                styled
+            };
+            if gutter_w > 0 {
+                // Prepend line number.
+                let num = format!("{:>width$} ", abs_idx + 1, width = gutter_w - 1);
+                let mut spans = vec![Span::styled(num, ln_style)];
+                spans.extend(styled.spans);
+                Line::from(spans)
             } else {
                 styled
             }

@@ -22,7 +22,7 @@ pub struct PromptLine<'a> {
 impl PromptLine<'_> {
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let mode_tag = match self.vi_mode {
-            Some(ViMode::Normal) => "[N] ",
+            Some(ViMode::Normal) => "[V] ",
             Some(ViMode::Insert) => "[I] ",
             None => "",
         };

@@ -1596,10 +1596,16 @@ impl App {
                 view.scroll_by(-i32::from(viewport), viewport);
             }
             KeyCode::PageDown | KeyCode::Char(' ') => view.scroll_by(i32::from(viewport), viewport),
-            KeyCode::PageUp => view.scroll_by(-i32::from(viewport), viewport),
+            KeyCode::PageUp | KeyCode::Char('b') => view.scroll_by(-i32::from(viewport), viewport),
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
             KeyCode::Char('l') => view.toggle_whitespace(),
+            KeyCode::Char('s') if view.saveable => {
+                match view.save_to_file() {
+                    Ok(path) => self.flash_info(format!("saved: {}", path.display())),
+                    Err(e) => self.flash_error(format!("save failed: {e}")),
+                }
+            }
             _ => {}
         }
     }
