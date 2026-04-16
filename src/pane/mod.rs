@@ -90,6 +90,15 @@ impl Pane {
 
         let parser = vt100::Parser::new(rows, cols, 10_000);
 
+        // Nudge: send SIGWINCH so shells (especially p10k/oh-my-zsh)
+        // re-query the pty size and render their first prompt correctly.
+        let _ = pair.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+
         Ok(Self {
             parser,
             writer,
@@ -108,6 +117,19 @@ impl Pane {
     pub fn drain_output(&mut self) -> bool {
         let mut had_bytes = false;
         while let Ok(event) = self.event_rx.try_recv() {
+            // Debug: dump raw pty bytes when CSPY_PTY_DEBUG is set.
+            if let PaneEvent::Bytes(ref bytes) = event {
+                if std::env::var("CSPY_PTY_DEBUG").is_ok() {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/cspy_pty_debug.bin")
+                    {
+                        let _ = f.write_all(bytes);
+                    }
+                }
+            }
             match event {
                 PaneEvent::Bytes(bytes) => {
                     had_bytes = true;
