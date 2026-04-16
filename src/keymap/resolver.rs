@@ -159,6 +159,12 @@ impl Resolver {
             self.reset();
             return ResolverOutcome::Action(Action::TogglePane);
         }
+        // F11 opens the pane with `claude --resume` to continue the last
+        // conversation.
+        if matches!(ev.code, KeyCode::F(9)) {
+            self.reset();
+            return ResolverOutcome::Action(Action::ResumePane);
+        }
 
         match ev.code {
             // Count prefix. Leading zero is a motion (home column) in vi; here

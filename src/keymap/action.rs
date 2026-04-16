@@ -75,6 +75,7 @@ pub enum Action {
 
     // Split pane (M8).
     TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
+    ResumePane,         // F11 — open pane with `claude --resume`
     PaneFocusToggle,    // ^W j / ^W k — switch focus between list and pane
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
     PaneGrow,           // ^W + — bottom pane takes more height
@@ -130,6 +131,7 @@ impl Action {
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
             Self::TogglePane => "toggle split pane",
+            Self::ResumePane => "open pane with claude --resume",
             Self::PaneFocusToggle => "focus pane / list",
             Self::PaneSendSelection => "send selection to pane",
             Self::PaneGrow => "grow pane",

@@ -133,7 +133,8 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Split pane (M8)",
         rows: &[
-            ("^\\  F10  ^W \\  ^W c", "toggle the bottom pty pane"),
+            ("^\\  F10  ^W \\  ^W c", "toggle the bottom pane (claude)"),
+            ("F9", "open pane with claude --resume"),
             ("^W j  ^W k", "switch focus between list and pane"),
             ("^W s", "send selection paths to pane stdin"),
             ("^W +  ^W -", "grow / shrink the pane"),

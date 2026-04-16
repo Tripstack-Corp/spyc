@@ -144,6 +144,9 @@ pub struct App {
     /// When the subprocess exits, cspy's file listing is restored and
     /// the bottom pane (claude) is completely unaffected.
     top_overlay: Option<Pane>,
+    /// The overlay subprocess has exited but we're holding the screen
+    /// so the user can read the final output. Enter dismisses.
+    overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
     /// A `!` command running in the background with piped output. The
     /// event loop stays alive so Ctrl+C can kill the child.
@@ -161,6 +164,9 @@ pub struct App {
     pending_pane_close: bool,
     /// Most recent search term; `n` / `N` use this.
     last_search: Option<String>,
+    /// Timestamp of the first quit press. Must press again within 2s to
+    /// actually quit — prevents murdering a claude session by accident.
+    quit_pending: Option<std::time::Instant>,
     /// Transient message shown in the prompt row when no prompt is active.
     /// Cleared on the next keypress so it doesn't linger after you've read it.
     flash: Option<FlashMessage>,
@@ -218,6 +224,7 @@ impl App {
             pager: None,
             pane: None,
             top_overlay: None,
+            overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
             pending_capture: None,
             pane_focused: false,
@@ -225,6 +232,7 @@ impl App {
             pane_height_pct: 70,
             pending_pane_close: false,
             last_search: None,
+            quit_pending: None,
             flash: None,
             user_host: user_host_string(),
             should_quit: false,
@@ -319,11 +327,9 @@ impl App {
                 self.pane_focused = false;
                 self.flash_info("pane: subprocess exited");
             }
-            if self.pending_overlay_close {
-                self.pending_overlay_close = false;
-                self.top_overlay = None;
-                self.flash_info("command finished");
-            }
+            // pending_overlay_close is no longer used — the overlay stays
+            // visible until Enter via overlay_awaiting_dismiss.
+            let _ = self.pending_overlay_close;
 
             // Check if a background `!` capture has finished.
             if let Some(capture) = &mut self.pending_capture {
@@ -562,8 +568,8 @@ impl App {
             };
             let _ = overlay.resize(overlay_area.height, overlay_area.width);
             overlay.drain_output();
-            if overlay.is_closed() {
-                self.pending_overlay_close = true;
+            if overlay.is_closed() && !self.overlay_awaiting_dismiss {
+                self.overlay_awaiting_dismiss = true;
             }
             frame.render_widget(
                 PaneWidget {
@@ -571,6 +577,31 @@ impl App {
                 },
                 overlay_area,
             );
+            // Show a dismiss prompt when the subprocess has exited.
+            if self.overlay_awaiting_dismiss && overlay_area.height > 0 {
+                use ratatui::{
+                    style::{Modifier, Style},
+                    text::{Line, Span},
+                    widgets::Paragraph,
+                };
+                let prompt_y = overlay_area.y + overlay_area.height.saturating_sub(1);
+                let prompt_rect = ratatui::layout::Rect {
+                    x: overlay_area.x,
+                    y: prompt_y,
+                    width: overlay_area.width,
+                    height: 1,
+                };
+                let style = Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD);
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        "[process exited — press any key to continue]",
+                        style,
+                    ))),
+                    prompt_rect,
+                );
+            }
 
             // Divider + bottom pane still render normally.
             if let Some(divider_rect) = layout.divider {
@@ -738,17 +769,49 @@ impl App {
         // Any keypress clears a lingering flash message.
         self.flash = None;
 
-        // While a `!` capture is running, Ctrl+C kills it. All other
-        // keys are swallowed.
+        // While a `!` capture is running, Ctrl+C kills it and opens the
+        // pager with whatever partial output was collected.
         if let Some(capture) = &mut self.pending_capture {
             if matches!(key.code, KeyCode::Char('c' | 'C'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
                 let _ = capture.child.kill();
+                // Kill closes the pipe → reader thread sees EOF → sends
+                // whatever it collected. Give it a moment to deliver.
+                let stdout = capture
+                    .output_rx
+                    .recv_timeout(std::time::Duration::from_secs(1))
+                    .unwrap_or_default();
+                let mut bytes = stdout;
+                if let Some(mut stderr) = capture.child.stderr.take() {
+                    use std::io::Read as _;
+                    let mut err = Vec::new();
+                    let _ = stderr.read_to_end(&mut err);
+                    if !err.is_empty() {
+                        if !bytes.is_empty() {
+                            bytes.push(b'\n');
+                        }
+                        bytes.extend_from_slice(&err);
+                    }
+                }
                 let _ = capture.child.wait();
+                let title = format!("{} — interrupted", capture.title);
                 self.pending_capture = None;
-                self.flash_info("command interrupted");
+                if bytes.is_empty() {
+                    self.flash_info("command interrupted (no output)");
+                } else {
+                    self.pager = Some(PagerView::new_ansi(title, &bytes));
+                }
             }
+            return Ok(PostAction::None);
+        }
+
+        // Top overlay: once the subprocess exits, hold the screen until
+        // any key so short-lived commands (`;ls`) don't flash and vanish.
+        if self.overlay_awaiting_dismiss {
+            self.top_overlay = None;
+            self.overlay_awaiting_dismiss = false;
+            self.flash_info("command finished");
             return Ok(PostAction::None);
         }
 
@@ -1067,23 +1130,26 @@ impl App {
     /// `claude` (or a config-provided command) once the integration is
     /// proven end to end.
     fn toggle_pane(&mut self) {
-        if self.pane.take().is_some() {
+        if self.pane.is_some() {
+            self.pane = None;
             self.pane_focused = false;
             self.flash_info("pane closed");
             return;
         }
-        let cmd = std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| {
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-        });
-        // Spawn at the real pane size so TUI subprocesses (which do
-        // their initial layout at startup and don't always repaint on
-        // SIGWINCH) get a correct first draw.
+        let cmd = std::env::var("CSPY_PANE_CMD")
+            .unwrap_or_else(|_| "claude".to_string());
+        self.open_pane_with(&cmd);
+    }
+
+    fn open_pane_with(&mut self, cmd: &str) {
+        if self.pane.is_some() {
+            self.flash_info("pane already open — close first");
+            return;
+        }
         let (rows, cols) = Self::pane_spawn_size(self.pane_height_pct);
-        match Pane::spawn(&cmd, rows, cols) {
+        match Pane::spawn(cmd, rows, cols) {
             Ok(p) => {
                 self.pane = Some(p);
-                // New pane opens focused: you almost always want to type
-                // at it immediately after invoking it.
                 self.pane_focused = true;
                 self.flash_info(format!("pane: {cmd} (^W k for list)"));
             }
@@ -1716,6 +1782,7 @@ impl App {
             Action::ReloadConfig => self.reload_config(),
 
             Action::TogglePane => self.toggle_pane(),
+            Action::ResumePane => self.open_pane_with("claude --resume"),
             Action::PaneFocusToggle => self.toggle_pane_focus(),
             Action::PaneSendSelection => self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
@@ -1746,7 +1813,18 @@ impl App {
             }
 
             Action::Redraw | Action::Noop => {}
-            Action::Quit => self.should_quit = true,
+            Action::Quit => {
+                let now = std::time::Instant::now();
+                if self
+                    .quit_pending
+                    .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
+                {
+                    self.should_quit = true;
+                } else {
+                    self.quit_pending = Some(now);
+                    self.flash_info("press again to quit");
+                }
+            }
         }
         self.cursor.clamp(self.rows.len());
         Ok(PostAction::None)
