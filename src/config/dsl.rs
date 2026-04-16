@@ -156,7 +156,11 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
         "next" => Ok(BoundAction::Plain(Action::SearchNext)),
 
         "startshell" => Ok(BoundAction::Plain(Action::StartShell)),
-        "unix_cmd" => Ok(BoundAction::Plain(Action::ShellPrompt)),
+        // `unix_cmd` in spy was a prompted shell command. In cspy, `!`
+        // captures output into the pager while `;` runs foreground. DSL
+        // defaults to the captured variant; use `foreground_cmd` for `;`.
+        "unix_cmd" => Ok(BoundAction::Plain(Action::ShellCapturedPrompt)),
+        "foreground_cmd" => Ok(BoundAction::Plain(Action::ShellForegroundPrompt)),
         "unix" => {
             if tail.is_empty() {
                 Err("`unix` needs a shell command (e.g. `unix ls %`)".to_string())

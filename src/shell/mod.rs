@@ -23,14 +23,6 @@ pub fn resolve_editor() -> Vec<String> {
     split_command(&raw)
 }
 
-/// $PAGER, fall back to `less`.
-pub fn resolve_pager() -> Vec<String> {
-    let raw = std::env::var("PAGER")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "less".to_string());
-    split_command(&raw)
-}
 
 /// Split an `$EDITOR`-style value into `[program, arg, arg, ...]` on
 /// whitespace. This is what git does. People who need shell features set

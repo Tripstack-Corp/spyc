@@ -267,10 +267,16 @@ impl Resolver {
                 ResolverOutcome::Action(Action::ToggleMask(2))
             }
 
-            // Shell-out.
-            KeyCode::Char('!' | ';') => {
+            // Shell-out. `!` captures output into the in-app pager (with
+            // ANSI colors preserved); `;` runs in the foreground for
+            // interactive tools (vim, htop, etc.).
+            KeyCode::Char('!') => {
                 self.reset();
-                ResolverOutcome::Action(Action::ShellPrompt)
+                ResolverOutcome::Action(Action::ShellCapturedPrompt)
+            }
+            KeyCode::Char(';') => {
+                self.reset();
+                ResolverOutcome::Action(Action::ShellForegroundPrompt)
             }
             KeyCode::Char('$') => {
                 self.reset();

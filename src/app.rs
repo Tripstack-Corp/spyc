@@ -103,6 +103,8 @@ enum PromptKind {
     /// anything else is treated as a cancel.
     RemoveConfirm,
     SetEnv,
+    /// `!` — capture command output with ANSI colors, show in in-app pager.
+    ShellCmdCaptured,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -828,6 +830,30 @@ impl App {
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
                 sh_c(&expanded, true)
             }
+            PromptKind::ShellCmdCaptured => {
+                let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
+                let title = format!("! {}", prompt.buffer);
+                let output = std::process::Command::new("sh")
+                    .args(["-c", &expanded])
+                    .env("CLICOLOR_FORCE", "1")
+                    .env("FORCE_COLOR", "1")
+                    .env("COLORTERM", "truecolor")
+                    .output();
+                match output {
+                    Ok(out) => {
+                        let mut bytes = out.stdout;
+                        if !out.stderr.is_empty() {
+                            if !bytes.is_empty() {
+                                bytes.extend_from_slice(b"\n");
+                            }
+                            bytes.extend_from_slice(&out.stderr);
+                        }
+                        self.pager = Some(PagerView::new_ansi(title, &bytes));
+                    }
+                    Err(e) => self.flash_error(format!("exec: {e}")),
+                }
+                PostAction::None
+            }
             PromptKind::Search { .. } => {
                 // Cursor is already where the incremental search left it.
                 if !prompt.buffer.is_empty() {
@@ -1016,7 +1042,7 @@ impl App {
                 lines.push(format!("  {}", src.display()));
             }
         }
-        self.pager = Some(PagerView::new("session info", lines));
+        self.pager = Some(PagerView::new_plain("session info", lines));
     }
 
     /// Resolve `raw_dest` and run a copy-like or move-like operation across
@@ -1180,13 +1206,42 @@ impl App {
         let Some(view) = &mut self.pager else {
             return;
         };
-        // Use the current list-panel height as the viewport — we render
-        // the pager within ~90% of the screen, so this is roughly right.
-        let viewport = self.last_grid.rows.max(4);
+        // Compute the pager's actual viewport from the terminal size.
+        // The pager overlay occupies ~92% of the frame height, with a
+        // 1-row border on each side, and possibly a search bar at the
+        // bottom.
+        let viewport = {
+            let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
+            let body = (u32::from(term_h) * 92 / 100).saturating_sub(2) as u16;
+            body.max(2)
+        };
+
+        // While typing a search query, most keys feed the buffer.
+        if view.is_typing_search() {
+            match key.code {
+                KeyCode::Esc => view.cancel_search(),
+                KeyCode::Enter => {
+                    let committed = view.commit_search(viewport);
+                    if !committed {
+                        self.flash_error("no matches");
+                    }
+                }
+                KeyCode::Backspace => view.search_backspace(),
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.search_push_char(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 self.pager = None;
             }
+            KeyCode::Char('/') => view.begin_search(),
+            KeyCode::Char('n') => view.search_next(viewport),
+            KeyCode::Char('N') => view.search_prev(viewport),
             KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
             KeyCode::Char('k') | KeyCode::Up => view.scroll_by(-1, viewport),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1205,6 +1260,7 @@ impl App {
             KeyCode::PageUp => view.scroll_by(-i32::from(viewport), viewport),
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
+            KeyCode::Char('l') => view.toggle_whitespace(),
             _ => {}
         }
     }
@@ -1336,7 +1392,14 @@ impl App {
                 self.rebuild_rows();
             }
 
-            Action::ShellPrompt => {
+            Action::ShellCapturedPrompt => {
+                self.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::ShellCmdCaptured,
+                    prefix: "!".to_string(),
+                    buffer: String::new(),
+                });
+            }
+            Action::ShellForegroundPrompt => {
                 self.mode = Mode::Prompting(Prompt {
                     kind: PromptKind::ShellCmd,
                     prefix: "!".to_string(),
@@ -1462,7 +1525,7 @@ impl App {
                 };
                 let lines = fs::ops::format_long_listing(&paths);
                 let title = format!("long listing — {}", self.listing.dir.display());
-                self.pager = Some(PagerView::new(title, lines));
+                self.pager = Some(PagerView::new_plain(title, lines));
             }
             Action::FileType => {
                 let paths = self.selection_paths();
@@ -1485,7 +1548,7 @@ impl App {
                             format!("{name}: {}", fs::ops::file_type_label(p))
                         })
                         .collect();
-                    self.pager = Some(PagerView::new("file types", lines));
+                    self.pager = Some(PagerView::new_plain("file types", lines));
                 }
             }
 
@@ -1566,19 +1629,24 @@ impl App {
         match intent {
             ActivateIntent::Display => {
                 if shell::looks_like_text(&path) {
-                    let mut argv = shell::resolve_pager();
-                    if argv.is_empty() {
-                        return Ok(PostAction::None);
+                    // Show text files in the in-app pager: no TUI teardown,
+                    // consistent keybindings, keeps the pane running below.
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            let lines: Vec<String> =
+                                content.lines().map(String::from).collect();
+                            self.pager = Some(PagerView::new_plain(name, lines));
+                        }
+                        Err(e) => self.flash_error(format!("read: {e}")),
                     }
-                    let program = argv.remove(0);
-                    argv.push(path.to_string_lossy().into_owned());
-                    Ok(PostAction::Spawn {
-                        program,
-                        args: argv,
-                        pause_after: false,
-                    })
+                    Ok(PostAction::None)
                 } else {
-                    // Binary file: nothing to page. Silent no-op for now.
+                    // Binary file: hex view on the roadmap.
                     Ok(PostAction::None)
                 }
             }

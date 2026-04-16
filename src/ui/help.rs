@@ -143,9 +143,9 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Shell-out",
         rows: &[
-            ("!  ;", "prompt shell command (% = selection)"),
+            ("!", "shell command → captured in pager (colors preserved)"),
+            (";", "shell command → foreground (for interactive tools)"),
             ("$", "drop into $SHELL in current dir"),
-            ("^W", "chmod +w on selection"),
             ("^X", "chmod +x on selection"),
         ],
     },

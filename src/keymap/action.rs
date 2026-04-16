@@ -35,9 +35,10 @@ pub enum Action {
     ToggleMask(u8), // a -> 1, o -> 2
 
     // Shell-out.
-    ShellPrompt,    // ! or ; — prompts for a command; `%` expands to selection
-    StartShell,     // $ — drops you into $SHELL in the current directory
-    ChmodAdd(char), // ^W -> 'w', ^X -> 'x'
+    ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colors
+    ShellForegroundPrompt, // ; — prompt command, run in foreground (for interactive tools)
+    StartShell,      // $ — drops you into $SHELL in the current directory
+    ChmodAdd(char),  // ^X -> 'x'
 
     // Search.
     SearchPrompt, // / — start incremental search
@@ -112,7 +113,8 @@ impl Action {
             Self::ToggleInventoryView => "toggle inventory view",
             Self::EmptyInventory => "empty inventory",
             Self::ToggleMask(_) => "toggle ignore mask",
-            Self::ShellPrompt => "shell command prompt",
+            Self::ShellCapturedPrompt => "shell command (captured, pager)",
+            Self::ShellForegroundPrompt => "shell command (foreground)",
             Self::StartShell => "start shell",
             Self::ChmodAdd(_) => "chmod add bits",
             Self::SearchPrompt => "search",
