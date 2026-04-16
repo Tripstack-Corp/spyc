@@ -2,16 +2,6 @@
 
 ## Planned
 
-### Diff view in pager (M12)
-
-Unified and side-by-side diff rendering in the pager, building on
-existing ANSI color and line number support.
-
-- `d` on a modified file (git-tracked) opens a diff view
-- Unified diff with `+`/`-` line highlighting
-- Side-by-side mode toggle (if terminal is wide enough)
-- Search works across diff content (existing `/` infrastructure)
-
 ### Session forking
 
 In multi-tab pane, duplicate a tab to branch a conversation — like
@@ -37,6 +27,9 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- **Diff view in pager (M12)** — `g d` shows unstaged diff, `g D` shows
+  staged diff. Runs `git diff --color=always` and pipes through the
+  existing ANSI pager. Works on cursor file or picks selection.
 - **Git worktree integration (M11)** — `W l` list/switch worktrees,
   `W n` create new worktree (prompt for branch), `W d` delete worktree.
   Status bar already shows branch per worktree. Pane tabs are independent.

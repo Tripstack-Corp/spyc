@@ -98,6 +98,10 @@ pub enum Action {
     WorktreeNew,       // W n — prompt for branch, create worktree
     WorktreeDelete,    // W d — confirm, remove current worktree
 
+    // Git diff (M12).
+    GitDiff,           // g d — unstaged diff for cursor file / selection
+    GitDiffCached,     // g D — staged (cached) diff
+
     // Meta.
     Redraw, // ^L
     Quit,   // ^D / Q / q
@@ -166,6 +170,8 @@ impl Action {
             Self::WorktreeList => "list git worktrees",
             Self::WorktreeNew => "new git worktree",
             Self::WorktreeDelete => "delete git worktree",
+            Self::GitDiff => "git diff (unstaged)",
+            Self::GitDiffCached => "git diff --cached (staged)",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",

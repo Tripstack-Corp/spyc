@@ -96,8 +96,10 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Git worktrees",
+        title: "Git",
         rows: &[
+            ("g d", "git diff (unstaged changes)"),
+            ("g D", "git diff --cached (staged changes)"),
             ("W l", "list worktrees (1-9 to switch)"),
             ("W n", "new worktree (prompt for branch)"),
             ("W d", "delete current worktree (confirm)"),

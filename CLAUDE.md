@@ -42,7 +42,7 @@ make                   # see Makefile for build, release, cross-compile, install
 
 ## Roadmap
 
-See `ROADMAP.md` for current plans. Key upcoming: diff view (M12), session forking, demo mode.
+See `ROADMAP.md` for current plans. Key upcoming: session forking, demo mode.
 
 ## Dog-fooding context
 

@@ -121,10 +121,12 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: `g` already seen.
+        // Mid-sequence: `g` already seen (gg, gd, gD).
         if self.pending == PendingSeq::G {
             let out = match ev.code {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
+                KeyCode::Char('d') => ResolverOutcome::Action(Action::GitDiff),
+                KeyCode::Char('D') => ResolverOutcome::Action(Action::GitDiffCached),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

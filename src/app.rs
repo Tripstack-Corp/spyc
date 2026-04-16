@@ -1703,6 +1703,41 @@ impl App {
         self.pane_height_pct = new as u16;
     }
 
+    // ---- Git diff (M12) ----------------------------------------------------
+
+    /// g d / g D — run `git diff` on selection and show in pager.
+    fn open_git_diff(&mut self, cached: bool) {
+        let paths = self.selection_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let mut args = vec!["diff", "--color=always"];
+        if cached {
+            args.push("--cached");
+        }
+        args.push("--");
+        let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        for s in &path_strings {
+            args.push(s);
+        }
+        match std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&self.listing.dir)
+            .output()
+        {
+            Ok(out) => {
+                if out.stdout.is_empty() {
+                    let label = if cached { "staged" } else { "unstaged" };
+                    self.flash_info(format!("no {label} changes"));
+                } else {
+                    let label = if cached { "git diff --cached" } else { "git diff" };
+                    self.pager = Some(pager::PagerView::new_ansi(label, &out.stdout));
+                }
+            }
+            Err(e) => self.flash_error(format!("git diff: {e}")),
+        }
+    }
+
     // ---- Git worktree (M11) -------------------------------------------------
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
@@ -2415,6 +2450,15 @@ impl App {
                         PromptKind::WorktreeDeleteConfirm,
                         format!("remove worktree {dir}? (y/N): "),
                     ));
+                }
+            }
+
+            Action::GitDiff | Action::GitDiffCached => {
+                let cached = matches!(action, Action::GitDiffCached);
+                if self.git_info.is_none() {
+                    self.flash_error("not in a git repository");
+                } else {
+                    self.open_git_diff(cached);
                 }
             }
 
