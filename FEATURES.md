@@ -15,7 +15,7 @@ context and AI conversation stay in the same window.
 
 Everything is keyboard-driven with vi motions as the foundation.
 
-- **h/j/k/l** movement across a multi-column file listing
+- **h/j/k/l** movement across a multi-column file listing (h/l clamp at edges, no wrap)
 - **gg / G** to jump to top or bottom
 - **^B / ^F** page up and down
 - **Count prefix** — `5j`, `10k`, etc.
@@ -26,7 +26,7 @@ Everything is keyboard-driven with vi motions as the foundation.
 
 - **d / Enter** descend into a directory, or view a text file in the pager
 - **e / v** descend into a directory, or open a file in `$EDITOR`
-- **u / -** climb to the parent directory
+- **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion)
 - Multi-column layout that adapts to terminal width
@@ -117,8 +117,14 @@ The shell prompt uses a vi-mode line editor with persistent history
 (shared across sessions), so you get `h/l/w/b/0/$` motion, `x/D/C`
 editing, operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`, etc.),
 and `i/a/I/A` mode switching — all within the one-line prompt.
-Alt+Enter inserts a newline in the pane (for Claude CLI multi-line
-input).
+`j`/`k` in normal mode cycle through history without leaving normal
+mode. Alt+Enter inserts a newline in the pane (for Claude CLI
+multi-line input).
+
+Pane command prompts (`^W n`) have their own dedicated history,
+separate from shell commands — so Up/Down shows `claude`, `zsh`,
+`bash` instead of mixed shell commands. History is de-duplicated
+(most recent use moves to the end).
 
 ## Marks
 

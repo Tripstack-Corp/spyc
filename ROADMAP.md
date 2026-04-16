@@ -25,12 +25,17 @@ onboarding new users or recording screencasts. Details TBD.
   a `!` command starts and stream output live as it arrives, instead of
   waiting for the command to finish. Useful for long-running commands
   (brew install, cargo build, etc.) where progress feedback matters.
-- ~~'v' in the pager should open the buffer in EDITOR~~ Done
 - Session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc.)
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
 ## Done (recent)
 
+- Separate pane command history with move-to-end dedup; `j`/`k` in
+  normal mode cycle history without leaving normal mode
+- Cursor returns to previous directory on climb (`u`/`-`)
+- h/l at column edges clamp instead of wrapping
+- Terminal resize handler: pty tabs resize immediately on `SIGWINCH`
+- Pager `v` opens buffer in `$EDITOR`, returns to pager on quit
 - **Diff view in pager (M12)** — `g d` shows unstaged diff, `g D` shows
   staged diff. Runs `git diff --color=always` and pipes through the
   existing ANSI pager. Works on cursor file or picks selection.
