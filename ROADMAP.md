@@ -1,23 +1,5 @@
 # cspy roadmap
 
-## Next up
-
-### Multi-tab pane (M9)
-
-The lower split pane currently hosts a single subprocess. The next major
-feature adds tabbed panes so multiple Claude instances (or any mix of
-subprocesses) can run simultaneously.
-
-- Tab bar across the top of the pane area with switchable tabs
-- Each tab is an independent pty with its own scrollback
-- Tab headers show the running command or a user-assigned label
-- **Attention indicator** — when a background tab's subprocess produces
-  new output (or exits), its tab header gets a visual flag (bold,
-  color change, or badge) so you know it needs attention
-- Keybindings: `^W 1`..`^W 9` to switch tabs, `^W n` to open a new
-  tab, `^W x` to close the current tab
-- Scroll mode (`^W v`) applies to the focused tab
-
 ## Planned
 
 ### Context piping (M10)
@@ -74,6 +56,13 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- **Multi-tab pane (M9)** — multiple independent pty tabs with `^W n`
+  new, `^W x` close, `^W 1`..`^W 9` switch, `^W [`/`^W ]` prev/next
+- Tab rename (`^W r`), activity indicators (`+`) on background tabs
+- Powerline-style status bar with git branch + dirty flag
+- Pager full-width rendering, yank to clipboard
+- ESC in vi-normal mode cancels prompt (new-tab flow fix)
+- Removed mouse capture (coexists with terminal text selection)
 - Bracketed paste forwarding to pane — multi-line paste delivered as
   a single block to Claude CLI instead of line-by-line
 - Pager line wrapping — long lines wrap instead of clipping
