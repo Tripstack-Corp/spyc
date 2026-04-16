@@ -107,37 +107,32 @@ impl PagerView {
         }
     }
 
+    /// All lines as plain text (ANSI stripped), joined with newlines.
+    fn plain_text(&self) -> String {
+        self.lines
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Save the plain-text content to a timestamped file in the current
     /// directory. Returns the path on success.
     pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
-        // Strip "UTC" and clean up for a filename.
         let stamp = now.trim_end_matches("_UTC");
         let filename = format!("cspy_output_{stamp}.txt");
         let path = std::env::current_dir()?.join(&filename);
-        let text: String = self
-            .lines
-            .iter()
-            .map(line_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&path, text + "\n")?;
+        std::fs::write(&path, self.plain_text() + "\n")?;
         Ok(path)
     }
 
     /// Write the plain-text content to a temp file for editing.
-    /// Returns the path so the caller can spawn `$EDITOR` on it.
     pub fn write_to_temp(&self) -> std::io::Result<std::path::PathBuf> {
         let dir = std::env::temp_dir();
         let filename = format!("cspy_pager_{}.txt", std::process::id());
         let path = dir.join(filename);
-        let text: String = self
-            .lines
-            .iter()
-            .map(line_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&path, text + "\n")?;
+        std::fs::write(&path, self.plain_text() + "\n")?;
         Ok(path)
     }
 
@@ -149,12 +144,7 @@ impl PagerView {
     pub fn yank_to_clipboard(&self) -> std::io::Result<()> {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let text: String = self
-            .lines
-            .iter()
-            .map(line_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = self.plain_text();
         let mut child = Command::new("pbcopy")
             .stdin(Stdio::piped())
             .spawn()?;

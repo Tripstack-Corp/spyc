@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use glob::Pattern;
 use ratatui::Frame;
@@ -552,13 +552,9 @@ impl App {
                             // Paste into the active prompt buffer.
                             // Strip newlines (prompts are single-line).
                             let clean = text.replace(['\n', '\r'], " ");
+                            p.buffer.push_str(&clean);
                             if let Some(ed) = p.editor.as_mut() {
-                                for ch in clean.chars() {
-                                    p.buffer.push(ch);
-                                }
                                 ed.set_content(&p.buffer);
-                            } else {
-                                p.buffer.push_str(&clean);
                             }
                         } else if let Some(pane) = self.pane_tabs.as_mut().map(|t| t.active_mut()) {
                             // Wrap in bracketed paste so the child app (e.g. claude)
@@ -2210,42 +2206,29 @@ impl App {
                 Err(e) => self.flash_error(format!("save failed: {e}")),
             },
             KeyCode::Char('v') => {
-                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+                let argv = shell::resolve_editor();
+                let editor_cmd = argv.join(" ");
                 let scroll = view.scroll;
-                if let Some(ref src) = view.source_path {
-                    // On-disk file: open directly, return to pager after.
-                    let src = src.clone();
-                    let edit_path = src.clone();
-                    self.pending_pager_return = Some(PagerReturn::SourceFile {
-                        path: src,
-                        scroll,
-                    });
-                    self.pager = None;
-                    self.needs_full_repaint = true;
-                    return sh_c(
-                        &format!("{editor} {}", shell::shell_quote(&edit_path.display().to_string())),
-                        false,
-                    );
-                }
-                // Buffer: write to temp, edit, reload on return.
-                let title = view.title.clone();
-                match view.write_to_temp() {
-                    Ok(tmp) => {
-                        let edit_path = tmp.clone();
-                        self.pending_pager_return = Some(PagerReturn::TempFile {
-                            path: tmp,
-                            title,
-                            scroll,
-                        });
-                        self.pager = None;
-                        self.needs_full_repaint = true;
-                        return sh_c(
-                            &format!("{editor} {}", shell::shell_quote(&edit_path.display().to_string())),
-                            false,
-                        );
+                // Determine the file to edit and the return state.
+                let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
+                    (src.clone(), PagerReturn::SourceFile { path: src.clone(), scroll })
+                } else {
+                    let title = view.title.clone();
+                    match view.write_to_temp() {
+                        Ok(tmp) => (tmp.clone(), PagerReturn::TempFile { path: tmp, title, scroll }),
+                        Err(e) => {
+                            self.flash_error(format!("write temp: {e}"));
+                            return PostAction::None;
+                        }
                     }
-                    Err(e) => self.flash_error(format!("write temp: {e}")),
-                }
+                };
+                self.pending_pager_return = Some(pager_return);
+                self.pager = None;
+                self.needs_full_repaint = true;
+                return sh_c(
+                    &format!("{editor_cmd} {}", shell::shell_quote(&edit_path.display().to_string())),
+                    false,
+                );
             }
             _ => {}
         }
@@ -2721,8 +2704,7 @@ impl App {
                     .map_or_else(|| path.clone(), Path::to_path_buf)
             };
             if let Err(e) = self.chdir(&target_dir) {
-                self.flash_error(format!("permission denied: {}", target_dir.display()));
-                let _ = e;
+                self.flash_error(format!("chdir: {e}"));
                 return Ok(PostAction::None);
             }
             self.view = View::Dir;
@@ -2735,8 +2717,7 @@ impl App {
 
         if kind == EntryKind::Dir {
             if let Err(e) = self.chdir(&path) {
-                self.flash_error(format!("permission denied: {}", path.display()));
-                let _ = e;
+                self.flash_error(format!("chdir: {e}"));
             }
             return Ok(PostAction::None);
         }

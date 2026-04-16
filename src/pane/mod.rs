@@ -38,6 +38,10 @@ pub struct Pane {
     /// Set when the reader thread observed EOF on the master — the
     /// subprocess has exited and the pane should be torn down.
     closed: bool,
+    /// Cached at construction so we don't call `std::env::var` per tick.
+    debug_dump: bool,
+    /// Last size passed to resize(), to skip redundant ioctl+SIGWINCH.
+    last_size: (u16, u16),
     /// When > 0, the pane is in scroll mode: keys navigate the scrollback
     /// instead of being forwarded to the child. `drain_output()` still
     /// runs so no output is lost.
@@ -89,6 +93,7 @@ impl Pane {
         thread::spawn(move || reader_loop(reader, &tx));
 
         let parser = vt100::Parser::new(rows, cols, 10_000);
+        let debug_dump = std::env::var("CSPY_PTY_DEBUG").is_ok();
 
         // Nudge: send SIGWINCH so shells (especially p10k/oh-my-zsh)
         // re-query the pty size and render their first prompt correctly.
@@ -106,6 +111,8 @@ impl Pane {
             _child: child,
             event_rx,
             closed: false,
+            debug_dump,
+            last_size: (rows, cols),
             scroll_offset: 0,
         })
     }
@@ -117,9 +124,9 @@ impl Pane {
     pub fn drain_output(&mut self) -> bool {
         let mut had_bytes = false;
         while let Ok(event) = self.event_rx.try_recv() {
-            // Debug: dump raw pty bytes when CSPY_PTY_DEBUG is set.
-            if let PaneEvent::Bytes(ref bytes) = event {
-                if std::env::var("CSPY_PTY_DEBUG").is_ok() {
+            // Debug: dump raw pty bytes when CSPY_PTY_DEBUG was set at spawn.
+            if self.debug_dump {
+                if let PaneEvent::Bytes(ref bytes) = event {
                     use std::io::Write;
                     if let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)
@@ -150,6 +157,10 @@ impl Pane {
     /// cell grid matches — without this, the child keeps drawing at the
     /// old dimensions.
     pub fn resize(&mut self, rows: u16, cols: u16) -> anyhow::Result<()> {
+        if (rows, cols) == self.last_size {
+            return Ok(());
+        }
+        self.last_size = (rows, cols);
         self.master.resize(PtySize {
             rows,
             cols,

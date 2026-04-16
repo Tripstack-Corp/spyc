@@ -102,14 +102,11 @@ pub fn git_worktree_list(dir: &std::path::Path) -> Option<Vec<Worktree>> {
     for line in text.lines().chain(std::iter::once("")) {
         if line.is_empty() {
             if let Some(p) = path.take() {
+                let b = std::mem::take(&mut branch);
                 worktrees.push(Worktree {
                     path: std::path::PathBuf::from(p),
-                    head: head.clone(),
-                    branch: if branch.is_empty() {
-                        "(detached)".into()
-                    } else {
-                        branch.clone()
-                    },
+                    head: std::mem::take(&mut head),
+                    branch: if b.is_empty() { "(detached)".into() } else { b },
                 });
             }
             head.clear();

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use super::Pane;
 
 /// Per-tab metadata displayed in the status line.
+#[allow(dead_code)] // `command` stored for future session restore
 pub struct TabInfo {
     /// Full command string passed to `Pane::spawn`.
     pub command: String,
