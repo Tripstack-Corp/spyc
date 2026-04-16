@@ -13,7 +13,8 @@ use crate::config::Config;
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneWidget};
 use crate::shell;
-use crate::state::{Cursor, IgnoreMasks, Inventory, Mark, Marks, Picks};
+use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
+use crate::ui::line_edit::LineEditor;
 use crate::ui::{
     help,
     list_view::{Grid, ListView, Row},
@@ -95,6 +96,31 @@ struct Prompt {
     kind: PromptKind,
     prefix: String,
     buffer: String,
+    /// When set, this prompt uses the vi line editor with history.
+    #[allow(dead_code)]
+    editor: Option<crate::ui::line_edit::LineEditor>,
+}
+
+impl Prompt {
+    /// Simple prompt (pattern pick, search, jump, etc.) — no vi editing.
+    fn simple(kind: PromptKind, prefix: impl Into<String>) -> Self {
+        Self {
+            kind,
+            prefix: prefix.into(),
+            buffer: String::new(),
+            editor: None,
+        }
+    }
+
+    /// Shell prompt (`!` / `;`) — vi line editor with history support.
+    fn shell(kind: PromptKind, prefix: impl Into<String>) -> Self {
+        Self {
+            kind,
+            prefix: prefix.into(),
+            buffer: String::new(),
+            editor: Some(LineEditor::new()),
+        }
+    }
 }
 
 enum PromptKind {
@@ -171,6 +197,9 @@ pub struct App {
     /// Timestamp of the first quit press. Must press again within 2s to
     /// actually quit — prevents murdering a claude session by accident.
     quit_pending: Option<std::time::Instant>,
+    /// Shared command history for `!` / `;` prompts — persisted.
+    #[allow(dead_code)]
+    history: History,
     /// Transient message shown in the prompt row when no prompt is active.
     /// Cleared on the next keypress so it doesn't linger after you've read it.
     flash: Option<FlashMessage>,
@@ -239,6 +268,7 @@ impl App {
             prev_dir: None,
             last_search: None,
             quit_pending: None,
+            history: History::load(),
             flash: None,
             user_host: user_host_string(),
             should_quit: false,
@@ -681,6 +711,8 @@ impl App {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
                 theme: &self.theme,
+                cursor_pos: p.editor.as_ref().map(|e| e.cursor),
+                vi_mode: p.editor.as_ref().map(|e| e.mode),
             }
             .render(frame, layout.prompt);
         } else if let Some(flash) = &self.flash {
@@ -916,9 +948,18 @@ impl App {
             return self.handle_remove_confirm_key(key);
         }
 
-        // Esc cancels; Backspace on an empty buffer cancels too (it's a
-        // natural reach — when you've typed nothing and hit Backspace again
-        // you clearly meant to back out).
+        // Shell prompts (`!` / `;`) use the vi line editor + history.
+        let has_editor = matches!(
+            &self.mode,
+            Mode::Prompting(p) if p.editor.is_some()
+        );
+        if has_editor {
+            return self.handle_vi_prompt_key(key);
+        }
+
+        // --- Simple prompts (search, jump, pattern-pick, etc.) ---
+
+        // Esc cancels; Backspace on an empty buffer cancels too.
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
             && matches!(&self.mode, Mode::Prompting(p) if p.buffer.is_empty());
         if matches!(key.code, KeyCode::Esc) || backspace_on_empty {
@@ -1007,6 +1048,75 @@ impl App {
         self.run_and_flash(fs::ops::remove_all(&paths), format!("removed {count} item(s)"));
         self.picks.clear();
         self.refresh_listing();
+        PostAction::None
+    }
+
+    /// Handle keys for shell prompts that use the vi line editor.
+    fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> PostAction {
+        use crate::ui::line_edit::EditResult;
+
+        // Feed key to the editor.
+        let result = {
+            let Mode::Prompting(prompt) = &mut self.mode else {
+                return PostAction::None;
+            };
+            let editor = prompt.editor.as_mut().expect("checked above");
+            let r = editor.feed(key);
+            // Sync the buffer for display (prompt.buffer drives rendering).
+            prompt.buffer = editor.text();
+            r
+        };
+
+        match result {
+            EditResult::Submit => {
+                let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal)
+                else {
+                    return PostAction::None;
+                };
+                // Push to shared history before dispatching.
+                if !p.buffer.trim().is_empty() {
+                    self.history.push(p.buffer.trim());
+                }
+                self.history.reset_nav();
+                return self.dispatch_prompt(p);
+            }
+            EditResult::Cancel => {
+                self.history.reset_nav();
+                self.cancel_prompt();
+            }
+            EditResult::HistoryPrev => {
+                let current_text = {
+                    let Mode::Prompting(p) = &self.mode else {
+                        return PostAction::None;
+                    };
+                    p.buffer.clone()
+                };
+                if let Some(entry) = self.history.prev(&current_text) {
+                    let entry = entry.to_string();
+                    let Mode::Prompting(p) = &mut self.mode else {
+                        return PostAction::None;
+                    };
+                    if let Some(ed) = p.editor.as_mut() {
+                        ed.set_content(&entry);
+                    }
+                    p.buffer = entry;
+                }
+            }
+            EditResult::HistoryNext => {
+                let replacement = match self.history.next() {
+                    Some(entry) => entry.to_string(),
+                    None => self.history.stashed().to_string(),
+                };
+                let Mode::Prompting(p) = &mut self.mode else {
+                    return PostAction::None;
+                };
+                if let Some(ed) = p.editor.as_mut() {
+                    ed.set_content(&replacement);
+                }
+                p.buffer = replacement;
+            }
+            EditResult::Continue => {}
+        }
         PostAction::None
     }
 
@@ -1595,11 +1705,7 @@ impl App {
             Action::TogglePick => self.toggle_pick_cursor(),
             Action::PickPatternPrompt => {
                 if self.view == View::Dir {
-                    self.mode = Mode::Prompting(Prompt {
-                        kind: PromptKind::PatternPick,
-                        prefix: "pick pattern: ".to_string(),
-                        buffer: String::new(),
-                    });
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
                 }
             }
             Action::PickToggleAll => self.toggle_all_picks(),
@@ -1622,18 +1728,10 @@ impl App {
             }
 
             Action::ShellCapturedPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::ShellCmdCaptured,
-                    prefix: "!".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
             }
             Action::ShellForegroundPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::ShellCmd,
-                    prefix: ";".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
             }
             Action::StartShell => {
                 let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
@@ -1665,13 +1763,9 @@ impl App {
             }
 
             Action::SearchPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::Search {
-                        saved_cursor: self.cursor.index,
-                    },
-                    prefix: "/".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Search {
+                    saved_cursor: self.cursor.index,
+                }, "/"));
             }
             Action::SearchNext => {
                 if let Some(term) = self.last_search.clone() {
@@ -1701,46 +1795,26 @@ impl App {
             }
 
             Action::JumpPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::Jump,
-                    prefix: "jump to: ".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
             }
 
             Action::CopyPrompt => {
                 if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt {
-                        kind: PromptKind::CopyTo,
-                        prefix: "copy to: ".to_string(),
-                        buffer: String::new(),
-                    });
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
                 }
             }
             Action::MovePrompt => {
                 if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt {
-                        kind: PromptKind::MoveTo,
-                        prefix: "move to: ".to_string(),
-                        buffer: String::new(),
-                    });
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
                 }
             }
             Action::MakeDirPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::MakeDir,
-                    prefix: "mkdir: ".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
             }
             Action::RemovePrompt => {
                 let count = self.selection_paths().len();
                 if count > 0 {
-                    self.mode = Mode::Prompting(Prompt {
-                        kind: PromptKind::RemoveConfirm,
-                        prefix: format!("remove {count} file(s)? (y/N): "),
-                        buffer: String::new(),
-                    });
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::RemoveConfirm, format!("remove {count} file(s)? (y/N): ")));
                 }
             }
             Action::LongList => {
@@ -1826,11 +1900,7 @@ impl App {
                 });
             }
             Action::SetEnvPrompt => {
-                self.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::SetEnv,
-                    prefix: "setenv NAME=VALUE: ".to_string(),
-                    buffer: String::new(),
-                });
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
             }
 
             Action::Redraw | Action::Noop => {}
