@@ -1893,6 +1893,7 @@ impl App {
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 self.pager = None;
+                self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
             KeyCode::Char('n') => view.search_next(viewport),
@@ -2195,7 +2196,9 @@ impl App {
 
             Action::Help => {
                 let lines = help::build_lines(&self.theme, &self.user_keymap);
-                self.pager = Some(pager::PagerView::new_styled("cspy — key bindings", lines));
+                let mut view = pager::PagerView::new_styled("cspy — key bindings", lines);
+                view.columns = 2;
+                self.pager = Some(view);
             }
 
             Action::ReloadConfig => self.reload_config(),

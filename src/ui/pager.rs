@@ -48,6 +48,9 @@ pub struct PagerView {
     /// When true, the pager fills the entire terminal instead of the
     /// centered 90×92% box. Toggled with `f`.
     pub full_width: bool,
+    /// Number of columns for multi-column layout (1 = normal single column).
+    /// Lines flow top-to-bottom within each column, then left-to-right.
+    pub columns: u8,
 }
 
 impl PagerView {
@@ -63,6 +66,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: false,
             full_width: false,
+            columns: 1,
         }
     }
 
@@ -75,6 +79,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: false,
             full_width: false,
+            columns: 1,
         }
     }
 
@@ -91,6 +96,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: true,
             full_width: false,
+            columns: 1,
         }
     }
 
@@ -144,9 +150,14 @@ impl PagerView {
         u16::try_from(self.lines.len()).unwrap_or(u16::MAX)
     }
 
+    /// Lines visible per "page" — viewport_height * columns.
+    fn page_lines(&self, viewport_height: u16) -> u16 {
+        viewport_height.saturating_mul(self.columns.max(1) as u16)
+    }
+
     fn clamp_scroll(&mut self, viewport_height: u16) {
         let total = self.line_count();
-        let max_scroll = total.saturating_sub(viewport_height.max(1));
+        let max_scroll = total.saturating_sub(self.page_lines(viewport_height).max(1));
         if self.scroll > max_scroll {
             self.scroll = max_scroll;
         }
@@ -164,7 +175,26 @@ impl PagerView {
     }
 
     pub fn scroll_to_bottom(&mut self, viewport_height: u16) {
-        self.scroll = self.line_count().saturating_sub(viewport_height.max(1));
+        self.scroll = self.line_count().saturating_sub(self.page_lines(viewport_height).max(1));
+    }
+
+    /// Position indicator for the title bar: "Top", "Bot", "All", or "NN%".
+    pub fn position_indicator(&self, viewport_height: u16) -> String {
+        let total = self.line_count();
+        let page = self.page_lines(viewport_height);
+        if total <= page {
+            return "All".to_string();
+        }
+        if self.scroll == 0 {
+            return "Top".to_string();
+        }
+        let max_scroll = total.saturating_sub(page);
+        if self.scroll >= max_scroll {
+            return "Bot".to_string();
+        }
+        // Percentage of the way through the document.
+        let pct = (u32::from(self.scroll) * 100) / u32::from(max_scroll);
+        format!("{pct}%")
     }
 
     // ---- Search ----------------------------------------------------------
@@ -313,17 +343,27 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
 
     frame.render_widget(Clear, inner_area);
 
+    let pos = view.position_indicator(inner_area.height.saturating_sub(2));
     let title = format!(
-        "  {}   ({} lines, / search, n/N match, j/k scroll, q to close)  ",
+        "  {}   ({} lines)  ",
         view.title,
         view.lines.len()
     );
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        title,
-        Style::default()
-            .fg(theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD),
-    ));
+    let title_right = format!("  {pos}  ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(Line::from(Span::styled(
+            title_right,
+            Style::default()
+                .fg(theme.status_suffix)
+                .add_modifier(Modifier::BOLD),
+        )).right_aligned());
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
 
@@ -348,17 +388,29 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         (body_area, None)
     };
 
-    // Only build the visible slice — O(viewport) instead of O(total_lines).
-    // This is critical for large outputs (27K+ lines from `!find`).
+    let ncols = view.columns.max(1) as usize;
+    if ncols > 1 {
+        render_multi_column(frame, content_area, view, theme, ncols);
+    } else {
+        render_single_column(frame, content_area, view, theme);
+    }
+
+    if let (Some(rect), Some(text)) = (search_area, view.status_text()) {
+        let style = Style::default()
+            .fg(theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
+    }
+}
+
+fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView, theme: &Theme) {
     let viewport_h = content_area.height as usize;
     let start = view.scroll as usize;
     let content_end = view.lines.len();
     let slice_end = (start + viewport_h).min(content_end);
 
-    // Width of the line-number gutter (only shown when whitespace mode is on).
     let total_lines = view.lines.len();
     let gutter_w = if view.show_whitespace {
-        // Enough digits for the largest line number + one space.
         total_lines.max(1).ilog10() as usize + 2
     } else {
         0
@@ -379,7 +431,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
                 styled
             };
             if gutter_w > 0 {
-                // Prepend line number.
                 let num = format!("{:>width$} ", abs_idx + 1, width = gutter_w - 1);
                 let mut spans = vec![Span::styled(num, ln_style)];
                 spans.extend(styled.spans);
@@ -390,7 +441,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         })
         .collect();
 
-    // EOF + tilde markers only matter when we can see past the content.
     let eof_style = Style::default()
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
@@ -403,12 +453,75 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
 
     let paragraph = Paragraph::new(display_lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, content_area);
+}
 
-    if let (Some(rect), Some(text)) = (search_area, view.status_text()) {
-        let style = Style::default()
-            .fg(theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD);
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
+fn render_multi_column(
+    frame: &mut Frame,
+    content_area: Rect,
+    view: &PagerView,
+    theme: &Theme,
+    ncols: usize,
+) {
+    let viewport_h = content_area.height as usize;
+    let start = view.scroll as usize;
+    let content_end = view.lines.len();
+    let col_gap = 2u16;
+    // Divide available width evenly (minus gaps between columns).
+    let total_gap = col_gap * (ncols as u16).saturating_sub(1);
+    let col_w = content_area.width.saturating_sub(total_gap) / ncols as u16;
+
+    let eof_style = Style::default()
+        .fg(theme.status_suffix)
+        .add_modifier(Modifier::DIM);
+
+    for col in 0..ncols {
+        let col_start = start + col * viewport_h;
+        let col_end = (col_start + viewport_h).min(content_end);
+        let x = content_area.x + (col as u16) * (col_w + col_gap);
+        let col_rect = Rect {
+            x,
+            y: content_area.y,
+            width: col_w,
+            height: content_area.height,
+        };
+
+        let mut display_lines: Vec<Line<'static>> = if col_start < content_end {
+            view.lines[col_start..col_end]
+                .iter()
+                .enumerate()
+                .map(|(i, line)| {
+                    let abs_idx = col_start + i;
+                    styled_line_for_render(line, view, abs_idx, theme)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Fill remaining rows with tilde markers.
+        if col_end >= content_end && display_lines.len() < viewport_h {
+            if col_start < content_end {
+                display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
+            }
+            while display_lines.len() < viewport_h {
+                display_lines.push(Line::from(Span::styled("~", eof_style)));
+            }
+        }
+
+        let paragraph = Paragraph::new(display_lines);
+        frame.render_widget(paragraph, col_rect);
+
+        // Draw a thin separator between columns.
+        if col + 1 < ncols {
+            let sep_x = x + col_w;
+            let sep_style = Style::default()
+                .fg(theme.status_suffix)
+                .add_modifier(Modifier::DIM);
+            for row in 0..content_area.height {
+                let buf = frame.buffer_mut();
+                buf.set_string(sep_x, content_area.y + row, "│", sep_style);
+            }
+        }
     }
 }
 
