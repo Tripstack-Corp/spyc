@@ -178,7 +178,9 @@ impl PagerView {
         self.scroll = self.line_count().saturating_sub(self.page_lines(viewport_height).max(1));
     }
 
-    /// Position indicator for the title bar: "Top", "Bot", "All", or "NN%".
+    /// Position indicator: "Top", "Bot", "All", or "NN%".
+    /// Percentage is based on the bottom visible line relative to the total
+    /// (like `less`), so it reflects how much of the document you've seen.
     pub fn position_indicator(&self, viewport_height: u16) -> String {
         let total = self.line_count();
         let page = self.page_lines(viewport_height);
@@ -188,12 +190,12 @@ impl PagerView {
         if self.scroll == 0 {
             return "Top".to_string();
         }
-        let max_scroll = total.saturating_sub(page);
-        if self.scroll >= max_scroll {
+        let bottom = u32::from(self.scroll) + u32::from(page);
+        let total32 = u32::from(total);
+        if bottom >= total32 {
             return "Bot".to_string();
         }
-        // Percentage of the way through the document.
-        let pct = (u32::from(self.scroll) * 100) / u32::from(max_scroll);
+        let pct = (bottom * 100) / total32;
         format!("{pct}%")
     }
 
