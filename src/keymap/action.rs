@@ -59,6 +59,8 @@ pub enum Action {
     // Marks (vi-style named bookmarks).
     SetMark(char),  // m{a-z}
     JumpMark(char), // '{a-z}
+    JumpPrevDir,    // '' — jump back to directory before last chdir
+    JumpStartDir,   // ` — jump to directory where cspy was launched
 
     // Info commands.
     Date,          // D — show date/time
@@ -138,6 +140,8 @@ impl Action {
             Self::PaneShrink => "shrink pane",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
+            Self::JumpPrevDir => "jump to previous directory",
+            Self::JumpStartDir => "jump to starting directory",
             Self::Date => "show date",
             Self::Version => "show version",
             Self::ShowMemory => "session info",

@@ -118,6 +118,8 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("m{a-z}", "set mark at current dir + cursor"),
             ("'{a-z}", "jump to mark (chdir + focus)"),
+            ("''", "jump back to previous directory (cd -)"),
+            ("`", "jump to starting directory (project root)"),
         ],
     },
     Section {

@@ -145,6 +145,10 @@ impl Resolver {
                 } else {
                     Action::JumpMark(c)
                 }),
+                // '' (single-quote twice) = jump to previous directory.
+                KeyCode::Char('\'') if !is_set => {
+                    ResolverOutcome::Action(Action::JumpPrevDir)
+                }
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -313,6 +317,10 @@ impl Resolver {
             KeyCode::Char('c') => {
                 self.reset();
                 ResolverOutcome::Action(Action::CopyPrompt)
+            }
+            KeyCode::Char('`') => {
+                self.reset();
+                ResolverOutcome::Action(Action::JumpStartDir)
             }
             KeyCode::Char('m') => {
                 // Start of `m{a-z}` set-mark sequence.

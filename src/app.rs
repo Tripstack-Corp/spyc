@@ -162,6 +162,10 @@ pub struct App {
     /// the pane *after* the render loop finishes so the final frame is
     /// drawn before the layout collapses.
     pending_pane_close: bool,
+    /// The directory cspy was launched in — `` ` `` jumps here (project root).
+    start_dir: PathBuf,
+    /// Directory before the last chdir — `''` jumps back here (like `cd -`).
+    prev_dir: Option<PathBuf>,
     /// Most recent search term; `n` / `N` use this.
     last_search: Option<String>,
     /// Timestamp of the first quit press. Must press again within 2s to
@@ -231,6 +235,8 @@ impl App {
             // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
             pending_pane_close: false,
+            start_dir: cwd,
+            prev_dir: None,
             last_search: None,
             quit_pending: None,
             flash: None,
@@ -1790,6 +1796,21 @@ impl App {
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),
+            Action::JumpStartDir => {
+                let dir = self.start_dir.clone();
+                if let Err(e) = self.chdir(&dir) {
+                    self.flash_error(format!("jump to start failed: {e}"));
+                }
+            }
+            Action::JumpPrevDir => {
+                if let Some(prev) = self.prev_dir.clone() {
+                    if let Err(e) = self.chdir(&prev) {
+                        self.flash_error(format!("jump back failed: {e}"));
+                    }
+                } else {
+                    self.flash_error("no previous directory");
+                }
+            }
 
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
@@ -1942,6 +1963,10 @@ impl App {
         // the status bar shows a clean absolute path.
         let canonical = std::fs::canonicalize(path)?;
         let new_listing = Listing::read(&canonical)?;
+        // Save previous directory for `''` (jump-back).
+        if self.listing.dir != canonical {
+            self.prev_dir = Some(self.listing.dir.clone());
+        }
         // Keep the process cwd in sync with navigation so subprocesses
         // (`!cmd`, `$SHELL`, `chmod`, editor, pager) run in the directory
         // the user is looking at.
