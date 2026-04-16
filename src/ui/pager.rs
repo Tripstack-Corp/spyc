@@ -51,6 +51,10 @@ pub struct PagerView {
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,
+    /// When set, the pager is showing a file on disk. `v` opens this path
+    /// directly in `$EDITOR`. When `None`, content is a buffer (command
+    /// output, help, etc.) and `v` uses a temp file.
+    pub source_path: Option<std::path::PathBuf>,
 }
 
 impl PagerView {
@@ -67,6 +71,7 @@ impl PagerView {
             saveable: false,
             full_width: false,
             columns: 1,
+            source_path: None,
         }
     }
 
@@ -80,6 +85,7 @@ impl PagerView {
             saveable: false,
             full_width: false,
             columns: 1,
+            source_path: None,
         }
     }
 
@@ -97,6 +103,7 @@ impl PagerView {
             saveable: true,
             full_width: false,
             columns: 1,
+            source_path: None,
         }
     }
 
@@ -108,6 +115,22 @@ impl PagerView {
         let stamp = now.trim_end_matches("_UTC");
         let filename = format!("cspy_output_{stamp}.txt");
         let path = std::env::current_dir()?.join(&filename);
+        let text: String = self
+            .lines
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&path, text + "\n")?;
+        Ok(path)
+    }
+
+    /// Write the plain-text content to a temp file for editing.
+    /// Returns the path so the caller can spawn `$EDITOR` on it.
+    pub fn write_to_temp(&self) -> std::io::Result<std::path::PathBuf> {
+        let dir = std::env::temp_dir();
+        let filename = format!("cspy_pager_{}.txt", std::process::id());
+        let path = dir.join(filename);
         let text: String = self
             .lines
             .iter()

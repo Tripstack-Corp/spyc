@@ -95,6 +95,7 @@ cspy.
 - **/ search** within pager content, with **n / N** navigation
 - **l** toggle line numbers and whitespace markers
 - **f** toggle full-width mode vs. centered overlay
+- **v** open pager content in `$EDITOR`
 - **s** save pager content to a file
 - **y** yank pager content to the system clipboard
 - **x** toggle hex-dump view for binary files

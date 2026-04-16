@@ -92,6 +92,14 @@ enum FlashKind {
     Error,
 }
 
+/// State for returning to the pager after `v` (edit) exits.
+enum PagerReturn {
+    /// Buffer content: reload from this temp file, then delete it.
+    TempFile { path: PathBuf, title: String, scroll: u16 },
+    /// On-disk file: reopen from the original path.
+    SourceFile { path: PathBuf, scroll: u16 },
+}
+
 struct Prompt {
     kind: PromptKind,
     prefix: String,
@@ -197,6 +205,10 @@ pub struct App {
     pending_new_tab_cmd: Option<String>,
     /// Worktree paths for the `W l` picker. Digit keys 1-9 select.
     pending_worktrees: Option<Vec<PathBuf>>,
+    /// When `v` is pressed in the pager, stash info to restore it after
+    /// the editor exits. `Some(path)` for temp-file buffers (reload on
+    /// return); `None` for on-disk files (just reopen pager normally).
+    pending_pager_return: Option<PagerReturn>,
     /// The directory cspy was launched in — `` ` `` jumps here (project root).
     start_dir: PathBuf,
     /// Directory before the last chdir — `''` jumps back here (like `cd -`).
@@ -282,6 +294,7 @@ impl App {
             pane_height_pct: 70,
             pending_new_tab_cmd: None,
             pending_worktrees: None,
+            pending_pager_return: None,
             start_dir: cwd,
             prev_dir: None,
             last_search: None,
@@ -479,6 +492,37 @@ impl App {
                                 run_child_in_foreground(terminal, &program, &args, pause_after)?;
                                 // The listing may have changed (mv, rm, chmod, etc).
                                 self.refresh_listing();
+                                // If we were editing a pager buffer, restore it.
+                                if let Some(ret) = self.pending_pager_return.take() {
+                                    match ret {
+                                        PagerReturn::TempFile { path, title, scroll } => {
+                                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                                let lines: Vec<String> =
+                                                    content.lines().map(String::from).collect();
+                                                let mut view = PagerView::new_plain(title, lines);
+                                                view.scroll = scroll;
+                                                view.saveable = true;
+                                                self.pager = Some(view);
+                                            }
+                                            let _ = std::fs::remove_file(&path);
+                                        }
+                                        PagerReturn::SourceFile { path, scroll } => {
+                                            let name = path
+                                                .file_name()
+                                                .unwrap_or_default()
+                                                .to_string_lossy()
+                                                .into_owned();
+                                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                                let lines: Vec<String> =
+                                                    content.lines().map(String::from).collect();
+                                                let mut view = PagerView::new_plain(name, lines);
+                                                view.source_path = Some(path);
+                                                view.scroll = scroll;
+                                                self.pager = Some(view);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1012,8 +1056,8 @@ impl App {
 
         // Pager eats all keys until dismissed.
         if self.pager.is_some() {
-            self.handle_pager_key(key);
-            return Ok(PostAction::None);
+            let post = self.handle_pager_key(key);
+            return Ok(post);
         }
         // When the pane is in scroll mode, navigation keys are handled
         // here instead of being forwarded to the child subprocess.
@@ -1978,9 +2022,9 @@ impl App {
     /// at the bottom jumps back to the top (and vice versa).
     /// Route a key to the pager overlay. Also uses vi-like motion so the
     /// pager feels native to the rest of the UI.
-    fn handle_pager_key(&mut self, key: KeyEvent) {
+    fn handle_pager_key(&mut self, key: KeyEvent) -> PostAction {
         let Some(view) = &mut self.pager else {
-            return;
+            return PostAction::None;
         };
         // Compute the pager's actual viewport from the terminal size.
         // The pager overlay occupies ~92% of the frame height, with a
@@ -2012,7 +2056,7 @@ impl App {
                 }
                 _ => {}
             }
-            return;
+            return PostAction::None;
         }
 
         // Worktree picker: 1-9 selects a worktree and chdirs.
@@ -2026,7 +2070,7 @@ impl App {
                     if let Err(e) = self.chdir(&path) {
                         self.flash_error(format!("chdir: {e}"));
                     }
-                    return;
+                    return PostAction::None;
                 }
             }
         }
@@ -2068,8 +2112,47 @@ impl App {
                 Ok(path) => self.flash_info(format!("saved: {}", path.display())),
                 Err(e) => self.flash_error(format!("save failed: {e}")),
             },
+            KeyCode::Char('v') => {
+                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+                let scroll = view.scroll;
+                if let Some(ref src) = view.source_path {
+                    // On-disk file: open directly, return to pager after.
+                    let src = src.clone();
+                    let edit_path = src.clone();
+                    self.pending_pager_return = Some(PagerReturn::SourceFile {
+                        path: src,
+                        scroll,
+                    });
+                    self.pager = None;
+                    self.needs_full_repaint = true;
+                    return sh_c(
+                        &format!("{editor} {}", shell::shell_quote(&edit_path.display().to_string())),
+                        false,
+                    );
+                }
+                // Buffer: write to temp, edit, reload on return.
+                let title = view.title.clone();
+                match view.write_to_temp() {
+                    Ok(tmp) => {
+                        let edit_path = tmp.clone();
+                        self.pending_pager_return = Some(PagerReturn::TempFile {
+                            path: tmp,
+                            title,
+                            scroll,
+                        });
+                        self.pager = None;
+                        self.needs_full_repaint = true;
+                        return sh_c(
+                            &format!("{editor} {}", shell::shell_quote(&edit_path.display().to_string())),
+                            false,
+                        );
+                    }
+                    Err(e) => self.flash_error(format!("write temp: {e}")),
+                }
+            }
             _ => {}
         }
+        PostAction::None
     }
 
     fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
@@ -2563,7 +2646,9 @@ impl App {
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
                             let lines: Vec<String> = content.lines().map(String::from).collect();
-                            self.pager = Some(PagerView::new_plain(name, lines));
+                            let mut view = PagerView::new_plain(name, lines);
+                            view.source_path = Some(path.clone());
+                            self.pager = Some(view);
                         }
                         Err(e) => self.flash_error(format!("read: {e}")),
                     }
