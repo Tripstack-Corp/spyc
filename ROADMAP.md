@@ -20,6 +20,48 @@ subprocesses) can run simultaneously.
 
 ## Planned
 
+### Context piping (M10)
+
+Send file selections from the file manager directly into the Claude pane
+as context — bridge the gap between browsing and prompting.
+
+- Pipe current picks or inventory to the active pane tab as file paths
+  or inline content (`@file`-style injection)
+- `^W p` sends picks, `^W i` sends inventory items
+- Support both "here are the paths" and "here are the contents" modes
+- Natural fit: we're already a file manager with multi-select
+
+### Git worktree integration (M11)
+
+First-class worktree management from the file list — create, switch,
+and delete worktrees without leaving cspy.
+
+- `W n` create a new worktree (prompt for branch name)
+- `W l` list worktrees with quick-switch
+- `W d` delete a worktree (with confirmation)
+- Status bar shows current worktree/branch
+- Each worktree can have its own pane tabs running independent Claude
+  sessions — parallel workstreams without .gitignore hacks
+
+### Diff view in pager (M12)
+
+Unified and side-by-side diff rendering in the pager, building on
+existing ANSI color and line number support.
+
+- `d` on a modified file (git-tracked) opens a diff view
+- Unified diff with `+`/`-` line highlighting
+- Side-by-side mode toggle (if terminal is wide enough)
+- Search works across diff content (existing `/` infrastructure)
+
+### Session forking
+
+In multi-tab pane, duplicate a tab to branch a conversation — like
+git branching but for Claude sessions.
+
+- `^W f` forks the current tab: new pty with scrollback contents
+  pasted in, so the new Claude instance has the prior context
+- Useful for "let me try a different approach without losing this one"
+
 ### Demo mode
 
 A guided walkthrough mode that showcases cspy's features — useful for
@@ -27,6 +69,9 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- Bracketed paste forwarding to pane — multi-line paste delivered as
+  a single block to Claude CLI instead of line-by-line
+- Pager line wrapping — long lines wrap instead of clipping
 - Pane scroll mode (`^W v`) — browse 10K-line scrollback without
   interrupting the child process; save with `s`
 - One-shot repaint strategy (`needs_full_repaint` flag, `^L` manual
