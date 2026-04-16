@@ -86,12 +86,16 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 
 .PHONY: release-linux-x86
 release-linux-x86: ## Linux x86_64 (static, musl)
+	@# Touch the main source so zigbuild always recompiles cspy itself
+	@# (zigbuild cache is separate from cargo build and can go stale).
+	@touch src/main.rs
 	cargo zigbuild $(RELEASE_FLAGS) --target x86_64-unknown-linux-musl
 	@echo "→ target/x86_64-unknown-linux-musl/release/$(BINARY)"
 	@ls -lh target/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: release-linux-arm
 release-linux-arm: ## Linux aarch64 (static, musl)
+	@touch src/main.rs
 	cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
 	@echo "→ target/aarch64-unknown-linux-musl/release/$(BINARY)"
 	@ls -lh target/aarch64-unknown-linux-musl/release/$(BINARY)

@@ -2026,9 +2026,15 @@ impl App {
         let canonical = std::fs::canonicalize(&abs)?;
         let md = std::fs::metadata(&canonical)?;
         if md.is_dir() {
-            self.chdir(&canonical)?;
+            if let Err(e) = self.chdir(&canonical) {
+                self.flash_error(format!("chdir: {e}"));
+                return Ok(());
+            }
         } else if let Some(parent) = canonical.parent() {
-            self.chdir(parent)?;
+            if let Err(e) = self.chdir(parent) {
+                self.flash_error(format!("chdir: {e}"));
+                return Ok(());
+            }
             self.focus_on_path(&canonical);
         }
         Ok(())
@@ -2342,7 +2348,9 @@ impl App {
             Action::Climb => self.climb()?,
             Action::Home => {
                 if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-                    self.chdir(&home)?;
+                    if let Err(e) = self.chdir(&home) {
+                        self.flash_error(format!("chdir: {e}"));
+                    }
                 }
             }
 
@@ -2712,7 +2720,11 @@ impl App {
                 path.parent()
                     .map_or_else(|| path.clone(), Path::to_path_buf)
             };
-            self.chdir(&target_dir)?;
+            if let Err(e) = self.chdir(&target_dir) {
+                self.flash_error(format!("permission denied: {}", target_dir.display()));
+                let _ = e;
+                return Ok(PostAction::None);
+            }
             self.view = View::Dir;
             self.focus_on_path(&path);
             self.rebuild_rows();
@@ -2722,7 +2734,10 @@ impl App {
         }
 
         if kind == EntryKind::Dir {
-            self.chdir(&path)?;
+            if let Err(e) = self.chdir(&path) {
+                self.flash_error(format!("permission denied: {}", path.display()));
+                let _ = e;
+            }
             return Ok(PostAction::None);
         }
 
@@ -2803,7 +2818,10 @@ impl App {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned());
         if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
-            self.chdir(&parent)?;
+            if let Err(e) = self.chdir(&parent) {
+                self.flash_error(format!("chdir: {e}"));
+                return Ok(());
+            }
             // Place cursor on the directory we just came from.
             if let Some(name) = prev_name {
                 if let Some(idx) = self.rows.iter().position(|r| r.display == name || r.display == format!("{name}/")) {
