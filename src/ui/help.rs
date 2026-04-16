@@ -136,7 +136,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("?  F1", "this help"),
             ("^L", "redraw"),
-            ("^R", "reload config"),
+            ("^R", "reload config (auto-reloads on save)"),
             ("q  Q  ^D", "quit"),
             ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
