@@ -17,11 +17,17 @@ pub struct History {
     /// The text the user had typed before starting to browse — restored
     /// if they cycle past the end (back to the "live" buffer).
     stashed: String,
+    /// Filename within the state dir (e.g. "history", "pane_history").
+    filename: String,
 }
 
 impl History {
     pub fn load() -> Self {
-        let entries = disk_path()
+        Self::load_file("history")
+    }
+
+    pub fn load_file(filename: &str) -> Self {
+        let entries = disk_path(filename)
             .and_then(|p| std::fs::read_to_string(&p).ok())
             .map(|text| {
                 text.lines()
@@ -34,20 +40,19 @@ impl History {
             entries,
             nav: None,
             stashed: String::new(),
+            filename: filename.to_string(),
         }
     }
 
-    /// Append a command. Deduplicates consecutive repeats. Saves to disk
-    /// best-effort.
+    /// Append a command. Removes any earlier duplicate so the most recent
+    /// use is always at the end. Saves to disk best-effort.
     pub fn push(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         if cmd.is_empty() {
             return;
         }
-        // Don't duplicate the last entry.
-        if self.entries.last().is_some_and(|last| last == cmd) {
-            return;
-        }
+        // Remove earlier duplicate (move-to-end dedup).
+        self.entries.retain(|e| e != cmd);
         self.entries.push(cmd.to_string());
         // Cap at MAX_ENTRIES.
         if self.entries.len() > MAX_ENTRIES {
@@ -108,7 +113,7 @@ impl History {
     }
 
     fn save(&self) -> std::io::Result<()> {
-        let Some(path) = disk_path() else {
+        let Some(path) = disk_path(&self.filename) else {
             return Ok(());
         };
         if let Some(parent) = path.parent() {
@@ -119,9 +124,9 @@ impl History {
     }
 }
 
-fn disk_path() -> Option<PathBuf> {
+fn disk_path(filename: &str) -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join("cspy/history"));
+        return Some(PathBuf::from(xdg).join(format!("cspy/{filename}")));
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/cspy/history"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(format!(".local/state/cspy/{filename}")))
 }

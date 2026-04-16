@@ -221,6 +221,7 @@ pub struct App {
     /// Shared command history for `!` / `;` prompts — persisted.
     #[allow(dead_code)]
     history: History,
+    pane_history: History,
     /// Transient message shown in the prompt row when no prompt is active.
     /// Cleared on the next keypress so it doesn't linger after you've read it.
     flash: Option<FlashMessage>,
@@ -300,6 +301,7 @@ impl App {
             last_search: None,
             quit_pending: None,
             history: History::load(),
+            pane_history: History::load_file("pane_history"),
             flash: None,
             needs_full_repaint: false,
             user_host: user_host_string(),
@@ -1279,6 +1281,22 @@ impl App {
         PostAction::None
     }
 
+    /// Return the appropriate history for the current prompt kind.
+    fn history_for_prompt(&mut self) -> &mut History {
+        let is_pane = matches!(
+            self.mode,
+            Mode::Prompting(Prompt {
+                kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
+                ..
+            })
+        );
+        if is_pane {
+            &mut self.pane_history
+        } else {
+            &mut self.history
+        }
+    }
+
     /// Handle keys for shell prompts that use the vi line editor.
     fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> PostAction {
         use crate::ui::line_edit::EditResult;
@@ -1297,18 +1315,30 @@ impl App {
 
         match result {
             EditResult::Submit => {
+                let is_pane_prompt = matches!(
+                    self.mode,
+                    Mode::Prompting(Prompt {
+                        kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
+                        ..
+                    })
+                );
                 let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
                     return PostAction::None;
                 };
-                // Push to shared history before dispatching.
+                // Push to the appropriate history before dispatching.
+                let hist = if is_pane_prompt {
+                    &mut self.pane_history
+                } else {
+                    &mut self.history
+                };
                 if !p.buffer.trim().is_empty() {
-                    self.history.push(p.buffer.trim());
+                    hist.push(p.buffer.trim());
                 }
-                self.history.reset_nav();
+                hist.reset_nav();
                 return self.dispatch_prompt(p);
             }
             EditResult::Cancel => {
-                self.history.reset_nav();
+                self.history_for_prompt().reset_nav();
                 self.cancel_prompt();
             }
             EditResult::HistoryPrev => {
@@ -1318,27 +1348,29 @@ impl App {
                     };
                     p.buffer.clone()
                 };
-                if let Some(entry) = self.history.prev(&current_text) {
+                let hist = self.history_for_prompt();
+                if let Some(entry) = hist.prev(&current_text) {
                     let entry = entry.to_string();
                     let Mode::Prompting(p) = &mut self.mode else {
                         return PostAction::None;
                     };
                     if let Some(ed) = p.editor.as_mut() {
-                        ed.set_content(&entry);
+                        ed.set_content_keep_mode(&entry);
                     }
                     p.buffer = entry;
                 }
             }
             EditResult::HistoryNext => {
-                let replacement = match self.history.next() {
+                let hist = self.history_for_prompt();
+                let replacement = match hist.next() {
                     Some(entry) => entry.to_string(),
-                    None => self.history.stashed().to_string(),
+                    None => hist.stashed().to_string(),
                 };
                 let Mode::Prompting(p) = &mut self.mode else {
                     return PostAction::None;
                 };
                 if let Some(ed) = p.editor.as_mut() {
-                    ed.set_content(&replacement);
+                    ed.set_content_keep_mode(&replacement);
                 }
                 p.buffer = replacement;
             }

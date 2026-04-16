@@ -56,10 +56,23 @@ impl LineEditor {
     }
 
     /// Replace the buffer contents (e.g. when loading a history entry).
+    /// Switches to Insert mode with cursor at end.
     pub fn set_content(&mut self, s: &str) {
         self.buf = s.chars().collect();
         self.cursor = self.buf.len();
         self.mode = Mode::Insert;
+    }
+
+    /// Replace buffer contents, preserving the current mode.
+    /// In Normal mode, cursor lands on the last character.
+    pub fn set_content_keep_mode(&mut self, s: &str) {
+        let was_normal = self.mode == Mode::Normal;
+        self.buf = s.chars().collect();
+        if was_normal && !self.buf.is_empty() {
+            self.cursor = self.buf.len() - 1;
+        } else {
+            self.cursor = self.buf.len();
+        }
     }
 
     pub fn text(&self) -> String {
@@ -248,6 +261,10 @@ impl LineEditor {
             KeyCode::Char('w') => self.cursor = self.next_word_start(),
             KeyCode::Char('b') => self.cursor = self.prev_word_start(),
             KeyCode::Char('e') => self.cursor = self.word_end(),
+
+            // History (like vim command-line normal mode).
+            KeyCode::Char('k') => return EditResult::HistoryPrev,
+            KeyCode::Char('j') => return EditResult::HistoryNext,
 
             // Operators — wait for a motion key.
             KeyCode::Char('d') => self.pending_op = Some(PendingOp::Delete),
