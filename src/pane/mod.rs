@@ -100,13 +100,19 @@ impl Pane {
     /// Drain any pending output from the child into the parser. Call
     /// each render tick before drawing. A `Closed` event marks the
     /// subprocess as finished so the caller can tear the pane down.
-    pub fn drain_output(&mut self) {
+    /// Returns `true` if any bytes were processed.
+    pub fn drain_output(&mut self) -> bool {
+        let mut had_bytes = false;
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
-                PaneEvent::Bytes(bytes) => self.parser.process(&bytes),
+                PaneEvent::Bytes(bytes) => {
+                    had_bytes = true;
+                    self.parser.process(&bytes);
+                }
                 PaneEvent::Closed => self.closed = true,
             }
         }
+        had_bytes
     }
 
     /// True once the subprocess has exited (reader thread saw EOF).

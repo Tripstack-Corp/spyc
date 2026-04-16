@@ -233,7 +233,8 @@ impl LineEditor {
             }
 
             KeyCode::Esc => {
-                // Stay in Normal — no-op (like vim).
+                // Second Esc (already in Normal) cancels the prompt.
+                return EditResult::Cancel;
             }
             _ => {}
         }

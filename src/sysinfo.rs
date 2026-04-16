@@ -37,6 +37,39 @@ const fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (year as i32, m as u32, d as u32)
 }
 
+/// Git status for a directory: branch name + dirty flag.
+/// Returns e.g. `"main*"` (dirty) or `"main"` (clean), or `None` if
+/// the directory isn't in a git repo.
+pub fn git_status(dir: &std::path::Path) -> Option<String> {
+    let branch = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !branch.status.success() {
+        return None;
+    }
+    let branch = std::str::from_utf8(&branch.stdout).ok()?.trim().to_string();
+
+    let porcelain = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let dirty = porcelain.status.success()
+        && !porcelain.stdout.is_empty();
+
+    Some(if dirty {
+        format!("{branch}*")
+    } else {
+        branch
+    })
+}
+
 /// Resident set size in kilobytes, or None if we can't determine it.
 pub fn rss_kb() -> Option<u64> {
     #[cfg(target_os = "linux")]

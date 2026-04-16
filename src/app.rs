@@ -145,6 +145,8 @@ enum PromptKind {
     PaneNewTabCmd,
     /// New pane tab step 2: working directory.
     PaneNewTabCwd,
+    /// Rename the active pane tab.
+    PaneRenameTab,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -209,6 +211,8 @@ pub struct App {
     /// so ratatui repaints every cell instead of diffing against stale state.
     needs_full_repaint: bool,
     user_host: String,
+    /// Cached git branch + dirty flag, refreshed on chdir.
+    git_info: Option<String>,
     should_quit: bool,
 
     /// Rebuilt on chdir / mask toggle / inventory change.
@@ -228,6 +232,7 @@ impl App {
     pub fn new() -> Result<Self> {
         let cwd = std::env::current_dir().context("getting current directory")?;
         let listing = Listing::read(&cwd)?;
+        let git_info = crate::sysinfo::git_status(&cwd);
         let (config, load_note) = match Config::load_default(&cwd) {
             Ok(c) => {
                 let note = if c.sources.is_empty() {
@@ -277,6 +282,7 @@ impl App {
             flash: None,
             needs_full_repaint: false,
             user_host: user_host_string(),
+            git_info,
             should_quit: false,
             rows: Vec::new(),
             last_grid: Grid {
@@ -611,22 +617,31 @@ impl App {
         let mut spans: Vec<Span> = Vec::new();
         let mut used = 0usize;
 
-        // Tab indicators: ─[1*] claude ─[2] bash
+        let activity_style = Style::default()
+            .fg(self.theme.pick)
+            .add_modifier(Modifier::BOLD);
+
+        // Tab indicators: ─[1*] claude ─[2+] bash
         if let Some(tabs) = &self.pane_tabs {
             for (i, entry) in tabs.tabs().iter().enumerate() {
                 let is_active = i == tabs.active_index();
                 let star = if is_active { "*" } else { "" };
+                let activity = if entry.info.has_activity { "+" } else { "" };
                 let sep = "─";
-                let tab_text = format!("[{}{star}] {} ", i + 1, entry.info.label);
+                let tab_text = format!("[{}{star}{activity}] {} ", i + 1, entry.info.label);
                 let tab_len = sep.len() + tab_text.len();
                 if used + tab_len > width {
                     break;
                 }
                 spans.push(Span::styled(sep, rule_style));
-                spans.push(Span::styled(
-                    tab_text,
-                    if is_active { active_tab_style } else { inactive_tab_style },
-                ));
+                let style = if is_active {
+                    active_tab_style
+                } else if entry.info.has_activity {
+                    activity_style
+                } else {
+                    inactive_tab_style
+                };
+                spans.push(Span::styled(tab_text, style));
                 used += tab_len;
             }
 
@@ -764,6 +779,7 @@ impl App {
             user_host: &self.user_host,
             path: &path,
             suffix: &suffix,
+            git_info: self.git_info.as_deref(),
             theme: &self.theme,
         }
         .render(frame, layout.status);
@@ -1385,6 +1401,15 @@ impl App {
                         std::path::PathBuf::from(&cwd)
                     };
                     self.open_pane_tab_in(&cmd, &cwd_path);
+                }
+                PostAction::None
+            }
+            PromptKind::PaneRenameTab => {
+                let name = prompt.buffer.trim().to_string();
+                if !name.is_empty() {
+                    if let Some(tabs) = self.pane_tabs.as_mut() {
+                        tabs.active_info_mut().label = name;
+                    }
                 }
                 PostAction::None
             }
@@ -2116,10 +2141,13 @@ impl App {
             | Action::PaneTabByIndex(_)
             | Action::PaneNextTab
             | Action::PanePrevTab
+            | Action::PaneRenameTab
                 if matches!(
                     self.mode,
                     Mode::Prompting(Prompt {
-                        kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
+                        kind: PromptKind::PaneNewTabCmd
+                            | PromptKind::PaneNewTabCwd
+                            | PromptKind::PaneRenameTab,
                         ..
                     })
                 ) =>
@@ -2168,6 +2196,17 @@ impl App {
             Action::PanePrevTab => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.prev();
+                }
+            }
+            Action::PaneRenameTab => {
+                if let Some(tabs) = self.pane_tabs.as_ref() {
+                    let current = tabs.active_info().label.clone();
+                    let mut p = Prompt::shell(PromptKind::PaneRenameTab, "tab name: ");
+                    p.buffer.clone_from(&current);
+                    if let Some(ed) = p.editor.as_mut() {
+                        ed.set_content(&current);
+                    }
+                    self.mode = Mode::Prompting(p);
                 }
             }
 
@@ -2346,6 +2385,7 @@ impl App {
         // the user is looking at.
         let _ = std::env::set_current_dir(&canonical);
         self.listing = new_listing;
+        self.git_info = crate::sysinfo::git_status(&canonical);
         self.picks.clear();
         self.cursor = Cursor::new();
         self.view = View::Dir;

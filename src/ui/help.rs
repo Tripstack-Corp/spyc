@@ -145,6 +145,7 @@ const SECTIONS: &[Section] = &[
             ("^W x", "close active pane tab"),
             ("^W 1..9", "switch to tab N"),
             ("^W [  ^W ]", "prev / next tab"),
+            ("^W r", "rename active tab"),
             ("CSPY_PANE_CMD", "env var for pane command (default claude)"),
         ],
     },

@@ -89,6 +89,7 @@ pub enum Action {
     PaneTabByIndex(u8),// ^W 1..9 — switch to tab N
     PaneNextTab,       // ^W ] — next tab
     PanePrevTab,       // ^W [ — previous tab
+    PaneRenameTab,     // ^W r — rename the active tab
 
     // Meta.
     Redraw, // ^L
@@ -152,6 +153,7 @@ impl Action {
             Self::PaneTabByIndex(_) => "switch pane tab",
             Self::PaneNextTab => "next pane tab",
             Self::PanePrevTab => "prev pane tab",
+            Self::PaneRenameTab => "rename pane tab",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",

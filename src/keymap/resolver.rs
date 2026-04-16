@@ -134,6 +134,7 @@ impl Resolver {
                 }
                 KeyCode::Char(']') => ResolverOutcome::Action(Action::PaneNextTab),
                 KeyCode::Char('[') => ResolverOutcome::Action(Action::PanePrevTab),
+                KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::PaneRenameTab),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

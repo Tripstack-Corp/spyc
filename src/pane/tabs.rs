@@ -8,14 +8,15 @@ use std::path::PathBuf;
 use super::Pane;
 
 /// Per-tab metadata displayed in the status line.
-#[allow(dead_code)]
 pub struct TabInfo {
     /// Full command string passed to `Pane::spawn`.
     pub command: String,
-    /// Short display name (first word of command).
+    /// Short display name — defaults to first word of command, user can rename.
     pub label: String,
     /// Working directory at spawn time.
     pub cwd: PathBuf,
+    /// True when a background tab received output since last viewed.
+    pub has_activity: bool,
 }
 
 impl TabInfo {
@@ -31,6 +32,7 @@ impl TabInfo {
             command,
             label,
             cwd,
+            has_activity: false,
         }
     }
 }
@@ -69,6 +71,10 @@ impl PaneTabs {
         &self.tabs[self.active].info
     }
 
+    pub fn active_info_mut(&mut self) -> &mut TabInfo {
+        &mut self.tabs[self.active].info
+    }
+
     pub fn len(&self) -> usize {
         self.tabs.len()
     }
@@ -82,15 +88,18 @@ impl PaneTabs {
     }
 
     /// Switch to tab at `idx` (0-indexed). Clamped to valid range.
+    /// Clears the activity flag on the newly active tab.
     pub fn switch_to(&mut self, idx: usize) {
         if !self.tabs.is_empty() {
             self.active = idx.min(self.tabs.len() - 1);
+            self.tabs[self.active].info.has_activity = false;
         }
     }
 
     pub fn next(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active + 1) % self.tabs.len();
+            self.tabs[self.active].info.has_activity = false;
         }
     }
 
@@ -101,6 +110,7 @@ impl PaneTabs {
             } else {
                 self.active - 1
             };
+            self.tabs[self.active].info.has_activity = false;
         }
     }
 
@@ -128,9 +138,13 @@ impl PaneTabs {
     }
 
     /// Drain output from *every* tab so background tabs don't lose data.
+    /// Sets `has_activity` on background tabs that received new output.
     pub fn drain_all(&mut self) {
-        for entry in &mut self.tabs {
-            entry.pane.drain_output();
+        for (i, entry) in self.tabs.iter_mut().enumerate() {
+            let had_bytes = entry.pane.drain_output();
+            if had_bytes && i != self.active {
+                entry.info.has_activity = true;
+            }
         }
     }
 
