@@ -2,18 +2,6 @@
 
 ## Planned
 
-### Git worktree integration (M11)
-
-First-class worktree management from the file list — create, switch,
-and delete worktrees without leaving cspy.
-
-- `W n` create a new worktree (prompt for branch name)
-- `W l` list worktrees with quick-switch
-- `W d` delete a worktree (with confirmation)
-- Status bar shows current worktree/branch
-- Each worktree can have its own pane tabs running independent Claude
-  sessions — parallel workstreams without .gitignore hacks
-
 ### Diff view in pager (M12)
 
 Unified and side-by-side diff rendering in the pager, building on
@@ -39,12 +27,19 @@ A guided walkthrough mode that showcases cspy's features — useful for
 onboarding new users or recording screencasts. Details TBD.
 
 ### Additional Ideas
+- **`:` command line** — vim-style command mode (`:Wl`, `:set`, `:q`, etc.)
+  for discoverable, composable commands. Currently multi-key sequences
+  (W l, ^W n, m{a-z}) show a pending indicator in the prompt line, but a
+  full `:` command mode would be more powerful and self-documenting.
 - 'v' in the pager should open the buffer in EDITOR
 - Session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc.)
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
 ## Done (recent)
 
+- **Git worktree integration (M11)** — `W l` list/switch worktrees,
+  `W n` create new worktree (prompt for branch), `W d` delete worktree.
+  Status bar already shows branch per worktree. Pane tabs are independent.
 - **Context piping (M10)** — `^W p` pipes file contents of selection,
   `^W i` pipes inventory contents to pane as bracketed paste with
   `[file: path]` headers. `^W s` remains for paths only.

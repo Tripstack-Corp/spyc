@@ -147,6 +147,10 @@ enum PromptKind {
     PaneNewTabCwd,
     /// Rename the active pane tab.
     PaneRenameTab,
+    /// W n — branch name for new worktree.
+    WorktreeNewBranch,
+    /// W d — confirm worktree removal (y/N).
+    WorktreeDeleteConfirm,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -191,6 +195,8 @@ pub struct App {
     pane_height_pct: u16,
     /// Stashed command for the two-step new-tab prompt flow.
     pending_new_tab_cmd: Option<String>,
+    /// Worktree paths for the `W l` picker. Digit keys 1-9 select.
+    pending_worktrees: Option<Vec<PathBuf>>,
     /// The directory cspy was launched in — `` ` `` jumps here (project root).
     start_dir: PathBuf,
     /// Directory before the last chdir — `''` jumps back here (like `cd -`).
@@ -275,6 +281,7 @@ impl App {
             // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
             pending_new_tab_cmd: None,
+            pending_worktrees: None,
             start_dir: cwd,
             prev_dir: None,
             last_search: None,
@@ -876,6 +883,19 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ));
             frame.render_widget(Paragraph::new(line), layout.prompt);
+        } else if let Some(pending) = self.resolver.pending_display() {
+            use ratatui::{
+                style::{Modifier, Style},
+                text::{Line, Span},
+                widgets::Paragraph,
+            };
+            let line = Line::from(Span::styled(
+                pending,
+                Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(line), layout.prompt);
         }
 
         // Pager comes after list but before help (help always wins).
@@ -1419,6 +1439,39 @@ impl App {
                 }
                 PostAction::None
             }
+            PromptKind::WorktreeNewBranch => {
+                let branch = prompt.buffer.trim().to_string();
+                if branch.is_empty() {
+                    return PostAction::None;
+                }
+                match crate::sysinfo::git_worktree_add(&self.listing.dir, &branch) {
+                    Ok(path) => {
+                        self.flash_info(format!("created worktree: {}", path.display()));
+                        if let Err(e) = self.chdir(&path) {
+                            self.flash_error(format!("chdir: {e}"));
+                        }
+                    }
+                    Err(e) => self.flash_error(format!("worktree add: {e}")),
+                }
+                PostAction::None
+            }
+            PromptKind::WorktreeDeleteConfirm => {
+                let confirmed = prompt.buffer.trim().eq_ignore_ascii_case("y");
+                if !confirmed {
+                    return PostAction::None;
+                }
+                let dir = self.listing.dir.clone();
+                match crate::sysinfo::git_worktree_remove(&dir) {
+                    Ok(()) => {
+                        self.flash_info(format!("removed worktree: {}", dir.display()));
+                        if let Some(parent) = dir.parent() {
+                            let _ = self.chdir(parent);
+                        }
+                    }
+                    Err(e) => self.flash_error(format!("worktree remove: {e}")),
+                }
+                PostAction::None
+            }
         }
     }
 
@@ -1648,6 +1701,43 @@ impl App {
         let current = i32::from(self.pane_height_pct);
         let new = (current + delta_pct).clamp(10, 90);
         self.pane_height_pct = new as u16;
+    }
+
+    // ---- Git worktree (M11) -------------------------------------------------
+
+    /// W l — list worktrees in a pager; digit keys 1-9 select.
+    fn worktree_list(&mut self) {
+        match crate::sysinfo::git_worktree_list(&self.listing.dir) {
+            Some(worktrees) => {
+                self.pending_worktrees =
+                    Some(worktrees.iter().map(|w| w.path.clone()).collect());
+                let lines: Vec<String> = worktrees
+                    .iter()
+                    .enumerate()
+                    .map(|(i, wt)| {
+                        let current = if wt.path == self.listing.dir {
+                            " ← current"
+                        } else {
+                            ""
+                        };
+                        format!(
+                            "  [{}]  {:<30} {:>8}  {}{}",
+                            i + 1,
+                            wt.branch,
+                            wt.head,
+                            wt.path.display(),
+                            current,
+                        )
+                    })
+                    .collect();
+                let view = pager::PagerView::new_plain(
+                    "git worktrees — press 1-9 to switch, q to close",
+                    lines,
+                );
+                self.pager = Some(view);
+            }
+            None => self.flash_error("not in a git repository (or no worktrees)"),
+        }
     }
 
     /// Compute the (rows, cols) the bottom pane will occupy.
@@ -1890,9 +1980,26 @@ impl App {
             return;
         }
 
+        // Worktree picker: 1-9 selects a worktree and chdirs.
+        if let Some(ref worktrees) = self.pending_worktrees {
+            if let KeyCode::Char(c @ '1'..='9') = key.code {
+                let idx = (c as u8 - b'1') as usize;
+                if let Some(path) = worktrees.get(idx).cloned() {
+                    self.pager = None;
+                    self.pending_worktrees = None;
+                    self.needs_full_repaint = true;
+                    if let Err(e) = self.chdir(&path) {
+                        self.flash_error(format!("chdir: {e}"));
+                    }
+                    return;
+                }
+            }
+        }
+
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 self.pager = None;
+                self.pending_worktrees = None;
                 self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
@@ -2289,6 +2396,27 @@ impl App {
 
             Action::PanePipeContent => self.pipe_content_to_pane(false),
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
+
+            Action::WorktreeList => self.worktree_list(),
+            Action::WorktreeNew => {
+                if self.git_info.is_none() {
+                    self.flash_error("not in a git repository");
+                } else {
+                    let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
+                    self.mode = Mode::Prompting(p);
+                }
+            }
+            Action::WorktreeDelete => {
+                if self.git_info.is_none() {
+                    self.flash_error("not in a git repository");
+                } else {
+                    let dir = self.listing.dir.display().to_string();
+                    self.mode = Mode::Prompting(Prompt::simple(
+                        PromptKind::WorktreeDeleteConfirm,
+                        format!("remove worktree {dir}? (y/N): "),
+                    ));
+                }
+            }
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),

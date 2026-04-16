@@ -42,7 +42,7 @@ make                   # see Makefile for build, release, cross-compile, install
 
 ## Roadmap
 
-See `ROADMAP.md` for current plans. Key upcoming: git worktree integration (M11), diff view (M12), demo mode.
+See `ROADMAP.md` for current plans. Key upcoming: diff view (M12), session forking, demo mode.
 
 ## Dog-fooding context
 

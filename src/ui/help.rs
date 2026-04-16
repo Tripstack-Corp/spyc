@@ -96,6 +96,14 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Git worktrees",
+        rows: &[
+            ("W l", "list worktrees (1-9 to switch)"),
+            ("W n", "new worktree (prompt for branch)"),
+            ("W d", "delete current worktree (confirm)"),
+        ],
+    },
+    Section {
         title: "Split pane (multi-tab)",
         rows: &[
             ("^\\  F10  ^W \\  ^W c", "toggle the bottom pane (claude)"),

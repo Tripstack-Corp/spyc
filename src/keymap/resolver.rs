@@ -24,6 +24,8 @@ enum PendingSeq {
     /// Seen `Ctrl-W`, waiting for a pane-command letter
     /// (`j`/`k`/`s`/`+`/`-`/`\\`/`c`).
     W,
+    /// Seen uppercase `W`, waiting for a worktree sub-command (l/n/d).
+    Worktree,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -64,6 +66,19 @@ impl Resolver {
     /// the pty pane is focused.
     pub const fn is_pending(&self) -> bool {
         !matches!(self.pending, PendingSeq::Normal)
+    }
+
+    /// Display string for the current pending sequence, or `None` when idle.
+    /// Shown in the prompt line so the user knows cspy is waiting for more input.
+    pub fn pending_display(&self) -> Option<&'static str> {
+        match self.pending {
+            PendingSeq::Normal => None,
+            PendingSeq::G => Some("g-"),
+            PendingSeq::Mark => Some("m-"),
+            PendingSeq::JumpMark => Some("'-"),
+            PendingSeq::W => Some("^W-"),
+            PendingSeq::Worktree => Some("W-"),
+        }
     }
 
     /// Feed a key through the resolver, first consulting the user keymap
@@ -137,6 +152,18 @@ impl Resolver {
                 KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::PaneRenameTab),
                 KeyCode::Char('p' | 'P') => ResolverOutcome::Action(Action::PanePipeContent),
                 KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: uppercase W prefix waiting for a worktree command.
+        if self.pending == PendingSeq::Worktree {
+            let out = match ev.code {
+                KeyCode::Char('l' | 'L') => ResolverOutcome::Action(Action::WorktreeList),
+                KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::WorktreeNew),
+                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::WorktreeDelete),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -387,6 +414,12 @@ impl Resolver {
             KeyCode::Char('s') => {
                 self.reset();
                 ResolverOutcome::Action(Action::SetEnvPrompt)
+            }
+
+            // Git worktree prefix.
+            KeyCode::Char('W') => {
+                self.pending = PendingSeq::Worktree;
+                return ResolverOutcome::Pending;
             }
 
             // Quit.

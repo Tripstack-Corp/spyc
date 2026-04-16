@@ -93,6 +93,11 @@ pub enum Action {
     PanePipeContent,   // ^W p — send file contents of selection to pane
     PanePipeInventory, // ^W i — send file contents of inventory to pane
 
+    // Git worktree (M11).
+    WorktreeList,      // W l — list worktrees, pick to chdir
+    WorktreeNew,       // W n — prompt for branch, create worktree
+    WorktreeDelete,    // W d — confirm, remove current worktree
+
     // Meta.
     Redraw, // ^L
     Quit,   // ^D / Q / q
@@ -158,6 +163,9 @@ impl Action {
             Self::PaneRenameTab => "rename pane tab",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
+            Self::WorktreeList => "list git worktrees",
+            Self::WorktreeNew => "new git worktree",
+            Self::WorktreeDelete => "delete git worktree",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",
