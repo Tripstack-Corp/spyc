@@ -133,14 +133,19 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Split pane (M8)",
+        title: "Split pane (M9 — multi-tab)",
         rows: &[
             ("^\\  F10  ^W \\  ^W c", "toggle the bottom pane (claude)"),
             ("F9", "open pane with claude --resume"),
             ("^W j  ^W k", "switch focus between list and pane"),
             ("^W s", "send selection paths to pane stdin"),
             ("^W +  ^W -", "grow / shrink the pane"),
-            ("CSPY_PANE_CMD", "env var for pane command (default $SHELL)"),
+            ("^W v", "scroll pane history"),
+            ("^W n", "new pane tab (prompt for command + cwd)"),
+            ("^W x", "close active pane tab"),
+            ("^W 1..9", "switch to tab N"),
+            ("^W [  ^W ]", "prev / next tab"),
+            ("CSPY_PANE_CMD", "env var for pane command (default claude)"),
         ],
     },
     Section {

@@ -127,6 +127,13 @@ impl Resolver {
                 KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
                 KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
                 KeyCode::Char('\\' | 'c' | 'C') => ResolverOutcome::Action(Action::TogglePane),
+                KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::PaneNewTab),
+                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
+                KeyCode::Char(c @ '1'..='9') => {
+                    ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
+                }
+                KeyCode::Char(']') => ResolverOutcome::Action(Action::PaneNextTab),
+                KeyCode::Char('[') => ResolverOutcome::Action(Action::PanePrevTab),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

@@ -9,11 +9,14 @@
 //! pane's stdin. For the spike it is intentionally generic.
 
 mod input;
+pub mod tabs;
 mod widget;
 
+pub use tabs::{PaneTabs, TabEntry, TabInfo};
 pub use widget::PaneWidget;
 
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
@@ -50,8 +53,9 @@ enum PaneEvent {
 }
 
 impl Pane {
-    /// Spawn `command` in a fresh pty of `rows × cols`.
-    pub fn spawn(command: &str, rows: u16, cols: u16) -> anyhow::Result<Self> {
+    /// Spawn `command` in a fresh pty of `rows × cols`, with `cwd` as
+    /// the working directory.
+    pub fn spawn(command: &str, rows: u16, cols: u16, cwd: &Path) -> anyhow::Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -66,8 +70,8 @@ impl Pane {
         // "claude --print" work without us parsing shell syntax.
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", command]);
-        // Inherit cwd and env from the parent.
-        cmd.cwd(std::env::current_dir()?);
+        // Use the caller-specified working directory.
+        cmd.cwd(cwd);
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // We don't need our own handle on the slave.

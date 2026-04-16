@@ -16,9 +16,7 @@ use std::io;
 use anyhow::Result;
 use crossterm::{
     cursor::MoveTo,
-    event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    },
+    event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     terminal::{
         disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
@@ -44,7 +42,6 @@ fn setup_terminal() -> Result<Tui> {
     execute!(
         stdout,
         EnterAlternateScreen,
-        EnableMouseCapture,
         EnableBracketedPaste
     )?;
     let backend = CrosstermBackend::new(stdout);
@@ -57,7 +54,6 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture,
         DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
@@ -78,7 +74,6 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
         terminal.backend_mut(),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        DisableMouseCapture,
         DisableBracketedPaste,
     )?;
     terminal.show_cursor()?;
@@ -95,7 +90,6 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         EnterAlternateScreen,
-        EnableMouseCapture,
         EnableBracketedPaste
     )?;
     terminal.hide_cursor()?;

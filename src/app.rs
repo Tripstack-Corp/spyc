@@ -11,7 +11,7 @@ use ratatui::Frame;
 use crate::config::Config;
 use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
-use crate::pane::{Pane, PaneWidget};
+use crate::pane::{Pane, PaneTabs, PaneWidget, TabEntry, TabInfo};
 use crate::shell;
 use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::line_edit::LineEditor;
@@ -141,6 +141,10 @@ enum PromptKind {
     SetEnv,
     /// `!` — capture command output with ANSI colors, show in in-app pager.
     ShellCmdCaptured,
+    /// New pane tab step 1: command to run.
+    PaneNewTabCmd,
+    /// New pane tab step 2: working directory.
+    PaneNewTabCwd,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -163,8 +167,8 @@ pub struct App {
     /// When set, a scrollable text pager sits on top of the file list.
     /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
     pager: Option<PagerView>,
-    /// Pty-hosted subprocess shown as a horizontal split under the list.
-    pane: Option<Pane>,
+    /// Tabbed pty-hosted subprocesses shown as a horizontal split under the list.
+    pane_tabs: Option<PaneTabs>,
     /// When set, an interactive `!` command has taken over the top pane.
     /// cspy's list/status/prompt are hidden; this pty renders instead.
     /// When the subprocess exits, cspy's file listing is restored and
@@ -184,10 +188,8 @@ pub struct App {
     /// The bottom pane's share of the middle rect, in percent. Resized
     /// by `^W +` / `^W -`.
     pane_height_pct: u16,
-    /// Set during render when the pane's subprocess has exited. We drop
-    /// the pane *after* the render loop finishes so the final frame is
-    /// drawn before the layout collapses.
-    pending_pane_close: bool,
+    /// Stashed command for the two-step new-tab prompt flow.
+    pending_new_tab_cmd: Option<String>,
     /// The directory cspy was launched in — `` ` `` jumps here (project root).
     start_dir: PathBuf,
     /// Directory before the last chdir — `''` jumps back here (like `cd -`).
@@ -258,7 +260,7 @@ impl App {
             mode: Mode::Normal,
             help_visible: false,
             pager: None,
-            pane: None,
+            pane_tabs: None,
             top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
@@ -266,7 +268,7 @@ impl App {
             pane_focused: false,
             // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
-            pending_pane_close: false,
+            pending_new_tab_cmd: None,
             start_dir: cwd,
             prev_dir: None,
             last_search: None,
@@ -364,15 +366,15 @@ impl App {
             }
             terminal.draw(|frame| self.render(frame))?;
 
-            // If the pane's subprocess exited during the frame just drawn,
-            // tear the pane down now so the next frame is laid out without
-            // it. Also flash so the user knows why it vanished.
-            if self.pending_pane_close {
-                self.pending_pane_close = false;
-                self.pane = None;
-                self.pane_focused = false;
-                self.needs_full_repaint = true;
-                self.flash_info("pane: subprocess exited");
+            // Auto-remove tabs whose subprocess has exited. If the last
+            // tab closes, tear down the entire pane area.
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                if !tabs.remove_closed() {
+                    self.pane_tabs = None;
+                    self.pane_focused = false;
+                    self.needs_full_repaint = true;
+                    self.flash_info("pane: last tab exited");
+                }
             }
             // pending_overlay_close is no longer used — the overlay stays
             // visible until Enter via overlay_awaiting_dismiss.
@@ -441,7 +443,7 @@ impl App {
             // (and cursor motion in e.g. claude's visual mode) feels
             // snappy. Long poll otherwise to keep CPU near zero when
             // the user is just browsing files.
-            let poll_ms = if self.pane.is_some() { 16 } else { 250 };
+            let poll_ms = if self.pane_tabs.is_some() { 16 } else { 250 };
             if event::poll(Duration::from_millis(poll_ms))? {
                 match event::read()? {
                     Event::Key(key) => {
@@ -460,7 +462,7 @@ impl App {
                         }
                     }
                     Event::Paste(text) => {
-                        if let Some(pane) = self.pane.as_mut() {
+                        if let Some(pane) = self.pane_tabs.as_mut().map(|t| t.active_mut()) {
                             // Wrap in bracketed paste so the child app (e.g. claude)
                             // receives the block as a single paste, not line-by-line.
                             let mut buf = Vec::with_capacity(text.len() + 12);
@@ -585,29 +587,86 @@ impl App {
         }
     }
 
-    /// Draw a horizontal rule across the divider rect. The color reflects
-    /// which pane currently has focus, giving a clear visual cue without
-    /// needing labels.
-    fn render_divider(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
+    /// Replaces the old plain-rule divider.
+    fn render_pane_status_line(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
             widgets::Paragraph,
         };
-        let is_scrolling = self
-            .pane
-            .as_ref()
-            .is_some_and(|p| p.is_scrolling());
-        let tag = if is_scrolling { " [SCROLL] " } else { "" };
-        let rule_width = (area.width as usize).saturating_sub(tag.len());
-        let style = if self.pane_focused {
+        let width = area.width as usize;
+        let rule_style = if self.pane_focused {
             Style::default()
                 .fg(self.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.theme.status_suffix)
         };
-        let mut spans = vec![Span::styled("─".repeat(rule_width), style)];
+        let active_tab_style = Style::default()
+            .fg(self.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        let inactive_tab_style = Style::default().fg(self.theme.status_suffix);
+
+        let mut spans: Vec<Span> = Vec::new();
+        let mut used = 0usize;
+
+        // Tab indicators: ─[1*] claude ─[2] bash
+        if let Some(tabs) = &self.pane_tabs {
+            for (i, entry) in tabs.tabs().iter().enumerate() {
+                let is_active = i == tabs.active_index();
+                let star = if is_active { "*" } else { "" };
+                let sep = "─";
+                let tab_text = format!("[{}{star}] {} ", i + 1, entry.info.label);
+                let tab_len = sep.len() + tab_text.len();
+                if used + tab_len > width {
+                    break;
+                }
+                spans.push(Span::styled(sep, rule_style));
+                spans.push(Span::styled(
+                    tab_text,
+                    if is_active { active_tab_style } else { inactive_tab_style },
+                ));
+                used += tab_len;
+            }
+
+            // CWD of active tab.
+            let cwd_display = {
+                let cwd = &tabs.active_info().cwd;
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                match home {
+                    Some(h) if cwd.starts_with(&h) => {
+                        format!("~/{}", cwd.strip_prefix(&h).unwrap().display())
+                    }
+                    _ => cwd.display().to_string(),
+                }
+            };
+            // "── ~/path"
+            let cwd_prefix = "── ";
+            let avail = width.saturating_sub(used + 12); // leave room for [SCROLL] + trailing rule
+            if avail > 4 {
+                let truncated = if cwd_display.len() > avail {
+                    format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])
+                } else {
+                    cwd_display
+                };
+                let cwd_fragment = format!("{cwd_prefix}{truncated} ");
+                used += cwd_fragment.len();
+                spans.push(Span::styled(cwd_fragment, inactive_tab_style));
+            }
+        }
+
+        // Right-aligned [SCROLL] tag.
+        let is_scrolling = self
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|t| t.active().is_scrolling());
+        let tag = if is_scrolling { " [SCROLL]" } else { "" };
+        let fill = width.saturating_sub(used + tag.len());
+        if fill > 0 {
+            spans.push(Span::styled("─".repeat(fill), rule_style));
+            used += fill;
+        }
         if is_scrolling {
             spans.push(Span::styled(
                 tag,
@@ -615,7 +674,11 @@ impl App {
                     .fg(self.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ));
+            used += tag.len();
         }
+        // If anything's left (shouldn't be), pad.
+        let _ = used;
+
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
@@ -629,7 +692,7 @@ impl App {
         //   The status row is always at the top of the file-list region —
         //   so when the pane is open it sits *inside* the top pane rather
         //   than above the divider.
-        let layout = Self::compute_layout(frame_area, self.pane.is_some(), self.pane_height_pct);
+        let layout = Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.pane_height_pct);
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire cspy area. Status, list, and prompt are
@@ -681,17 +744,14 @@ impl App {
 
             // Divider + bottom pane still render normally.
             if let Some(divider_rect) = layout.divider {
-                self.render_divider(frame, divider_rect);
+                self.render_pane_status_line(frame, divider_rect);
             }
-            if let (Some(pane), Some(rect)) = (self.pane.as_mut(), layout.pane) {
-                let _ = pane.resize(rect.height, rect.width);
-                pane.drain_output();
-                if pane.is_closed() {
-                    self.pending_pane_close = true;
-                }
+            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+                let _ = tabs.active_mut().resize(rect.height, rect.width);
+                tabs.drain_all();
                 frame.render_widget(
                     PaneWidget {
-                        screen: pane.screen(),
+                        screen: tabs.active().screen(),
                     },
                     rect,
                 );
@@ -730,25 +790,19 @@ impl App {
             layout.list,
         );
 
-        if let (Some(pane), Some(rect)) = (self.pane.as_mut(), layout.pane) {
-            // Keep the pty's view of its size matched to what we render.
-            let _ = pane.resize(rect.height, rect.width);
-            pane.drain_output();
-            if pane.is_closed() {
-                // Subprocess exited — drop the pane after drawing one
-                // final frame so users see the last output.
-                self.pending_pane_close = true;
-            }
+        if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+            let _ = tabs.active_mut().resize(rect.height, rect.width);
+            tabs.drain_all();
             frame.render_widget(
                 PaneWidget {
-                    screen: pane.screen(),
+                    screen: tabs.active().screen(),
                 },
                 rect,
             );
         }
 
         if let Some(divider_rect) = layout.divider {
-            self.render_divider(frame, divider_rect);
+            self.render_pane_status_line(frame, divider_rect);
         }
 
         if let Mode::Prompting(p) = &self.mode {
@@ -923,7 +977,8 @@ impl App {
         // here instead of being forwarded to the child subprocess.
         // Let cspy meta keys (^W prefix, ^\\, F10) fall through so
         // pane commands still work from scroll mode.
-        if let Some(pane) = self.pane.as_mut() {
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            let pane = tabs.active_mut();
             if pane.is_scrolling()
                 && self.pane_focused
                 && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
@@ -935,12 +990,13 @@ impl App {
         // subprocess — except cspy meta keys, which are always caught
         // by cspy so the user can toggle / resize / focus-switch / send
         // selection from inside the pane.
-        if self.pane.is_some()
+        if self.pane_tabs.is_some()
             && self.pane_focused
+            && !matches!(self.mode, Mode::Prompting(_))
             && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
         {
-            if let Some(pane) = self.pane.as_mut() {
-                let _ = pane.send_key(key);
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                let _ = tabs.active_mut().send_key(key);
             }
             return Ok(PostAction::None);
         }
@@ -1190,6 +1246,8 @@ impl App {
             self.cursor.index = saved_cursor;
             self.cursor.clamp(self.rows.len());
         }
+        // Clear any stashed state from the two-step new-tab prompt.
+        self.pending_new_tab_cmd = None;
     }
 
     fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
@@ -1210,8 +1268,9 @@ impl App {
                 // untouched. When the command exits, cspy comes back.
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
                 let (rows, cols) =
-                    Self::top_overlay_size(self.pane_height_pct, self.pane.is_some());
-                match Pane::spawn(&expanded, rows, cols) {
+                    Self::top_overlay_size(self.pane_height_pct, self.pane_tabs.is_some());
+                let cwd = self.listing.dir.clone();
+                match Pane::spawn(&expanded, rows, cols, &cwd) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
                     }
@@ -1299,34 +1358,70 @@ impl App {
                 }
                 PostAction::None
             }
+            PromptKind::PaneNewTabCmd => {
+                let cmd = prompt.buffer.trim().to_string();
+                if cmd.is_empty() {
+                    return PostAction::None;
+                }
+                self.pending_new_tab_cmd = Some(cmd);
+                let cwd_default = self.listing.dir.display().to_string();
+                let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
+                p.buffer.clone_from(&cwd_default);
+                if let Some(ed) = p.editor.as_mut() {
+                    ed.set_content(&cwd_default);
+                }
+                self.mode = Mode::Prompting(p);
+                return PostAction::None;
+            }
+            PromptKind::PaneNewTabCwd => {
+                let cwd = prompt.buffer.trim().to_string();
+                if let Some(cmd) = self.pending_new_tab_cmd.take() {
+                    let cwd_path = if cwd.is_empty() {
+                        self.listing.dir.clone()
+                    } else if cwd.starts_with('~') {
+                        let home = std::env::var("HOME").unwrap_or_default();
+                        std::path::PathBuf::from(cwd.replacen('~', &home, 1))
+                    } else {
+                        std::path::PathBuf::from(&cwd)
+                    };
+                    self.open_pane_tab_in(&cmd, &cwd_path);
+                }
+                PostAction::None
+            }
         }
     }
 
-    /// Open the split pane if it's closed, close it if it's open. The
-    /// pane command defaults to `$SHELL` for the spike; we'll swap in
-    /// `claude` (or a config-provided command) once the integration is
-    /// proven end to end.
+    /// Open the split pane if it's closed, close all tabs if it's open.
     fn toggle_pane(&mut self) {
-        if self.pane.is_some() {
-            self.pane = None;
+        if self.pane_tabs.is_some() {
+            self.pane_tabs = None;
             self.pane_focused = false;
             self.needs_full_repaint = true;
             self.flash_info("pane closed");
             return;
         }
         let cmd = std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
-        self.open_pane_with(&cmd);
+        self.open_pane_tab(&cmd);
     }
 
-    fn open_pane_with(&mut self, cmd: &str) {
-        if self.pane.is_some() {
-            self.flash_info("pane already open — close first");
-            return;
-        }
+    /// Spawn a new pane tab. If no tabs exist, creates the container.
+    fn open_pane_tab(&mut self, cmd: &str) {
+        self.open_pane_tab_in(cmd, &self.listing.dir.clone());
+    }
+
+    fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
         let (rows, cols) = Self::pane_spawn_size(self.pane_height_pct);
-        match Pane::spawn(cmd, rows, cols) {
+        match Pane::spawn(cmd, rows, cols, cwd) {
             Ok(p) => {
-                self.pane = Some(p);
+                let entry = TabEntry {
+                    pane: p,
+                    info: TabInfo::new(cmd, cwd),
+                };
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.push(entry);
+                } else {
+                    self.pane_tabs = Some(PaneTabs::new(entry));
+                }
                 self.pane_focused = true;
                 self.flash_info(format!("pane: {cmd} (^W k for list)"));
             }
@@ -1334,9 +1429,34 @@ impl App {
         }
     }
 
+    /// ^W n — start the two-step prompt for a new pane tab.
+    fn start_new_tab_prompt(&mut self) {
+        let default_cmd =
+            std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+        let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
+        p.buffer.clone_from(&default_cmd);
+        if let Some(ed) = p.editor.as_mut() {
+            ed.set_content(&default_cmd);
+        }
+        self.mode = Mode::Prompting(p);
+    }
+
+    /// ^W x — close the active pane tab.
+    fn close_active_tab(&mut self) {
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            if !tabs.close_active() {
+                // Last tab removed.
+                self.pane_tabs = None;
+                self.pane_focused = false;
+                self.needs_full_repaint = true;
+                self.flash_info("pane: last tab closed");
+            }
+        }
+    }
+
     /// ^W j / ^W k — flip keyboard focus between the list and the pane.
     fn toggle_pane_focus(&mut self) {
-        if self.pane.is_none() {
+        if self.pane_tabs.is_none() {
             return;
         }
         self.pane_focused = !self.pane_focused;
@@ -1354,7 +1474,7 @@ impl App {
         key: crossterm::event::KeyEvent,
     ) -> Result<PostAction> {
         use crossterm::event::{KeyCode, KeyModifiers};
-        let pane = self.pane.as_mut().unwrap();
+        let pane = self.pane_tabs.as_mut().unwrap().active_mut();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('k') | KeyCode::Up => pane.scroll_up(1),
@@ -1364,7 +1484,6 @@ impl App {
             KeyCode::PageDown | KeyCode::Char('f') if ctrl => pane.scroll_down_or_exit(20),
             KeyCode::Char('d') if ctrl => pane.scroll_down_or_exit(10),
             KeyCode::Char('g') => {
-                // Single 'g' — we don't track gg state here, just go to top.
                 pane.scroll_to_top();
             }
             KeyCode::Char('G') => pane.scroll_to_bottom(),
@@ -1381,7 +1500,7 @@ impl App {
                 pane.exit_scroll_mode();
                 self.flash_info("scroll: off");
             }
-            _ => {} // Swallow all other keys while scrolling.
+            _ => {}
         }
         Ok(PostAction::None)
     }
@@ -1391,7 +1510,7 @@ impl App {
     /// typing without concatenating against the last path. No newline
     /// — let the user decide when to submit.
     fn send_selection_to_pane(&mut self) {
-        if self.pane.is_none() {
+        if self.pane_tabs.is_none() {
             self.flash_error("no pane open (Ctrl-\\ to open one)");
             return;
         }
@@ -1415,7 +1534,7 @@ impl App {
             (out, count)
         };
         let result = {
-            let pane = self.pane.as_mut().expect("pane existence already checked");
+            let pane = self.pane_tabs.as_mut().expect("pane existence already checked").active_mut();
             pane.send_bytes(payload.as_bytes())
         };
         match result {
@@ -1427,7 +1546,7 @@ impl App {
     /// ^W + / ^W - — change the bottom pane's share of the middle rect
     /// in 5% steps, clamped to [10%, 90%].
     fn resize_pane(&mut self, delta_pct: i32) {
-        if self.pane.is_none() {
+        if self.pane_tabs.is_none() {
             return;
         }
         let current = i32::from(self.pane_height_pct);
@@ -1648,8 +1767,12 @@ impl App {
         // bottom.
         let viewport = {
             let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
-            let body = (u32::from(term_h) * 92 / 100).saturating_sub(2) as u16;
-            body.max(2)
+            let pager_h = if view.full_width {
+                term_h
+            } else {
+                (u32::from(term_h) * 92 / 100) as u16
+            };
+            pager_h.saturating_sub(2).max(2)
         };
 
         // While typing a search query, most keys feed the buffer.
@@ -1697,6 +1820,11 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
             KeyCode::Char('l') => view.toggle_whitespace(),
+            KeyCode::Char('f') => view.toggle_full_width(),
+            KeyCode::Char('y') => match view.yank_to_clipboard() {
+                Ok(()) => self.flash_info("yanked to clipboard"),
+                Err(e) => self.flash_error(format!("yank failed: {e}")),
+            },
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {
                 Ok(path) => self.flash_info(format!("saved: {}", path.display())),
                 Err(e) => self.flash_error(format!("save failed: {e}")),
@@ -1975,28 +2103,71 @@ impl App {
 
             Action::ReloadConfig => self.reload_config(),
 
+            Action::TogglePane
+            | Action::ResumePane
+            | Action::PaneFocusToggle
+            | Action::PaneSendSelection
+            | Action::PaneGrow
+            | Action::PaneShrink
+            | Action::PaneScrollEnter
+            | Action::PaneScrollSave
+            | Action::PaneNewTab
+            | Action::PaneCloseTab
+            | Action::PaneTabByIndex(_)
+            | Action::PaneNextTab
+            | Action::PanePrevTab
+                if matches!(
+                    self.mode,
+                    Mode::Prompting(Prompt {
+                        kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
+                        ..
+                    })
+                ) =>
+            {
+                self.cancel_prompt();
+                return self.apply(action);
+            }
+
             Action::TogglePane => self.toggle_pane(),
-            Action::ResumePane => self.open_pane_with("claude --resume"),
+            Action::ResumePane => self.open_pane_tab("claude --resume"),
             Action::PaneFocusToggle => self.toggle_pane_focus(),
             Action::PaneSendSelection => self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
             Action::PaneShrink => self.resize_pane(-5),
             Action::PaneScrollEnter => {
-                if let Some(pane) = self.pane.as_mut() {
-                    pane.enter_scroll_mode();
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.active_mut().enter_scroll_mode();
                     self.pane_focused = true;
                     self.flash_info("scroll: on (j/k nav, s save, Esc exit)");
                 }
             }
             Action::PaneScrollSave => {
-                if let Some(pane) = self.pane.as_mut() {
-                    match pane.save_to_file() {
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    match tabs.active_mut().save_to_file() {
                         Ok(path) => {
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
                             self.flash_info(&format!("saved: {name}"));
                         }
                         Err(e) => self.flash_info(&format!("save error: {e}")),
                     }
+                }
+            }
+
+            Action::PaneNewTab => self.start_new_tab_prompt(),
+            Action::PaneCloseTab => self.close_active_tab(),
+            Action::PaneTabByIndex(n) => {
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.switch_to((*n as usize).saturating_sub(1));
+                }
+            }
+            Action::PaneNextTab => {
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.next();
+                }
+            }
+            Action::PanePrevTab => {
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.prev();
                 }
             }
 

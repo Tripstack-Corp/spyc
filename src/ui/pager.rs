@@ -45,6 +45,9 @@ pub struct PagerView {
     /// output — not for files the user opened with `d`/Enter (they
     /// already exist on disk).
     pub saveable: bool,
+    /// When true, the pager fills the entire terminal instead of the
+    /// centered 90×92% box. Toggled with `f`.
+    pub full_width: bool,
 }
 
 impl PagerView {
@@ -58,6 +61,7 @@ impl PagerView {
             search: Search::Off,
             show_whitespace: false,
             saveable: false,
+            full_width: false,
         }
     }
 
@@ -73,6 +77,7 @@ impl PagerView {
             search: Search::Off,
             show_whitespace: false,
             saveable: true,
+            full_width: false,
         }
     }
 
@@ -92,6 +97,30 @@ impl PagerView {
             .join("\n");
         std::fs::write(&path, text + "\n")?;
         Ok(path)
+    }
+
+    pub fn toggle_full_width(&mut self) {
+        self.full_width = !self.full_width;
+    }
+
+    /// Yank the full pager content to the system clipboard via pbcopy.
+    pub fn yank_to_clipboard(&self) -> std::io::Result<()> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let text: String = self
+            .lines
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut child = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+        Ok(())
     }
 
     pub fn toggle_whitespace(&mut self) {
@@ -267,7 +296,7 @@ fn line_plain_text(line: &Line) -> String {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
-    let inner_area = centered_rect(area, 90, 92);
+    let inner_area = if view.full_width { area } else { centered_rect(area, 90, 92) };
 
     frame.render_widget(Clear, inner_area);
 

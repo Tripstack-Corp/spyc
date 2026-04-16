@@ -67,6 +67,11 @@ git branching but for Claude sessions.
 A guided walkthrough mode that showcases cspy's features — useful for
 onboarding new users or recording screencasts. Details TBD.
 
+### Additional Ideas
+- 'v' in the pager should open the buffer in EDITOR
+- session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc. - does claude support named sessions or another indicator?)
+- Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection (disable mouse capture when not needed, or use modifier-key passthrough)
+
 ## Done (recent)
 
 - Bracketed paste forwarding to pane — multi-line paste delivered as
