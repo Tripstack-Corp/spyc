@@ -2,17 +2,6 @@
 
 ## Planned
 
-### Context piping (M10)
-
-Send file selections from the file manager directly into the Claude pane
-as context — bridge the gap between browsing and prompting.
-
-- Pipe current picks or inventory to the active pane tab as file paths
-  or inline content (`@file`-style injection)
-- `^W p` sends picks, `^W i` sends inventory items
-- Support both "here are the paths" and "here are the contents" modes
-- Natural fit: we're already a file manager with multi-select
-
 ### Git worktree integration (M11)
 
 First-class worktree management from the file list — create, switch,
@@ -51,13 +40,22 @@ onboarding new users or recording screencasts. Details TBD.
 
 ### Additional Ideas
 - 'v' in the pager should open the buffer in EDITOR
-- session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc. - does claude support named sessions or another indicator?)
-- Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection (disable mouse capture when not needed, or use modifier-key passthrough)
-- mutli-column view in pager for help
-- <<< more >>>
+- Session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc.)
+- Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
 ## Done (recent)
 
+- **Context piping (M10)** — `^W p` pipes file contents of selection,
+  `^W i` pipes inventory contents to pane as bracketed paste with
+  `[file: path]` headers. `^W s` remains for paths only.
+- Help overlay uses the pager (scrollable, searchable)
+- Pager multi-column layout with position indicator (Top/Bot/NN%)
+- Focus indicators: dim list cursor when pane focused, blinking pane
+  cursor when focused, static block when not
+- Alt+Enter sends newline to pane (Claude CLI multi-line input)
+- Vi line editor: operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`)
+- Backspace on empty no longer cancels vi-mode prompts
+- Force full repaint on pager close (fixes ghost character artifacts)
 - **Multi-tab pane (M9)** — multiple independent pty tabs with `^W n`
   new, `^W x` close, `^W 1`..`^W 9` switch, `^W [`/`^W ]` prev/next
 - Tab rename (`^W r`), activity indicators (`+`) on background tabs
