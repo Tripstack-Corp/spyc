@@ -1646,7 +1646,24 @@ impl App {
                     }
                     Ok(PostAction::None)
                 } else {
-                    // Binary file: hex view on the roadmap.
+                    // Binary file: hex dump via pretty-hex.
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    match fs::ops::hex_dump_lines(&path, &self.theme) {
+                        Ok(lines) => {
+                            let mut view = PagerView::new_plain(
+                                format!("{name} [hex]"),
+                                Vec::new(),
+                            );
+                            // Replace the empty lines with our pre-styled hex lines.
+                            view.lines = lines;
+                            self.pager = Some(view);
+                        }
+                        Err(e) => self.flash_error(format!("hex: {e}")),
+                    }
                     Ok(PostAction::None)
                 }
             }

@@ -19,6 +19,7 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
+use std::io::Read as _;
 use std::path::Path;
 
 /// Value of the POSIX `EXDEV` errno ("cross-device link"). Same on Linux
@@ -349,6 +350,87 @@ fn magic_label(head: &[u8]) -> Option<&'static str> {
         }
     }
     None
+}
+
+// ---- Hex dump (`d` / Enter on binary files) --------------------------------
+
+/// Max bytes we'll read for the hex view. 64 KiB is plenty to inspect
+/// headers, magic bytes, and initial structure without loading a giant
+/// binary into memory.
+const HEX_CAP: usize = 64 * 1024;
+
+/// Read up to `HEX_CAP` bytes from `path` and format as a hex dump.
+/// Returns styled lines ready for the pager: each line split into
+/// offset (dim), hex bytes (default), and ASCII sidebar (warm).
+pub fn hex_dump_lines(
+    path: &Path,
+    theme: &crate::ui::theme::Theme,
+) -> io::Result<Vec<ratatui::text::Line<'static>>> {
+    use pretty_hex::{config_hex, HexConfig};
+    use ratatui::{
+        style::{Modifier, Style},
+        text::{Line, Span},
+    };
+
+    let mut f = fs::File::open(path)?;
+    let mut buf = vec![0u8; HEX_CAP];
+    let n = f.read(&mut buf)?;
+    buf.truncate(n);
+
+    let hex_str = config_hex(
+        &buf,
+        HexConfig {
+            title: false,
+            width: 16,
+            group: 0,
+            ..HexConfig::default()
+        },
+    );
+
+    let offset_style = Style::default()
+        .fg(theme.status_suffix)
+        .add_modifier(Modifier::DIM);
+    let hex_style = Style::default().fg(theme.file);
+    let ascii_style = Style::default()
+        .fg(theme.pick)
+        .add_modifier(Modifier::DIM);
+    let sep_style = Style::default().fg(theme.status_suffix);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for text_line in hex_str.lines() {
+        // pretty-hex lines look like:
+        //   00000000: 7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00  .ELF............
+        // Split into offset (before ':'), hex (middle), ascii (after '  ').
+        if let Some(colon) = text_line.find(':') {
+            let offset_part = &text_line[..colon];
+            let rest = &text_line[colon + 1..];
+            // The ASCII sidebar is the last segment after "  " (double space).
+            let (hex_part, ascii_part) = if let Some(sep) = rest.rfind("  ") {
+                (&rest[..sep], rest[sep + 2..].trim())
+            } else {
+                (rest, "")
+            };
+            lines.push(Line::from(vec![
+                Span::styled(offset_part.to_string(), offset_style),
+                Span::styled(":", sep_style),
+                Span::styled(hex_part.to_string(), hex_style),
+                Span::styled("  ", sep_style),
+                Span::styled(ascii_part.to_string(), ascii_style),
+            ]));
+        } else {
+            // Fallback: unstyled.
+            lines.push(Line::from(text_line.to_string()));
+        }
+    }
+
+    if n >= HEX_CAP {
+        lines.push(Line::from(Span::styled(
+            format!("... truncated at {HEX_CAP} bytes ({n} read)"),
+            offset_style,
+        )));
+    }
+
+    Ok(lines)
 }
 
 #[cfg(test)]

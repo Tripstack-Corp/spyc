@@ -374,8 +374,10 @@ fn styled_line_for_render(
 ///   `^M` carriage return
 ///   `$`  end-of-line (non-empty lines only — blank lines are obviously blank)
 fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static> {
+    // Warm amber-ish so markers are visible against dark backgrounds
+    // without fighting the content. Uses the pick color (amber) dimmed.
     let ws_style = Style::default()
-        .fg(theme.status_suffix)
+        .fg(theme.pick)
         .add_modifier(Modifier::DIM);
 
     // Check if the whole line is empty / whitespace-only.

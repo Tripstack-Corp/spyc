@@ -121,6 +121,7 @@ dependencies = [
  "glob",
  "notify",
  "portable-pty",
+ "pretty-hex",
  "ratatui",
  "serde",
  "tempfile",
@@ -606,6 +607,12 @@ dependencies = [
  "winapi",
  "winreg",
 ]
+
+[[package]]
+name = "pretty-hex"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a65843dfefbafd3c879c683306959a6de478443ffe9c9adf02f5976432402d7"
 
 [[package]]
 name = "prettyplease"
