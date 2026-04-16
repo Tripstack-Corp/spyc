@@ -1587,6 +1587,71 @@ impl App {
         }
     }
 
+    /// ^W p / ^W i — read file contents of selection (or inventory) and
+    /// send them to the active pane tab as bracketed paste. Each file is
+    /// wrapped with a header so the recipient (e.g. Claude) knows what
+    /// it's looking at.
+    fn pipe_content_to_pane(&mut self, use_inventory: bool) {
+        if self.pane_tabs.is_none() {
+            self.flash_error("no pane open");
+            return;
+        }
+        let paths: Vec<PathBuf> = if use_inventory {
+            self.inventory.paths().cloned().collect()
+        } else {
+            self.selection_paths().into_iter().map(Path::to_path_buf).collect()
+        };
+        if paths.is_empty() {
+            self.flash_error(if use_inventory {
+                "inventory is empty"
+            } else {
+                "nothing selected"
+            });
+            return;
+        }
+        // Read file contents and build payload.
+        let mut payload = String::new();
+        let mut count = 0usize;
+        let mut skipped = 0usize;
+        for path in &paths {
+            let Ok(contents) = std::fs::read_to_string(path) else {
+                skipped += 1;
+                continue;
+            };
+            if !payload.is_empty() {
+                payload.push('\n');
+            }
+            payload.push_str(&format!(
+                "[file: {}]\n{}",
+                path.display(),
+                contents
+            ));
+            count += 1;
+        }
+        if count == 0 {
+            self.flash_error("no readable text files in selection");
+            return;
+        }
+        // Send as bracketed paste so it arrives as a single block.
+        let mut buf = Vec::with_capacity(payload.len() + 12);
+        buf.extend_from_slice(b"\x1b[200~");
+        buf.extend_from_slice(payload.as_bytes());
+        buf.extend_from_slice(b"\x1b[201~");
+        let result = {
+            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
+            pane.send_bytes(&buf)
+        };
+        let msg = if skipped > 0 {
+            format!("piped {count} file(s), skipped {skipped} binary/unreadable")
+        } else {
+            format!("piped {count} file(s) to pane")
+        };
+        match result {
+            Ok(()) => self.flash_info(msg),
+            Err(e) => self.flash_error(format!("pipe failed: {e}")),
+        }
+    }
+
     /// ^W + / ^W - — change the bottom pane's share of the middle rect
     /// in 5% steps, clamped to [10%, 90%].
     fn resize_pane(&mut self, delta_pct: i32) {
@@ -2161,6 +2226,8 @@ impl App {
             | Action::PaneNextTab
             | Action::PanePrevTab
             | Action::PaneRenameTab
+            | Action::PanePipeContent
+            | Action::PanePipeInventory
                 if matches!(
                     self.mode,
                     Mode::Prompting(Prompt {
@@ -2228,6 +2295,9 @@ impl App {
                     self.mode = Mode::Prompting(p);
                 }
             }
+
+            Action::PanePipeContent => self.pipe_content_to_pane(false),
+            Action::PanePipeInventory => self.pipe_content_to_pane(true),
 
             Action::SetMark(letter) => self.set_mark(*letter),
             Action::JumpMark(letter) => self.jump_to_mark(*letter),

@@ -139,6 +139,8 @@ const SECTIONS: &[Section] = &[
             ("F9", "open pane with claude --resume"),
             ("^W j  ^W k", "switch focus between list and pane"),
             ("^W s", "send selection paths to pane stdin"),
+            ("^W p", "pipe file contents of selection to pane"),
+            ("^W i", "pipe inventory file contents to pane"),
             ("^W +  ^W -", "grow / shrink the pane"),
             ("^W v", "scroll pane history"),
             ("^W n", "new pane tab (prompt for command + cwd)"),

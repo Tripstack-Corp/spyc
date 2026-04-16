@@ -90,6 +90,8 @@ pub enum Action {
     PaneNextTab,       // ^W ] — next tab
     PanePrevTab,       // ^W [ — previous tab
     PaneRenameTab,     // ^W r — rename the active tab
+    PanePipeContent,   // ^W p — send file contents of selection to pane
+    PanePipeInventory, // ^W i — send file contents of inventory to pane
 
     // Meta.
     Redraw, // ^L
@@ -154,6 +156,8 @@ impl Action {
             Self::PaneNextTab => "next pane tab",
             Self::PanePrevTab => "prev pane tab",
             Self::PaneRenameTab => "rename pane tab",
+            Self::PanePipeContent => "pipe file contents to pane",
+            Self::PanePipeInventory => "pipe inventory contents to pane",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",
