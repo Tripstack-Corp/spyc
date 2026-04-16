@@ -21,7 +21,11 @@ onboarding new users or recording screencasts. Details TBD.
   for discoverable, composable commands. Currently multi-key sequences
   (W l, ^W n, m{a-z}) show a pending indicator in the prompt line, but a
   full `:` command mode would be more powerful and self-documenting.
-- 'v' in the pager should open the buffer in EDITOR
+- **Streaming pager for `!` commands** — open the pager immediately when
+  a `!` command starts and stream output live as it arrives, instead of
+  waiting for the command to finish. Useful for long-running commands
+  (brew install, cargo build, etc.) where progress feedback matters.
+- ~~'v' in the pager should open the buffer in EDITOR~~ Done
 - Session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc.)
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 

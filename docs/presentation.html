@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cspy — Tech Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --midnight: #08104D;
+    --orange: #FF6E00;
+    --royal: #5854F7;
+    --cloud: #F2F2F0;
+    --cabin: #DBDBDB;
+    --airspace: #A8A8A8;
+    --white: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Work Sans', sans-serif;
+    background: var(--midnight);
+    color: var(--white);
+    overflow: hidden;
+  }
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 60px 80px;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+  .slide.light {
+    background: var(--cloud);
+    color: var(--midnight);
+  }
+  .slide.dark {
+    background: var(--midnight);
+    color: var(--white);
+  }
+  .slide-number {
+    position: fixed;
+    bottom: 24px;
+    left: 40px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--airspace);
+    letter-spacing: 0.05em;
+  }
+  h1 {
+    font-size: 3.2em;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 24px;
+  }
+  h2 {
+    font-size: 2.2em;
+    font-weight: 600;
+    line-height: 1.2;
+    margin-bottom: 20px;
+  }
+  h3 {
+    font-size: 1.4em;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--royal);
+  }
+  .light h3 { color: var(--royal); }
+  .dark h3 { color: var(--orange); }
+  p, li {
+    font-size: 1.3em;
+    line-height: 1.6;
+    font-weight: 400;
+  }
+  .subtitle {
+    font-size: 1.5em;
+    font-weight: 500;
+    color: var(--royal);
+    margin-bottom: 12px;
+  }
+  .dark .subtitle { color: var(--orange); }
+  ul { list-style: none; padding: 0; }
+  ul li {
+    padding: 6px 0;
+    padding-left: 24px;
+    position: relative;
+  }
+  ul li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 14px;
+    width: 10px;
+    height: 10px;
+    background: var(--orange);
+    border-radius: 2px;
+    transform: rotate(45deg);
+  }
+  .light ul li::before { background: var(--royal); }
+  .accent { color: var(--orange); font-weight: 700; }
+  .light .accent { color: var(--royal); font-weight: 700; }
+  .stat-row {
+    display: flex;
+    gap: 48px;
+    margin: 32px 0;
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat-number {
+    font-size: 3.5em;
+    font-weight: 700;
+    color: var(--orange);
+    line-height: 1;
+  }
+  .light .stat-number { color: var(--royal); }
+  .stat-label {
+    font-size: 1em;
+    font-weight: 500;
+    color: var(--airspace);
+    margin-top: 8px;
+  }
+  .light .stat-label { color: var(--midnight); }
+  code, .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    background: rgba(88, 84, 247, 0.15);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .dark code { background: rgba(255, 110, 0, 0.15); }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin-top: 24px;
+  }
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 36px;
+    margin-top: 24px;
+  }
+  .card {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 28px;
+    border-left: 4px solid var(--orange);
+  }
+  .light .card {
+    background: var(--white);
+    box-shadow: 0 2px 12px rgba(8, 16, 77, 0.08);
+    border-left: 4px solid var(--royal);
+  }
+  .card h3 { margin-bottom: 12px; }
+  .card p, .card li { font-size: 1.05em; }
+  .arch-box {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95em;
+    line-height: 1.8;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 32px;
+    margin-top: 20px;
+  }
+  .light .arch-box {
+    background: var(--white);
+    box-shadow: 0 2px 12px rgba(8, 16, 77, 0.08);
+  }
+  .arch-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+  .arch-file { color: var(--orange); font-weight: 600; min-width: 200px; }
+  .light .arch-file { color: var(--royal); }
+  .arch-desc { color: var(--airspace); font-weight: 400; }
+  .light .arch-desc { color: var(--midnight); }
+  .timeline {
+    margin-top: 24px;
+    position: relative;
+    padding-left: 32px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--royal);
+  }
+  .dark .timeline::before { background: var(--orange); }
+  .timeline-item {
+    padding: 10px 0;
+    position: relative;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -32px;
+    top: 16px;
+    width: 12px;
+    height: 12px;
+    background: var(--royal);
+    border-radius: 50%;
+    border: 3px solid var(--cloud);
+  }
+  .dark .timeline-item::before {
+    background: var(--orange);
+    border-color: var(--midnight);
+  }
+  .timeline-label {
+    font-weight: 600;
+    font-size: 1.1em;
+  }
+  .timeline-desc {
+    font-size: 0.95em;
+    color: var(--airspace);
+  }
+  .light .timeline-desc { color: var(--midnight); opacity: 0.7; }
+  .key-hint {
+    position: fixed;
+    bottom: 24px;
+    right: 40px;
+    font-size: 13px;
+    color: var(--airspace);
+  }
+  .quote {
+    font-size: 1.6em;
+    font-style: italic;
+    font-weight: 500;
+    line-height: 1.5;
+    border-left: 4px solid var(--orange);
+    padding-left: 24px;
+    margin: 32px 0;
+  }
+  .light .quote { border-left-color: var(--royal); }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: Title -->
+<div class="slide dark active" id="s1">
+  <div>
+    <p class="subtitle">Tripstack Tech Demo</p>
+    <h1>cspy</h1>
+    <p style="font-size:1.5em; font-weight:400; color:var(--airspace); margin-top:12px;">
+      A vi-keyboard-driven terminal file manager<br>
+      built in Rust with Claude Code
+    </p>
+    <div style="margin-top:48px; display:flex; gap:32px; align-items:center;">
+      <span style="font-size:1.1em; color:var(--orange); font-weight:600;">Derek Marshall</span>
+      <span style="color:var(--airspace);">April 2026</span>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 2: What is cspy -->
+<div class="slide light" id="s2">
+  <h2>What is <span class="accent">cspy</span>?</h2>
+  <p style="font-size:1.3em; margin-bottom:32px;">
+    A terminal file manager inspired by SideFX's <code>spy</code>, rebuilt for modern
+    developer workflows — specifically designed to pair with AI coding assistants.
+  </p>
+  <div class="two-col">
+    <div>
+      <h3>The Problem</h3>
+      <ul>
+        <li>Terminal workflows are fragmented: ls, cd, vim, git, tmux</li>
+        <li>AI coding assistants run in a separate window</li>
+        <li>Context switching kills flow</li>
+      </ul>
+    </div>
+    <div>
+      <h3>The Solution</h3>
+      <ul>
+        <li>Browse files in the top pane, talk to Claude below</li>
+        <li>Pipe file contents directly into the AI</li>
+        <li>Vi keybindings everywhere — muscle memory transfers</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: By the Numbers -->
+<div class="slide dark" id="s3">
+  <h2>By the Numbers</h2>
+  <div class="stat-row">
+    <div class="stat">
+      <div class="stat-number">12,800+</div>
+      <div class="stat-label">Lines of Rust</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">35</div>
+      <div class="stat-label">Source Files</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">12</div>
+      <div class="stat-label">Milestones Shipped</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">74</div>
+      <div class="stat-label">Tests Passing</div>
+    </div>
+  </div>
+  <div class="stat-row" style="margin-top:16px;">
+    <div class="stat">
+      <div class="stat-number">30+</div>
+      <div class="stat-label">Commits</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">~2MB</div>
+      <div class="stat-label">Release Binary</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">0</div>
+      <div class="stat-label">Runtime Dependencies</div>
+    </div>
+    <div class="stat">
+      <div class="stat-number">3</div>
+      <div class="stat-label">Target Platforms</div>
+    </div>
+  </div>
+  <p style="margin-top:32px; font-size:1.1em; color:var(--airspace);">
+    Built with <span class="accent">ratatui</span> + <span class="accent">crossterm</span> + <span class="accent">vt100</span>.
+    Static Linux binaries via musl. macOS universal binary.
+  </p>
+</div>
+
+<!-- SLIDE 4: Architecture -->
+<div class="slide light" id="s4">
+  <h2>Architecture</h2>
+  <p style="margin-bottom:16px;">Clean module boundaries. One event loop. Action-driven dispatch.</p>
+  <div class="arch-box">
+    <div class="arch-row"><span class="arch-file">src/app.rs</span> <span class="arch-desc">Event loop, layout, all key dispatch (3,000 lines)</span></div>
+    <div class="arch-row"><span class="arch-file">src/keymap/</span> <span class="arch-desc">Action enum, resolver, user keymap DSL</span></div>
+    <div class="arch-row"><span class="arch-file">src/pane/</span> <span class="arch-desc">Pty-hosted subprocess, multi-tab, vt100 rendering</span></div>
+    <div class="arch-row"><span class="arch-file">src/ui/</span> <span class="arch-desc">List view, pager, status bar, prompt, line editor, theme</span></div>
+    <div class="arch-row"><span class="arch-file">src/fs/</span> <span class="arch-desc">Directory listing, file operations</span></div>
+    <div class="arch-row"><span class="arch-file">src/state/</span> <span class="arch-desc">Cursor, marks, picks, inventory, history</span></div>
+    <div class="arch-row"><span class="arch-file">src/config/</span> <span class="arch-desc">TOML config with keymap DSL, live reload</span></div>
+    <div class="arch-row"><span class="arch-file">src/shell/</span> <span class="arch-desc">Shell expansion, command execution</span></div>
+  </div>
+  <p style="margin-top:20px; font-size:1em; color:var(--airspace);">
+    Every user action maps to an <code>Action</code> enum variant. New features = new variant + keymap binding + handler.
+  </p>
+</div>
+
+<!-- SLIDE 5: Key Design Patterns -->
+<div class="slide dark" id="s5">
+  <h2>Design Patterns</h2>
+  <div class="three-col">
+    <div class="card">
+      <h3>Action Dispatch</h3>
+      <p>Single <code>Action</code> enum is the full vocabulary of user behaviour. Keymap DSL binds any key to any action. One match arm per feature.</p>
+    </div>
+    <div class="card">
+      <h3>One-shot Repaint</h3>
+      <p><code>needs_full_repaint</code> flag instead of per-frame <code>terminal.clear()</code>. Set on overlay/pager close. Eliminates diff-buffer ghost artifacts.</p>
+    </div>
+    <div class="card">
+      <h3>Pty Multiplexing</h3>
+      <p>Each tab is an independent pty. <code>vt100</code> parser processes output. Cursor blink via software toggle. Bracketed paste forwarding.</p>
+    </div>
+  </div>
+  <div class="three-col" style="margin-top:24px;">
+    <div class="card">
+      <h3>Vi Everywhere</h3>
+      <p>Line editor has insert/normal modes, operator+motion (<code>dw</code>, <code>cw</code>), word objects. Same muscle memory from prompt to pager to file list.</p>
+    </div>
+    <div class="card">
+      <h3>Live Config</h3>
+      <p><code>.cspyrc.toml</code> with fs watcher. Per-user and per-project. Keymap DSL, color overrides, ignore mask patterns. No restart needed.</p>
+    </div>
+    <div class="card">
+      <h3>Context Piping</h3>
+      <p><code>^W p</code> reads file contents and sends to the pane as bracketed paste with <code>[file: path]</code> headers. Bridge between browsing and prompting.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 6: Feature Highlights -->
+<div class="slide light" id="s6">
+  <h2>Feature Highlights</h2>
+  <div class="two-col">
+    <div>
+      <h3>File Management</h3>
+      <ul>
+        <li>Multi-column listing with vi navigation</li>
+        <li>Picks (per-dir) + inventory (cross-dir)</li>
+        <li>Copy, move, remove, chmod, mkdir</li>
+        <li>Search with glob patterns</li>
+        <li>Named marks with <code>m{a-z}</code> / <code>'{a-z}</code></li>
+        <li>Ignore masks (dotfiles, build artifacts)</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Split Pane</h3>
+      <ul>
+        <li>Multi-tab pty (Claude, zsh, anything)</li>
+        <li>Tab rename, activity indicators</li>
+        <li>10K-line scrollback with save</li>
+        <li>Context piping: file contents to pane</li>
+        <li>Focus indicators: cursor blink + dim</li>
+        <li>Alt+Enter for multi-line input</li>
+      </ul>
+    </div>
+  </div>
+  <div class="two-col" style="margin-top:24px;">
+    <div>
+      <h3>In-App Pager</h3>
+      <ul>
+        <li>ANSI color preservation</li>
+        <li>Search, line numbers, hex dump</li>
+        <li>Multi-column layout, position indicator</li>
+        <li><code>v</code> opens buffer in $EDITOR, returns to pager</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Git Integration</h3>
+      <ul>
+        <li>Branch + dirty flag in status bar</li>
+        <li><code>g d</code> / <code>g D</code> diff view in pager</li>
+        <li>Worktree list, create, delete</li>
+        <li>Powerline-style status segments</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 7: Development Timeline -->
+<div class="slide dark" id="s7">
+  <h2>Development Timeline</h2>
+  <div class="two-col">
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-label">M4 — Config System</div>
+        <div class="timeline-desc">.cspyrc.toml, keymap DSL, live reload</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M6 — File Operations</div>
+        <div class="timeline-desc">Copy, move, remove, chmod in pure Rust</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M8 — Embedded Pty</div>
+        <div class="timeline-desc">Split pane, Claude Code hosting</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M9 — Multi-tab Pane</div>
+        <div class="timeline-desc">Independent pty tabs, powerline status bar</div>
+      </div>
+    </div>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-label">M10 — Context Piping</div>
+        <div class="timeline-desc">Send file contents to pane as context</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M11 — Git Worktrees</div>
+        <div class="timeline-desc">List, create, switch, delete worktrees</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M12 — Diff View</div>
+        <div class="timeline-desc">git diff in the ANSI pager</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">Next up</div>
+        <div class="timeline-desc">Session forking, : command line, demo mode</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 8: The Claude Code Story -->
+<div class="slide light" id="s8">
+  <h2>Building with <span class="accent">Claude Code</span></h2>
+  <div class="quote">
+    "cspy is both a product of Claude Code and a host for it.
+    The developer uses cspy with Claude running in the lower pane —
+    bugs and features are discovered through this dog-fooding loop."
+  </div>
+  <div class="two-col" style="margin-top:32px;">
+    <div>
+      <h3>What Worked</h3>
+      <ul>
+        <li>Milestone-driven development: clear scope per feature</li>
+        <li>Action enum pattern: Claude adds features without breaking existing ones</li>
+        <li>Docs-in-sync convention: ROADMAP, FEATURES, help text updated with every commit</li>
+        <li>Iterative refinement: ship, dog-food, fix, repeat</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What's Interesting</h3>
+      <ul>
+        <li>12,800 lines of idiomatic Rust (clippy pedantic + nursery)</li>
+        <li>Complex terminal state: pty multiplexing, vt100 parsing, cursor management</li>
+        <li>Subtle UX: focus indicators, ghost char fixes, blink timing</li>
+        <li>Cross-platform: macOS universal + Linux static binaries</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 9: Live Demo -->
+<div class="slide dark" id="s9">
+  <div style="text-align:center;">
+    <p class="subtitle">Time to see it in action</p>
+    <h1 style="font-size:4em;">Live Demo</h1>
+    <div style="margin-top:48px; display:flex; justify-content:center; gap:48px;">
+      <div style="text-align:left;">
+        <p style="color:var(--airspace); font-size:1.1em; margin-bottom:12px;">Demo flow:</p>
+        <ul style="font-size:1em;">
+          <li>Navigate, pick files, search</li>
+          <li>Open Claude in the pane</li>
+          <li>Pipe file contents to Claude</li>
+          <li>Git diff view</li>
+          <li>Worktree management</li>
+          <li>Pager: search, edit, return</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 10: Questions -->
+<div class="slide light" id="s10">
+  <div style="text-align:center;">
+    <h1 style="font-size:4em;">Questions?</h1>
+    <p style="font-size:1.3em; margin-top:24px; color:var(--airspace);">
+      <code>bitbucket.org/tripstack/cspy</code>
+    </p>
+  </div>
+</div>
+
+<div class="slide-number"></div>
+<div class="key-hint"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const numEl = document.querySelector('.slide-number');
+  const hintEl = document.querySelector('.key-hint');
+  let current = 0;
+
+  function show(idx) {
+    slides.forEach(s => s.classList.remove('active'));
+    slides[idx].classList.add('active');
+    numEl.textContent = `// ${idx + 1}`;
+    numEl.style.color = slides[idx].classList.contains('light') ? '#A8A8A8' : '#A8A8A8';
+    hintEl.textContent = idx === 0 ? 'arrow keys to navigate' : '';
+    hintEl.style.color = slides[idx].classList.contains('light') ? '#A8A8A8' : '#A8A8A8';
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (current < slides.length - 1) { current++; show(current); }
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (current > 0) { current--; show(current); }
+    } else if (e.key === 'Home') {
+      current = 0; show(current);
+    } else if (e.key === 'End') {
+      current = slides.length - 1; show(current);
+    }
+  });
+
+  show(0);
+</script>
+</body>
+</html>
