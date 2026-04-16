@@ -39,16 +39,16 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            dir: Color::Rgb(0x7a, 0xa2, 0xf7),           // soft blue
-            exec: Color::Rgb(0x9e, 0xce, 0x6a),          // soft green
-            symlink: Color::Rgb(0xbb, 0x9a, 0xf7),       // lavender
-            file: Color::Rgb(0xc0, 0xca, 0xf5),          // near-white
-            other: Color::Rgb(0x54, 0x5c, 0x7e),         // dim slate
-            cursor_bg: Color::Rgb(0xb8, 0x5c, 0x4a),     // warm terracotta
-            cursor_fg: Color::Rgb(0xff, 0xff, 0xff),      // pure white
-            pick: Color::Rgb(0xe0, 0xaf, 0x68),           // amber
-            take: Color::Rgb(0x73, 0xda, 0xca),           // teal
-            status_user: Color::Rgb(0xbb, 0x9a, 0xf7),   // lavender
+            dir: Color::Rgb(0x7a, 0xa2, 0xf7),         // soft blue
+            exec: Color::Rgb(0x9e, 0xce, 0x6a),        // soft green
+            symlink: Color::Rgb(0xbb, 0x9a, 0xf7),     // lavender
+            file: Color::Rgb(0xc0, 0xca, 0xf5),        // near-white
+            other: Color::Rgb(0x54, 0x5c, 0x7e),       // dim slate
+            cursor_bg: Color::Rgb(0xb8, 0x5c, 0x4a),   // warm terracotta
+            cursor_fg: Color::Rgb(0xff, 0xff, 0xff),   // pure white
+            pick: Color::Rgb(0xe0, 0xaf, 0x68),        // amber
+            take: Color::Rgb(0x73, 0xda, 0xca),        // teal
+            status_user: Color::Rgb(0xbb, 0x9a, 0xf7), // lavender
             status_path: Color::Rgb(0xc0, 0xca, 0xf5),
             status_suffix: Color::Rgb(0x56, 0x5f, 0x89),
             prompt_prefix: Color::Rgb(0xe0, 0xaf, 0x68),
@@ -183,11 +183,7 @@ fn parse_hex(hex: &str) -> Option<Color> {
                     u8::from_str_radix(s, 16).ok()
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(Color::Rgb(
-                chars[0] * 17,
-                chars[1] * 17,
-                chars[2] * 17,
-            ))
+            Some(Color::Rgb(chars[0] * 17, chars[1] * 17, chars[2] * 17))
         }
         _ => None,
     }

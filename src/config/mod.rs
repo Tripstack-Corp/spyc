@@ -133,9 +133,8 @@ impl Config {
 
         // Keymap: parse each line, append.
         for (i, line) in file.keymap.iter().enumerate() {
-            let parsed = dsl::parse(line).map_err(|e| {
-                anyhow::anyhow!("{}: keymap[{i}]: {e}", source.display())
-            })?;
+            let parsed = dsl::parse(line)
+                .map_err(|e| anyhow::anyhow!("{}: keymap[{i}]: {e}", source.display()))?;
             if let Some(binding) = parsed {
                 self.bindings.push(binding);
             }

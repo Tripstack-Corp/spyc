@@ -37,8 +37,8 @@ pub enum Action {
     // Shell-out.
     ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colors
     ShellForegroundPrompt, // ; — prompt command, run in foreground (for interactive tools)
-    StartShell,      // $ — drops you into $SHELL in the current directory
-    ChmodAdd(char),  // ^X -> 'x'
+    StartShell,          // $ — drops you into $SHELL in the current directory
+    ChmodAdd(char),      // ^X -> 'x'
 
     // Search.
     SearchPrompt, // / — start incremental search
@@ -63,11 +63,11 @@ pub enum Action {
     JumpStartDir,   // ` — jump to directory where cspy was launched
 
     // Info commands.
-    Date,          // D — show date/time
-    Version,       // V — show cspy version
-    ShowMemory,    // I — session info pager (version, pid, rss, counts)
-    ColorToggle,   // C — toggle color theme on/off
-    SetEnvPrompt,  // s — NAME=VALUE prompt
+    Date,         // D — show date/time
+    Version,      // V — show cspy version
+    ShowMemory,   // I — session info pager (version, pid, rss, counts)
+    ColorToggle,  // C — toggle color theme on/off
+    SetEnvPrompt, // s — NAME=VALUE prompt
 
     // Help.
     Help, // ? or F1 — key bindings overlay
@@ -76,12 +76,12 @@ pub enum Action {
     ReloadConfig, // ^R — re-read ~/.cspyrc.toml + project config
 
     // Split pane (M8).
-    TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
-    ResumePane,         // F11 — open pane with `claude --resume`
-    PaneFocusToggle,    // ^W j / ^W k — switch focus between list and pane
-    PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
-    PaneGrow,           // ^W + — bottom pane takes more height
-    PaneShrink,         // ^W - — bottom pane takes less height
+    TogglePane,        // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
+    ResumePane,        // F11 — open pane with `claude --resume`
+    PaneFocusToggle,   // ^W j / ^W k — switch focus between list and pane
+    PaneSendSelection, // ^W s — send shell-quoted selection to pane stdin
+    PaneGrow,          // ^W + — bottom pane takes more height
+    PaneShrink,        // ^W - — bottom pane takes less height
 
     // Meta.
     Redraw, // ^L

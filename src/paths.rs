@@ -118,7 +118,10 @@ mod tests {
             return;
         }
         let home = std::env::var("HOME").unwrap();
-        assert_eq!(expand("~/foo/bar"), PathBuf::from(format!("{home}/foo/bar")));
+        assert_eq!(
+            expand("~/foo/bar"),
+            PathBuf::from(format!("{home}/foo/bar"))
+        );
     }
 
     #[test]

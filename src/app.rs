@@ -8,8 +8,8 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use glob::Pattern;
 use ratatui::Frame;
 
-use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::config::Config;
+use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneWidget};
 use crate::shell;
@@ -391,8 +391,7 @@ impl App {
                             } else {
                                 format!(
                                     "exit {}",
-                                    s.code()
-                                        .map_or_else(|| "?".to_string(), |c| c.to_string())
+                                    s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
                                 )
                             }
                         }
@@ -519,7 +518,12 @@ impl App {
 
         // Inside the top region: status(1) + list(top_h - 2) + prompt(1).
         // If top_h is too small (< 2), the list simply collapses to 0.
-        let status = Rect { x: area.x, y: area.y, width: w, height: 1.min(top_h) };
+        let status = Rect {
+            x: area.x,
+            y: area.y,
+            width: w,
+            height: 1.min(top_h),
+        };
         let list_h = top_h.saturating_sub(2);
         let list = Rect {
             x: area.x,
@@ -649,7 +653,12 @@ impl App {
                 if pane.is_closed() {
                     self.pending_pane_close = true;
                 }
-                frame.render_widget(PaneWidget { screen: pane.screen() }, rect);
+                frame.render_widget(
+                    PaneWidget {
+                        screen: pane.screen(),
+                    },
+                    rect,
+                );
             }
             return;
         }
@@ -1045,7 +1054,10 @@ impl App {
             return PostAction::None;
         }
         let count = paths.len();
-        self.run_and_flash(fs::ops::remove_all(&paths), format!("removed {count} item(s)"));
+        self.run_and_flash(
+            fs::ops::remove_all(&paths),
+            format!("removed {count} item(s)"),
+        );
         self.picks.clear();
         self.refresh_listing();
         PostAction::None
@@ -1069,8 +1081,7 @@ impl App {
 
         match result {
             EditResult::Submit => {
-                let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal)
-                else {
+                let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
                     return PostAction::None;
                 };
                 // Push to shared history before dispatching.
@@ -1149,7 +1160,8 @@ impl App {
                 // replaces the cspy listing. Bottom pane (claude) stays
                 // untouched. When the command exits, cspy comes back.
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
-                let (rows, cols) = Self::top_overlay_size(self.pane_height_pct, self.pane.is_some());
+                let (rows, cols) =
+                    Self::top_overlay_size(self.pane_height_pct, self.pane.is_some());
                 match Pane::spawn(&expanded, rows, cols) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
@@ -1252,8 +1264,7 @@ impl App {
             self.flash_info("pane closed");
             return;
         }
-        let cmd = std::env::var("CSPY_PANE_CMD")
-            .unwrap_or_else(|_| "claude".to_string());
+        let cmd = std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         self.open_pane_with(&cmd);
     }
 
@@ -1315,10 +1326,7 @@ impl App {
             (out, count)
         };
         let result = {
-            let pane = self
-                .pane
-                .as_mut()
-                .expect("pane existence already checked");
+            let pane = self.pane.as_mut().expect("pane existence already checked");
             pane.send_bytes(payload.as_bytes())
         };
         match result {
@@ -1409,7 +1417,10 @@ impl App {
         } else {
             self.listing.dir.join(&expanded)
         };
-        self.run_and_flash(op(&paths, &dest), format!("{verb} {count} item(s) to {}", dest.display()));
+        self.run_and_flash(
+            op(&paths, &dest),
+            format!("{verb} {count} item(s) to {}", dest.display()),
+        );
         // Picks point at paths that may no longer exist after a move.
         self.picks.clear();
         self.refresh_listing();
@@ -1464,10 +1475,7 @@ impl App {
     /// restarts; a disk failure flashes but doesn't block the in-memory
     /// set.
     fn set_mark(&mut self, letter: char) {
-        let focus = self
-            .rows
-            .get(self.cursor.index)
-            .map(|r| r.path.clone());
+        let focus = self.rows.get(self.cursor.index).map(|r| r.path.clone());
         self.marks.set(
             letter,
             Mark {
@@ -1600,12 +1608,10 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
             KeyCode::Char('l') => view.toggle_whitespace(),
-            KeyCode::Char('s') if view.saveable => {
-                match view.save_to_file() {
-                    Ok(path) => self.flash_info(format!("saved: {}", path.display())),
-                    Err(e) => self.flash_error(format!("save failed: {e}")),
-                }
-            }
+            KeyCode::Char('s') if view.saveable => match view.save_to_file() {
+                Ok(path) => self.flash_info(format!("saved: {}", path.display())),
+                Err(e) => self.flash_error(format!("save failed: {e}")),
+            },
             _ => {}
         }
     }
@@ -1661,8 +1667,7 @@ impl App {
         }
         let current_col = (self.cursor.index / rows_per_col) as isize;
         let current_row = self.cursor.index % rows_per_col;
-        let target_col =
-            (current_col + delta).rem_euclid(num_cols as isize) as usize;
+        let target_col = (current_col + delta).rem_euclid(num_cols as isize) as usize;
         let target_idx = target_col * rows_per_col + current_row;
         self.cursor.index = if target_idx < len {
             target_idx
@@ -1711,7 +1716,8 @@ impl App {
             Action::TogglePick => self.toggle_pick_cursor(),
             Action::PickPatternPrompt => {
                 if self.view == View::Dir {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
+                    self.mode =
+                        Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
                 }
             }
             Action::PickToggleAll => self.toggle_all_picks(),
@@ -1769,9 +1775,12 @@ impl App {
             }
 
             Action::SearchPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Search {
-                    saved_cursor: self.cursor.index,
-                }, "/"));
+                self.mode = Mode::Prompting(Prompt::simple(
+                    PromptKind::Search {
+                        saved_cursor: self.cursor.index,
+                    },
+                    "/",
+                ));
             }
             Action::SearchNext => {
                 if let Some(term) = self.last_search.clone() {
@@ -1820,14 +1829,22 @@ impl App {
             Action::RemovePrompt => {
                 let count = self.selection_paths().len();
                 if count > 0 {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::RemoveConfirm, format!("remove {count} file(s)? (y/N): ")));
+                    self.mode = Mode::Prompting(Prompt::simple(
+                        PromptKind::RemoveConfirm,
+                        format!("remove {count} file(s)? (y/N): "),
+                    ));
                 }
             }
             Action::LongList => {
                 // No selection → list the whole current directory.
                 let owned: Vec<PathBuf>;
                 let paths: Vec<&Path> = if self.selection_paths().is_empty() {
-                    owned = self.listing.entries.iter().map(|e| e.path.clone()).collect();
+                    owned = self
+                        .listing
+                        .entries
+                        .iter()
+                        .map(|e| e.path.clone())
+                        .collect();
                     owned.iter().map(PathBuf::as_path).collect()
                 } else {
                     self.selection_paths()
@@ -1843,17 +1860,19 @@ impl App {
                 }
                 if paths.len() == 1 {
                     let label = fs::ops::file_type_label(paths[0]);
-                    let name = paths[0]
-                        .file_name()
-                        .map_or_else(|| paths[0].display().to_string(), |n| n.to_string_lossy().into_owned());
+                    let name = paths[0].file_name().map_or_else(
+                        || paths[0].display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
                     self.flash_info(format!("{name}: {label}"));
                 } else {
                     let lines: Vec<String> = paths
                         .iter()
                         .map(|p| {
-                            let name = p
-                                .file_name()
-                                .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned());
+                            let name = p.file_name().map_or_else(
+                                || p.display().to_string(),
+                                |n| n.to_string_lossy().into_owned(),
+                            );
                             format!("{name}: {}", fs::ops::file_type_label(p))
                         })
                         .collect();
@@ -1906,7 +1925,8 @@ impl App {
                 });
             }
             Action::SetEnvPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
+                self.mode =
+                    Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
             }
 
             Action::Redraw | Action::Noop => {}
@@ -1970,8 +1990,7 @@ impl App {
                         .into_owned();
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
-                            let lines: Vec<String> =
-                                content.lines().map(String::from).collect();
+                            let lines: Vec<String> = content.lines().map(String::from).collect();
                             self.pager = Some(PagerView::new_plain(name, lines));
                         }
                         Err(e) => self.flash_error(format!("read: {e}")),
@@ -1986,10 +2005,8 @@ impl App {
                         .into_owned();
                     match fs::ops::hex_dump_lines(&path, &self.theme) {
                         Ok(lines) => {
-                            let mut view = PagerView::new_plain(
-                                format!("{name} [hex]"),
-                                Vec::new(),
-                            );
+                            let mut view =
+                                PagerView::new_plain(format!("{name} [hex]"), Vec::new());
                             // Replace the empty lines with our pre-styled hex lines.
                             view.lines = lines;
                             self.pager = Some(view);
@@ -2224,9 +2241,7 @@ fn sync_listing_watch(
 
 /// Spawn a shell command with piped stdout/stderr. Returns the child handle
 /// and a channel that will deliver the collected stdout bytes when EOF.
-fn spawn_capture(
-    cmd: &str,
-) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
+fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
     use std::io::Read as _;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;

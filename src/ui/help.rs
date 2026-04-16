@@ -173,9 +173,7 @@ const SECTIONS: &[Section] = &[
 
 fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
-    let key_style = Style::default()
-        .fg(theme.pick)
-        .add_modifier(Modifier::BOLD);
+    let key_style = Style::default().fg(theme.pick).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(theme.status_path);
     let section_style = Style::default()
         .fg(theme.status_user)

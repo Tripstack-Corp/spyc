@@ -23,7 +23,6 @@ pub fn resolve_editor() -> Vec<String> {
     split_command(&raw)
 }
 
-
 /// Split an `$EDITOR`-style value into `[program, arg, arg, ...]` on
 /// whitespace. This is what git does. People who need shell features set
 /// `EDITOR` to a wrapper script.

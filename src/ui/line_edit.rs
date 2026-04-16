@@ -140,7 +140,7 @@ impl LineEditor {
                         self.cursor = 0;
                     }
                     'w' | 'W' => self.delete_word_back(),
-                    'a' | 'A' => self.cursor = 0,       // ^A = home
+                    'a' | 'A' => self.cursor = 0, // ^A = home
                     'e' | 'E' => self.cursor = self.buf.len(), // ^E = end
                     _ => {}
                 }
@@ -300,7 +300,11 @@ impl LineEditor {
         while i < n && !self.buf[i].is_whitespace() {
             i += 1;
         }
-        if i > 0 { i - 1 } else { 0 }
+        if i > 0 {
+            i - 1
+        } else {
+            0
+        }
     }
 }
 

@@ -256,11 +256,7 @@ impl PagerView {
                 query,
                 matches,
                 cursor,
-            } => Some(format!(
-                "/{query}  {}/{}",
-                cursor + 1,
-                matches.len()
-            )),
+            } => Some(format!("/{query}  {}/{}", cursor + 1, matches.len())),
         }
     }
 }
@@ -370,10 +366,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         let style = Style::default()
             .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, style))),
-            rect,
-        );
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
     }
 }
 
@@ -421,9 +414,7 @@ fn styled_line_for_render(
 fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static> {
     // Warm amber-ish so markers are visible against dark backgrounds
     // without fighting the content. Uses the pick color (amber) dimmed.
-    let ws_style = Style::default()
-        .fg(theme.pick)
-        .add_modifier(Modifier::DIM);
+    let ws_style = Style::default().fg(theme.pick).add_modifier(Modifier::DIM);
 
     // Check if the whole line is empty / whitespace-only.
     let plain = line_plain_text(line);
@@ -440,19 +431,13 @@ fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static
             match ch {
                 '\t' => {
                     if !segment.is_empty() {
-                        out.push(Span::styled(
-                            std::mem::take(&mut segment),
-                            span.style,
-                        ));
+                        out.push(Span::styled(std::mem::take(&mut segment), span.style));
                     }
                     out.push(Span::styled("→", ws_style));
                 }
                 '\r' => {
                     if !segment.is_empty() {
-                        out.push(Span::styled(
-                            std::mem::take(&mut segment),
-                            span.style,
-                        ));
+                        out.push(Span::styled(std::mem::take(&mut segment), span.style));
                     }
                     out.push(Span::styled("^M", ws_style));
                 }

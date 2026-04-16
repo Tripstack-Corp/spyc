@@ -138,7 +138,9 @@ fn dispatch_selection(
     }
     Err(io::Error::new(
         io::ErrorKind::InvalidInput,
-        format!("cannot {verb}: destination must be an existing directory when moving multiple sources"),
+        format!(
+            "cannot {verb}: destination must be an existing directory when moving multiple sources"
+        ),
     ))
 }
 
@@ -193,9 +195,10 @@ fn format_long_line(path: &Path) -> String {
 }
 
 fn display_name(path: &Path, md: &fs::Metadata) -> String {
-    let base = path
-        .file_name()
-        .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let base = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
     if md.is_dir() {
         format!("{base}/")
     } else if md.file_type().is_symlink() {
@@ -285,7 +288,9 @@ pub fn file_type_label(path: &Path) -> String {
         return "directory".to_string();
     }
     if ft.is_symlink() {
-        let tgt = fs::read_link(path).map(|p| p.display().to_string()).unwrap_or_default();
+        let tgt = fs::read_link(path)
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         return if tgt.is_empty() {
             "symbolic link".to_string()
         } else {
@@ -391,9 +396,7 @@ pub fn hex_dump_lines(
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
     let hex_style = Style::default().fg(theme.file);
-    let ascii_style = Style::default()
-        .fg(theme.pick)
-        .add_modifier(Modifier::DIM);
+    let ascii_style = Style::default().fg(theme.pick).add_modifier(Modifier::DIM);
     let sep_style = Style::default().fg(theme.status_suffix);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -582,7 +585,10 @@ mod tests {
     fn file_type_label_binary_fallback() {
         let tmp = tempdir().unwrap();
         let p = tmp.path().join("blob.bin");
-        File::create(&p).unwrap().write_all(&[1, 2, 3, 0, 4, 5]).unwrap();
+        File::create(&p)
+            .unwrap()
+            .write_all(&[1, 2, 3, 0, 4, 5])
+            .unwrap();
         let label = file_type_label(&p);
         assert!(label.starts_with("binary data"), "got: {label}");
     }

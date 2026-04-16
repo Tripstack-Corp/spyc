@@ -122,14 +122,10 @@ impl Resolver {
                 KeyCode::Char('j' | 'J' | 'k' | 'K') => {
                     ResolverOutcome::Action(Action::PaneFocusToggle)
                 }
-                KeyCode::Char('s' | 'S') => {
-                    ResolverOutcome::Action(Action::PaneSendSelection)
-                }
+                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
                 KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
-                KeyCode::Char('\\' | 'c' | 'C') => {
-                    ResolverOutcome::Action(Action::TogglePane)
-                }
+                KeyCode::Char('\\' | 'c' | 'C') => ResolverOutcome::Action(Action::TogglePane),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -146,9 +142,7 @@ impl Resolver {
                     Action::JumpMark(c)
                 }),
                 // '' (single-quote twice) = jump to previous directory.
-                KeyCode::Char('\'') if !is_set => {
-                    ResolverOutcome::Action(Action::JumpPrevDir)
-                }
+                KeyCode::Char('\'') if !is_set => ResolverOutcome::Action(Action::JumpPrevDir),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
