@@ -4,10 +4,13 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 
 ## What it does
 
-- Vi-style navigation, marks, and cursor motion
+- Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
 - Embedded pty pane (horizontal split) for running subprocesses — primarily used to host `claude` CLI for dog-fooding
-- In-app pager with search, ANSI rendering, hex-dump, line numbers, save
+- In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)
+- `!?` history editor — popup with vi-editable lines, `/search`, `G`/`gg`, `:N` jump, `Ctrl+D` delete
+- `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:q`)
+- `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=` clears)
 - Picks (per-directory multi-select) and inventory (global cross-directory)
 - `.cspyrc.toml` config with keymap DSL, themes, ignore masks, live reload
 

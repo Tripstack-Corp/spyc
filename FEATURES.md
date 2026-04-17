@@ -18,7 +18,7 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **h/j/k/l** movement across a multi-column file listing (h/l clamp at edges, no wrap)
 - **gg / G** to jump to top or bottom
 - **^B / ^F** page up and down
-- **Count prefix** — `5j`, `10k`, etc.
+- **Count prefix** — `5j`, `10k`, etc. with visual display in the prompt area
 - **/ search** with incremental filtering (prefix match, or glob with `*`, `?`, `[`)
 - **n / N** to repeat search forward / backward
 
@@ -142,6 +142,21 @@ Pane command prompts (`^W n`) have their own dedicated history,
 separate from shell commands — so Up/Down shows `claude`, `zsh`,
 `bash` instead of mixed shell commands. History is de-duplicated
 (most recent use moves to the end).
+
+## Command line
+
+**`:`** opens a vim-style command prompt with vi editing and history:
+
+- **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
+- **`:limit !`** — show only picked files
+- **`:limit`** — clear filter
+- **`:!<cmd>`** — captured shell command (same as `!`)
+- **`:!!`** — repeat last captured command
+- **`:;<cmd>`** — foreground shell command (same as `;`)
+- **`:q`** — quit
+
+The `:` prompt shares history with other shell prompts, so Up/Down
+cycles through previous commands.
 
 ## Marks
 

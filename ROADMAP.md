@@ -17,10 +17,9 @@ A guided walkthrough mode that showcases cspy's features — useful for
 onboarding new users or recording screencasts. Details TBD.
 
 ### Additional Ideas
-- **`:` command line** — vim-style command mode (`:Wl`, `:set`, `:q`, etc.)
-  for discoverable, composable commands. Currently multi-key sequences
-  (W l, ^W n, m{a-z}) show a pending indicator in the prompt line, but a
-  full `:` command mode would be more powerful and self-documenting.
+- **`:` command extensions** — expand `:` with more commands: `:set`,
+  `:sort`, `:cd`, `:marks`, etc. Currently supports `:limit`, `:!`,
+  `:!!`, `:;`, `:q`.
 - **Split stdout/stderr pager** — option to show stdout and stderr in
   separate horizontal panes within the pager, for commands where you
   want to see errors separately from normal output
@@ -67,6 +66,17 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- **`:` command line** — vim-style command prompt with `:limit`, `:!cmd`,
+  `:!!`, `:;cmd`, `:q`. Vi line editor with history.
+- **`=` limit filter** — temporary glob filtering (`=*.rs`, `=!` for
+  picks only, `=` clears). Status bar indicator, auto-clears on chdir.
+- **`!?` history editor** — vi-editable popup with `/search`, `n`/`N`
+  match navigation, `:N` jump, `G`/`gg`, `Ctrl+D` delete, instant
+  trigger from `!` prompt, deduped history on load.
+- **Numeric prefix display** — typing `3j` shows "3" in the prompt area.
+- **`:N` jump-to-line** in pager and history editor.
+- **Pager repaint fix** — force full repaint on pager open when pane is
+  active, preventing stale PTY cells from bleeding through.
 - Syntax highlighting in pager via syntect (base16-eighties.dark theme,
   hundreds of languages, auto-detected from file extension)
 - Streaming pager for `!` commands — output streams live with hourglass
