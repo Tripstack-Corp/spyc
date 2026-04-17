@@ -21,15 +21,17 @@ onboarding new users or recording screencasts. Details TBD.
   for discoverable, composable commands. Currently multi-key sequences
   (W l, ^W n, m{a-z}) show a pending indicator in the prompt line, but a
   full `:` command mode would be more powerful and self-documenting.
-- **Streaming pager for `!` commands** — open the pager immediately when
-  a `!` command starts and stream output live as it arrives, instead of
-  waiting for the command to finish. Useful for long-running commands
-  (brew install, cargo build, etc.) where progress feedback matters.
-- Session state save and recall (e.g. automatically resume claude sessions and tab state on restart / save state, etc.)
+- **Split stdout/stderr pager** — option to show stdout and stderr in
+  separate horizontal panes within the pager, for commands where you
+  want to see errors separately from normal output
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
 ## Done (recent)
 
+- Streaming pager for `!` commands — output streams live with hourglass
+  timer, stderr merged into stdout, auto-scroll to bottom
+- Session save/restore (`--resume`) — auto-save on quit, picker UI with
+  j/k navigation, human-readable timestamps, dedup by cwd+tabs
 - Separate pane command history with move-to-end dedup; `j`/`k` in
   normal mode cycle history without leaving normal mode
 - Git file status colors in the listing (modified, added, untracked,
