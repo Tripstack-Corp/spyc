@@ -31,9 +31,14 @@ use crate::{resume_tui, suspend_tui, Tui};
 /// the user kills the child.
 struct PendingCapture {
     child: std::process::Child,
+    /// Receives chunks of stdout as they arrive (not all at once).
     output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    /// Accumulated raw bytes for the pager (ANSI included).
+    buffer: Vec<u8>,
     title: String,
     cmd_display: String,
+    /// True once the reader thread has sent all output.
+    finished: bool,
 }
 
 struct FrameLayout {
@@ -446,38 +451,66 @@ impl App {
             let _ = self.pending_overlay_close;
 
             // Check if a background `!` capture has finished.
+            // Stream captured command output into the pager in real-time.
             if let Some(capture) = &mut self.pending_capture {
-                if let Ok(stdout) = capture.output_rx.try_recv() {
-                    // Collect stderr too.
-                    let mut bytes = stdout;
+                let mut got_data = false;
+                while let Ok(chunk) = capture.output_rx.try_recv() {
+                    if chunk.is_empty() {
+                        // EOF — child is done.
+                        capture.finished = true;
+                        break;
+                    }
+                    capture.buffer.extend_from_slice(&chunk);
+                    got_data = true;
+                }
+                if got_data || capture.finished {
+                    // Rebuild pager content from the accumulated buffer.
+                    use ansi_to_tui::IntoText;
+                    let text = capture.buffer.as_slice().into_text().unwrap_or_default();
+                    let at_bottom = self.pager.as_ref().is_some_and(|v| {
+                        let total = v.line_count();
+                        let page = v.page_lines(40); // approximate
+                        v.scroll >= total.saturating_sub(page)
+                    });
+                    if let Some(view) = self.pager.as_mut() {
+                        view.lines = text.lines;
+                        // Auto-scroll to bottom if user was at the bottom.
+                        if at_bottom {
+                            view.scroll_to_bottom(40);
+                        }
+                    }
+                }
+                if capture.finished {
+                    // Collect stderr and update title with exit status.
+                    let mut stderr_bytes = Vec::new();
                     if let Some(mut stderr) = capture.child.stderr.take() {
                         use std::io::Read as _;
-                        let mut err = Vec::new();
-                        let _ = stderr.read_to_end(&mut err);
-                        if !err.is_empty() {
-                            if !bytes.is_empty() {
-                                bytes.push(b'\n');
-                            }
-                            bytes.extend_from_slice(&err);
-                        }
+                        let _ = stderr.read_to_end(&mut stderr_bytes);
+                    }
+                    if !stderr_bytes.is_empty() {
+                        capture.buffer.push(b'\n');
+                        capture.buffer.extend_from_slice(&stderr_bytes);
                     }
                     let status = capture.child.wait();
                     let exit_info = match status {
-                        Ok(s) => {
-                            if s.success() {
-                                "exit 0".to_string()
-                            } else {
-                                format!(
-                                    "exit {}",
-                                    s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
-                                )
-                            }
-                        }
+                        Ok(s) if s.success() => "exit 0".to_string(),
+                        Ok(s) => format!(
+                            "exit {}",
+                            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
+                        ),
                         Err(e) => format!("error: {e}"),
                     };
                     let title = format!("{} — {exit_info}", capture.title);
+                    // Final rebuild with stderr included.
+                    use ansi_to_tui::IntoText;
+                    let text = capture.buffer.as_slice().into_text().unwrap_or_default();
+                    if let Some(view) = self.pager.as_mut() {
+                        view.title = title;
+                        view.lines = text.lines;
+                        view.saveable = true;
+                        view.scroll_to_bottom(40);
+                    }
                     self.pending_capture = None;
-                    self.pager = Some(PagerView::new_ansi(title, &bytes));
                 }
             }
 
@@ -1072,39 +1105,20 @@ impl App {
         // Any keypress clears a lingering flash message.
         self.flash = None;
 
-        // While a `!` capture is running, Ctrl+C kills it and opens the
-        // pager with whatever partial output was collected.
+        // While a `!` capture is running, Ctrl+C kills it.
+        // The pager is already open with streamed output.
         if let Some(capture) = &mut self.pending_capture {
             if matches!(key.code, KeyCode::Char('c' | 'C'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
                 let _ = capture.child.kill();
-                // Kill closes the pipe → reader thread sees EOF → sends
-                // whatever it collected. Give it a moment to deliver.
-                let stdout = capture
-                    .output_rx
-                    .recv_timeout(std::time::Duration::from_secs(1))
-                    .unwrap_or_default();
-                let mut bytes = stdout;
-                if let Some(mut stderr) = capture.child.stderr.take() {
-                    use std::io::Read as _;
-                    let mut err = Vec::new();
-                    let _ = stderr.read_to_end(&mut err);
-                    if !err.is_empty() {
-                        if !bytes.is_empty() {
-                            bytes.push(b'\n');
-                        }
-                        bytes.extend_from_slice(&err);
-                    }
-                }
                 let _ = capture.child.wait();
                 let title = format!("{} — interrupted", capture.title);
-                self.pending_capture = None;
-                if bytes.is_empty() {
-                    self.flash_info("command interrupted (no output)");
-                } else {
-                    self.pager = Some(PagerView::new_ansi(title, &bytes));
+                if let Some(view) = self.pager.as_mut() {
+                    view.title = title;
+                    view.saveable = true;
                 }
+                self.pending_capture = None;
             }
             return Ok(PostAction::None);
         }
@@ -1470,16 +1484,21 @@ impl App {
             PromptKind::ShellCmdCaptured => {
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
                 let title = format!("! {}", prompt.buffer);
-                // Spawn non-blocking so the event loop stays alive and
-                // Ctrl+C can kill the child.
                 match spawn_capture(&expanded) {
                     Ok((child, rx)) => {
                         let cmd_display = prompt.buffer.clone();
+                        // Open the pager immediately with a "running" header.
+                        self.pager = Some(PagerView::new_plain(
+                            format!("{title} — running..."),
+                            Vec::new(),
+                        ));
                         self.pending_capture = Some(PendingCapture {
                             child,
                             output_rx: rx,
+                            buffer: Vec::new(),
                             title,
                             cmd_display,
+                            finished: false,
                         });
                     }
                     Err(e) => self.flash_error(format!("exec: {e}")),
@@ -3198,17 +3217,14 @@ fn sync_listing_watch(
 
 /// Spawn a shell command with piped stdout/stderr. Returns the child handle
 /// and a channel that will deliver the collected stdout bytes when EOF.
+/// Spawn a shell command with piped stdout. The reader thread sends
+/// chunks as they arrive so the pager can stream output in real-time.
+/// An empty Vec signals EOF.
 fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
     use std::io::Read as _;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
 
-    // stdout is piped so isatty(1) returns false → programs switch to
-    // batch/non-interactive mode automatically (top, vim, less, etc.).
-    //
-    // We set COLUMNS/LINES so tools that format batch output (ls, ps,
-    // top -l) know our viewport width. We also set the color-force env
-    // vars so tools that check them emit ANSI even on a pipe.
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut child = Command::new("sh")
         .args(["-c", cmd])
@@ -3229,9 +3245,19 @@ fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Rec
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = stdout;
-        let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf);
-        let _ = tx.send(buf);
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        // Signal EOF with an empty vec.
+        let _ = tx.send(Vec::new());
     });
 
     Ok((child, rx))

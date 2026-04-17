@@ -192,7 +192,7 @@ impl PagerView {
     }
 
     /// Lines visible per "page" — viewport_height * columns.
-    fn page_lines(&self, viewport_height: u16) -> u16 {
+    pub fn page_lines(&self, viewport_height: u16) -> u16 {
         viewport_height.saturating_mul(self.columns.max(1) as u16)
     }
 
