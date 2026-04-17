@@ -129,6 +129,8 @@ const SECTIONS: &[Section] = &[
         title: "Shell-out",
         rows: &[
             ("!", "capture output → pager (colors preserved)"),
+            ("!!", "repeat last captured command"),
+            ("!?", "history picker — browse, select, delete"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
         ],

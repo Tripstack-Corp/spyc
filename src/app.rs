@@ -217,6 +217,11 @@ pub struct App {
     pending_worktrees: Option<Vec<PathBuf>>,
     /// Session restore picker. Digit keys 1-9 select.
     pending_sessions: Option<Vec<crate::state::sessions::Session>>,
+    /// True while the history picker overlay is active.
+    pending_history_pick: bool,
+    /// Tracks whether the pager was open on the previous frame, so we can
+    /// detect open-transitions and force a full repaint.
+    pager_was_open: bool,
     /// When `v` is pressed in the pager, stash info to restore it after
     /// the editor exits. `Some(path)` for temp-file buffers (reload on
     /// return); `None` for on-disk files (just reopen pager normally).
@@ -328,6 +333,8 @@ impl App {
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            pending_history_pick: false,
+            pager_was_open: false,
             pending_pager_return: None,
             start_dir: cwd,
             prev_dir: None,
@@ -431,6 +438,12 @@ impl App {
         while !self.should_quit {
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
+            // Also force repaint when the pager opens while a pane exists,
+            // because the pane stops rendering and its stale cells need clearing.
+            if self.pager.is_some() && self.pane_tabs.is_some() && !self.pager_was_open {
+                self.needs_full_repaint = true;
+            }
+            self.pager_was_open = self.pager.is_some();
             if self.needs_full_repaint {
                 self.needs_full_repaint = false;
                 terminal.clear()?;
@@ -1566,6 +1579,11 @@ impl App {
                 PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
+                // `!?` opens history picker.
+                if prompt.buffer.trim() == "?" {
+                    self.show_history_popup();
+                    return PostAction::None;
+                }
                 // `!!` repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
                     match self.last_captured_cmd.clone() {
@@ -2087,6 +2105,28 @@ impl App {
         self.pager = Some(view);
     }
 
+    fn show_history_popup(&mut self) {
+        let entries = self.history.entries();
+        if entries.is_empty() {
+            self.flash_info("history is empty");
+            return;
+        }
+        // Show newest-first, numbered from 1.
+        let lines: Vec<String> = entries
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(i, cmd)| format!("  {:>3}  {}", i + 1, cmd))
+            .collect();
+        let mut view = pager::PagerView::new_plain(
+            "history — j/k navigate, Enter select, dd delete, q close",
+            lines,
+        );
+        view.picker_cursor = Some(0); // Start on newest entry.
+        self.pending_history_pick = true;
+        self.pager = Some(view);
+    }
+
     fn restore_session(&mut self, session: &crate::state::sessions::Session) {
         // Restore working directory.
         if session.cwd.is_dir() {
@@ -2425,6 +2465,57 @@ impl App {
             }
         }
 
+        // History picker: j/k navigate, Enter select, dd delete.
+        if self.pending_history_pick {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    view.picker_move(1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    view.picker_move(-1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Enter => {
+                    let cursor = view.picker_cursor.unwrap_or(0);
+                    let entries = self.history.entries();
+                    // Picker is newest-first, so reverse the index.
+                    let hist_idx = entries.len().saturating_sub(1 + cursor);
+                    if let Some(cmd) = entries.get(hist_idx).cloned() {
+                        self.pager = None;
+                        self.pending_history_pick = false;
+                        self.needs_full_repaint = true;
+                        // Load the selected command into a ! prompt for editing.
+                        let mut prompt = Prompt::shell(PromptKind::ShellCmdCaptured, "!");
+                        prompt.buffer = cmd.clone();
+                        if let Some(ref mut ed) = prompt.editor {
+                            ed.set_content(&cmd);
+                        }
+                        self.mode = Mode::Prompting(prompt);
+                    }
+                    return PostAction::None;
+                }
+                KeyCode::Char('d' | 'x') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // d or x deletes the highlighted entry.
+                    let cursor = view.picker_cursor.unwrap_or(0);
+                    let entries = self.history.entries();
+                    let hist_idx = entries.len().saturating_sub(1 + cursor);
+                    if hist_idx < entries.len() {
+                        self.history.remove(hist_idx);
+                        // Rebuild the popup.
+                        let old_cursor = cursor;
+                        self.show_history_popup();
+                        if let Some(ref mut v) = self.pager {
+                            let max = (v.line_count() as usize).saturating_sub(1);
+                            v.picker_cursor = Some(old_cursor.min(max));
+                        }
+                    }
+                    return PostAction::None;
+                }
+                _ => {}
+            }
+        }
+
         // Session picker: j/k navigate, Enter/1-9 select, n new.
         if self.pending_sessions.is_some() {
             match key.code {
@@ -2485,6 +2576,7 @@ impl App {
                 self.pager = None;
                 self.pending_worktrees = None;
                 self.pending_sessions = None;
+                self.pending_history_pick = false;
                 self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),

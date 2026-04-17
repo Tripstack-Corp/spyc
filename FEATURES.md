@@ -117,6 +117,10 @@ Three modes of running commands, each for a different use case:
   real-time with an hourglass timer. Stderr is merged so build
   progress, errors, and output all appear together. `%` expands to
   the current selection. `^C` interrupts.
+- **!!** — repeat the last captured command.
+- **!?** — history picker popup. Browse all history with `j`/`k`,
+  `Enter` to load a command into the `!` prompt for editing before
+  running, `d`/`x` to delete an entry, `q`/`Esc` to close.
 - **;** foreground — run an interactive command (top, vim, htop) in a
   top-overlay pty that replaces the file listing while the bottom pane
   stays untouched.

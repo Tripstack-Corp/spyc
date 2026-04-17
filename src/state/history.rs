@@ -112,6 +112,19 @@ impl History {
         self.stashed.clear();
     }
 
+    /// Read-only access to the full entry list (oldest first).
+    pub fn entries(&self) -> &[String] {
+        &self.entries
+    }
+
+    /// Remove the entry at `index`. Saves to disk best-effort.
+    pub fn remove(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.entries.remove(index);
+            let _ = self.save();
+        }
+    }
+
     fn save(&self) -> std::io::Result<()> {
         let Some(path) = disk_path(&self.filename) else {
             return Ok(());
