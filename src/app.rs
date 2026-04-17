@@ -210,6 +210,8 @@ pub struct App {
     pane_height_pct: u16,
     /// Stashed command for the two-step new-tab prompt flow.
     pending_new_tab_cmd: Option<String>,
+    /// Last `!` command — `!!` repeats it.
+    last_captured_cmd: Option<String>,
     /// Worktree paths for the `W l` picker. Digit keys 1-9 select.
     pending_worktrees: Option<Vec<PathBuf>>,
     /// Session restore picker. Digit keys 1-9 select.
@@ -322,6 +324,7 @@ impl App {
             // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
             pending_new_tab_cmd: None,
+            last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
             pending_pager_return: None,
@@ -1489,8 +1492,21 @@ impl App {
                 PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
-                let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
-                let title = format!("! {}", prompt.buffer);
+                // `!!` repeats the last captured command.
+                let cmd = if prompt.buffer.trim() == "!" {
+                    match self.last_captured_cmd.clone() {
+                        Some(c) => c,
+                        None => {
+                            self.flash_error("no previous ! command");
+                            return PostAction::None;
+                        }
+                    }
+                } else {
+                    prompt.buffer.clone()
+                };
+                self.last_captured_cmd = Some(cmd.clone());
+                let expanded = shell::expand_percent(&cmd, &self.selection_paths());
+                let title = format!("! {cmd}");
                 match spawn_capture(&expanded) {
                     Ok((child, rx)) => {
                         let cmd_display = prompt.buffer.clone();
