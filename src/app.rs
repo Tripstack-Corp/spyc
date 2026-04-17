@@ -2956,8 +2956,15 @@ impl App {
                         .into_owned();
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
-                            let lines: Vec<String> = content.lines().map(String::from).collect();
-                            let mut view = PagerView::new_plain(name, lines);
+                            let mut view = if let Some(styled) =
+                                crate::ui::syntax::highlight_to_lines(&name, &content)
+                            {
+                                PagerView::new_styled(name, styled)
+                            } else {
+                                let lines: Vec<String> =
+                                    content.lines().map(String::from).collect();
+                                PagerView::new_plain(name, lines)
+                            };
                             view.source_path = Some(path.clone());
                             self.pager = Some(view);
                         }

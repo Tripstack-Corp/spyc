@@ -13,4 +13,5 @@ pub mod list_view;
 pub mod pager;
 pub mod prompt;
 pub mod status;
+pub mod syntax;
 pub mod theme;

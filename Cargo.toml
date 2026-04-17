@@ -25,6 +25,7 @@ portable-pty = "0.8"
 vt100 = "0.15"
 ansi-to-tui = "7"
 pretty-hex = "0.4"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 [dev-dependencies]
 tempfile = "3"
