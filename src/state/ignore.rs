@@ -69,7 +69,7 @@ impl IgnoreMasks {
     }
 
     /// Replace a group's built-in patterns with the `[[ignore_masks]]`
-    /// entries from `.cspyrc.toml`. When multiple entries target the same
+    /// entries from `.spycrc.toml`. When multiple entries target the same
     /// group, their patterns are unioned and `enabled = any(enabled)`.
     /// Groups without any config entry keep their built-in defaults.
     pub fn apply_config(&mut self, configs: &[crate::config::IgnoreMask]) {

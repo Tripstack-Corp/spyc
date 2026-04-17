@@ -1,4 +1,4 @@
-# cspy CI — runs formatting, clippy, and tests on every push.
+# spyc CI — runs formatting, clippy, and tests on every push.
 #
 # We build against the pinned rust-toolchain.toml so that a new stable Rust
 # release cannot silently tighten lints. Target is linux x86_64 with musl

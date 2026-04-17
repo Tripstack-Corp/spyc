@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cspy_debug;
+use crate::spyc_debug;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use glob::Pattern;
@@ -198,8 +198,8 @@ pub struct App {
     /// Tabbed pty-hosted subprocesses shown as a horizontal split under the list.
     pane_tabs: Option<PaneTabs>,
     /// When set, an interactive `!` command has taken over the top pane.
-    /// cspy's list/status/prompt are hidden; this pty renders instead.
-    /// When the subprocess exits, cspy's file listing is restored and
+    /// spyc's list/status/prompt are hidden; this pty renders instead.
+    /// When the subprocess exits, spyc's file listing is restored and
     /// the bottom pane (claude) is completely unaffected.
     top_overlay: Option<Pane>,
     /// The overlay subprocess has exited but we're holding the screen
@@ -211,7 +211,7 @@ pub struct App {
     pending_capture: Option<PendingCapture>,
     /// Whether the pane (vs the file list) is the current keyboard focus.
     /// Most keys are forwarded to the pane when this is true, but the
-    /// Ctrl-W prefix and Ctrl-\\ / F10 toggle are always caught by cspy.
+    /// Ctrl-W prefix and Ctrl-\\ / F10 toggle are always caught by spyc.
     pane_focused: bool,
     /// The bottom pane's share of the middle rect, in percent. Resized
     /// by `^W +` / `^W -`.
@@ -238,7 +238,7 @@ pub struct App {
     /// the editor exits. `Some(path)` for temp-file buffers (reload on
     /// return); `None` for on-disk files (just reopen pager normally).
     pending_pager_return: Option<PagerReturn>,
-    /// The directory cspy was launched in — `` ` `` jumps here (project root).
+    /// The directory spyc was launched in — `` ` `` jumps here (project root).
     start_dir: PathBuf,
     /// Directory before the last chdir — `''` jumps back here (like `cd -`).
     prev_dir: Option<PathBuf>,
@@ -340,7 +340,7 @@ impl App {
             pending_overlay_close: false,
             pending_capture: None,
             pane_focused: false,
-            // cspy (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
+            // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
@@ -385,7 +385,7 @@ impl App {
         Ok(app)
     }
 
-    /// Reload `.cspyrc.toml` and rebuild the user keymap. Leaves the old
+    /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
     /// config in place on failure and flashes the error.
     pub fn reload_config(&mut self) {
         match Config::load_default(&self.listing.dir) {
@@ -408,13 +408,13 @@ impl App {
 
     /// Candidate config paths — used by the file watcher. We watch the
     /// directories holding these even when the files don't exist yet so
-    /// that `touch ~/.cspyrc.toml` picks up immediately.
+    /// that `touch ~/.spycrc.toml` picks up immediately.
     fn candidate_config_paths(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();
         if let Some(home) = std::env::var_os("HOME") {
-            out.push(PathBuf::from(home).join(".cspyrc.toml"));
+            out.push(PathBuf::from(home).join(".spycrc.toml"));
         }
-        out.push(self.listing.dir.join(".cspyrc.toml"));
+        out.push(self.listing.dir.join(".spycrc.toml"));
         out
     }
 
@@ -700,7 +700,7 @@ impl App {
     /// Partition the frame into status/list/prompt rects — plus, when
     /// the pane is open, a divider row and the pane rect below it.
     ///
-    /// The **entire cspy unit** (status, list, prompt) lives above the
+    /// The **entire spyc unit** (status, list, prompt) lives above the
     /// divider. That way the prompt row sits with the file list it's
     /// about rather than attached to the bottom of the screen where the
     /// pane's subprocess is typing.
@@ -904,7 +904,7 @@ impl App {
         let layout = Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.pane_height_pct);
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
-        // replaces the entire cspy area. Status, list, and prompt are
+        // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
         if let Some(overlay) = self.top_overlay.as_mut() {
             // The overlay occupies status + list + prompt area.
@@ -1009,7 +1009,7 @@ impl App {
                 let pp = self.last_grid.items_per_page();
                 self.ensure_cursor_visible();
                 if self.cursor.view_top == old_vt {
-                    cspy_debug!(
+                    spyc_debug!(
                         "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
                         round + 1,
                         old_vt,
@@ -1021,7 +1021,7 @@ impl App {
                     settled = true;
                     break;
                 }
-                cspy_debug!(
+                spyc_debug!(
                     "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
                     round + 1,
                     old_vt,
@@ -1046,7 +1046,7 @@ impl App {
                         theme: &self.theme,
                     };
                     self.last_grid = probe.grid(layout.list);
-                    cspy_debug!(
+                    spyc_debug!(
                         "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
                         forced,
                         self.cursor.index,
@@ -1060,7 +1060,7 @@ impl App {
                 prev_vt = Some(old_vt);
             }
             if !settled {
-                cspy_debug!(
+                spyc_debug!(
                     "grid did NOT settle after 4 rounds: vt={} cursor={}",
                     self.cursor.view_top,
                     self.cursor.index,
@@ -1268,25 +1268,25 @@ impl App {
         }
         // When the pane is in scroll mode, navigation keys are handled
         // here instead of being forwarded to the child subprocess.
-        // Let cspy meta keys (^W prefix, ^\\, F10) fall through so
+        // Let spyc meta keys (^W prefix, ^\\, F10) fall through so
         // pane commands still work from scroll mode.
         if let Some(tabs) = self.pane_tabs.as_mut() {
             let pane = tabs.active_mut();
             if pane.is_scrolling()
                 && self.pane_focused
-                && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
+                && !is_spyc_meta_when_pane_focused(key, self.resolver.is_pending())
             {
                 return self.handle_pane_scroll_key(key);
             }
         }
         // When the pane is open *and focused*, forward keys to the
-        // subprocess — except cspy meta keys, which are always caught
-        // by cspy so the user can toggle / resize / focus-switch / send
+        // subprocess — except spyc meta keys, which are always caught
+        // by spyc so the user can toggle / resize / focus-switch / send
         // selection from inside the pane.
         if self.pane_tabs.is_some()
             && self.pane_focused
             && !matches!(self.mode, Mode::Prompting(_))
-            && !is_cspy_meta_when_pane_focused(key, self.resolver.is_pending())
+            && !is_spyc_meta_when_pane_focused(key, self.resolver.is_pending())
         {
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let _ = tabs.active_mut().send_key(key);
@@ -1734,8 +1734,8 @@ impl App {
             }
             PromptKind::ShellCmd => {
                 // `;cmd` — run interactively in a top-overlay pty that
-                // replaces the cspy listing. Bottom pane (claude) stays
-                // untouched. When the command exits, cspy comes back.
+                // replaces the spyc listing. Bottom pane (claude) stays
+                // untouched. When the command exits, spyc comes back.
                 let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
                 let (rows, cols) =
                     Self::top_overlay_size(self.pane_height_pct, self.pane_tabs.is_some());
@@ -1953,7 +1953,7 @@ impl App {
             self.flash_info("pane closed");
             return;
         }
-        let cmd = std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+        let cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         self.open_pane_tab(&cmd);
     }
 
@@ -1985,7 +1985,7 @@ impl App {
     /// ^W n — start the two-step prompt for a new pane tab.
     fn start_new_tab_prompt(&mut self) {
         let default_cmd =
-            std::env::var("CSPY_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+            std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
         p.buffer.clone_from(&default_cmd);
         if let Some(ed) = p.editor.as_mut() {
@@ -2460,7 +2460,7 @@ impl App {
 
     fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("cspy {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("spyc {}", env!("CARGO_PKG_VERSION")));
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!("cwd      : {}", self.listing.dir.display()));
         lines.push(format!("entries  : {}", self.listing.entries.len()));
@@ -3171,7 +3171,7 @@ impl App {
         // the flat index by `rows_per_col`. Moving vertically is ±1.
         let rows_per_col = self.last_grid.rows as usize;
         let per_page = self.last_grid.items_per_page();
-        cspy_debug!(
+        spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
             self.cursor.index,
@@ -3386,7 +3386,7 @@ impl App {
 
             Action::Help => {
                 let lines = help::build_lines(&self.theme, &self.user_keymap);
-                let mut view = pager::PagerView::new_styled("cspy — key bindings", lines);
+                let mut view = pager::PagerView::new_styled("spyc — key bindings", lines);
                 view.columns = 2;
                 self.pager = Some(view);
             }
@@ -3532,7 +3532,7 @@ impl App {
 
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
-                self.flash_info(format!("cspy {}", env!("CARGO_PKG_VERSION")));
+                self.flash_info(format!("spyc {}", env!("CARGO_PKG_VERSION")));
             }
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
@@ -3875,12 +3875,12 @@ impl Matcher {
 /// listing dir if any. No-op when the watcher failed to initialize or
 /// when the same dir is already being watched.
 /// Keys we intercept even when the pane is focused.
-const fn is_cspy_meta_when_pane_focused(
+const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
     resolver_pending: bool,
 ) -> bool {
     use crossterm::event::{KeyCode, KeyModifiers};
-    // Continuation of a multi-key cspy sequence must stay with cspy.
+    // Continuation of a multi-key spyc sequence must stay with spyc.
     if resolver_pending {
         return true;
     }
@@ -3986,12 +3986,12 @@ fn run_child_in_foreground(
     suspend_tui(terminal)?;
 
     // Ignoring status on purpose: non-zero exits (e.g. less with `q`, or a
-    // grep that found nothing) are normal and should not crash cspy.
+    // grep that found nothing) are normal and should not crash spyc.
     let _ = std::process::Command::new(program).args(args).status();
 
     if pause_after {
         let mut stdout = std::io::stdout();
-        write!(stdout, "\n[cspy] press any key to continue…")?;
+        write!(stdout, "\n[spyc] press any key to continue…")?;
         stdout.flush()?;
         // We're not in raw mode right now, so read a single byte directly
         // from stdin. Any key (including Enter) unblocks.

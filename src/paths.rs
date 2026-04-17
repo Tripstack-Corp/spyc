@@ -129,22 +129,22 @@ mod tests {
         // SAFETY: scoped to this test thread; single-threaded test run avoids
         // interference with other tests that read env.
         unsafe {
-            std::env::set_var("CSPY_TEST_BRACE", "/tmp/cspy-brace");
+            std::env::set_var("SPYC_TEST_BRACE", "/tmp/spyc-brace");
         }
         assert_eq!(
-            expand("${CSPY_TEST_BRACE}/sub"),
-            PathBuf::from("/tmp/cspy-brace/sub")
+            expand("${SPYC_TEST_BRACE}/sub"),
+            PathBuf::from("/tmp/spyc-brace/sub")
         );
     }
 
     #[test]
     fn env_var_bare_form() {
         unsafe {
-            std::env::set_var("CSPY_TEST_BARE", "/tmp/cspy-bare");
+            std::env::set_var("SPYC_TEST_BARE", "/tmp/spyc-bare");
         }
         assert_eq!(
-            expand("$CSPY_TEST_BARE/x"),
-            PathBuf::from("/tmp/cspy-bare/x")
+            expand("$SPYC_TEST_BARE/x"),
+            PathBuf::from("/tmp/spyc-bare/x")
         );
     }
 
@@ -152,11 +152,11 @@ mod tests {
     fn unset_var_passes_through() {
         // Ensure the var really isn't set.
         unsafe {
-            std::env::remove_var("CSPY_NEVER_SET_PROBABLY");
+            std::env::remove_var("SPYC_NEVER_SET_PROBABLY");
         }
         assert_eq!(
-            expand("/prefix/$CSPY_NEVER_SET_PROBABLY/suffix"),
-            PathBuf::from("/prefix/$CSPY_NEVER_SET_PROBABLY/suffix")
+            expand("/prefix/$SPYC_NEVER_SET_PROBABLY/suffix"),
+            PathBuf::from("/prefix/$SPYC_NEVER_SET_PROBABLY/suffix")
         );
     }
 

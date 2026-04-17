@@ -1,11 +1,11 @@
 //! Opt-in debug logging to a file.
 //!
-//! Enabled by `--debug` / `-d` CLI flag or `CSPY_DEBUG=1` env var.
-//! Logs go to `/tmp/cspy-debug-<TIMESTAMP>.log`.  The path is printed to
+//! Enabled by `--debug` / `-d` CLI flag or `SPYC_DEBUG=1` env var.
+//! Logs go to `/tmp/spyc-debug-<TIMESTAMP>.log`.  The path is printed to
 //! stderr at startup so you can `tail -f` it.
 //!
 //! Usage:
-//!   cspy_debug!("view_top={} grid={}x{}", vt, cols, rows);
+//!   spyc_debug!("view_top={} grid={}x{}", vt, cols, rows);
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -26,13 +26,13 @@ fn make_path() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    format!("/tmp/cspy-debug-{ts}.log")
+    format!("/tmp/spyc-debug-{ts}.log")
 }
 
 /// Call once at startup.  Returns the log path if debug mode is active.
 pub fn init(flag: bool) -> Option<String> {
     let enabled = flag
-        || std::env::var("CSPY_DEBUG")
+        || std::env::var("SPYC_DEBUG")
             .map(|v| !v.is_empty() && v != "0" && v != "false")
             .unwrap_or(false);
     if !enabled {
@@ -57,7 +57,7 @@ pub fn _log(msg: &str) {
 }
 
 #[macro_export]
-macro_rules! cspy_debug {
+macro_rules! spyc_debug {
     ($($arg:tt)*) => {
         $crate::debug_log::_log(&format!($($arg)*))
     };

@@ -1,4 +1,4 @@
-# cspy — build and distribution
+# spyc — build and distribution
 #
 # Prerequisites (one-time setup):
 #   brew install zig
@@ -13,7 +13,7 @@
 #   make check        — fmt + clippy + test (CI gate)
 #   make install      — install to /usr/local/bin
 
-BINARY   := cspy
+BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 DIST_DIR := dist
 
@@ -86,7 +86,7 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 
 .PHONY: release-linux-x86
 release-linux-x86: ## Linux x86_64 (static, musl)
-	@# Touch the main source so zigbuild always recompiles cspy itself
+	@# Touch the main source so zigbuild always recompiles spyc itself
 	@# (zigbuild cache is separate from cargo build and can go stale).
 	@touch src/main.rs
 	cargo zigbuild $(RELEASE_FLAGS) --target x86_64-unknown-linux-musl
@@ -149,7 +149,7 @@ deploy-fika: release-linux-x86 ## Build Linux x86_64 and scp to fika-vm
 
 .PHONY: doctor
 doctor: ## Check build prerequisites
-	@echo "=== cspy doctor ==="
+	@echo "=== spyc doctor ==="
 	@echo ""
 	@printf "  %-24s" "rustc:" && (rustc --version 2>/dev/null || echo "MISSING — install via rustup")
 	@printf "  %-24s" "cargo:" && (cargo --version 2>/dev/null || echo "MISSING — install via rustup")

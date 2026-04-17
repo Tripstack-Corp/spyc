@@ -1,4 +1,4 @@
-# Contributing to cspy
+# Contributing to spyc
 
 Thanks for your interest in contributing. This document covers the
 workflow, standards, and conventions for the project.
@@ -6,8 +6,8 @@ workflow, standards, and conventions for the project.
 ## Getting started
 
 ```sh
-git clone git@bitbucket.org:tripstack/cspy.git
-cd cspy
+git clone git@bitbucket.org:tripstack/spyc.git
+cd spyc
 make doctor    # check prerequisites (rustc, cargo, zig, etc.)
 cargo build    # dev build
 cargo test     # run all tests
@@ -38,7 +38,7 @@ We use Bitbucket pull requests. The target branch is `main`.
    git push -u origin feature/short-description
    ```
    Then create the PR at
-   `https://bitbucket.org/tripstack/cspy/pull-requests/new`.
+   `https://bitbucket.org/tripstack/spyc/pull-requests/new`.
 
 5. **PR title** should be concise (under 70 chars). Use the body for
    details. Format:
@@ -51,8 +51,8 @@ We use Bitbucket pull requests. The target branch is `main`.
    ```
 
    **Bug fix PRs** should include relevant debug log output.
-   Run `cspy --debug` to reproduce the issue, then attach the
-   relevant lines from the `/tmp/cspy-debug-*.log` file.
+   Run `spyc --debug` to reproduce the issue, then attach the
+   relevant lines from the `/tmp/spyc-debug-*.log` file.
 
 6. **One approval required** before merge. Squash-merge preferred to
    keep `main` history clean.

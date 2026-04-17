@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Pepper body: glossy red with darker shading on the right -->
+    <linearGradient id="pepperBody" x1="20%" y1="15%" x2="85%" y2="95%">
+      <stop offset="0%" stop-color="#ff6b5b"/>
+      <stop offset="35%" stop-color="#ee3a3a"/>
+      <stop offset="75%" stop-color="#c41e1e"/>
+      <stop offset="100%" stop-color="#8a0f14"/>
+    </linearGradient>
+
+    <!-- Upper-left highlight to give the pepper a glossy sheen -->
+    <radialGradient id="pepperShine" cx="30%" cy="22%" r="35%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.75"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle secondary highlight near the bottom tip -->
+    <radialGradient id="pepperTip" cx="45%" cy="90%" r="18%">
+      <stop offset="0%" stop-color="#ff8a7a" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ff8a7a" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Green for the calyx + stem -->
+    <linearGradient id="calyxGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7bc74d"/>
+      <stop offset="100%" stop-color="#3e8a28"/>
+    </linearGradient>
+
+    <linearGradient id="stemGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8cd158"/>
+      <stop offset="100%" stop-color="#5aa235"/>
+    </linearGradient>
+
+    <!-- Subtle inner shadow on the window -->
+    <linearGradient id="titleBarGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2a2f45"/>
+      <stop offset="100%" stop-color="#24283b"/>
+    </linearGradient>
+
+    <!-- Clip path matching the Twemoji pepper body, used to constrain the gloss overlay. -->
+    <clipPath id="pepperBodyClip" clipPathUnits="userSpaceOnUse">
+      <path d="M4.042 27.916c4.89.551 9.458-1.625 13.471-5.946 4.812-5.182 5-13 5-14s11.31-3.056 11 5c-.43 11.196-7.43 20.946-19.917 21.916-5.982.465-9.679-.928-11.387-2.345-2.69-2.231-.751-4.916 1.833-4.625z"/>
+    </clipPath>
+  </defs>
+
+  <!-- ============ TERMINAL WINDOW ============ -->
+  <!-- Background -->
+  <rect x="24" y="24" width="464" height="464" rx="18" fill="#1a1b26"/>
+
+  <!-- Title bar -->
+  <path d="M 24 42
+           a 18 18 0 0 1 18 -18
+           h 428
+           a 18 18 0 0 1 18 18
+           v 36
+           h -464 z"
+        fill="url(#titleBarGrad)"/>
+
+  <!-- Thin separator line below title bar -->
+  <line x1="24" y1="78" x2="488" y2="78" stroke="#0f1019" stroke-width="1"/>
+
+  <!-- Traffic light dots -->
+  <circle cx="52" cy="51" r="7" fill="#ff5f56"/>
+  <circle cx="76" cy="51" r="7" fill="#ffbd2e"/>
+  <circle cx="100" cy="51" r="7" fill="#27c93f"/>
+
+  <!-- ============ TOP PANE: FILE LISTING ============ -->
+  <!-- Row 1: dir -->
+  <rect x="50" y="102" width="14" height="14" rx="2" fill="#7aa2f7"/>
+  <rect x="76" y="106" width="148" height="6" rx="2" fill="#414868"/>
+
+  <!-- Row 2: dir -->
+  <rect x="50" y="128" width="14" height="14" rx="2" fill="#7aa2f7"/>
+  <rect x="76" y="132" width="104" height="6" rx="2" fill="#414868"/>
+
+  <!-- Row 3: executable -->
+  <rect x="50" y="154" width="14" height="14" rx="2" fill="#9ece6a"/>
+  <rect x="76" y="158" width="124" height="6" rx="2" fill="#414868"/>
+
+  <!-- Row 4: HIGHLIGHTED (cursor row) -->
+  <rect x="36" y="176" width="440" height="24" rx="3" fill="#e63946"/>
+  <rect x="50" y="183" width="14" height="10" rx="2" fill="#ffffff"/>
+  <rect x="76" y="185" width="168" height="6" rx="2" fill="#ffffff"/>
+  <rect x="254" y="185" width="44" height="6" rx="2" fill="#ffffff" opacity="0.7"/>
+
+  <!-- Row 5: purple file -->
+  <rect x="50" y="210" width="14" height="14" rx="2" fill="#bb9af7"/>
+  <rect x="76" y="214" width="92" height="6" rx="2" fill="#414868"/>
+
+  <!-- Row 6: grey file -->
+  <rect x="50" y="236" width="14" height="14" rx="2" fill="#565f89"/>
+  <rect x="76" y="240" width="116" height="6" rx="2" fill="#414868"/>
+
+  <!-- Row 7: grey file -->
+  <rect x="50" y="262" width="14" height="14" rx="2" fill="#565f89"/>
+  <rect x="76" y="266" width="78" height="6" rx="2" fill="#414868"/>
+
+  <!-- ============ DASHED DIVIDER ============ -->
+  <line x1="50" y1="300" x2="462" y2="300"
+        stroke="#e63946" stroke-width="2.5" stroke-dasharray="9 6" stroke-linecap="round"/>
+
+  <!-- ============ BOTTOM PANE: PEPPER + WORDMARK ============ -->
+  <!--
+    Chili pepper: Twemoji paths by Twitter / jdecked, licensed CC-BY 4.0
+    Source: https://github.com/jdecked/twemoji (1f336.svg)
+    Native viewBox is 36x36; here scaled 4.5x and positioned in the bottom pane.
+    The flat Twemoji fills are overlaid with our red gradient + a clipped white
+    shine streak so the pepper reads as glossy while keeping the emoji silhouette.
+  -->
+  <g transform="translate(58, 330) scale(4.0)">
+
+    <!-- Body: Twemoji silhouette filled with our red gradient -->
+    <path d="M4.042 27.916c4.89.551 9.458-1.625 13.471-5.946 4.812-5.182 5-13 5-14s11.31-3.056 11 5c-.43 11.196-7.43 20.946-19.917 21.916-5.982.465-9.679-.928-11.387-2.345-2.69-2.231-.751-4.916 1.833-4.625z"
+          fill="url(#pepperBody)"/>
+
+    <!-- Radial highlight layer (upper-left gloss) -->
+    <path d="M4.042 27.916c4.89.551 9.458-1.625 13.471-5.946 4.812-5.182 5-13 5-14s11.31-3.056 11 5c-.43 11.196-7.43 20.946-19.917 21.916-5.982.465-9.679-.928-11.387-2.345-2.69-2.231-.751-4.916 1.833-4.625z"
+          fill="url(#pepperShine)"/>
+
+    <!-- Warm glow near the tip -->
+    <path d="M4.042 27.916c4.89.551 9.458-1.625 13.471-5.946 4.812-5.182 5-13 5-14s11.31-3.056 11 5c-.43 11.196-7.43 20.946-19.917 21.916-5.982.465-9.679-.928-11.387-2.345-2.69-2.231-.751-4.916 1.833-4.625z"
+          fill="url(#pepperTip)"/>
+
+    <!-- Glossy shine streak: follows the concave (upper) inner curve of the pepper.
+         Clipped to the body so it can't spill outside the silhouette. -->
+    <g clip-path="url(#pepperBodyClip)">
+      <ellipse cx="15" cy="17" rx="9" ry="2.2" fill="#ffffff" opacity="0.55"
+               transform="rotate(-38 15 17)"/>
+      <ellipse cx="14" cy="16" rx="6" ry="1.1" fill="#ffffff" opacity="0.9"
+               transform="rotate(-38 14 16)"/>
+      <!-- Secondary sparkle on the belly -->
+      <ellipse cx="23" cy="22" rx="2.5" ry="0.8" fill="#ffffff" opacity="0.5"
+               transform="rotate(-15 23 22)"/>
+    </g>
+
+    <!-- Stem + calyx: Twemoji silhouette filled with our green gradient -->
+    <path d="M30.545 6.246c.204-1.644.079-3.754-.747-4.853-1.111-1.479-4.431-.765-3.569.113.96.979 2.455 2.254 2.401 4.151-.044-.01-.085-.022-.13-.032-3.856-.869-6.721 1.405-7.167 2.958-.782 2.722 4.065.568 4.68 1.762 1.82 3.53 3.903.155 4.403 1.28s4.097 4.303 4.097.636c0-3.01-1.192-4.903-3.968-6.015z"
+          fill="url(#calyxGreen)"/>
+
+    <!-- Subtle lighter highlight on the stem curve -->
+    <path d="M26 2.5 C 28 2, 30 3, 30.5 5"
+          fill="none" stroke="#a6e07a" stroke-width="0.5" stroke-linecap="round"
+          opacity="0.7"/>
+  </g>
+
+  <!-- ============ WORDMARK "spyc" ============ -->
+  <text x="232" y="428"
+        font-family="'JetBrains Mono', 'SF Mono', 'Fira Code', 'Menlo', monospace"
+        font-size="78"
+        font-weight="700"
+        fill="#c0caf5"
+        letter-spacing="8">spyc</text>
+</svg>

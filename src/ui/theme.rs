@@ -4,7 +4,7 @@
 //! backgrounds. We use true-color RGB values; ratatui will map them to the
 //! closest 256-color on terminals that don't speak 24-bit.
 //!
-//! Users can override individual colors via `[colors]` in `.cspyrc.toml`.
+//! Users can override individual colors via `[colors]` in `.spycrc.toml`.
 //! Invalid values are silently ignored so a bad rc file degrades rather than
 //! crashing.
 
@@ -13,7 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::config::ColorOverrides;
 
 /// Runtime color theme. Every field corresponds to a named color that can be
-/// overridden by the user's `.cspyrc.toml` `[colors]` table.
+/// overridden by the user's `.spycrc.toml` `[colors]` table.
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub dir: Color,

@@ -1,6 +1,6 @@
 //! In-app scrollable pager overlay with incremental search.
 //!
-//! Used for cspy-internal content where shelling out to `less` would be
+//! Used for spyc-internal content where shelling out to `less` would be
 //! overkill — long listings, file contents, captured `!` output, version
 //! info. Arbitrary terminal-output viewing lives here too, with ANSI
 //! colors preserved via `ansi-to-tui`.
@@ -144,7 +144,7 @@ impl PagerView {
     pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = now.trim_end_matches("_UTC");
-        let filename = format!("cspy_output_{stamp}.txt");
+        let filename = format!("spyc_output_{stamp}.txt");
         let path = std::env::current_dir()?.join(&filename);
         std::fs::write(&path, self.plain_text() + "\n")?;
         Ok(path)
@@ -153,7 +153,7 @@ impl PagerView {
     /// Write the plain-text content to a temp file for editing.
     pub fn write_to_temp(&self) -> std::io::Result<std::path::PathBuf> {
         let dir = std::env::temp_dir();
-        let filename = format!("cspy_pager_{}.txt", std::process::id());
+        let filename = format!("spyc_pager_{}.txt", std::process::id());
         let path = dir.join(filename);
         std::fs::write(&path, self.plain_text() + "\n")?;
         Ok(path)

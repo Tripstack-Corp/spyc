@@ -2,7 +2,7 @@
 //!
 //! Designed to grow: today it handles counts (e.g. `5j`) and a small set of
 //! motion/verb keys. Future milestones will add operators, marks (`m{a-z}` /
-//! `'{a-z}`), search (`/`, `n`, `N`), and user-defined maps from `.cspyrc`.
+//! `'{a-z}`), search (`/`, `n`, `N`), and user-defined maps from `.spycrc`.
 
 pub mod action;
 pub mod resolver;

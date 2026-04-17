@@ -1,4 +1,4 @@
-//! User-supplied keymap bindings — the target of `.cspyrc` parsing.
+//! User-supplied keymap bindings — the target of `.spycrc` parsing.
 //!
 //! A user binding marries a `KeyChord` (how the binding is triggered) to a
 //! `BoundAction` (what to do). The `Resolver` consults the user table
@@ -59,7 +59,7 @@ impl NamedKey {
 
 impl KeyChord {
     /// Human-readable rendering, suitable for help output. Matches the
-    /// DSL `map` syntax the user wrote in `.cspyrc.toml`.
+    /// DSL `map` syntax the user wrote in `.spycrc.toml`.
     pub fn display(&self) -> String {
         match self {
             Self::Char(c) => c.to_string(),
@@ -155,7 +155,7 @@ impl UserKeymap {
     }
 
     /// Iterate over the bindings in the order they were declared. Used by
-    /// the help overlay so the user sees their own `.cspyrc` entries.
+    /// the help overlay so the user sees their own `.spycrc` entries.
     pub fn iter(&self) -> std::slice::Iter<'_, UserBinding> {
         self.entries.iter()
     }

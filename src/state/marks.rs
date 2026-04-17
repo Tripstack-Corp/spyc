@@ -5,8 +5,8 @@
 //!   - Optionally the file the cursor was on, so jumping back lands on
 //!     the same entry rather than the top of the listing.
 //!
-//! Persisted to `$XDG_STATE_HOME/cspy/marks.toml` (or
-//! `$HOME/.local/state/cspy/marks.toml`) so marks survive restarts.
+//! Persisted to `$XDG_STATE_HOME/spyc/marks.toml` (or
+//! `$HOME/.local/state/spyc/marks.toml`) so marks survive restarts.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -71,9 +71,9 @@ impl Marks {
 fn state_dir() -> Option<PathBuf> {
     // XDG first, then the conventional fallback.
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join("cspy"));
+        return Some(PathBuf::from(xdg).join("spyc"));
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/cspy"))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
 }
 
 #[cfg(test)]

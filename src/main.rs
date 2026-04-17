@@ -1,4 +1,4 @@
-//! cspy — a vi-keyboard-driven file commander inspired by SideFX's spy.
+//! spyc — a vi-keyboard-driven file commander inspired by SideFX's spy.
 
 mod app;
 mod config;
@@ -33,11 +33,11 @@ fn main() -> Result<()> {
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "cspy {} — vi-keyboard-driven file commander\n\n\
-             Usage: cspy [OPTIONS]\n\n\
+            "spyc {} — vi-keyboard-driven file commander\n\n\
+             Usage: spyc [OPTIONS]\n\n\
              Options:\n  \
                -r, --resume   Open pane with `claude --resume`\n  \
-               -d, --debug    Write debug log to /tmp/cspy-debug-<ts>.log\n  \
+               -d, --debug    Write debug log to /tmp/spyc-debug-<ts>.log\n  \
                -h, --help     Show this help\n  \
                -v, --version  Show version",
             env!("CARGO_PKG_VERSION"),
@@ -45,14 +45,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("cspy {}", env!("CARGO_PKG_VERSION"));
+        println!("spyc {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
     let resume = args.iter().any(|a| a == "--resume" || a == "-r");
     let debug = args.iter().any(|a| a == "--debug" || a == "-d");
     if let Some(p) = debug_log::init(debug) {
-        eprintln!("cspy: debug log → {p}");
+        eprintln!("spyc: debug log → {p}");
     }
     let mut terminal = setup_terminal()?;
     let result = App::new(resume)?.run(&mut terminal);

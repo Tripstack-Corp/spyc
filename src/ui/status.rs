@@ -48,7 +48,7 @@ impl StatusBar<'_> {
         let term_bg = Color::Reset;
 
         // Build fixed-width segments first so path gets the remainder.
-        let host_text = format!(" {} ", self.user_host);
+        let host_text = format!(" \u{1f336}\u{fe0f} {} ", self.user_host);
 
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} ")); // branch icon
         let git_w = git_text.as_ref().map_or(0, |s| s.len() + 1); // +1 for sep
@@ -125,7 +125,7 @@ impl StatusBar<'_> {
     fn render_plain(&self, frame: &mut Frame, area: Rect) {
         let avail = area.width as usize;
 
-        let host_w = self.user_host.chars().count() + 2;
+        let host_w = self.user_host.chars().count() + 2 + 3; // +3 for "🌶️ "
         let suffix_w = if self.suffix.is_empty() {
             0
         } else {
@@ -145,7 +145,7 @@ impl StatusBar<'_> {
 
         let mut spans = vec![
             Span::styled(
-                format!("{}: ", self.user_host),
+                format!("\u{1f336}\u{fe0f} {}: ", self.user_host),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(path_disp),
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn middle_truncation_favours_tail() {
-        let s = "/Users/derek/src/cspy/a/b/c/very_long_directory_name";
+        let s = "/Users/derek/src/spyc/a/b/c/very_long_directory_name";
         let out = truncate_middle(s, 25);
         assert_eq!(out.chars().count(), 25);
         assert!(out.starts_with("/User"));

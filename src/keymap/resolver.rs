@@ -69,7 +69,7 @@ impl Resolver {
     }
 
     /// Display string for the current pending sequence, or `None` when idle.
-    /// Shown in the prompt line so the user knows cspy is waiting for more input.
+    /// Shown in the prompt line so the user knows spyc is waiting for more input.
     pub fn pending_display(&self) -> Option<String> {
         let prefix = self.count.map(|n| n.to_string()).unwrap_or_default();
         let seq = match self.pending {

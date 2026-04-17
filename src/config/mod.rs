@@ -1,8 +1,8 @@
-//! `.cspyrc.toml` loader and runtime configuration.
+//! `.spycrc.toml` loader and runtime configuration.
 //!
 //! Two files are consulted in order:
-//!   1. `$HOME/.cspyrc.toml` — per-user defaults.
-//!   2. `<cwd>/.cspyrc.toml` — per-project overrides (win).
+//!   1. `$HOME/.spycrc.toml` — per-user defaults.
+//!   2. `<cwd>/.spycrc.toml` — per-project overrides (win).
 //!
 //! Both are optional. Anything missing falls back to built-in defaults.
 //!
@@ -61,7 +61,7 @@ pub struct IgnoreMask {
     pub enabled: bool,
 }
 
-/// On-disk shape of a single `.cspyrc.toml`. We parse each file into one
+/// On-disk shape of a single `.spycrc.toml`. We parse each file into one
 /// of these, then merge them into the final `Config`.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -82,8 +82,8 @@ impl Config {
     /// Load and merge the standard config file locations. Missing files
     /// are silently skipped; broken TOML / DSL returns an `Err`.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
-        let user = home_dir().map(|h| h.join(".cspyrc.toml"));
-        let project = cwd.join(".cspyrc.toml");
+        let user = home_dir().map(|h| h.join(".spycrc.toml"));
+        let project = cwd.join(".spycrc.toml");
         Self::load_from(&[user.as_deref(), Some(&project)])
     }
 
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn parses_keymap_and_colors() {
         let tmp = tempdir().unwrap();
-        let path = tmp.path().join("cspyrc.toml");
+        let path = tmp.path().join("spycrc.toml");
         let mut f = std::fs::File::create(&path).unwrap();
         // Top-level scalar/array fields must come before any [table] or
         // they get parsed as members of the preceding table.

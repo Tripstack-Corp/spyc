@@ -1,7 +1,7 @@
-/// The full vocabulary of things cspy can do in response to input.
+/// The full vocabulary of things spyc can do in response to input.
 ///
 /// Keep this enum stable and spy-parity-friendly: each variant should map to
-/// one user-observable behavior, so `.cspyrc` can bind any key to any action.
+/// one user-observable behavior, so `.spycrc` can bind any key to any action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     // Cursor motion. A count of 0 means "no explicit count" (default 1).
@@ -62,11 +62,11 @@ pub enum Action {
     SetMark(char),  // m{a-z}
     JumpMark(char), // '{a-z}
     JumpPrevDir,    // '' — jump back to directory before last chdir
-    JumpStartDir,   // ` — jump to directory where cspy was launched
+    JumpStartDir,   // ` — jump to directory where spyc was launched
 
     // Info commands.
     Date,         // D — show date/time
-    Version,      // V — show cspy version
+    Version,      // V — show spyc version
     ShowMemory,   // I — session info pager (version, pid, rss, counts)
     ColorToggle,  // C — toggle color theme on/off
     SetEnvPrompt, // s — NAME=VALUE prompt
@@ -75,7 +75,7 @@ pub enum Action {
     Help, // ? or F1 — key bindings overlay
 
     // Config reload.
-    ReloadConfig, // ^R — re-read ~/.cspyrc.toml + project config
+    ReloadConfig, // ^R — re-read ~/.spycrc.toml + project config
 
     // Split pane (M8).
     TogglePane,        // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane

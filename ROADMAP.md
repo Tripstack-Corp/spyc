@@ -1,4 +1,4 @@
-# cspy roadmap
+# spyc roadmap
 
 ## Planned
 
@@ -13,7 +13,7 @@ git branching but for Claude sessions.
 
 ### Demo mode
 
-A guided walkthrough mode that showcases cspy's features — useful for
+A guided walkthrough mode that showcases spyc's features — useful for
 onboarding new users or recording screencasts. Details TBD.
 
 ### Additional Ideas
@@ -27,6 +27,8 @@ onboarding new users or recording screencasts. Details TBD.
   output, file views, diffs) so you can cycle back through them without
   re-running commands. Like `:bprev`/`:bnext` in vim.
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
+- **Drag and drop** — test and support dragging files from the desktop
+  into spyc (terminal drag-and-drop via OSC 52 or path paste)
 
 ### Ideas from fbi-improved (fim)
 
@@ -41,16 +43,16 @@ onboarding new users or recording screencasts. Details TBD.
 **Automation / scripting:**
 - **Autocommands** — user-configurable hooks triggered per file type:
   `autocmd "*.md" "preview"`, `autocmd "*.log" "tail_mode"`. Could live
-  in `.cspyrc.toml` and replace hardcoded special cases.
+  in `.spycrc.toml` and replace hardcoded special cases.
 - **Macro recording** — vim-style `qa`...`q`...`@a`. Record a sequence
   of actions (rename, move, tag) and replay on demand.
-- **Startup/exit command flags** — `cspy -c "sort mtime"` to execute
+- **Startup/exit command flags** — `spyc -c "sort mtime"` to execute
   commands at startup, `-F` for exit hooks.
 
 **Shell composability:**
 - **Stdout on exit** — output picks/inventory paths to stdout when
-  quitting, making cspy composable: `cspy | xargs rm`, `cspy | tar czf`.
-- **`--dump-default-config`** — output the full default `.cspyrc.toml` so
+  quitting, making spyc composable: `spyc | xargs rm`, `spyc | tar czf`.
+- **`--dump-default-config`** — output the full default `.spycrc.toml` so
   users have a complete starting point for customization.
 
 **Status bar / display:**
@@ -129,4 +131,4 @@ onboarding new users or recording screencasts. Details TBD.
 - Shell modes: `!` captured, `;` foreground
 - Hex-dump view for binary files
 - Embedded pty pane (M8)
-- `.cspyrc.toml` config, keymap DSL, live reload
+- `.spycrc.toml` config, keymap DSL, live reload

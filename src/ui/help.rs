@@ -1,6 +1,6 @@
 //! Help content — the `?` screen. Rendered via the pager so it scrolls
 //! and supports search. Content is hardcoded so it always reflects what
-//! the resolver actually binds; user bindings from `.cspyrc` are appended.
+//! the resolver actually binds; user bindings from `.spycrc` are appended.
 
 use ratatui::{
     style::{Modifier, Style},
@@ -90,7 +90,7 @@ const SECTIONS: &[Section] = &[
         title: "Info",
         rows: &[
             ("D", "show date/time (UTC)"),
-            ("V", "show cspy version"),
+            ("V", "show spyc version"),
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
             ("s", "set environment variable (NAME=VALUE)"),
@@ -123,7 +123,7 @@ const SECTIONS: &[Section] = &[
             ("^W [  ^W ]", "prev / next tab"),
             ("^W r", "rename active tab"),
             ("Alt+Enter", "newline in pane (multi-line input)"),
-            ("CSPY_PANE_CMD", "env var for pane command (default claude)"),
+            ("SPYC_PANE_CMD", "env var for pane command (default claude)"),
         ],
     },
     Section {
@@ -159,7 +159,7 @@ const SECTIONS: &[Section] = &[
         title: "CLI Flags",
         rows: &[
             ("-r --resume", "open pane with claude --resume"),
-            ("-d --debug", "write debug log to /tmp/cspy-debug-<ts>.log"),
+            ("-d --debug", "write debug log to /tmp/spyc-debug-<ts>.log"),
             ("-h --help", "show usage"),
             ("-v --version", "show version"),
         ],
@@ -189,12 +189,12 @@ pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>
         }
     }
 
-    // Per-user bindings from .cspyrc.toml, if any.
+    // Per-user bindings from .spycrc.toml, if any.
     let user_bindings: Vec<_> = user_keymap.iter().collect();
     if !user_bindings.is_empty() {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled(
-            "Custom (.cspyrc.toml)",
+            "Custom (.spycrc.toml)",
             section_style,
         )));
         for binding in user_bindings {

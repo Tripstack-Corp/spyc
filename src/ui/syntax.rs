@@ -20,7 +20,7 @@ static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// Theme name from syntect's bundled defaults. Dark theme that pairs
-/// well with cspy's Tokyo Night palette.
+/// well with spyc's Tokyo Night palette.
 const THEME_NAME: &str = "base16-eighties.dark";
 
 /// Highlight a file's content and return ratatui `Line`s.

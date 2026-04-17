@@ -1,4 +1,4 @@
-# cspy
+# spyc
 
 A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/crossterm. Inspired by SideFX's `spy`. Single-developer project.
 
@@ -12,7 +12,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:q`)
 - `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=` clears)
 - Picks (per-directory multi-select) and inventory (global cross-directory)
-- `.cspyrc.toml` config with keymap DSL, themes, ignore masks, live reload
+- `.spycrc.toml` config with keymap DSL, themes, ignore masks, live reload
 
 ## Architecture
 
@@ -50,4 +50,4 @@ See `ROADMAP.md` for current plans. Key upcoming: session forking, demo mode.
 
 ## Dog-fooding context
 
-The developer uses cspy with Claude Code CLI running in the lower pane. Bugs and features are often discovered through this dog-fooding workflow — if something affects the Claude Code pane experience, it's high priority.
+The developer uses spyc with Claude Code CLI running in the lower pane. Bugs and features are often discovered through this dog-fooding workflow — if something affects the Claude Code pane experience, it's high priority.

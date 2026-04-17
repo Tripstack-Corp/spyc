@@ -1,4 +1,4 @@
-//! The multi-column file list that is the heart of cspy's UI.
+//! The multi-column file list that is the heart of spyc's UI.
 //!
 //! Layout is **column-major** (`ls -C` / spy style): items fill the first
 //! column top-to-bottom before spilling into the next column. Rows per

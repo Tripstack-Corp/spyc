@@ -1,7 +1,7 @@
 //! Session save / restore.
 //!
 //! Each session is a JSON snapshot of the workspace layout at quit time.
-//! Stored in `$XDG_STATE_HOME/cspy/sessions/` (or `~/.local/state/cspy/sessions/`),
+//! Stored in `$XDG_STATE_HOME/spyc/sessions/` (or `~/.local/state/spyc/sessions/`),
 //! one file per session, filename is the epoch millis.
 
 use std::path::PathBuf;
@@ -31,9 +31,9 @@ pub struct Session {
 
 fn sessions_dir() -> Option<PathBuf> {
     let base = if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        PathBuf::from(xdg).join("cspy")
+        PathBuf::from(xdg).join("spyc")
     } else {
-        PathBuf::from(std::env::var_os("HOME")?).join(".local/state/cspy")
+        PathBuf::from(std::env::var_os("HOME")?).join(".local/state/spyc")
     };
     Some(base.join("sessions"))
 }

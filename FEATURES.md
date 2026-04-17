@@ -1,12 +1,12 @@
-# cspy — features
+# spyc — features
 
-cspy is a vi-keyboard-driven terminal file manager written in Rust. It's
+spyc is a vi-keyboard-driven terminal file manager written in Rust. It's
 built for developers who live in the terminal and want a fast, modal
 interface for navigating files, running commands, and — critically —
 working alongside AI coding assistants like Claude Code.
 
 Inspired by SideFX's `spy` (a file manager from the Houdini VFX
-ecosystem), cspy brings that same "always-open workspace" philosophy to
+ecosystem), spyc brings that same "always-open workspace" philosophy to
 modern terminal workflows. The split-pane design lets you browse your
 project in the top half while Claude runs in the bottom half, so file
 context and AI conversation stay in the same window.
@@ -67,7 +67,7 @@ become `%` in shell expansion.
 
 The bottom half of the terminal hosts a fully independent pty — by
 default, it runs `claude` (the Claude Code CLI). This is the core of
-cspy's workflow: browse files above, talk to Claude below.
+spyc's workflow: browse files above, talk to Claude below.
 
 - **^\\ / F10** toggle the pane open/closed
 - **F9** open pane with `claude --resume`
@@ -87,12 +87,12 @@ Multiple tabs, each running an independent pty:
 - **^W [ / ^W ]** prev / next tab
 - **^W r** rename the active tab
 - Activity indicator (**+**) on background tabs that have new output
-- Set `CSPY_PANE_CMD` to change the default pane command from `claude`
+- Set `SPYC_PANE_CMD` to change the default pane command from `claude`
 
 ## In-app pager
 
 A built-in pager for viewing files and command output without leaving
-cspy.
+spyc.
 
 - **Syntax highlighting** via syntect — source files are highlighted
   with language-aware coloring (hundreds of languages supported)
@@ -165,7 +165,7 @@ Vi-style named bookmarks for fast navigation:
 - **m{a-z}** set a mark at the current directory + cursor position
 - **'{a-z}** jump to a mark
 - **''** jump back to the previous directory (like `cd -`)
-- **\`** jump to the directory where cspy was launched
+- **\`** jump to the directory where spyc was launched
 
 ## Ignore masks & filtering
 
@@ -174,7 +174,7 @@ Two toggle-able filter masks to hide clutter:
 - **a** toggle mask 1 (dotfiles by default)
 - **o** toggle mask 2 (build artifacts by default)
 
-Masks are configurable in `.cspyrc.toml` — you can define custom glob
+Masks are configurable in `.spycrc.toml` — you can define custom glob
 patterns for each group.
 
 **Temporary filter** (`=`): type a glob pattern to temporarily hide
@@ -204,8 +204,8 @@ unambiguous:
 
 ## Configuration
 
-`.cspyrc.toml` supports per-user (`~/.cspyrc.toml`) and per-project
-(`.cspyrc.toml` in the working directory) configuration:
+`.spycrc.toml` supports per-user (`~/.spycrc.toml`) and per-project
+(`.spycrc.toml` in the working directory) configuration:
 
 - **Keymap DSL** — `map KEY action [args]` syntax to rebind any key to
   any action. Chord bindings (e.g., `^W n`) are supported.
@@ -213,15 +213,15 @@ unambiguous:
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.
 - **Live reload** — config changes are picked up automatically without
-  restarting cspy. Manual reload with **^R**.
+  restarting spyc. Manual reload with **^R**.
 
 ## Session management
 
-cspy auto-saves your workspace on quit and can restore it on startup.
+spyc auto-saves your workspace on quit and can restore it on startup.
 
-- **Auto-save** — on quit, cspy saves the current directory, all pane
+- **Auto-save** — on quit, spyc saves the current directory, all pane
   tabs (command, label, cwd), active tab, pane height, and focus state.
-- **`cspy --resume`** (or `-r`) — opens a session picker with
+- **`spyc --resume`** (or `-r`) — opens a session picker with
   human-readable timestamps ("just now", "2 hours ago", "3 days ago").
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
@@ -231,7 +231,7 @@ cspy auto-saves your workspace on quit and can restore it on startup.
 ## Info and diagnostics
 
 - **D** show date and time (UTC)
-- **V** show cspy version
+- **V** show spyc version
 - **I** session info: PID, RSS memory usage, entry counts
 - **C** toggle between color and mono themes
 - **s** set an environment variable (`NAME=VALUE`)

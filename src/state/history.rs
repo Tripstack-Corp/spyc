@@ -1,7 +1,7 @@
 //! Shared command history for `!` and `;` prompts.
 //!
-//! Persisted to `$XDG_STATE_HOME/cspy/history` (or
-//! `$HOME/.local/state/cspy/history`), one command per line.
+//! Persisted to `$XDG_STATE_HOME/spyc/history` (or
+//! `$HOME/.local/state/spyc/history`), one command per line.
 //! Deduplicates consecutive repeats.
 
 use std::path::PathBuf;
@@ -151,7 +151,7 @@ impl History {
 
 fn disk_path(filename: &str) -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join(format!("cspy/{filename}")));
+        return Some(PathBuf::from(xdg).join(format!("spyc/{filename}")));
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(format!(".local/state/cspy/{filename}")))
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(format!(".local/state/spyc/{filename}")))
 }

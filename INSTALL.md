@@ -1,8 +1,8 @@
-# Installing cspy
+# Installing spyc
 
 ## Terminal
 
-cspy is designed for modern terminals with true-color (24-bit) and
+spyc is designed for modern terminals with true-color (24-bit) and
 powerline glyph support. We recommend **Ghostty** on macOS:
 
 - [ghostty.org](https://ghostty.org) — fast, GPU-accelerated, native
@@ -38,13 +38,13 @@ brew install --cask font-jetbrains-mono-nerd-font
 brew install --cask font-hack-nerd-font
 ```
 
-If you don't install a Nerd Font, cspy still works — the powerline
+If you don't install a Nerd Font, spyc still works — the powerline
 separators will render as missing-glyph boxes. Toggle to mono mode
 with **C** for a plain-text fallback that uses no special glyphs.
 
 ## Rust toolchain
 
-cspy is written in Rust. Install the toolchain via rustup:
+spyc is written in Rust. Install the toolchain via rustup:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -55,8 +55,8 @@ Minimum supported Rust version: **1.80**.
 ## Build and install
 
 ```sh
-git clone https://github.com/tripstack/cspy.git
-cd cspy
+git clone https://github.com/tripstack/spyc.git
+cd spyc
 make install        # builds release and installs to ~/bin
 ```
 
@@ -64,7 +64,7 @@ Or build manually:
 
 ```sh
 cargo build --release
-cp target/release/cspy /usr/local/bin/
+cp target/release/spyc /usr/local/bin/
 ```
 
 ## Cross-compilation (optional)
@@ -98,15 +98,15 @@ it if you haven't:
 npm install -g @anthropic-ai/claude-code
 ```
 
-Set `CSPY_PANE_CMD` to change the default pane command:
+Set `SPYC_PANE_CMD` to change the default pane command:
 
 ```sh
-export CSPY_PANE_CMD="bash"
+export SPYC_PANE_CMD="bash"
 ```
 
 ## Verifying the setup
 
-Launch cspy and check:
+Launch spyc and check:
 
 1. **Powerline bar** — status line at the top should show colored
    segments with arrow separators. If you see boxes instead of arrows,
@@ -115,6 +115,6 @@ Launch cspy and check:
    executables). If everything is white, your terminal may not support
    true-color.
 3. **Pane** — press `^\` (Ctrl+Backslash) to open the lower pane. It
-   should spawn `claude` (or whatever `CSPY_PANE_CMD` is set to).
+   should spawn `claude` (or whatever `SPYC_PANE_CMD` is set to).
 4. **Alt+Enter** — in the pane with Claude, Alt+Enter should insert a
    newline for multi-line input.

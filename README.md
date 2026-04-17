@@ -1,8 +1,8 @@
-# cspy
+# spyc
 
 A vi-keyboard-driven file commander for macOS and Linux that pairs with
 [Claude Code](https://www.anthropic.com/claude-code). Inspired by SideFX's
-in-house `spy` tool — hence the name: **c**laude + **spy**.
+in-house `spy` tool — hence the name: **spy** + **c**laude = **spyc** (spicy 🌶️).
 
 Goals:
 
@@ -74,11 +74,11 @@ just release-all           # all of the above
 
 Linking against glibc produces binaries that only run on systems whose glibc
 is at least as new as the build host's. musl is a fully static C library, so
-the resulting `cspy` runs on any Linux kernel ≥ the target triple's baseline
+the resulting `spyc` runs on any Linux kernel ≥ the target triple's baseline
 without any shared-library dependencies. Check with:
 
 ```
-ldd target/x86_64-unknown-linux-musl/release/cspy
+ldd target/x86_64-unknown-linux-musl/release/spyc
 # -> "statically linked"
 ```
 
@@ -89,8 +89,13 @@ Apple Silicon and Intel Macs run different architectures. A single universal
 
 ## Roadmap
 
-- **M4** — `.cspyrc` keymap DSL and `^R` reload.
+- **M4** — `.spycrc` keymap DSL and `^R` reload.
 - **M5** — Search (`/`, `n`, `N`), marks (`m{a-z}`, `'{a-z}`), `J` jump.
 - **M6** — File operations (`c`, `m`, `R`, `N`, `L`).
 - **M7** — Previews, git status, true-color theming, optional mouse.
 - **M8** — Claude Code split pane.
+
+## Credits
+
+Logo uses [Twemoji](https://github.com/jdecked/twemoji) pepper artwork
+(CC-BY 4.0).
