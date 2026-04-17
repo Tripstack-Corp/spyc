@@ -37,6 +37,8 @@ struct PendingCapture {
     buffer: Vec<u8>,
     title: String,
     cmd_display: String,
+    /// When the capture started — for the elapsed timer.
+    started: std::time::Instant,
     /// True once the reader thread has sent all output.
     finished: bool,
 }
@@ -463,6 +465,17 @@ impl App {
                     capture.buffer.extend_from_slice(&chunk);
                     got_data = true;
                 }
+                // Update elapsed timer in the title while running.
+                if !capture.finished {
+                    let elapsed = capture.started.elapsed().as_secs();
+                    let timer_title = format!(
+                        "\u{23f3} {} — running... ({elapsed}s)",
+                        capture.title,
+                    );
+                    if let Some(view) = self.pager.as_mut() {
+                        view.title = timer_title;
+                    }
+                }
                 if got_data || capture.finished {
                     // Rebuild pager content from the accumulated buffer.
                     use ansi_to_tui::IntoText;
@@ -474,23 +487,12 @@ impl App {
                     });
                     if let Some(view) = self.pager.as_mut() {
                         view.lines = text.lines;
-                        // Auto-scroll to bottom if user was at the bottom.
                         if at_bottom {
                             view.scroll_to_bottom(40);
                         }
                     }
                 }
                 if capture.finished {
-                    // Collect stderr and update title with exit status.
-                    let mut stderr_bytes = Vec::new();
-                    if let Some(mut stderr) = capture.child.stderr.take() {
-                        use std::io::Read as _;
-                        let _ = stderr.read_to_end(&mut stderr_bytes);
-                    }
-                    if !stderr_bytes.is_empty() {
-                        capture.buffer.push(b'\n');
-                        capture.buffer.extend_from_slice(&stderr_bytes);
-                    }
                     let status = capture.child.wait();
                     let exit_info = match status {
                         Ok(s) if s.success() => "exit 0".to_string(),
@@ -1492,9 +1494,9 @@ impl App {
                 match spawn_capture(&expanded) {
                     Ok((child, rx)) => {
                         let cmd_display = prompt.buffer.clone();
-                        // Open the pager immediately with a "running" header.
+                        // Open the pager immediately — title is updated by the timer.
                         let mut view = PagerView::new_plain(
-                            format!("{title} — running..."),
+                            format!("\u{23f3} {title} — running... (0s)"),
                             Vec::new(),
                         );
                         view.streaming = true;
@@ -1505,6 +1507,7 @@ impl App {
                             buffer: Vec::new(),
                             title,
                             cmd_display,
+                            started: std::time::Instant::now(),
                             finished: false,
                         });
                     }
@@ -3222,21 +3225,21 @@ fn sync_listing_watch(
     }
 }
 
-/// Spawn a shell command with piped stdout/stderr. Returns the child handle
-/// and a channel that will deliver the collected stdout bytes when EOF.
-/// Spawn a shell command with piped stdout. The reader thread sends
-/// chunks as they arrive so the pager can stream output in real-time.
-/// An empty Vec signals EOF.
+/// Spawn a shell command with stdout+stderr merged into one pipe.
+/// The reader thread sends chunks as they arrive so the pager can
+/// stream output in real-time. An empty Vec signals EOF.
 fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
     use std::io::Read as _;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
 
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    // Redirect stderr into stdout (`2>&1`) so all output streams together.
+    let merged_cmd = format!("({cmd}) 2>&1");
     let mut child = Command::new("sh")
-        .args(["-c", cmd])
+        .args(["-c", &merged_cmd])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .env("CLICOLOR_FORCE", "1")
         .env("FORCE_COLOR", "1")
         .env("COLORTERM", "truecolor")
