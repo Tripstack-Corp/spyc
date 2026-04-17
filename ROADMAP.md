@@ -24,6 +24,9 @@ onboarding new users or recording screencasts. Details TBD.
 - **Split stdout/stderr pager** — option to show stdout and stderr in
   separate horizontal panes within the pager, for commands where you
   want to see errors separately from normal output
+- **Buffer history** — keep a stack of recent pager buffers (command
+  output, file views, diffs) so you can cycle back through them without
+  re-running commands. Like `:bprev`/`:bnext` in vim.
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
 ## Done (recent)
