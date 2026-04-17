@@ -389,7 +389,9 @@ fn line_plain_text(line: &Line) -> String {
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let inner_area = if view.full_width { area } else { centered_rect(area, 90, 92) };
 
-    frame.render_widget(Clear, inner_area);
+    // Clear the full frame so the file listing behind doesn't bleed
+    // through at the edges of the centered pager box.
+    frame.render_widget(Clear, area);
 
     let pos = view.position_indicator(inner_area.height.saturating_sub(2));
     let title = format!(
