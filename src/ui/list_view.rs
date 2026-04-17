@@ -238,14 +238,17 @@ fn row_style(kind: EntryKind, git: GitFileStatus, theme: &Theme) -> Style {
         EntryKind::File => theme.file_style(),
         EntryKind::Other => theme.other_style(),
     };
-    // Tint based on git status — override fg for modified/new files.
+    // Layer git status on top of file-type color. File type stays as
+    // the primary fg; git status adds a modifier so both signals are
+    // visible. Only truly exceptional states (deleted, conflicted)
+    // override the foreground.
     match git {
         GitFileStatus::Clean => base,
-        GitFileStatus::Modified => base.fg(theme.pick),  // amber
-        GitFileStatus::Added | GitFileStatus::Untracked => base.fg(theme.exec), // green
-        GitFileStatus::Deleted => base.fg(theme.cursor_bg).add_modifier(Modifier::DIM), // red-ish dim
-        GitFileStatus::Renamed => base.fg(theme.symlink), // lavender
-        GitFileStatus::Conflicted => base.fg(theme.cursor_bg).add_modifier(Modifier::BOLD), // red bold
+        GitFileStatus::Modified => base.add_modifier(Modifier::ITALIC),
+        GitFileStatus::Added | GitFileStatus::Untracked => base.add_modifier(Modifier::UNDERLINED),
+        GitFileStatus::Deleted => base.fg(theme.cursor_bg).add_modifier(Modifier::DIM),
+        GitFileStatus::Renamed => base.add_modifier(Modifier::ITALIC),
+        GitFileStatus::Conflicted => base.fg(theme.cursor_bg).add_modifier(Modifier::BOLD),
     }
 }
 
