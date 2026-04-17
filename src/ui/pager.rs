@@ -398,20 +398,25 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         view.lines.len()
     );
     let title_right = format!("  {pos}  ");
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .title_bottom(Line::from(Span::styled(
-            title_right,
-            Style::default()
-                .fg(theme.status_suffix)
-                .add_modifier(Modifier::BOLD),
-        )).right_aligned());
+    let block = if view.full_width {
+        // No border in full-width mode so terminal text selection is clean.
+        Block::default()
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(
+                title,
+                Style::default()
+                    .fg(theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_bottom(Line::from(Span::styled(
+                title_right,
+                Style::default()
+                    .fg(theme.status_suffix)
+                    .add_modifier(Modifier::BOLD),
+            )).right_aligned())
+    };
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
 
