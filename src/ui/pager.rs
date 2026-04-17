@@ -59,6 +59,8 @@ pub struct PagerView {
     /// instead of scrolling, and Enter selects. The value is the 0-based
     /// line index of the highlighted row.
     pub picker_cursor: Option<usize>,
+    /// When true, suppress [EOF] and tilde markers (content is still arriving).
+    pub streaming: bool,
 }
 
 impl PagerView {
@@ -77,6 +79,7 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            streaming: false,
         }
     }
 
@@ -92,6 +95,7 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            streaming: false,
         }
     }
 
@@ -111,6 +115,7 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            streaming: false,
         }
     }
 
@@ -505,7 +510,7 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     let eof_style = Style::default()
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
-    if slice_end >= content_end && display_lines.len() < viewport_h {
+    if slice_end >= content_end && display_lines.len() < viewport_h && !view.streaming {
         display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
         while display_lines.len() < viewport_h {
             display_lines.push(Line::from(Span::styled("~", eof_style)));
@@ -560,7 +565,7 @@ fn render_multi_column(
         };
 
         // Fill remaining rows with tilde markers.
-        if col_end >= content_end && display_lines.len() < viewport_h {
+        if col_end >= content_end && display_lines.len() < viewport_h && !view.streaming {
             if col_start < content_end {
                 display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
             }

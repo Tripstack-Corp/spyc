@@ -508,6 +508,7 @@ impl App {
                         view.title = title;
                         view.lines = text.lines;
                         view.saveable = true;
+                        view.streaming = false;
                         view.scroll_to_bottom(40);
                     }
                     self.pending_capture = None;
@@ -537,11 +538,14 @@ impl App {
                 self.refresh_listing();
             }
 
-            // Short poll while the pane is active so child output
-            // (and cursor motion in e.g. claude's visual mode) feels
-            // snappy. Long poll otherwise to keep CPU near zero when
-            // the user is just browsing files.
-            let poll_ms = if self.pane_tabs.is_some() { 16 } else { 250 };
+            // Short poll while the pane or a capture is active so output
+            // streams without lag. Long poll otherwise to keep CPU near
+            // zero when the user is just browsing files.
+            let poll_ms = if self.pane_tabs.is_some() || self.pending_capture.is_some() {
+                16
+            } else {
+                250
+            };
             if event::poll(Duration::from_millis(poll_ms))? {
                 match event::read()? {
                     Event::Key(key) => {
@@ -1117,6 +1121,7 @@ impl App {
                 if let Some(view) = self.pager.as_mut() {
                     view.title = title;
                     view.saveable = true;
+                    view.streaming = false;
                 }
                 self.pending_capture = None;
             }
@@ -1488,10 +1493,12 @@ impl App {
                     Ok((child, rx)) => {
                         let cmd_display = prompt.buffer.clone();
                         // Open the pager immediately with a "running" header.
-                        self.pager = Some(PagerView::new_plain(
+                        let mut view = PagerView::new_plain(
                             format!("{title} — running..."),
                             Vec::new(),
-                        ));
+                        );
+                        view.streaming = true;
+                        self.pager = Some(view);
                         self.pending_capture = Some(PendingCapture {
                             child,
                             output_rx: rx,
