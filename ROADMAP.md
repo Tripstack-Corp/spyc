@@ -28,6 +28,8 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- Syntax highlighting in pager via syntect (base16-eighties.dark theme,
+  hundreds of languages, auto-detected from file extension)
 - Streaming pager for `!` commands — output streams live with hourglass
   timer, stderr merged into stdout, auto-scroll to bottom
 - Session save/restore (`--resume`) — auto-save on quit, picker UI with

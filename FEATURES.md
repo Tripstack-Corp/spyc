@@ -94,7 +94,11 @@ Multiple tabs, each running an independent pty:
 A built-in pager for viewing files and command output without leaving
 cspy.
 
+- **Syntax highlighting** via syntect — source files are highlighted
+  with language-aware coloring (hundreds of languages supported)
 - ANSI color preservation — captured command output looks exactly right
+- **Streaming output** — `!` commands show output live with an
+  hourglass timer, stderr merged so build progress appears in real-time
 - **/ search** within pager content, with **n / N** navigation
 - **l** toggle line numbers and whitespace markers
 - **f** toggle full-width mode vs. centered overlay
