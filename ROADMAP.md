@@ -29,6 +29,42 @@ onboarding new users or recording screencasts. Details TBD.
   re-running commands. Like `:bprev`/`:bnext` in vim.
 - Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
 
+### Ideas from fbi-improved (fim)
+
+**Pager / navigation:**
+- **Page scroll overlap** — when paging up/down, keep 2-3 lines from the
+  previous page visible for reading continuity (`_scroll_skip_page_fraction`)
+- **Auto-scroll reading mode** — continuous scroll at configurable speed
+  for hands-free reading. `while(1){scroll;sleep 2}` style.
+- **Jump-back in pager** — `''` to return to where you were before the
+  last search/jump (pager already has it for the file list)
+
+**Automation / scripting:**
+- **Autocommands** — user-configurable hooks triggered per file type:
+  `autocmd "*.md" "preview"`, `autocmd "*.log" "tail_mode"`. Could live
+  in `.cspyrc.toml` and replace hardcoded special cases.
+- **Macro recording** — vim-style `qa`...`q`...`@a`. Record a sequence
+  of actions (rename, move, tag) and replay on demand.
+- **Startup/exit command flags** — `cspy -c "sort mtime"` to execute
+  commands at startup, `-F` for exit hooks.
+
+**Shell composability:**
+- **Stdout on exit** — output picks/inventory paths to stdout when
+  quitting, making cspy composable: `cspy | xargs rm`, `cspy | tar czf`.
+- **`--dump-default-config`** — output the full default `.cspyrc.toml` so
+  users have a complete starting point for customization.
+
+**Status bar / display:**
+- **Conditional status bar expandos** — `%?git?%branch?` shows git info
+  only when in a repo. Format-string-based status bar with `%i/%l`,
+  `%n`, `%F` etc.
+
+**File management:**
+- **Per-file tags/metadata** — key-value pairs attached to files that
+  persist within a session, usable in filters and autocommands.
+- **Background directory loading** — async listing for large trees so
+  the UI stays responsive.
+
 ## Done (recent)
 
 - Syntax highlighting in pager via syntect (base16-eighties.dark theme,

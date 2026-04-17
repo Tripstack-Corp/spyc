@@ -152,7 +152,7 @@ Vi-style named bookmarks for fast navigation:
 - **''** jump back to the previous directory (like `cd -`)
 - **\`** jump to the directory where cspy was launched
 
-## Ignore masks
+## Ignore masks & filtering
 
 Two toggle-able filter masks to hide clutter:
 
@@ -161,6 +161,11 @@ Two toggle-able filter masks to hide clutter:
 
 Masks are configurable in `.cspyrc.toml` — you can define custom glob
 patterns for each group.
+
+**Temporary filter** (`=`): type a glob pattern to temporarily hide
+non-matching files. `=!` shows only picked files. `=` with an empty
+pattern clears the filter. The active filter is shown in the status bar.
+Cleared automatically when changing directories.
 
 ## Powerline status bar
 

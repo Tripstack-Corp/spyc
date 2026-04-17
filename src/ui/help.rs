@@ -58,10 +58,11 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Ignore masks",
+        title: "Ignore masks & filtering",
         rows: &[
             ("a", "toggle mask 1 (dotfiles by default)"),
             ("o", "toggle mask 2 (build artifacts by default)"),
+            ("=", "limit — filter by glob (! = picks only, empty clears)"),
         ],
     },
     Section {
@@ -126,13 +127,14 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Shell-out",
+        title: "Shell-out & commands",
         rows: &[
             ("!", "capture output → pager (colors preserved)"),
             ("!!", "repeat last captured command"),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
+            (":", "command line (:limit, :!cmd, :!!, :;cmd, :q)"),
         ],
     },
     Section {

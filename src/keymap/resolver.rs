@@ -70,15 +70,18 @@ impl Resolver {
 
     /// Display string for the current pending sequence, or `None` when idle.
     /// Shown in the prompt line so the user knows cspy is waiting for more input.
-    pub fn pending_display(&self) -> Option<&'static str> {
-        match self.pending {
-            PendingSeq::Normal => None,
-            PendingSeq::G => Some("g-"),
-            PendingSeq::Mark => Some("m-"),
-            PendingSeq::JumpMark => Some("'-"),
-            PendingSeq::W => Some("^W-"),
-            PendingSeq::Worktree => Some("W-"),
-        }
+    pub fn pending_display(&self) -> Option<String> {
+        let prefix = self.count.map(|n| n.to_string()).unwrap_or_default();
+        let seq = match self.pending {
+            PendingSeq::Normal if self.count.is_some() => "",
+            PendingSeq::Normal => return None,
+            PendingSeq::G => "g-",
+            PendingSeq::Mark => "m-",
+            PendingSeq::JumpMark => "'-",
+            PendingSeq::W => "^W-",
+            PendingSeq::Worktree => "W-",
+        };
+        Some(format!("{prefix}{seq}"))
     }
 
     /// Feed a key through the resolver, first consulting the user keymap
@@ -342,6 +345,18 @@ impl Resolver {
             KeyCode::Char('N') => {
                 self.reset();
                 ResolverOutcome::Action(Action::SearchPrev)
+            }
+
+            // Filter.
+            KeyCode::Char('=') => {
+                self.reset();
+                ResolverOutcome::Action(Action::LimitPrompt)
+            }
+
+            // Command line.
+            KeyCode::Char(':') => {
+                self.reset();
+                ResolverOutcome::Action(Action::CommandPrompt)
             }
 
             // Jump.

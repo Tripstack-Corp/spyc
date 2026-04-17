@@ -167,6 +167,10 @@ enum PromptKind {
     WorktreeNewBranch,
     /// W d — confirm worktree removal (y/N).
     WorktreeDeleteConfirm,
+    /// `=` — temporary file list filter (glob pattern, `!` for picks, empty clears).
+    Limit,
+    /// `:` — vim-style command line.
+    Command,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -176,6 +180,9 @@ pub struct App {
     inventory: Inventory,
     marks: Marks,
     masks: IgnoreMasks,
+    /// Temporary filter pattern from `:limit`. `None` = show all.
+    /// `Some("!")` = show only picked files.
+    temp_filter: Option<String>,
     view: View,
     cursor: Cursor,
     resolver: Resolver,
@@ -318,6 +325,7 @@ impl App {
                 m.apply_config(&config.ignore_masks);
                 m
             },
+            temp_filter: None,
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),
@@ -1153,13 +1161,21 @@ impl App {
         match self.view {
             View::Dir => (
                 self.listing.dir.display().to_string(),
-                format!(
-                    "[picks:{} inv:{} m1:{} m2:{}]",
-                    self.picks.len(),
-                    self.inventory.len(),
-                    on_off(self.masks.mask1.enabled),
-                    on_off(self.masks.mask2.enabled),
-                ),
+                {
+                    let filter_tag = match &self.temp_filter {
+                        Some(f) if f == "!" => " limit:picks".to_string(),
+                        Some(f) => format!(" limit:{f}"),
+                        None => String::new(),
+                    };
+                    format!(
+                        "[picks:{} inv:{} m1:{} m2:{}{}]",
+                        self.picks.len(),
+                        self.inventory.len(),
+                        on_off(self.masks.mask1.enabled),
+                        on_off(self.masks.mask2.enabled),
+                        filter_tag,
+                    )
+                },
             ),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
@@ -1574,6 +1590,136 @@ impl App {
         self.pending_new_tab_cmd = None;
     }
 
+    /// Parse and dispatch a `:` command. Recognized commands:
+    ///   :limit <pat>  /  :limit !  /  :limit     — temp filter
+    ///   :!<cmd>                                    — captured shell command
+    ///   :!!                                        — repeat last captured
+    ///   :;<cmd>                                    — foreground shell command
+    ///   :q                                         — quit
+    fn dispatch_command(&mut self, input: &str) -> PostAction {
+        let input = input.trim();
+        if input.is_empty() {
+            return PostAction::None;
+        }
+
+        // :q / :quit
+        if input == "q" || input == "quit" {
+            self.should_quit = true;
+            return PostAction::None;
+        }
+
+        // :limit [pattern]
+        if input == "limit" {
+            self.temp_filter = None;
+            self.flash_info("limit cleared");
+            self.rebuild_rows();
+            return PostAction::None;
+        }
+        if let Some(pat) = input.strip_prefix("limit ") {
+            let pat = pat.trim();
+            if pat.is_empty() {
+                self.temp_filter = None;
+                self.flash_info("limit cleared");
+            } else if pat == "!" {
+                self.temp_filter = Some("!".to_string());
+                self.flash_info("limit: picks only");
+            } else {
+                self.temp_filter = Some(pat.to_string());
+                self.flash_info(format!("limit: {pat}"));
+            }
+            self.rebuild_rows();
+            return PostAction::None;
+        }
+
+        // :!! — repeat last captured command
+        if input == "!!" || input == "!" {
+            match self.last_captured_cmd.clone() {
+                Some(cmd) => {
+                    let expanded = crate::shell::expand_percent(&cmd, &self.selection_paths());
+                    let title = format!("! {cmd}");
+                    match spawn_capture(&expanded) {
+                        Ok((child, rx)) => {
+                            let mut view = PagerView::new_plain(
+                                format!("\u{23f3} {title} — running... (0s)"),
+                                Vec::new(),
+                            );
+                            view.streaming = true;
+                            self.pager = Some(view);
+                            self.pending_capture = Some(PendingCapture {
+                                child,
+                                output_rx: rx,
+                                buffer: Vec::new(),
+                                title,
+                                cmd_display: cmd,
+                                started: std::time::Instant::now(),
+                                finished: false,
+                            });
+                        }
+                        Err(e) => self.flash_error(format!("exec: {e}")),
+                    }
+                }
+                None => self.flash_error("no previous ! command"),
+            }
+            return PostAction::None;
+        }
+
+        // :!<cmd> — captured shell command
+        if let Some(cmd) = input.strip_prefix('!') {
+            let cmd = cmd.trim();
+            if cmd.is_empty() {
+                self.flash_error("empty command");
+                return PostAction::None;
+            }
+            self.last_captured_cmd = Some(cmd.to_string());
+            let expanded = crate::shell::expand_percent(cmd, &self.selection_paths());
+            let title = format!("! {cmd}");
+            match spawn_capture(&expanded) {
+                Ok((child, rx)) => {
+                    let mut view = PagerView::new_plain(
+                        format!("\u{23f3} {title} — running... (0s)"),
+                        Vec::new(),
+                    );
+                    view.streaming = true;
+                    self.pager = Some(view);
+                    self.pending_capture = Some(PendingCapture {
+                        child,
+                        output_rx: rx,
+                        buffer: Vec::new(),
+                        title,
+                        cmd_display: cmd.to_string(),
+                        started: std::time::Instant::now(),
+                        finished: false,
+                    });
+                }
+                Err(e) => self.flash_error(format!("exec: {e}")),
+            }
+            return PostAction::None;
+        }
+
+        // :;<cmd> — foreground shell command
+        if let Some(cmd) = input.strip_prefix(';') {
+            let cmd = cmd.trim();
+            if cmd.is_empty() {
+                self.flash_error("empty command");
+                return PostAction::None;
+            }
+            let expanded = crate::shell::expand_percent(cmd, &self.selection_paths());
+            let (rows, cols) =
+                Self::top_overlay_size(self.pane_height_pct, self.pane_tabs.is_some());
+            let cwd = self.listing.dir.clone();
+            match Pane::spawn(&expanded, rows, cols, &cwd) {
+                Ok(p) => {
+                    self.top_overlay = Some(p);
+                }
+                Err(e) => self.flash_error(format!("spawn: {e}")),
+            }
+            return PostAction::None;
+        }
+
+        self.flash_error(format!("unknown command: {input}"));
+        PostAction::None
+    }
+
     fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
         match prompt.kind {
             PromptKind::PatternPick => {
@@ -1756,6 +1902,26 @@ impl App {
                     }
                     Err(e) => self.flash_error(format!("worktree add: {e}")),
                 }
+                PostAction::None
+            }
+            PromptKind::Command => {
+                return self.dispatch_command(&prompt.buffer);
+            }
+            PromptKind::Limit => {
+                let pattern = prompt.buffer.trim().to_string();
+                if pattern.is_empty() {
+                    // Clear the filter.
+                    self.temp_filter = None;
+                    self.flash_info("limit cleared");
+                } else if pattern == "!" {
+                    // Show only picked files.
+                    self.temp_filter = Some("!".to_string());
+                    self.flash_info("limit: picks only");
+                } else {
+                    self.temp_filter = Some(pattern.clone());
+                    self.flash_info(format!("limit: {pattern}"));
+                }
+                self.rebuild_rows();
                 PostAction::None
             }
             PromptKind::WorktreeDeleteConfirm => {
@@ -3069,6 +3235,13 @@ impl App {
                 }
                 self.rebuild_rows();
             }
+            Action::LimitPrompt => {
+                let prefix = if self.temp_filter.is_some() { "limit (active)=" } else { "limit=" };
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
+            }
+            Action::CommandPrompt => {
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+            }
 
             Action::ShellCapturedPrompt => {
                 self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
@@ -3548,6 +3721,7 @@ impl App {
         self.git_info = crate::sysinfo::git_status(&canonical);
         self.git_files = crate::sysinfo::git_file_statuses(&canonical);
         self.picks.clear();
+        self.temp_filter = None;
         self.cursor = Cursor::new();
         self.view = View::Dir;
         self.rebuild_rows();
@@ -3623,13 +3797,16 @@ impl App {
 
     fn rebuild_rows(&mut self) {
         self.rows = match self.view {
-            View::Dir => self
-                .listing
-                .entries
-                .iter()
-                .filter(|e| !self.masks.hides(&e.name))
-                .map(row_from_entry)
-                .collect(),
+            View::Dir => {
+                let base: Vec<RowData> = self
+                    .listing
+                    .entries
+                    .iter()
+                    .filter(|e| !self.masks.hides(&e.name))
+                    .map(row_from_entry)
+                    .collect();
+                self.apply_temp_filter(base)
+            }
             View::Inventory => self
                 .inventory
                 .paths()
@@ -3641,6 +3818,23 @@ impl App {
                 .collect(),
         };
         self.cursor.clamp(self.rows.len());
+    }
+
+    fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
+        let Some(ref pattern) = self.temp_filter else {
+            return rows;
+        };
+        if pattern == "!" {
+            // Show only picked files.
+            rows.into_iter()
+                .filter(|r| self.picks.contains(&r.path))
+                .collect()
+        } else {
+            let matcher = Matcher::build(pattern);
+            rows.into_iter()
+                .filter(|r| matcher.matches(&r.display))
+                .collect()
+        }
     }
 }
 

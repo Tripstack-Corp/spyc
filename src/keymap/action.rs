@@ -31,8 +31,10 @@ pub enum Action {
     ToggleInventoryView, // i
     EmptyInventory,      // z
 
-    // Ignore masks.
-    ToggleMask(u8), // a -> 1, o -> 2
+    // Ignore masks & filtering.
+    ToggleMask(u8),  // a -> 1, o -> 2
+    LimitPrompt,     // = — temporary filter (glob pattern, `!` for picks, empty clears)
+    CommandPrompt,   // : — vim-style command line (limit, !, !!, ;, etc.)
 
     // Shell-out.
     ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colors
@@ -136,6 +138,8 @@ impl Action {
             Self::ToggleInventoryView => "toggle inventory view",
             Self::EmptyInventory => "empty inventory",
             Self::ToggleMask(_) => "toggle ignore mask",
+            Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
+            Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",
             Self::ShellCapturedPrompt => "shell command (captured, pager)",
             Self::ShellForegroundPrompt => "shell command (foreground)",
             Self::StartShell => "start shell",
