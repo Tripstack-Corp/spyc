@@ -109,8 +109,10 @@ cspy.
 
 Three modes of running commands, each for a different use case:
 
-- **!** captured — run a command, capture stdout with ANSI colors, view
-  in the pager. `%` expands to the current selection.
+- **!** captured — run a command and stream output into the pager in
+  real-time with an hourglass timer. Stderr is merged so build
+  progress, errors, and output all appear together. `%` expands to
+  the current selection. `^C` interrupts.
 - **;** foreground — run an interactive command (top, vim, htop) in a
   top-overlay pty that replaces the file listing while the bottom pane
   stays untouched.
@@ -180,6 +182,19 @@ unambiguous:
 - **Ignore mask patterns** — define what each mask group hides.
 - **Live reload** — config changes are picked up automatically without
   restarting cspy. Manual reload with **^R**.
+
+## Session management
+
+cspy auto-saves your workspace on quit and can restore it on startup.
+
+- **Auto-save** — on quit, cspy saves the current directory, all pane
+  tabs (command, label, cwd), active tab, pane height, and focus state.
+- **`cspy --resume`** (or `-r`) — opens a session picker with
+  human-readable timestamps ("just now", "2 hours ago", "3 days ago").
+- **j/k navigation** — browse sessions with highlighted cursor row.
+  Enter to restore, n for a new session, 1-9 for direct selection.
+- Sessions are de-duplicated by cwd + tab commands (most recent kept).
+- Capped at 20 most recent sessions.
 
 ## Info and diagnostics
 
