@@ -110,7 +110,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("^\\  F10  ^W \\  ^W c", "toggle the bottom pane (claude)"),
             ("F9", "open pane with claude --resume"),
-            ("^W j  ^W k", "switch focus between list and pane"),
+            ("^W j / ^W k", "focus pane (down) / list (up)"),
             ("^W s", "send selection paths to pane stdin"),
             ("^W p", "pipe file contents of selection to pane"),
             ("^W i", "pipe inventory file contents to pane"),

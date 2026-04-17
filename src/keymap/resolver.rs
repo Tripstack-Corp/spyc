@@ -136,8 +136,11 @@ impl Resolver {
         // Mid-sequence: Ctrl-W prefix waiting for a pane command.
         if self.pending == PendingSeq::W {
             let out = match ev.code {
-                KeyCode::Char('j' | 'J' | 'k' | 'K') => {
-                    ResolverOutcome::Action(Action::PaneFocusToggle)
+                KeyCode::Char('j' | 'J') => {
+                    ResolverOutcome::Action(Action::PaneFocusDown)
+                }
+                KeyCode::Char('k' | 'K') => {
+                    ResolverOutcome::Action(Action::PaneFocusUp)
                 }
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),

@@ -1804,12 +1804,15 @@ impl App {
         }
     }
 
-    /// ^W j / ^W k — flip keyboard focus between the list and the pane.
-    fn toggle_pane_focus(&mut self) {
+    /// ^W j / ^W k — set keyboard focus directionally (no wrap).
+    fn set_pane_focus(&mut self, want_pane: bool) {
         if self.pane_tabs.is_none() {
             return;
         }
-        self.pane_focused = !self.pane_focused;
+        if self.pane_focused == want_pane {
+            return; // already there — no-op
+        }
+        self.pane_focused = want_pane;
         self.flash_info(if self.pane_focused {
             "focus: pane"
         } else {
@@ -2601,13 +2604,10 @@ impl App {
             return; // already at the edge
         }
         let target_idx = target_col * rows_per_col + current_row;
-        self.cursor.index = if target_idx < len {
-            target_idx
-        } else {
-            // Partial column — clamp to its last entry.
-            let col_end = ((target_col + 1) * rows_per_col).min(len);
-            col_end - 1
-        };
+        if target_idx >= len {
+            return; // target column has no entry on this row
+        }
+        self.cursor.index = target_idx;
     }
 
     // --- Action handlers --------------------------------------------------
@@ -2835,7 +2835,8 @@ impl App {
 
             Action::TogglePane
             | Action::ResumePane
-            | Action::PaneFocusToggle
+            | Action::PaneFocusDown
+            | Action::PaneFocusUp
             | Action::PaneSendSelection
             | Action::PaneGrow
             | Action::PaneShrink
@@ -2865,7 +2866,8 @@ impl App {
 
             Action::TogglePane => self.toggle_pane(),
             Action::ResumePane => self.open_pane_tab("claude --resume"),
-            Action::PaneFocusToggle => self.toggle_pane_focus(),
+            Action::PaneFocusDown => self.set_pane_focus(true),
+            Action::PaneFocusUp => self.set_pane_focus(false),
             Action::PaneSendSelection => self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
             Action::PaneShrink => self.resize_pane(-5),
