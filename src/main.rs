@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("spyc {}", env!("CARGO_PKG_VERSION"));
+        println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 

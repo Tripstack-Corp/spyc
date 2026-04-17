@@ -2460,7 +2460,7 @@ impl App {
 
     fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("spyc {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION")));
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!("cwd      : {}", self.listing.dir.display()));
         lines.push(format!("entries  : {}", self.listing.entries.len()));
@@ -3532,7 +3532,7 @@ impl App {
 
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
-                self.flash_info(format!("spyc {}", env!("CARGO_PKG_VERSION")));
+                self.flash_info(format!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION")));
             }
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
