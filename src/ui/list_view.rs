@@ -171,19 +171,12 @@ impl Widget for ListView<'_> {
             let x = area.x + x_offsets[col_idx];
             let y = area.y + row_idx as u16;
 
-            let marker = if row.picked {
-                '*'
+            let (marker, marker_style) = if row.picked {
+                ('*', self.theme.pick_style())
             } else if row.taken {
-                '+'
+                ('+', self.theme.take_style())
             } else {
-                ' '
-            };
-            let marker_style = if row.picked {
-                self.theme.pick_style()
-            } else if row.taken {
-                self.theme.take_style()
-            } else {
-                Style::default()
+                git_marker(row.git_status, self.theme)
             };
 
             let name_style = row_style(row.kind, row.git_status, self.theme);
@@ -230,25 +223,27 @@ impl Widget for ListView<'_> {
     }
 }
 
-fn row_style(kind: EntryKind, git: GitFileStatus, theme: &Theme) -> Style {
-    let base = match kind {
+fn row_style(kind: EntryKind, _git: GitFileStatus, theme: &Theme) -> Style {
+    match kind {
         EntryKind::Dir => theme.dir_style(),
         EntryKind::Executable => theme.exec_style(),
         EntryKind::Symlink => theme.symlink_style(),
         EntryKind::File => theme.file_style(),
         EntryKind::Other => theme.other_style(),
-    };
-    // Layer git status on top of file-type color. File type stays as
-    // the primary fg; git status adds a modifier so both signals are
-    // visible. Only truly exceptional states (deleted, conflicted)
-    // override the foreground.
+    }
+}
+
+/// Colored marker character for git status, shown in the left gutter.
+/// Picks and inventory markers take priority (handled by the caller).
+fn git_marker(git: GitFileStatus, theme: &Theme) -> (char, Style) {
     match git {
-        GitFileStatus::Clean => base,
-        GitFileStatus::Modified => base.add_modifier(Modifier::ITALIC),
-        GitFileStatus::Added | GitFileStatus::Untracked => base.add_modifier(Modifier::UNDERLINED),
-        GitFileStatus::Deleted => base.fg(theme.cursor_bg).add_modifier(Modifier::DIM),
-        GitFileStatus::Renamed => base.add_modifier(Modifier::ITALIC),
-        GitFileStatus::Conflicted => base.fg(theme.cursor_bg).add_modifier(Modifier::BOLD),
+        GitFileStatus::Clean => (' ', Style::default()),
+        GitFileStatus::Modified => ('~', Style::default().fg(theme.pick)),          // amber
+        GitFileStatus::Added => ('+', Style::default().fg(theme.exec)),             // green
+        GitFileStatus::Untracked => ('?', Style::default().fg(theme.exec)),         // green
+        GitFileStatus::Deleted => ('-', Style::default().fg(theme.cursor_bg)),      // red
+        GitFileStatus::Renamed => ('>', Style::default().fg(theme.symlink)),         // lavender
+        GitFileStatus::Conflicted => ('!', Style::default().fg(theme.cursor_bg).add_modifier(Modifier::BOLD)),
     }
 }
 
