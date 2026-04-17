@@ -27,7 +27,7 @@ impl History {
     }
 
     pub fn load_file(filename: &str) -> Self {
-        let entries = disk_path(filename)
+        let mut entries = disk_path(filename)
             .and_then(|p| std::fs::read_to_string(&p).ok())
             .map(|text| {
                 text.lines()
@@ -36,6 +36,18 @@ impl History {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // Deduplicate: keep the *last* occurrence of each command (most recent).
+        {
+            let mut seen = std::collections::HashSet::new();
+            let mut deduped = Vec::with_capacity(entries.len());
+            for entry in entries.drain(..).rev() {
+                if seen.insert(entry.clone()) {
+                    deduped.push(entry);
+                }
+            }
+            deduped.reverse();
+            entries = deduped;
+        }
         Self {
             entries,
             nav: None,

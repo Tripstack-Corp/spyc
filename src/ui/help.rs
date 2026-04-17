@@ -130,7 +130,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("!", "capture output → pager (colors preserved)"),
             ("!!", "repeat last captured command"),
-            ("!?", "history picker — browse, select, delete"),
+            ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
         ],

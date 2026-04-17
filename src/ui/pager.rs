@@ -59,8 +59,13 @@ pub struct PagerView {
     /// instead of scrolling, and Enter selects. The value is the 0-based
     /// line index of the highlighted row.
     pub picker_cursor: Option<usize>,
+    /// When set, render a vi cursor on the picker line at this column offset.
+    /// Used by the history editor to show the editing cursor inline.
+    pub picker_edit_cursor: Option<(usize, crate::ui::line_edit::Mode)>,
     /// When true, suppress [EOF] and tilde markers (content is still arriving).
     pub streaming: bool,
+    /// When set, show `:` + digits at the bottom of the pager (inline jump prompt).
+    pub jump_buf: Option<String>,
 }
 
 impl PagerView {
@@ -79,7 +84,9 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            picker_edit_cursor: None,
             streaming: false,
+            jump_buf: None,
         }
     }
 
@@ -95,7 +102,9 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            picker_edit_cursor: None,
             streaming: false,
+            jump_buf: None,
         }
     }
 
@@ -115,7 +124,9 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            picker_edit_cursor: None,
             streaming: false,
+            jump_buf: None,
         }
     }
 
@@ -343,6 +354,15 @@ impl PagerView {
         self.scroll_to_match(line_idx, viewport_height);
     }
 
+    /// Returns the line index of the current search match, if any.
+    pub fn current_match_line(&self) -> Option<usize> {
+        if let Search::Active { matches, cursor, .. } = &self.search {
+            matches.get(*cursor).copied()
+        } else {
+            None
+        }
+    }
+
     /// Scroll the viewport so `line_idx` is roughly a third of the way
     /// down — gives context above and more content below.
     fn scroll_to_match(&mut self, line_idx: usize, viewport_height: u16) {
@@ -369,6 +389,9 @@ impl PagerView {
 
     /// Current search status for the footer line (e.g. `/foo 3/17`).
     fn status_text(&self) -> Option<String> {
+        if let Some(ref buf) = self.jump_buf {
+            return Some(format!(":{buf}_"));
+        }
         match &self.search {
             Search::Off => None,
             Search::Typing(buf) => Some(format!("/{buf}_")),
@@ -480,21 +503,42 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
             let mut styled = styled_line_for_render(line, view, abs_idx, theme);
             // Highlight the picker cursor row.
             if view.picker_cursor == Some(abs_idx) {
-                styled = Line::from(
-                    styled
-                        .spans
-                        .into_iter()
-                        .map(|s| {
-                            Span::styled(
-                                s.content,
-                                s.style
-                                    .bg(theme.cursor_bg)
-                                    .fg(theme.cursor_fg)
-                                    .add_modifier(Modifier::BOLD),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                );
+                if let Some((col, vi_mode)) = view.picker_edit_cursor {
+                    // History editor: show editing cursor on this line.
+                    let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let row_style = Style::default()
+                        .bg(theme.cursor_bg)
+                        .fg(theme.cursor_fg);
+                    let before: String = plain.chars().take(col).collect();
+                    let cursor_ch: String = plain.chars().nth(col).map_or(" ".into(), |c| c.to_string());
+                    let after: String = plain.chars().skip(col + 1).collect();
+                    let cursor_style = if vi_mode == crate::ui::line_edit::Mode::Normal {
+                        row_style.add_modifier(Modifier::REVERSED)
+                    } else {
+                        row_style.add_modifier(Modifier::UNDERLINED)
+                    };
+                    styled = Line::from(vec![
+                        Span::styled(before, row_style),
+                        Span::styled(cursor_ch, cursor_style),
+                        Span::styled(after, row_style),
+                    ]);
+                } else {
+                    styled = Line::from(
+                        styled
+                            .spans
+                            .into_iter()
+                            .map(|s| {
+                                Span::styled(
+                                    s.content,
+                                    s.style
+                                        .bg(theme.cursor_bg)
+                                        .fg(theme.cursor_fg)
+                                        .add_modifier(Modifier::BOLD),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                }
             }
             let styled = if view.show_whitespace {
                 apply_whitespace_markers(&styled, theme)

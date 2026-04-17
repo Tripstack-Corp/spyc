@@ -217,11 +217,16 @@ pub struct App {
     pending_worktrees: Option<Vec<PathBuf>>,
     /// Session restore picker. Digit keys 1-9 select.
     pending_sessions: Option<Vec<crate::state::sessions::Session>>,
-    /// True while the history picker overlay is active.
-    pending_history_pick: bool,
+    /// When active, holds the LineEditor for the history editor overlay.
+    pending_history_pick: Option<LineEditor>,
     /// Tracks whether the pager was open on the previous frame, so we can
     /// detect open-transitions and force a full repaint.
     pager_was_open: bool,
+    /// Accumulates digits for `:N` jump-to-entry in the history editor
+    /// (and pager). `Some("")` means `:` was just pressed, awaiting digits.
+    pager_jump_buf: Option<String>,
+    /// Pending `g` key for `gg` (go-to-top) in the history editor.
+    history_pending_g: bool,
     /// When `v` is pressed in the pager, stash info to restore it after
     /// the editor exits. `Some(path)` for temp-file buffers (reload on
     /// return); `None` for on-disk files (just reopen pager normally).
@@ -333,8 +338,10 @@ impl App {
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
-            pending_history_pick: false,
+            pending_history_pick: None,
             pager_was_open: false,
+            pager_jump_buf: None,
+            history_pending_g: false,
             pending_pager_return: None,
             start_dir: cwd,
             prev_dir: None,
@@ -1458,6 +1465,23 @@ impl App {
     fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> PostAction {
         use crate::ui::line_edit::EditResult;
 
+        // `!?` — when the buffer is empty and the user types '?',
+        // immediately open the history editor (no Enter needed).
+        if let KeyCode::Char('?') = key.code {
+            if let Mode::Prompting(Prompt {
+                kind: PromptKind::ShellCmdCaptured,
+                ref buffer,
+                ..
+            }) = self.mode
+            {
+                if buffer.is_empty() {
+                    self.mode = Mode::Normal;
+                    self.show_history_popup();
+                    return PostAction::None;
+                }
+            }
+        }
+
         // Feed key to the editor.
         let result = {
             let Mode::Prompting(prompt) = &mut self.mode else {
@@ -1579,11 +1603,6 @@ impl App {
                 PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
-                // `!?` opens history picker.
-                if prompt.buffer.trim() == "?" {
-                    self.show_history_popup();
-                    return PostAction::None;
-                }
                 // `!!` repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
                     match self.last_captured_cmd.clone() {
@@ -2105,6 +2124,40 @@ impl App {
         self.pager = Some(view);
     }
 
+    /// Prefix width for history editor lines: "  NNN  " = 7 chars.
+    const HIST_PREFIX_W: usize = 7;
+
+    /// Sync the history editor after moving the picker cursor to a new line.
+    /// Updates the LineEditor content and the display line.
+    fn sync_history_editor_to_cursor(&mut self) {
+        Self::sync_hist_editor(
+            &mut self.pager,
+            &mut self.pending_history_pick,
+            &self.history,
+        );
+    }
+
+    fn sync_hist_editor(
+        pager: &mut Option<pager::PagerView>,
+        editor_opt: &mut Option<LineEditor>,
+        history: &crate::state::history::History,
+    ) {
+        let Some(view) = pager else { return };
+        let Some(editor) = editor_opt else { return };
+        let new_cursor = view.picker_cursor.unwrap_or(0);
+        let entries = history.entries();
+        let hist_idx = entries.len().saturating_sub(1 + new_cursor);
+        if let Some(cmd) = entries.get(hist_idx) {
+            editor.set_content_keep_mode(cmd);
+        }
+        let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
+        view.lines[new_cursor] = ratatui::text::Line::from(text);
+        view.picker_edit_cursor = Some((
+            Self::HIST_PREFIX_W + editor.cursor,
+            editor.mode,
+        ));
+    }
+
     fn show_history_popup(&mut self) {
         let entries = self.history.entries();
         if entries.is_empty() {
@@ -2118,12 +2171,24 @@ impl App {
             .enumerate()
             .map(|(i, cmd)| format!("  {:>3}  {}", i + 1, cmd))
             .collect();
+        // Create a line editor loaded with the newest entry, Normal mode.
+        let newest = entries.last().unwrap();
+        let mut editor = LineEditor::new();
+        editor.set_content(newest);
+        editor.mode = crate::ui::line_edit::Mode::Normal;
+        if !editor.buf.is_empty() {
+            editor.cursor = editor.buf.len() - 1;
+        }
         let mut view = pager::PagerView::new_plain(
-            "history — j/k navigate, Enter select, dd delete, q close",
+            "history — j/k move, i edit, Enter run, ^D delete, q close",
             lines,
         );
-        view.picker_cursor = Some(0); // Start on newest entry.
-        self.pending_history_pick = true;
+        view.picker_cursor = Some(0);
+        view.picker_edit_cursor = Some((
+            Self::HIST_PREFIX_W + editor.cursor,
+            editor.mode,
+        ));
+        self.pending_history_pick = Some(editor);
         self.pager = Some(view);
     }
 
@@ -2438,6 +2503,23 @@ impl App {
                     let committed = view.commit_search(viewport);
                     if !committed {
                         self.flash_error("no matches");
+                    } else if let Some(ref mut editor) = self.pending_history_pick {
+                        // Sync picker cursor to the first match.
+                        if let Some(line) = view.current_match_line() {
+                            view.picker_cursor = Some(line);
+                            let nc = line;
+                            let entries = self.history.entries();
+                            let hi = entries.len().saturating_sub(1 + nc);
+                            if let Some(cmd) = entries.get(hi) {
+                                editor.set_content_keep_mode(cmd);
+                            }
+                            let text = format!("  {:>3}  {}", nc + 1, editor.text());
+                            view.lines[nc] = ratatui::text::Line::from(text);
+                            view.picker_edit_cursor = Some((
+                                Self::HIST_PREFIX_W + editor.cursor,
+                                editor.mode,
+                            ));
+                        }
                     }
                 }
                 KeyCode::Backspace => view.search_backspace(),
@@ -2445,6 +2527,53 @@ impl App {
                     view.search_push_char(c);
                 }
                 _ => {}
+            }
+            return PostAction::None;
+        }
+
+        // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
+        if let Some(ref mut buf) = self.pager_jump_buf {
+            match key.code {
+                KeyCode::Char(c @ '0'..='9') => {
+                    buf.push(c);
+                    view.jump_buf = Some(buf.clone());
+                }
+                KeyCode::Backspace => {
+                    if buf.pop().is_none() {
+                        self.pager_jump_buf = None;
+                        view.jump_buf = None;
+                    } else {
+                        view.jump_buf = Some(buf.clone());
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Ok(n) = buf.parse::<usize>() {
+                        if n > 0 {
+                            let target = n.saturating_sub(1);
+                            if self.pending_history_pick.is_some() {
+                                // History editor: jump to entry N.
+                                let max = view.lines.len().saturating_sub(1);
+                                let clamped = target.min(max);
+                                view.picker_cursor = Some(clamped);
+                                view.scroll = u16::try_from(clamped.saturating_sub(2))
+                                    .unwrap_or(u16::MAX);
+                            } else {
+                                // Regular pager: jump to line N.
+                                view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
+                            }
+                        }
+                    }
+                    view.jump_buf = None;
+                    self.pager_jump_buf = None;
+                    if self.pending_history_pick.is_some() {
+                        self.sync_history_editor_to_cursor();
+                    }
+                }
+                _ => {
+                    // Esc or non-digit cancels.
+                    self.pager_jump_buf = None;
+                    view.jump_buf = None;
+                }
             }
             return PostAction::None;
         }
@@ -2465,55 +2594,216 @@ impl App {
             }
         }
 
-        // History picker: j/k navigate, Enter select, dd delete.
-        if self.pending_history_pick {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    view.picker_move(1, viewport);
-                    return PostAction::None;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    view.picker_move(-1, viewport);
-                    return PostAction::None;
-                }
-                KeyCode::Enter => {
-                    let cursor = view.picker_cursor.unwrap_or(0);
-                    let entries = self.history.entries();
-                    // Picker is newest-first, so reverse the index.
-                    let hist_idx = entries.len().saturating_sub(1 + cursor);
-                    if let Some(cmd) = entries.get(hist_idx).cloned() {
+        // History editor: vi-edit highlighted line, Enter runs, d/x deletes.
+        if let Some(ref mut editor) = self.pending_history_pick {
+            use crate::ui::line_edit::EditResult;
+            let editor_is_normal = editor.mode == crate::ui::line_edit::Mode::Normal;
+
+            // Ctrl+D deletes the highlighted entry from history (any mode).
+            if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                let cursor = view.picker_cursor.unwrap_or(0);
+                let entries = self.history.entries();
+                let hist_idx = entries.len().saturating_sub(1 + cursor);
+                if hist_idx < entries.len() {
+                    self.history.remove(hist_idx);
+                    if self.history.entries().is_empty() {
                         self.pager = None;
-                        self.pending_history_pick = false;
+                        self.pending_history_pick = None;
                         self.needs_full_repaint = true;
-                        // Load the selected command into a ! prompt for editing.
-                        let mut prompt = Prompt::shell(PromptKind::ShellCmdCaptured, "!");
-                        prompt.buffer = cmd.clone();
-                        if let Some(ref mut ed) = prompt.editor {
-                            ed.set_content(&cmd);
-                        }
-                        self.mode = Mode::Prompting(prompt);
+                        self.flash_info("history is empty");
+                        return PostAction::None;
                     }
+                    let old_cursor = cursor;
+                    self.show_history_popup();
+                    if let Some(ref mut v) = self.pager {
+                        let max = (v.line_count() as usize).saturating_sub(1);
+                        v.picker_cursor = Some(old_cursor.min(max));
+                        let new_cur = v.picker_cursor.unwrap_or(0);
+                        let entries = self.history.entries();
+                        let hist_idx = entries.len().saturating_sub(1 + new_cur);
+                        if let Some(ref mut ed) = self.pending_history_pick {
+                            if let Some(cmd) = entries.get(hist_idx) {
+                                ed.set_content_keep_mode(cmd);
+                            }
+                            v.picker_edit_cursor = Some((
+                                Self::HIST_PREFIX_W + ed.cursor,
+                                ed.mode,
+                            ));
+                            let text = format!("  {:>3}  {}", new_cur + 1, ed.text());
+                            v.lines[new_cur] = ratatui::text::Line::from(text);
+                        }
+                    }
+                }
+                return PostAction::None;
+            }
+
+            // Inline sync: update editor from the current picker line.
+            // Uses `view` and `editor` already borrowed in this scope.
+            macro_rules! sync_editor {
+                ($v:expr, $ed:expr, $hist:expr) => {{
+                    let nc = $v.picker_cursor.unwrap_or(0);
+                    let entries = $hist.entries();
+                    let hi = entries.len().saturating_sub(1 + nc);
+                    if let Some(cmd) = entries.get(hi) {
+                        $ed.set_content_keep_mode(cmd);
+                    }
+                    let text = format!("  {:>3}  {}", nc + 1, $ed.text());
+                    $v.lines[nc] = ratatui::text::Line::from(text);
+                    $v.picker_edit_cursor = Some((
+                        Self::HIST_PREFIX_W + $ed.cursor,
+                        $ed.mode,
+                    ));
+                }};
+            }
+
+            // In Normal mode, j/k/G/gg/n/N navigate, / searches, : jumps.
+            if editor_is_normal {
+                let handled = match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.history_pending_g = false;
+                        view.picker_move(1, viewport);
+                        sync_editor!(view, editor, self.history);
+                        true
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.history_pending_g = false;
+                        view.picker_move(-1, viewport);
+                        sync_editor!(view, editor, self.history);
+                        true
+                    }
+                    KeyCode::Char('G') => {
+                        self.history_pending_g = false;
+                        let last = view.lines.len().saturating_sub(1);
+                        let delta = last as isize - view.picker_cursor.unwrap_or(0) as isize;
+                        view.picker_move(delta, viewport);
+                        sync_editor!(view, editor, self.history);
+                        true
+                    }
+                    KeyCode::Char('g') => {
+                        if self.history_pending_g {
+                            self.history_pending_g = false;
+                            let delta = -(view.picker_cursor.unwrap_or(0) as isize);
+                            view.picker_move(delta, viewport);
+                            sync_editor!(view, editor, self.history);
+                        } else {
+                            self.history_pending_g = true;
+                        }
+                        true
+                    }
+                    KeyCode::Char('/') => {
+                        self.history_pending_g = false;
+                        view.begin_search();
+                        true
+                    }
+                    KeyCode::Char('n') => {
+                        self.history_pending_g = false;
+                        view.search_next(viewport);
+                        if let Some(line) = view.current_match_line() {
+                            view.picker_cursor = Some(line);
+                            sync_editor!(view, editor, self.history);
+                        }
+                        true
+                    }
+                    KeyCode::Char('N') => {
+                        self.history_pending_g = false;
+                        view.search_prev(viewport);
+                        if let Some(line) = view.current_match_line() {
+                            view.picker_cursor = Some(line);
+                            sync_editor!(view, editor, self.history);
+                        }
+                        true
+                    }
+                    KeyCode::Char(':') => {
+                        self.history_pending_g = false;
+                        self.pager_jump_buf = Some(String::new());
+                        view.jump_buf = Some(String::new());
+                        true
+                    }
+                    // Disable pager keys that don't make sense here.
+                    KeyCode::Char('l' | 'v') => true,
+                    _ => { self.history_pending_g = false; false }
+                };
+                if handled {
                     return PostAction::None;
                 }
-                KeyCode::Char('d' | 'x') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    // d or x deletes the highlighted entry.
-                    let cursor = view.picker_cursor.unwrap_or(0);
-                    let entries = self.history.entries();
-                    let hist_idx = entries.len().saturating_sub(1 + cursor);
-                    if hist_idx < entries.len() {
-                        self.history.remove(hist_idx);
-                        // Rebuild the popup.
-                        let old_cursor = cursor;
-                        self.show_history_popup();
-                        if let Some(ref mut v) = self.pager {
-                            let max = (v.line_count() as usize).saturating_sub(1);
-                            v.picker_cursor = Some(old_cursor.min(max));
-                        }
+            }
+
+            // Feed all other keys to the line editor.
+            let result = editor.feed(key);
+            // Sync the display line with the editor buffer.
+            let pc = view.picker_cursor.unwrap_or(0);
+            let text = format!("  {:>3}  {}", pc + 1, editor.text());
+            view.lines[pc] = ratatui::text::Line::from(text);
+            view.picker_edit_cursor = Some((
+                Self::HIST_PREFIX_W + editor.cursor,
+                editor.mode,
+            ));
+
+            match result {
+                EditResult::Submit => {
+                    let cmd = editor.text();
+                    self.pager = None;
+                    self.pending_history_pick = None;
+                    self.needs_full_repaint = true;
+                    if cmd.trim().is_empty() {
+                        return PostAction::None;
                     }
-                    return PostAction::None;
+                    // Execute the (possibly edited) command directly.
+                    self.last_captured_cmd = Some(cmd.clone());
+                    self.history.push(cmd.trim());
+                    let expanded =
+                        crate::shell::expand_percent(&cmd, &self.selection_paths());
+                    let title = format!("! {cmd}");
+                    match spawn_capture(&expanded) {
+                        Ok((child, rx)) => {
+                            let mut cview =
+                                PagerView::new_plain(
+                                    format!("\u{23f3} {title} — running... (0s)"),
+                                    Vec::new(),
+                                );
+                            cview.streaming = true;
+                            self.pager = Some(cview);
+                            self.pending_capture = Some(PendingCapture {
+                                child,
+                                output_rx: rx,
+                                buffer: Vec::new(),
+                                title,
+                                cmd_display: cmd,
+                                started: std::time::Instant::now(),
+                                finished: false,
+                            });
+                        }
+                        Err(e) => self.flash_error(format!("exec: {e}")),
+                    }
+                }
+                EditResult::Cancel => {
+                    // Esc in Insert → Normal (handled by editor, returns Continue).
+                    // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
+                    self.pager = None;
+                    self.pending_history_pick = None;
+                    self.needs_full_repaint = true;
+                }
+                EditResult::HistoryPrev | EditResult::HistoryNext => {
+                    // Up/Down in Insert mode → move between lines.
+                    // HistoryPrev = Up key → move toward top of list (newer).
+                    let delta: isize = if result == EditResult::HistoryPrev { -1 } else { 1 };
+                    view.picker_move(delta, viewport);
+                    let new_cursor = view.picker_cursor.unwrap_or(0);
+                    let entries = self.history.entries();
+                    let hist_idx = entries.len().saturating_sub(1 + new_cursor);
+                    if let Some(cmd) = entries.get(hist_idx) {
+                        editor.set_content(cmd);
+                    }
+                    let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
+                    view.lines[new_cursor] = ratatui::text::Line::from(text);
+                    view.picker_edit_cursor = Some((
+                        Self::HIST_PREFIX_W + editor.cursor,
+                        editor.mode,
+                    ));
                 }
                 _ => {}
             }
+            return PostAction::None;
         }
 
         // Session picker: j/k navigate, Enter/1-9 select, n new.
@@ -2576,12 +2866,17 @@ impl App {
                 self.pager = None;
                 self.pending_worktrees = None;
                 self.pending_sessions = None;
-                self.pending_history_pick = false;
+                self.pending_history_pick = None;
+                self.pager_jump_buf = None;
                 self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
             KeyCode::Char('n') => view.search_next(viewport),
             KeyCode::Char('N') => view.search_prev(viewport),
+            KeyCode::Char(':') => {
+                self.pager_jump_buf = Some(String::new());
+                view.jump_buf = Some(String::new());
+            }
             KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
             KeyCode::Char('k') | KeyCode::Up => view.scroll_by(-1, viewport),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {

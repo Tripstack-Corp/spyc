@@ -100,6 +100,7 @@ cspy.
 - **Streaming output** — `!` commands show output live with an
   hourglass timer, stderr merged so build progress appears in real-time
 - **/ search** within pager content, with **n / N** navigation
+- **:N** jump to line N
 - **l** toggle line numbers and whitespace markers
 - **f** toggle full-width mode vs. centered overlay
 - **v** open pager content in `$EDITOR`
@@ -118,9 +119,12 @@ Three modes of running commands, each for a different use case:
   progress, errors, and output all appear together. `%` expands to
   the current selection. `^C` interrupts.
 - **!!** — repeat the last captured command.
-- **!?** — history picker popup. Browse all history with `j`/`k`,
-  `Enter` to load a command into the `!` prompt for editing before
-  running, `d`/`x` to delete an entry, `q`/`Esc` to close.
+- **!?** — history editor popup. Opens instantly (no Enter needed).
+  Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
+  with `n`/`N` to jump between matches, `:N` jumps to entry N.
+  Press `i` to vi-edit the highlighted command in-place.
+  `Enter` executes the (possibly edited) command, `Ctrl+D` deletes
+  an entry, `Esc`/`q` closes.
 - **;** foreground — run an interactive command (top, vim, htop) in a
   top-overlay pty that replaces the file listing while the bottom pane
   stays untouched.
