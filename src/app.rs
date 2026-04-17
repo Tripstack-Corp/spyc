@@ -205,6 +205,8 @@ pub struct App {
     pending_new_tab_cmd: Option<String>,
     /// Worktree paths for the `W l` picker. Digit keys 1-9 select.
     pending_worktrees: Option<Vec<PathBuf>>,
+    /// Session restore picker. Digit keys 1-9 select.
+    pending_sessions: Option<Vec<crate::state::sessions::Session>>,
     /// When `v` is pressed in the pager, stash info to restore it after
     /// the editor exits. `Some(path)` for temp-file buffers (reload on
     /// return); `None` for on-disk files (just reopen pager normally).
@@ -252,7 +254,7 @@ struct RowData {
 }
 
 impl App {
-    pub fn new() -> Result<Self> {
+    pub fn new(resume: bool) -> Result<Self> {
         let (cwd, start_error) = match std::env::current_dir() {
             Ok(d) => (d, None),
             Err(_) => {
@@ -314,6 +316,7 @@ impl App {
             pane_height_pct: 70,
             pending_new_tab_cmd: None,
             pending_worktrees: None,
+            pending_sessions: None,
             pending_pager_return: None,
             start_dir: cwd,
             prev_dir: None,
@@ -342,6 +345,9 @@ impl App {
         app.rebuild_rows();
         if let Some(msg) = load_note {
             app.flash_info(msg);
+        }
+        if resume {
+            app.show_session_picker();
         }
         Ok(app)
     }
@@ -1879,6 +1885,122 @@ impl App {
         }
     }
 
+    // ---- Session management --------------------------------------------------
+
+    fn save_session(&self) {
+        use crate::state::sessions::{SavedTab, Session};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let epoch_secs = now.as_secs();
+        let id = now.as_millis() as u64;
+
+        let tabs: Vec<SavedTab> = self
+            .pane_tabs
+            .as_ref()
+            .map(|pt| {
+                pt.tabs()
+                    .iter()
+                    .map(|t| SavedTab {
+                        command: t.info.command.clone(),
+                        label: t.info.label.clone(),
+                        cwd: t.info.cwd.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let session = Session {
+            id,
+            saved_at: crate::sysinfo::format_now(),
+            epoch_secs,
+            cwd: self.listing.dir.clone(),
+            tabs,
+            active_tab: self
+                .pane_tabs
+                .as_ref()
+                .map_or(0, |pt| pt.active_index()),
+            pane_height_pct: self.pane_height_pct,
+            pane_focused: self.pane_focused,
+        };
+        let _ = crate::state::sessions::save_session(&session);
+    }
+
+    fn show_session_picker(&mut self) {
+        use crate::state::sessions;
+        let sessions = sessions::load_sessions();
+        if sessions.is_empty() {
+            self.flash_info("no saved sessions");
+            return;
+        }
+        let lines: Vec<String> = sessions
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let age = sessions::format_relative_time(s.epoch_secs);
+                let tab_count = s.tabs.len();
+                let names: Vec<&str> = s.tabs.iter().map(|t| t.label.as_str()).collect();
+                let tab_info = if tab_count == 0 {
+                    String::new()
+                } else {
+                    format!("  [{}]", names.join(", "))
+                };
+                format!(
+                    "  [{}]  {:<20} {}{}",
+                    i + 1,
+                    age,
+                    s.cwd.display(),
+                    tab_info,
+                )
+            })
+            .collect();
+        self.pending_sessions = Some(sessions);
+        let mut all_lines = vec!["  [n]  new session".to_string(), String::new()];
+        all_lines.extend(lines);
+        let mut view = pager::PagerView::new_plain(
+            "sessions — j/k navigate, Enter restore, n new, q close",
+            all_lines,
+        );
+        view.picker_cursor = Some(2); // Start on first session (after header).
+        self.pager = Some(view);
+    }
+
+    fn restore_session(&mut self, session: &crate::state::sessions::Session) {
+        // Restore working directory.
+        if session.cwd.is_dir() {
+            if let Err(e) = self.chdir(&session.cwd) {
+                self.flash_error(format!("session chdir: {e}"));
+                return;
+            }
+        } else {
+            self.flash_error(format!("session dir gone: {}", session.cwd.display()));
+            return;
+        }
+        // Restore pane layout.
+        self.pane_height_pct = session.pane_height_pct;
+        if !session.tabs.is_empty() {
+            self.pane_tabs = None;
+            for tab in &session.tabs {
+                let cwd = if tab.cwd.is_dir() {
+                    &tab.cwd
+                } else {
+                    &session.cwd
+                };
+                self.open_pane_tab_in(&tab.command, cwd);
+            }
+            // Restore active tab.
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                tabs.switch_to(session.active_tab);
+                // Restore custom labels.
+                for (entry, saved) in tabs.tabs_mut().iter_mut().zip(&session.tabs) {
+                    entry.info.label.clone_from(&saved.label);
+                }
+            }
+            self.pane_focused = session.pane_focused;
+        }
+        self.flash_info("session restored");
+    }
+
     // ---- Git worktree (M11) -------------------------------------------------
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
@@ -2181,10 +2303,66 @@ impl App {
             }
         }
 
+        // Session picker: j/k navigate, Enter/1-9 select, n new.
+        if self.pending_sessions.is_some() {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    view.picker_move(1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    view.picker_move(-1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char(c @ '1'..='9') => {
+                    // Direct selection — index into sessions (offset by 2 header lines).
+                    let sessions = self.pending_sessions.take().unwrap();
+                    let idx = (c as u8 - b'1') as usize;
+                    if let Some(session) = sessions.get(idx) {
+                        let session = session.clone();
+                        self.pager = None;
+                        self.needs_full_repaint = true;
+                        self.restore_session(&session);
+                        return PostAction::None;
+                    }
+                    self.pending_sessions = Some(sessions);
+                }
+                KeyCode::Enter => {
+                    let cursor = view.picker_cursor.unwrap_or(0);
+                    let sessions = self.pending_sessions.take().unwrap();
+                    if cursor < 2 {
+                        // "New session" header.
+                        self.pager = None;
+                        self.needs_full_repaint = true;
+                        self.flash_info("new session");
+                        return PostAction::None;
+                    }
+                    let idx = cursor - 2;
+                    if let Some(session) = sessions.get(idx) {
+                        let session = session.clone();
+                        self.pager = None;
+                        self.needs_full_repaint = true;
+                        self.restore_session(&session);
+                        return PostAction::None;
+                    }
+                    self.pending_sessions = Some(sessions);
+                }
+                KeyCode::Char('n' | 'N') => {
+                    self.pager = None;
+                    self.pending_sessions = None;
+                    self.needs_full_repaint = true;
+                    self.flash_info("new session");
+                    return PostAction::None;
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 self.pager = None;
                 self.pending_worktrees = None;
+                self.pending_sessions = None;
                 self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
@@ -2689,6 +2867,7 @@ impl App {
                     .quit_pending
                     .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
                 {
+                    self.save_session();
                     self.should_quit = true;
                 } else {
                     self.quit_pending = Some(now);

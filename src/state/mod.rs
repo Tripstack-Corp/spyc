@@ -7,6 +7,7 @@ pub mod ignore;
 pub mod inventory;
 pub mod marks;
 pub mod picks;
+pub mod sessions;
 
 pub use cursor::Cursor;
 pub use history::History;

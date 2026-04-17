@@ -55,6 +55,10 @@ pub struct PagerView {
     /// directly in `$EDITOR`. When `None`, content is a buffer (command
     /// output, help, etc.) and `v` uses a temp file.
     pub source_path: Option<std::path::PathBuf>,
+    /// When set, the pager acts as a picker: j/k move a highlighted cursor
+    /// instead of scrolling, and Enter selects. The value is the 0-based
+    /// line index of the highlighted row.
+    pub picker_cursor: Option<usize>,
 }
 
 impl PagerView {
@@ -72,6 +76,7 @@ impl PagerView {
             full_width: false,
             columns: 1,
             source_path: None,
+            picker_cursor: None,
         }
     }
 
@@ -86,6 +91,7 @@ impl PagerView {
             full_width: false,
             columns: 1,
             source_path: None,
+            picker_cursor: None,
         }
     }
 
@@ -104,6 +110,7 @@ impl PagerView {
             full_width: false,
             columns: 1,
             source_path: None,
+            picker_cursor: None,
         }
     }
 
@@ -134,6 +141,27 @@ impl PagerView {
         let path = dir.join(filename);
         std::fs::write(&path, self.plain_text() + "\n")?;
         Ok(path)
+    }
+
+    /// Move picker cursor up/down (only when `picker_cursor` is set).
+    pub fn picker_move(&mut self, delta: isize, viewport_height: u16) {
+        let Some(cur) = self.picker_cursor.as_mut() else {
+            return;
+        };
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let new = (*cur as isize + delta).clamp(0, n as isize - 1) as usize;
+        *cur = new;
+        // Auto-scroll to keep the cursor visible.
+        let top = self.scroll as usize;
+        let bot = top + viewport_height as usize;
+        if new < top {
+            self.scroll = new as u16;
+        } else if new >= bot {
+            self.scroll = (new + 1).saturating_sub(viewport_height as usize) as u16;
+        }
     }
 
     pub fn toggle_full_width(&mut self) {
@@ -439,7 +467,25 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         .enumerate()
         .map(|(i, line)| {
             let abs_idx = start + i;
-            let styled = styled_line_for_render(line, view, abs_idx, theme);
+            let mut styled = styled_line_for_render(line, view, abs_idx, theme);
+            // Highlight the picker cursor row.
+            if view.picker_cursor == Some(abs_idx) {
+                styled = Line::from(
+                    styled
+                        .spans
+                        .into_iter()
+                        .map(|s| {
+                            Span::styled(
+                                s.content,
+                                s.style
+                                    .bg(theme.cursor_bg)
+                                    .fg(theme.cursor_fg)
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
             let styled = if view.show_whitespace {
                 apply_whitespace_markers(&styled, theme)
             } else {

@@ -28,8 +28,9 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::app::App;
 
 fn main() -> Result<()> {
+    let resume = std::env::args().any(|a| a == "--resume" || a == "-r");
     let mut terminal = setup_terminal()?;
-    let result = App::new()?.run(&mut terminal);
+    let result = App::new(resume)?.run(&mut terminal);
     restore_terminal(&mut terminal)?;
     result
 }
