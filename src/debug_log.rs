@@ -1,0 +1,64 @@
+//! Opt-in debug logging to a file.
+//!
+//! Enabled by `--debug` / `-d` CLI flag or `CSPY_DEBUG=1` env var.
+//! Logs go to `/tmp/cspy-debug-<TIMESTAMP>.log`.  The path is printed to
+//! stderr at startup so you can `tail -f` it.
+//!
+//! Usage:
+//!   cspy_debug!("view_top={} grid={}x{}", vt, cols, rows);
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::Mutex;
+
+struct LogState {
+    file: Option<std::fs::File>,
+    path: Option<String>,
+}
+
+static LOG: Mutex<LogState> = Mutex::new(LogState {
+    file: None,
+    path: None,
+});
+
+fn make_path() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("/tmp/cspy-debug-{ts}.log")
+}
+
+/// Call once at startup.  Returns the log path if debug mode is active.
+pub fn init(flag: bool) -> Option<String> {
+    let enabled = flag
+        || std::env::var("CSPY_DEBUG")
+            .map(|v| !v.is_empty() && v != "0" && v != "false")
+            .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let path = make_path();
+    if let Ok(f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let mut state = LOG.lock().unwrap();
+        state.file = Some(f);
+        state.path = Some(path.clone());
+        Some(path)
+    } else {
+        None
+    }
+}
+
+#[doc(hidden)]
+pub fn _log(msg: &str) {
+    if let Some(f) = LOG.lock().unwrap().file.as_mut() {
+        let _ = writeln!(f, "{msg}");
+    }
+}
+
+#[macro_export]
+macro_rules! cspy_debug {
+    ($($arg:tt)*) => {
+        $crate::debug_log::_log(&format!($($arg)*))
+    };
+}

@@ -50,6 +50,10 @@ We use Bitbucket pull requests. The target branch is `main`.
    - How to verify the change
    ```
 
+   **Bug fix PRs** should include relevant debug log output.
+   Run `cspy --debug` to reproduce the issue, then attach the
+   relevant lines from the `/tmp/cspy-debug-*.log` file.
+
 6. **One approval required** before merge. Squash-merge preferred to
    keep `main` history clean.
 

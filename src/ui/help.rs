@@ -151,6 +151,15 @@ const SECTIONS: &[Section] = &[
             ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
     },
+    Section {
+        title: "CLI Flags",
+        rows: &[
+            ("-r --resume", "open pane with claude --resume"),
+            ("-d --debug", "write debug log to /tmp/cspy-debug-<ts>.log"),
+            ("-h --help", "show usage"),
+            ("-v --version", "show version"),
+        ],
+    },
 ];
 
 pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {

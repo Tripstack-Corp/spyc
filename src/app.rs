@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::cspy_debug;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use glob::Pattern;
@@ -955,16 +956,89 @@ impl App {
 
         let rows = self.build_rows();
         let list_focused = !self.pane_focused;
-        let probe = ListView {
-            rows: &rows,
-            cursor: self.cursor.index,
-            view_top: self.cursor.view_top,
-            empty_marker: self.view == View::Dir,
-            focused: list_focused,
-            theme: &self.theme,
-        };
-        self.last_grid = probe.grid(layout.list);
-        self.ensure_cursor_visible();
+        // Stabilize view_top ↔ grid.  The grid depends on view_top (different
+        // entries have different name lengths → different column count →
+        // different items_per_page), and view_top depends on the grid.
+        //
+        // This can produce a 2-cycle: vt=A gives grid that wants vt=B, and
+        // vt=B gives grid that wants vt=A.  When we detect that, always pick
+        // the lower of the two (shows more context, deterministic across
+        // frames) and recompute the grid for that choice.
+        {
+            let mut prev_vt: Option<usize> = None; // for 2-cycle detection
+            let mut settled = false;
+            for round in 0..4 {
+                let probe = ListView {
+                    rows: &rows,
+                    cursor: self.cursor.index,
+                    view_top: self.cursor.view_top,
+                    empty_marker: self.view == View::Dir,
+                    focused: list_focused,
+                    theme: &self.theme,
+                };
+                self.last_grid = probe.grid(layout.list);
+                let old_vt = self.cursor.view_top;
+                let pp = self.last_grid.items_per_page();
+                self.ensure_cursor_visible();
+                if self.cursor.view_top == old_vt {
+                    cspy_debug!(
+                        "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
+                        round + 1,
+                        old_vt,
+                        self.cursor.index,
+                        self.last_grid.cols,
+                        self.last_grid.rows,
+                        pp,
+                    );
+                    settled = true;
+                    break;
+                }
+                cspy_debug!(
+                    "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
+                    round + 1,
+                    old_vt,
+                    self.cursor.view_top,
+                    self.cursor.index,
+                    self.last_grid.cols,
+                    self.last_grid.rows,
+                    pp,
+                );
+                // 2-cycle: new vt equals the vt from two rounds ago.
+                if Some(self.cursor.view_top) == prev_vt {
+                    // Always pick the lower vt — deterministic across frames.
+                    let forced = old_vt.min(self.cursor.view_top);
+                    self.cursor.view_top = forced;
+                    // Recompute grid for the forced view_top.
+                    let probe = ListView {
+                        rows: &rows,
+                        cursor: self.cursor.index,
+                        view_top: self.cursor.view_top,
+                        empty_marker: self.view == View::Dir,
+                        focused: list_focused,
+                        theme: &self.theme,
+                    };
+                    self.last_grid = probe.grid(layout.list);
+                    cspy_debug!(
+                        "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
+                        forced,
+                        self.cursor.index,
+                        self.last_grid.cols,
+                        self.last_grid.rows,
+                        self.last_grid.items_per_page(),
+                    );
+                    settled = true;
+                    break;
+                }
+                prev_vt = Some(old_vt);
+            }
+            if !settled {
+                cspy_debug!(
+                    "grid did NOT settle after 4 rounds: vt={} cursor={}",
+                    self.cursor.view_top,
+                    self.cursor.index,
+                );
+            }
+        }
 
         frame.render_widget(
             ListView {
@@ -2544,6 +2618,16 @@ impl App {
         // the flat index by `rows_per_col`. Moving vertically is ±1.
         let rows_per_col = self.last_grid.rows as usize;
         let per_page = self.last_grid.items_per_page();
+        cspy_debug!(
+            "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
+            action,
+            self.cursor.index,
+            self.cursor.view_top,
+            self.last_grid.cols,
+            self.last_grid.rows,
+            per_page,
+            len,
+        );
         match action {
             Action::Up(n) => self.cursor_move_vertical(-(*n as isize), len),
             Action::Down(n) => self.cursor_move_vertical(*n as isize, len),

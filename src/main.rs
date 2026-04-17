@@ -2,6 +2,7 @@
 
 mod app;
 mod config;
+mod debug_log;
 mod fs;
 mod keymap;
 mod pane;
@@ -28,7 +29,31 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use crate::app::App;
 
 fn main() -> Result<()> {
-    let resume = std::env::args().any(|a| a == "--resume" || a == "-r");
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!(
+            "cspy {} — vi-keyboard-driven file commander\n\n\
+             Usage: cspy [OPTIONS]\n\n\
+             Options:\n  \
+               -r, --resume   Open pane with `claude --resume`\n  \
+               -d, --debug    Write debug log to /tmp/cspy-debug-<ts>.log\n  \
+               -h, --help     Show this help\n  \
+               -v, --version  Show version",
+            env!("CARGO_PKG_VERSION"),
+        );
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--version" || a == "-v") {
+        println!("cspy {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    let resume = args.iter().any(|a| a == "--resume" || a == "-r");
+    let debug = args.iter().any(|a| a == "--debug" || a == "-d");
+    if let Some(p) = debug_log::init(debug) {
+        eprintln!("cspy: debug log → {p}");
+    }
     let mut terminal = setup_terminal()?;
     let result = App::new(resume)?.run(&mut terminal);
     restore_terminal(&mut terminal)?;
