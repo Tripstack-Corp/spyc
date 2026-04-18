@@ -104,18 +104,26 @@ fn candidates(line: &str) -> Vec<String> {
     let cleaned = strip_prefixes(&stripped);
 
     // Strategy: split on whitespace, then for each token strip decorations.
-    // Also try the whole line (after prefix stripping) as a single candidate
-    // for lines like "Reading src/app.rs:42".
     for token in cleaned.split_whitespace() {
         let clean = strip_decorations(token);
         if !clean.is_empty() {
             result.push(clean.to_string());
         }
+        // Also try extracting a path from inside parentheses/brackets
+        // anywhere in the token — handles `Update(path/to/file)`,
+        // `[path/to/file]`, etc.
+        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+            if let Some(start) = token.find(open) {
+                if let Some(end) = token[start..].find(close) {
+                    let inner = &token[start + 1..start + end];
+                    let inner = strip_decorations(inner);
+                    if !inner.is_empty() && !result.contains(&inner.to_string()) {
+                        result.push(inner.to_string());
+                    }
+                }
+            }
+        }
     }
-
-    // For lines with structure like "  → src/foo.rs:42", the token after
-    // the arrow is already captured above. But also try combining tokens
-    // that might have spaces in paths (rare but possible).
 
     result
 }
@@ -166,6 +174,8 @@ fn strip_prefixes(s: &str) -> &str {
     //   "--- a/src/foo.rs"
     //   "+++ b/src/foo.rs"
     for prefix in &[
+        // Claude Code output patterns
+        "Read ",
         "Reading ",
         "Editing ",
         "Created ",
@@ -173,9 +183,16 @@ fn strip_prefixes(s: &str) -> &str {
         "Deleted ",
         "Wrote ",
         "Updated ",
+        "Update ",
+        "Write ",
+        "create mode 100644 ",
+        "create mode 100755 ",
+        // Arrow/pointer prefixes
         "→ ",
+        "⎿ ",
         "=> ",
         "-> ",
+        // Diff headers
         "--- a/",
         "+++ b/",
         "--- ",
@@ -211,10 +228,16 @@ fn strip_decorations(s: &str) -> &str {
 
 /// Heuristic: does this string look like a file path?
 fn looks_like_path(s: &str) -> bool {
+    // Too short to be a meaningful path.
+    if s.len() < 2 {
+        return false;
+    }
     // Must contain a slash or a dot (to have an extension).
     // Single words like "error" or "warning" should not match.
     if s.contains('/') {
-        return true;
+        // Reject bare "/" or strings that are just slashes/dots
+        let meaningful = s.trim_matches('/');
+        return !meaningful.is_empty();
     }
     // Dotfile or file with extension: ".gitignore", "foo.rs", "Cargo.toml"
     if s.contains('.') && !s.starts_with("..") {
@@ -454,5 +477,72 @@ mod tests {
         let pr = extract_from_line("src/main.rs:42:5", tmp.path()).unwrap();
         assert_eq!(pr.path, tmp.path().join("src/main.rs"));
         assert_eq!(pr.line, Some(42));
+    }
+
+    // ── Claude CLI output patterns ────────────────────────────────
+
+    #[test]
+    fn claude_update_parens() {
+        let tmp = setup_tree();
+        let pr = extract_from_line("⏺ Update(src/main.rs)", tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/main.rs"));
+    }
+
+    #[test]
+    fn claude_create_mode() {
+        let tmp = setup_tree();
+        let pr =
+            extract_from_line("     create mode 100644 src/main.rs", tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/main.rs"));
+    }
+
+    #[test]
+    fn claude_read_file() {
+        let tmp = setup_tree();
+        let pr = extract_from_line("  Read src/main.rs", tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/main.rs"));
+    }
+
+    #[test]
+    fn claude_path_in_sentence() {
+        let tmp = setup_tree();
+        let pr = extract_from_line(
+            "  Claude outputs src/app/state.rs:172 in the pane",
+            tmp.path(),
+        )
+        .unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/app/state.rs"));
+        assert_eq!(pr.line, Some(172));
+    }
+
+    #[test]
+    fn claude_prefixed_path_with_slash() {
+        let tmp = setup_tree();
+        // "spyc/Cargo.toml" should match if spyc/ subdir exists
+        fs::create_dir_all(tmp.path().join("spyc")).unwrap();
+        fs::write(tmp.path().join("spyc/Cargo.toml"), "").unwrap();
+        let pr = extract_from_line("⏺ Update(spyc/Cargo.toml)", tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("spyc/Cargo.toml"));
+    }
+
+    #[test]
+    fn bare_slash_is_not_a_path() {
+        assert!(!looks_like_path("/"));
+        assert!(!looks_like_path("//"));
+    }
+
+    #[test]
+    fn short_tokens_rejected() {
+        assert!(!looks_like_path("a"));
+        assert!(!looks_like_path("."));
+    }
+
+    #[test]
+    fn no_path_returns_none_not_root() {
+        let tmp = setup_tree();
+        // These lines have no valid paths — should return None
+        assert!(extract_from_line("just some text with no paths", tmp.path()).is_none());
+        assert!(extract_from_line("  ⎿  Added 1 line, removed 1 line", tmp.path()).is_none());
+        assert!(extract_from_line("      3 -version = \"1.3.1\"", tmp.path()).is_none());
     }
 }
