@@ -1,4 +1,4 @@
-# spyc CI — runs formatting, clippy, and tests on every push.
+# spyc CI — runs formatting, clippy, tests, audit, and coverage on every push.
 #
 # We build against the pinned rust-toolchain.toml so that a new stable Rust
 # release cannot silently tighten lints. Target is linux x86_64 with musl
@@ -17,14 +17,27 @@ definitions:
 
   steps:
     - step: &quality
-        name: Quality gate (fmt, clippy, test)
+        name: Quality gate (fmt, clippy, test, audit)
         caches:
           - cargo
         script:
           - rustup component add rustfmt clippy
+          - cargo install cargo-audit --locked
           - cargo fmt --all -- --check
           - cargo clippy --all-targets -- -D warnings
           - cargo test --all-targets
+          # RUSTSEC-2026-0009: time 0.3.45 DoS — fix needs Rust 1.88, our MSRV is 1.85.
+          # Not exploitable: transitive via syntect→plist, no user time parsing.
+          - cargo audit --ignore RUSTSEC-2026-0009
+
+    - step: &coverage
+        name: Coverage (ratcheting floor)
+        caches:
+          - cargo
+        script:
+          - rustup component add llvm-tools-preview
+          - cargo install cargo-llvm-cov --locked
+          - cargo llvm-cov --all-targets --fail-under-lines 35
 
 pipelines:
   default:
@@ -32,8 +45,12 @@ pipelines:
 
   branches:
     main:
-      - step: *quality
+      - parallel:
+          - step: *quality
+          - step: *coverage
 
   pull-requests:
     '**':
-      - step: *quality
+      - parallel:
+          - step: *quality
+          - step: *coverage

@@ -1,58 +1,241 @@
 # spyc roadmap
 
-## Planned
+## Thesis
 
-### Session forking
+spyc is a vi-keyboard-driven file commander that pairs with an AI coding
+agent in a single terminal window. The target user is a developer who
+already thinks in vi motions and wants Claude Code living in the same
+workspace — not one window over, not in a browser tab, in the same
+session, sharing context.
 
-In multi-tab pane, duplicate a tab to branch a conversation — like
-git branching but for Claude sessions.
+That positioning is the reason the tool exists. Every other feature —
+picks, inventory, pager, status bar, sessions — is supporting
+infrastructure that makes the split-pane workflow fast and comfortable.
+The roadmap is organized accordingly: the pane-and-agent integration is
+the defining work track, not the trailing milestone.
 
-- `^W f` forks the current tab: new pty with scrollback contents
-  pasted in, so the new Claude instance has the prior context
-- Useful for "let me try a different approach without losing this one"
+## Working tracks
 
-### Additional Ideas
-- Mouse support: click to change pane focus, click tab indicators to switch
-  tabs, click file list entries to select. Must coexist with terminal native
-  text selection
-- **Drag and drop** — test and support dragging files from the desktop
-  into spyc (terminal drag-and-drop via OSC 52 or path paste)
+Work proceeds along three parallel tracks. They're not strictly
+sequential; distribution work can land while thesis work is still in
+flight, and foundations work continues throughout.
 
-### Ideas from fbi-improved (fim)
+- **Foundations** — testing, hardening, build hygiene. The minimum to
+  not embarrass ourselves and to make every other change safer.
+- **Thesis** — deepening the agent integration until the split-pane
+  workflow is measurably better than `tmux` + `claude` for the target
+  audience. This is where the tool earns its reason for being.
+- **Distribution** — release automation, signing, packaging, docs.
+  Turns a repo into a tool people can install, trust, and find.
 
-**Pager / navigation:**
-- **Page scroll overlap** — when paging up/down, keep 2-3 lines from the
-  previous page visible for reading continuity (`_scroll_skip_page_fraction`)
-- **Auto-scroll reading mode** — continuous scroll at configurable speed
-  for hands-free reading. `while(1){scroll;sleep 2}` style.
-- **Jump-back in pager** — `''` to return to where you were before the
-  last search/jump (pager already has it for the file list)
+Each track has its own priority ordering below. Specific items migrate
+from these lists into `Done (recent)` as they ship.
 
-**Automation / scripting:**
-- **Autocommands** — user-configurable hooks triggered per file type:
-  `autocmd "*.md" "preview"`, `autocmd "*.log" "tail_mode"`. Could live
-  in `.spycrc.toml` and replace hardcoded special cases.
-- **Macro recording** — vim-style `qa`...`q`...`@a`. Record a sequence
-  of actions (rename, move, tag) and replay on demand.
-- **Startup/exit command flags** — `spyc -c "sort mtime"` to execute
-  commands at startup, `-F` for exit hooks.
+## Foundations
 
-**Shell composability:**
-- **Stdout on exit** — output picks/inventory paths to stdout when
-  quitting, making spyc composable: `spyc | xargs rm`, `spyc | tar czf`.
-- **`--dump-default-config`** — output the full default `.spycrc.toml` so
-  users have a complete starting point for customization.
+In roughly descending priority. Items near the top reduce risk for
+everything else and are mostly cheap.
 
-**Status bar / display:**
-- **Conditional status bar expandos** — `%?git?%branch?` shows git info
-  only when in a repo. Format-string-based status bar with `%i/%l`,
-  `%n`, `%F` etc.
+- **Panic hook that restores the terminal.** If any code path panics in
+  raw mode or alt screen, the user's terminal is left wedged. Install a
+  panic hook in `main()` that calls `restore_terminal()` before unwinding
+  and writes the backtrace to the debug log. Non-negotiable before any
+  external release.
+- **Unicode width in the list view.** `chars().count()` is used as a
+  width proxy in places; CJK filenames, flags, and family emoji will
+  misalign columns. Bring in `unicode-width` and route width calculations
+  through it.
+- **Testing strategy execution.** See the separate testing-strategy
+  document. In priority order: keymap resolver state machine (462 lines
+  of pure logic, zero tests today); `state/` modules (picks, inventory,
+  history, sessions, cursor, ignore); DSL → resolver round-trip;
+  integration tests under `tests/` using `tempfile`; snapshot tests on
+  widgets via `ratatui::backend::TestBackend` + `insta`; one pty
+  integration test for `pane/` wired end-to-end. The app.rs handler
+  extraction refactor is a prerequisite for meaningful dispatch
+  testing — treat it as part of this track.
+- **CI fixes.** The Bitbucket pipelines image is `rust:1.80-slim` but
+  `rust-toolchain.toml` pins 1.85 — a clean build would fail on CI
+  today. Bump the image. Add `cargo-audit` to the pipeline. Add
+  `cargo-llvm-cov` with a ratcheting coverage floor (start at whatever
+  honest baseline the first run produces).
+- **CHANGELOG.md** in Keep-a-Changelog format. Every user-visible
+  change gets an entry; the release pipeline reads from it for release
+  notes.
+- **`spyc --version --verbose`** dumps version, git SHA, build
+  timestamp, rustc version, terminal detection, and active feature
+  flags. First line of every bug triage.
+- **`RUST_BACKTRACE=full` wired into the debug log.** `--debug`
+  already captures events; ensure panics land there too.
+- **`spyc --dump-default-config`** per the idea already in the old
+  roadmap — gives users a complete `.spycrc.toml` starting point and
+  doubles as self-documentation for the keymap DSL.
+- **Background directory loading.** Large directories (100K+ entries,
+  realistic for `node_modules` or Druid segment caches) block the
+  event loop. Async listing with a cancellable progress indicator.
+  Scoped conservatively — the common case stays synchronous.
 
-**File management:**
-- **Per-file tags/metadata** — key-value pairs attached to files that
-  persist within a session, usable in filters and autocommands.
-- **Background directory loading** — async listing for large trees so
-  the UI stays responsive.
+## Thesis — deepening the agent integration
+
+The pty pane is already the core of the tool (M8–M12 done). The work
+that remains is making the integration genuinely novel, not just "a
+terminal inside a terminal." In priority order:
+
+- **Bidirectional path references.** When Claude outputs
+  `src/app.rs:1284` in the pane, spyc should recognize the path and
+  support a vi-style `gf`-equivalent to jump the file list there (and
+  optionally open the pager to that line). Claude produces path
+  references constantly; making them navigable closes the most
+  valuable workflow loop. Probably the single highest-leverage
+  feature remaining.
+- **Automatic context handoff.** Picks and inventory are already
+  pipeable to the pane via `^W p` / `^W i` (M10). The next step is
+  passive: spyc maintains a context file Claude can watch (e.g.,
+  `.claude/spyc-context.md`) that reflects the current directory,
+  picks, inventory, and active filter. When Claude is asked "what am
+  I looking at," it already knows. Wire via a small MCP server if the
+  file-watcher approach gets noisy.
+- **Session forking** (already in old roadmap as `^W f`). Duplicate a
+  pane tab with scrollback replayed, so a Claude conversation can
+  branch without losing the prior line of inquiry. High-value for
+  "let me try a different approach." Implementable with current
+  plumbing.
+- **Conversation-aware session restore.** `--resume` already restores
+  cwd, tabs, and pane geometry. Extend to capture the agent session
+  identity (Claude Code's `--resume` surface) so restoring a spyc
+  session restores the conversation, not just a fresh pane pointed at
+  the right directory.
+- **Prompt templates in `.spycrc.toml`.** User-defined macros that
+  send a pre-composed prompt to the pane with picks/inventory
+  substituted in — e.g., `map "<space>cr" claude-template review`
+  where `review` is defined in config. Turns spyc into a
+  keyboard-driven Claude launcher for repeated workflows.
+- **Status bar agent segment.** When the pane is running Claude, show
+  a small indicator: session identity, maybe token usage if the CLI
+  surface exposes it. Useful, not essential.
+- **Autocommands** per the old roadmap, but scoped to the agent
+  workflow — `autocmd "*.test.ts" "claude-template test-review"`
+  etc. Defer until the template feature lands and the shape is
+  clear.
+
+## Distribution
+
+Most of this is one-time setup work. Worth doing properly and then
+forgetting about.
+
+- **Release automation in Bitbucket Pipelines.** Tag push
+  (`v[0-9]+.*`) triggers: cross-compile matrix (Linux x86_64/aarch64
+  musl, macOS universal), build artifacts uploaded to a release
+  bucket, release notes generated from CHANGELOG.md, Homebrew tap
+  formula bumped, crates.io publish. Zero-manual-step release.
+- **macOS code signing and notarization.** Developer ID certificate,
+  `codesign --deep --sign`, `xcrun notarytool submit`, stapled.
+  Without this, Gatekeeper blocks the binary on fresh macOS
+  installations and the first user report will be "it says spyc is
+  damaged."
+- **Linux signing.** Minisign or cosign on release artifacts,
+  public key committed to the repo and published in release notes.
+  Cheaper than Sigstore/SLSA attestation and sufficient for this
+  audience.
+- **Reproducible build verification.** Lock the toolchain
+  (`rust-toolchain.toml` already pins), `SOURCE_DATE_EPOCH` honored,
+  `cargo-auditable` to embed build metadata. A second CI job rebuilds
+  from the tag and diffs against the released artifact. Not strictly
+  required but cheap insurance and a nice signal.
+- **SBOM.** `cargo-sbom` or `cargo-auditable` generates SPDX/CycloneDX
+  at release time. Uploaded alongside binaries.
+- **Package registries.** `cargo publish` to crates.io (binary-only
+  crate, acceptable). Homebrew tap at `tripstack/homebrew-spyc`.
+  Arch via AUR `spyc-bin`. Skip nixpkgs, Debian, Fedora packaging
+  unless volunteers emerge — not worth the maintenance tail for this
+  tier.
+- **GitHub mirror.** Read-only mirror at `github.com/tripstack/spyc`,
+  synced from Bitbucket on every push. Bitbucket's public-repo
+  discoverability is worse than GitHub's, and the target audience
+  expects a GitHub URL. Mirror, don't migrate.
+- **Docs site.** `mdbook` rendered to Bitbucket/GitHub Pages.
+  Getting started, keymap reference, `.spycrc.toml` DSL reference,
+  agent workflow guide. Auto-built from the `docs/` directory on
+  release.
+- **README rewrite.** Current README buries the thesis. First
+  paragraph should sell the split-pane agent workflow. One asciinema
+  cast embedded — 90 seconds, nothing more. Install instructions
+  above feature list.
+- **Repo hygiene.** `SECURITY.md` (how to report vulnerabilities),
+  `CODE_OF_CONDUCT.md` (one of the standard ones, link only),
+  PR template, issue templates for bug reports and feature
+  requests. Low effort, sets the tone.
+- **`spyc --generate-completion {bash,zsh,fish}`.** Shell
+  completions for the (small) CLI surface. Trivial with `clap`
+  derive, worth it for the polish signal.
+
+## Non-goals
+
+These are things someone will inevitably ask for. The answer is no, and
+the roadmap committing to that saves a lot of drift.
+
+- **Native Windows support.** WSL is the supported story. `portable-pty`
+  technically works on Windows but debugging the failure modes is a tax
+  we're not paying.
+- **Plugin system.** A decade of maintenance debt for a feature 3% of
+  users will touch. The `.spycrc` DSL and keymap extensibility are the
+  customization surface.
+- **Localization.** English only. The target audience reads English
+  docs.
+- **Telemetry.** Not even anonymized opt-in. The greybeard half of
+  the audience will not forgive it and the vibe-coder half won't
+  notice it's missing.
+- **SLSA L3 / supply-chain theatre.** Minisign signatures + SBOM + a
+  reproducible build job are proportionate. Full SLSA attestation
+  infrastructure is not.
+- **Mouse support beyond what already exists.** Old roadmap mentions
+  it; deprioritize indefinitely. The tool is keyboard-first by
+  thesis.
+
+## Releases
+
+Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of
+the PR that ships the change. The `CHANGELOG.md` entry lands in the
+same commit.
+
+- **v1.x** — Foundations track. Ship incrementally; no external
+  announcement. Internal dogfooding feedback loop.
+- **v2.0** — Public distribution launch. Gated on: thesis-track items
+  #1 (bidirectional path refs) and #2 (automatic context handoff)
+  shipped, all Foundations track items complete, Distribution track
+  complete. External announcement: TripStack engineering blog post,
+  optional Show HN. This is the "credibly public" moment.
+- **v2.x onward** — Remaining thesis items, feature work from
+  `Additional Ideas` section, community-driven contributions.
+
+The v2.0 version bump is a signaling choice as much as a semver one.
+The tool has been shipping 1.x for a while, but the repositioning +
+public distribution justifies a major bump to mark the transition.
+
+## Additional Ideas
+
+Lower-priority items retained from the prior roadmap. Will graduate to
+one of the tracks above when picked up.
+
+- **Drag and drop** — files from the desktop into spyc via OSC 52 or
+  path paste.
+- **Page scroll overlap** in the pager — keep 2–3 lines of previous
+  page visible (`_scroll_skip_page_fraction`).
+- **Auto-scroll reading mode** — continuous scroll at configurable
+  speed for hands-free reading.
+- **Jump-back in pager** (`''`) — return to the pre-search/jump
+  position, matching the file-list behavior.
+- **Macro recording** (`qa` … `q` … `@a`) — vim-style action
+  recording and replay.
+- **Startup/exit command flags** — `spyc -c "sort mtime"` runs
+  commands at launch, `-F` for exit hooks.
+- **Stdout on exit** — emit picks/inventory paths on quit so spyc
+  composes with shell pipelines (`spyc | xargs rm`).
+- **Conditional status bar expandos** — `%?git?%branch?` shows a
+  segment only when its condition holds. Requires a format-string
+  parser; worth it only if the status bar gains more segments.
+- **Per-file tags/metadata** — key-value pairs attached to files,
+  usable in filters and autocommands.
 
 ## Done (recent)
 

@@ -29,6 +29,27 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use crate::app::App;
 
 fn main() -> Result<()> {
+    // Restore the terminal on panic so the user's shell isn't left in raw
+    // mode / alt screen. This runs before the default handler which prints
+    // the panic message to stderr.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Best-effort terminal restore — ignore errors.
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableBracketedPaste
+        );
+
+        // Dump to the debug log if active.
+        let bt = std::backtrace::Backtrace::force_capture();
+        debug_log::log(&format!("PANIC: {info}\n{bt}"));
+
+        // Let the default handler print to stderr.
+        default_hook(info);
+    }));
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
