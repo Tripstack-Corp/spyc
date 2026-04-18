@@ -11,13 +11,14 @@ use anyhow::Result;
 
 use crate::config::Config;
 use crate::fs::Listing;
-use crate::keymap::{Resolver, UserKeymap};
+use crate::fs;
+use crate::keymap::{Action, Resolver, UserKeymap};
 use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::list_view::Grid;
 
 use super::{
-    detect_kind, row_from_entry, FlashKind, FlashMessage, Matcher, Mode, Prompt, PromptKind,
-    RowData, View,
+    detect_kind, row_from_entry, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt,
+    PromptKind, RowData, View,
 };
 
 /// Result of `AppState::dispatch_command` — tells the `App` caller what to do.
@@ -38,6 +39,33 @@ pub enum PromptResult {
     Handled,
     /// Needs terminal: caller handles this prompt kind.
     NotHandled,
+}
+
+/// Result of `AppState::apply` — tells the `App` caller what to do.
+#[derive(Debug)]
+pub enum ApplyResult {
+    /// Handled entirely by `AppState`. Cursor already clamped.
+    Handled,
+    /// Open a pager with these contents.
+    OpenPager(PagerRequest),
+    /// Return this `PostAction` to the event loop (e.g. `Spawn` for `$SHELL`).
+    Post(PostAction),
+    /// Caller must handle this action (terminal-touching).
+    NotHandled,
+}
+
+/// Description of a pager to open, without importing UI types.
+#[derive(Debug)]
+pub struct PagerRequest {
+    pub title: String,
+    pub lines: PagerLines,
+    pub columns: u8,
+}
+
+/// Content for a pager — either plain strings or pre-styled lines.
+#[derive(Debug)]
+pub enum PagerLines {
+    Plain(Vec<String>),
 }
 
 pub struct AppState {
@@ -375,6 +403,284 @@ impl AppState {
                 }
             }
         }
+    }
+
+    // --- Action dispatch (pure-domain arms) ---
+
+    /// Handle the pure-domain arms of `Action` dispatch.
+    ///
+    /// Returns `ApplyResult::Handled` when the action was fully processed
+    /// (cursor is clamped before returning), `ApplyResult::OpenPager` when
+    /// the caller should open a pager, `ApplyResult::Post` for a `PostAction`,
+    /// or `ApplyResult::NotHandled` when the caller must handle the action
+    /// (terminal-touching: pager, pane, theme, redraw, etc.).
+    pub fn apply(&mut self, action: &Action) -> ApplyResult {
+        let len = self.rows.len();
+        let rows_per_col = self.last_grid.rows as usize;
+        let per_page = self.last_grid.items_per_page();
+
+        match action {
+            // -- Cursor motion --
+            Action::Up(n) => self.cursor_move_vertical(-(*n as isize), len),
+            Action::Down(n) => self.cursor_move_vertical(*n as isize, len),
+            Action::Left(n) => self.cursor_move_columns(-(*n as isize), rows_per_col, len),
+            Action::Right(n) => self.cursor_move_columns(*n as isize, rows_per_col, len),
+            Action::PageUp => self.cursor_move_vertical(-(per_page as isize), len),
+            Action::PageDown => self.cursor_move_vertical(per_page as isize, len),
+            Action::GotoFirst => self.goto_col_top(),
+            Action::GotoLast => self.goto_col_bottom(len),
+
+            // -- Navigation --
+            Action::Climb => self.climb(),
+            Action::Home => {
+                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+                    if let Err(e) = self.chdir(&home) {
+                        self.flash_error(format!("chdir: {e}"));
+                    }
+                }
+            }
+
+            // -- Picks --
+            Action::TogglePick => self.toggle_pick_cursor(),
+            Action::PickPatternPrompt => {
+                if self.view == View::Dir {
+                    self.mode =
+                        Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
+                }
+            }
+            Action::PickToggleAll => self.toggle_all_picks(),
+
+            // -- Inventory --
+            Action::Take => self.take(),
+            Action::Drop => self.drop_cursor(),
+            Action::ToggleInventoryView => self.toggle_inventory_view(),
+            Action::EmptyInventory => {
+                self.inventory.clear();
+                self.rebuild_rows();
+            }
+
+            // -- Masks & filtering --
+            Action::ToggleMask(n) => {
+                if *n == 1 {
+                    self.masks.toggle_mask1();
+                } else if *n == 2 {
+                    self.masks.toggle_mask2();
+                }
+                self.rebuild_rows();
+            }
+            Action::LimitPrompt => {
+                let prefix = if self.temp_filter.is_some() {
+                    "limit (active)="
+                } else {
+                    "limit="
+                };
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
+            }
+            Action::CommandPrompt => {
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+            }
+
+            // -- Shell prompts --
+            Action::ShellCapturedPrompt => {
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
+            }
+            Action::ShellForegroundPrompt => {
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
+            }
+            Action::StartShell => {
+                let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+                return ApplyResult::Post(PostAction::Spawn {
+                    program: sh,
+                    args: vec![],
+                    pause_after: false,
+                });
+            }
+
+            // -- Search --
+            Action::SearchPrompt => {
+                self.mode = Mode::Prompting(Prompt::simple(
+                    PromptKind::Search {
+                        saved_cursor: self.cursor.index,
+                    },
+                    "/",
+                ));
+            }
+            Action::SearchNext => {
+                if let Some(term) = self.last_search.clone() {
+                    let n = self.rows.len();
+                    if n > 0 {
+                        let start = (self.cursor.index + 1) % n;
+                        if let Some(i) = self.find_match(&term, start, false) {
+                            self.cursor.index = i;
+                        }
+                    }
+                }
+            }
+            Action::SearchPrev => {
+                if let Some(term) = self.last_search.clone() {
+                    let n = self.rows.len();
+                    if n > 0 {
+                        let start = if self.cursor.index == 0 {
+                            n - 1
+                        } else {
+                            self.cursor.index - 1
+                        };
+                        if let Some(i) = self.find_match(&term, start, true) {
+                            self.cursor.index = i;
+                        }
+                    }
+                }
+            }
+
+            // -- Navigation prompts --
+            Action::JumpPrompt => {
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
+            }
+
+            // -- File operation prompts --
+            Action::CopyPrompt => {
+                if !self.selection_paths().is_empty() {
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
+                }
+            }
+            Action::MovePrompt => {
+                if !self.selection_paths().is_empty() {
+                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
+                }
+            }
+            Action::MakeDirPrompt => {
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
+            }
+            Action::RemovePrompt => {
+                let count = self.selection_paths().len();
+                if count > 0 {
+                    self.mode = Mode::Prompting(Prompt::simple(
+                        PromptKind::RemoveConfirm,
+                        format!("remove {count} file(s)? (y/N): "),
+                    ));
+                }
+            }
+
+            // -- Long listing (pager) --
+            Action::LongList => {
+                let owned: Vec<PathBuf>;
+                let paths: Vec<&Path> = if self.selection_paths().is_empty() {
+                    owned = self
+                        .listing
+                        .entries
+                        .iter()
+                        .map(|e| e.path.clone())
+                        .collect();
+                    owned.iter().map(PathBuf::as_path).collect()
+                } else {
+                    self.selection_paths()
+                };
+                let lines = fs::ops::format_long_listing(&paths);
+                let title = format!("long listing — {}", self.listing.dir.display());
+                self.cursor.clamp(self.rows.len());
+                return ApplyResult::OpenPager(PagerRequest {
+                    title,
+                    lines: PagerLines::Plain(lines),
+                    columns: 1,
+                });
+            }
+
+            // -- File type --
+            Action::FileType => {
+                let paths = self.selection_paths();
+                if paths.is_empty() {
+                    self.cursor.clamp(self.rows.len());
+                    return ApplyResult::Post(PostAction::None);
+                }
+                if paths.len() == 1 {
+                    let label = fs::ops::file_type_label(paths[0]);
+                    let name = paths[0].file_name().map_or_else(
+                        || paths[0].display().to_string(),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                    self.flash_info(format!("{name}: {label}"));
+                } else {
+                    let lines: Vec<String> = paths
+                        .iter()
+                        .map(|p| {
+                            let name = p.file_name().map_or_else(
+                                || p.display().to_string(),
+                                |n| n.to_string_lossy().into_owned(),
+                            );
+                            format!("{name}: {}", fs::ops::file_type_label(p))
+                        })
+                        .collect();
+                    self.cursor.clamp(self.rows.len());
+                    return ApplyResult::OpenPager(PagerRequest {
+                        title: "file types".to_string(),
+                        lines: PagerLines::Plain(lines),
+                        columns: 1,
+                    });
+                }
+            }
+
+            // -- Marks --
+            Action::SetMark(letter) => self.set_mark(*letter),
+            Action::JumpMark(letter) => self.jump_to_mark(*letter),
+            Action::JumpStartDir => {
+                let dir = self.start_dir.clone();
+                if let Err(e) = self.chdir(&dir) {
+                    self.flash_error(format!("jump to start failed: {e}"));
+                }
+            }
+            Action::JumpPrevDir => {
+                if let Some(prev) = self.prev_dir.clone() {
+                    if let Err(e) = self.chdir(&prev) {
+                        self.flash_error(format!("jump back failed: {e}"));
+                    }
+                } else {
+                    self.flash_error("no previous directory");
+                }
+            }
+
+            // -- Info --
+            Action::Date => self.flash_info(crate::sysinfo::format_now()),
+            Action::Version => {
+                self.flash_info(format!(
+                    "\u{1f336}\u{fe0f} spyc {}",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
+            Action::SetEnvPrompt => {
+                self.mode =
+                    Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
+            }
+
+            // -- Worktree prompts (pure state: just set mode) --
+            Action::WorktreeNew => {
+                if self.git_info.is_none() {
+                    self.flash_error("not in a git repository");
+                } else {
+                    let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
+                    self.mode = Mode::Prompting(p);
+                }
+            }
+            Action::WorktreeDelete => {
+                if self.git_info.is_none() {
+                    self.flash_error("not in a git repository");
+                } else {
+                    let dir = self.listing.dir.display().to_string();
+                    self.mode = Mode::Prompting(Prompt::simple(
+                        PromptKind::WorktreeDeleteConfirm,
+                        format!("remove worktree {dir}? (y/N): "),
+                    ));
+                }
+            }
+
+            // -- No-op --
+            Action::Noop => {}
+
+            // -- Everything else stays in App --
+            _ => return ApplyResult::NotHandled,
+        }
+
+        self.cursor.clamp(self.rows.len());
+        ApplyResult::Handled
     }
 
     // --- Command / prompt dispatch (pure-domain arms) ---
@@ -1304,5 +1610,270 @@ mod tests {
             s.dispatch_prompt(&PromptKind::RemoveConfirm, "n"),
             PromptResult::Handled
         ));
+    }
+
+    // ── apply() action dispatch ───────────────────────────────────
+
+    #[test]
+    fn apply_down_moves_cursor() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        assert!(matches!(s.apply(&Action::Down(1)), ApplyResult::Handled));
+        assert_eq!(s.cursor.index, 1);
+    }
+
+    #[test]
+    fn apply_up_wraps() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        assert!(matches!(s.apply(&Action::Up(1)), ApplyResult::Handled));
+        assert_eq!(s.cursor.index, 2);
+    }
+
+    #[test]
+    fn apply_down_with_count() {
+        let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
+        s.apply(&Action::Down(3));
+        assert_eq!(s.cursor.index, 3);
+    }
+
+    #[test]
+    fn apply_page_down() {
+        let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
+        s.last_grid = Grid { cols: 1, rows: 3, col_widths: vec![20] };
+        s.apply(&Action::PageDown);
+        assert_eq!(s.cursor.index, 3);
+    }
+
+    #[test]
+    fn apply_goto_first() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        s.cursor.index = 2;
+        s.apply(&Action::GotoFirst);
+        assert_eq!(s.cursor.index, 0);
+    }
+
+    #[test]
+    fn apply_goto_last() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        s.apply(&Action::GotoLast);
+        assert_eq!(s.cursor.index, 2);
+    }
+
+    #[test]
+    fn apply_left_right_columns() {
+        let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
+        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.apply(&Action::Right(1));
+        assert_eq!(s.cursor.index, 3);
+        s.apply(&Action::Left(1));
+        assert_eq!(s.cursor.index, 0);
+    }
+
+    #[test]
+    fn apply_toggle_pick() {
+        let mut s = state_with_rows(&["a.txt", "b.txt"]);
+        s.apply(&Action::TogglePick);
+        assert!(s.picks.contains(Path::new("/tmp/test/a.txt")));
+    }
+
+    #[test]
+    fn apply_pick_toggle_all() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        s.apply(&Action::PickToggleAll);
+        assert_eq!(s.picks.len(), 3);
+        s.apply(&Action::PickToggleAll);
+        assert!(s.picks.is_empty());
+    }
+
+    #[test]
+    fn apply_take_adds_to_inventory() {
+        let mut s = state_with_rows(&["a.txt"]);
+        s.apply(&Action::Take);
+        assert_eq!(s.inventory.len(), 1);
+        assert!(s.inventory.contains(Path::new("/tmp/test/a.txt")));
+    }
+
+    #[test]
+    fn apply_drop_removes_from_inventory() {
+        let mut s = state_with_rows(&["a.txt"]);
+        s.inventory.extend(vec![PathBuf::from("/tmp/test/a.txt")]);
+        s.apply(&Action::Drop);
+        assert!(s.inventory.is_empty());
+    }
+
+    #[test]
+    fn apply_toggle_inventory_view() {
+        let mut s = test_state();
+        s.apply(&Action::ToggleInventoryView);
+        assert_eq!(s.view, View::Inventory);
+        s.apply(&Action::ToggleInventoryView);
+        assert_eq!(s.view, View::Dir);
+    }
+
+    #[test]
+    fn apply_empty_inventory() {
+        let mut s = state_with_rows(&["a"]);
+        s.inventory.extend(vec![PathBuf::from("/tmp/x")]);
+        s.apply(&Action::EmptyInventory);
+        assert!(s.inventory.is_empty());
+    }
+
+    #[test]
+    fn apply_toggle_mask() {
+        let mut s = test_state();
+        let was_enabled = s.masks.mask1.enabled;
+        s.apply(&Action::ToggleMask(1));
+        assert_ne!(s.masks.mask1.enabled, was_enabled);
+    }
+
+    #[test]
+    fn apply_search_next_finds_match() {
+        let mut s = state_with_rows(&["alpha", "beta", "gamma"]);
+        s.last_search = Some("g".to_string());
+        s.apply(&Action::SearchNext);
+        assert_eq!(s.cursor.index, 2);
+    }
+
+    #[test]
+    fn apply_search_prev_finds_match() {
+        let mut s = state_with_rows(&["alpha", "beta", "gamma"]);
+        s.cursor.index = 2;
+        s.last_search = Some("a".to_string());
+        s.apply(&Action::SearchPrev);
+        assert_eq!(s.cursor.index, 0);
+    }
+
+    #[test]
+    fn apply_start_shell_returns_spawn() {
+        let mut s = test_state();
+        let result = s.apply(&Action::StartShell);
+        assert!(matches!(result, ApplyResult::Post(PostAction::Spawn { .. })));
+    }
+
+    #[test]
+    fn apply_prompt_actions_set_mode() {
+        let mut s = test_state();
+        s.apply(&Action::SearchPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+
+        s.mode = Mode::Normal;
+        s.apply(&Action::ShellCapturedPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+
+        s.mode = Mode::Normal;
+        s.apply(&Action::CommandPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+
+        s.mode = Mode::Normal;
+        s.apply(&Action::JumpPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+
+        s.mode = Mode::Normal;
+        s.apply(&Action::LimitPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+
+        s.mode = Mode::Normal;
+        s.apply(&Action::SetEnvPrompt);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+    }
+
+    #[test]
+    fn apply_set_mark() {
+        let mut s = state_with_rows(&["file.txt"]);
+        s.apply(&Action::SetMark('a'));
+        assert!(s.marks.get('a').is_some());
+    }
+
+    #[test]
+    fn apply_date_flashes() {
+        let mut s = test_state();
+        s.apply(&Action::Date);
+        assert!(s.flash.is_some());
+        assert!(s.flash.as_ref().unwrap().text.contains("UTC"));
+    }
+
+    #[test]
+    fn apply_version_flashes() {
+        let mut s = test_state();
+        s.apply(&Action::Version);
+        let flash = s.flash.as_ref().unwrap();
+        assert!(flash.text.contains("spyc"));
+    }
+
+    #[test]
+    fn apply_noop_does_nothing() {
+        let mut s = test_state();
+        let result = s.apply(&Action::Noop);
+        assert!(matches!(result, ApplyResult::Handled));
+    }
+
+    #[test]
+    fn apply_long_list_returns_pager() {
+        let mut s = state_with_rows(&["a.txt"]);
+        let result = s.apply(&Action::LongList);
+        assert!(matches!(result, ApplyResult::OpenPager(_)));
+    }
+
+    #[test]
+    fn apply_file_type_single_flashes() {
+        let mut s = state_with_rows(&["a.txt"]);
+        let result = s.apply(&Action::FileType);
+        // Single file: flashes info, returns Handled
+        assert!(matches!(result, ApplyResult::Handled));
+        assert!(s.flash.is_some());
+    }
+
+    #[test]
+    fn apply_pane_actions_not_handled() {
+        let mut s = test_state();
+        assert!(matches!(
+            s.apply(&Action::TogglePane),
+            ApplyResult::NotHandled
+        ));
+        assert!(matches!(
+            s.apply(&Action::PaneFocusDown),
+            ApplyResult::NotHandled
+        ));
+        assert!(matches!(
+            s.apply(&Action::Help),
+            ApplyResult::NotHandled
+        ));
+        assert!(matches!(
+            s.apply(&Action::Redraw),
+            ApplyResult::NotHandled
+        ));
+        assert!(matches!(
+            s.apply(&Action::ColorToggle),
+            ApplyResult::NotHandled
+        ));
+    }
+
+    #[test]
+    fn apply_worktree_new_sets_prompt_or_errors() {
+        let mut s = test_state();
+        // No git info → error
+        s.apply(&Action::WorktreeNew);
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+
+        // With git info → prompt
+        s.flash = None;
+        s.git_info = Some("main".to_string());
+        s.apply(&Action::WorktreeNew);
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+    }
+
+    #[test]
+    fn apply_jump_prev_dir() {
+        let mut s = test_state();
+        // No prev dir → error
+        s.apply(&Action::JumpPrevDir);
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn apply_clamps_cursor_after_action() {
+        let mut s = state_with_rows(&["a", "b"]);
+        s.cursor.index = 10; // out of bounds
+        s.apply(&Action::Noop); // any handled action should clamp
+        assert_eq!(s.cursor.index, 1); // clamped to last valid
     }
 }

@@ -2932,11 +2932,6 @@ impl App {
     // --- Action handlers --------------------------------------------------
 
     fn apply(&mut self, action: &Action) -> Result<PostAction> {
-        let len = self.state.rows.len();
-        // In a column-major grid, moving one column horizontally advances
-        // the flat index by `rows_per_col`. Moving vertically is ±1.
-        let rows_per_col = self.state.last_grid.rows as usize;
-        let per_page = self.state.last_grid.items_per_page();
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
@@ -2944,19 +2939,30 @@ impl App {
             self.state.cursor.view_top,
             self.state.last_grid.cols,
             self.state.last_grid.rows,
-            per_page,
-            len,
+            self.state.last_grid.items_per_page(),
+            self.state.rows.len(),
         );
-        match action {
-            Action::Up(n) => self.state.cursor_move_vertical(-(*n as isize), len),
-            Action::Down(n) => self.state.cursor_move_vertical(*n as isize, len),
-            Action::Left(n) => self.state.cursor_move_columns(-(*n as isize), rows_per_col, len),
-            Action::Right(n) => self.state.cursor_move_columns(*n as isize, rows_per_col, len),
-            Action::PageUp => self.state.cursor_move_vertical(-(per_page as isize), len),
-            Action::PageDown => self.state.cursor_move_vertical(per_page as isize, len),
-            Action::GotoFirst => self.state.goto_col_top(),
-            Action::GotoLast => self.state.goto_col_bottom(len),
 
+        // Try pure-domain dispatch first.
+        match self.state.apply(action) {
+            state::ApplyResult::Handled => return Ok(PostAction::None),
+            state::ApplyResult::Post(post) => return Ok(post),
+            state::ApplyResult::OpenPager(req) => {
+                let view = match req.lines {
+                    state::PagerLines::Plain(lines) => {
+                        let mut v = PagerView::new_plain(req.title, lines);
+                        v.columns = req.columns;
+                        v
+                    }
+                };
+                self.pager = Some(view);
+                return Ok(PostAction::None);
+            }
+            state::ApplyResult::NotHandled => {}
+        }
+
+        // Terminal-touching arms that must stay in App.
+        match action {
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
                 self.state.cursor.clamp(self.state.rows.len());
@@ -2967,74 +2973,12 @@ impl App {
                 self.state.cursor.clamp(self.state.rows.len());
                 return Ok(post);
             }
-            Action::Climb => self.state.climb(),
-            Action::Home => {
-                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-                    if let Err(e) = self.state.chdir(&home) {
-                        self.state.flash_error(format!("chdir: {e}"));
-                    }
-                }
-            }
 
-            Action::TogglePick => self.state.toggle_pick_cursor(),
-            Action::PickPatternPrompt => {
-                if self.state.view == View::Dir {
-                    self.state.mode =
-                        Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
-                }
-            }
-            Action::PickToggleAll => self.state.toggle_all_picks(),
-
-            Action::Take => self.state.take(),
-            Action::Drop => self.state.drop_cursor(),
-            Action::ToggleInventoryView => self.state.toggle_inventory_view(),
-            Action::EmptyInventory => {
-                self.state.inventory.clear();
-                self.state.rebuild_rows();
-            }
-
-            Action::ToggleMask(n) => {
-                if *n == 1 {
-                    self.state.masks.toggle_mask1();
-                } else if *n == 2 {
-                    self.state.masks.toggle_mask2();
-                }
-                self.state.rebuild_rows();
-            }
-            Action::LimitPrompt => {
-                let prefix = if self.state.temp_filter.is_some() {
-                    "limit (active)="
-                } else {
-                    "limit="
-                };
-                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
-            }
-            Action::CommandPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
-            }
-
-            Action::ShellCapturedPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
-            }
-            Action::ShellForegroundPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
-            }
-            Action::StartShell => {
-                let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-                return Ok(PostAction::Spawn {
-                    program: sh,
-                    args: vec![],
-                    pause_after: false,
-                });
-            }
             Action::ChmodAdd(mode_char) => {
                 let paths = self.state.selection_paths();
                 if paths.is_empty() {
                     return Ok(PostAction::None);
                 }
-                // +w adds user-write (0o200); +x adds exec-for-all (0o111).
-                // Mirroring the common shell conventions without consulting
-                // umask — if the user wants finer control they can !chmod %.
                 let bits: u32 = match mode_char {
                     'w' => 0o200,
                     'x' => 0o111,
@@ -3046,112 +2990,6 @@ impl App {
                     format!("chmod +{mode_char} on {count} item(s)"),
                 );
                 self.state.refresh_listing();
-            }
-
-            Action::SearchPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::simple(
-                    PromptKind::Search {
-                        saved_cursor: self.state.cursor.index,
-                    },
-                    "/",
-                ));
-            }
-            Action::SearchNext => {
-                if let Some(term) = self.state.last_search.clone() {
-                    let n = self.state.rows.len();
-                    if n > 0 {
-                        let start = (self.state.cursor.index + 1) % n;
-                        if let Some(i) = self.state.find_match(&term, start, false) {
-                            self.state.cursor.index = i;
-                        }
-                    }
-                }
-            }
-            Action::SearchPrev => {
-                if let Some(term) = self.state.last_search.clone() {
-                    let n = self.state.rows.len();
-                    if n > 0 {
-                        let start = if self.state.cursor.index == 0 {
-                            n - 1
-                        } else {
-                            self.state.cursor.index - 1
-                        };
-                        if let Some(i) = self.state.find_match(&term, start, true) {
-                            self.state.cursor.index = i;
-                        }
-                    }
-                }
-            }
-
-            Action::JumpPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
-            }
-
-            Action::CopyPrompt => {
-                if !self.state.selection_paths().is_empty() {
-                    self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
-                }
-            }
-            Action::MovePrompt => {
-                if !self.state.selection_paths().is_empty() {
-                    self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
-                }
-            }
-            Action::MakeDirPrompt => {
-                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
-            }
-            Action::RemovePrompt => {
-                let count = self.state.selection_paths().len();
-                if count > 0 {
-                    self.state.mode = Mode::Prompting(Prompt::simple(
-                        PromptKind::RemoveConfirm,
-                        format!("remove {count} file(s)? (y/N): "),
-                    ));
-                }
-            }
-            Action::LongList => {
-                // No selection → list the whole current directory.
-                let owned: Vec<PathBuf>;
-                let paths: Vec<&Path> = if self.state.selection_paths().is_empty() {
-                    owned = self.state
-                        .listing
-                        .entries
-                        .iter()
-                        .map(|e| e.path.clone())
-                        .collect();
-                    owned.iter().map(PathBuf::as_path).collect()
-                } else {
-                    self.state.selection_paths()
-                };
-                let lines = fs::ops::format_long_listing(&paths);
-                let title = format!("long listing — {}", self.state.listing.dir.display());
-                self.pager = Some(PagerView::new_plain(title, lines));
-            }
-            Action::FileType => {
-                let paths = self.state.selection_paths();
-                if paths.is_empty() {
-                    return Ok(PostAction::None);
-                }
-                if paths.len() == 1 {
-                    let label = fs::ops::file_type_label(paths[0]);
-                    let name = paths[0].file_name().map_or_else(
-                        || paths[0].display().to_string(),
-                        |n| n.to_string_lossy().into_owned(),
-                    );
-                    self.state.flash_info(format!("{name}: {label}"));
-                } else {
-                    let lines: Vec<String> = paths
-                        .iter()
-                        .map(|p| {
-                            let name = p.file_name().map_or_else(
-                                || p.display().to_string(),
-                                |n| n.to_string_lossy().into_owned(),
-                            );
-                            format!("{name}: {}", fs::ops::file_type_label(p))
-                        })
-                        .collect();
-                    self.pager = Some(PagerView::new_plain("file types", lines));
-                }
             }
 
             Action::Help => {
@@ -3253,25 +3091,6 @@ impl App {
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
 
             Action::WorktreeList => self.worktree_list(),
-            Action::WorktreeNew => {
-                if self.state.git_info.is_none() {
-                    self.state.flash_error("not in a git repository");
-                } else {
-                    let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
-                    self.state.mode = Mode::Prompting(p);
-                }
-            }
-            Action::WorktreeDelete => {
-                if self.state.git_info.is_none() {
-                    self.state.flash_error("not in a git repository");
-                } else {
-                    let dir = self.state.listing.dir.display().to_string();
-                    self.state.mode = Mode::Prompting(Prompt::simple(
-                        PromptKind::WorktreeDeleteConfirm,
-                        format!("remove worktree {dir}? (y/N): "),
-                    ));
-                }
-            }
 
             Action::GitDiff | Action::GitDiffCached => {
                 let cached = matches!(action, Action::GitDiffCached);
@@ -3282,31 +3101,6 @@ impl App {
                 }
             }
 
-            Action::SetMark(letter) => self.state.set_mark(*letter),
-            Action::JumpMark(letter) => self.state.jump_to_mark(*letter),
-            Action::JumpStartDir => {
-                let dir = self.state.start_dir.clone();
-                if let Err(e) = self.state.chdir(&dir) {
-                    self.state.flash_error(format!("jump to start failed: {e}"));
-                }
-            }
-            Action::JumpPrevDir => {
-                if let Some(prev) = self.state.prev_dir.clone() {
-                    if let Err(e) = self.state.chdir(&prev) {
-                        self.state.flash_error(format!("jump back failed: {e}"));
-                    }
-                } else {
-                    self.state.flash_error("no previous directory");
-                }
-            }
-
-            Action::Date => self.state.flash_info(crate::sysinfo::format_now()),
-            Action::Version => {
-                self.state.flash_info(format!(
-                    "\u{1f336}\u{fe0f} spyc {}",
-                    env!("CARGO_PKG_VERSION")
-                ));
-            }
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
                 self.theme = self.theme.toggled();
@@ -3316,15 +3110,10 @@ impl App {
                     "colors on"
                 });
             }
-            Action::SetEnvPrompt => {
-                self.state.mode =
-                    Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
-            }
 
             Action::Redraw => {
                 self.needs_full_repaint = true;
             }
-            Action::Noop => {}
             Action::Quit => {
                 let now = std::time::Instant::now();
                 if self.state
@@ -3338,6 +3127,9 @@ impl App {
                     self.state.flash_info("press again to quit");
                 }
             }
+
+            // All other actions were already handled by `self.state.apply()`.
+            _ => {}
         }
         self.state.cursor.clamp(self.state.rows.len());
         Ok(PostAction::None)
