@@ -248,6 +248,9 @@ pub struct App {
     pending_capture: Option<PendingCapture>,
     pending_history_pick: Option<LineEditor>,
     history_pending_g: bool,
+    /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
+    /// jump to file reference.
+    scroll_pending_g: bool,
     pending_pager_return: Option<PagerReturn>,
     needs_full_repaint: bool,
     theme: Theme,
@@ -357,6 +360,7 @@ impl App {
             pending_capture: None,
             pending_history_pick: None,
             history_pending_g: false,
+            scroll_pending_g: false,
             pending_pager_return: None,
             needs_full_repaint: false,
             theme,
@@ -1916,8 +1920,27 @@ impl App {
     /// through the scrollback buffer; `Esc`/`q` exit back to live view.
     fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
         use crossterm::event::{KeyCode, KeyModifiers};
-        let pane = self.pane_tabs.as_mut().unwrap().active_mut();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // Handle pending `g` prefix: gg = scroll top, gf/gF = goto file.
+        if self.scroll_pending_g {
+            self.scroll_pending_g = false;
+            match key.code {
+                KeyCode::Char('g') => {
+                    self.pane_tabs.as_mut().unwrap().active_mut().scroll_to_top();
+                }
+                KeyCode::Char('f') => {
+                    self.goto_file_from_pane(false);
+                }
+                KeyCode::Char('F') => {
+                    self.goto_file_from_pane(true);
+                }
+                _ => {} // Unknown g-sequence, ignore
+            }
+            return PostAction::None;
+        }
+
+        let pane = self.pane_tabs.as_mut().unwrap().active_mut();
         match key.code {
             KeyCode::Char('k') | KeyCode::Up => pane.scroll_up(1),
             KeyCode::Char('j') | KeyCode::Down => pane.scroll_down_or_exit(1),
@@ -1926,7 +1949,7 @@ impl App {
             KeyCode::PageDown | KeyCode::Char('f') if ctrl => pane.scroll_down_or_exit(20),
             KeyCode::Char('d') if ctrl => pane.scroll_down_or_exit(10),
             KeyCode::Char('g') => {
-                pane.scroll_to_top();
+                self.scroll_pending_g = true;
             }
             KeyCode::Char('G') => pane.scroll_to_bottom(),
             KeyCode::Char('s') => match pane.save_to_file() {
@@ -2112,15 +2135,36 @@ impl App {
             return;
         };
         let lines = tabs.active().visible_lines();
-        let resolve_base = tabs.active_info().cwd.clone();
+        // Also try resolving against the spyc cwd (project root), not just
+        // the pane tab's cwd — Claude often prints paths relative to the
+        // project root regardless of the shell's cwd.
+        let pane_cwd = tabs.active_info().cwd.clone();
+        let spyc_cwd = self.state.listing.dir.clone();
 
-        let Some(pathref) = crate::pane::pathref::extract_path_ref(&lines, &resolve_base) else {
+        let pathref = crate::pane::pathref::extract_path_ref(&lines, &pane_cwd)
+            .or_else(|| {
+                (pane_cwd != spyc_cwd)
+                    .then(|| crate::pane::pathref::extract_path_ref(&lines, &spyc_cwd))
+                    .flatten()
+            });
+
+        let Some(pathref) = pathref else {
             self.state.flash_error("no path reference found in pane output");
             return;
         };
 
         let path = pathref.path;
         let line = pathref.line;
+
+        // Exit scroll mode and switch focus to the file list so the user
+        // sees the navigation result.
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            if tabs.active().is_scrolling() {
+                tabs.active_mut().exit_scroll_mode();
+            }
+        }
+        self.state.pane_focused = false;
+        self.needs_full_repaint = true;
 
         // Navigate: if it's a directory, chdir there; if a file, chdir to
         // its parent and focus on it.
