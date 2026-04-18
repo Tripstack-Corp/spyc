@@ -32,9 +32,9 @@ pub enum Action {
     EmptyInventory,      // z
 
     // Ignore masks & filtering.
-    ToggleMask(u8),  // a -> 1, o -> 2
-    LimitPrompt,     // = — temporary filter (glob pattern, `!` for picks, empty clears)
-    CommandPrompt,   // : — vim-style command line (limit, !, !!, ;, etc.)
+    ToggleMask(u8), // a -> 1, o -> 2
+    LimitPrompt,    // = — temporary filter (glob pattern, `!` for picks, empty clears)
+    CommandPrompt,  // : — vim-style command line (limit, !, !!, ;, etc.)
 
     // Shell-out.
     ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colors
@@ -78,32 +78,32 @@ pub enum Action {
     ReloadConfig, // ^R — re-read ~/.spycrc.toml + project config
 
     // Split pane (M8).
-    TogglePane,        // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
-    ResumePane,        // F11 — open pane with `claude --resume`
-    PaneFocusDown,     // ^W j — move focus down (to pane)
-    PaneFocusUp,       // ^W k — move focus up (to list)
-    PaneSendSelection, // ^W s — send shell-quoted selection to pane stdin
-    PaneGrow,          // ^W + — bottom pane takes more height
-    PaneShrink,        // ^W - — bottom pane takes less height
-    PaneScrollEnter,   // ^W v — enter scroll mode (browse scrollback)
-    PaneScrollSave,    // s (while in scroll mode) — save scrollback to file
-    PaneNewTab,        // ^W n — open a new pane tab (prompt for command + cwd)
-    PaneCloseTab,      // ^W x — close the active pane tab
-    PaneTabByIndex(u8),// ^W 1..9 — switch to tab N
-    PaneNextTab,       // ^W ] — next tab
-    PanePrevTab,       // ^W [ — previous tab
-    PaneRenameTab,     // ^W r — rename the active tab
-    PanePipeContent,   // ^W p — send file contents of selection to pane
-    PanePipeInventory, // ^W i — send file contents of inventory to pane
+    TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
+    ResumePane,         // F11 — open pane with `claude --resume`
+    PaneFocusDown,      // ^W j — move focus down (to pane)
+    PaneFocusUp,        // ^W k — move focus up (to list)
+    PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
+    PaneGrow,           // ^W + — bottom pane takes more height
+    PaneShrink,         // ^W - — bottom pane takes less height
+    PaneScrollEnter,    // ^W v — enter scroll mode (browse scrollback)
+    PaneScrollSave,     // s (while in scroll mode) — save scrollback to file
+    PaneNewTab,         // ^W n — open a new pane tab (prompt for command + cwd)
+    PaneCloseTab,       // ^W x — close the active pane tab
+    PaneTabByIndex(u8), // ^W 1..9 — switch to tab N
+    PaneNextTab,        // ^W ] — next tab
+    PanePrevTab,        // ^W [ — previous tab
+    PaneRenameTab,      // ^W r — rename the active tab
+    PanePipeContent,    // ^W p — send file contents of selection to pane
+    PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
     // Git worktree (M11).
-    WorktreeList,      // W l — list worktrees, pick to chdir
-    WorktreeNew,       // W n — prompt for branch, create worktree
-    WorktreeDelete,    // W d — confirm, remove current worktree
+    WorktreeList,   // W l — list worktrees, pick to chdir
+    WorktreeNew,    // W n — prompt for branch, create worktree
+    WorktreeDelete, // W d — confirm, remove current worktree
 
     // Git diff (M12).
-    GitDiff,           // g d — unstaged diff for cursor file / selection
-    GitDiffCached,     // g D — staged (cached) diff
+    GitDiff,       // g d — unstaged diff for cursor file / selection
+    GitDiffCached, // g D — staged (cached) diff
 
     // Meta.
     Redraw, // ^L

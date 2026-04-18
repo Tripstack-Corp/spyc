@@ -43,11 +43,7 @@ impl Widget for PaneWidget<'_> {
         //  - Focused + blink_on: bright reverse-video block (visible phase).
         //  - Focused + blink_off: no overlay (hidden phase → blink effect).
         //  - Unfocused: static dim reverse-video block (always visible).
-        let show_cursor = if self.focused {
-            self.blink_on
-        } else {
-            true
-        };
+        let show_cursor = if self.focused { self.blink_on } else { true };
         if show_cursor {
             let (cy, cx) = self.screen.cursor_position();
             if cy < draw_rows && cx < draw_cols {

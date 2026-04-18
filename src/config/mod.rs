@@ -195,6 +195,122 @@ exec = "#112233"
         assert_eq!(cfg.bindings.len(), 2);
     }
 
+    // ── DSL → Resolver → Action round-trip tests ──────────────────
+
+    #[test]
+    fn dsl_unix_binding_round_trips_through_resolver() {
+        use crate::keymap::resolver::{Resolver, ResolverOutcome};
+        use crate::keymap::user::{BoundAction, UserKeymap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let binding = dsl::parse("map f unix file %").unwrap().unwrap();
+        let keymap = UserKeymap::from_bindings(vec![binding]);
+        let mut resolver = Resolver::new();
+
+        let ev = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE);
+        let out = resolver.feed(ev, &keymap);
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("file %".to_string()))
+        );
+    }
+
+    #[test]
+    fn dsl_ctrl_binding_round_trips() {
+        use crate::keymap::resolver::{Resolver, ResolverOutcome};
+        use crate::keymap::user::{BoundAction, UserKeymap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let binding = dsl::parse("map ^P unix ps aux").unwrap().unwrap();
+        let keymap = UserKeymap::from_bindings(vec![binding]);
+        let mut resolver = Resolver::new();
+
+        let ev = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        let out = resolver.feed(ev, &keymap);
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("ps aux".to_string()))
+        );
+    }
+
+    #[test]
+    fn dsl_jump_binding_round_trips() {
+        use crate::keymap::resolver::{Resolver, ResolverOutcome};
+        use crate::keymap::user::{BoundAction, UserKeymap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let binding = dsl::parse("map X jump =/usr/local").unwrap().unwrap();
+        let keymap = UserKeymap::from_bindings(vec![binding]);
+        let mut resolver = Resolver::new();
+
+        let ev = KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE);
+        let out = resolver.feed(ev, &keymap);
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::Jump("/usr/local".to_string()))
+        );
+    }
+
+    #[test]
+    fn dsl_plain_action_round_trips() {
+        use crate::keymap::action::Action;
+        use crate::keymap::resolver::{Resolver, ResolverOutcome};
+        use crate::keymap::user::{BoundAction, UserKeymap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let binding = dsl::parse("map X quit").unwrap().unwrap();
+        let keymap = UserKeymap::from_bindings(vec![binding]);
+        let mut resolver = Resolver::new();
+
+        let ev = KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE);
+        let out = resolver.feed(ev, &keymap);
+        assert_eq!(out, ResolverOutcome::User(BoundAction::Plain(Action::Quit)));
+    }
+
+    #[test]
+    fn full_config_file_round_trip() {
+        use crate::keymap::resolver::{Resolver, ResolverOutcome};
+        use crate::keymap::user::{BoundAction, UserKeymap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("test.toml");
+        std::fs::write(
+            &path,
+            r##"
+keymap = [
+    "map f unix file %",
+    "map g unix git status",
+]
+"##,
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        let keymap = UserKeymap::from_bindings(cfg.bindings);
+        let mut resolver = Resolver::new();
+
+        // 'f' should fire the first binding
+        let out = resolver.feed(
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+            &keymap,
+        );
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("file %".to_string()))
+        );
+
+        // 'g' should fire the second (overrides built-in 'g' pending)
+        let out = resolver.feed(
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            &keymap,
+        );
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("git status".to_string()))
+        );
+    }
+
     #[test]
     fn project_overrides_user_colors_but_appends_keymap() {
         let tmp = tempdir().unwrap();

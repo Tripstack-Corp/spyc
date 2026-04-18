@@ -34,14 +34,12 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    let syntax = ss
-        .find_syntax_by_extension(ext)
-        .or_else(|| {
-            content
-                .lines()
-                .next()
-                .and_then(|first| ss.find_syntax_by_first_line(first))
-        })?;
+    let syntax = ss.find_syntax_by_extension(ext).or_else(|| {
+        content
+            .lines()
+            .next()
+            .and_then(|first| ss.find_syntax_by_first_line(first))
+    })?;
 
     let theme = ts.themes.get(THEME_NAME)?;
     let mut highlighter = HighlightLines::new(syntax, theme);
@@ -52,11 +50,7 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
         let spans: Vec<Span<'static>> = ranges
             .into_iter()
             .map(|(style, text)| {
-                let fg = Color::Rgb(
-                    style.foreground.r,
-                    style.foreground.g,
-                    style.foreground.b,
-                );
+                let fg = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
                 let mut modifier = Modifier::empty();
                 if style.font_style.contains(FontStyle::BOLD) {
                     modifier |= Modifier::BOLD;

@@ -7,11 +7,11 @@
 
 use ansi_to_tui::IntoText;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::ui::theme::Theme;
@@ -31,6 +31,7 @@ enum Search {
     },
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct PagerView {
     pub title: String,
     /// Pre-styled lines. ANSI escapes in source are already converted to
@@ -180,7 +181,7 @@ impl PagerView {
         }
     }
 
-    pub fn toggle_full_width(&mut self) {
+    pub const fn toggle_full_width(&mut self) {
         self.full_width = !self.full_width;
     }
 
@@ -189,9 +190,7 @@ impl PagerView {
         use std::io::Write;
         use std::process::{Command, Stdio};
         let text = self.plain_text();
-        let mut child = Command::new("pbcopy")
-            .stdin(Stdio::piped())
-            .spawn()?;
+        let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
         if let Some(stdin) = child.stdin.as_mut() {
             stdin.write_all(text.as_bytes())?;
         }
@@ -199,7 +198,7 @@ impl PagerView {
         Ok(())
     }
 
-    pub fn toggle_whitespace(&mut self) {
+    pub const fn toggle_whitespace(&mut self) {
         self.show_whitespace = !self.show_whitespace;
     }
 
@@ -209,7 +208,7 @@ impl PagerView {
 
     /// Lines visible per "page" — viewport_height * columns.
     pub fn page_lines(&self, viewport_height: u16) -> u16 {
-        viewport_height.saturating_mul(self.columns.max(1) as u16)
+        viewport_height.saturating_mul(u16::from(self.columns.max(1)))
     }
 
     fn clamp_scroll(&mut self, viewport_height: u16) {
@@ -227,12 +226,14 @@ impl PagerView {
         self.clamp_scroll(viewport_height);
     }
 
-    pub fn scroll_to_top(&mut self) {
+    pub const fn scroll_to_top(&mut self) {
         self.scroll = 0;
     }
 
     pub fn scroll_to_bottom(&mut self, viewport_height: u16) {
-        self.scroll = self.line_count().saturating_sub(self.page_lines(viewport_height).max(1));
+        self.scroll = self
+            .line_count()
+            .saturating_sub(self.page_lines(viewport_height).max(1));
     }
 
     /// Position indicator: "Top", "Bot", "All", or "NN%".
@@ -356,7 +357,10 @@ impl PagerView {
 
     /// Returns the line index of the current search match, if any.
     pub fn current_match_line(&self) -> Option<usize> {
-        if let Search::Active { matches, cursor, .. } = &self.search {
+        if let Search::Active {
+            matches, cursor, ..
+        } = &self.search
+        {
             matches.get(*cursor).copied()
         } else {
             None
@@ -410,16 +414,16 @@ fn line_plain_text(line: &Line) -> String {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
-    let inner_area = if view.full_width { area } else { centered_rect(area, 90, 92) };
+    let inner_area = if view.full_width {
+        area
+    } else {
+        centered_rect(area, 90, 92)
+    };
 
     frame.render_widget(Clear, inner_area);
 
     let pos = view.position_indicator(inner_area.height.saturating_sub(2));
-    let title = format!(
-        "  {}   ({} lines)  ",
-        view.title,
-        view.lines.len()
-    );
+    let title = format!("  {}   ({} lines)  ", view.title, view.lines.len());
     let title_right = format!("  {pos}  ");
     let block = if view.full_width {
         // No border in full-width mode so terminal text selection is clean.
@@ -433,12 +437,15 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
                     .fg(theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ))
-            .title_bottom(Line::from(Span::styled(
-                title_right,
-                Style::default()
-                    .fg(theme.status_suffix)
-                    .add_modifier(Modifier::BOLD),
-            )).right_aligned())
+            .title_bottom(
+                Line::from(Span::styled(
+                    title_right,
+                    Style::default()
+                        .fg(theme.status_suffix)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .right_aligned(),
+            )
     };
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
@@ -506,11 +513,12 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
                 if let Some((col, vi_mode)) = view.picker_edit_cursor {
                     // History editor: show editing cursor on this line.
                     let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-                    let row_style = Style::default()
-                        .bg(theme.cursor_bg)
-                        .fg(theme.cursor_fg);
+                    let row_style = Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg);
                     let before: String = plain.chars().take(col).collect();
-                    let cursor_ch: String = plain.chars().nth(col).map_or(" ".into(), |c| c.to_string());
+                    let cursor_ch: String = plain
+                        .chars()
+                        .nth(col)
+                        .map_or_else(|| " ".into(), |c| c.to_string());
                     let after: String = plain.chars().skip(col + 1).collect();
                     let cursor_style = if vi_mode == crate::ui::line_edit::Mode::Normal {
                         row_style.add_modifier(Modifier::REVERSED)

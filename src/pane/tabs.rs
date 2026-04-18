@@ -84,7 +84,7 @@ impl PaneTabs {
         self.tabs.is_empty()
     }
 
-    pub fn active_index(&self) -> usize {
+    pub const fn active_index(&self) -> usize {
         self.active
     }
 

@@ -40,7 +40,7 @@ impl History {
         {
             let mut seen = std::collections::HashSet::new();
             let mut deduped = Vec::with_capacity(entries.len());
-            for entry in entries.drain(..).rev() {
+            for entry in entries.into_iter().rev() {
                 if seen.insert(entry.clone()) {
                     deduped.push(entry);
                 }
@@ -154,4 +154,158 @@ fn disk_path(filename: &str) -> Option<PathBuf> {
         return Some(PathBuf::from(xdg).join(format!("spyc/{filename}")));
     }
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(format!(".local/state/spyc/{filename}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build an in-memory History. `push` will attempt best-effort saves
+    /// to disk (harmless test artifact); the test assertions are purely
+    /// in-memory.
+    fn empty_history() -> History {
+        History {
+            entries: Vec::new(),
+            nav: None,
+            stashed: String::new(),
+            filename: format!("test_history_{}", std::process::id()),
+        }
+    }
+
+    #[test]
+    fn empty_history_has_no_entries() {
+        let h = empty_history();
+        assert!(h.entries().is_empty());
+    }
+
+    #[test]
+    fn push_adds_entry() {
+        let mut h = empty_history();
+        h.push("ls -la");
+        assert_eq!(h.entries(), &["ls -la"]);
+    }
+
+    #[test]
+    fn push_trims_whitespace() {
+        let mut h = empty_history();
+        h.push("  echo hello  ");
+        assert_eq!(h.entries(), &["echo hello"]);
+    }
+
+    #[test]
+    fn push_ignores_empty() {
+        let mut h = empty_history();
+        h.push("");
+        h.push("   ");
+        assert!(h.entries().is_empty());
+    }
+
+    #[test]
+    fn push_deduplicates_moves_to_end() {
+        let mut h = empty_history();
+        h.push("first");
+        h.push("second");
+        h.push("first");
+        assert_eq!(h.entries(), &["second", "first"]);
+    }
+
+    #[test]
+    fn push_caps_at_max() {
+        let mut h = empty_history();
+        for i in 0..1050 {
+            h.push(&format!("cmd-{i}"));
+        }
+        assert_eq!(h.entries().len(), MAX_ENTRIES);
+        // Oldest commands were drained
+        assert_eq!(h.entries()[0], "cmd-50");
+        assert_eq!(h.entries().last().unwrap(), "cmd-1049");
+    }
+
+    #[test]
+    fn prev_navigates_backward() {
+        let mut h = empty_history();
+        h.push("a");
+        h.push("b");
+        h.push("c");
+
+        assert_eq!(h.prev("live"), Some("c"));
+        assert_eq!(h.prev("live"), Some("b"));
+        assert_eq!(h.prev("live"), Some("a"));
+        assert_eq!(h.prev("live"), None); // at oldest
+    }
+
+    #[test]
+    fn prev_stashes_current_text() {
+        let mut h = empty_history();
+        h.push("old");
+        h.prev("my typing");
+        assert_eq!(h.stashed(), "my typing");
+    }
+
+    #[test]
+    fn next_navigates_forward() {
+        let mut h = empty_history();
+        h.push("a");
+        h.push("b");
+        h.push("c");
+
+        h.prev("live");
+        h.prev("live");
+        h.prev("live"); // at "a"
+        assert_eq!(h.next(), Some("b"));
+        assert_eq!(h.next(), Some("c"));
+        assert_eq!(h.next(), None); // past newest → restore stashed
+    }
+
+    #[test]
+    fn next_without_prev_returns_none() {
+        let mut h = empty_history();
+        h.push("a");
+        assert_eq!(h.next(), None);
+    }
+
+    #[test]
+    fn reset_nav_clears_browsing() {
+        let mut h = empty_history();
+        h.push("a");
+        h.prev("typing");
+        h.reset_nav();
+        assert_eq!(h.stashed(), "");
+        // prev starts from the end again
+        assert_eq!(h.prev("new typing"), Some("a"));
+    }
+
+    #[test]
+    fn remove_entry() {
+        let mut h = empty_history();
+        h.push("a");
+        h.push("b");
+        h.push("c");
+        h.remove(1); // remove "b"
+        assert_eq!(h.entries(), &["a", "c"]);
+    }
+
+    #[test]
+    fn remove_out_of_bounds_is_noop() {
+        let mut h = empty_history();
+        h.push("a");
+        h.remove(5);
+        assert_eq!(h.entries().len(), 1);
+    }
+
+    #[test]
+    fn push_dedup_preserves_order_like_load() {
+        // Tests the same dedup logic that load_file applies on read:
+        // when the same command appears multiple times, only the last
+        // occurrence is kept. We test via push() which uses the same
+        // move-to-end dedup strategy, avoiding env-var races from
+        // XDG_STATE_HOME.
+        let mut h = empty_history();
+        h.push("a");
+        h.push("b");
+        h.push("a");
+        h.push("c");
+        h.push("b");
+        assert_eq!(h.entries(), &["a", "c", "b"]);
+    }
 }

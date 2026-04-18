@@ -60,11 +60,11 @@ impl IgnoreMasks {
             || (self.mask2.enabled && self.mask2.matches(name))
     }
 
-    pub fn toggle_mask1(&mut self) {
+    pub const fn toggle_mask1(&mut self) {
         self.mask1.enabled = !self.mask1.enabled;
     }
 
-    pub fn toggle_mask2(&mut self) {
+    pub const fn toggle_mask2(&mut self) {
         self.mask2.enabled = !self.mask2.enabled;
     }
 
@@ -94,5 +94,133 @@ impl IgnoreMasks {
             let enabled = group2.iter().any(|m| m.enabled);
             self.mask2 = Mask::new(&pats, enabled);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_matches_glob() {
+        let m = Mask::new(&["*.o", "*.pyc"], true);
+        assert!(m.matches("foo.o"));
+        assert!(m.matches("bar.pyc"));
+        assert!(!m.matches("foo.rs"));
+    }
+
+    #[test]
+    fn mask_matches_dotfiles() {
+        let m = Mask::new(&[".*"], true);
+        assert!(m.matches(".git"));
+        assert!(m.matches(".bashrc"));
+        assert!(!m.matches("README"));
+    }
+
+    #[test]
+    fn invalid_patterns_are_skipped() {
+        // Unclosed bracket is an invalid glob
+        let m = Mask::new(&["[invalid", "*.txt"], true);
+        assert!(m.matches("foo.txt"));
+        // The invalid pattern was silently dropped
+        assert!(!m.matches("[invalid"));
+    }
+
+    #[test]
+    fn default_masks_hide_dotfiles_and_artifacts() {
+        let masks = IgnoreMasks::default();
+        assert!(masks.hides(".git"));
+        assert!(masks.hides(".bashrc"));
+        assert!(masks.hides("foo.o"));
+        assert!(masks.hides("node_modules"));
+        assert!(!masks.hides("README.md"));
+        assert!(!masks.hides("Cargo.toml"));
+    }
+
+    #[test]
+    fn toggle_mask1() {
+        let mut masks = IgnoreMasks::default();
+        assert!(masks.mask1.enabled);
+        masks.toggle_mask1();
+        assert!(!masks.mask1.enabled);
+        // With mask1 off, dotfiles not matched by mask2 become visible
+        assert!(!masks.hides(".bashrc"));
+        // .git is in mask2's list too, so it stays hidden
+        assert!(masks.hides(".git"));
+        // mask2 still active
+        assert!(masks.hides("foo.o"));
+    }
+
+    #[test]
+    fn toggle_mask2() {
+        let mut masks = IgnoreMasks::default();
+        assert!(masks.mask2.enabled);
+        masks.toggle_mask2();
+        assert!(!masks.mask2.enabled);
+        // Build artifacts visible now
+        assert!(!masks.hides("foo.o"));
+        assert!(!masks.hides("node_modules"));
+        // mask1 still active
+        assert!(masks.hides(".hidden"));
+    }
+
+    #[test]
+    fn hides_requires_enabled() {
+        let mut masks = IgnoreMasks::default();
+        masks.toggle_mask1();
+        masks.toggle_mask2();
+        // Both off — nothing hidden
+        assert!(!masks.hides(".git"));
+        assert!(!masks.hides("foo.o"));
+    }
+
+    #[test]
+    fn apply_config_replaces_group() {
+        let mut masks = IgnoreMasks::default();
+        let configs = vec![crate::config::IgnoreMask {
+            group: 1,
+            patterns: vec!["*.log".to_string()],
+            enabled: true,
+        }];
+        masks.apply_config(&configs);
+        // mask1 now matches .log, not dotfiles
+        assert!(masks.hides("app.log"));
+        // .bashrc was only in mask1 (dotfile pattern), now gone
+        assert!(!masks.hides(".bashrc"));
+        // .git is still in mask2's explicit list
+        assert!(masks.hides(".git"));
+        // mask2 unchanged
+        assert!(masks.hides("foo.o"));
+    }
+
+    #[test]
+    fn apply_config_unions_same_group() {
+        let mut masks = IgnoreMasks::default();
+        let configs = vec![
+            crate::config::IgnoreMask {
+                group: 2,
+                patterns: vec!["*.log".to_string()],
+                enabled: false,
+            },
+            crate::config::IgnoreMask {
+                group: 2,
+                patterns: vec!["*.tmp".to_string()],
+                enabled: true,
+            },
+        ];
+        masks.apply_config(&configs);
+        // enabled = any(enabled) = true
+        assert!(masks.mask2.enabled);
+        assert!(masks.hides("app.log"));
+        assert!(masks.hides("data.tmp"));
+    }
+
+    #[test]
+    fn apply_config_no_entries_keeps_defaults() {
+        let mut masks = IgnoreMasks::default();
+        masks.apply_config(&[]);
+        // Defaults still active
+        assert!(masks.hides(".git"));
+        assert!(masks.hides("foo.o"));
     }
 }

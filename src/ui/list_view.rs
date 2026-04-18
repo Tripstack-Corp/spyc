@@ -238,12 +238,17 @@ fn row_style(kind: EntryKind, _git: GitFileStatus, theme: &Theme) -> Style {
 fn git_marker(git: GitFileStatus, theme: &Theme) -> (char, Style) {
     match git {
         GitFileStatus::Clean => (' ', Style::default()),
-        GitFileStatus::Modified => ('~', Style::default().fg(theme.pick)),          // amber
-        GitFileStatus::Added => ('+', Style::default().fg(theme.exec)),             // green
-        GitFileStatus::Untracked => ('?', Style::default().fg(theme.exec)),         // green
-        GitFileStatus::Deleted => ('-', Style::default().fg(theme.cursor_bg)),      // red
-        GitFileStatus::Renamed => ('>', Style::default().fg(theme.symlink)),         // lavender
-        GitFileStatus::Conflicted => ('!', Style::default().fg(theme.cursor_bg).add_modifier(Modifier::BOLD)),
+        GitFileStatus::Modified => ('~', Style::default().fg(theme.pick)), // amber
+        GitFileStatus::Added => ('+', Style::default().fg(theme.exec)),    // green
+        GitFileStatus::Untracked => ('?', Style::default().fg(theme.exec)), // green
+        GitFileStatus::Deleted => ('-', Style::default().fg(theme.cursor_bg)), // red
+        GitFileStatus::Renamed => ('>', Style::default().fg(theme.symlink)), // lavender
+        GitFileStatus::Conflicted => (
+            '!',
+            Style::default()
+                .fg(theme.cursor_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
     }
 }
 

@@ -20,7 +20,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 /// A hosted subprocess + its terminal emulator state.
 pub struct Pane {
@@ -258,7 +258,8 @@ impl Pane {
         Ok(path)
     }
 
-    fn max_scrollback(&self) -> usize {
+    #[allow(clippy::unused_self)]
+    const fn max_scrollback(&self) -> usize {
         // vt100 stores scrollback rows in an internal VecDeque.
         // screen().scrollback() returns the *current* offset, not
         // the maximum. We can probe by temporarily setting a huge

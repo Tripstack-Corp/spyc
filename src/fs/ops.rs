@@ -371,7 +371,7 @@ pub fn hex_dump_lines(
     path: &Path,
     theme: &crate::ui::theme::Theme,
 ) -> io::Result<Vec<ratatui::text::Line<'static>>> {
-    use pretty_hex::{config_hex, HexConfig};
+    use pretty_hex::{HexConfig, config_hex};
     use ratatui::{
         style::{Modifier, Style},
         text::{Line, Span},

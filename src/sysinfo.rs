@@ -10,8 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn format_now() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let days = (secs / 86_400) as i64;
     let (y, m, d) = civil_from_days(days);
     let hour = (secs / 3600) % 24;
@@ -60,14 +59,9 @@ pub fn git_status(dir: &std::path::Path) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
-    let dirty = porcelain.status.success()
-        && !porcelain.stdout.is_empty();
+    let dirty = porcelain.status.success() && !porcelain.stdout.is_empty();
 
-    Some(if dirty {
-        format!("{branch}*")
-    } else {
-        branch
-    })
+    Some(if dirty { format!("{branch}*") } else { branch })
 }
 
 /// Per-file git status for the current directory. Returns a map from
@@ -96,10 +90,7 @@ pub fn git_file_statuses(
         let xy = &line[..2];
         let path_str = &line[3..];
         // For renames ("R  old -> new"), take the new name.
-        let filename = path_str
-            .rsplit(" -> ")
-            .next()
-            .unwrap_or(path_str);
+        let filename = path_str.rsplit(" -> ").next().unwrap_or(path_str);
         // We only care about the filename relative to the listing dir.
         // `git status` gives repo-relative paths, so extract the last component.
         let name = std::path::Path::new(filename)
@@ -122,7 +113,8 @@ pub fn git_file_statuses(
         }
         // Mark parent directories as modified too.
         if top_component != filename && !top_component.is_empty() {
-            map.entry(format!("{top_component}/")).or_insert(GitFileStatus::Modified);
+            map.entry(format!("{top_component}/"))
+                .or_insert(GitFileStatus::Modified);
         }
     }
     map
@@ -212,12 +204,7 @@ pub fn git_worktree_add(
 
     // Try existing branch first.
     let status = std::process::Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            &target.display().to_string(),
-            branch,
-        ])
+        .args(["worktree", "add", &target.display().to_string(), branch])
         .current_dir(dir)
         .stderr(std::process::Stdio::piped())
         .output()?;
@@ -240,10 +227,7 @@ pub fn git_worktree_add(
         Ok(target)
     } else {
         let msg = std::str::from_utf8(&status.stderr).unwrap_or("unknown error");
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            msg.trim().to_string(),
-        ))
+        Err(std::io::Error::other(msg.trim().to_string()))
     }
 }
 
@@ -257,10 +241,7 @@ pub fn git_worktree_remove(path: &std::path::Path) -> std::io::Result<()> {
         Ok(())
     } else {
         let msg = std::str::from_utf8(&output.stderr).unwrap_or("unknown error");
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            msg.trim().to_string(),
-        ))
+        Err(std::io::Error::other(msg.trim().to_string()))
     }
 }
 

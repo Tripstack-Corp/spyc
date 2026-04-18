@@ -20,11 +20,11 @@ use crossterm::{
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
-        LeaveAlternateScreen,
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
     },
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::app::App;
 
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
         eprintln!("spyc: debug log → {p}");
     }
     let mut terminal = setup_terminal()?;
-    let result = App::new(resume)?.run(&mut terminal);
+    let result = App::new(resume).run(&mut terminal);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -65,11 +65,7 @@ pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableBracketedPaste
-    )?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)

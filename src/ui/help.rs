@@ -134,7 +134,10 @@ const SECTIONS: &[Section] = &[
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
-            (":", "command line (:cd, :sort, :marks, :bprev, :bnext, :limit, :set, :!, :;, :q)"),
+            (
+                ":",
+                "command line (:cd, :sort, :marks, :bprev, :bnext, :limit, :set, :!, :;, :q)",
+            ),
         ],
     },
     Section {

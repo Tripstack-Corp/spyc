@@ -128,26 +128,18 @@ impl LineEditor {
                     self.cursor -= 1;
                 }
             }
-            KeyCode::Backspace => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                    self.buf.remove(self.cursor);
-                }
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.cursor -= 1;
+                self.buf.remove(self.cursor);
             }
-            KeyCode::Delete => {
-                if self.cursor < self.buf.len() {
-                    self.buf.remove(self.cursor);
-                }
+            KeyCode::Delete if self.cursor < self.buf.len() => {
+                self.buf.remove(self.cursor);
             }
-            KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+            KeyCode::Left if self.cursor > 0 => {
+                self.cursor -= 1;
             }
-            KeyCode::Right => {
-                if self.cursor < self.buf.len() {
-                    self.cursor += 1;
-                }
+            KeyCode::Right if self.cursor < self.buf.len() => {
+                self.cursor += 1;
             }
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.buf.len(),
@@ -235,21 +227,15 @@ impl LineEditor {
 
         match key.code {
             // Movement.
-            KeyCode::Char('h') | KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+            KeyCode::Char('h') | KeyCode::Left if self.cursor > 0 => {
+                self.cursor -= 1;
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                if self.cursor + 1 < self.buf.len() {
-                    self.cursor += 1;
-                }
+            KeyCode::Char('l') | KeyCode::Right if self.cursor + 1 < self.buf.len() => {
+                self.cursor += 1;
             }
             KeyCode::Char('0') | KeyCode::Home => self.cursor = 0,
-            KeyCode::Char('$') | KeyCode::End => {
-                if !self.buf.is_empty() {
-                    self.cursor = self.buf.len() - 1;
-                }
+            KeyCode::Char('$') | KeyCode::End if !self.buf.is_empty() => {
+                self.cursor = self.buf.len() - 1;
             }
             KeyCode::Char('^') => {
                 self.cursor = self
@@ -271,12 +257,10 @@ impl LineEditor {
             KeyCode::Char('c') => self.pending_op = Some(PendingOp::Change),
 
             // Editing.
-            KeyCode::Char('x') => {
-                if self.cursor < self.buf.len() {
-                    self.buf.remove(self.cursor);
-                    if self.cursor >= self.buf.len() && self.cursor > 0 {
-                        self.cursor -= 1;
-                    }
+            KeyCode::Char('x') if self.cursor < self.buf.len() => {
+                self.buf.remove(self.cursor);
+                if self.cursor >= self.buf.len() && self.cursor > 0 {
+                    self.cursor -= 1;
                 }
             }
             KeyCode::Char('D') => {
@@ -370,7 +354,7 @@ impl LineEditor {
         while i < n && self.buf[i].is_whitespace() {
             i += 1;
         }
-        i.min(n.saturating_sub(1).max(0))
+        i.min(n.saturating_sub(1))
     }
 
     fn prev_word_start(&self) -> usize {
@@ -405,11 +389,7 @@ impl LineEditor {
         while i < n && !self.buf[i].is_whitespace() {
             i += 1;
         }
-        if i > 0 {
-            i - 1
-        } else {
-            0
-        }
+        if i > 0 { i - 1 } else { 0 }
     }
 }
 

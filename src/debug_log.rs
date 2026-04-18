@@ -32,9 +32,7 @@ fn make_path() -> String {
 /// Call once at startup.  Returns the log path if debug mode is active.
 pub fn init(flag: bool) -> Option<String> {
     let enabled = flag
-        || std::env::var("SPYC_DEBUG")
-            .map(|v| !v.is_empty() && v != "0" && v != "false")
-            .unwrap_or(false);
+        || std::env::var("SPYC_DEBUG").is_ok_and(|v| !v.is_empty() && v != "0" && v != "false");
     if !enabled {
         return None;
     }
@@ -43,6 +41,7 @@ pub fn init(flag: bool) -> Option<String> {
         let mut state = LOG.lock().unwrap();
         state.file = Some(f);
         state.path = Some(path.clone());
+        drop(state);
         Some(path)
     } else {
         None
@@ -50,7 +49,7 @@ pub fn init(flag: bool) -> Option<String> {
 }
 
 #[doc(hidden)]
-pub fn _log(msg: &str) {
+pub fn log(msg: &str) {
     if let Some(f) = LOG.lock().unwrap().file.as_mut() {
         let _ = writeln!(f, "{msg}");
     }
@@ -59,6 +58,6 @@ pub fn _log(msg: &str) {
 #[macro_export]
 macro_rules! spyc_debug {
     ($($arg:tt)*) => {
-        $crate::debug_log::_log(&format!($($arg)*))
+        $crate::debug_log::log(&format!($($arg)*))
     };
 }

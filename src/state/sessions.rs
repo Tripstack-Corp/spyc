@@ -44,8 +44,7 @@ pub fn save_session(session: &Session) -> std::io::Result<()> {
     };
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.json", session.id));
-    let json = serde_json::to_string_pretty(session)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(session).map_err(std::io::Error::other)?;
     std::fs::write(&path, json)?;
     prune_old(&dir);
     Ok(())
@@ -59,25 +58,25 @@ pub fn load_sessions() -> Vec<Session> {
         return Vec::new();
     };
     let mut sessions: Vec<Session> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "json")
-        })
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .filter_map(|e| {
             let text = std::fs::read_to_string(e.path()).ok()?;
             serde_json::from_str(&text).ok()
         })
         .collect();
-    sessions.sort_by(|a, b| b.epoch_secs.cmp(&a.epoch_secs));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.epoch_secs));
     // Dedup by cwd + tab commands (keep most recent).
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| {
         let key = format!(
             "{}|{}",
             s.cwd.display(),
-            s.tabs.iter().map(|t| t.command.as_str()).collect::<Vec<_>>().join(",")
+            s.tabs
+                .iter()
+                .map(|t| t.command.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
         );
         seen.insert(key)
     });
@@ -89,7 +88,7 @@ fn prune_old(dir: &std::path::Path) {
         return;
     };
     let mut files: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .map(|e| e.path())
         .collect();
@@ -127,5 +126,167 @@ pub fn format_relative_time(epoch_secs: u64) -> String {
     } else {
         let d = diff / 86400;
         format!("{d} days ago")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn format_just_now() {
+        let s = format_relative_time(now_secs());
+        assert_eq!(s, "just now");
+    }
+
+    #[test]
+    fn format_seconds_ago() {
+        let s = format_relative_time(now_secs() - 30);
+        assert_eq!(s, "30 seconds ago");
+    }
+
+    #[test]
+    fn format_1_minute_ago() {
+        let s = format_relative_time(now_secs() - 60);
+        assert_eq!(s, "1 minute ago");
+    }
+
+    #[test]
+    fn format_minutes_ago() {
+        let s = format_relative_time(now_secs() - 300);
+        assert_eq!(s, "5 minutes ago");
+    }
+
+    #[test]
+    fn format_1_hour_ago() {
+        let s = format_relative_time(now_secs() - 3600);
+        assert_eq!(s, "1 hour ago");
+    }
+
+    #[test]
+    fn format_hours_ago() {
+        let s = format_relative_time(now_secs() - 7200);
+        assert_eq!(s, "2 hours ago");
+    }
+
+    #[test]
+    fn format_1_day_ago() {
+        let s = format_relative_time(now_secs() - 86400);
+        assert_eq!(s, "1 day ago");
+    }
+
+    #[test]
+    fn format_days_ago_within_week() {
+        let s = format_relative_time(now_secs() - 86400 * 3);
+        assert_eq!(s, "3 days ago");
+    }
+
+    #[test]
+    fn format_days_ago_past_week() {
+        let s = format_relative_time(now_secs() - 86400 * 30);
+        assert_eq!(s, "30 days ago");
+    }
+
+    #[test]
+    fn format_future_timestamp_is_just_now() {
+        // A timestamp in the future — saturating_sub makes diff 0
+        let s = format_relative_time(now_secs() + 1000);
+        assert_eq!(s, "just now");
+    }
+
+    // Note: save/load/prune tests use the shared XDG_STATE_HOME env var.
+    // Run them serially to avoid interference between parallel tests.
+    // We use `#[serial_test::serial]` conceptually but since that's not a
+    // dep, we combine them into a single test.
+
+    #[test]
+    fn save_load_prune_and_dedup() {
+        let tmp = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
+
+        // --- roundtrip ---
+        let session = Session {
+            id: 12345,
+            saved_at: "2025-01-01 12:00".to_string(),
+            epoch_secs: 1_700_000_000,
+            cwd: PathBuf::from("/tmp/test"),
+            tabs: vec![SavedTab {
+                command: "bash".to_string(),
+                label: "shell".to_string(),
+                cwd: PathBuf::from("/tmp/test"),
+            }],
+            active_tab: 0,
+            pane_height_pct: 30,
+            pane_focused: false,
+        };
+        save_session(&session).unwrap();
+        let loaded = load_sessions();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, 12345);
+        assert_eq!(loaded[0].tabs.len(), 1);
+        assert_eq!(loaded[0].tabs[0].command, "bash");
+
+        // --- clean up for next sub-test ---
+        let dir = tmp.path().join("spyc/sessions");
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+
+        // --- prune ---
+        for i in 0..25_u32 {
+            let s = Session {
+                id: u64::from(i),
+                saved_at: format!("2025-01-{i:02}"),
+                epoch_secs: 1_700_000_000 + u64::from(i),
+                cwd: PathBuf::from(format!("/tmp/dir{i}")),
+                tabs: vec![SavedTab {
+                    command: format!("cmd{i}"),
+                    label: format!("tab{i}"),
+                    cwd: PathBuf::from(format!("/tmp/dir{i}")),
+                }],
+                active_tab: 0,
+                pane_height_pct: 30,
+                pane_focused: false,
+            };
+            save_session(&s).unwrap();
+        }
+        let loaded = load_sessions();
+        assert!(loaded.len() <= MAX_SESSIONS);
+
+        // --- clean up for dedup test ---
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // --- dedup ---
+        for id in [100_u64, 200] {
+            let s = Session {
+                id,
+                saved_at: "2025-01-01".to_string(),
+                epoch_secs: 1_700_000_000 + id,
+                cwd: PathBuf::from("/same/dir"),
+                tabs: vec![SavedTab {
+                    command: "bash".to_string(),
+                    label: "shell".to_string(),
+                    cwd: PathBuf::from("/same/dir"),
+                }],
+                active_tab: 0,
+                pane_height_pct: 30,
+                pane_focused: false,
+            };
+            save_session(&s).unwrap();
+        }
+        let loaded = load_sessions();
+        assert_eq!(loaded.len(), 1);
+        // Most recent (id=200) wins
+        assert_eq!(loaded[0].id, 200);
     }
 }

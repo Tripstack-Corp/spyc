@@ -51,7 +51,7 @@ const fn kind_rank(k: EntryKind) -> u8 {
 }
 
 fn ext_of(name: &str) -> &str {
-    name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("")
+    name.rsplit_once('.').map_or("", |(_, ext)| ext)
 }
 
 /// A snapshot of one directory's entries.
@@ -63,7 +63,7 @@ pub struct Listing {
 
 impl Listing {
     /// An empty listing for a given directory (used when the dir isn't readable).
-    pub fn empty(dir: PathBuf) -> Self {
+    pub const fn empty(dir: PathBuf) -> Self {
         Self {
             dir,
             entries: Vec::new(),
@@ -89,23 +89,25 @@ impl Listing {
     /// Re-sort entries in-place.
     pub fn sort(&mut self, mode: SortMode) {
         self.entries.sort_by(|a, b| {
-            kind_rank(a.kind).cmp(&kind_rank(b.kind)).then_with(|| match mode {
-                SortMode::Name => a
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&b.name.to_ascii_lowercase()),
-                SortMode::Size => b.size.cmp(&a.size), // largest first
-                SortMode::Mtime => b.mtime.cmp(&a.mtime), // newest first
-                SortMode::Ext => {
-                    let ea = ext_of(&a.name).to_ascii_lowercase();
-                    let eb = ext_of(&b.name).to_ascii_lowercase();
-                    ea.cmp(&eb).then_with(|| {
-                        a.name
-                            .to_ascii_lowercase()
-                            .cmp(&b.name.to_ascii_lowercase())
-                    })
-                }
-            })
+            kind_rank(a.kind)
+                .cmp(&kind_rank(b.kind))
+                .then_with(|| match mode {
+                    SortMode::Name => a
+                        .name
+                        .to_ascii_lowercase()
+                        .cmp(&b.name.to_ascii_lowercase()),
+                    SortMode::Size => b.size.cmp(&a.size), // largest first
+                    SortMode::Mtime => b.mtime.cmp(&a.mtime), // newest first
+                    SortMode::Ext => {
+                        let ea = ext_of(&a.name).to_ascii_lowercase();
+                        let eb = ext_of(&b.name).to_ascii_lowercase();
+                        ea.cmp(&eb).then_with(|| {
+                            a.name
+                                .to_ascii_lowercase()
+                                .cmp(&b.name.to_ascii_lowercase())
+                        })
+                    }
+                })
         });
     }
 

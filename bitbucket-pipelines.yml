@@ -4,7 +4,7 @@
 # release cannot silently tighten lints. Target is linux x86_64 with musl
 # for our statically-linked artifact.
 
-image: rust:1.80-slim
+image: rust:1.85-slim
 
 definitions:
   caches:

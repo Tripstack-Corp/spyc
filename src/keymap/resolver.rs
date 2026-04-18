@@ -49,14 +49,10 @@ impl Resolver {
     /// Non-zero count supplied by user, else 1.
     fn take_count(&mut self) -> usize {
         let n = self.count.take().unwrap_or(0);
-        if n == 0 {
-            1
-        } else {
-            n as usize
-        }
+        if n == 0 { 1 } else { n as usize }
     }
 
-    fn reset(&mut self) {
+    const fn reset(&mut self) {
         self.count = None;
         self.pending = PendingSeq::Normal;
     }
@@ -139,12 +135,8 @@ impl Resolver {
         // Mid-sequence: Ctrl-W prefix waiting for a pane command.
         if self.pending == PendingSeq::W {
             let out = match ev.code {
-                KeyCode::Char('j' | 'J') => {
-                    ResolverOutcome::Action(Action::PaneFocusDown)
-                }
-                KeyCode::Char('k' | 'K') => {
-                    ResolverOutcome::Action(Action::PaneFocusUp)
-                }
+                KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
+                KeyCode::Char('k' | 'K') => ResolverOutcome::Action(Action::PaneFocusUp),
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
                 KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
@@ -439,7 +431,7 @@ impl Resolver {
             // Git worktree prefix.
             KeyCode::Char('W') => {
                 self.pending = PendingSeq::Worktree;
-                return ResolverOutcome::Pending;
+                ResolverOutcome::Pending
             }
 
             // Quit.
@@ -458,5 +450,879 @@ impl Resolver {
                 ResolverOutcome::Ignored
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn special(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn empty_keymap() -> UserKeymap {
+        UserKeymap::default()
+    }
+
+    fn feed(r: &mut Resolver, ev: KeyEvent) -> ResolverOutcome {
+        r.feed(ev, &empty_keymap())
+    }
+
+    // ── count accumulation ────────────────────────────────────────
+
+    #[test]
+    fn bare_zero_is_ignored() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('0')), ResolverOutcome::Ignored);
+    }
+
+    #[test]
+    fn single_digit_starts_count() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('3')), ResolverOutcome::Pending);
+    }
+
+    #[test]
+    fn multi_digit_count() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('1')), ResolverOutcome::Pending);
+        assert_eq!(feed(&mut r, key('2')), ResolverOutcome::Pending);
+        // 12j should move down 12
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(12))
+        );
+    }
+
+    #[test]
+    fn count_with_trailing_zero() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('1'));
+        feed(&mut r, key('0'));
+        assert_eq!(
+            feed(&mut r, key('k')),
+            ResolverOutcome::Action(Action::Up(10))
+        );
+    }
+
+    #[test]
+    fn count_resets_after_action() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        feed(&mut r, key('j'));
+        // Next motion without count should default to 1
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+    }
+
+    #[test]
+    fn count_applies_to_all_motions() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('3'));
+        assert_eq!(
+            feed(&mut r, key('h')),
+            ResolverOutcome::Action(Action::Left(3))
+        );
+
+        feed(&mut r, key('7'));
+        assert_eq!(
+            feed(&mut r, key('l')),
+            ResolverOutcome::Action(Action::Right(7))
+        );
+    }
+
+    #[test]
+    fn count_resets_on_non_motion_key() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        // 't' is toggle pick — doesn't use count, resets
+        assert_eq!(
+            feed(&mut r, key('t')),
+            ResolverOutcome::Action(Action::TogglePick)
+        );
+        // Count should be gone
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+    }
+
+    #[test]
+    fn large_count() {
+        let mut r = Resolver::new();
+        for c in "999".chars() {
+            feed(&mut r, key(c));
+        }
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(999))
+        );
+    }
+
+    // ── gg sequence ───────────────────────────────────────────────
+
+    #[test]
+    fn g_enters_pending() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('g')), ResolverOutcome::Pending);
+        assert!(r.is_pending());
+    }
+
+    #[test]
+    fn gg_goes_to_first() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('g')),
+            ResolverOutcome::Action(Action::GotoFirst)
+        );
+        assert!(!r.is_pending());
+    }
+
+    #[test]
+    fn gd_is_git_diff() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('d')),
+            ResolverOutcome::Action(Action::GitDiff)
+        );
+    }
+
+    #[test]
+    fn g_cap_d_is_git_diff_cached() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('D')),
+            ResolverOutcome::Action(Action::GitDiffCached)
+        );
+    }
+
+    #[test]
+    fn g_followed_by_unknown_is_ignored() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(feed(&mut r, key('x')), ResolverOutcome::Ignored);
+        assert!(!r.is_pending());
+    }
+
+    #[test]
+    fn cap_g_goes_to_last() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('G')),
+            ResolverOutcome::Action(Action::GotoLast)
+        );
+    }
+
+    // ── marks ─────────────────────────────────────────────────────
+
+    #[test]
+    fn m_enters_mark_pending() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('m')), ResolverOutcome::Pending);
+        assert!(r.is_pending());
+    }
+
+    #[test]
+    fn m_a_sets_mark() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('m'));
+        assert_eq!(
+            feed(&mut r, key('a')),
+            ResolverOutcome::Action(Action::SetMark('a'))
+        );
+    }
+
+    #[test]
+    fn m_z_sets_mark() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('m'));
+        assert_eq!(
+            feed(&mut r, key('z')),
+            ResolverOutcome::Action(Action::SetMark('z'))
+        );
+    }
+
+    #[test]
+    fn m_nonletter_is_ignored() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('m'));
+        assert_eq!(feed(&mut r, key('1')), ResolverOutcome::Ignored);
+    }
+
+    #[test]
+    fn quote_a_jumps_to_mark() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('\''));
+        assert_eq!(
+            feed(&mut r, key('a')),
+            ResolverOutcome::Action(Action::JumpMark('a'))
+        );
+    }
+
+    #[test]
+    fn quote_quote_jumps_prev_dir() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('\''));
+        assert_eq!(
+            feed(&mut r, key('\'')),
+            ResolverOutcome::Action(Action::JumpPrevDir)
+        );
+    }
+
+    #[test]
+    fn quote_nonletter_is_ignored() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('\''));
+        assert_eq!(feed(&mut r, key('3')), ResolverOutcome::Ignored);
+    }
+
+    // ── Ctrl-W pane commands ──────────────────────────────────────
+
+    #[test]
+    fn ctrl_w_enters_pane_pending() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, ctrl('w')), ResolverOutcome::Pending);
+        assert!(r.is_pending());
+    }
+
+    #[test]
+    fn ctrl_w_j_focuses_down() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::PaneFocusDown)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_k_focuses_up() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('k')),
+            ResolverOutcome::Action(Action::PaneFocusUp)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_plus_grows_pane() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('+')),
+            ResolverOutcome::Action(Action::PaneGrow)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_minus_shrinks_pane() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('-')),
+            ResolverOutcome::Action(Action::PaneShrink)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_n_new_tab() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('n')),
+            ResolverOutcome::Action(Action::PaneNewTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_x_close_tab() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('x')),
+            ResolverOutcome::Action(Action::PaneCloseTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_digit_switches_tab() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('3')),
+            ResolverOutcome::Action(Action::PaneTabByIndex(3))
+        );
+    }
+
+    #[test]
+    fn ctrl_w_bracket_navigates_tabs() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key(']')),
+            ResolverOutcome::Action(Action::PaneNextTab)
+        );
+
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('[')),
+            ResolverOutcome::Action(Action::PanePrevTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_s_sends_selection() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('s')),
+            ResolverOutcome::Action(Action::PaneSendSelection)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_v_enters_scroll() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('v')),
+            ResolverOutcome::Action(Action::PaneScrollEnter)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_backslash_toggles_pane() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('\\')),
+            ResolverOutcome::Action(Action::TogglePane)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_r_renames_tab() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('r')),
+            ResolverOutcome::Action(Action::PaneRenameTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_p_pipes_content() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('p')),
+            ResolverOutcome::Action(Action::PanePipeContent)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_i_pipes_inventory() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('i')),
+            ResolverOutcome::Action(Action::PanePipeInventory)
+        );
+    }
+
+    #[test]
+    fn ctrl_w_unknown_is_ignored() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(feed(&mut r, key('z')), ResolverOutcome::Ignored);
+    }
+
+    // ── W (worktree) prefix ───────────────────────────────────────
+
+    #[test]
+    fn cap_w_enters_worktree_pending() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('W')), ResolverOutcome::Pending);
+        assert!(r.is_pending());
+    }
+
+    #[test]
+    fn w_l_lists_worktrees() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('W'));
+        assert_eq!(
+            feed(&mut r, key('l')),
+            ResolverOutcome::Action(Action::WorktreeList)
+        );
+    }
+
+    #[test]
+    fn w_n_creates_worktree() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('W'));
+        assert_eq!(
+            feed(&mut r, key('n')),
+            ResolverOutcome::Action(Action::WorktreeNew)
+        );
+    }
+
+    #[test]
+    fn w_d_deletes_worktree() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('W'));
+        assert_eq!(
+            feed(&mut r, key('d')),
+            ResolverOutcome::Action(Action::WorktreeDelete)
+        );
+    }
+
+    #[test]
+    fn w_unknown_is_ignored() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('W'));
+        assert_eq!(feed(&mut r, key('z')), ResolverOutcome::Ignored);
+    }
+
+    // ── control codes ─────────────────────────────────────────────
+
+    #[test]
+    fn ctrl_d_quits() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('d')),
+            ResolverOutcome::Action(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn ctrl_l_redraws() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('l')),
+            ResolverOutcome::Action(Action::Redraw)
+        );
+    }
+
+    #[test]
+    fn ctrl_b_page_up() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('b')),
+            ResolverOutcome::Action(Action::PageUp)
+        );
+    }
+
+    #[test]
+    fn ctrl_f_page_down() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('f')),
+            ResolverOutcome::Action(Action::PageDown)
+        );
+    }
+
+    #[test]
+    fn ctrl_t_toggles_all_picks() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('t')),
+            ResolverOutcome::Action(Action::PickToggleAll)
+        );
+    }
+
+    #[test]
+    fn ctrl_x_chmod() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('x')),
+            ResolverOutcome::Action(Action::ChmodAdd('x'))
+        );
+    }
+
+    #[test]
+    fn ctrl_r_reloads_config() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, ctrl('r')),
+            ResolverOutcome::Action(Action::ReloadConfig)
+        );
+    }
+
+    #[test]
+    fn ctrl_resets_pending_state() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g')); // pending G
+        assert!(r.is_pending());
+        assert_eq!(
+            feed(&mut r, ctrl('d')),
+            ResolverOutcome::Action(Action::Quit)
+        );
+        assert!(!r.is_pending());
+    }
+
+    // ── simple single-key actions ─────────────────────────────────
+
+    #[test]
+    fn basic_motions_default_count_1() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+        assert_eq!(
+            feed(&mut r, key('k')),
+            ResolverOutcome::Action(Action::Up(1))
+        );
+        assert_eq!(
+            feed(&mut r, key('h')),
+            ResolverOutcome::Action(Action::Left(1))
+        );
+        assert_eq!(
+            feed(&mut r, key('l')),
+            ResolverOutcome::Action(Action::Right(1))
+        );
+    }
+
+    #[test]
+    fn arrow_keys_work() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Down)),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Up)),
+            ResolverOutcome::Action(Action::Up(1))
+        );
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Left)),
+            ResolverOutcome::Action(Action::Left(1))
+        );
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Right)),
+            ResolverOutcome::Action(Action::Right(1))
+        );
+    }
+
+    #[test]
+    fn shell_prompts() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('!')),
+            ResolverOutcome::Action(Action::ShellCapturedPrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key(';')),
+            ResolverOutcome::Action(Action::ShellForegroundPrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key('$')),
+            ResolverOutcome::Action(Action::StartShell)
+        );
+    }
+
+    #[test]
+    fn search_keys() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('/')),
+            ResolverOutcome::Action(Action::SearchPrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key('n')),
+            ResolverOutcome::Action(Action::SearchNext)
+        );
+        assert_eq!(
+            feed(&mut r, key('N')),
+            ResolverOutcome::Action(Action::SearchPrev)
+        );
+    }
+
+    #[test]
+    fn quit_keys() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('q')),
+            ResolverOutcome::Action(Action::Quit)
+        );
+        assert_eq!(
+            feed(&mut r, key('Q')),
+            ResolverOutcome::Action(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn navigation_keys() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('u')),
+            ResolverOutcome::Action(Action::Climb)
+        );
+        assert_eq!(
+            feed(&mut r, key('-')),
+            ResolverOutcome::Action(Action::Climb)
+        );
+        assert_eq!(
+            feed(&mut r, key('H')),
+            ResolverOutcome::Action(Action::Home)
+        );
+        assert_eq!(
+            feed(&mut r, key('~')),
+            ResolverOutcome::Action(Action::Home)
+        );
+    }
+
+    #[test]
+    fn inventory_keys() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('y')),
+            ResolverOutcome::Action(Action::Take)
+        );
+        assert_eq!(
+            feed(&mut r, key('p')),
+            ResolverOutcome::Action(Action::Drop)
+        );
+        assert_eq!(
+            feed(&mut r, key('i')),
+            ResolverOutcome::Action(Action::ToggleInventoryView)
+        );
+        assert_eq!(
+            feed(&mut r, key('z')),
+            ResolverOutcome::Action(Action::EmptyInventory)
+        );
+    }
+
+    #[test]
+    fn file_operation_keys() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key('c')),
+            ResolverOutcome::Action(Action::CopyPrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key('R')),
+            ResolverOutcome::Action(Action::RemovePrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key('M')),
+            ResolverOutcome::Action(Action::MovePrompt)
+        );
+        assert_eq!(
+            feed(&mut r, key('+')),
+            ResolverOutcome::Action(Action::MakeDirPrompt)
+        );
+    }
+
+    // ── Esc resets ────────────────────────────────────────────────
+
+    #[test]
+    fn esc_resets_count_and_pending() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        feed(&mut r, key('g'));
+        assert!(r.is_pending());
+        // Esc hits the catch-all `_ =>` arm which resets and returns Ignored
+        // (g-pending intercepts first, so Esc after g is "unknown in g-seq")
+        let out = feed(&mut r, special(KeyCode::Esc));
+        assert_eq!(out, ResolverOutcome::Ignored);
+        // State is fully reset — next key is fresh
+        assert!(!r.is_pending());
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+    }
+
+    #[test]
+    fn esc_from_normal_resets_count() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        // Esc from normal (non-pending) state returns Pending but resets count
+        let out = feed(&mut r, special(KeyCode::Esc));
+        assert_eq!(out, ResolverOutcome::Pending);
+        assert!(!r.is_pending());
+        assert_eq!(
+            feed(&mut r, key('j')),
+            ResolverOutcome::Action(Action::Down(1))
+        );
+    }
+
+    // ── pending display ───────────────────────────────────────────
+
+    #[test]
+    fn pending_display_idle() {
+        let r = Resolver::new();
+        assert!(r.pending_display().is_none());
+    }
+
+    #[test]
+    fn pending_display_count_only() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        assert_eq!(r.pending_display(), Some("5".to_string()));
+    }
+
+    #[test]
+    fn pending_display_g() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(r.pending_display(), Some("g-".to_string()));
+    }
+
+    #[test]
+    fn pending_display_count_plus_g() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('5'));
+        feed(&mut r, key('g'));
+        // count is 5 but g clears count context — actually let's check
+        // Actually looking at the code: g doesn't go through count path,
+        // it sets pending = G. The count stays.
+        // Wait, actually 'g' enters PendingSeq::G but doesn't touch count.
+        // So pending_display should be "5g-"
+        assert_eq!(r.pending_display(), Some("5g-".to_string()));
+    }
+
+    #[test]
+    fn pending_display_mark() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('m'));
+        assert_eq!(r.pending_display(), Some("m-".to_string()));
+    }
+
+    #[test]
+    fn pending_display_jump_mark() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('\''));
+        assert_eq!(r.pending_display(), Some("'-".to_string()));
+    }
+
+    #[test]
+    fn pending_display_ctrl_w() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(r.pending_display(), Some("^W-".to_string()));
+    }
+
+    #[test]
+    fn pending_display_worktree() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('W'));
+        assert_eq!(r.pending_display(), Some("W-".to_string()));
+    }
+
+    // ── user keymap override ──────────────────────────────────────
+
+    #[test]
+    fn user_binding_wins_over_builtin() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('j'),
+            action: BoundAction::UnixCmd("my-cmd".to_string()),
+        }]);
+        let out = r.feed(key('j'), &user);
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("my-cmd".to_string()))
+        );
+    }
+
+    #[test]
+    fn user_binding_resets_pending() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g')); // enter pending G
+        assert!(r.is_pending());
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('g'),
+            action: BoundAction::Plain(Action::Noop),
+        }]);
+        r.feed(key('g'), &user);
+        assert!(!r.is_pending());
+    }
+
+    // ── special keys ──────────────────────────────────────────────
+
+    #[test]
+    fn f1_is_help() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::F(1))),
+            ResolverOutcome::Action(Action::Help)
+        );
+    }
+
+    #[test]
+    fn f9_resumes_pane() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::F(9))),
+            ResolverOutcome::Action(Action::ResumePane)
+        );
+    }
+
+    #[test]
+    fn f10_toggles_pane() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::F(10))),
+            ResolverOutcome::Action(Action::TogglePane)
+        );
+    }
+
+    #[test]
+    fn page_up_down() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::PageUp)),
+            ResolverOutcome::Action(Action::PageUp)
+        );
+        assert_eq!(
+            feed(&mut r, special(KeyCode::PageDown)),
+            ResolverOutcome::Action(Action::PageDown)
+        );
+    }
+
+    #[test]
+    fn home_key() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Home)),
+            ResolverOutcome::Action(Action::Home)
+        );
+    }
+
+    #[test]
+    fn enter_is_enter_or_display() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::Enter)),
+            ResolverOutcome::Action(Action::EnterOrDisplay)
+        );
+    }
+
+    #[test]
+    fn unknown_key_is_ignored() {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, special(KeyCode::F(20))),
+            ResolverOutcome::Ignored
+        );
     }
 }

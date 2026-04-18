@@ -1,9 +1,11 @@
 //! Top-level application state and event loop.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::spyc_debug;
+use ansi_to_tui::IntoText;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use glob::Pattern;
@@ -24,7 +26,7 @@ use crate::ui::{
     status::StatusBar,
     theme::Theme,
 };
-use crate::{resume_tui, suspend_tui, Tui};
+use crate::{Tui, resume_tui, suspend_tui};
 
 /// Precomputed rects for the current frame. Built by `App::compute_layout`.
 /// Background capture for a `!` command. The child runs with piped
@@ -103,7 +105,11 @@ enum FlashKind {
 /// State for returning to the pager after `v` (edit) exits.
 enum PagerReturn {
     /// Buffer content: reload from this temp file, then delete it.
-    TempFile { path: PathBuf, title: String, scroll: u16 },
+    TempFile {
+        path: PathBuf,
+        title: String,
+        scroll: u16,
+    },
     /// On-disk file: reopen from the original path.
     SourceFile { path: PathBuf, scroll: u16 },
 }
@@ -183,7 +189,7 @@ struct PagerHistory {
 const MAX_PAGER_HISTORY: usize = 10;
 
 impl PagerHistory {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             back: Vec::new(),
             forward: Vec::new(),
@@ -333,17 +339,17 @@ struct RowData {
 }
 
 impl App {
-    pub fn new(resume: bool) -> Result<Self> {
-        let (cwd, start_error) = match std::env::current_dir() {
-            Ok(d) => (d, None),
-            Err(_) => {
-                // cwd not accessible — fall back to $HOME.
-                let home = std::env::var("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| PathBuf::from("/tmp"));
-                let _ = std::env::set_current_dir(&home);
-                (home, Some("cwd not accessible, started in $HOME".to_string()))
-            }
+    pub fn new(resume: bool) -> Self {
+        let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
+            (d, None)
+        } else {
+            // cwd not accessible — fall back to $HOME.
+            let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
+            let _ = std::env::set_current_dir(&home);
+            (
+                home,
+                Some("cwd not accessible, started in $HOME".to_string()),
+            )
         };
         let (listing, start_error) = match Listing::read(&cwd) {
             Ok(l) => (l, start_error),
@@ -437,7 +443,7 @@ impl App {
         if resume {
             app.show_session_picker();
         }
-        Ok(app)
+        app
     }
 
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
@@ -504,7 +510,12 @@ impl App {
         // this one and re-watch the new dir.
         let mut watched_listing: Option<PathBuf> = None;
         let mut watched_git: Option<PathBuf> = None;
-        sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &mut watched_git, &self.listing.dir);
+        sync_listing_watch(
+            fs_watcher.as_mut(),
+            &mut watched_listing,
+            &mut watched_git,
+            &self.listing.dir,
+        );
 
         while !self.should_quit {
             // One-shot full repaint after a pane or overlay closes (or any
@@ -556,10 +567,8 @@ impl App {
                 // Update elapsed timer in the title while running.
                 if !capture.finished {
                     let elapsed = capture.started.elapsed().as_secs();
-                    let timer_title = format!(
-                        "\u{23f3} {} — running... ({elapsed}s)",
-                        capture.title,
-                    );
+                    let timer_title =
+                        format!("\u{23f3} {} — running... ({elapsed}s)", capture.title);
                     if let Some(view) = self.pager.as_mut() {
                         view.title = timer_title;
                     }
@@ -592,7 +601,6 @@ impl App {
                     };
                     let title = format!("{} — {exit_info}", capture.title);
                     // Final rebuild with stderr included.
-                    use ansi_to_tui::IntoText;
                     let text = capture.buffer.as_slice().into_text().unwrap_or_default();
                     if let Some(view) = self.pager.as_mut() {
                         view.title = title;
@@ -638,46 +646,50 @@ impl App {
             };
             if event::poll(Duration::from_millis(poll_ms))? {
                 match event::read()? {
-                    Event::Key(key) => {
-                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
-                            let post = self.handle_key(key)?;
-                            if let PostAction::Spawn {
-                                program,
-                                args,
-                                pause_after,
-                            } = post
-                            {
-                                run_child_in_foreground(terminal, &program, &args, pause_after)?;
-                                // The listing may have changed (mv, rm, chmod, etc).
-                                self.refresh_listing();
-                                // If we were editing a pager buffer, restore it.
-                                if let Some(ret) = self.pending_pager_return.take() {
-                                    match ret {
-                                        PagerReturn::TempFile { path, title, scroll } => {
-                                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                                let lines: Vec<String> =
-                                                    content.lines().map(String::from).collect();
-                                                let mut view = PagerView::new_plain(title, lines);
-                                                view.scroll = scroll;
-                                                view.saveable = true;
-                                                self.pager = Some(view);
-                                            }
-                                            let _ = std::fs::remove_file(&path);
+                    Event::Key(key)
+                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
+                    {
+                        let post = self.handle_key(key)?;
+                        if let PostAction::Spawn {
+                            program,
+                            args,
+                            pause_after,
+                        } = post
+                        {
+                            run_child_in_foreground(terminal, &program, &args, pause_after)?;
+                            // The listing may have changed (mv, rm, chmod, etc).
+                            self.refresh_listing();
+                            // If we were editing a pager buffer, restore it.
+                            if let Some(ret) = self.pending_pager_return.take() {
+                                match ret {
+                                    PagerReturn::TempFile {
+                                        path,
+                                        title,
+                                        scroll,
+                                    } => {
+                                        if let Ok(content) = std::fs::read_to_string(&path) {
+                                            let lines: Vec<String> =
+                                                content.lines().map(String::from).collect();
+                                            let mut view = PagerView::new_plain(title, lines);
+                                            view.scroll = scroll;
+                                            view.saveable = true;
+                                            self.pager = Some(view);
                                         }
-                                        PagerReturn::SourceFile { path, scroll } => {
-                                            let name = path
-                                                .file_name()
-                                                .unwrap_or_default()
-                                                .to_string_lossy()
-                                                .into_owned();
-                                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                                let lines: Vec<String> =
-                                                    content.lines().map(String::from).collect();
-                                                let mut view = PagerView::new_plain(name, lines);
-                                                view.source_path = Some(path);
-                                                view.scroll = scroll;
-                                                self.pager = Some(view);
-                                            }
+                                        let _ = std::fs::remove_file(&path);
+                                    }
+                                    PagerReturn::SourceFile { path, scroll } => {
+                                        let name = path
+                                            .file_name()
+                                            .unwrap_or_default()
+                                            .to_string_lossy()
+                                            .into_owned();
+                                        if let Ok(content) = std::fs::read_to_string(&path) {
+                                            let lines: Vec<String> =
+                                                content.lines().map(String::from).collect();
+                                            let mut view = PagerView::new_plain(name, lines);
+                                            view.source_path = Some(path);
+                                            view.scroll = scroll;
+                                            self.pager = Some(view);
                                         }
                                     }
                                 }
@@ -693,7 +705,8 @@ impl App {
                             if let Some(ed) = p.editor.as_mut() {
                                 ed.set_content(&p.buffer);
                             }
-                        } else if let Some(pane) = self.pane_tabs.as_mut().map(|t| t.active_mut()) {
+                        } else if let Some(pane) = self.pane_tabs.as_mut().map(PaneTabs::active_mut)
+                        {
                             // Wrap in bracketed paste so the child app (e.g. claude)
                             // receives the block as a single paste, not line-by-line.
                             let mut buf = Vec::with_capacity(text.len() + 12);
@@ -709,11 +722,7 @@ impl App {
                         // correct width.
                         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
                         if let Some(tabs) = self.pane_tabs.as_mut() {
-                            let layout = Self::compute_layout(
-                                area,
-                                true,
-                                self.pane_height_pct,
-                            );
+                            let layout = Self::compute_layout(area, true, self.pane_height_pct);
                             if let Some(pane_rect) = layout.pane {
                                 for entry in tabs.tabs_mut() {
                                     let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
@@ -734,7 +743,12 @@ impl App {
 
             // chdir may have happened in the tick just finished — keep the
             // watcher pointed at the current listing dir.
-            sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &mut watched_git, &self.listing.dir);
+            sync_listing_watch(
+                fs_watcher.as_mut(),
+                &mut watched_listing,
+                &mut watched_git,
+                &self.listing.dir,
+            );
         }
         Ok(())
     }
@@ -962,7 +976,8 @@ impl App {
         //   The status row is always at the top of the file-list region —
         //   so when the pane is open it sits *inside* the top pane rather
         //   than above the divider.
-        let layout = Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.pane_height_pct);
+        let layout =
+            Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.pane_height_pct);
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
@@ -1215,29 +1230,25 @@ impl App {
         if let Some(view) = &self.pager {
             pager::render(frame, frame.area(), view, &self.theme);
         }
-
     }
 
     fn header_parts(&self) -> (String, String) {
         match self.view {
-            View::Dir => (
-                self.listing.dir.display().to_string(),
-                {
-                    let filter_tag = match &self.temp_filter {
-                        Some(f) if f == "!" => " limit:picks".to_string(),
-                        Some(f) => format!(" limit:{f}"),
-                        None => String::new(),
-                    };
-                    format!(
-                        "[picks:{} inv:{} m1:{} m2:{}{}]",
-                        self.picks.len(),
-                        self.inventory.len(),
-                        on_off(self.masks.mask1.enabled),
-                        on_off(self.masks.mask2.enabled),
-                        filter_tag,
-                    )
-                },
-            ),
+            View::Dir => (self.listing.dir.display().to_string(), {
+                let filter_tag = match &self.temp_filter {
+                    Some(f) if f == "!" => " limit:picks".to_string(),
+                    Some(f) => format!(" limit:{f}"),
+                    None => String::new(),
+                };
+                format!(
+                    "[picks:{} inv:{} m1:{} m2:{}{}]",
+                    self.picks.len(),
+                    self.inventory.len(),
+                    on_off(self.masks.mask1.enabled),
+                    on_off(self.masks.mask2.enabled),
+                    filter_tag,
+                )
+            }),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
                 format!("[{} items]  (i: return, u: back)", self.inventory.len()),
@@ -1337,7 +1348,7 @@ impl App {
                 && self.pane_focused
                 && !is_spyc_meta_when_pane_focused(key, self.resolver.is_pending())
             {
-                return self.handle_pane_scroll_key(key);
+                return Ok(self.handle_pane_scroll_key(key));
             }
         }
         // When the pane is open *and focused*, forward keys to the
@@ -1523,7 +1534,7 @@ impl App {
     }
 
     /// Return the appropriate history for the current prompt kind.
-    fn history_for_prompt(&mut self) -> &mut History {
+    const fn history_for_prompt(&mut self) -> &mut History {
         let is_pane = matches!(
             self.mode,
             Mode::Prompting(Prompt {
@@ -1544,7 +1555,7 @@ impl App {
 
         // `!?` — when the buffer is empty and the user types '?',
         // immediately open the history editor (no Enter needed).
-        if let KeyCode::Char('?') = key.code {
+        if key.code == KeyCode::Char('?') {
             if let Mode::Prompting(Prompt {
                 kind: PromptKind::ShellCmdCaptured,
                 ref buffer,
@@ -1850,17 +1861,15 @@ impl App {
                 let key = key.trim();
                 let value = value.trim();
                 match key {
-                    "sort" => {
-                        match crate::fs::listing::SortMode::parse(value) {
-                            Some(mode) => {
-                                self.sort_order = mode;
-                                self.listing.sort(mode);
-                                self.rebuild_rows();
-                                self.flash_info(format!("sort={mode}"));
-                            }
-                            None => self.flash_error(format!("invalid sort mode: {value}")),
+                    "sort" => match crate::fs::listing::SortMode::parse(value) {
+                        Some(mode) => {
+                            self.sort_order = mode;
+                            self.listing.sort(mode);
+                            self.rebuild_rows();
+                            self.flash_info(format!("sort={mode}"));
                         }
-                    }
+                        None => self.flash_error(format!("invalid sort mode: {value}")),
+                    },
                     _ => self.flash_error(format!("unknown setting: {key}")),
                 }
             } else {
@@ -1947,12 +1956,11 @@ impl App {
             PromptKind::ShellCmdCaptured => {
                 // `!!` repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
-                    match self.last_captured_cmd.clone() {
-                        Some(c) => c,
-                        None => {
-                            self.flash_error("no previous ! command");
-                            return PostAction::None;
-                        }
+                    if let Some(c) = self.last_captured_cmd.clone() {
+                        c
+                    } else {
+                        self.flash_error("no previous ! command");
+                        return PostAction::None;
                     }
                 } else {
                     prompt.buffer.clone()
@@ -2058,7 +2066,7 @@ impl App {
                     ed.set_content(&cwd_default);
                 }
                 self.mode = Mode::Prompting(p);
-                return PostAction::None;
+                PostAction::None
             }
             PromptKind::PaneNewTabCwd => {
                 let cwd = prompt.buffer.trim().to_string();
@@ -2100,9 +2108,7 @@ impl App {
                 }
                 PostAction::None
             }
-            PromptKind::Command => {
-                return self.dispatch_command(&prompt.buffer);
-            }
+            PromptKind::Command => self.dispatch_command(&prompt.buffer),
             PromptKind::Limit => {
                 let pattern = prompt.buffer.trim().to_string();
                 if pattern.is_empty() {
@@ -2180,8 +2186,7 @@ impl App {
 
     /// ^W n — start the two-step prompt for a new pane tab.
     fn start_new_tab_prompt(&mut self) {
-        let default_cmd =
-            std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+        let default_cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
         p.buffer.clone_from(&default_cmd);
         if let Some(ed) = p.editor.as_mut() {
@@ -2221,10 +2226,7 @@ impl App {
 
     /// Handle keys while the pane is in scroll mode. Vi-style navigation
     /// through the scrollback buffer; `Esc`/`q` exit back to live view.
-    fn handle_pane_scroll_key(
-        &mut self,
-        key: crossterm::event::KeyEvent,
-    ) -> Result<PostAction> {
+    fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
         use crossterm::event::{KeyCode, KeyModifiers};
         let pane = self.pane_tabs.as_mut().unwrap().active_mut();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -2239,22 +2241,20 @@ impl App {
                 pane.scroll_to_top();
             }
             KeyCode::Char('G') => pane.scroll_to_bottom(),
-            KeyCode::Char('s') => {
-                match pane.save_to_file() {
-                    Ok(path) => {
-                        let name = path.file_name().unwrap_or_default().to_string_lossy();
-                        self.flash_info(&format!("saved: {name}"));
-                    }
-                    Err(e) => self.flash_info(&format!("save error: {e}")),
+            KeyCode::Char('s') => match pane.save_to_file() {
+                Ok(path) => {
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    self.flash_info(format!("saved: {name}"));
                 }
-            }
+                Err(e) => self.flash_info(format!("save error: {e}")),
+            },
             KeyCode::Esc | KeyCode::Char('q') => {
                 pane.exit_scroll_mode();
                 self.flash_info("scroll: off");
             }
             _ => {}
         }
-        Ok(PostAction::None)
+        PostAction::None
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
@@ -2286,7 +2286,11 @@ impl App {
             (out, count)
         };
         let result = {
-            let pane = self.pane_tabs.as_mut().expect("pane existence already checked").active_mut();
+            let pane = self
+                .pane_tabs
+                .as_mut()
+                .expect("pane existence already checked")
+                .active_mut();
             pane.send_bytes(payload.as_bytes())
         };
         match result {
@@ -2307,7 +2311,10 @@ impl App {
         let paths: Vec<PathBuf> = if use_inventory {
             self.inventory.paths().cloned().collect()
         } else {
-            self.selection_paths().into_iter().map(Path::to_path_buf).collect()
+            self.selection_paths()
+                .into_iter()
+                .map(Path::to_path_buf)
+                .collect()
         };
         if paths.is_empty() {
             self.flash_error(if use_inventory {
@@ -2329,11 +2336,7 @@ impl App {
             if !payload.is_empty() {
                 payload.push('\n');
             }
-            payload.push_str(&format!(
-                "[file: {}]\n{}",
-                path.display(),
-                contents
-            ));
+            let _ = write!(payload, "[file: {}]\n{}", path.display(), contents);
             count += 1;
         }
         if count == 0 {
@@ -2398,7 +2401,11 @@ impl App {
                     let label = if cached { "staged" } else { "unstaged" };
                     self.flash_info(format!("no {label} changes"));
                 } else {
-                    let label = if cached { "git diff --cached" } else { "git diff" };
+                    let label = if cached {
+                        "git diff --cached"
+                    } else {
+                        "git diff"
+                    };
                     self.pager = Some(pager::PagerView::new_ansi(label, &out.stdout));
                 }
             }
@@ -2437,10 +2444,7 @@ impl App {
             epoch_secs,
             cwd: self.listing.dir.clone(),
             tabs,
-            active_tab: self
-                .pane_tabs
-                .as_ref()
-                .map_or(0, |pt| pt.active_index()),
+            active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
             pane_height_pct: self.pane_height_pct,
             pane_focused: self.pane_focused,
         };
@@ -2466,13 +2470,7 @@ impl App {
                 } else {
                     format!("  [{}]", names.join(", "))
                 };
-                format!(
-                    "  [{}]  {:<20} {}{}",
-                    i + 1,
-                    age,
-                    s.cwd.display(),
-                    tab_info,
-                )
+                format!("  [{}]  {:<20} {}{}", i + 1, age, s.cwd.display(), tab_info)
             })
             .collect();
         self.pending_sessions = Some(sessions);
@@ -2514,10 +2512,7 @@ impl App {
         }
         let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
         view.lines[new_cursor] = ratatui::text::Line::from(text);
-        view.picker_edit_cursor = Some((
-            Self::HIST_PREFIX_W + editor.cursor,
-            editor.mode,
-        ));
+        view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
     }
 
     fn show_history_popup(&mut self) {
@@ -2546,10 +2541,7 @@ impl App {
             lines,
         );
         view.picker_cursor = Some(0);
-        view.picker_edit_cursor = Some((
-            Self::HIST_PREFIX_W + editor.cursor,
-            editor.mode,
-        ));
+        view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.pending_history_pick = Some(editor);
         self.pager = Some(view);
     }
@@ -2596,8 +2588,7 @@ impl App {
     fn worktree_list(&mut self) {
         match crate::sysinfo::git_worktree_list(&self.listing.dir) {
             Some(worktrees) => {
-                self.pending_worktrees =
-                    Some(worktrees.iter().map(|w| w.path.clone()).collect());
+                self.pending_worktrees = Some(worktrees.iter().map(|w| w.path.clone()).collect());
                 let lines: Vec<String> = worktrees
                     .iter()
                     .enumerate()
@@ -2656,7 +2647,10 @@ impl App {
 
     fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
-        lines.push(format!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION")));
+        lines.push(format!(
+            "\u{1f336}\u{fe0f} spyc {}",
+            env!("CARGO_PKG_VERSION")
+        ));
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!("cwd      : {}", self.listing.dir.display()));
         lines.push(format!("entries  : {}", self.listing.entries.len()));
@@ -2877,10 +2871,8 @@ impl App {
                             }
                             let text = format!("  {:>3}  {}", nc + 1, editor.text());
                             view.lines[nc] = ratatui::text::Line::from(text);
-                            view.picker_edit_cursor = Some((
-                                Self::HIST_PREFIX_W + editor.cursor,
-                                editor.mode,
-                            ));
+                            view.picker_edit_cursor =
+                                Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
                         }
                     }
                 }
@@ -2917,8 +2909,8 @@ impl App {
                                 let max = view.lines.len().saturating_sub(1);
                                 let clamped = target.min(max);
                                 view.picker_cursor = Some(clamped);
-                                view.scroll = u16::try_from(clamped.saturating_sub(2))
-                                    .unwrap_or(u16::MAX);
+                                view.scroll =
+                                    u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
                             } else {
                                 // Regular pager: jump to line N.
                                 view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
@@ -3026,10 +3018,7 @@ impl App {
                             if let Some(cmd) = entries.get(hist_idx) {
                                 ed.set_content_keep_mode(cmd);
                             }
-                            v.picker_edit_cursor = Some((
-                                Self::HIST_PREFIX_W + ed.cursor,
-                                ed.mode,
-                            ));
+                            v.picker_edit_cursor = Some((Self::HIST_PREFIX_W + ed.cursor, ed.mode));
                             let text = format!("  {:>3}  {}", new_cur + 1, ed.text());
                             v.lines[new_cur] = ratatui::text::Line::from(text);
                         }
@@ -3050,10 +3039,7 @@ impl App {
                     }
                     let text = format!("  {:>3}  {}", nc + 1, $ed.text());
                     $v.lines[nc] = ratatui::text::Line::from(text);
-                    $v.picker_edit_cursor = Some((
-                        Self::HIST_PREFIX_W + $ed.cursor,
-                        $ed.mode,
-                    ));
+                    $v.picker_edit_cursor = Some((Self::HIST_PREFIX_W + $ed.cursor, $ed.mode));
                 }};
             }
 
@@ -3122,7 +3108,10 @@ impl App {
                     }
                     // Disable pager keys that don't make sense here.
                     KeyCode::Char('l' | 'v') => true,
-                    _ => { self.history_pending_g = false; false }
+                    _ => {
+                        self.history_pending_g = false;
+                        false
+                    }
                 };
                 if handled {
                     return PostAction::None;
@@ -3135,10 +3124,7 @@ impl App {
             let pc = view.picker_cursor.unwrap_or(0);
             let text = format!("  {:>3}  {}", pc + 1, editor.text());
             view.lines[pc] = ratatui::text::Line::from(text);
-            view.picker_edit_cursor = Some((
-                Self::HIST_PREFIX_W + editor.cursor,
-                editor.mode,
-            ));
+            view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
 
             match result {
                 EditResult::Submit => {
@@ -3152,16 +3138,14 @@ impl App {
                     // Execute the (possibly edited) command directly.
                     self.last_captured_cmd = Some(cmd.clone());
                     self.history.push(cmd.trim());
-                    let expanded =
-                        crate::shell::expand_percent(&cmd, &self.selection_paths());
+                    let expanded = crate::shell::expand_percent(&cmd, &self.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
                         Ok((child, rx)) => {
-                            let mut cview =
-                                PagerView::new_plain(
-                                    format!("\u{23f3} {title} — running... (0s)"),
-                                    Vec::new(),
-                                );
+                            let mut cview = PagerView::new_plain(
+                                format!("\u{23f3} {title} — running... (0s)"),
+                                Vec::new(),
+                            );
                             cview.streaming = true;
                             self.pager = Some(cview);
                             self.pending_capture = Some(PendingCapture {
@@ -3187,7 +3171,11 @@ impl App {
                 EditResult::HistoryPrev | EditResult::HistoryNext => {
                     // Up/Down in Insert mode → move between lines.
                     // HistoryPrev = Up key → move toward top of list (newer).
-                    let delta: isize = if result == EditResult::HistoryPrev { -1 } else { 1 };
+                    let delta: isize = if result == EditResult::HistoryPrev {
+                        -1
+                    } else {
+                        1
+                    };
                     view.picker_move(delta, viewport);
                     let new_cursor = view.picker_cursor.unwrap_or(0);
                     let entries = self.history.entries();
@@ -3197,12 +3185,10 @@ impl App {
                     }
                     let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
                     view.lines[new_cursor] = ratatui::text::Line::from(text);
-                    view.picker_edit_cursor = Some((
-                        Self::HIST_PREFIX_W + editor.cursor,
-                        editor.mode,
-                    ));
+                    view.picker_edit_cursor =
+                        Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
                 }
-                _ => {}
+                EditResult::Continue => {}
             }
             return PostAction::None;
         }
@@ -3292,7 +3278,7 @@ impl App {
                 self.pager_jump_buf = Some(String::new());
                 view.jump_buf = Some(String::new());
             }
-            KeyCode::Char('[') | KeyCode::Char(']') => {
+            KeyCode::Char('[' | ']') => {
                 if let KeyCode::Char(c) = key.code {
                     self.pager_pending_bracket = Some(c);
                 }
@@ -3331,11 +3317,24 @@ impl App {
                 let scroll = view.scroll;
                 // Determine the file to edit and the return state.
                 let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
-                    (src.clone(), PagerReturn::SourceFile { path: src.clone(), scroll })
+                    (
+                        src.clone(),
+                        PagerReturn::SourceFile {
+                            path: src.clone(),
+                            scroll,
+                        },
+                    )
                 } else {
                     let title = view.title.clone();
                     match view.write_to_temp() {
-                        Ok(tmp) => (tmp.clone(), PagerReturn::TempFile { path: tmp, title, scroll }),
+                        Ok(tmp) => (
+                            tmp.clone(),
+                            PagerReturn::TempFile {
+                                path: tmp,
+                                title,
+                                scroll,
+                            },
+                        ),
                         Err(e) => {
                             self.flash_error(format!("write temp: {e}"));
                             return PostAction::None;
@@ -3346,7 +3345,10 @@ impl App {
                 self.pager = None;
                 self.needs_full_repaint = true;
                 return sh_c(
-                    &format!("{editor_cmd} {}", shell::shell_quote(&edit_path.display().to_string())),
+                    &format!(
+                        "{editor_cmd} {}",
+                        shell::shell_quote(&edit_path.display().to_string())
+                    ),
                     false,
                 );
             }
@@ -3355,7 +3357,7 @@ impl App {
         PostAction::None
     }
 
-    fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
+    const fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
         if len == 0 {
             return;
         }
@@ -3364,7 +3366,7 @@ impl App {
     }
 
     /// `gg` — jump to the first entry of the current column.
-    fn goto_col_top(&mut self) {
+    const fn goto_col_top(&mut self) {
         let rows_per_col = self.last_grid.rows as usize;
         if rows_per_col == 0 {
             self.cursor.index = 0;
@@ -3446,16 +3448,16 @@ impl App {
             Action::GotoLast => self.goto_col_bottom(len),
 
             Action::EnterOrDisplay => {
-                let post = self.activate(ActivateIntent::Display)?;
+                let post = self.activate(ActivateIntent::Display);
                 self.cursor.clamp(self.rows.len());
                 return Ok(post);
             }
             Action::EnterOrEdit => {
-                let post = self.activate(ActivateIntent::Edit)?;
+                let post = self.activate(ActivateIntent::Edit);
                 self.cursor.clamp(self.rows.len());
                 return Ok(post);
             }
-            Action::Climb => self.climb()?,
+            Action::Climb => self.climb(),
             Action::Home => {
                 if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
                     if let Err(e) = self.chdir(&home) {
@@ -3490,7 +3492,11 @@ impl App {
                 self.rebuild_rows();
             }
             Action::LimitPrompt => {
-                let prefix = if self.temp_filter.is_some() { "limit (active)=" } else { "limit=" };
+                let prefix = if self.temp_filter.is_some() {
+                    "limit (active)="
+                } else {
+                    "limit="
+                };
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
             }
             Action::CommandPrompt => {
@@ -3697,9 +3703,9 @@ impl App {
                     match tabs.active_mut().save_to_file() {
                         Ok(path) => {
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
-                            self.flash_info(&format!("saved: {name}"));
+                            self.flash_info(format!("saved: {name}"));
                         }
-                        Err(e) => self.flash_info(&format!("save error: {e}")),
+                        Err(e) => self.flash_info(format!("save error: {e}")),
                     }
                 }
             }
@@ -3786,7 +3792,10 @@ impl App {
 
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
-                self.flash_info(format!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION")));
+                self.flash_info(format!(
+                    "\u{1f336}\u{fe0f} spyc {}",
+                    env!("CARGO_PKG_VERSION")
+                ));
             }
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
@@ -3824,9 +3833,9 @@ impl App {
         Ok(PostAction::None)
     }
 
-    fn activate(&mut self, intent: ActivateIntent) -> Result<PostAction> {
+    fn activate(&mut self, intent: ActivateIntent) -> PostAction {
         let Some(row) = self.rows.get(self.cursor.index) else {
-            return Ok(PostAction::None);
+            return PostAction::None;
         };
         let path = row.path.clone();
         let kind = row.kind;
@@ -3842,13 +3851,13 @@ impl App {
             };
             if let Err(e) = self.chdir(&target_dir) {
                 self.flash_error(format!("chdir: {e}"));
-                return Ok(PostAction::None);
+                return PostAction::None;
             }
             self.view = View::Dir;
             self.focus_on_path(&path);
             self.rebuild_rows();
             if kind == EntryKind::Dir {
-                return Ok(PostAction::None);
+                return PostAction::None;
             }
         }
 
@@ -3856,7 +3865,7 @@ impl App {
             if let Err(e) = self.chdir(&path) {
                 self.flash_error(format!("chdir: {e}"));
             }
-            return Ok(PostAction::None);
+            return PostAction::None;
         }
 
         // File: dispatch based on intent.
@@ -3886,7 +3895,7 @@ impl App {
                         }
                         Err(e) => self.flash_error(format!("read: {e}")),
                     }
-                    Ok(PostAction::None)
+                    PostAction::None
                 } else {
                     // Binary file: hex dump via pretty-hex.
                     let name = path
@@ -3904,21 +3913,21 @@ impl App {
                         }
                         Err(e) => self.flash_error(format!("hex: {e}")),
                     }
-                    Ok(PostAction::None)
+                    PostAction::None
                 }
             }
             ActivateIntent::Edit => {
                 let mut argv = shell::resolve_editor();
                 if argv.is_empty() {
-                    return Ok(PostAction::None);
+                    return PostAction::None;
                 }
                 let program = argv.remove(0);
                 argv.push(path.to_string_lossy().into_owned());
-                Ok(PostAction::Spawn {
+                PostAction::Spawn {
                     program,
                     args: argv,
                     pause_after: false,
-                })
+                }
             }
         }
     }
@@ -3931,11 +3940,11 @@ impl App {
         }
     }
 
-    fn climb(&mut self) -> Result<()> {
+    fn climb(&mut self) {
         if self.view == View::Inventory {
             self.view = View::Dir;
             self.rebuild_rows();
-            return Ok(());
+            return;
         }
         // Remember the directory we're leaving so we can focus it after chdir.
         let prev_name = self
@@ -3946,16 +3955,19 @@ impl App {
         if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
             if let Err(e) = self.chdir(&parent) {
                 self.flash_error(format!("chdir: {e}"));
-                return Ok(());
+                return;
             }
             // Place cursor on the directory we just came from.
             if let Some(name) = prev_name {
-                if let Some(idx) = self.rows.iter().position(|r| r.display == name || r.display == format!("{name}/")) {
+                if let Some(idx) = self
+                    .rows
+                    .iter()
+                    .position(|r| r.display == name || r.display == format!("{name}/"))
+                {
                     self.cursor.index = idx;
                 }
             }
         }
-        Ok(())
     }
 
     fn chdir(&mut self, path: &Path) -> Result<()> {
@@ -4178,10 +4190,8 @@ fn sync_listing_watch(
         if let Some(old) = active_git.take() {
             let _ = w.unwatch(&old);
         }
-        if want_git {
-            if w.watch(&git_index, RecursiveMode::NonRecursive).is_ok() {
-                *active_git = Some(git_index);
-            }
+        if want_git && w.watch(&git_index, RecursiveMode::NonRecursive).is_ok() {
+            *active_git = Some(git_index);
         }
     }
 }
@@ -4292,11 +4302,7 @@ fn detect_kind(p: &Path) -> EntryKind {
 }
 
 const fn on_off(b: bool) -> &'static str {
-    if b {
-        "on"
-    } else {
-        "off"
-    }
+    if b { "on" } else { "off" }
 }
 
 fn user_host_string() -> String {
