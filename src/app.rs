@@ -503,7 +503,8 @@ impl App {
         // Which listing dir is currently watched. On chdir we'll unwatch
         // this one and re-watch the new dir.
         let mut watched_listing: Option<PathBuf> = None;
-        sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &self.listing.dir);
+        let mut watched_git: Option<PathBuf> = None;
+        sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &mut watched_git, &self.listing.dir);
 
         while !self.should_quit {
             // One-shot full repaint after a pane or overlay closes (or any
@@ -733,7 +734,7 @@ impl App {
 
             // chdir may have happened in the tick just finished — keep the
             // watcher pointed at the current listing dir.
-            sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &self.listing.dir);
+            sync_listing_watch(fs_watcher.as_mut(), &mut watched_listing, &mut watched_git, &self.listing.dir);
         }
         Ok(())
     }
@@ -747,7 +748,12 @@ impl App {
     /// `notify` events sometimes include just the directory and sometimes
     /// the affected child, so we accept both.
     fn is_listing_path(&self, path: &Path) -> bool {
-        path == self.listing.dir || path.parent() == Some(self.listing.dir.as_path())
+        let dir = self.listing.dir.as_path();
+        path == dir
+            || path.parent() == Some(dir)
+            // .git/index changes (git add, commit, checkout, etc.)
+            // trigger a refresh so git status markers stay current.
+            || path == dir.join(".git/index")
     }
 
     // --- Rendering --------------------------------------------------------
@@ -4145,22 +4151,38 @@ const fn is_spyc_meta_when_pane_focused(
 fn sync_listing_watch(
     fs_watcher: Option<&mut notify::RecommendedWatcher>,
     active: &mut Option<PathBuf>,
+    active_git: &mut Option<PathBuf>,
     new_dir: &Path,
 ) {
     use notify::{RecursiveMode, Watcher};
     let Some(w) = fs_watcher else {
         return;
     };
-    if active.as_deref() == Some(new_dir) {
-        return;
+    if active.as_deref() != Some(new_dir) {
+        if let Some(old) = active.as_ref() {
+            let _ = w.unwatch(old);
+        }
+        if w.watch(new_dir, RecursiveMode::NonRecursive).is_ok() {
+            *active = Some(new_dir.to_path_buf());
+        } else {
+            *active = None;
+        }
     }
-    if let Some(old) = active.as_ref() {
-        let _ = w.unwatch(old);
-    }
-    if w.watch(new_dir, RecursiveMode::NonRecursive).is_ok() {
-        *active = Some(new_dir.to_path_buf());
-    } else {
-        *active = None;
+    // Watch .git/index — this single file is touched by virtually every
+    // git operation that changes status (add, commit, checkout, reset,
+    // merge, stash, rebase). Watching one file is safe even in huge repos.
+    let git_index = new_dir.join(".git/index");
+    let want_git = git_index.is_file();
+    let have_git = active_git.as_deref() == Some(&git_index);
+    if !have_git {
+        if let Some(old) = active_git.take() {
+            let _ = w.unwatch(&old);
+        }
+        if want_git {
+            if w.watch(&git_index, RecursiveMode::NonRecursive).is_ok() {
+                *active_git = Some(git_index);
+            }
+        }
     }
 }
 
