@@ -1576,46 +1576,25 @@ impl App {
         self.state.pending_new_tab_cmd = None;
     }
 
-    /// Parse and dispatch a `:` command. Recognized commands:
-    ///   :limit <pat>  /  :limit !  /  :limit     — temp filter
-    ///   :!<cmd>                                    — captured shell command
-    ///   :!!                                        — repeat last captured
-    ///   :;<cmd>                                    — foreground shell command
-    ///   :q                                         — quit
+    /// Parse and dispatch a `:` command.
+    ///
+    /// Pure-domain arms are handled by `AppState::dispatch_command`;
+    /// terminal-touching arms (shell, pager, overlay) stay here.
     fn dispatch_command(&mut self, input: &str) -> PostAction {
-        let input = input.trim();
-        if input.is_empty() {
-            return PostAction::None;
-        }
+        use state::CommandResult;
 
-        // :q / :quit
-        if input == "q" || input == "quit" {
-            self.state.should_quit = true;
-            return PostAction::None;
-        }
-
-        // :limit [pattern]
-        if input == "limit" {
-            self.state.temp_filter = None;
-            self.state.flash_info("limit cleared");
-            self.state.rebuild_rows();
-            return PostAction::None;
-        }
-        if let Some(pat) = input.strip_prefix("limit ") {
-            let pat = pat.trim();
-            if pat.is_empty() {
-                self.state.temp_filter = None;
-                self.state.flash_info("limit cleared");
-            } else if pat == "!" {
-                self.state.temp_filter = Some("!".to_string());
-                self.state.flash_info("limit: picks only");
-            } else {
-                self.state.temp_filter = Some(pat.to_string());
-                self.state.flash_info(format!("limit: {pat}"));
+        // Try the pure-domain handler first.
+        match self.state.dispatch_command(input) {
+            CommandResult::Handled => return PostAction::None,
+            CommandResult::OpenPager { title, lines } => {
+                self.pager = Some(PagerView::new_plain(title, lines));
+                return PostAction::None;
             }
-            self.state.rebuild_rows();
-            return PostAction::None;
+            CommandResult::NotHandled => {}
         }
+
+        // --- Terminal-touching arms (shell/pager/overlay) ---
+        let input = input.trim();
 
         // :!! — repeat last captured command
         if input == "!!" || input == "!" {
@@ -1702,96 +1681,6 @@ impl App {
             return PostAction::None;
         }
 
-        // :cd <path>
-        if input == "cd" {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-            match self.state.chdir(&std::path::PathBuf::from(home)) {
-                Ok(()) => {}
-                Err(e) => self.state.flash_error(format!("cd: {e}")),
-            }
-            return PostAction::None;
-        }
-        if let Some(raw) = input.strip_prefix("cd ") {
-            let raw = raw.trim();
-            if raw.is_empty() {
-                self.state.flash_error("cd: missing path");
-                return PostAction::None;
-            }
-            let path = crate::paths::expand(raw);
-            match self.state.chdir(&path) {
-                Ok(()) => {}
-                Err(e) => self.state.flash_error(format!("cd: {e}")),
-            }
-            return PostAction::None;
-        }
-
-        // :sort [mode]
-        if input == "sort" {
-            self.state.flash_info(format!("sort: {}", self.state.sort_order));
-            return PostAction::None;
-        }
-        if let Some(mode_str) = input.strip_prefix("sort ") {
-            let mode_str = mode_str.trim();
-            match crate::fs::listing::SortMode::parse(mode_str) {
-                Some(mode) => {
-                    self.state.sort_order = mode;
-                    self.state.listing.sort(mode);
-                    self.state.rebuild_rows();
-                    self.state.flash_info(format!("sort: {mode}"));
-                }
-                None => self.state.flash_error(format!(
-                    "unknown sort mode: {mode_str} (name|size|mtime|ext)"
-                )),
-            }
-            return PostAction::None;
-        }
-
-        // :marks
-        if input == "marks" {
-            if self.state.marks.entries.is_empty() {
-                self.state.flash_info("no marks set");
-                return PostAction::None;
-            }
-            let lines: Vec<String> = self.state
-                .marks
-                .entries
-                .iter()
-                .map(|(key, mark)| {
-                    let focus = match &mark.focus {
-                        Some(p) => format!("  → {}", p.display()),
-                        None => String::new(),
-                    };
-                    format!("  {key}  {}{focus}", mark.dir.display())
-                })
-                .collect();
-            self.pager = Some(PagerView::new_plain("marks", lines));
-            return PostAction::None;
-        }
-
-        // :set key=value
-        if let Some(assignment) = input.strip_prefix("set ") {
-            let assignment = assignment.trim();
-            if let Some((key, value)) = assignment.split_once('=') {
-                let key = key.trim();
-                let value = value.trim();
-                match key {
-                    "sort" => match crate::fs::listing::SortMode::parse(value) {
-                        Some(mode) => {
-                            self.state.sort_order = mode;
-                            self.state.listing.sort(mode);
-                            self.state.rebuild_rows();
-                            self.state.flash_info(format!("sort={mode}"));
-                        }
-                        None => self.state.flash_error(format!("invalid sort mode: {value}")),
-                    },
-                    _ => self.state.flash_error(format!("unknown setting: {key}")),
-                }
-            } else {
-                self.state.flash_error("usage: :set key=value");
-            }
-            return PostAction::None;
-        }
-
         // :bprev / :bnext — pager buffer history
         if input == "bprev" {
             if let Some(current) = self.pager.take() {
@@ -1835,26 +1724,29 @@ impl App {
             return PostAction::None;
         }
 
+        // If we get here, AppState said NotHandled but we don't recognize it
+        // either — this shouldn't happen, but handle gracefully.
         self.state.flash_error(format!("unknown command: {input}"));
         PostAction::None
     }
 
+    /// Dispatch a submitted prompt.
+    ///
+    /// Pure-domain arms are handled by `AppState::dispatch_prompt`;
+    /// terminal-touching arms (shell, pager, overlay, copy/move) stay here.
+    #[allow(clippy::needless_pass_by_value)]
     fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
+        use state::PromptResult;
+
+        // Try the pure-domain handler first.
+        match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
+            PromptResult::Handled => return PostAction::None,
+            PromptResult::NotHandled => {}
+        }
+
+        // --- Terminal-touching arms ---
         match prompt.kind {
-            PromptKind::PatternPick => {
-                if let Ok(pat) = Pattern::new(&prompt.buffer) {
-                    for e in &self.state.listing.entries {
-                        if pat.matches(&e.name) {
-                            self.state.picks.insert(&e.path);
-                        }
-                    }
-                }
-                PostAction::None
-            }
             PromptKind::ShellCmd => {
-                // `;cmd` — run interactively in a top-overlay pty that
-                // replaces the spyc listing. Bottom pane (claude) stays
-                // untouched. When the command exits, spyc comes back.
                 let expanded = shell::expand_percent(&prompt.buffer, &self.state.selection_paths());
                 let (rows, cols) =
                     Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
@@ -1868,7 +1760,6 @@ impl App {
                 PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
-                // `!!` repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
                     if let Some(c) = self.state.last_captured_cmd.clone() {
                         c
@@ -1885,7 +1776,6 @@ impl App {
                 match spawn_capture(&expanded) {
                     Ok((child, rx)) => {
                         let cmd_display = prompt.buffer.clone();
-                        // Open the pager immediately — title is updated by the timer.
                         let mut view = PagerView::new_plain(
                             format!("\u{23f3} {title} — running... (0s)"),
                             Vec::new(),
@@ -1906,80 +1796,12 @@ impl App {
                 }
                 PostAction::None
             }
-            PromptKind::Search { .. } => {
-                // Cursor is already where the incremental search left it.
-                if !prompt.buffer.is_empty() {
-                    self.state.last_search = Some(prompt.buffer);
-                }
-                PostAction::None
-            }
-            PromptKind::Jump => {
-                let trimmed = prompt.buffer.trim();
-                if !trimmed.is_empty() {
-                    let _ = self.state.jump_to(trimmed);
-                }
-                PostAction::None
-            }
             PromptKind::CopyTo => {
                 self.run_selection_to(&prompt.buffer, fs::ops::copy_selection_to, "copied");
                 PostAction::None
             }
             PromptKind::MoveTo => {
                 self.run_selection_to(&prompt.buffer, fs::ops::move_selection_to, "moved");
-                PostAction::None
-            }
-            PromptKind::MakeDir => {
-                let name = prompt.buffer.trim();
-                if !name.is_empty() {
-                    let target = crate::paths::expand(name);
-                    let resolved = if target.is_absolute() {
-                        target
-                    } else {
-                        self.state.listing.dir.join(&target)
-                    };
-                    self.run_and_flash(
-                        std::fs::create_dir_all(&resolved),
-                        format!("created {}", resolved.display()),
-                    );
-                    self.state.refresh_listing();
-                }
-                PostAction::None
-            }
-            // RemoveConfirm never reaches dispatch — it's handled as a
-            // single-key confirm in `handle_remove_confirm_key`.
-            PromptKind::RemoveConfirm => PostAction::None,
-            PromptKind::SetEnv => {
-                let line = prompt.buffer.trim();
-                if let Some((name, value)) = line.split_once('=') {
-                    let name = name.trim();
-                    if name.is_empty() {
-                        self.state.flash_error("setenv: missing variable name");
-                    } else {
-                        // SAFETY: single-threaded TUI; no other thread is
-                        // reading env concurrently.
-                        unsafe {
-                            std::env::set_var(name, value);
-                        }
-                        self.state.flash_info(format!("setenv {name}={value}"));
-                    }
-                } else if !line.is_empty() {
-                    self.state.flash_error("setenv: expected NAME=VALUE");
-                }
-                PostAction::None
-            }
-            PromptKind::PaneNewTabCmd => {
-                let cmd = prompt.buffer.trim().to_string();
-                if cmd.is_empty() {
-                    return PostAction::None;
-                }
-                self.state.pending_new_tab_cmd = Some(cmd);
-                let cwd_default = self.state.listing.dir.display().to_string();
-                let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
-                p.buffer.clone_from(&cwd_default);
-                if let Some(ed) = p.editor.as_mut() {
-                    ed.set_content(&cwd_default);
-                }
-                self.state.mode = Mode::Prompting(p);
                 PostAction::None
             }
             PromptKind::PaneNewTabCwd => {
@@ -2006,57 +1828,9 @@ impl App {
                 }
                 PostAction::None
             }
-            PromptKind::WorktreeNewBranch => {
-                let branch = prompt.buffer.trim().to_string();
-                if branch.is_empty() {
-                    return PostAction::None;
-                }
-                match crate::sysinfo::git_worktree_add(&self.state.listing.dir, &branch) {
-                    Ok(path) => {
-                        self.state.flash_info(format!("created worktree: {}", path.display()));
-                        if let Err(e) = self.state.chdir(&path) {
-                            self.state.flash_error(format!("chdir: {e}"));
-                        }
-                    }
-                    Err(e) => self.state.flash_error(format!("worktree add: {e}")),
-                }
-                PostAction::None
-            }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
-            PromptKind::Limit => {
-                let pattern = prompt.buffer.trim().to_string();
-                if pattern.is_empty() {
-                    // Clear the filter.
-                    self.state.temp_filter = None;
-                    self.state.flash_info("limit cleared");
-                } else if pattern == "!" {
-                    // Show only picked files.
-                    self.state.temp_filter = Some("!".to_string());
-                    self.state.flash_info("limit: picks only");
-                } else {
-                    self.state.temp_filter = Some(pattern.clone());
-                    self.state.flash_info(format!("limit: {pattern}"));
-                }
-                self.state.rebuild_rows();
-                PostAction::None
-            }
-            PromptKind::WorktreeDeleteConfirm => {
-                let confirmed = prompt.buffer.trim().eq_ignore_ascii_case("y");
-                if !confirmed {
-                    return PostAction::None;
-                }
-                let dir = self.state.listing.dir.clone();
-                match crate::sysinfo::git_worktree_remove(&dir) {
-                    Ok(()) => {
-                        self.state.flash_info(format!("removed worktree: {}", dir.display()));
-                        if let Some(parent) = dir.parent() {
-                            let _ = self.state.chdir(parent);
-                        }
-                    }
-                    Err(e) => self.state.flash_error(format!("worktree remove: {e}")),
-                }
-                PostAction::None
-            }
+            // These should have been handled by AppState — unreachable in practice.
+            _ => PostAction::None,
         }
     }
 

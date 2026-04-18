@@ -16,8 +16,29 @@ use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::list_view::Grid;
 
 use super::{
-    detect_kind, row_from_entry, FlashKind, FlashMessage, Matcher, Mode, RowData, View,
+    detect_kind, row_from_entry, FlashKind, FlashMessage, Matcher, Mode, Prompt, PromptKind,
+    RowData, View,
 };
+
+/// Result of `AppState::dispatch_command` — tells the `App` caller what to do.
+#[derive(Debug)]
+pub enum CommandResult {
+    /// Handled entirely by `AppState`. No terminal action needed.
+    Handled,
+    /// Open the marks view in the pager. Carries the lines.
+    OpenPager { title: String, lines: Vec<String> },
+    /// The input was a shell/pager/overlay command — caller should handle it.
+    NotHandled,
+}
+
+/// Result of `AppState::dispatch_prompt` — tells the `App` caller what to do.
+#[derive(Debug)]
+pub enum PromptResult {
+    /// Handled entirely by `AppState`.
+    Handled,
+    /// Needs terminal: caller handles this prompt kind.
+    NotHandled,
+}
 
 pub struct AppState {
     pub listing: Listing,
@@ -353,6 +374,295 @@ impl AppState {
                     self.cursor.index = idx;
                 }
             }
+        }
+    }
+
+    // --- Command / prompt dispatch (pure-domain arms) ---
+
+    /// Handle the pure-domain arms of `:` commands.
+    ///
+    /// Returns `CommandResult::Handled` when the command was fully processed,
+    /// `CommandResult::OpenPager` when the caller should open the pager with
+    /// the supplied lines, or `CommandResult::NotHandled` when the caller
+    /// (which owns the terminal) must process it.
+    pub fn dispatch_command(&mut self, input: &str) -> CommandResult {
+        let input = input.trim();
+        if input.is_empty() {
+            return CommandResult::Handled;
+        }
+
+        // :q / :quit
+        if input == "q" || input == "quit" {
+            self.should_quit = true;
+            return CommandResult::Handled;
+        }
+
+        // :limit [pattern]
+        if input == "limit" {
+            self.temp_filter = None;
+            self.flash_info("limit cleared");
+            self.rebuild_rows();
+            return CommandResult::Handled;
+        }
+        if let Some(pat) = input.strip_prefix("limit ") {
+            let pat = pat.trim();
+            if pat.is_empty() {
+                self.temp_filter = None;
+                self.flash_info("limit cleared");
+            } else if pat == "!" {
+                self.temp_filter = Some("!".to_string());
+                self.flash_info("limit: picks only");
+            } else {
+                self.temp_filter = Some(pat.to_string());
+                self.flash_info(format!("limit: {pat}"));
+            }
+            self.rebuild_rows();
+            return CommandResult::Handled;
+        }
+
+        // :cd <path>
+        if input == "cd" {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+            match self.chdir(&PathBuf::from(home)) {
+                Ok(()) => {}
+                Err(e) => self.flash_error(format!("cd: {e}")),
+            }
+            return CommandResult::Handled;
+        }
+        if let Some(raw) = input.strip_prefix("cd ") {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                self.flash_error("cd: missing path");
+                return CommandResult::Handled;
+            }
+            let path = crate::paths::expand(raw);
+            match self.chdir(&path) {
+                Ok(()) => {}
+                Err(e) => self.flash_error(format!("cd: {e}")),
+            }
+            return CommandResult::Handled;
+        }
+
+        // :sort [mode]
+        if input == "sort" {
+            self.flash_info(format!("sort: {}", self.sort_order));
+            return CommandResult::Handled;
+        }
+        if let Some(mode_str) = input.strip_prefix("sort ") {
+            let mode_str = mode_str.trim();
+            match crate::fs::listing::SortMode::parse(mode_str) {
+                Some(mode) => {
+                    self.sort_order = mode;
+                    self.listing.sort(mode);
+                    self.rebuild_rows();
+                    self.flash_info(format!("sort: {mode}"));
+                }
+                None => self.flash_error(format!(
+                    "unknown sort mode: {mode_str} (name|size|mtime|ext)"
+                )),
+            }
+            return CommandResult::Handled;
+        }
+
+        // :marks
+        if input == "marks" {
+            if self.marks.entries.is_empty() {
+                self.flash_info("no marks set");
+                return CommandResult::Handled;
+            }
+            let lines: Vec<String> = self
+                .marks
+                .entries
+                .iter()
+                .map(|(key, mark)| {
+                    let focus = match &mark.focus {
+                        Some(p) => format!("  → {}", p.display()),
+                        None => String::new(),
+                    };
+                    format!("  {key}  {}{focus}", mark.dir.display())
+                })
+                .collect();
+            return CommandResult::OpenPager {
+                title: "marks".to_string(),
+                lines,
+            };
+        }
+
+        // :set key=value
+        if let Some(assignment) = input.strip_prefix("set ") {
+            let assignment = assignment.trim();
+            if let Some((key, value)) = assignment.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                match key {
+                    "sort" => match crate::fs::listing::SortMode::parse(value) {
+                        Some(mode) => {
+                            self.sort_order = mode;
+                            self.listing.sort(mode);
+                            self.rebuild_rows();
+                            self.flash_info(format!("sort={mode}"));
+                        }
+                        None => self.flash_error(format!("invalid sort mode: {value}")),
+                    },
+                    _ => self.flash_error(format!("unknown setting: {key}")),
+                }
+            } else {
+                self.flash_error("usage: :set key=value");
+            }
+            return CommandResult::Handled;
+        }
+
+        // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd, :bprev, :bnext
+        if input.starts_with('!')
+            || input.starts_with(';')
+            || input == "bprev"
+            || input == "bnext"
+        {
+            return CommandResult::NotHandled;
+        }
+
+        // Unknown command
+        self.flash_error(format!("unknown command: {input}"));
+        CommandResult::Handled
+    }
+
+    /// Handle the pure-domain arms of prompt submission.
+    ///
+    /// Returns `PromptResult::Handled` when fully processed, or
+    /// `PromptResult::NotHandled` when the caller must handle it (terminal I/O).
+    pub fn dispatch_prompt(&mut self, kind: &PromptKind, buffer: &str) -> PromptResult {
+        match kind {
+            PromptKind::PatternPick => {
+                if let Ok(pat) = glob::Pattern::new(buffer) {
+                    for e in &self.listing.entries {
+                        if pat.matches(&e.name) {
+                            self.picks.insert(&e.path);
+                        }
+                    }
+                }
+                PromptResult::Handled
+            }
+            PromptKind::Search { .. } => {
+                if !buffer.is_empty() {
+                    self.last_search = Some(buffer.to_string());
+                }
+                PromptResult::Handled
+            }
+            PromptKind::Jump => {
+                let trimmed = buffer.trim();
+                if !trimmed.is_empty() {
+                    let _ = self.jump_to(trimmed);
+                }
+                PromptResult::Handled
+            }
+            PromptKind::MakeDir => {
+                let name = buffer.trim();
+                if !name.is_empty() {
+                    let target = crate::paths::expand(name);
+                    let resolved = if target.is_absolute() {
+                        target
+                    } else {
+                        self.listing.dir.join(&target)
+                    };
+                    match std::fs::create_dir_all(&resolved) {
+                        Ok(()) => self.flash_info(format!("created {}", resolved.display())),
+                        Err(e) => self.flash_error(format!("error: {e}")),
+                    }
+                    self.refresh_listing();
+                }
+                PromptResult::Handled
+            }
+            PromptKind::SetEnv => {
+                let line = buffer.trim();
+                if let Some((name, value)) = line.split_once('=') {
+                    let name = name.trim();
+                    if name.is_empty() {
+                        self.flash_error("setenv: missing variable name");
+                    } else {
+                        // SAFETY: single-threaded TUI; no other thread is
+                        // reading env concurrently.
+                        unsafe {
+                            std::env::set_var(name, value);
+                        }
+                        self.flash_info(format!("setenv {name}={value}"));
+                    }
+                } else if !line.is_empty() {
+                    self.flash_error("setenv: expected NAME=VALUE");
+                }
+                PromptResult::Handled
+            }
+            PromptKind::Limit => {
+                let pattern = buffer.trim();
+                if pattern.is_empty() {
+                    self.temp_filter = None;
+                    self.flash_info("limit cleared");
+                } else if pattern == "!" {
+                    self.temp_filter = Some("!".to_string());
+                    self.flash_info("limit: picks only");
+                } else {
+                    self.temp_filter = Some(pattern.to_string());
+                    self.flash_info(format!("limit: {pattern}"));
+                }
+                self.rebuild_rows();
+                PromptResult::Handled
+            }
+            PromptKind::WorktreeNewBranch => {
+                let branch = buffer.trim();
+                if branch.is_empty() {
+                    return PromptResult::Handled;
+                }
+                match crate::sysinfo::git_worktree_add(&self.listing.dir, branch) {
+                    Ok(path) => {
+                        self.flash_info(format!("created worktree: {}", path.display()));
+                        if let Err(e) = self.chdir(&path) {
+                            self.flash_error(format!("chdir: {e}"));
+                        }
+                    }
+                    Err(e) => self.flash_error(format!("worktree add: {e}")),
+                }
+                PromptResult::Handled
+            }
+            PromptKind::WorktreeDeleteConfirm => {
+                let confirmed = buffer.trim().eq_ignore_ascii_case("y");
+                if !confirmed {
+                    return PromptResult::Handled;
+                }
+                let dir = self.listing.dir.clone();
+                match crate::sysinfo::git_worktree_remove(&dir) {
+                    Ok(()) => {
+                        self.flash_info(format!("removed worktree: {}", dir.display()));
+                        if let Some(parent) = dir.parent() {
+                            let _ = self.chdir(parent);
+                        }
+                    }
+                    Err(e) => self.flash_error(format!("worktree remove: {e}")),
+                }
+                PromptResult::Handled
+            }
+            PromptKind::PaneNewTabCmd => {
+                let cmd = buffer.trim().to_string();
+                if cmd.is_empty() {
+                    return PromptResult::Handled;
+                }
+                self.pending_new_tab_cmd = Some(cmd);
+                let cwd_default = self.listing.dir.display().to_string();
+                let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
+                p.buffer.clone_from(&cwd_default);
+                if let Some(ed) = p.editor.as_mut() {
+                    ed.set_content(&cwd_default);
+                }
+                self.mode = Mode::Prompting(p);
+                PromptResult::Handled
+            }
+            PromptKind::RemoveConfirm => PromptResult::Handled,
+            // These need terminal/overlay/pager — caller handles them.
+            PromptKind::ShellCmd
+            | PromptKind::ShellCmdCaptured
+            | PromptKind::CopyTo
+            | PromptKind::MoveTo
+            | PromptKind::PaneNewTabCwd
+            | PromptKind::PaneRenameTab
+            | PromptKind::Command => PromptResult::NotHandled,
         }
     }
 
@@ -737,5 +1047,262 @@ mod tests {
         s.cursor.index = 1;
         s.focus_on_path(Path::new("/tmp/test/nope"));
         assert_eq!(s.cursor.index, 1); // unchanged
+    }
+
+    // ── dispatch_command ──────────────────────────────────────────
+
+    #[test]
+    fn cmd_empty_is_handled() {
+        let mut s = test_state();
+        assert!(matches!(s.dispatch_command(""), CommandResult::Handled));
+        assert!(matches!(s.dispatch_command("   "), CommandResult::Handled));
+    }
+
+    #[test]
+    fn cmd_quit() {
+        let mut s = test_state();
+        assert!(matches!(s.dispatch_command("q"), CommandResult::Handled));
+        assert!(s.should_quit);
+    }
+
+    #[test]
+    fn cmd_quit_long() {
+        let mut s = test_state();
+        assert!(matches!(s.dispatch_command("quit"), CommandResult::Handled));
+        assert!(s.should_quit);
+    }
+
+    #[test]
+    fn cmd_limit_set_and_clear() {
+        let mut s = state_with_rows(&["foo.rs", "bar.txt", "baz.rs"]);
+        s.dispatch_command("limit *.rs");
+        assert_eq!(s.temp_filter.as_deref(), Some("*.rs"));
+        assert!(s.flash.as_ref().unwrap().text.contains("limit:"));
+
+        s.dispatch_command("limit");
+        assert!(s.temp_filter.is_none());
+        assert!(s.flash.as_ref().unwrap().text.contains("cleared"));
+    }
+
+    #[test]
+    fn cmd_limit_picks_only() {
+        let mut s = test_state();
+        s.dispatch_command("limit !");
+        assert_eq!(s.temp_filter.as_deref(), Some("!"));
+    }
+
+    #[test]
+    fn cmd_sort_query() {
+        let mut s = test_state();
+        s.dispatch_command("sort");
+        assert!(s.flash.as_ref().unwrap().text.contains("name"));
+    }
+
+    #[test]
+    fn cmd_sort_set() {
+        let mut s = test_state();
+        s.dispatch_command("sort size");
+        assert_eq!(s.sort_order, SortMode::Size);
+        assert!(s.flash.as_ref().unwrap().text.contains("size"));
+    }
+
+    #[test]
+    fn cmd_sort_invalid() {
+        let mut s = test_state();
+        s.dispatch_command("sort bogus");
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn cmd_marks_empty() {
+        let mut s = test_state();
+        let result = s.dispatch_command("marks");
+        assert!(matches!(result, CommandResult::Handled));
+        assert!(s.flash.as_ref().unwrap().text.contains("no marks"));
+    }
+
+    #[test]
+    fn cmd_marks_with_entries() {
+        let mut s = test_state();
+        s.marks.set(
+            'a',
+            Mark {
+                dir: PathBuf::from("/tmp"),
+                focus: None,
+            },
+        );
+        let result = s.dispatch_command("marks");
+        match result {
+            CommandResult::OpenPager { title, lines } => {
+                assert_eq!(title, "marks");
+                assert_eq!(lines.len(), 1);
+                assert!(lines[0].contains("/tmp"));
+            }
+            _ => panic!("expected OpenPager"),
+        }
+    }
+
+    #[test]
+    fn cmd_set_sort() {
+        let mut s = test_state();
+        s.dispatch_command("set sort=mtime");
+        assert_eq!(s.sort_order, SortMode::Mtime);
+    }
+
+    #[test]
+    fn cmd_set_unknown_key() {
+        let mut s = test_state();
+        s.dispatch_command("set foo=bar");
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn cmd_shell_not_handled() {
+        let mut s = test_state();
+        assert!(matches!(
+            s.dispatch_command("!ls"),
+            CommandResult::NotHandled
+        ));
+        assert!(matches!(
+            s.dispatch_command(";htop"),
+            CommandResult::NotHandled
+        ));
+        assert!(matches!(
+            s.dispatch_command("bprev"),
+            CommandResult::NotHandled
+        ));
+        assert!(matches!(
+            s.dispatch_command("bnext"),
+            CommandResult::NotHandled
+        ));
+    }
+
+    #[test]
+    fn cmd_unknown() {
+        let mut s = test_state();
+        s.dispatch_command("foobar");
+        let flash = s.flash.as_ref().unwrap();
+        assert!(matches!(flash.kind, FlashKind::Error));
+        assert!(flash.text.contains("foobar"));
+    }
+
+    // ── dispatch_prompt ───────────────────────────────────────────
+
+    #[test]
+    fn prompt_search_saves_last_search() {
+        let mut s = test_state();
+        let result = s.dispatch_prompt(
+            &PromptKind::Search { saved_cursor: 0 },
+            "foo",
+        );
+        assert!(matches!(result, PromptResult::Handled));
+        assert_eq!(s.last_search.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn prompt_search_empty_does_not_save() {
+        let mut s = test_state();
+        s.last_search = Some("old".to_string());
+        s.dispatch_prompt(&PromptKind::Search { saved_cursor: 0 }, "");
+        assert_eq!(s.last_search.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn prompt_limit_sets_filter() {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::Limit, "*.rs");
+        assert_eq!(s.temp_filter.as_deref(), Some("*.rs"));
+    }
+
+    #[test]
+    fn prompt_limit_empty_clears() {
+        let mut s = test_state();
+        s.temp_filter = Some("old".to_string());
+        s.dispatch_prompt(&PromptKind::Limit, "");
+        assert!(s.temp_filter.is_none());
+    }
+
+    #[test]
+    fn prompt_set_env() {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::SetEnv, "TEST_SPYC_VAR=hello");
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Info));
+        // Verify env was set
+        assert_eq!(std::env::var("TEST_SPYC_VAR").unwrap(), "hello");
+    }
+
+    #[test]
+    fn prompt_set_env_bad_format() {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::SetEnv, "no_equals_sign");
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn prompt_pattern_pick() {
+        let mut s = test_state();
+        // Add some listing entries for the pattern to match against
+        s.listing = Listing::empty(PathBuf::from("/tmp/test"));
+        use crate::fs::entry::{Entry, EntryKind};
+        s.listing.entries = vec![
+            Entry {
+                path: PathBuf::from("/tmp/test/foo.rs"),
+                name: "foo.rs".to_string(),
+                kind: EntryKind::File,
+                size: 0,
+                mtime: std::time::SystemTime::UNIX_EPOCH,
+            },
+            Entry {
+                path: PathBuf::from("/tmp/test/bar.txt"),
+                name: "bar.txt".to_string(),
+                kind: EntryKind::File,
+                size: 0,
+                mtime: std::time::SystemTime::UNIX_EPOCH,
+            },
+        ];
+        s.dispatch_prompt(&PromptKind::PatternPick, "*.rs");
+        assert!(s.picks.contains(Path::new("/tmp/test/foo.rs")));
+        assert!(!s.picks.contains(Path::new("/tmp/test/bar.txt")));
+    }
+
+    #[test]
+    fn prompt_pane_new_tab_cmd_stashes() {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::PaneNewTabCmd, "bash");
+        assert_eq!(s.pending_new_tab_cmd.as_deref(), Some("bash"));
+        assert!(matches!(s.mode, Mode::Prompting(_)));
+    }
+
+    #[test]
+    fn prompt_pane_new_tab_cmd_empty_is_noop() {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::PaneNewTabCmd, "");
+        assert!(s.pending_new_tab_cmd.is_none());
+    }
+
+    #[test]
+    fn prompt_shell_cmd_not_handled() {
+        let mut s = test_state();
+        assert!(matches!(
+            s.dispatch_prompt(&PromptKind::ShellCmd, "ls"),
+            PromptResult::NotHandled
+        ));
+        assert!(matches!(
+            s.dispatch_prompt(&PromptKind::ShellCmdCaptured, "ls"),
+            PromptResult::NotHandled
+        ));
+        assert!(matches!(
+            s.dispatch_prompt(&PromptKind::CopyTo, "/tmp"),
+            PromptResult::NotHandled
+        ));
+    }
+
+    #[test]
+    fn prompt_remove_confirm_handled() {
+        let mut s = test_state();
+        assert!(matches!(
+            s.dispatch_prompt(&PromptKind::RemoveConfirm, "n"),
+            PromptResult::Handled
+        ));
     }
 }
