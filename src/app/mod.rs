@@ -16,7 +16,7 @@ use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneTabs, PaneWidget, TabEntry, TabInfo};
 use crate::shell;
-use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
+use crate::state::{Cursor, History, IgnoreMasks, Inventory, Marks, Picks};
 use crate::ui::line_edit::LineEditor;
 use crate::ui::{
     help,
@@ -71,15 +71,17 @@ pub enum PostAction {
     },
 }
 
+pub mod state;
+
 /// Which collection the user is looking at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum View {
+pub enum View {
     Dir,
     Inventory,
 }
 
 /// Input mode: normal key bindings or a one-line text prompt.
-enum Mode {
+pub enum Mode {
     Normal,
     Prompting(Prompt),
 }
@@ -91,13 +93,13 @@ enum ActivateIntent {
 }
 
 #[derive(Debug, Clone)]
-struct FlashMessage {
-    text: String,
-    kind: FlashKind,
+pub struct FlashMessage {
+    pub text: String,
+    pub kind: FlashKind,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum FlashKind {
+pub enum FlashKind {
     Info,
     Error,
 }
@@ -114,13 +116,13 @@ enum PagerReturn {
     SourceFile { path: PathBuf, scroll: u16 },
 }
 
-struct Prompt {
-    kind: PromptKind,
-    prefix: String,
-    buffer: String,
+pub struct Prompt {
+    pub kind: PromptKind,
+    pub prefix: String,
+    pub buffer: String,
     /// When set, this prompt uses the vi line editor with history.
     #[allow(dead_code)]
-    editor: Option<crate::ui::line_edit::LineEditor>,
+    pub editor: Option<crate::ui::line_edit::LineEditor>,
 }
 
 impl Prompt {
@@ -145,7 +147,7 @@ impl Prompt {
     }
 }
 
-enum PromptKind {
+pub enum PromptKind {
     PatternPick,
     ShellCmd,
     /// Incremental search. `saved_cursor` is where the cursor was when `/`
@@ -230,112 +232,34 @@ impl PagerHistory {
 
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
-    listing: Listing,
-    picks: Picks,
-    inventory: Inventory,
-    marks: Marks,
-    masks: IgnoreMasks,
-    /// Temporary filter pattern from `:limit`. `None` = show all.
-    /// `Some("!")` = show only picked files.
-    temp_filter: Option<String>,
-    sort_order: crate::fs::listing::SortMode,
+    /// Domain state — navigation, selection, filtering, config, etc.
+    pub state: state::AppState,
+
+    // --- UI/terminal state (stays in App) ---
+    pager: Option<PagerView>,
     pager_history: PagerHistory,
     pager_pending_bracket: Option<char>,
-    view: View,
-    cursor: Cursor,
-    resolver: Resolver,
-    user_keymap: UserKeymap,
-    config: Config,
-    theme: Theme,
-    mode: Mode,
-    /// When true, the key-bindings overlay is drawn on top of everything
-    /// and the next keypress dismisses it.
-    /// When set, a scrollable text pager sits on top of the file list.
-    /// `q` / `Esc` close it; `j` / `k` / `gg` / `G` scroll.
-    pager: Option<PagerView>,
-    /// Tabbed pty-hosted subprocesses shown as a horizontal split under the list.
+    pager_was_open: bool,
+    pager_jump_buf: Option<String>,
     pane_tabs: Option<PaneTabs>,
-    /// When set, an interactive `!` command has taken over the top pane.
-    /// spyc's list/status/prompt are hidden; this pty renders instead.
-    /// When the subprocess exits, spyc's file listing is restored and
-    /// the bottom pane (claude) is completely unaffected.
     top_overlay: Option<Pane>,
-    /// The overlay subprocess has exited but we're holding the screen
-    /// so the user can read the final output. Enter dismisses.
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
-    /// A `!` command running in the background with piped output. The
-    /// event loop stays alive so Ctrl+C can kill the child.
     pending_capture: Option<PendingCapture>,
-    /// Whether the pane (vs the file list) is the current keyboard focus.
-    /// Most keys are forwarded to the pane when this is true, but the
-    /// Ctrl-W prefix and Ctrl-\\ / F10 toggle are always caught by spyc.
-    pane_focused: bool,
-    /// The bottom pane's share of the middle rect, in percent. Resized
-    /// by `^W +` / `^W -`.
-    pane_height_pct: u16,
-    /// Stashed command for the two-step new-tab prompt flow.
-    pending_new_tab_cmd: Option<String>,
-    /// Last `!` command — `!!` repeats it.
-    last_captured_cmd: Option<String>,
-    /// Worktree paths for the `W l` picker. Digit keys 1-9 select.
-    pending_worktrees: Option<Vec<PathBuf>>,
-    /// Session restore picker. Digit keys 1-9 select.
-    pending_sessions: Option<Vec<crate::state::sessions::Session>>,
-    /// When active, holds the LineEditor for the history editor overlay.
     pending_history_pick: Option<LineEditor>,
-    /// Tracks whether the pager was open on the previous frame, so we can
-    /// detect open-transitions and force a full repaint.
-    pager_was_open: bool,
-    /// Accumulates digits for `:N` jump-to-entry in the history editor
-    /// (and pager). `Some("")` means `:` was just pressed, awaiting digits.
-    pager_jump_buf: Option<String>,
-    /// Pending `g` key for `gg` (go-to-top) in the history editor.
     history_pending_g: bool,
-    /// When `v` is pressed in the pager, stash info to restore it after
-    /// the editor exits. `Some(path)` for temp-file buffers (reload on
-    /// return); `None` for on-disk files (just reopen pager normally).
     pending_pager_return: Option<PagerReturn>,
-    /// The directory spyc was launched in — `` ` `` jumps here (project root).
-    start_dir: PathBuf,
-    /// Directory before the last chdir — `''` jumps back here (like `cd -`).
-    prev_dir: Option<PathBuf>,
-    /// Most recent search term; `n` / `N` use this.
-    last_search: Option<String>,
-    /// Timestamp of the first quit press. Must press again within 2s to
-    /// actually quit — prevents murdering a claude session by accident.
-    quit_pending: Option<std::time::Instant>,
-    /// Shared command history for `!` / `;` prompts — persisted.
-    #[allow(dead_code)]
-    history: History,
-    pane_history: History,
-    /// Transient message shown in the prompt row when no prompt is active.
-    /// Cleared on the next keypress so it doesn't linger after you've read it.
-    flash: Option<FlashMessage>,
-    /// Set when a pane or overlay closes — triggers one `terminal.clear()`
-    /// so ratatui repaints every cell instead of diffing against stale state.
     needs_full_repaint: bool,
-    user_host: String,
-    /// Cached git branch + dirty flag, refreshed on chdir.
-    git_info: Option<String>,
-    /// Per-file git status for the current directory listing.
-    git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
-    /// Pane cursor blink state: toggles every ~530ms for a visible blink.
+    theme: Theme,
     cursor_blink_on: bool,
     cursor_blink_instant: std::time::Instant,
-    should_quit: bool,
-
-    /// Rebuilt on chdir / mask toggle / inventory change.
-    rows: Vec<RowData>,
-    /// Geometry of the last rendered grid. Motion uses this.
-    last_grid: Grid,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
-struct RowData {
-    path: PathBuf,
-    display: String,
-    kind: EntryKind,
+pub struct RowData {
+    pub path: PathBuf,
+    pub display: String,
+    pub kind: EntryKind,
 }
 
 impl App {
@@ -373,7 +297,7 @@ impl App {
         };
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
-        let mut app = Self {
+        let app_state = state::AppState {
             listing,
             picks: Picks::new(),
             inventory: Inventory::new(),
@@ -385,21 +309,12 @@ impl App {
             },
             temp_filter: None,
             sort_order: crate::fs::listing::SortMode::Name,
-            pager_history: PagerHistory::new(),
-            pager_pending_bracket: None,
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),
             user_keymap,
             config,
-            theme,
             mode: Mode::Normal,
-            pager: None,
-            pane_tabs: None,
-            top_overlay: None,
-            overlay_awaiting_dismiss: false,
-            pending_overlay_close: false,
-            pending_capture: None,
             pane_focused: false,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
@@ -407,11 +322,6 @@ impl App {
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
-            pending_history_pick: None,
-            pager_was_open: false,
-            pager_jump_buf: None,
-            history_pending_g: false,
-            pending_pager_return: None,
             start_dir: cwd,
             prev_dir: None,
             last_search: None,
@@ -422,12 +332,9 @@ impl App {
                 text,
                 kind: FlashKind::Error,
             }),
-            needs_full_repaint: false,
             user_host: user_host_string(),
             git_info,
             git_files,
-            cursor_blink_on: true,
-            cursor_blink_instant: std::time::Instant::now(),
             should_quit: false,
             rows: Vec::new(),
             last_grid: Grid {
@@ -436,9 +343,29 @@ impl App {
                 col_widths: vec![20],
             },
         };
-        app.rebuild_rows();
+        let mut app = Self {
+            state: app_state,
+            pager: None,
+            pager_history: PagerHistory::new(),
+            pager_pending_bracket: None,
+            pager_was_open: false,
+            pager_jump_buf: None,
+            pane_tabs: None,
+            top_overlay: None,
+            overlay_awaiting_dismiss: false,
+            pending_overlay_close: false,
+            pending_capture: None,
+            pending_history_pick: None,
+            history_pending_g: false,
+            pending_pager_return: None,
+            needs_full_repaint: false,
+            theme,
+            cursor_blink_on: true,
+            cursor_blink_instant: std::time::Instant::now(),
+        };
+        app.state.rebuild_rows();
         if let Some(msg) = load_note {
-            app.flash_info(msg);
+            app.state.flash_info(msg);
         }
         if resume {
             app.show_session_picker();
@@ -449,21 +376,21 @@ impl App {
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
     /// config in place on failure and flashes the error.
     pub fn reload_config(&mut self) {
-        match Config::load_default(&self.listing.dir) {
+        match Config::load_default(&self.state.listing.dir) {
             Ok(new_config) => {
-                self.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
+                self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
                 self.theme = Theme::default().with_overrides(&new_config.colors);
                 // Reset to built-in mask defaults first, then apply config
                 // overrides — so removing `[[ignore_masks]]` entries from
                 // the rc file reverts the group to defaults on reload.
-                self.masks = IgnoreMasks::default();
-                self.masks.apply_config(&new_config.ignore_masks);
+                self.state.masks = IgnoreMasks::default();
+                self.state.masks.apply_config(&new_config.ignore_masks);
                 let count = new_config.sources.len();
-                self.config = new_config;
-                self.rebuild_rows();
-                self.flash_info(format!("reloaded {count} config file(s)"));
+                self.state.config = new_config;
+                self.state.rebuild_rows();
+                self.state.flash_info(format!("reloaded {count} config file(s)"));
             }
-            Err(e) => self.flash_error(format!("config error: {e}")),
+            Err(e) => self.state.flash_error(format!("config error: {e}")),
         }
     }
 
@@ -475,7 +402,7 @@ impl App {
         if let Some(home) = std::env::var_os("HOME") {
             out.push(PathBuf::from(home).join(".spycrc.toml"));
         }
-        out.push(self.listing.dir.join(".spycrc.toml"));
+        out.push(self.state.listing.dir.join(".spycrc.toml"));
         out
     }
 
@@ -514,10 +441,10 @@ impl App {
             fs_watcher.as_mut(),
             &mut watched_listing,
             &mut watched_git,
-            &self.listing.dir,
+            &self.state.listing.dir,
         );
 
-        while !self.should_quit {
+        while !self.state.should_quit {
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
             // Also force repaint when the pager opens while a pane exists,
@@ -542,9 +469,9 @@ impl App {
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 if !tabs.remove_closed() {
                     self.pane_tabs = None;
-                    self.pane_focused = false;
+                    self.state.pane_focused = false;
                     self.needs_full_repaint = true;
-                    self.flash_info("pane: last tab exited");
+                    self.state.flash_info("pane: last tab exited");
                 }
             }
             // pending_overlay_close is no longer used — the overlay stays
@@ -633,7 +560,7 @@ impl App {
                 self.reload_config();
             }
             if needs_refresh {
-                self.refresh_listing();
+                self.state.refresh_listing();
             }
 
             // Short poll while the pane or a capture is active so output
@@ -658,7 +585,7 @@ impl App {
                         {
                             run_child_in_foreground(terminal, &program, &args, pause_after)?;
                             // The listing may have changed (mv, rm, chmod, etc).
-                            self.refresh_listing();
+                            self.state.refresh_listing();
                             // If we were editing a pager buffer, restore it.
                             if let Some(ret) = self.pending_pager_return.take() {
                                 match ret {
@@ -697,7 +624,7 @@ impl App {
                         }
                     }
                     Event::Paste(text) => {
-                        if let Mode::Prompting(ref mut p) = self.mode {
+                        if let Mode::Prompting(ref mut p) = self.state.mode {
                             // Paste into the active prompt buffer.
                             // Strip newlines (prompts are single-line).
                             let clean = text.replace(['\n', '\r'], " ");
@@ -722,7 +649,7 @@ impl App {
                         // correct width.
                         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
                         if let Some(tabs) = self.pane_tabs.as_mut() {
-                            let layout = Self::compute_layout(area, true, self.pane_height_pct);
+                            let layout = Self::compute_layout(area, true, self.state.pane_height_pct);
                             if let Some(pane_rect) = layout.pane {
                                 for entry in tabs.tabs_mut() {
                                     let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
@@ -731,7 +658,7 @@ impl App {
                         }
                         if let Some(overlay) = self.top_overlay.as_mut() {
                             let (r, c) = Self::top_overlay_size(
-                                self.pane_height_pct,
+                                self.state.pane_height_pct,
                                 self.pane_tabs.is_some(),
                             );
                             let _ = overlay.resize(r, c);
@@ -747,7 +674,7 @@ impl App {
                 fs_watcher.as_mut(),
                 &mut watched_listing,
                 &mut watched_git,
-                &self.listing.dir,
+                &self.state.listing.dir,
             );
         }
         Ok(())
@@ -755,14 +682,14 @@ impl App {
 
     fn is_config_path(&self, path: &Path) -> bool {
         self.candidate_config_paths().iter().any(|c| c == path)
-            || self.config.sources.iter().any(|c| c == path)
+            || self.state.config.sources.iter().any(|c| c == path)
     }
 
     /// True iff `path` is the listing directory or a direct child of it.
     /// `notify` events sometimes include just the directory and sometimes
     /// the affected child, so we accept both.
     fn is_listing_path(&self, path: &Path) -> bool {
-        let dir = self.listing.dir.as_path();
+        let dir = self.state.listing.dir.as_path();
         path == dir
             || path.parent() == Some(dir)
             // .git/index changes (git add, commit, checkout, etc.)
@@ -871,7 +798,7 @@ impl App {
             widgets::Paragraph,
         };
         let width = area.width as usize;
-        let rule_style = if self.pane_focused {
+        let rule_style = if self.state.pane_focused {
             Style::default()
                 .fg(self.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD)
@@ -977,7 +904,7 @@ impl App {
         //   so when the pane is open it sits *inside* the top pane rather
         //   than above the divider.
         let layout =
-            Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.pane_height_pct);
+            Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.state.pane_height_pct);
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
@@ -1050,16 +977,16 @@ impl App {
 
         let (path, suffix) = self.header_parts();
         StatusBar {
-            user_host: &self.user_host,
+            user_host: &self.state.user_host,
             path: &path,
             suffix: &suffix,
-            git_info: self.git_info.as_deref(),
+            git_info: self.state.git_info.as_deref(),
             theme: &self.theme,
         }
         .render(frame, layout.status);
 
         let rows = self.build_rows();
-        let list_focused = !self.pane_focused;
+        let list_focused = !self.state.pane_focused;
         // Stabilize view_top ↔ grid.  The grid depends on view_top (different
         // entries have different name lengths → different column count →
         // different items_per_page), and view_top depends on the grid.
@@ -1074,24 +1001,24 @@ impl App {
             for round in 0..4 {
                 let probe = ListView {
                     rows: &rows,
-                    cursor: self.cursor.index,
-                    view_top: self.cursor.view_top,
-                    empty_marker: self.view == View::Dir,
+                    cursor: self.state.cursor.index,
+                    view_top: self.state.cursor.view_top,
+                    empty_marker: self.state.view == View::Dir,
                     focused: list_focused,
                     theme: &self.theme,
                 };
-                self.last_grid = probe.grid(layout.list);
-                let old_vt = self.cursor.view_top;
-                let pp = self.last_grid.items_per_page();
-                self.ensure_cursor_visible();
-                if self.cursor.view_top == old_vt {
+                self.state.last_grid = probe.grid(layout.list);
+                let old_vt = self.state.cursor.view_top;
+                let pp = self.state.last_grid.items_per_page();
+                self.state.ensure_cursor_visible();
+                if self.state.cursor.view_top == old_vt {
                     spyc_debug!(
                         "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
                         round + 1,
                         old_vt,
-                        self.cursor.index,
-                        self.last_grid.cols,
-                        self.last_grid.rows,
+                        self.state.cursor.index,
+                        self.state.last_grid.cols,
+                        self.state.last_grid.rows,
                         pp,
                     );
                     settled = true;
@@ -1101,34 +1028,34 @@ impl App {
                     "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
                     round + 1,
                     old_vt,
-                    self.cursor.view_top,
-                    self.cursor.index,
-                    self.last_grid.cols,
-                    self.last_grid.rows,
+                    self.state.cursor.view_top,
+                    self.state.cursor.index,
+                    self.state.last_grid.cols,
+                    self.state.last_grid.rows,
                     pp,
                 );
                 // 2-cycle: new vt equals the vt from two rounds ago.
-                if Some(self.cursor.view_top) == prev_vt {
+                if Some(self.state.cursor.view_top) == prev_vt {
                     // Always pick the lower vt — deterministic across frames.
-                    let forced = old_vt.min(self.cursor.view_top);
-                    self.cursor.view_top = forced;
+                    let forced = old_vt.min(self.state.cursor.view_top);
+                    self.state.cursor.view_top = forced;
                     // Recompute grid for the forced view_top.
                     let probe = ListView {
                         rows: &rows,
-                        cursor: self.cursor.index,
-                        view_top: self.cursor.view_top,
-                        empty_marker: self.view == View::Dir,
+                        cursor: self.state.cursor.index,
+                        view_top: self.state.cursor.view_top,
+                        empty_marker: self.state.view == View::Dir,
                         focused: list_focused,
                         theme: &self.theme,
                     };
-                    self.last_grid = probe.grid(layout.list);
+                    self.state.last_grid = probe.grid(layout.list);
                     spyc_debug!(
                         "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
                         forced,
-                        self.cursor.index,
-                        self.last_grid.cols,
-                        self.last_grid.rows,
-                        self.last_grid.items_per_page(),
+                        self.state.cursor.index,
+                        self.state.last_grid.cols,
+                        self.state.last_grid.rows,
+                        self.state.last_grid.items_per_page(),
                     );
                     settled = true;
                     break;
@@ -1138,8 +1065,8 @@ impl App {
             if !settled {
                 spyc_debug!(
                     "grid did NOT settle after 4 rounds: vt={} cursor={}",
-                    self.cursor.view_top,
-                    self.cursor.index,
+                    self.state.cursor.view_top,
+                    self.state.cursor.index,
                 );
             }
         }
@@ -1147,9 +1074,9 @@ impl App {
         frame.render_widget(
             ListView {
                 rows: &rows,
-                cursor: self.cursor.index,
-                view_top: self.cursor.view_top,
-                empty_marker: self.view == View::Dir,
+                cursor: self.state.cursor.index,
+                view_top: self.state.cursor.view_top,
+                empty_marker: self.state.view == View::Dir,
                 focused: list_focused,
                 theme: &self.theme,
             },
@@ -1162,7 +1089,7 @@ impl App {
             frame.render_widget(
                 PaneWidget {
                     screen: tabs.active().screen(),
-                    focused: self.pane_focused,
+                    focused: self.state.pane_focused,
                     blink_on: self.cursor_blink_on,
                 },
                 rect,
@@ -1173,7 +1100,7 @@ impl App {
             self.render_pane_status_line(frame, divider_rect);
         }
 
-        if let Mode::Prompting(p) = &self.mode {
+        if let Mode::Prompting(p) = &self.state.mode {
             PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
@@ -1182,7 +1109,7 @@ impl App {
                 vi_mode: p.editor.as_ref().map(|e| e.mode),
             }
             .render(frame, layout.prompt);
-        } else if let Some(flash) = &self.flash {
+        } else if let Some(flash) = &self.state.flash {
             use ratatui::{
                 style::{Modifier, Style},
                 text::{Line, Span},
@@ -1211,7 +1138,7 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             ));
             frame.render_widget(Paragraph::new(line), layout.prompt);
-        } else if let Some(pending) = self.resolver.pending_display() {
+        } else if let Some(pending) = self.state.resolver.pending_display() {
             use ratatui::{
                 style::{Modifier, Style},
                 text::{Line, Span},
@@ -1233,35 +1160,35 @@ impl App {
     }
 
     fn header_parts(&self) -> (String, String) {
-        match self.view {
-            View::Dir => (self.listing.dir.display().to_string(), {
-                let filter_tag = match &self.temp_filter {
+        match self.state.view {
+            View::Dir => (self.state.listing.dir.display().to_string(), {
+                let filter_tag = match &self.state.temp_filter {
                     Some(f) if f == "!" => " limit:picks".to_string(),
                     Some(f) => format!(" limit:{f}"),
                     None => String::new(),
                 };
                 format!(
                     "[picks:{} inv:{} m1:{} m2:{}{}]",
-                    self.picks.len(),
-                    self.inventory.len(),
-                    on_off(self.masks.mask1.enabled),
-                    on_off(self.masks.mask2.enabled),
+                    self.state.picks.len(),
+                    self.state.inventory.len(),
+                    on_off(self.state.masks.mask1.enabled),
+                    on_off(self.state.masks.mask2.enabled),
                     filter_tag,
                 )
             }),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
-                format!("[{} items]  (i: return, u: back)", self.inventory.len()),
+                format!("[{} items]  (i: return, u: back)", self.state.inventory.len()),
             ),
         }
     }
 
     fn build_rows(&self) -> Vec<Row> {
         use crate::ui::list_view::GitFileStatus;
-        self.rows
+        self.state.rows
             .iter()
             .map(|rd| {
-                let git_status = self
+                let git_status = self.state
                     .git_files
                     .get(&rd.display)
                     .copied()
@@ -1269,32 +1196,19 @@ impl App {
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,
-                    picked: self.view == View::Dir && self.picks.contains(&rd.path),
-                    taken: self.inventory.contains(&rd.path),
+                    picked: self.state.view == View::Dir && self.state.picks.contains(&rd.path),
+                    taken: self.state.inventory.contains(&rd.path),
                     git_status,
                 }
             })
             .collect()
     }
 
-    fn ensure_cursor_visible(&mut self) {
-        let per_page = self.last_grid.items_per_page();
-        if per_page == 0 || self.rows.is_empty() {
-            self.cursor.view_top = 0;
-            return;
-        }
-        // Pages always start on an items_per_page boundary. Any time the
-        // cursor strays outside the current page, snap view_top to the
-        // page that contains it.
-        let page = self.cursor.index / per_page;
-        self.cursor.view_top = page * per_page;
-    }
-
     // --- Input handling ---------------------------------------------------
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
         // Any keypress clears a lingering flash message.
-        self.flash = None;
+        self.state.flash = None;
 
         // While a `!` capture is running, Ctrl+C kills it.
         // The pager is already open with streamed output.
@@ -1321,7 +1235,7 @@ impl App {
             self.top_overlay = None;
             self.overlay_awaiting_dismiss = false;
             self.needs_full_repaint = true;
-            self.flash_info("command finished");
+            self.state.flash_info("command finished");
             return Ok(PostAction::None);
         }
 
@@ -1345,8 +1259,8 @@ impl App {
         if let Some(tabs) = self.pane_tabs.as_mut() {
             let pane = tabs.active_mut();
             if pane.is_scrolling()
-                && self.pane_focused
-                && !is_spyc_meta_when_pane_focused(key, self.resolver.is_pending())
+                && self.state.pane_focused
+                && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
             {
                 return Ok(self.handle_pane_scroll_key(key));
             }
@@ -1356,19 +1270,19 @@ impl App {
         // by spyc so the user can toggle / resize / focus-switch / send
         // selection from inside the pane.
         if self.pane_tabs.is_some()
-            && self.pane_focused
-            && !matches!(self.mode, Mode::Prompting(_))
-            && !is_spyc_meta_when_pane_focused(key, self.resolver.is_pending())
+            && self.state.pane_focused
+            && !matches!(self.state.mode, Mode::Prompting(_))
+            && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
         {
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let _ = tabs.active_mut().send_key(key);
             }
             return Ok(PostAction::None);
         }
-        if matches!(self.mode, Mode::Prompting(_)) {
+        if matches!(self.state.mode, Mode::Prompting(_)) {
             return Ok(self.handle_prompt_key(key));
         }
-        match self.resolver.feed(key, &self.user_keymap) {
+        match self.state.resolver.feed(key, &self.state.user_keymap) {
             ResolverOutcome::Action(action) => return self.apply(&action),
             ResolverOutcome::User(bound) => return self.apply_user(&bound),
             ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
@@ -1383,20 +1297,20 @@ impl App {
         match bound {
             BoundAction::Plain(action) => return self.apply(action),
             BoundAction::UnixCmd(template) => {
-                let cmd = shell::expand_percent(template, &self.selection_paths());
+                let cmd = shell::expand_percent(template, &self.state.selection_paths());
                 return Ok(sh_c(&cmd, true));
             }
             BoundAction::PatternPick(pattern) => {
                 if let Ok(pat) = glob::Pattern::new(pattern) {
-                    for e in &self.listing.entries {
+                    for e in &self.state.listing.entries {
                         if pat.matches(&e.name) {
-                            self.picks.insert(&e.path);
+                            self.state.picks.insert(&e.path);
                         }
                     }
                 }
             }
             BoundAction::Jump(path) => {
-                let _ = self.jump_to(path);
+                let _ = self.state.jump_to(path);
             }
             BoundAction::Copy(dest) => {
                 self.run_selection_to(dest, fs::ops::copy_selection_to, "copied");
@@ -1406,14 +1320,14 @@ impl App {
             }
             BoundAction::ToggleMaskFixed(n) => {
                 if *n == 1 {
-                    self.masks.toggle_mask1();
+                    self.state.masks.toggle_mask1();
                 } else if *n == 2 {
-                    self.masks.toggle_mask2();
+                    self.state.masks.toggle_mask2();
                 }
-                self.rebuild_rows();
+                self.state.rebuild_rows();
             }
         }
-        self.cursor.clamp(self.rows.len());
+        self.state.cursor.clamp(self.state.rows.len());
         Ok(PostAction::None)
     }
 
@@ -1421,7 +1335,7 @@ impl App {
         // Destructive-confirm prompts are single-key: `y` / `Y` proceeds
         // immediately, anything else cancels. No Enter needed.
         if matches!(
-            &self.mode,
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::RemoveConfirm)
         ) {
             return self.handle_remove_confirm_key(key);
@@ -1429,7 +1343,7 @@ impl App {
 
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
-            &self.mode,
+            &self.state.mode,
             Mode::Prompting(p) if p.editor.is_some()
         );
         if has_editor {
@@ -1440,13 +1354,13 @@ impl App {
 
         // Esc cancels; Backspace on an empty buffer cancels too.
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
-            && matches!(&self.mode, Mode::Prompting(p) if p.buffer.is_empty());
+            && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
         if matches!(key.code, KeyCode::Esc) || backspace_on_empty {
             self.cancel_prompt();
             return PostAction::None;
         }
         if matches!(key.code, KeyCode::Enter) {
-            let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
                 return PostAction::None;
             };
             return self.dispatch_prompt(p);
@@ -1454,7 +1368,7 @@ impl App {
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
-            let Mode::Prompting(prompt) = &mut self.mode else {
+            let Mode::Prompting(prompt) = &mut self.state.mode else {
                 return PostAction::None;
             };
             match key.code {
@@ -1492,7 +1406,7 @@ impl App {
             kind: PromptKind::Search { saved_cursor },
             buffer,
             ..
-        }) = &self.mode
+        }) = &self.state.mode
         {
             Some((*saved_cursor, buffer.clone()))
         } else {
@@ -1500,11 +1414,11 @@ impl App {
         };
         if let Some((saved, query)) = search_info {
             if query.is_empty() {
-                self.cursor.index = saved;
-            } else if let Some(i) = self.find_match(&query, saved, false) {
-                self.cursor.index = i;
+                self.state.cursor.index = saved;
+            } else if let Some(i) = self.state.find_match(&query, saved, false) {
+                self.state.cursor.index = i;
             }
-            self.cursor.clamp(self.rows.len());
+            self.state.cursor.clamp(self.state.rows.len());
         }
 
         PostAction::None
@@ -1515,11 +1429,11 @@ impl App {
     /// The prompt closes in every case.
     fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> PostAction {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
-        self.mode = Mode::Normal;
+        self.state.mode = Mode::Normal;
         if !confirmed {
             return PostAction::None;
         }
-        let paths = self.selection_paths();
+        let paths = self.state.selection_paths();
         if paths.is_empty() {
             return PostAction::None;
         }
@@ -1528,24 +1442,24 @@ impl App {
             fs::ops::remove_all(&paths),
             format!("removed {count} item(s)"),
         );
-        self.picks.clear();
-        self.refresh_listing();
+        self.state.picks.clear();
+        self.state.refresh_listing();
         PostAction::None
     }
 
     /// Return the appropriate history for the current prompt kind.
     const fn history_for_prompt(&mut self) -> &mut History {
         let is_pane = matches!(
-            self.mode,
+            self.state.mode,
             Mode::Prompting(Prompt {
                 kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
                 ..
             })
         );
         if is_pane {
-            &mut self.pane_history
+            &mut self.state.pane_history
         } else {
-            &mut self.history
+            &mut self.state.history
         }
     }
 
@@ -1560,10 +1474,10 @@ impl App {
                 kind: PromptKind::ShellCmdCaptured,
                 ref buffer,
                 ..
-            }) = self.mode
+            }) = self.state.mode
             {
                 if buffer.is_empty() {
-                    self.mode = Mode::Normal;
+                    self.state.mode = Mode::Normal;
                     self.show_history_popup();
                     return PostAction::None;
                 }
@@ -1572,7 +1486,7 @@ impl App {
 
         // Feed key to the editor.
         let result = {
-            let Mode::Prompting(prompt) = &mut self.mode else {
+            let Mode::Prompting(prompt) = &mut self.state.mode else {
                 return PostAction::None;
             };
             let editor = prompt.editor.as_mut().expect("checked above");
@@ -1585,20 +1499,20 @@ impl App {
         match result {
             EditResult::Submit => {
                 let is_pane_prompt = matches!(
-                    self.mode,
+                    self.state.mode,
                     Mode::Prompting(Prompt {
                         kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
                         ..
                     })
                 );
-                let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+                let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
                     return PostAction::None;
                 };
                 // Push to the appropriate history before dispatching.
                 let hist = if is_pane_prompt {
-                    &mut self.pane_history
+                    &mut self.state.pane_history
                 } else {
-                    &mut self.history
+                    &mut self.state.history
                 };
                 if !p.buffer.trim().is_empty() {
                     hist.push(p.buffer.trim());
@@ -1612,7 +1526,7 @@ impl App {
             }
             EditResult::HistoryPrev => {
                 let current_text = {
-                    let Mode::Prompting(p) = &self.mode else {
+                    let Mode::Prompting(p) = &self.state.mode else {
                         return PostAction::None;
                     };
                     p.buffer.clone()
@@ -1620,7 +1534,7 @@ impl App {
                 let hist = self.history_for_prompt();
                 if let Some(entry) = hist.prev(&current_text) {
                     let entry = entry.to_string();
-                    let Mode::Prompting(p) = &mut self.mode else {
+                    let Mode::Prompting(p) = &mut self.state.mode else {
                         return PostAction::None;
                     };
                     if let Some(ed) = p.editor.as_mut() {
@@ -1635,7 +1549,7 @@ impl App {
                     Some(entry) => entry.to_string(),
                     None => hist.stashed().to_string(),
                 };
-                let Mode::Prompting(p) = &mut self.mode else {
+                let Mode::Prompting(p) = &mut self.state.mode else {
                     return PostAction::None;
                 };
                 if let Some(ed) = p.editor.as_mut() {
@@ -1651,15 +1565,15 @@ impl App {
     /// Close the prompt without dispatching. For a Search prompt, also
     /// restore the cursor position that was saved when `/` was pressed.
     fn cancel_prompt(&mut self) {
-        let Mode::Prompting(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+        let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
             return;
         };
         if let PromptKind::Search { saved_cursor } = p.kind {
-            self.cursor.index = saved_cursor;
-            self.cursor.clamp(self.rows.len());
+            self.state.cursor.index = saved_cursor;
+            self.state.cursor.clamp(self.state.rows.len());
         }
         // Clear any stashed state from the two-step new-tab prompt.
-        self.pending_new_tab_cmd = None;
+        self.state.pending_new_tab_cmd = None;
     }
 
     /// Parse and dispatch a `:` command. Recognized commands:
@@ -1676,38 +1590,38 @@ impl App {
 
         // :q / :quit
         if input == "q" || input == "quit" {
-            self.should_quit = true;
+            self.state.should_quit = true;
             return PostAction::None;
         }
 
         // :limit [pattern]
         if input == "limit" {
-            self.temp_filter = None;
-            self.flash_info("limit cleared");
-            self.rebuild_rows();
+            self.state.temp_filter = None;
+            self.state.flash_info("limit cleared");
+            self.state.rebuild_rows();
             return PostAction::None;
         }
         if let Some(pat) = input.strip_prefix("limit ") {
             let pat = pat.trim();
             if pat.is_empty() {
-                self.temp_filter = None;
-                self.flash_info("limit cleared");
+                self.state.temp_filter = None;
+                self.state.flash_info("limit cleared");
             } else if pat == "!" {
-                self.temp_filter = Some("!".to_string());
-                self.flash_info("limit: picks only");
+                self.state.temp_filter = Some("!".to_string());
+                self.state.flash_info("limit: picks only");
             } else {
-                self.temp_filter = Some(pat.to_string());
-                self.flash_info(format!("limit: {pat}"));
+                self.state.temp_filter = Some(pat.to_string());
+                self.state.flash_info(format!("limit: {pat}"));
             }
-            self.rebuild_rows();
+            self.state.rebuild_rows();
             return PostAction::None;
         }
 
         // :!! — repeat last captured command
         if input == "!!" || input == "!" {
-            match self.last_captured_cmd.clone() {
+            match self.state.last_captured_cmd.clone() {
                 Some(cmd) => {
-                    let expanded = crate::shell::expand_percent(&cmd, &self.selection_paths());
+                    let expanded = crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
                         Ok((child, rx)) => {
@@ -1727,10 +1641,10 @@ impl App {
                                 finished: false,
                             });
                         }
-                        Err(e) => self.flash_error(format!("exec: {e}")),
+                        Err(e) => self.state.flash_error(format!("exec: {e}")),
                     }
                 }
-                None => self.flash_error("no previous ! command"),
+                None => self.state.flash_error("no previous ! command"),
             }
             return PostAction::None;
         }
@@ -1739,11 +1653,11 @@ impl App {
         if let Some(cmd) = input.strip_prefix('!') {
             let cmd = cmd.trim();
             if cmd.is_empty() {
-                self.flash_error("empty command");
+                self.state.flash_error("empty command");
                 return PostAction::None;
             }
-            self.last_captured_cmd = Some(cmd.to_string());
-            let expanded = crate::shell::expand_percent(cmd, &self.selection_paths());
+            self.state.last_captured_cmd = Some(cmd.to_string());
+            let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let title = format!("! {cmd}");
             match spawn_capture(&expanded) {
                 Ok((child, rx)) => {
@@ -1763,7 +1677,7 @@ impl App {
                         finished: false,
                     });
                 }
-                Err(e) => self.flash_error(format!("exec: {e}")),
+                Err(e) => self.state.flash_error(format!("exec: {e}")),
             }
             return PostAction::None;
         }
@@ -1772,18 +1686,18 @@ impl App {
         if let Some(cmd) = input.strip_prefix(';') {
             let cmd = cmd.trim();
             if cmd.is_empty() {
-                self.flash_error("empty command");
+                self.state.flash_error("empty command");
                 return PostAction::None;
             }
-            let expanded = crate::shell::expand_percent(cmd, &self.selection_paths());
+            let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let (rows, cols) =
-                Self::top_overlay_size(self.pane_height_pct, self.pane_tabs.is_some());
-            let cwd = self.listing.dir.clone();
+                Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+            let cwd = self.state.listing.dir.clone();
             match Pane::spawn(&expanded, rows, cols, &cwd) {
                 Ok(p) => {
                     self.top_overlay = Some(p);
                 }
-                Err(e) => self.flash_error(format!("spawn: {e}")),
+                Err(e) => self.state.flash_error(format!("spawn: {e}")),
             }
             return PostAction::None;
         }
@@ -1791,41 +1705,41 @@ impl App {
         // :cd <path>
         if input == "cd" {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-            match self.chdir(&std::path::PathBuf::from(home)) {
+            match self.state.chdir(&std::path::PathBuf::from(home)) {
                 Ok(()) => {}
-                Err(e) => self.flash_error(format!("cd: {e}")),
+                Err(e) => self.state.flash_error(format!("cd: {e}")),
             }
             return PostAction::None;
         }
         if let Some(raw) = input.strip_prefix("cd ") {
             let raw = raw.trim();
             if raw.is_empty() {
-                self.flash_error("cd: missing path");
+                self.state.flash_error("cd: missing path");
                 return PostAction::None;
             }
             let path = crate::paths::expand(raw);
-            match self.chdir(&path) {
+            match self.state.chdir(&path) {
                 Ok(()) => {}
-                Err(e) => self.flash_error(format!("cd: {e}")),
+                Err(e) => self.state.flash_error(format!("cd: {e}")),
             }
             return PostAction::None;
         }
 
         // :sort [mode]
         if input == "sort" {
-            self.flash_info(format!("sort: {}", self.sort_order));
+            self.state.flash_info(format!("sort: {}", self.state.sort_order));
             return PostAction::None;
         }
         if let Some(mode_str) = input.strip_prefix("sort ") {
             let mode_str = mode_str.trim();
             match crate::fs::listing::SortMode::parse(mode_str) {
                 Some(mode) => {
-                    self.sort_order = mode;
-                    self.listing.sort(mode);
-                    self.rebuild_rows();
-                    self.flash_info(format!("sort: {mode}"));
+                    self.state.sort_order = mode;
+                    self.state.listing.sort(mode);
+                    self.state.rebuild_rows();
+                    self.state.flash_info(format!("sort: {mode}"));
                 }
-                None => self.flash_error(format!(
+                None => self.state.flash_error(format!(
                     "unknown sort mode: {mode_str} (name|size|mtime|ext)"
                 )),
             }
@@ -1834,11 +1748,11 @@ impl App {
 
         // :marks
         if input == "marks" {
-            if self.marks.entries.is_empty() {
-                self.flash_info("no marks set");
+            if self.state.marks.entries.is_empty() {
+                self.state.flash_info("no marks set");
                 return PostAction::None;
             }
-            let lines: Vec<String> = self
+            let lines: Vec<String> = self.state
                 .marks
                 .entries
                 .iter()
@@ -1863,17 +1777,17 @@ impl App {
                 match key {
                     "sort" => match crate::fs::listing::SortMode::parse(value) {
                         Some(mode) => {
-                            self.sort_order = mode;
-                            self.listing.sort(mode);
-                            self.rebuild_rows();
-                            self.flash_info(format!("sort={mode}"));
+                            self.state.sort_order = mode;
+                            self.state.listing.sort(mode);
+                            self.state.rebuild_rows();
+                            self.state.flash_info(format!("sort={mode}"));
                         }
-                        None => self.flash_error(format!("invalid sort mode: {value}")),
+                        None => self.state.flash_error(format!("invalid sort mode: {value}")),
                     },
-                    _ => self.flash_error(format!("unknown setting: {key}")),
+                    _ => self.state.flash_error(format!("unknown setting: {key}")),
                 }
             } else {
-                self.flash_error("usage: :set key=value");
+                self.state.flash_error("usage: :set key=value");
             }
             return PostAction::None;
         }
@@ -1886,18 +1800,18 @@ impl App {
                     self.needs_full_repaint = true;
                     let back = self.pager_history.back_len();
                     let fwd = self.pager_history.forward_len();
-                    self.flash_info(format!("buffer ←{back} →{fwd}"));
+                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                 } else {
                     // go_back returned None — restore current
                     self.pager = self.pager_history.forward.pop();
-                    self.flash_info("no older buffers");
+                    self.state.flash_info("no older buffers");
                 }
             } else if let Some(prev) = self.pager_history.back.pop() {
                 self.pager = Some(prev);
                 self.needs_full_repaint = true;
-                self.flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+                self.state.flash_info(format!("buffer ←{}", self.pager_history.back_len()));
             } else {
-                self.flash_info("no buffers in history");
+                self.state.flash_info("no buffers in history");
             }
             return PostAction::None;
         }
@@ -1908,20 +1822,20 @@ impl App {
                     self.needs_full_repaint = true;
                     let back = self.pager_history.back_len();
                     let fwd = self.pager_history.forward_len();
-                    self.flash_info(format!("buffer ←{back} →{fwd}"));
+                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                 } else {
                     // go_forward returned None — restore current
                     self.pager = self.pager_history.back.pop();
                     self.needs_full_repaint = true;
-                    self.flash_info("no newer buffers");
+                    self.state.flash_info("no newer buffers");
                 }
             } else {
-                self.flash_info("no pager open");
+                self.state.flash_info("no pager open");
             }
             return PostAction::None;
         }
 
-        self.flash_error(format!("unknown command: {input}"));
+        self.state.flash_error(format!("unknown command: {input}"));
         PostAction::None
     }
 
@@ -1929,9 +1843,9 @@ impl App {
         match prompt.kind {
             PromptKind::PatternPick => {
                 if let Ok(pat) = Pattern::new(&prompt.buffer) {
-                    for e in &self.listing.entries {
+                    for e in &self.state.listing.entries {
                         if pat.matches(&e.name) {
-                            self.picks.insert(&e.path);
+                            self.state.picks.insert(&e.path);
                         }
                     }
                 }
@@ -1941,32 +1855,32 @@ impl App {
                 // `;cmd` — run interactively in a top-overlay pty that
                 // replaces the spyc listing. Bottom pane (claude) stays
                 // untouched. When the command exits, spyc comes back.
-                let expanded = shell::expand_percent(&prompt.buffer, &self.selection_paths());
+                let expanded = shell::expand_percent(&prompt.buffer, &self.state.selection_paths());
                 let (rows, cols) =
-                    Self::top_overlay_size(self.pane_height_pct, self.pane_tabs.is_some());
-                let cwd = self.listing.dir.clone();
+                    Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+                let cwd = self.state.listing.dir.clone();
                 match Pane::spawn(&expanded, rows, cols, &cwd) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
                     }
-                    Err(e) => self.flash_error(format!("spawn: {e}")),
+                    Err(e) => self.state.flash_error(format!("spawn: {e}")),
                 }
                 PostAction::None
             }
             PromptKind::ShellCmdCaptured => {
                 // `!!` repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
-                    if let Some(c) = self.last_captured_cmd.clone() {
+                    if let Some(c) = self.state.last_captured_cmd.clone() {
                         c
                     } else {
-                        self.flash_error("no previous ! command");
+                        self.state.flash_error("no previous ! command");
                         return PostAction::None;
                     }
                 } else {
                     prompt.buffer.clone()
                 };
-                self.last_captured_cmd = Some(cmd.clone());
-                let expanded = shell::expand_percent(&cmd, &self.selection_paths());
+                self.state.last_captured_cmd = Some(cmd.clone());
+                let expanded = shell::expand_percent(&cmd, &self.state.selection_paths());
                 let title = format!("! {cmd}");
                 match spawn_capture(&expanded) {
                     Ok((child, rx)) => {
@@ -1988,21 +1902,21 @@ impl App {
                             finished: false,
                         });
                     }
-                    Err(e) => self.flash_error(format!("exec: {e}")),
+                    Err(e) => self.state.flash_error(format!("exec: {e}")),
                 }
                 PostAction::None
             }
             PromptKind::Search { .. } => {
                 // Cursor is already where the incremental search left it.
                 if !prompt.buffer.is_empty() {
-                    self.last_search = Some(prompt.buffer);
+                    self.state.last_search = Some(prompt.buffer);
                 }
                 PostAction::None
             }
             PromptKind::Jump => {
                 let trimmed = prompt.buffer.trim();
                 if !trimmed.is_empty() {
-                    let _ = self.jump_to(trimmed);
+                    let _ = self.state.jump_to(trimmed);
                 }
                 PostAction::None
             }
@@ -2021,13 +1935,13 @@ impl App {
                     let resolved = if target.is_absolute() {
                         target
                     } else {
-                        self.listing.dir.join(&target)
+                        self.state.listing.dir.join(&target)
                     };
                     self.run_and_flash(
                         std::fs::create_dir_all(&resolved),
                         format!("created {}", resolved.display()),
                     );
-                    self.refresh_listing();
+                    self.state.refresh_listing();
                 }
                 PostAction::None
             }
@@ -2039,17 +1953,17 @@ impl App {
                 if let Some((name, value)) = line.split_once('=') {
                     let name = name.trim();
                     if name.is_empty() {
-                        self.flash_error("setenv: missing variable name");
+                        self.state.flash_error("setenv: missing variable name");
                     } else {
                         // SAFETY: single-threaded TUI; no other thread is
                         // reading env concurrently.
                         unsafe {
                             std::env::set_var(name, value);
                         }
-                        self.flash_info(format!("setenv {name}={value}"));
+                        self.state.flash_info(format!("setenv {name}={value}"));
                     }
                 } else if !line.is_empty() {
-                    self.flash_error("setenv: expected NAME=VALUE");
+                    self.state.flash_error("setenv: expected NAME=VALUE");
                 }
                 PostAction::None
             }
@@ -2058,21 +1972,21 @@ impl App {
                 if cmd.is_empty() {
                     return PostAction::None;
                 }
-                self.pending_new_tab_cmd = Some(cmd);
-                let cwd_default = self.listing.dir.display().to_string();
+                self.state.pending_new_tab_cmd = Some(cmd);
+                let cwd_default = self.state.listing.dir.display().to_string();
                 let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
                 p.buffer.clone_from(&cwd_default);
                 if let Some(ed) = p.editor.as_mut() {
                     ed.set_content(&cwd_default);
                 }
-                self.mode = Mode::Prompting(p);
+                self.state.mode = Mode::Prompting(p);
                 PostAction::None
             }
             PromptKind::PaneNewTabCwd => {
                 let cwd = prompt.buffer.trim().to_string();
-                if let Some(cmd) = self.pending_new_tab_cmd.take() {
+                if let Some(cmd) = self.state.pending_new_tab_cmd.take() {
                     let cwd_path = if cwd.is_empty() {
-                        self.listing.dir.clone()
+                        self.state.listing.dir.clone()
                     } else if cwd.starts_with('~') {
                         let home = std::env::var("HOME").unwrap_or_default();
                         std::path::PathBuf::from(cwd.replacen('~', &home, 1))
@@ -2097,14 +2011,14 @@ impl App {
                 if branch.is_empty() {
                     return PostAction::None;
                 }
-                match crate::sysinfo::git_worktree_add(&self.listing.dir, &branch) {
+                match crate::sysinfo::git_worktree_add(&self.state.listing.dir, &branch) {
                     Ok(path) => {
-                        self.flash_info(format!("created worktree: {}", path.display()));
-                        if let Err(e) = self.chdir(&path) {
-                            self.flash_error(format!("chdir: {e}"));
+                        self.state.flash_info(format!("created worktree: {}", path.display()));
+                        if let Err(e) = self.state.chdir(&path) {
+                            self.state.flash_error(format!("chdir: {e}"));
                         }
                     }
-                    Err(e) => self.flash_error(format!("worktree add: {e}")),
+                    Err(e) => self.state.flash_error(format!("worktree add: {e}")),
                 }
                 PostAction::None
             }
@@ -2113,17 +2027,17 @@ impl App {
                 let pattern = prompt.buffer.trim().to_string();
                 if pattern.is_empty() {
                     // Clear the filter.
-                    self.temp_filter = None;
-                    self.flash_info("limit cleared");
+                    self.state.temp_filter = None;
+                    self.state.flash_info("limit cleared");
                 } else if pattern == "!" {
                     // Show only picked files.
-                    self.temp_filter = Some("!".to_string());
-                    self.flash_info("limit: picks only");
+                    self.state.temp_filter = Some("!".to_string());
+                    self.state.flash_info("limit: picks only");
                 } else {
-                    self.temp_filter = Some(pattern.clone());
-                    self.flash_info(format!("limit: {pattern}"));
+                    self.state.temp_filter = Some(pattern.clone());
+                    self.state.flash_info(format!("limit: {pattern}"));
                 }
-                self.rebuild_rows();
+                self.state.rebuild_rows();
                 PostAction::None
             }
             PromptKind::WorktreeDeleteConfirm => {
@@ -2131,15 +2045,15 @@ impl App {
                 if !confirmed {
                     return PostAction::None;
                 }
-                let dir = self.listing.dir.clone();
+                let dir = self.state.listing.dir.clone();
                 match crate::sysinfo::git_worktree_remove(&dir) {
                     Ok(()) => {
-                        self.flash_info(format!("removed worktree: {}", dir.display()));
+                        self.state.flash_info(format!("removed worktree: {}", dir.display()));
                         if let Some(parent) = dir.parent() {
-                            let _ = self.chdir(parent);
+                            let _ = self.state.chdir(parent);
                         }
                     }
-                    Err(e) => self.flash_error(format!("worktree remove: {e}")),
+                    Err(e) => self.state.flash_error(format!("worktree remove: {e}")),
                 }
                 PostAction::None
             }
@@ -2150,9 +2064,9 @@ impl App {
     fn toggle_pane(&mut self) {
         if self.pane_tabs.is_some() {
             self.pane_tabs = None;
-            self.pane_focused = false;
+            self.state.pane_focused = false;
             self.needs_full_repaint = true;
-            self.flash_info("pane closed");
+            self.state.flash_info("pane closed");
             return;
         }
         let cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
@@ -2161,11 +2075,11 @@ impl App {
 
     /// Spawn a new pane tab. If no tabs exist, creates the container.
     fn open_pane_tab(&mut self, cmd: &str) {
-        self.open_pane_tab_in(cmd, &self.listing.dir.clone());
+        self.open_pane_tab_in(cmd, &self.state.listing.dir.clone());
     }
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
-        let (rows, cols) = Self::pane_spawn_size(self.pane_height_pct);
+        let (rows, cols) = Self::pane_spawn_size(self.state.pane_height_pct);
         match Pane::spawn(cmd, rows, cols, cwd) {
             Ok(p) => {
                 let entry = TabEntry {
@@ -2177,10 +2091,10 @@ impl App {
                 } else {
                     self.pane_tabs = Some(PaneTabs::new(entry));
                 }
-                self.pane_focused = true;
-                self.flash_info(format!("pane: {cmd} (^W k for list)"));
+                self.state.pane_focused = true;
+                self.state.flash_info(format!("pane: {cmd} (^W k for list)"));
             }
-            Err(e) => self.flash_error(format!("pane spawn failed: {e}")),
+            Err(e) => self.state.flash_error(format!("pane spawn failed: {e}")),
         }
     }
 
@@ -2192,7 +2106,7 @@ impl App {
         if let Some(ed) = p.editor.as_mut() {
             ed.set_content(&default_cmd);
         }
-        self.mode = Mode::Prompting(p);
+        self.state.mode = Mode::Prompting(p);
     }
 
     /// ^W x — close the active pane tab.
@@ -2201,9 +2115,9 @@ impl App {
             if !tabs.close_active() {
                 // Last tab removed.
                 self.pane_tabs = None;
-                self.pane_focused = false;
+                self.state.pane_focused = false;
                 self.needs_full_repaint = true;
-                self.flash_info("pane: last tab closed");
+                self.state.flash_info("pane: last tab closed");
             }
         }
     }
@@ -2213,11 +2127,11 @@ impl App {
         if self.pane_tabs.is_none() {
             return;
         }
-        if self.pane_focused == want_pane {
+        if self.state.pane_focused == want_pane {
             return; // already there — no-op
         }
-        self.pane_focused = want_pane;
-        self.flash_info(if self.pane_focused {
+        self.state.pane_focused = want_pane;
+        self.state.flash_info(if self.state.pane_focused {
             "focus: pane"
         } else {
             "focus: list"
@@ -2244,13 +2158,13 @@ impl App {
             KeyCode::Char('s') => match pane.save_to_file() {
                 Ok(path) => {
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    self.flash_info(format!("saved: {name}"));
+                    self.state.flash_info(format!("saved: {name}"));
                 }
-                Err(e) => self.flash_info(format!("save error: {e}")),
+                Err(e) => self.state.flash_info(format!("save error: {e}")),
             },
             KeyCode::Esc | KeyCode::Char('q') => {
                 pane.exit_scroll_mode();
-                self.flash_info("scroll: off");
+                self.state.flash_info("scroll: off");
             }
             _ => {}
         }
@@ -2263,15 +2177,15 @@ impl App {
     /// — let the user decide when to submit.
     fn send_selection_to_pane(&mut self) {
         if self.pane_tabs.is_none() {
-            self.flash_error("no pane open (Ctrl-\\ to open one)");
+            self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return;
         }
         // Build the payload before grabbing the pane mut-borrow, so we
         // can still call self.flash_* below without overlapping borrows.
         let (payload, count) = {
-            let paths = self.selection_paths();
+            let paths = self.state.selection_paths();
             if paths.is_empty() {
-                self.flash_error("nothing selected");
+                self.state.flash_error("nothing selected");
                 return;
             }
             let count = paths.len();
@@ -2294,8 +2208,8 @@ impl App {
             pane.send_bytes(payload.as_bytes())
         };
         match result {
-            Ok(()) => self.flash_info(format!("sent {count} path(s) to pane")),
-            Err(e) => self.flash_error(format!("send failed: {e}")),
+            Ok(()) => self.state.flash_info(format!("sent {count} path(s) to pane")),
+            Err(e) => self.state.flash_error(format!("send failed: {e}")),
         }
     }
 
@@ -2305,19 +2219,19 @@ impl App {
     /// it's looking at.
     fn pipe_content_to_pane(&mut self, use_inventory: bool) {
         if self.pane_tabs.is_none() {
-            self.flash_error("no pane open");
+            self.state.flash_error("no pane open");
             return;
         }
         let paths: Vec<PathBuf> = if use_inventory {
-            self.inventory.paths().cloned().collect()
+            self.state.inventory.paths().cloned().collect()
         } else {
-            self.selection_paths()
+            self.state.selection_paths()
                 .into_iter()
                 .map(Path::to_path_buf)
                 .collect()
         };
         if paths.is_empty() {
-            self.flash_error(if use_inventory {
+            self.state.flash_error(if use_inventory {
                 "inventory is empty"
             } else {
                 "nothing selected"
@@ -2340,7 +2254,7 @@ impl App {
             count += 1;
         }
         if count == 0 {
-            self.flash_error("no readable text files in selection");
+            self.state.flash_error("no readable text files in selection");
             return;
         }
         // Send as bracketed paste so it arrives as a single block.
@@ -2358,8 +2272,8 @@ impl App {
             format!("piped {count} file(s) to pane")
         };
         match result {
-            Ok(()) => self.flash_info(msg),
-            Err(e) => self.flash_error(format!("pipe failed: {e}")),
+            Ok(()) => self.state.flash_info(msg),
+            Err(e) => self.state.flash_error(format!("pipe failed: {e}")),
         }
     }
 
@@ -2369,16 +2283,16 @@ impl App {
         if self.pane_tabs.is_none() {
             return;
         }
-        let current = i32::from(self.pane_height_pct);
+        let current = i32::from(self.state.pane_height_pct);
         let new = (current + delta_pct).clamp(10, 90);
-        self.pane_height_pct = new as u16;
+        self.state.pane_height_pct = new as u16;
     }
 
     // ---- Git diff (M12) ----------------------------------------------------
 
     /// g d / g D — run `git diff` on selection and show in pager.
     fn open_git_diff(&mut self, cached: bool) {
-        let paths = self.selection_paths();
+        let paths = self.state.selection_paths();
         if paths.is_empty() {
             return;
         }
@@ -2393,13 +2307,13 @@ impl App {
         }
         match std::process::Command::new("git")
             .args(&args)
-            .current_dir(&self.listing.dir)
+            .current_dir(&self.state.listing.dir)
             .output()
         {
             Ok(out) => {
                 if out.stdout.is_empty() {
                     let label = if cached { "staged" } else { "unstaged" };
-                    self.flash_info(format!("no {label} changes"));
+                    self.state.flash_info(format!("no {label} changes"));
                 } else {
                     let label = if cached {
                         "git diff --cached"
@@ -2409,7 +2323,7 @@ impl App {
                     self.pager = Some(pager::PagerView::new_ansi(label, &out.stdout));
                 }
             }
-            Err(e) => self.flash_error(format!("git diff: {e}")),
+            Err(e) => self.state.flash_error(format!("git diff: {e}")),
         }
     }
 
@@ -2442,11 +2356,11 @@ impl App {
             id,
             saved_at: crate::sysinfo::format_now(),
             epoch_secs,
-            cwd: self.listing.dir.clone(),
+            cwd: self.state.listing.dir.clone(),
             tabs,
             active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
-            pane_height_pct: self.pane_height_pct,
-            pane_focused: self.pane_focused,
+            pane_height_pct: self.state.pane_height_pct,
+            pane_focused: self.state.pane_focused,
         };
         let _ = crate::state::sessions::save_session(&session);
     }
@@ -2455,7 +2369,7 @@ impl App {
         use crate::state::sessions;
         let sessions = sessions::load_sessions();
         if sessions.is_empty() {
-            self.flash_info("no saved sessions");
+            self.state.flash_info("no saved sessions");
             return;
         }
         let lines: Vec<String> = sessions
@@ -2473,7 +2387,7 @@ impl App {
                 format!("  [{}]  {:<20} {}{}", i + 1, age, s.cwd.display(), tab_info)
             })
             .collect();
-        self.pending_sessions = Some(sessions);
+        self.state.pending_sessions = Some(sessions);
         let mut all_lines = vec!["  [n]  new session".to_string(), String::new()];
         all_lines.extend(lines);
         let mut view = pager::PagerView::new_plain(
@@ -2493,7 +2407,7 @@ impl App {
         Self::sync_hist_editor(
             &mut self.pager,
             &mut self.pending_history_pick,
-            &self.history,
+            &self.state.history,
         );
     }
 
@@ -2516,9 +2430,9 @@ impl App {
     }
 
     fn show_history_popup(&mut self) {
-        let entries = self.history.entries();
+        let entries = self.state.history.entries();
         if entries.is_empty() {
-            self.flash_info("history is empty");
+            self.state.flash_info("history is empty");
             return;
         }
         // Show newest-first, numbered from 1.
@@ -2549,16 +2463,16 @@ impl App {
     fn restore_session(&mut self, session: &crate::state::sessions::Session) {
         // Restore working directory.
         if session.cwd.is_dir() {
-            if let Err(e) = self.chdir(&session.cwd) {
-                self.flash_error(format!("session chdir: {e}"));
+            if let Err(e) = self.state.chdir(&session.cwd) {
+                self.state.flash_error(format!("session chdir: {e}"));
                 return;
             }
         } else {
-            self.flash_error(format!("session dir gone: {}", session.cwd.display()));
+            self.state.flash_error(format!("session dir gone: {}", session.cwd.display()));
             return;
         }
         // Restore pane layout.
-        self.pane_height_pct = session.pane_height_pct;
+        self.state.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
             self.pane_tabs = None;
             for tab in &session.tabs {
@@ -2577,23 +2491,23 @@ impl App {
                     entry.info.label.clone_from(&saved.label);
                 }
             }
-            self.pane_focused = session.pane_focused;
+            self.state.pane_focused = session.pane_focused;
         }
-        self.flash_info("session restored");
+        self.state.flash_info("session restored");
     }
 
     // ---- Git worktree (M11) -------------------------------------------------
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
     fn worktree_list(&mut self) {
-        match crate::sysinfo::git_worktree_list(&self.listing.dir) {
+        match crate::sysinfo::git_worktree_list(&self.state.listing.dir) {
             Some(worktrees) => {
-                self.pending_worktrees = Some(worktrees.iter().map(|w| w.path.clone()).collect());
+                self.state.pending_worktrees = Some(worktrees.iter().map(|w| w.path.clone()).collect());
                 let lines: Vec<String> = worktrees
                     .iter()
                     .enumerate()
                     .map(|(i, wt)| {
-                        let current = if wt.path == self.listing.dir {
+                        let current = if wt.path == self.state.listing.dir {
                             " ← current"
                         } else {
                             ""
@@ -2614,7 +2528,7 @@ impl App {
                 );
                 self.pager = Some(view);
             }
-            None => self.flash_error("not in a git repository (or no worktrees)"),
+            None => self.state.flash_error("not in a git repository (or no worktrees)"),
         }
     }
 
@@ -2652,18 +2566,18 @@ impl App {
             env!("CARGO_PKG_VERSION")
         ));
         lines.push(format!("pid      : {}", std::process::id()));
-        lines.push(format!("cwd      : {}", self.listing.dir.display()));
-        lines.push(format!("entries  : {}", self.listing.entries.len()));
-        lines.push(format!("visible  : {}", self.rows.len()));
-        lines.push(format!("picks    : {}", self.picks.len()));
-        lines.push(format!("inventory: {}", self.inventory.len()));
-        lines.push(format!("marks    : {}", self.marks.entries.len()));
+        lines.push(format!("cwd      : {}", self.state.listing.dir.display()));
+        lines.push(format!("entries  : {}", self.state.listing.entries.len()));
+        lines.push(format!("visible  : {}", self.state.rows.len()));
+        lines.push(format!("picks    : {}", self.state.picks.len()));
+        lines.push(format!("inventory: {}", self.state.inventory.len()));
+        lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
         lines.push(format!("time     : {}", crate::sysinfo::format_now()));
-        if !self.config.sources.is_empty() {
+        if !self.state.config.sources.is_empty() {
             lines.push(String::new());
             lines.push("config sources:".into());
-            for src in &self.config.sources {
+            for src in &self.state.config.sources {
                 lines.push(format!("  {}", src.display()));
             }
         }
@@ -2683,9 +2597,9 @@ impl App {
         if dest_trim.is_empty() {
             return;
         }
-        let paths = self.selection_paths();
+        let paths = self.state.selection_paths();
         if paths.is_empty() {
-            self.flash_error("nothing selected");
+            self.state.flash_error("nothing selected");
             return;
         }
         let count = paths.len();
@@ -2693,138 +2607,22 @@ impl App {
         let dest = if expanded.is_absolute() {
             expanded
         } else {
-            self.listing.dir.join(&expanded)
+            self.state.listing.dir.join(&expanded)
         };
         self.run_and_flash(
             op(&paths, &dest),
             format!("{verb} {count} item(s) to {}", dest.display()),
         );
         // Picks point at paths that may no longer exist after a move.
-        self.picks.clear();
-        self.refresh_listing();
+        self.state.picks.clear();
+        self.state.refresh_listing();
     }
 
     /// Set the flash message based on the result of a mutating operation.
     fn run_and_flash(&mut self, result: std::io::Result<()>, success_msg: String) {
         match result {
-            Ok(()) => self.flash_info(success_msg),
-            Err(e) => self.flash_error(format!("error: {e}")),
-        }
-    }
-
-    fn flash_info<S: Into<String>>(&mut self, text: S) {
-        self.flash = Some(FlashMessage {
-            text: text.into(),
-            kind: FlashKind::Info,
-        });
-    }
-
-    fn flash_error<S: Into<String>>(&mut self, text: S) {
-        self.flash = Some(FlashMessage {
-            text: text.into(),
-            kind: FlashKind::Error,
-        });
-    }
-
-    /// Navigate to an arbitrary path. `target` is expanded for `~` and
-    /// `$VAR`; relative paths are resolved against the current directory.
-    /// If the expanded path points to a file, we chdir to its parent and
-    /// focus the cursor on it.
-    fn jump_to(&mut self, target: &str) -> Result<()> {
-        let expanded = crate::paths::expand(target);
-        let abs = if expanded.is_absolute() {
-            expanded
-        } else {
-            self.listing.dir.join(&expanded)
-        };
-        let canonical = std::fs::canonicalize(&abs)?;
-        let md = std::fs::metadata(&canonical)?;
-        if md.is_dir() {
-            if let Err(e) = self.chdir(&canonical) {
-                self.flash_error(format!("chdir: {e}"));
-                return Ok(());
-            }
-        } else if let Some(parent) = canonical.parent() {
-            if let Err(e) = self.chdir(parent) {
-                self.flash_error(format!("chdir: {e}"));
-                return Ok(());
-            }
-            self.focus_on_path(&canonical);
-        }
-        Ok(())
-    }
-
-    /// `ma` — remember the current directory and cursor entry under
-    /// letter `letter`. Saved to disk best-effort so marks survive
-    /// restarts; a disk failure flashes but doesn't block the in-memory
-    /// set.
-    fn set_mark(&mut self, letter: char) {
-        let focus = self.rows.get(self.cursor.index).map(|r| r.path.clone());
-        self.marks.set(
-            letter,
-            Mark {
-                dir: self.listing.dir.clone(),
-                focus,
-            },
-        );
-        match self.marks.save() {
-            Ok(()) => self.flash_info(format!("mark '{letter}' set")),
-            Err(e) => self.flash_error(format!("mark saved in-memory only: {e}")),
-        }
-    }
-
-    /// `'a` — chdir to the remembered directory and focus on the entry
-    /// if it still exists.
-    fn jump_to_mark(&mut self, letter: char) {
-        let Some(mark) = self.marks.get(letter).cloned() else {
-            self.flash_error(format!("mark '{letter}' not set"));
-            return;
-        };
-        if let Err(e) = self.chdir(&mark.dir) {
-            self.flash_error(format!("jump failed: {e}"));
-            return;
-        }
-        if let Some(focus) = mark.focus {
-            self.focus_on_path(&focus);
-        }
-        self.flash_info(format!("jumped to mark '{letter}'"));
-    }
-
-    /// Search over visible rows. Case-insensitive.
-    ///
-    /// - If `query` contains no glob metacharacters (`*`, `?`, `[`), it is
-    ///   treated as a **prefix**: `/R` lands on `README.md`, not the first
-    ///   file that happens to contain an `r`.
-    /// - If `query` does contain glob metacharacters, it's treated as a
-    ///   glob pattern against the full name: `/*.rs` matches all Rust
-    ///   files, `/*README*` matches anything containing `README`.
-    fn find_match(&self, query: &str, from: usize, backward: bool) -> Option<usize> {
-        if self.rows.is_empty() {
-            return None;
-        }
-        let matcher = Matcher::build(query);
-        let n = self.rows.len();
-        for step in 0..n {
-            let i = if backward {
-                (from + n - step) % n
-            } else {
-                (from + step) % n
-            };
-            if matcher.matches(&self.rows[i].display) {
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    fn selection_paths(&self) -> Vec<&Path> {
-        // `%` expands to picks if any, else the cursor item.
-        if self.view == View::Dir && !self.picks.is_empty() {
-            self.picks.iter().map(PathBuf::as_path).collect()
-        } else if let Some(row) = self.rows.get(self.cursor.index) {
-            vec![row.path.as_path()]
-        } else {
-            Vec::new()
+            Ok(()) => self.state.flash_info(success_msg),
+            Err(e) => self.state.flash_error(format!("error: {e}")),
         }
     }
 
@@ -2858,13 +2656,13 @@ impl App {
                 KeyCode::Enter => {
                     let committed = view.commit_search(viewport);
                     if !committed {
-                        self.flash_error("no matches");
+                        self.state.flash_error("no matches");
                     } else if let Some(ref mut editor) = self.pending_history_pick {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
                             let nc = line;
-                            let entries = self.history.entries();
+                            let entries = self.state.history.entries();
                             let hi = entries.len().saturating_sub(1 + nc);
                             if let Some(cmd) = entries.get(hi) {
                                 editor.set_content_keep_mode(cmd);
@@ -2943,11 +2741,11 @@ impl App {
                                 self.needs_full_repaint = true;
                                 let back = self.pager_history.back_len();
                                 let fwd = self.pager_history.forward_len();
-                                self.flash_info(format!("buffer ←{back} →{fwd}"));
+                                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                             } else {
                                 // Restore — go_back returned None.
                                 self.pager = self.pager_history.forward.pop();
-                                self.flash_info("no older buffers");
+                                self.state.flash_info("no older buffers");
                             }
                         }
                     }
@@ -2958,10 +2756,10 @@ impl App {
                                 self.needs_full_repaint = true;
                                 let back = self.pager_history.back_len();
                                 let fwd = self.pager_history.forward_len();
-                                self.flash_info(format!("buffer ←{back} →{fwd}"));
+                                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                             } else {
                                 self.pager = self.pager_history.back.pop();
-                                self.flash_info("no newer buffers");
+                                self.state.flash_info("no newer buffers");
                             }
                         }
                     }
@@ -2972,15 +2770,15 @@ impl App {
         }
 
         // Worktree picker: 1-9 selects a worktree and chdirs.
-        if let Some(ref worktrees) = self.pending_worktrees {
+        if let Some(ref worktrees) = self.state.pending_worktrees {
             if let KeyCode::Char(c @ '1'..='9') = key.code {
                 let idx = (c as u8 - b'1') as usize;
                 if let Some(path) = worktrees.get(idx).cloned() {
                     self.pager = None;
-                    self.pending_worktrees = None;
+                    self.state.pending_worktrees = None;
                     self.needs_full_repaint = true;
-                    if let Err(e) = self.chdir(&path) {
-                        self.flash_error(format!("chdir: {e}"));
+                    if let Err(e) = self.state.chdir(&path) {
+                        self.state.flash_error(format!("chdir: {e}"));
                     }
                     return PostAction::None;
                 }
@@ -2995,15 +2793,15 @@ impl App {
             // Ctrl+D deletes the highlighted entry from history (any mode).
             if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 let cursor = view.picker_cursor.unwrap_or(0);
-                let entries = self.history.entries();
+                let entries = self.state.history.entries();
                 let hist_idx = entries.len().saturating_sub(1 + cursor);
                 if hist_idx < entries.len() {
-                    self.history.remove(hist_idx);
-                    if self.history.entries().is_empty() {
+                    self.state.history.remove(hist_idx);
+                    if self.state.history.entries().is_empty() {
                         self.pager = None;
                         self.pending_history_pick = None;
                         self.needs_full_repaint = true;
-                        self.flash_info("history is empty");
+                        self.state.flash_info("history is empty");
                         return PostAction::None;
                     }
                     let old_cursor = cursor;
@@ -3012,7 +2810,7 @@ impl App {
                         let max = (v.line_count() as usize).saturating_sub(1);
                         v.picker_cursor = Some(old_cursor.min(max));
                         let new_cur = v.picker_cursor.unwrap_or(0);
-                        let entries = self.history.entries();
+                        let entries = self.state.history.entries();
                         let hist_idx = entries.len().saturating_sub(1 + new_cur);
                         if let Some(ref mut ed) = self.pending_history_pick {
                             if let Some(cmd) = entries.get(hist_idx) {
@@ -3049,13 +2847,13 @@ impl App {
                     KeyCode::Char('j') | KeyCode::Down => {
                         self.history_pending_g = false;
                         view.picker_move(1, viewport);
-                        sync_editor!(view, editor, self.history);
+                        sync_editor!(view, editor, self.state.history);
                         true
                     }
                     KeyCode::Char('k') | KeyCode::Up => {
                         self.history_pending_g = false;
                         view.picker_move(-1, viewport);
-                        sync_editor!(view, editor, self.history);
+                        sync_editor!(view, editor, self.state.history);
                         true
                     }
                     KeyCode::Char('G') => {
@@ -3063,7 +2861,7 @@ impl App {
                         let last = view.lines.len().saturating_sub(1);
                         let delta = last as isize - view.picker_cursor.unwrap_or(0) as isize;
                         view.picker_move(delta, viewport);
-                        sync_editor!(view, editor, self.history);
+                        sync_editor!(view, editor, self.state.history);
                         true
                     }
                     KeyCode::Char('g') => {
@@ -3071,7 +2869,7 @@ impl App {
                             self.history_pending_g = false;
                             let delta = -(view.picker_cursor.unwrap_or(0) as isize);
                             view.picker_move(delta, viewport);
-                            sync_editor!(view, editor, self.history);
+                            sync_editor!(view, editor, self.state.history);
                         } else {
                             self.history_pending_g = true;
                         }
@@ -3087,7 +2885,7 @@ impl App {
                         view.search_next(viewport);
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
-                            sync_editor!(view, editor, self.history);
+                            sync_editor!(view, editor, self.state.history);
                         }
                         true
                     }
@@ -3096,7 +2894,7 @@ impl App {
                         view.search_prev(viewport);
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
-                            sync_editor!(view, editor, self.history);
+                            sync_editor!(view, editor, self.state.history);
                         }
                         true
                     }
@@ -3136,9 +2934,9 @@ impl App {
                         return PostAction::None;
                     }
                     // Execute the (possibly edited) command directly.
-                    self.last_captured_cmd = Some(cmd.clone());
-                    self.history.push(cmd.trim());
-                    let expanded = crate::shell::expand_percent(&cmd, &self.selection_paths());
+                    self.state.last_captured_cmd = Some(cmd.clone());
+                    self.state.history.push(cmd.trim());
+                    let expanded = crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
                         Ok((child, rx)) => {
@@ -3158,7 +2956,7 @@ impl App {
                                 finished: false,
                             });
                         }
-                        Err(e) => self.flash_error(format!("exec: {e}")),
+                        Err(e) => self.state.flash_error(format!("exec: {e}")),
                     }
                 }
                 EditResult::Cancel => {
@@ -3178,7 +2976,7 @@ impl App {
                     };
                     view.picker_move(delta, viewport);
                     let new_cursor = view.picker_cursor.unwrap_or(0);
-                    let entries = self.history.entries();
+                    let entries = self.state.history.entries();
                     let hist_idx = entries.len().saturating_sub(1 + new_cursor);
                     if let Some(cmd) = entries.get(hist_idx) {
                         editor.set_content(cmd);
@@ -3194,7 +2992,7 @@ impl App {
         }
 
         // Session picker: j/k navigate, Enter/1-9 select, n new.
-        if self.pending_sessions.is_some() {
+        if self.state.pending_sessions.is_some() {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
@@ -3206,7 +3004,7 @@ impl App {
                 }
                 KeyCode::Char(c @ '1'..='9') => {
                     // Direct selection — index into sessions (offset by 2 header lines).
-                    let sessions = self.pending_sessions.take().unwrap();
+                    let sessions = self.state.pending_sessions.take().unwrap();
                     let idx = (c as u8 - b'1') as usize;
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
@@ -3215,16 +3013,16 @@ impl App {
                         self.restore_session(&session);
                         return PostAction::None;
                     }
-                    self.pending_sessions = Some(sessions);
+                    self.state.pending_sessions = Some(sessions);
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let sessions = self.pending_sessions.take().unwrap();
+                    let sessions = self.state.pending_sessions.take().unwrap();
                     if cursor < 2 {
                         // "New session" header.
                         self.pager = None;
                         self.needs_full_repaint = true;
-                        self.flash_info("new session");
+                        self.state.flash_info("new session");
                         return PostAction::None;
                     }
                     let idx = cursor - 2;
@@ -3235,13 +3033,13 @@ impl App {
                         self.restore_session(&session);
                         return PostAction::None;
                     }
-                    self.pending_sessions = Some(sessions);
+                    self.state.pending_sessions = Some(sessions);
                 }
                 KeyCode::Char('n' | 'N') => {
                     self.pager = None;
-                    self.pending_sessions = None;
+                    self.state.pending_sessions = None;
                     self.needs_full_repaint = true;
-                    self.flash_info("new session");
+                    self.state.flash_info("new session");
                     return PostAction::None;
                 }
                 _ => {}
@@ -3251,8 +3049,8 @@ impl App {
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 // Save eligible pagers to history before closing.
-                let is_picker = self.pending_worktrees.is_some()
-                    || self.pending_sessions.is_some()
+                let is_picker = self.state.pending_worktrees.is_some()
+                    || self.state.pending_sessions.is_some()
                     || self.pending_history_pick.is_some();
                 if !is_picker {
                     if let Some(ref v) = self.pager {
@@ -3264,8 +3062,8 @@ impl App {
                     }
                 }
                 self.pager = None;
-                self.pending_worktrees = None;
-                self.pending_sessions = None;
+                self.state.pending_worktrees = None;
+                self.state.pending_sessions = None;
                 self.pending_history_pick = None;
                 self.pager_jump_buf = None;
                 self.pager_pending_bracket = None;
@@ -3304,12 +3102,12 @@ impl App {
             KeyCode::Char('l') => view.toggle_whitespace(),
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
-                Ok(()) => self.flash_info("yanked to clipboard"),
-                Err(e) => self.flash_error(format!("yank failed: {e}")),
+                Ok(()) => self.state.flash_info("yanked to clipboard"),
+                Err(e) => self.state.flash_error(format!("yank failed: {e}")),
             },
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {
-                Ok(path) => self.flash_info(format!("saved: {}", path.display())),
-                Err(e) => self.flash_error(format!("save failed: {e}")),
+                Ok(path) => self.state.flash_info(format!("saved: {}", path.display())),
+                Err(e) => self.state.flash_error(format!("save failed: {e}")),
             },
             KeyCode::Char('v') => {
                 let argv = shell::resolve_editor();
@@ -3336,7 +3134,7 @@ impl App {
                             },
                         ),
                         Err(e) => {
-                            self.flash_error(format!("write temp: {e}"));
+                            self.state.flash_error(format!("write temp: {e}"));
                             return PostAction::None;
                         }
                     }
@@ -3357,157 +3155,95 @@ impl App {
         PostAction::None
     }
 
-    const fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
-        if len == 0 {
-            return;
-        }
-        let new_idx = (self.cursor.index as isize + delta).rem_euclid(len as isize);
-        self.cursor.index = new_idx as usize;
-    }
-
-    /// `gg` — jump to the first entry of the current column.
-    const fn goto_col_top(&mut self) {
-        let rows_per_col = self.last_grid.rows as usize;
-        if rows_per_col == 0 {
-            self.cursor.index = 0;
-            return;
-        }
-        let current_col = self.cursor.index / rows_per_col;
-        self.cursor.index = current_col * rows_per_col;
-    }
-
-    /// `G` — jump to the last entry of the current column. For partial
-    /// columns (the rightmost column when it doesn't fill all rows) this
-    /// is the last entry in that column, not in the list.
-    fn goto_col_bottom(&mut self, len: usize) {
-        if len == 0 {
-            return;
-        }
-        let rows_per_col = self.last_grid.rows as usize;
-        if rows_per_col == 0 {
-            self.cursor.index = len - 1;
-            return;
-        }
-        let current_col = self.cursor.index / rows_per_col;
-        let col_end = ((current_col + 1) * rows_per_col).min(len);
-        self.cursor.index = col_end - 1;
-    }
-
-    /// Move the cursor by `delta` columns, preserving the row within each
-    /// column and wrapping around the grid. When only one column exists,
-    /// horizontal motion is a no-op — there is nowhere to go. When the
-    /// target column is partial (fewer rows than the current row), land
-    /// on its last valid entry so we never leave the target column.
-    fn cursor_move_columns(&mut self, delta: isize, rows_per_col: usize, len: usize) {
-        if rows_per_col == 0 || len == 0 {
-            return;
-        }
-        let num_cols = len.div_ceil(rows_per_col);
-        if num_cols <= 1 {
-            return;
-        }
-        let current_col = (self.cursor.index / rows_per_col) as isize;
-        let current_row = self.cursor.index % rows_per_col;
-        let target_col = (current_col + delta).clamp(0, num_cols as isize - 1) as usize;
-        if target_col == current_col as usize {
-            return; // already at the edge
-        }
-        let target_idx = target_col * rows_per_col + current_row;
-        if target_idx >= len {
-            return; // target column has no entry on this row
-        }
-        self.cursor.index = target_idx;
-    }
-
     // --- Action handlers --------------------------------------------------
 
     fn apply(&mut self, action: &Action) -> Result<PostAction> {
-        let len = self.rows.len();
+        let len = self.state.rows.len();
         // In a column-major grid, moving one column horizontally advances
         // the flat index by `rows_per_col`. Moving vertically is ±1.
-        let rows_per_col = self.last_grid.rows as usize;
-        let per_page = self.last_grid.items_per_page();
+        let rows_per_col = self.state.last_grid.rows as usize;
+        let per_page = self.state.last_grid.items_per_page();
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
-            self.cursor.index,
-            self.cursor.view_top,
-            self.last_grid.cols,
-            self.last_grid.rows,
+            self.state.cursor.index,
+            self.state.cursor.view_top,
+            self.state.last_grid.cols,
+            self.state.last_grid.rows,
             per_page,
             len,
         );
         match action {
-            Action::Up(n) => self.cursor_move_vertical(-(*n as isize), len),
-            Action::Down(n) => self.cursor_move_vertical(*n as isize, len),
-            Action::Left(n) => self.cursor_move_columns(-(*n as isize), rows_per_col, len),
-            Action::Right(n) => self.cursor_move_columns(*n as isize, rows_per_col, len),
-            Action::PageUp => self.cursor_move_vertical(-(per_page as isize), len),
-            Action::PageDown => self.cursor_move_vertical(per_page as isize, len),
-            Action::GotoFirst => self.goto_col_top(),
-            Action::GotoLast => self.goto_col_bottom(len),
+            Action::Up(n) => self.state.cursor_move_vertical(-(*n as isize), len),
+            Action::Down(n) => self.state.cursor_move_vertical(*n as isize, len),
+            Action::Left(n) => self.state.cursor_move_columns(-(*n as isize), rows_per_col, len),
+            Action::Right(n) => self.state.cursor_move_columns(*n as isize, rows_per_col, len),
+            Action::PageUp => self.state.cursor_move_vertical(-(per_page as isize), len),
+            Action::PageDown => self.state.cursor_move_vertical(per_page as isize, len),
+            Action::GotoFirst => self.state.goto_col_top(),
+            Action::GotoLast => self.state.goto_col_bottom(len),
 
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
-                self.cursor.clamp(self.rows.len());
+                self.state.cursor.clamp(self.state.rows.len());
                 return Ok(post);
             }
             Action::EnterOrEdit => {
                 let post = self.activate(ActivateIntent::Edit);
-                self.cursor.clamp(self.rows.len());
+                self.state.cursor.clamp(self.state.rows.len());
                 return Ok(post);
             }
-            Action::Climb => self.climb(),
+            Action::Climb => self.state.climb(),
             Action::Home => {
                 if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-                    if let Err(e) = self.chdir(&home) {
-                        self.flash_error(format!("chdir: {e}"));
+                    if let Err(e) = self.state.chdir(&home) {
+                        self.state.flash_error(format!("chdir: {e}"));
                     }
                 }
             }
 
-            Action::TogglePick => self.toggle_pick_cursor(),
+            Action::TogglePick => self.state.toggle_pick_cursor(),
             Action::PickPatternPrompt => {
-                if self.view == View::Dir {
-                    self.mode =
+                if self.state.view == View::Dir {
+                    self.state.mode =
                         Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
                 }
             }
-            Action::PickToggleAll => self.toggle_all_picks(),
+            Action::PickToggleAll => self.state.toggle_all_picks(),
 
-            Action::Take => self.take(),
-            Action::Drop => self.drop_cursor(),
-            Action::ToggleInventoryView => self.toggle_inventory_view(),
+            Action::Take => self.state.take(),
+            Action::Drop => self.state.drop_cursor(),
+            Action::ToggleInventoryView => self.state.toggle_inventory_view(),
             Action::EmptyInventory => {
-                self.inventory.clear();
-                self.rebuild_rows();
+                self.state.inventory.clear();
+                self.state.rebuild_rows();
             }
 
             Action::ToggleMask(n) => {
                 if *n == 1 {
-                    self.masks.toggle_mask1();
+                    self.state.masks.toggle_mask1();
                 } else if *n == 2 {
-                    self.masks.toggle_mask2();
+                    self.state.masks.toggle_mask2();
                 }
-                self.rebuild_rows();
+                self.state.rebuild_rows();
             }
             Action::LimitPrompt => {
-                let prefix = if self.temp_filter.is_some() {
+                let prefix = if self.state.temp_filter.is_some() {
                     "limit (active)="
                 } else {
                     "limit="
                 };
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
+                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Limit, prefix));
             }
             Action::CommandPrompt => {
-                self.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
             }
 
             Action::ShellCapturedPrompt => {
-                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
+                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
             }
             Action::ShellForegroundPrompt => {
-                self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
+                self.state.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
             }
             Action::StartShell => {
                 let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
@@ -3518,7 +3254,7 @@ impl App {
                 });
             }
             Action::ChmodAdd(mode_char) => {
-                let paths = self.selection_paths();
+                let paths = self.state.selection_paths();
                 if paths.is_empty() {
                     return Ok(PostAction::None);
                 }
@@ -3535,65 +3271,65 @@ impl App {
                     fs::ops::chmod_add_bits(&paths, bits),
                     format!("chmod +{mode_char} on {count} item(s)"),
                 );
-                self.refresh_listing();
+                self.state.refresh_listing();
             }
 
             Action::SearchPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(
+                self.state.mode = Mode::Prompting(Prompt::simple(
                     PromptKind::Search {
-                        saved_cursor: self.cursor.index,
+                        saved_cursor: self.state.cursor.index,
                     },
                     "/",
                 ));
             }
             Action::SearchNext => {
-                if let Some(term) = self.last_search.clone() {
-                    let n = self.rows.len();
+                if let Some(term) = self.state.last_search.clone() {
+                    let n = self.state.rows.len();
                     if n > 0 {
-                        let start = (self.cursor.index + 1) % n;
-                        if let Some(i) = self.find_match(&term, start, false) {
-                            self.cursor.index = i;
+                        let start = (self.state.cursor.index + 1) % n;
+                        if let Some(i) = self.state.find_match(&term, start, false) {
+                            self.state.cursor.index = i;
                         }
                     }
                 }
             }
             Action::SearchPrev => {
-                if let Some(term) = self.last_search.clone() {
-                    let n = self.rows.len();
+                if let Some(term) = self.state.last_search.clone() {
+                    let n = self.state.rows.len();
                     if n > 0 {
-                        let start = if self.cursor.index == 0 {
+                        let start = if self.state.cursor.index == 0 {
                             n - 1
                         } else {
-                            self.cursor.index - 1
+                            self.state.cursor.index - 1
                         };
-                        if let Some(i) = self.find_match(&term, start, true) {
-                            self.cursor.index = i;
+                        if let Some(i) = self.state.find_match(&term, start, true) {
+                            self.state.cursor.index = i;
                         }
                     }
                 }
             }
 
             Action::JumpPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
+                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
             }
 
             Action::CopyPrompt => {
-                if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
+                if !self.state.selection_paths().is_empty() {
+                    self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
                 }
             }
             Action::MovePrompt => {
-                if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
+                if !self.state.selection_paths().is_empty() {
+                    self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
                 }
             }
             Action::MakeDirPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
+                self.state.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
             }
             Action::RemovePrompt => {
-                let count = self.selection_paths().len();
+                let count = self.state.selection_paths().len();
                 if count > 0 {
-                    self.mode = Mode::Prompting(Prompt::simple(
+                    self.state.mode = Mode::Prompting(Prompt::simple(
                         PromptKind::RemoveConfirm,
                         format!("remove {count} file(s)? (y/N): "),
                     ));
@@ -3602,8 +3338,8 @@ impl App {
             Action::LongList => {
                 // No selection → list the whole current directory.
                 let owned: Vec<PathBuf>;
-                let paths: Vec<&Path> = if self.selection_paths().is_empty() {
-                    owned = self
+                let paths: Vec<&Path> = if self.state.selection_paths().is_empty() {
+                    owned = self.state
                         .listing
                         .entries
                         .iter()
@@ -3611,14 +3347,14 @@ impl App {
                         .collect();
                     owned.iter().map(PathBuf::as_path).collect()
                 } else {
-                    self.selection_paths()
+                    self.state.selection_paths()
                 };
                 let lines = fs::ops::format_long_listing(&paths);
-                let title = format!("long listing — {}", self.listing.dir.display());
+                let title = format!("long listing — {}", self.state.listing.dir.display());
                 self.pager = Some(PagerView::new_plain(title, lines));
             }
             Action::FileType => {
-                let paths = self.selection_paths();
+                let paths = self.state.selection_paths();
                 if paths.is_empty() {
                     return Ok(PostAction::None);
                 }
@@ -3628,7 +3364,7 @@ impl App {
                         || paths[0].display().to_string(),
                         |n| n.to_string_lossy().into_owned(),
                     );
-                    self.flash_info(format!("{name}: {label}"));
+                    self.state.flash_info(format!("{name}: {label}"));
                 } else {
                     let lines: Vec<String> = paths
                         .iter()
@@ -3645,7 +3381,7 @@ impl App {
             }
 
             Action::Help => {
-                let lines = help::build_lines(&self.theme, &self.user_keymap);
+                let lines = help::build_lines(&self.theme, &self.state.user_keymap);
                 let mut view = pager::PagerView::new_styled("spyc — key bindings", lines);
                 view.columns = 2;
                 self.pager = Some(view);
@@ -3671,7 +3407,7 @@ impl App {
             | Action::PanePipeContent
             | Action::PanePipeInventory
                 if matches!(
-                    self.mode,
+                    self.state.mode,
                     Mode::Prompting(Prompt {
                         kind: PromptKind::PaneNewTabCmd
                             | PromptKind::PaneNewTabCwd
@@ -3694,8 +3430,8 @@ impl App {
             Action::PaneScrollEnter => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.active_mut().enter_scroll_mode();
-                    self.pane_focused = true;
-                    self.flash_info("scroll: on (j/k nav, s save, Esc exit)");
+                    self.state.pane_focused = true;
+                    self.state.flash_info("scroll: on (j/k nav, s save, Esc exit)");
                 }
             }
             Action::PaneScrollSave => {
@@ -3703,9 +3439,9 @@ impl App {
                     match tabs.active_mut().save_to_file() {
                         Ok(path) => {
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
-                            self.flash_info(format!("saved: {name}"));
+                            self.state.flash_info(format!("saved: {name}"));
                         }
-                        Err(e) => self.flash_info(format!("save error: {e}")),
+                        Err(e) => self.state.flash_info(format!("save error: {e}")),
                     }
                 }
             }
@@ -3735,7 +3471,7 @@ impl App {
                     if let Some(ed) = p.editor.as_mut() {
                         ed.set_content(&current);
                     }
-                    self.mode = Mode::Prompting(p);
+                    self.state.mode = Mode::Prompting(p);
                 }
             }
 
@@ -3744,19 +3480,19 @@ impl App {
 
             Action::WorktreeList => self.worktree_list(),
             Action::WorktreeNew => {
-                if self.git_info.is_none() {
-                    self.flash_error("not in a git repository");
+                if self.state.git_info.is_none() {
+                    self.state.flash_error("not in a git repository");
                 } else {
                     let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
-                    self.mode = Mode::Prompting(p);
+                    self.state.mode = Mode::Prompting(p);
                 }
             }
             Action::WorktreeDelete => {
-                if self.git_info.is_none() {
-                    self.flash_error("not in a git repository");
+                if self.state.git_info.is_none() {
+                    self.state.flash_error("not in a git repository");
                 } else {
-                    let dir = self.listing.dir.display().to_string();
-                    self.mode = Mode::Prompting(Prompt::simple(
+                    let dir = self.state.listing.dir.display().to_string();
+                    self.state.mode = Mode::Prompting(Prompt::simple(
                         PromptKind::WorktreeDeleteConfirm,
                         format!("remove worktree {dir}? (y/N): "),
                     ));
@@ -3765,34 +3501,34 @@ impl App {
 
             Action::GitDiff | Action::GitDiffCached => {
                 let cached = matches!(action, Action::GitDiffCached);
-                if self.git_info.is_none() {
-                    self.flash_error("not in a git repository");
+                if self.state.git_info.is_none() {
+                    self.state.flash_error("not in a git repository");
                 } else {
                     self.open_git_diff(cached);
                 }
             }
 
-            Action::SetMark(letter) => self.set_mark(*letter),
-            Action::JumpMark(letter) => self.jump_to_mark(*letter),
+            Action::SetMark(letter) => self.state.set_mark(*letter),
+            Action::JumpMark(letter) => self.state.jump_to_mark(*letter),
             Action::JumpStartDir => {
-                let dir = self.start_dir.clone();
-                if let Err(e) = self.chdir(&dir) {
-                    self.flash_error(format!("jump to start failed: {e}"));
+                let dir = self.state.start_dir.clone();
+                if let Err(e) = self.state.chdir(&dir) {
+                    self.state.flash_error(format!("jump to start failed: {e}"));
                 }
             }
             Action::JumpPrevDir => {
-                if let Some(prev) = self.prev_dir.clone() {
-                    if let Err(e) = self.chdir(&prev) {
-                        self.flash_error(format!("jump back failed: {e}"));
+                if let Some(prev) = self.state.prev_dir.clone() {
+                    if let Err(e) = self.state.chdir(&prev) {
+                        self.state.flash_error(format!("jump back failed: {e}"));
                     }
                 } else {
-                    self.flash_error("no previous directory");
+                    self.state.flash_error("no previous directory");
                 }
             }
 
-            Action::Date => self.flash_info(crate::sysinfo::format_now()),
+            Action::Date => self.state.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
-                self.flash_info(format!(
+                self.state.flash_info(format!(
                     "\u{1f336}\u{fe0f} spyc {}",
                     env!("CARGO_PKG_VERSION")
                 ));
@@ -3800,14 +3536,14 @@ impl App {
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
                 self.theme = self.theme.toggled();
-                self.flash_info(if self.theme.mono {
+                self.state.flash_info(if self.theme.mono {
                     "colors off"
                 } else {
                     "colors on"
                 });
             }
             Action::SetEnvPrompt => {
-                self.mode =
+                self.state.mode =
                     Mode::Prompting(Prompt::simple(PromptKind::SetEnv, "setenv NAME=VALUE: "));
             }
 
@@ -3817,24 +3553,24 @@ impl App {
             Action::Noop => {}
             Action::Quit => {
                 let now = std::time::Instant::now();
-                if self
+                if self.state
                     .quit_pending
                     .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
                 {
                     self.save_session();
-                    self.should_quit = true;
+                    self.state.should_quit = true;
                 } else {
-                    self.quit_pending = Some(now);
-                    self.flash_info("press again to quit");
+                    self.state.quit_pending = Some(now);
+                    self.state.flash_info("press again to quit");
                 }
             }
         }
-        self.cursor.clamp(self.rows.len());
+        self.state.cursor.clamp(self.state.rows.len());
         Ok(PostAction::None)
     }
 
     fn activate(&mut self, intent: ActivateIntent) -> PostAction {
-        let Some(row) = self.rows.get(self.cursor.index) else {
+        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
             return PostAction::None;
         };
         let path = row.path.clone();
@@ -3842,28 +3578,28 @@ impl App {
 
         // Inventory view: enter drills down to the containing directory and
         // focuses on the item, then continues with the intent on that item.
-        if self.view == View::Inventory {
+        if self.state.view == View::Inventory {
             let target_dir = if kind == EntryKind::Dir {
                 path.clone()
             } else {
                 path.parent()
                     .map_or_else(|| path.clone(), Path::to_path_buf)
             };
-            if let Err(e) = self.chdir(&target_dir) {
-                self.flash_error(format!("chdir: {e}"));
+            if let Err(e) = self.state.chdir(&target_dir) {
+                self.state.flash_error(format!("chdir: {e}"));
                 return PostAction::None;
             }
-            self.view = View::Dir;
-            self.focus_on_path(&path);
-            self.rebuild_rows();
+            self.state.view = View::Dir;
+            self.state.focus_on_path(&path);
+            self.state.rebuild_rows();
             if kind == EntryKind::Dir {
                 return PostAction::None;
             }
         }
 
         if kind == EntryKind::Dir {
-            if let Err(e) = self.chdir(&path) {
-                self.flash_error(format!("chdir: {e}"));
+            if let Err(e) = self.state.chdir(&path) {
+                self.state.flash_error(format!("chdir: {e}"));
             }
             return PostAction::None;
         }
@@ -3893,7 +3629,7 @@ impl App {
                             view.source_path = Some(path.clone());
                             self.pager = Some(view);
                         }
-                        Err(e) => self.flash_error(format!("read: {e}")),
+                        Err(e) => self.state.flash_error(format!("read: {e}")),
                     }
                     PostAction::None
                 } else {
@@ -3911,7 +3647,7 @@ impl App {
                             view.lines = lines;
                             self.pager = Some(view);
                         }
-                        Err(e) => self.flash_error(format!("hex: {e}")),
+                        Err(e) => self.state.flash_error(format!("hex: {e}")),
                     }
                     PostAction::None
                 }
@@ -3932,182 +3668,13 @@ impl App {
         }
     }
 
-    fn refresh_listing(&mut self) {
-        if let Ok(new) = Listing::read(&self.listing.dir) {
-            self.listing = new;
-            self.git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
-            self.rebuild_rows();
-        }
-    }
 
-    fn climb(&mut self) {
-        if self.view == View::Inventory {
-            self.view = View::Dir;
-            self.rebuild_rows();
-            return;
-        }
-        // Remember the directory we're leaving so we can focus it after chdir.
-        let prev_name = self
-            .listing
-            .dir
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned());
-        if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
-            if let Err(e) = self.chdir(&parent) {
-                self.flash_error(format!("chdir: {e}"));
-                return;
-            }
-            // Place cursor on the directory we just came from.
-            if let Some(name) = prev_name {
-                if let Some(idx) = self
-                    .rows
-                    .iter()
-                    .position(|r| r.display == name || r.display == format!("{name}/"))
-                {
-                    self.cursor.index = idx;
-                }
-            }
-        }
-    }
 
-    fn chdir(&mut self, path: &Path) -> Result<()> {
-        // Canonicalize so listing.dir and the process cwd always agree and
-        // the status bar shows a clean absolute path.
-        let canonical = std::fs::canonicalize(path)?;
-        let new_listing = Listing::read(&canonical)?;
-        // Save previous directory for `''` (jump-back).
-        if self.listing.dir != canonical {
-            self.prev_dir = Some(self.listing.dir.clone());
-        }
-        // Keep the process cwd in sync with navigation so subprocesses
-        // (`!cmd`, `$SHELL`, `chmod`, editor, pager) run in the directory
-        // the user is looking at.
-        let _ = std::env::set_current_dir(&canonical);
-        self.listing = new_listing;
-        self.listing.sort(self.sort_order);
-        self.git_info = crate::sysinfo::git_status(&canonical);
-        self.git_files = crate::sysinfo::git_file_statuses(&canonical);
-        self.picks.clear();
-        self.temp_filter = None;
-        self.cursor = Cursor::new();
-        self.view = View::Dir;
-        self.rebuild_rows();
-        Ok(())
-    }
-
-    fn toggle_pick_cursor(&mut self) {
-        if self.view != View::Dir {
-            return;
-        }
-        if let Some(row) = self.rows.get(self.cursor.index) {
-            self.picks.toggle(&row.path);
-        }
-    }
-
-    fn toggle_all_picks(&mut self) {
-        if self.view != View::Dir {
-            return;
-        }
-        // If anything in the current visible set is unpicked, pick all; else clear.
-        let any_unpicked = self.rows.iter().any(|r| !self.picks.contains(&r.path));
-        if any_unpicked {
-            for r in &self.rows {
-                self.picks.insert(&r.path);
-            }
-        } else {
-            self.picks.clear();
-        }
-    }
-
-    fn take(&mut self) {
-        if self.view != View::Dir {
-            return;
-        }
-        let to_take: Vec<PathBuf> = if !self.picks.is_empty() {
-            self.picks.iter().cloned().collect()
-        } else if let Some(row) = self.rows.get(self.cursor.index) {
-            vec![row.path.clone()]
-        } else {
-            vec![]
-        };
-        self.inventory.extend(to_take);
-        self.rebuild_rows();
-    }
-
-    fn drop_cursor(&mut self) {
-        // Drop removes from inventory. In Dir view: the cursor item if taken.
-        // In Inventory view: the cursor inventory item, and then re-focus.
-        let Some(row) = self.rows.get(self.cursor.index) else {
-            return;
-        };
-        let path = row.path.clone();
-        self.inventory.remove(&path);
-        self.rebuild_rows();
-    }
-
-    fn toggle_inventory_view(&mut self) {
-        self.view = match self.view {
-            View::Dir => View::Inventory,
-            View::Inventory => View::Dir,
-        };
-        self.cursor = Cursor::new();
-        self.rebuild_rows();
-    }
-
-    fn focus_on_path(&mut self, path: &Path) {
-        if let Some(i) = self.rows.iter().position(|r| r.path == path) {
-            self.cursor.index = i;
-        }
-    }
-
-    // --- Row construction -------------------------------------------------
-
-    fn rebuild_rows(&mut self) {
-        self.rows = match self.view {
-            View::Dir => {
-                let base: Vec<RowData> = self
-                    .listing
-                    .entries
-                    .iter()
-                    .filter(|e| !self.masks.hides(&e.name))
-                    .map(row_from_entry)
-                    .collect();
-                self.apply_temp_filter(base)
-            }
-            View::Inventory => self
-                .inventory
-                .paths()
-                .map(|p| RowData {
-                    path: p.clone(),
-                    display: p.display().to_string(),
-                    kind: detect_kind(p),
-                })
-                .collect(),
-        };
-        self.cursor.clamp(self.rows.len());
-    }
-
-    fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        let Some(ref pattern) = self.temp_filter else {
-            return rows;
-        };
-        if pattern == "!" {
-            // Show only picked files.
-            rows.into_iter()
-                .filter(|r| self.picks.contains(&r.path))
-                .collect()
-        } else {
-            let matcher = Matcher::build(pattern);
-            rows.into_iter()
-                .filter(|r| matcher.matches(&r.display))
-                .collect()
-        }
-    }
 }
 
 /// Search matcher: prefix match for plain text, glob for anything with
 /// `*`, `?`, or `[`. Both modes are case-insensitive.
-enum Matcher {
+pub enum Matcher {
     Prefix(String),
     Glob(Pattern),
     /// An invalid glob produced by a malformed pattern. Matches nothing.
@@ -4115,7 +3682,7 @@ enum Matcher {
 }
 
 impl Matcher {
-    fn build(query: &str) -> Self {
+    pub fn build(query: &str) -> Self {
         let is_glob = query.contains(['*', '?', '[']);
         let lower = query.to_lowercase();
         if is_glob {
@@ -4128,7 +3695,7 @@ impl Matcher {
         }
     }
 
-    fn matches(&self, name: &str) -> bool {
+    pub fn matches(&self, name: &str) -> bool {
         let lower = name.to_lowercase();
         match self {
             Self::Prefix(q) => lower.starts_with(q),
@@ -4284,7 +3851,7 @@ fn run_child_in_foreground(
     Ok(())
 }
 
-fn row_from_entry(e: &Entry) -> RowData {
+pub fn row_from_entry(e: &Entry) -> RowData {
     RowData {
         path: e.path.clone(),
         display: e.display_name(),
@@ -4292,7 +3859,7 @@ fn row_from_entry(e: &Entry) -> RowData {
     }
 }
 
-fn detect_kind(p: &Path) -> EntryKind {
+pub fn detect_kind(p: &Path) -> EntryKind {
     match std::fs::symlink_metadata(p) {
         Ok(md) if md.is_dir() => EntryKind::Dir,
         Ok(md) if md.file_type().is_symlink() => EntryKind::Symlink,
