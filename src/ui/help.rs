@@ -97,6 +97,13 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Pane path references",
+        rows: &[
+            ("g f", "jump to file path in pane output"),
+            ("g F", "jump + open pager at line number"),
+        ],
+    },
+    Section {
         title: "Git",
         rows: &[
             ("g d", "git diff (unstaged changes)"),

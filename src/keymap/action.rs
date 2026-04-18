@@ -105,6 +105,10 @@ pub enum Action {
     GitDiff,       // g d — unstaged diff for cursor file / selection
     GitDiffCached, // g D — staged (cached) diff
 
+    // Path references (M13).
+    GotoFile,     // g f — jump file list to path reference in pane output
+    GotoFileLine, // g F — jump + open pager at line
+
     // Meta.
     Redraw, // ^L
     Quit,   // ^D / Q / q
@@ -178,6 +182,8 @@ impl Action {
             Self::WorktreeDelete => "delete git worktree",
             Self::GitDiff => "git diff (unstaged)",
             Self::GitDiffCached => "git diff --cached (staged)",
+            Self::GotoFile => "jump to path in pane output",
+            Self::GotoFileLine => "jump to path:line in pane output",
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",

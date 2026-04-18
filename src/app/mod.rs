@@ -2101,6 +2101,78 @@ impl App {
         }
     }
 
+    // ---- Path references (M13) ------------------------------------------------
+
+    /// `gf` / `gF` — scan the active pane's visible output for a file path
+    /// reference, navigate the file list there, and optionally open the
+    /// pager at the referenced line.
+    fn goto_file_from_pane(&mut self, open_at_line: bool) {
+        let Some(tabs) = self.pane_tabs.as_ref() else {
+            self.state.flash_error("no pane open");
+            return;
+        };
+        let lines = tabs.active().visible_lines();
+        let resolve_base = tabs.active_info().cwd.clone();
+
+        let Some(pathref) = crate::pane::pathref::extract_path_ref(&lines, &resolve_base) else {
+            self.state.flash_error("no path reference found in pane output");
+            return;
+        };
+
+        let path = pathref.path;
+        let line = pathref.line;
+
+        // Navigate: if it's a directory, chdir there; if a file, chdir to
+        // its parent and focus on it.
+        if path.is_dir() {
+            if let Err(e) = self.state.chdir(&path) {
+                self.state.flash_error(format!("gf: {e}"));
+            }
+            return;
+        }
+
+        if let Some(parent) = path.parent() {
+            if parent != self.state.listing.dir {
+                if let Err(e) = self.state.chdir(parent) {
+                    self.state.flash_error(format!("gf: {e}"));
+                    return;
+                }
+            }
+            self.state.focus_on_path(&path);
+        }
+
+        // gF: also open the file in the pager at the referenced line.
+        if open_at_line {
+            let name = path
+                .file_name()
+                .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+
+            match std::fs::read_to_string(&path) {
+                Ok(text) => {
+                    let lines_vec: Vec<String> = text.lines().map(String::from).collect();
+                    let mut view = pager::PagerView::new_plain(&name, lines_vec);
+                    view.source_path = Some(path);
+                    // Jump to the referenced line (0-indexed scroll).
+                    if let Some(ln) = line {
+                        view.scroll = u16::try_from(ln.saturating_sub(1)).unwrap_or(u16::MAX);
+                    }
+                    self.pager = Some(view);
+                }
+                Err(e) => {
+                    self.state
+                        .flash_error(format!("gF: cannot read {name}: {e}"));
+                }
+            }
+        } else if let Some(ln) = line {
+            self.state.flash_info(format!(
+                "{}:{}",
+                path.file_name()
+                    .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned()),
+                ln
+            ));
+        }
+    }
+
     // ---- Session management --------------------------------------------------
 
     fn save_session(&self) {
@@ -3126,6 +3198,11 @@ impl App {
                     self.state.quit_pending = Some(now);
                     self.state.flash_info("press again to quit");
                 }
+            }
+
+            Action::GotoFile | Action::GotoFileLine => {
+                let open_at_line = matches!(action, Action::GotoFileLine);
+                self.goto_file_from_pane(open_at_line);
             }
 
             // All other actions were already handled by `self.state.apply()`.

@@ -33,47 +33,59 @@ from these lists into `Done (recent)` as they ship.
 
 ## Foundations
 
-In roughly descending priority. Items near the top reduce risk for
-everything else and are mostly cheap.
+Most of the critical foundations work has shipped. Remaining items are
+listed in priority order; the testing infrastructure and CI pipeline
+are now solid enough to support thesis feature development.
 
-- **Panic hook that restores the terminal.** If any code path panics in
-  raw mode or alt screen, the user's terminal is left wedged. Install a
-  panic hook in `main()` that calls `restore_terminal()` before unwinding
-  and writes the backtrace to the debug log. Non-negotiable before any
-  external release.
+### Done
+
+- ~~Panic hook that restores the terminal~~ — shipped. Restores raw
+  mode + alt screen on panic, writes backtrace to debug log.
+- ~~CI fixes~~ — `rust:1.85-slim` matches MSRV, `cargo-audit` in
+  pipeline (RUSTSEC-2026-0009 ignored — needs Rust 1.88),
+  `cargo-llvm-cov` with 35% ratcheting floor.
+- ~~Testing strategy execution~~ — 311 tests (up from 74). Keymap
+  resolver (77 tests), state modules (picks/inventory/cursor/ignore/
+  history/sessions), DSL→resolver round-trips, `tests/` integration
+  directory, snapshot tests via `insta` + `TestBackend`, handler
+  extraction (Phases 0–4 complete: `AppState` with domain logic
+  cleanly separated from terminal state).
+- ~~71 clippy errors fixed~~ — clean `cargo clippy -D warnings` build.
+
+### Remaining
+
 - **Unicode width in the list view.** `chars().count()` is used as a
   width proxy in places; CJK filenames, flags, and family emoji will
-  misalign columns. Bring in `unicode-width` and route width calculations
-  through it.
-- **Testing strategy execution.** See the separate testing-strategy
-  document. In priority order: keymap resolver state machine (462 lines
-  of pure logic, zero tests today); `state/` modules (picks, inventory,
-  history, sessions, cursor, ignore); DSL → resolver round-trip;
-  integration tests under `tests/` using `tempfile`; snapshot tests on
-  widgets via `ratatui::backend::TestBackend` + `insta`; one pty
-  integration test for `pane/` wired end-to-end. The app.rs handler
-  extraction refactor is a prerequisite for meaningful dispatch
-  testing — treat it as part of this track.
-- **CI fixes.** The Bitbucket pipelines image is `rust:1.80-slim` but
-  `rust-toolchain.toml` pins 1.85 — a clean build would fail on CI
-  today. Bump the image. Add `cargo-audit` to the pipeline. Add
-  `cargo-llvm-cov` with a ratcheting coverage floor (start at whatever
-  honest baseline the first run produces).
+  misalign columns. Bring in `unicode-width` and route width
+  calculations through it.
 - **CHANGELOG.md** in Keep-a-Changelog format. Every user-visible
   change gets an entry; the release pipeline reads from it for release
   notes.
-- **`spyc --version --verbose`** dumps version, git SHA, build
-  timestamp, rustc version, terminal detection, and active feature
-  flags. First line of every bug triage.
-- **`RUST_BACKTRACE=full` wired into the debug log.** `--debug`
-  already captures events; ensure panics land there too.
-- **`spyc --dump-default-config`** per the idea already in the old
-  roadmap — gives users a complete `.spycrc.toml` starting point and
-  doubles as self-documentation for the keymap DSL.
-- **Background directory loading.** Large directories (100K+ entries,
-  realistic for `node_modules` or Druid segment caches) block the
-  event loop. Async listing with a cancellable progress indicator.
-  Scoped conservatively — the common case stays synchronous.
+- **`spyc --version --verbose`** dumps version, git SHA (via
+  `build.rs`), build timestamp, rustc version, terminal detection,
+  and active feature flags. First line of every bug triage.
+- **`spyc --dump-default-config`** — complete `.spycrc.toml` with
+  comments. Self-documentation for the keymap DSL and a user starting
+  point.
+- **Handler extraction Phases 5–6** (deferred). The pager handler
+  (~500 lines) is deeply coupled to `PagerView` widget state;
+  extracting it cleanly needs a `PagerState` restructuring, best done
+  when we're actively modifying the pager. `handle_key` thinning is
+  lower ROI — mostly wiring. Both can land alongside thesis features
+  that touch those handlers.
+- **Expand snapshot tests.** `insta` + `TestBackend` infra is wired.
+  Status bar snapshots done (4). Remaining: `list_view`, `pager`
+  (ANSI, hex, line numbers, search highlight), `line_edit` modes.
+  Incremental — add as widgets are touched.
+- **One pty integration test.** Spawn `cat` via `portable-pty`, write
+  bytes, parse `vt100::Screen`, assert rendered output. `#[cfg(unix)]`.
+  One test, not a suite.
+- **Property tests (narrow).** `proptest!` blocks for: shell-arg
+  quoting round-trip, limit-filter glob matching, resolver count
+  invariants. One block per site.
+- **Background directory loading.** Large directories (100K+ entries)
+  block the event loop. Async listing with a cancellable progress
+  indicator. Scoped conservatively — the common case stays synchronous.
 
 ## Thesis — deepening the agent integration
 
@@ -239,6 +251,10 @@ one of the tracks above when picked up.
 
 ## Done (recent)
 
+- **Foundations overhaul** — 311 tests (from 74), 38% line coverage,
+  clean `cargo clippy -D warnings`, panic hook, `cargo-audit` +
+  `cargo-llvm-cov` in CI, `AppState` domain-layer extraction
+  (Phases 0–4).
 - **`:` command extensions** — `:cd`, `:sort` (name/size/mtime/ext),
   `:marks`, `:set key=value`, `:bprev`/`:bnext` buffer history.
 - **Pager buffer history** — closed pagers saved to a back/forward stack

@@ -126,6 +126,8 @@ impl Resolver {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
                 KeyCode::Char('d') => ResolverOutcome::Action(Action::GitDiff),
                 KeyCode::Char('D') => ResolverOutcome::Action(Action::GitDiffCached),
+                KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),
+                KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -608,6 +610,26 @@ mod tests {
         assert_eq!(
             feed(&mut r, key('D')),
             ResolverOutcome::Action(Action::GitDiffCached)
+        );
+    }
+
+    #[test]
+    fn gf_is_goto_file() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('f')),
+            ResolverOutcome::Action(Action::GotoFile)
+        );
+    }
+
+    #[test]
+    fn g_cap_f_is_goto_file_line() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('F')),
+            ResolverOutcome::Action(Action::GotoFileLine)
         );
     }
 

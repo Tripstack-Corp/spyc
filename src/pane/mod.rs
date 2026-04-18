@@ -9,6 +9,7 @@
 //! pane's stdin. For the spike it is intentionally generic.
 
 mod input;
+pub mod pathref;
 pub mod tabs;
 mod widget;
 
@@ -189,6 +190,17 @@ impl Pane {
 
     pub fn screen(&self) -> &vt100::Screen {
         self.parser.screen()
+    }
+
+    /// Return visible screen content as individual lines (plain text,
+    /// no ANSI escapes). Used by `gf` to scan for path references.
+    pub fn visible_lines(&self) -> Vec<String> {
+        let screen = self.parser.screen();
+        screen
+            .contents()
+            .lines()
+            .map(String::from)
+            .collect()
     }
 
     // ---- Scroll mode ------------------------------------------------
