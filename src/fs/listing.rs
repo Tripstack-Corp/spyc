@@ -1,8 +1,58 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 use super::entry::{Entry, EntryKind};
+
+/// Sort order for the file listing. Dirs-first grouping is always applied;
+/// this controls the secondary sort within each group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortMode {
+    #[default]
+    Name,
+    Size,
+    Mtime,
+    Ext,
+}
+
+impl SortMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "name" => Some(Self::Name),
+            "size" => Some(Self::Size),
+            "mtime" | "time" | "date" => Some(Self::Mtime),
+            "ext" | "extension" | "type" => Some(Self::Ext),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for SortMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Name => write!(f, "name"),
+            Self::Size => write!(f, "size"),
+            Self::Mtime => write!(f, "mtime"),
+            Self::Ext => write!(f, "ext"),
+        }
+    }
+}
+
+/// Dirs first, then executables, files, symlinks, other.
+const fn kind_rank(k: EntryKind) -> u8 {
+    match k {
+        EntryKind::Dir => 0,
+        EntryKind::Executable => 1,
+        EntryKind::File => 2,
+        EntryKind::Symlink => 3,
+        EntryKind::Other => 4,
+    }
+}
+
+fn ext_of(name: &str) -> &str {
+    name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("")
+}
 
 /// A snapshot of one directory's entries.
 #[derive(Debug, Clone)]
@@ -31,25 +81,32 @@ impl Listing {
                 entries.push(e);
             }
         }
-        // spy-ish: dotfiles mixed in, dirs sort with files, case-insensitive by name.
-        entries.sort_by(|a, b| {
-            // Directories first, then executables, then files, then links/other.
-            const fn rank(k: EntryKind) -> u8 {
-                match k {
-                    EntryKind::Dir => 0,
-                    EntryKind::Executable => 1,
-                    EntryKind::File => 2,
-                    EntryKind::Symlink => 3,
-                    EntryKind::Other => 4,
-                }
-            }
-            rank(a.kind).cmp(&rank(b.kind)).then_with(|| {
-                a.name
+        let mut listing = Self { dir, entries };
+        listing.sort(SortMode::Name);
+        Ok(listing)
+    }
+
+    /// Re-sort entries in-place.
+    pub fn sort(&mut self, mode: SortMode) {
+        self.entries.sort_by(|a, b| {
+            kind_rank(a.kind).cmp(&kind_rank(b.kind)).then_with(|| match mode {
+                SortMode::Name => a
+                    .name
                     .to_ascii_lowercase()
-                    .cmp(&b.name.to_ascii_lowercase())
+                    .cmp(&b.name.to_ascii_lowercase()),
+                SortMode::Size => b.size.cmp(&a.size), // largest first
+                SortMode::Mtime => b.mtime.cmp(&a.mtime), // newest first
+                SortMode::Ext => {
+                    let ea = ext_of(&a.name).to_ascii_lowercase();
+                    let eb = ext_of(&b.name).to_ascii_lowercase();
+                    ea.cmp(&eb).then_with(|| {
+                        a.name
+                            .to_ascii_lowercase()
+                            .cmp(&b.name.to_ascii_lowercase())
+                    })
+                }
             })
         });
-        Ok(Self { dir, entries })
     }
 
     #[allow(dead_code)]

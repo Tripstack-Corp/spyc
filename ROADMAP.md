@@ -11,22 +11,10 @@ git branching but for Claude sessions.
   pasted in, so the new Claude instance has the prior context
 - Useful for "let me try a different approach without losing this one"
 
-### Demo mode
-
-A guided walkthrough mode that showcases spyc's features — useful for
-onboarding new users or recording screencasts. Details TBD.
-
 ### Additional Ideas
-- **`:` command extensions** — expand `:` with more commands: `:set`,
-  `:sort`, `:cd`, `:marks`, etc. Currently supports `:limit`, `:!`,
-  `:!!`, `:;`, `:q`.
-- **Split stdout/stderr pager** — option to show stdout and stderr in
-  separate horizontal panes within the pager, for commands where you
-  want to see errors separately from normal output
-- **Buffer history** — keep a stack of recent pager buffers (command
-  output, file views, diffs) so you can cycle back through them without
-  re-running commands. Like `:bprev`/`:bnext` in vim.
-- Mouse support: click to change pane focus, click tab indicators to switch tabs, click file list entries to select. Must coexist with terminal native text selection
+- Mouse support: click to change pane focus, click tab indicators to switch
+  tabs, click file list entries to select. Must coexist with terminal native
+  text selection
 - **Drag and drop** — test and support dragging files from the desktop
   into spyc (terminal drag-and-drop via OSC 52 or path paste)
 
@@ -68,6 +56,10 @@ onboarding new users or recording screencasts. Details TBD.
 
 ## Done (recent)
 
+- **`:` command extensions** — `:cd`, `:sort` (name/size/mtime/ext),
+  `:marks`, `:set key=value`, `:bprev`/`:bnext` buffer history.
+- **Pager buffer history** — closed pagers saved to a back/forward stack
+  (max 10). Navigate with `:bprev`/`:bnext` or `[b`/`]b` in pager.
 - **`:` command line** — vim-style command prompt with `:limit`, `:!cmd`,
   `:!!`, `:;cmd`, `:q`. Vi line editor with history.
 - **`=` limit filter** — temporary glob filtering (`=*.rs`, `=!` for

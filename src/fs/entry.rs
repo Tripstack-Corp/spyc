@@ -1,5 +1,6 @@
 use std::fs::Metadata;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
@@ -15,9 +16,8 @@ pub struct Entry {
     pub path: PathBuf,
     pub name: String,
     pub kind: EntryKind,
-    /// Byte size; unused in M1 but surfaced soon for `L` long-listing.
-    #[allow(dead_code)]
     pub size: u64,
+    pub mtime: SystemTime,
 }
 
 impl Entry {
@@ -43,11 +43,13 @@ impl Entry {
             EntryKind::Other
         };
         let size = md.len();
+        let mtime = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         Self {
             path,
             name,
             kind,
             size,
+            mtime,
         }
     }
 

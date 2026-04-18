@@ -173,6 +173,55 @@ enum PromptKind {
     Command,
 }
 
+/// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
+/// Works like a browser back/forward stack.
+struct PagerHistory {
+    back: Vec<pager::PagerView>,
+    forward: Vec<pager::PagerView>,
+}
+
+const MAX_PAGER_HISTORY: usize = 10;
+
+impl PagerHistory {
+    fn new() -> Self {
+        Self {
+            back: Vec::new(),
+            forward: Vec::new(),
+        }
+    }
+
+    /// Save a closed pager view. Clears the forward stack.
+    fn push(&mut self, view: pager::PagerView) {
+        self.back.push(view);
+        self.forward.clear();
+        if self.back.len() > MAX_PAGER_HISTORY {
+            self.back.remove(0);
+        }
+    }
+
+    /// Go back: push current to forward, pop from back.
+    fn go_back(&mut self, current: pager::PagerView) -> Option<pager::PagerView> {
+        let prev = self.back.pop()?;
+        self.forward.push(current);
+        Some(prev)
+    }
+
+    /// Go forward: push current to back, pop from forward.
+    fn go_forward(&mut self, current: pager::PagerView) -> Option<pager::PagerView> {
+        let next = self.forward.pop()?;
+        self.back.push(current);
+        Some(next)
+    }
+
+    fn back_len(&self) -> usize {
+        self.back.len()
+    }
+
+    fn forward_len(&self) -> usize {
+        self.forward.len()
+    }
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
     listing: Listing,
@@ -183,6 +232,9 @@ pub struct App {
     /// Temporary filter pattern from `:limit`. `None` = show all.
     /// `Some("!")` = show only picked files.
     temp_filter: Option<String>,
+    sort_order: crate::fs::listing::SortMode,
+    pager_history: PagerHistory,
+    pager_pending_bracket: Option<char>,
     view: View,
     cursor: Cursor,
     resolver: Resolver,
@@ -326,6 +378,9 @@ impl App {
                 m
             },
             temp_filter: None,
+            sort_order: crate::fs::listing::SortMode::Name,
+            pager_history: PagerHistory::new(),
+            pager_pending_bracket: None,
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),
@@ -1716,6 +1771,141 @@ impl App {
             return PostAction::None;
         }
 
+        // :cd <path>
+        if input == "cd" {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+            match self.chdir(&std::path::PathBuf::from(home)) {
+                Ok(()) => {}
+                Err(e) => self.flash_error(format!("cd: {e}")),
+            }
+            return PostAction::None;
+        }
+        if let Some(raw) = input.strip_prefix("cd ") {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                self.flash_error("cd: missing path");
+                return PostAction::None;
+            }
+            let path = crate::paths::expand(raw);
+            match self.chdir(&path) {
+                Ok(()) => {}
+                Err(e) => self.flash_error(format!("cd: {e}")),
+            }
+            return PostAction::None;
+        }
+
+        // :sort [mode]
+        if input == "sort" {
+            self.flash_info(format!("sort: {}", self.sort_order));
+            return PostAction::None;
+        }
+        if let Some(mode_str) = input.strip_prefix("sort ") {
+            let mode_str = mode_str.trim();
+            match crate::fs::listing::SortMode::parse(mode_str) {
+                Some(mode) => {
+                    self.sort_order = mode;
+                    self.listing.sort(mode);
+                    self.rebuild_rows();
+                    self.flash_info(format!("sort: {mode}"));
+                }
+                None => self.flash_error(format!(
+                    "unknown sort mode: {mode_str} (name|size|mtime|ext)"
+                )),
+            }
+            return PostAction::None;
+        }
+
+        // :marks
+        if input == "marks" {
+            if self.marks.entries.is_empty() {
+                self.flash_info("no marks set");
+                return PostAction::None;
+            }
+            let lines: Vec<String> = self
+                .marks
+                .entries
+                .iter()
+                .map(|(key, mark)| {
+                    let focus = match &mark.focus {
+                        Some(p) => format!("  → {}", p.display()),
+                        None => String::new(),
+                    };
+                    format!("  {key}  {}{focus}", mark.dir.display())
+                })
+                .collect();
+            self.pager = Some(PagerView::new_plain("marks", lines));
+            return PostAction::None;
+        }
+
+        // :set key=value
+        if let Some(assignment) = input.strip_prefix("set ") {
+            let assignment = assignment.trim();
+            if let Some((key, value)) = assignment.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                match key {
+                    "sort" => {
+                        match crate::fs::listing::SortMode::parse(value) {
+                            Some(mode) => {
+                                self.sort_order = mode;
+                                self.listing.sort(mode);
+                                self.rebuild_rows();
+                                self.flash_info(format!("sort={mode}"));
+                            }
+                            None => self.flash_error(format!("invalid sort mode: {value}")),
+                        }
+                    }
+                    _ => self.flash_error(format!("unknown setting: {key}")),
+                }
+            } else {
+                self.flash_error("usage: :set key=value");
+            }
+            return PostAction::None;
+        }
+
+        // :bprev / :bnext — pager buffer history
+        if input == "bprev" {
+            if let Some(current) = self.pager.take() {
+                if let Some(prev) = self.pager_history.go_back(current) {
+                    self.pager = Some(prev);
+                    self.needs_full_repaint = true;
+                    let back = self.pager_history.back_len();
+                    let fwd = self.pager_history.forward_len();
+                    self.flash_info(format!("buffer ←{back} →{fwd}"));
+                } else {
+                    // go_back returned None — restore current
+                    self.pager = self.pager_history.forward.pop();
+                    self.flash_info("no older buffers");
+                }
+            } else if let Some(prev) = self.pager_history.back.pop() {
+                self.pager = Some(prev);
+                self.needs_full_repaint = true;
+                self.flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+            } else {
+                self.flash_info("no buffers in history");
+            }
+            return PostAction::None;
+        }
+        if input == "bnext" {
+            if let Some(current) = self.pager.take() {
+                if let Some(next) = self.pager_history.go_forward(current) {
+                    self.pager = Some(next);
+                    self.needs_full_repaint = true;
+                    let back = self.pager_history.back_len();
+                    let fwd = self.pager_history.forward_len();
+                    self.flash_info(format!("buffer ←{back} →{fwd}"));
+                } else {
+                    // go_forward returned None — restore current
+                    self.pager = self.pager_history.back.pop();
+                    self.needs_full_repaint = true;
+                    self.flash_info("no newer buffers");
+                }
+            } else {
+                self.flash_info("no pager open");
+            }
+            return PostAction::None;
+        }
+
         self.flash_error(format!("unknown command: {input}"));
         PostAction::None
     }
@@ -2744,6 +2934,45 @@ impl App {
             return PostAction::None;
         }
 
+        // [b / ]b — pager buffer history navigation (two-key sequence).
+        if let Some(bracket) = self.pager_pending_bracket.take() {
+            if key.code == KeyCode::Char('b') {
+                match bracket {
+                    '[' => {
+                        if let Some(current) = self.pager.take() {
+                            if let Some(prev) = self.pager_history.go_back(current) {
+                                self.pager = Some(prev);
+                                self.needs_full_repaint = true;
+                                let back = self.pager_history.back_len();
+                                let fwd = self.pager_history.forward_len();
+                                self.flash_info(format!("buffer ←{back} →{fwd}"));
+                            } else {
+                                // Restore — go_back returned None.
+                                self.pager = self.pager_history.forward.pop();
+                                self.flash_info("no older buffers");
+                            }
+                        }
+                    }
+                    ']' => {
+                        if let Some(current) = self.pager.take() {
+                            if let Some(next) = self.pager_history.go_forward(current) {
+                                self.pager = Some(next);
+                                self.needs_full_repaint = true;
+                                let back = self.pager_history.back_len();
+                                let fwd = self.pager_history.forward_len();
+                                self.flash_info(format!("buffer ←{back} →{fwd}"));
+                            } else {
+                                self.pager = self.pager_history.back.pop();
+                                self.flash_info("no newer buffers");
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return PostAction::None;
+        }
+
         // Worktree picker: 1-9 selects a worktree and chdirs.
         if let Some(ref worktrees) = self.pending_worktrees {
             if let KeyCode::Char(c @ '1'..='9') = key.code {
@@ -3029,11 +3258,25 @@ impl App {
 
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
+                // Save eligible pagers to history before closing.
+                let is_picker = self.pending_worktrees.is_some()
+                    || self.pending_sessions.is_some()
+                    || self.pending_history_pick.is_some();
+                if !is_picker {
+                    if let Some(ref v) = self.pager {
+                        if v.picker_cursor.is_none() && !v.streaming {
+                            if let Some(v) = self.pager.take() {
+                                self.pager_history.push(v);
+                            }
+                        }
+                    }
+                }
                 self.pager = None;
                 self.pending_worktrees = None;
                 self.pending_sessions = None;
                 self.pending_history_pick = None;
                 self.pager_jump_buf = None;
+                self.pager_pending_bracket = None;
                 self.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
@@ -3042,6 +3285,11 @@ impl App {
             KeyCode::Char(':') => {
                 self.pager_jump_buf = Some(String::new());
                 view.jump_buf = Some(String::new());
+            }
+            KeyCode::Char('[') | KeyCode::Char(']') => {
+                if let KeyCode::Char(c) = key.code {
+                    self.pager_pending_bracket = Some(c);
+                }
             }
             KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
             KeyCode::Char('k') | KeyCode::Up => view.scroll_by(-1, viewport),
@@ -3718,6 +3966,7 @@ impl App {
         // the user is looking at.
         let _ = std::env::set_current_dir(&canonical);
         self.listing = new_listing;
+        self.listing.sort(self.sort_order);
         self.git_info = crate::sysinfo::git_status(&canonical);
         self.git_files = crate::sysinfo::git_file_statuses(&canonical);
         self.picks.clear();

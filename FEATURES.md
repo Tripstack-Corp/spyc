@@ -147,6 +147,11 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 
 **`:`** opens a vim-style command prompt with vi editing and history:
 
+- **`:cd <path>`** — change directory (`~` and `$VAR` expanded, bare `:cd` goes home)
+- **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext` (persists across chdir)
+- **`:marks`** — show all marks in a pager popup
+- **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
+- **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit`** — clear filter
@@ -157,6 +162,13 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
+
+## Pager buffer history
+
+Closed pager views are saved to a history stack (up to 10). Navigate
+with `:bprev`/`:bnext` from the main prompt, or `[b`/`]b` while in
+the pager. Works like browser back/forward — scroll positions are
+preserved.
 
 ## Marks
 
