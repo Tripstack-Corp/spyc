@@ -82,6 +82,25 @@ pub fn git_file_statuses(
     if !output.status.success() {
         return map;
     }
+    // Compute the prefix to strip from repo-relative paths so we get
+    // paths relative to the current listing directory.
+    let prefix = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| {
+            let repo_root = std::path::PathBuf::from(s.trim());
+            dir.strip_prefix(&repo_root)
+                .unwrap_or(std::path::Path::new(""))
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_default();
+
     let text = String::from_utf8_lossy(&output.stdout);
     for line in text.lines() {
         if line.len() < 4 {
@@ -90,14 +109,27 @@ pub fn git_file_statuses(
         let xy = &line[..2];
         let path_str = &line[3..];
         // For renames ("R  old -> new"), take the new name.
-        let filename = path_str.rsplit(" -> ").next().unwrap_or(path_str);
-        // We only care about the filename relative to the listing dir.
-        // `git status` gives repo-relative paths, so extract the last component.
+        let raw_path = path_str.rsplit(" -> ").next().unwrap_or(path_str);
+        // Strip the directory prefix to get a path relative to the
+        // current listing dir (git status gives repo-relative paths).
+        let filename = if prefix.is_empty() {
+            raw_path
+        } else {
+            let pfx = if prefix.ends_with('/') {
+                prefix.as_str()
+            } else {
+                &format!("{prefix}/")
+            };
+            match raw_path.strip_prefix(pfx) {
+                Some(rest) => rest,
+                None => continue, // not under this directory
+            }
+        };
         let name = std::path::Path::new(filename)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // Also track directory names for changed files inside subdirs.
+        // Top component relative to THIS directory.
         let top_component = filename.split('/').next().unwrap_or(filename).to_string();
         let status = match xy {
             "??" => GitFileStatus::Untracked,

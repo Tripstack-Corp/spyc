@@ -283,10 +283,17 @@ impl AppState {
         } else {
             vec![]
         };
+        let total = to_take.len();
         let (count, err) = self.inventory.yank_many(&to_take);
         self.rebuild_rows();
+        let skipped = total - count;
         if count > 0 {
-            return Some(format!("yanked {count} file(s) to inventory"));
+            let msg = if skipped > 0 {
+                format!("yanked {count} file(s), skipped {skipped} (dirs/special)")
+            } else {
+                format!("yanked {count} file(s) to inventory")
+            };
+            return Some(msg);
         }
         err
     }
