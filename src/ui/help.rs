@@ -140,7 +140,7 @@ const SECTIONS: &[Section] = &[
             ("^W 1..9", "switch to tab N"),
             ("^W [  ^W ]", "prev / next tab"),
             ("^W r", "rename active tab"),
-            ("Alt+Enter", "newline in pane (multi-line input)"),
+            ("Ctrl+J", "newline in pane (multi-line input)"),
             ("SPYC_PANE_CMD", "env var for pane command (default claude)"),
         ],
     },

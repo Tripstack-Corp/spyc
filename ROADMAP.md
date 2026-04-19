@@ -309,7 +309,7 @@ one of the tracks above when picked up.
 - Pager multi-column layout with position indicator (Top/Bot/NN%)
 - Focus indicators: dim list cursor when pane focused, blinking pane
   cursor when focused, static block when not
-- Alt+Enter sends newline to pane (Claude CLI multi-line input)
+- Ctrl+J sends newline to pane (Claude CLI multi-line input)
 - Vi line editor: operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`)
 - Backspace on empty no longer cancels vi-mode prompts
 - Force full repaint on pager close (fixes ghost character artifacts)

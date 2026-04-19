@@ -143,7 +143,7 @@ The shell prompt uses a vi-mode line editor with persistent history
 editing, operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`, etc.),
 and `i/a/I/A` mode switching — all within the one-line prompt.
 `j`/`k` in normal mode cycle through history without leaving normal
-mode. Alt+Enter inserts a newline in the pane (for Claude CLI
+mode. Ctrl+J inserts a newline in the pane (for Claude CLI
 multi-line input).
 
 Pane command prompts (`^W n`) have their own dedicated history,

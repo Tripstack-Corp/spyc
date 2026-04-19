@@ -43,8 +43,10 @@ pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
             }
         }
         K::Enter => {
-            if alt {
-                // Alt+Enter → newline (used by Claude CLI for multi-line input).
+            if alt || ctrl {
+                // Alt+Enter or Ctrl+Enter → newline (Claude CLI multi-line).
+                // Ctrl+Enter is the fallback for terminals where Option
+                // doesn't produce an ALT modifier (iTerm2 with "Esc+" mode).
                 out.push(b'\n');
             } else {
                 out.push(b'\r');

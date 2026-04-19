@@ -120,5 +120,5 @@ Launch spyc and check:
    true-color.
 3. **Pane** — press `^\` (Ctrl+Backslash) to open the lower pane. It
    should spawn `claude` (or whatever `SPYC_PANE_CMD` is set to).
-4. **Alt+Enter** — in the pane with Claude, Alt+Enter should insert a
+4. **Ctrl+J** — in the pane with Claude, Ctrl+J should insert a
    newline for multi-line input.
