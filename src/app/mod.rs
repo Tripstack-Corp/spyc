@@ -1221,7 +1221,15 @@ impl App {
             }),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
-                format!("[{} items]  (x: remove, ESC/i: return, z: clear)", self.state.inventory.len()),
+                format!(
+                    "[{} items{}]  (t: tag, p: put, x: remove, ESC: return)",
+                    self.state.inventory.len(),
+                    if self.state.inventory.picks.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} tagged", self.state.inventory.picks.len())
+                    }
+                ),
             ),
         }
     }
@@ -1338,7 +1346,7 @@ impl App {
         if matches!(self.state.mode, Mode::Prompting(_)) {
             return Ok(self.handle_prompt_key(key));
         }
-        // Inventory view: ESC returns to dir view, x/d removes cursor item.
+        // Inventory view: special key handling.
         if self.state.view == View::Inventory {
             match key.code {
                 KeyCode::Esc => {
@@ -1348,6 +1356,14 @@ impl App {
                 KeyCode::Char('x') | KeyCode::Char('d') => {
                     self.state.drop_cursor();
                     return Ok(PostAction::None);
+                }
+                KeyCode::Char(' ') | KeyCode::Char('t') => {
+                    self.state.inventory.toggle_pick(self.state.cursor.index);
+                    self.state.cursor_move_vertical(1, self.state.rows.len());
+                    return Ok(PostAction::None);
+                }
+                KeyCode::Char('p') => {
+                    return Ok(self.put_inventory_to_cwd());
                 }
                 _ => {}
             }
@@ -1959,6 +1975,33 @@ impl App {
     }
 
     /// ^W n — start the two-step prompt for a new pane tab.
+    /// Put inventory items to the current working directory.
+    /// Picked items only if any picks exist, else all.
+    /// Items are removed from inventory after successful put.
+    fn put_inventory_to_cwd(&mut self) -> PostAction {
+        let dest = self.state.listing.dir.clone();
+        let item_count = if self.state.inventory.picks.is_empty() {
+            self.state.inventory.len()
+        } else {
+            self.state.inventory.picks.len()
+        };
+        if item_count == 0 {
+            self.state.flash_error("inventory is empty");
+            return PostAction::None;
+        }
+        // TODO: confirmation for large puts (>10 items)
+        let (count, _, err) = self.state.inventory.put_to(&dest);
+        self.state.rebuild_rows();
+        if count > 0 {
+            self.state.refresh_listing();
+            self.state.flash_info(format!("put {count} file(s) to {}", dest.display()));
+        }
+        if let Some(e) = err {
+            self.state.flash_error(e);
+        }
+        PostAction::None
+    }
+
     fn start_new_tab_prompt(&mut self) {
         let default_cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
@@ -2101,37 +2144,58 @@ impl App {
             self.state.flash_error("no pane open");
             return;
         }
-        let paths: Vec<PathBuf> = if use_inventory {
-            self.state.inventory.paths().cloned().collect()
-        } else {
-            self.state.selection_paths()
-                .into_iter()
-                .map(Path::to_path_buf)
-                .collect()
-        };
-        if paths.is_empty() {
-            self.state.flash_error(if use_inventory {
-                "inventory is empty"
-            } else {
-                "nothing selected"
-            });
-            return;
-        }
-        // Read file contents and build payload.
+        // Build payload: read from cache for inventory, from disk for selection.
         let mut payload = String::new();
         let mut count = 0usize;
         let mut skipped = 0usize;
-        for path in &paths {
-            let Ok(contents) = std::fs::read_to_string(path) else {
-                skipped += 1;
-                continue;
-            };
-            if !payload.is_empty() {
-                payload.push('\n');
+
+        if use_inventory {
+            let ids = self.state.inventory.selected_ids();
+            if ids.is_empty() {
+                self.state.flash_error("inventory is empty");
+                return;
             }
-            let _ = write!(payload, "[file: {}]\n{}", path.display(), contents);
-            count += 1;
+            for id in &ids {
+                if let Some(item) = self.state.inventory.items()
+                    .find(|i| &i.id == id)
+                {
+                    if let Some(bytes) = self.state.inventory.read_content(id) {
+                        if let Ok(text) = String::from_utf8(bytes) {
+                            if !payload.is_empty() {
+                                payload.push('\n');
+                            }
+                            let _ = write!(payload, "[file: {}]\n{}", item.orig_path.display(), text);
+                            count += 1;
+                        } else {
+                            skipped += 1;
+                        }
+                    } else {
+                        skipped += 1;
+                    }
+                }
+            }
+        } else {
+            let paths: Vec<PathBuf> = self.state.selection_paths()
+                .into_iter()
+                .map(Path::to_path_buf)
+                .collect();
+            if paths.is_empty() {
+                self.state.flash_error("nothing selected");
+                return;
+            }
+            for path in &paths {
+                let Ok(contents) = std::fs::read_to_string(path) else {
+                    skipped += 1;
+                    continue;
+                };
+                if !payload.is_empty() {
+                    payload.push('\n');
+                }
+                let _ = write!(payload, "[file: {}]\n{}", path.display(), contents);
+                count += 1;
+            }
         }
+
         if count == 0 {
             self.state.flash_error("no readable text files in selection");
             return;
@@ -3196,6 +3260,11 @@ impl App {
             self.state.last_grid.items_per_page(),
             self.state.rows.len(),
         );
+
+        // In dir view, `p` (Drop) means "put inventory to cwd".
+        if *action == Action::Drop && self.state.view == View::Dir {
+            return Ok(self.put_inventory_to_cwd());
+        }
 
         // Try pure-domain dispatch first.
         match self.state.apply(action) {

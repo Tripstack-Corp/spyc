@@ -98,6 +98,12 @@ rest of the dispatch testing.
 
 ### Hardening
 
+- [ ] **[S] Startup health check on state directory.**
+  Scan `~/.local/state/spyc/` on launch for unexpected types (e.g.
+  flat file where a directory is expected, corrupt JSON, orphaned
+  `.dat` without `.json`). Flash a warning and offer to fix.
+  Defensive against version upgrades that change storage format.
+
 - [ ] **[L] Background directory loading.**
   Async listing above a threshold (~10K entries). Cancellable
   progress indicator; synchronous path stays for the common case.

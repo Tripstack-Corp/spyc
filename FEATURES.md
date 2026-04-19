@@ -44,11 +44,19 @@ Two levels of selection for flexible file management.
 - **T** pick by glob pattern
 - **^T** pick all / clear all
 
-**Inventory** is a global, cross-directory clipboard:
-- **y / Y** take picked files (or cursor entry) into inventory
-- **p** drop an item from inventory
+**Inventory** is a file cache — yanked files are copied to a local cache
+(`~/.local/state/spyc/inventory/`), persisted across sessions:
+- **y** yank file(s) into inventory cache (regular files only)
+- **Y** remove cursor file from inventory
+- **p** put all inventory files to the current directory
 - **i** toggle the inventory view (replaces the file listing)
-- **z** empty the entire inventory
+- **z** clear inventory (moves files to graveyard)
+
+Inside the **inventory view** (`i`):
+- **t / Space** tag items for partial put
+- **p** put tagged items (or all) to cwd — removes from inventory
+- **x / d** remove item to graveyard
+- **ESC** return to directory view
 
 Picks and inventory feed into file operations and shell commands — they
 become `%` in shell expansion.

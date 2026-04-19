@@ -50,12 +50,22 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Inventory (cross-directory)",
+        title: "Inventory (file cache)",
         rows: &[
-            ("y  Y", "take selection into inventory"),
-            ("p", "drop cursor item from inventory"),
+            ("y", "yank file(s) into inventory cache"),
+            ("Y", "remove cursor file from inventory"),
+            ("p", "put inventory files to current dir"),
             ("i", "toggle inventory view"),
-            ("z", "empty inventory"),
+            ("z", "clear inventory (moves to graveyard)"),
+        ],
+    },
+    Section {
+        title: "Inventory view (inside i)",
+        rows: &[
+            ("t  Space", "tag/untag items for partial put"),
+            ("p", "put tagged (or all) to cwd"),
+            ("x  d", "remove item (to graveyard)"),
+            ("ESC  i", "return to directory view"),
         ],
     },
     Section {

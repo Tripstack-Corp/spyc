@@ -17,7 +17,7 @@ use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::list_view::Grid;
 
 use super::{
-    detect_kind, row_from_entry, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt,
+    row_from_entry, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt,
     PromptKind, RowData, View,
 };
 
@@ -270,9 +270,11 @@ impl AppState {
         }
     }
 
-    pub fn take(&mut self) {
+    /// Yank files into the inventory cache. Takes picks if any, else
+    /// cursor item. Only regular files are accepted.
+    pub fn take(&mut self) -> Option<String> {
         if self.view != View::Dir {
-            return;
+            return None;
         }
         let to_take: Vec<PathBuf> = if !self.picks.is_empty() {
             self.picks.iter().cloned().collect()
@@ -281,17 +283,19 @@ impl AppState {
         } else {
             vec![]
         };
-        self.inventory.extend(to_take);
+        let (count, err) = self.inventory.yank_many(&to_take);
         self.rebuild_rows();
+        if count > 0 {
+            return Some(format!("yanked {count} file(s) to inventory"));
+        }
+        err
     }
 
+    /// Remove the cursor item from inventory (move to graveyard).
     pub fn drop_cursor(&mut self) {
-        let Some(row) = self.rows.get(self.cursor.index) else {
-            return;
-        };
-        let path = row.path.clone();
-        self.inventory.remove(&path);
+        self.inventory.remove_at(self.cursor.index);
         self.rebuild_rows();
+        self.cursor.clamp(self.rows.len());
     }
 
     pub fn toggle_inventory_view(&mut self) {
@@ -323,11 +327,11 @@ impl AppState {
             }
             View::Inventory => self
                 .inventory
-                .paths()
-                .map(|p| RowData {
-                    path: p.clone(),
-                    display: p.display().to_string(),
-                    kind: detect_kind(p),
+                .items()
+                .map(|item| RowData {
+                    path: item.orig_path.clone(),
+                    display: format!("{}  ← {}", item.filename, item.orig_path.parent().unwrap_or(Path::new("/")).display()),
+                    kind: crate::fs::EntryKind::File,
                 })
                 .collect(),
         };
@@ -451,8 +455,39 @@ impl AppState {
             Action::PickToggleAll => self.toggle_all_picks(),
 
             // -- Inventory --
-            Action::Take => self.take(),
-            Action::Drop => self.drop_cursor(),
+            Action::Take => {
+                match self.take() {
+                    Some(msg) if msg.starts_with("yanked") => self.flash_info(msg),
+                    Some(err) => self.flash_error(err),
+                    None => {}
+                }
+            }
+            Action::Untake => {
+                if self.view != View::Dir {
+                    return ApplyResult::Handled;
+                }
+                if let Some(row) = self.rows.get(self.cursor.index) {
+                    let path = row.path.clone();
+                    if self.inventory.contains(&path) {
+                        // Find and remove by original path.
+                        let id = self.inventory.items()
+                            .find(|i| i.orig_path == path)
+                            .map(|i| i.id.clone());
+                        if let Some(id) = id {
+                            self.inventory.remove_by_id(&id);
+                            self.flash_info("removed from inventory");
+                        }
+                    } else {
+                        self.flash_error("not in inventory");
+                    }
+                }
+                self.rebuild_rows();
+            }
+            Action::Drop => {
+                // In dir view, p = put (handled by App, not here).
+                // This arm only fires from inventory view fallthrough.
+                self.drop_cursor();
+            }
             Action::ToggleInventoryView => self.toggle_inventory_view(),
             Action::EmptyInventory => {
                 self.inventory.clear();
@@ -1301,27 +1336,52 @@ mod tests {
 
     // ── take / drop / inventory ───────────────────────────────────
 
+    fn state_with_real_files(tmp: &std::path::Path, names: &[&str]) -> AppState {
+        let mut s = test_state();
+        for name in names {
+            std::fs::write(tmp.join(name), format!("content of {name}")).unwrap();
+        }
+        s.rows = names
+            .iter()
+            .map(|n| RowData {
+                path: tmp.join(n),
+                display: n.to_string(),
+                kind: EntryKind::File,
+            })
+            .collect();
+        s
+    }
+
     #[test]
     fn take_cursor_item_to_inventory() {
-        let mut s = state_with_rows(&["a.txt", "b.txt"]);
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
         s.take();
         assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(Path::new("/tmp/test/a.txt")));
+        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
     }
 
     #[test]
     fn take_picks_to_inventory() {
-        let mut s = state_with_rows(&["a.txt", "b.txt"]);
-        s.picks.toggle(Path::new("/tmp/test/a.txt"));
-        s.picks.toggle(Path::new("/tmp/test/b.txt"));
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
+        s.picks.toggle(&tmp.path().join("a.txt"));
+        s.picks.toggle(&tmp.path().join("b.txt"));
         s.take();
         assert_eq!(s.inventory.len(), 2);
     }
 
     #[test]
     fn drop_removes_from_inventory() {
-        let mut s = state_with_rows(&["a.txt"]);
-        s.inventory.extend(vec![PathBuf::from("/tmp/test/a.txt")]);
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+        s.take(); // yank it first
+        assert_eq!(s.inventory.len(), 1);
+        // Switch to inventory view to drop
+        s.toggle_inventory_view();
         s.drop_cursor();
         assert!(s.inventory.is_empty());
     }
@@ -1686,16 +1746,21 @@ mod tests {
 
     #[test]
     fn apply_take_adds_to_inventory() {
-        let mut s = state_with_rows(&["a.txt"]);
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
         s.apply(&Action::Take);
         assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(Path::new("/tmp/test/a.txt")));
+        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
     }
 
     #[test]
     fn apply_drop_removes_from_inventory() {
-        let mut s = state_with_rows(&["a.txt"]);
-        s.inventory.extend(vec![PathBuf::from("/tmp/test/a.txt")]);
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+        s.take(); // yank first
+        s.toggle_inventory_view();
         s.apply(&Action::Drop);
         assert!(s.inventory.is_empty());
     }
@@ -1711,8 +1776,11 @@ mod tests {
 
     #[test]
     fn apply_empty_inventory() {
-        let mut s = state_with_rows(&["a"]);
-        s.inventory.extend(vec![PathBuf::from("/tmp/x")]);
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+        s.take(); // yank first
+        assert_eq!(s.inventory.len(), 1);
         s.apply(&Action::EmptyInventory);
         assert!(s.inventory.is_empty());
     }

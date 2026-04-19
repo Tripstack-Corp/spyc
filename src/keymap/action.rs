@@ -26,8 +26,9 @@ pub enum Action {
     PickToggleAll,     // ^T
 
     // Inventory (global, cross-directory).
-    Take,                // y / Y
-    Drop,                // p
+    Take,                // y — yank into inventory
+    Untake,              // Y — remove from inventory (from dir view)
+    Drop,                // p — put inventory to cwd
     ToggleInventoryView, // i
     EmptyInventory,      // z
 
@@ -138,6 +139,7 @@ impl Action {
             Self::PickPatternPrompt => "pick by pattern (prompt)",
             Self::PickToggleAll => "pick all / clear",
             Self::Take => "take into inventory",
+            Self::Untake => "remove from inventory",
             Self::Drop => "drop from inventory",
             Self::ToggleInventoryView => "toggle inventory view",
             Self::EmptyInventory => "empty inventory",

@@ -9,6 +9,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 - Unicode-width support: CJK filenames, flags, and emoji now render
   with correct column alignment in the file list, status bar, help
   screen, and pager. Uses `unicode-width` crate.
+- `CHANGELOG.md` seeded in Keep-a-Changelog format.
+- `--version --verbose` dumps git SHA, build timestamp, rustc version,
+  TERM, COLORTERM, and os/arch. `build.rs` embeds build info.
+- **Inventory rewritten as file cache.** `y` (yank) copies file
+  content into `~/.local/state/spyc/inventory/`. `p` (put) copies
+  cached files to the current directory and removes from inventory.
+  Regular files only — directories and special files are rejected.
+- Inventory view (`i`): `t`/`Space` to tag items for partial put,
+  `p` to put tagged (or all) to cwd, `x`/`d` to remove to graveyard.
+- `Y` (shift-y) removes cursor file from inventory in dir view.
+- Inventory persists across sessions (file-backed cache with metadata).
+- Graveyard: removed inventory items are preserved in
+  `~/.local/state/spyc/graveyard/` for undo safety.
+- ESC exits inventory view (returns to directory view).
+
+### Changed
+- `p` in dir view now means "put inventory to cwd" (was "drop from
+  inventory").
 
 ## [1.5.0] - 2026-04-18
 

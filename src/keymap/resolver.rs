@@ -283,10 +283,14 @@ impl Resolver {
                 ResolverOutcome::Action(Action::PickPatternPrompt)
             }
 
-            // Inventory (take / drop / view / empty).
-            KeyCode::Char('y' | 'Y') => {
+            // Inventory (take / untake / drop / view / empty).
+            KeyCode::Char('y') => {
                 self.reset();
                 ResolverOutcome::Action(Action::Take)
+            }
+            KeyCode::Char('Y') => {
+                self.reset();
+                ResolverOutcome::Action(Action::Untake)
             }
             KeyCode::Char('p') => {
                 self.reset();
@@ -1117,6 +1121,10 @@ mod tests {
         assert_eq!(
             feed(&mut r, key('y')),
             ResolverOutcome::Action(Action::Take)
+        );
+        assert_eq!(
+            feed(&mut r, key('Y')),
+            ResolverOutcome::Action(Action::Untake)
         );
         assert_eq!(
             feed(&mut r, key('p')),

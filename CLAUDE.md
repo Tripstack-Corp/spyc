@@ -11,7 +11,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - `!?` history editor — popup with vi-editable lines, `/search`, `G`/`gg`, `:N` jump, `Ctrl+D` delete
 - `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:q`)
 - `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=` clears)
-- Picks (per-directory multi-select) and inventory (global cross-directory)
+- Picks (per-directory multi-select) and inventory (file cache with graveyard)
 - `.spycrc.toml` config with keymap DSL, themes, ignore masks, live reload
 
 ## Architecture
