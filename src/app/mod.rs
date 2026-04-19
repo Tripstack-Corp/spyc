@@ -332,6 +332,19 @@ impl App {
         };
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
+
+        // Run health check before loading state — cleans up orphaned
+        // files so Inventory::load() et al. see a consistent directory.
+        let health_warnings = if let Some(sd) = crate::state::health::state_dir() {
+            let report = crate::state::health::check(&sd);
+            if report.cleaned > 0 {
+                spyc_debug!("health check: cleaned {} orphaned file(s)", report.cleaned);
+            }
+            report.warnings
+        } else {
+            Vec::new()
+        };
+
         let app_state = state::AppState {
             listing,
             picks: Picks::new(),
@@ -430,6 +443,11 @@ impl App {
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
             app.state.flash_info(msg);
+        }
+        // Surface any health check warnings so the user knows state
+        // was repaired. Overrides the config load note if both exist.
+        if !health_warnings.is_empty() {
+            app.state.flash_error(health_warnings.join("; "));
         }
         if resume {
             app.show_session_picker();

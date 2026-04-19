@@ -2,29 +2,40 @@
   <img src="docs/spyc-logo.png" alt="spyc logo" width="128">
 </p>
 
-<h1 align="center">spyc 🌶️</h1>
+<h1 align="center">spyc</h1>
 
 <p align="center">
-  A vi-keyboard-driven file commander that pairs with Claude Code.<br>
-  Browse files in the top half. Talk to Claude in the bottom half.<br>
-  They share context via MCP — Claude can see what you see.
+  A vi-keyboard-driven file commander that runs Claude Code in a split pane<br>
+  and exposes itself to Claude as an MCP server.<br>
+  When Claude asks "what files are you looking at?" — it queries spyc directly.
 </p>
 
 ---
 
-## ✨ Why spyc?
+## Why spyc?
 
-Most developers alt-tab between a file browser and an AI assistant.
-spyc puts them in the **same terminal session** with shared context:
+spyc is the first terminal file manager built around the AI agent being
+a **peer in the workflow**, not a separate tab.
 
-- 🗂️ **File list above** — vi motions, picks, marks, inventory, git status
-- 🤖 **Claude Code below** — full pty pane with multi-tab, scrollback, session resume
-- 🔗 **MCP bridge** — Claude can query your cwd, cursor, picks, inventory, filter, and git branch
-- ⌨️ **100% keyboard** — if you think in `hjkl`, you're home
+When you pick three files and ask Claude a question in the bottom pane,
+Claude can call `get_spyc_context` and see your cwd, cursor file, picks,
+inventory, active filter, and git branch — without you copying or pasting
+anything. When Claude mentions a file path in its response, press `gf` to
+jump straight to it. The context flows both ways.
 
-The name: **spy** (inspired by SideFX's in-house file manager) + **c**laude = **spyc** (spicy 🌶️).
+This is possible because spyc runs an **MCP server** on a background
+thread. Claude connects at spawn via `--mcp-config`, and the context
+stays current as you navigate. No plugins, no config, no clipboard hacks.
 
-## 🚀 Quick start
+Everything else — vi motions, marks, picks, inventory, pager, shell
+integration — is what you'd expect from a keyboard-driven file manager.
+But the MCP bridge is what makes spyc different from Yazi, Broot, Ranger,
+or anything else in the space.
+
+The name: **spy** (inspired by SideFX's in-house file manager) +
+**c**laude = **spyc**.
+
+## Quick start
 
 ### Prerequisites
 
@@ -37,74 +48,84 @@ The name: **spy** (inspired by SideFX's in-house file manager) + **c**laude = **
 ```sh
 git clone https://bitbucket.org/tripstack/spyc.git
 cd spyc
-make install    # builds release → ~/bin/spyc
+make install    # builds release, copies to ~/bin/spyc
 ```
 
 ### Launch
 
 ```sh
 spyc            # opens in the current directory
-spyc -r         # resume a previous session
+spyc -r         # resume a previous session (restores Claude conversation)
 ```
 
 Press **`^\`** (Ctrl+Backslash) or **F10** to open the Claude pane.
-Press **`^W j`** / **`^W k`** to switch focus between file list and pane.
+Press **`^a j`** / **`^a k`** to switch focus between file list and pane.
 
-## 🎯 Core concepts
+## Core concepts
 
-### 📁 Navigation
+### Navigation
 
 | Key | Action |
 |-----|--------|
 | `h` `j` `k` `l` | Move (counts work: `5j`, `10k`) |
 | `gg` / `G` | Top / bottom |
-| `d` / `Enter` | Descend into dir or view file |
+| `d` / `Enter` | Descend into dir or view file in pager |
+| `e` / `v` | Descend into dir or open file in `$EDITOR` |
+| `V` | Open `$EDITOR` in top pane (Claude pane stays visible) |
 | `u` / `-` | Climb to parent |
 | `/` | Search (incremental, glob-aware) |
 | `H` / `~` | Jump to home |
 | `J` | Jump to any path |
 
-### 📌 Picks & inventory
+### Picks & inventory
 
-**Picks** are per-directory multi-select. **Inventory** is a persistent file cache.
+**Picks** are per-directory multi-select. **Inventory** is a persistent
+file cache that survives across sessions.
 
 | Key | Action |
 |-----|--------|
 | `t` | Toggle pick |
 | `T` | Pick by glob |
-| `y` | Yank to inventory (copies file to cache) |
+| `yy` | Yank to inventory (copies file to cache) |
+| `yp` | Yank visible pane output to clipboard |
+| `yP` | Yank last typed prompt to clipboard |
 | `Y` | Remove cursor file from inventory |
 | `p` | Put inventory files into cwd |
 | `i` | Toggle inventory view |
 
-### 🖥️ Split pane
+### Split pane
 
-The pane is a real pty — it runs `claude` by default, but any command works.
+The pane is a real pty — it runs `claude` by default, but any command
+works. Prefix is `^a` (screen-style); `^w` also works.
 
 | Key | Action |
 |-----|--------|
 | `^\` / `F10` | Toggle pane |
 | `F9` | Open pane with `claude --resume` |
-| `^W j` / `^W k` | Switch focus |
-| `^W n` | New tab |
-| `^W 1`..`9` | Switch to tab N |
-| `^W s` | Send selection paths to pane |
-| `^W p` | Pipe file contents to pane |
-| `^W v` | Scroll mode (10K line scrollback) |
+| `^a j` / `^a k` | Switch focus |
+| `^a c` | New tab |
+| `^a n` / `^a ]` | Next tab |
+| `^a p` / `^a [` | Prev tab |
+| `^a K` / `^a x` | Close tab |
+| `^a 1`..`9` | Switch to tab N |
+| `^a s` | Send selection paths to pane |
+| `^a P` | Pipe file contents to pane |
+| `^a v` | Scroll mode (10K line scrollback) |
 | `Ctrl+J` | Newline in pane (Claude multi-line input) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
 
-### 🔍 Pager
+### Pager
 
-Press `d` or `Enter` on a file to view it in the built-in pager with syntax
-highlighting, search, line numbers, hex dump, and ANSI color support.
+Press `d` or `Enter` on a file to view it in the built-in pager with
+syntax highlighting, search, line numbers, hex dump, and ANSI color
+support.
 
-### ⚡ Shell
+### Shell
 
 | Key | Action |
 |-----|--------|
-| `!` | Captured command → streams into pager |
+| `!` | Captured command — streams into pager |
 | `!!` | Repeat last command |
 | `!?` | History editor (vi-editable, searchable) |
 | `;` | Foreground command (top, vim, etc.) |
@@ -113,7 +134,7 @@ highlighting, search, line numbers, hex dump, and ANSI color support.
 
 `%` in any command expands to the current selection.
 
-### 🏷️ Marks & filters
+### Marks & filters
 
 | Key | Action |
 |-----|--------|
@@ -125,18 +146,20 @@ highlighting, search, line numbers, hex dump, and ANSI color support.
 | `o` | Toggle build artifact filter |
 | `=` | Temporary glob filter (`=*.rs`, `=!` for picks) |
 
-## 🤖 Claude Code integration
+## How the MCP bridge works
 
 When spyc spawns Claude in the pane, it automatically:
 
 1. **Starts an MCP server** on a background thread (HTTP, localhost)
 2. **Injects `--mcp-config`** so Claude connects at spawn
-3. **Writes context** every tick — cwd, cursor file, picks, inventory, filter, git branch
+3. **Writes a context snapshot** — cwd, cursor file, picks, inventory,
+   filter, git branch — updated when state changes
 
-Claude can call `get_spyc_context` to see exactly what you're looking at.
-Use `gf` to jump from Claude's output back to the file list. It's bidirectional.
+Claude can call `get_spyc_context` at any time to see exactly what
+you're looking at. Use `gf`/`gF` to jump from Claude's output back to
+the file list. The context is bidirectional and always current.
 
-### 💾 Session restore
+### Session restore
 
 spyc auto-saves on quit. `spyc -r` opens a session picker with:
 
@@ -144,7 +167,7 @@ spyc auto-saves on quit. `spyc -r` opens a session picker with:
 - Claude conversations resumed via `--resume <sessionId>`
 - Human-readable timestamps ("2 hours ago", "3 days ago")
 
-## 📋 Configuration
+## Configuration
 
 spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 (project). Supports keymap DSL, color overrides, ignore masks, and live reload
@@ -162,7 +185,7 @@ bindings = [
 mask2 = ["node_modules", "target", ".git", "__pycache__"]
 ```
 
-## 🖥️ Recommended setup
+## Recommended setup
 
 - **Terminal:** [iTerm2](https://iterm2.com/) (macOS), WezTerm, Kitty, Ghostty, or Alacritty
 - **Font:** MesloLGS Nerd Font — `brew install --cask font-meslo-lg-nerd-font`
@@ -171,7 +194,7 @@ mask2 = ["node_modules", "target", ".git", "__pycache__"]
 
 See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
-## 📖 More docs
+## More docs
 
 - [FEATURES.md](FEATURES.md) — complete feature reference
 - [INSTALL.md](INSTALL.md) — terminal, font, build, and cross-compilation setup
@@ -179,7 +202,7 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 - [ROADMAP.md](ROADMAP.md) — what's next
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines and SemVer policy
 
-## 📄 License
+## License
 
 BSD-3-Clause. Logo uses [Twemoji](https://github.com/jdecked/twemoji) pepper
 artwork (CC-BY 4.0).

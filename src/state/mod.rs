@@ -1,6 +1,7 @@
 //! Transient and persistent UI state (cursor, picks, inventory, masks, marks).
 
 pub mod cursor;
+pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
 pub mod ignore;
