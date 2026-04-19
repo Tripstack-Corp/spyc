@@ -1,8 +1,19 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+const INVENTORY_FILE: &str = "inventory";
+
+fn state_dir() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
+        Some(PathBuf::from(xdg).join("spyc"))
+    } else {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+    }
+}
+
 /// The cross-directory "taken files" collection. Uses a BTreeSet so the
-/// inventory view has a deterministic order.
+/// inventory view has a deterministic order. Persisted to disk on every
+/// change so it survives restarts.
 #[derive(Debug, Default, Clone)]
 pub struct Inventory {
     set: BTreeSet<PathBuf>,
@@ -13,23 +24,62 @@ impl Inventory {
         Self::default()
     }
 
+    /// Load inventory from disk. Returns an empty inventory if the file
+    /// doesn't exist or can't be read.
+    pub fn load() -> Self {
+        let Some(path) = state_dir().map(|d| d.join(INVENTORY_FILE)) else {
+            return Self::new();
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::new();
+        };
+        let set: BTreeSet<PathBuf> = text
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect();
+        Self { set }
+    }
+
+    /// Save inventory to disk (best-effort).
+    fn save(&self) {
+        let Some(dir) = state_dir() else { return };
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(INVENTORY_FILE);
+        let text: String = self
+            .set
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = std::fs::write(&path, if text.is_empty() { text } else { text + "\n" });
+    }
+
     #[allow(dead_code)]
     pub fn add(&mut self, path: PathBuf) {
         self.set.insert(path);
+        self.save();
     }
 
     pub fn extend<I: IntoIterator<Item = PathBuf>>(&mut self, iter: I) {
         for p in iter {
             self.set.insert(p);
         }
+        self.save();
     }
 
     pub fn remove(&mut self, path: &Path) -> bool {
-        self.set.remove(path)
+        let removed = self.set.remove(path);
+        if removed {
+            self.save();
+        }
+        removed
     }
 
     pub fn clear(&mut self) {
         self.set.clear();
+        self.save();
     }
 
     pub fn contains(&self, path: &Path) -> bool {

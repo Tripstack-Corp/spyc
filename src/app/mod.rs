@@ -308,7 +308,7 @@ impl App {
         let app_state = state::AppState {
             listing,
             picks: Picks::new(),
-            inventory: Inventory::new(),
+            inventory: Inventory::load(),
             marks: Marks::load(),
             masks: {
                 let mut m = IgnoreMasks::default();
@@ -1221,7 +1221,7 @@ impl App {
             }),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
-                format!("[{} items]  (i: return, u: back)", self.state.inventory.len()),
+                format!("[{} items]  (x: remove, ESC/i: return, z: clear)", self.state.inventory.len()),
             ),
         }
     }
@@ -1337,6 +1337,20 @@ impl App {
         }
         if matches!(self.state.mode, Mode::Prompting(_)) {
             return Ok(self.handle_prompt_key(key));
+        }
+        // Inventory view: ESC returns to dir view, x/d removes cursor item.
+        if self.state.view == View::Inventory {
+            match key.code {
+                KeyCode::Esc => {
+                    self.state.toggle_inventory_view();
+                    return Ok(PostAction::None);
+                }
+                KeyCode::Char('x') | KeyCode::Char('d') => {
+                    self.state.drop_cursor();
+                    return Ok(PostAction::None);
+                }
+                _ => {}
+            }
         }
         match self.state.resolver.feed(key, &self.state.user_keymap) {
             ResolverOutcome::Action(action) => return self.apply(&action),
