@@ -2,17 +2,23 @@
 
 ## Thesis
 
-spyc is a vi-keyboard-driven file commander that pairs with an AI coding
-agent in a single terminal window. The target user is a developer who
-already thinks in vi motions and wants Claude Code living in the same
-workspace — not one window over, not in a browser tab, in the same
-session, sharing context.
+spyc is a vi-keyboard-driven file commander that exposes itself to an
+AI coding agent as a queryable context source. The target user is a
+developer who already thinks in vi motions and wants Claude Code
+living in the same workspace — not one window over, not in a browser
+tab, in the same session, sharing context.
 
-That positioning is the reason the tool exists. Every other feature —
-picks, inventory, pager, status bar, sessions — is supporting
-infrastructure that makes the split-pane workflow fast and comfortable.
-The roadmap is organized accordingly: the pane-and-agent integration is
-the defining work track, not the trailing milestone.
+The MCP server (M14) shifted the tool's nature: spyc isn't just "a
+file manager with Claude in a pane." It's a file manager that Claude
+can query — current directory, cursor, picks, inventory, filter, git
+branch — via a standard protocol. That bidirectional awareness is the
+positioning that differentiates spyc from `tmux` + `claude`.
+
+Every other feature — picks, inventory, pager, status bar, sessions —
+is supporting infrastructure that makes the split-pane workflow fast
+and comfortable. The roadmap is organized accordingly: the
+pane-and-agent integration is the defining work track, not the
+trailing milestone.
 
 ## Working tracks
 
@@ -33,9 +39,9 @@ from these lists into `Done (recent)` as they ship.
 
 ## Foundations
 
-Most of the critical foundations work has shipped. Remaining items are
-listed in priority order; the testing infrastructure and CI pipeline
-are now solid enough to support thesis feature development.
+Foundations are ~70% complete. The testing infrastructure, CI pipeline,
+and handler extraction are solid. Remaining items are listed in
+priority order — the top three are pre-v2.0 blockers.
 
 ### Done
 
@@ -44,7 +50,7 @@ are now solid enough to support thesis feature development.
 - ~~CI fixes~~ — `rust:1.85-slim` matches MSRV, `cargo-audit` in
   pipeline (RUSTSEC-2026-0009 ignored — needs Rust 1.88),
   `cargo-llvm-cov` with 35% ratcheting floor.
-- ~~Testing strategy execution~~ — 311 tests (up from 74). Keymap
+- ~~Testing strategy execution~~ — 361 tests (up from 74). Keymap
   resolver (77 tests), state modules (picks/inventory/cursor/ignore/
   history/sessions), DSL→resolver round-trips, `tests/` integration
   directory, snapshot tests via `insta` + `TestBackend`, handler
@@ -52,15 +58,18 @@ are now solid enough to support thesis feature development.
   cleanly separated from terminal state).
 - ~~71 clippy errors fixed~~ — clean `cargo clippy -D warnings` build.
 
-### Remaining
+### Remaining (v2.0 blockers first)
 
-- **Unicode width in the list view.** `chars().count()` is used as a
-  width proxy in places; CJK filenames, flags, and family emoji will
+- **Unicode width in the list view.** URGENT — first thing external
+  users with non-ASCII filenames will hit. `chars().count()` is used
+  as a width proxy; CJK filenames, flags, and family emoji will
   misalign columns. Bring in `unicode-width` and route width
   calculations through it.
-- **CHANGELOG.md** in Keep-a-Changelog format. Every user-visible
-  change gets an entry; the release pipeline reads from it for release
-  notes.
+- **CHANGELOG.md** in Keep-a-Changelog format. OVERDUE — three
+  version bumps shipped (1.3.1, 1.4.0, 1.5.0) with no changelog
+  entries. Seed from ROADMAP's Done section. Every user-visible
+  change gets an entry; the release pipeline reads from it for
+  release notes.
 - **`spyc --version --verbose`** dumps version, git SHA (via
   `build.rs`), build timestamp, rustc version, terminal detection,
   and active feature flags. First line of every bug triage.
@@ -98,11 +107,6 @@ terminal inside a terminal." In priority order:
   branch without losing the prior line of inquiry. High-value for
   "let me try a different approach." Implementable with current
   plumbing.
-- **Conversation-aware session restore.** `--resume` already restores
-  cwd, tabs, and pane geometry. Extend to capture the agent session
-  identity (Claude Code's `--resume` surface) so restoring a spyc
-  session restores the conversation, not just a fresh pane pointed at
-  the right directory.
 - **Prompt templates in `.spycrc.toml`.** User-defined macros that
   send a pre-composed prompt to the pane with picks/inventory
   substituted in — e.g., `map "<space>cr" claude-template review`
@@ -196,19 +200,25 @@ Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of
 the PR that ships the change. The `CHANGELOG.md` entry lands in the
 same commit.
 
-- **v1.x** — Foundations track. Ship incrementally; no external
-  announcement. Internal dogfooding feedback loop.
+- **v1.6** — Next internal release. Target: unicode-width,
+  CHANGELOG.md, `--version --verbose`, BUGS.md triage (3 user-facing
+  bugs fixed). Closes the Foundations blockers.
+- **v1.7–v1.9** — Distribution track in parallel with polish. Release
+  automation, macOS notarization, Homebrew tap, docs site.
 - **v2.0** — Public distribution launch. Gated on: thesis-track items
-  #1 (bidirectional path refs) and #2 (automatic context handoff)
-  shipped, all Foundations track items complete, Distribution track
-  complete. External announcement: TripStack engineering blog post,
-  optional Show HN. This is the "credibly public" moment.
-- **v2.x onward** — Remaining thesis items, feature work from
+  #1–#3 shipped (bidirectional path refs, automatic context handoff,
+  conversation-aware session restore — all done), remaining
+  Foundations blockers complete, Distribution track complete.
+  External announcement: TripStack engineering blog post, optional
+  Show HN. Target: mid-to-late May 2026.
+- **v2.x onward** — Remaining thesis items (session forking, prompt
+  templates, status bar agent segment), feature work from
   `Additional Ideas` section, community-driven contributions.
 
 The v2.0 version bump is a signaling choice as much as a semver one.
-The tool has been shipping 1.x for a while, but the repositioning +
-public distribution justifies a major bump to mark the transition.
+The tool has been shipping 1.x for a while, but the MCP positioning
+shift + public distribution justifies a major bump to mark the
+transition.
 
 ## Additional Ideas
 
@@ -252,6 +262,12 @@ one of the tracks above when picked up.
   `get_spyc_context` to see what the user is looking at. Also: pane
   tabs now stay open with `[exited]` label when the child exits, so
   error output is readable. Shipped as v1.5.0.
+- **Conversation-aware session restore** — session save captures the
+  Claude Code session ID (UUID) and display name by scanning
+  `~/.claude/sessions/` and conversation JSONL files. On restore,
+  spawns `claude --resume <sessionId>` to resume the exact
+  conversation. Session picker shows name + short ID. Session dedup
+  normalized to ignore ephemeral `--mcp-config` port numbers.
 - **Foundations overhaul** — 348 tests (from 74), 38% line coverage,
   clean `cargo clippy -D warnings`, panic hook, `cargo-audit` +
   `cargo-llvm-cov` in CI, `AppState` domain-layer extraction

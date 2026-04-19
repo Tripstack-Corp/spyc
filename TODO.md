@@ -42,12 +42,11 @@ Priority order below; each item is a meaningful unit of work on its
 own. The handler-extraction refactor is the prerequisite for the
 rest of the dispatch testing.
 
-- [ ] **[L] `app.rs` handler extraction refactor.**
+- [x] **[L] `app.rs` handler extraction refactor.**
   Split handlers from the live `&mut Tui` surface. Each becomes a
   pure-ish `(state, event) -> (state', PostAction)`. Start with
   `handle_prompt_key`.
-  *Done when:* at least one handler is testable from a unit test
-  without a real terminal.
+  *Done:* `AppState` extracted with 87 tests. Phases 0–4 complete.
 
 - [x] **[M] Keymap resolver test module.**
   77 tests covering count accumulation, all pending-seq states,
@@ -92,8 +91,9 @@ rest of the dispatch testing.
   `$TERM` / `$COLORTERM`, active feature flags. First thing every
   bug report asks for.
 
-- [ ] **[S] Panic backtraces in debug log.**
+- [x] **[S] Panic backtraces in debug log.**
   Wire the panic hook to dump `RUST_BACKTRACE=full` to the debug log.
+  *Done:* `main.rs` does `Backtrace::force_capture()` → `debug_log::log()`.
 
 - [ ] **[S] `spyc --dump-default-config`.**
   Prints the full default `.spycrc.toml` with comments. Self-doc
@@ -114,28 +114,21 @@ the tool exists), then distribution.
 
 ### Thesis — deepening the agent integration
 
-- [ ] **[M] Bidirectional path references — `gf` / `gF`.**
-  Recognize `path:line` in pane output (live or scrollback). `gf`
-  jumps the file list; `gF` additionally opens the pager at the
-  line. Single highest-leverage feature remaining.
-  *Done when:* Claude emits `src/app.rs:1284` and a keypress
-  navigates there without retyping.
+- [x] **[M] Bidirectional path references — `gf` / `gF`.**
+  *Done:* M13, v1.4.0. Path extraction with 35 tests, dual cwd
+  resolution, scroll mode support.
 
-- [ ] **[L] Automatic context handoff.**
-  Maintain a context file (`.claude/spyc-context.md`) reflecting
-  cwd, picks, inventory, active filter. Claude watches it. Start
-  with file-watcher; switch to a small MCP server if polling
-  becomes noisy.
-  *Done when:* Claude can answer "what am I looking at" accurately
-  without the user explicitly piping context.
+- [x] **[L] Automatic context handoff.**
+  *Done:* M14, v1.5.0. HTTP MCP server on background thread,
+  `get_spyc_context` tool, `--mcp-config` injection at pane spawn.
 
 - [ ] **[M] Session forking — `^W f`.**
   Duplicate pane tab with scrollback replayed. Old roadmap item,
   more valuable after the two items above land.
 
-- [ ] **[M] Conversation-aware session restore.**
-  `--resume` captures and restores the Claude Code session
-  identity, not just pane geometry and cwd.
+- [x] **[M] Conversation-aware session restore.**
+  *Done:* Session save captures Claude session ID + name. Restore
+  spawns `claude --resume <sessionId>`. Picker shows name + ID.
 
 - [ ] **[M] Prompt templates in `.spycrc.toml`.**
   User-defined macros that send pre-composed prompts to the pane
