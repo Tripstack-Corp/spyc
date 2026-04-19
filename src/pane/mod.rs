@@ -81,6 +81,12 @@ impl Pane {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLUMNS", cols.to_string());
         cmd.env("LINES", rows.to_string());
+        // Tell child processes (e.g. Claude CLI's MCP server) where to
+        // find this spyc instance's context file.
+        cmd.env(
+            crate::context::CONTEXT_ENV_VAR,
+            crate::context::context_path(cwd).to_string_lossy().as_ref(),
+        );
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // We don't need our own handle on the slave.

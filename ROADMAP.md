@@ -93,20 +93,6 @@ The pty pane is already the core of the tool (M8–M12 done). The work
 that remains is making the integration genuinely novel, not just "a
 terminal inside a terminal." In priority order:
 
-- **Bidirectional path references.** When Claude outputs
-  `src/app.rs:1284` in the pane, spyc should recognize the path and
-  support a vi-style `gf`-equivalent to jump the file list there (and
-  optionally open the pager to that line). Claude produces path
-  references constantly; making them navigable closes the most
-  valuable workflow loop. Probably the single highest-leverage
-  feature remaining.
-- **Automatic context handoff.** Picks and inventory are already
-  pipeable to the pane via `^W p` / `^W i` (M10). The next step is
-  passive: spyc maintains a context file Claude can watch (e.g.,
-  `.claude/spyc-context.md`) that reflects the current directory,
-  picks, inventory, and active filter. When Claude is asked "what am
-  I looking at," it already knows. Wire via a small MCP server if the
-  file-watcher approach gets noisy.
 - **Session forking** (already in old roadmap as `^W f`). Duplicate a
   pane tab with scrollback replayed, so a Claude conversation can
   branch without losing the prior line of inquiry. High-value for
@@ -251,7 +237,22 @@ one of the tracks above when picked up.
 
 ## Done (recent)
 
-- **Foundations overhaul** — 311 tests (from 74), 38% line coverage,
+- **Bidirectional path references (M13)** — `gf` jumps the file list
+  to a path reference in pane output; `gF` also opens the pager at the
+  referenced line. Path extraction handles bare paths, `path:line:col`,
+  backticks, quotes, Claude CLI patterns (`Update(path)`, `Read path`,
+  `⎿`, `→`), diff headers, ANSI stripping. Bottom-up scan (most recent
+  wins), dual cwd resolution (pane cwd + project root). Works in both
+  live and scroll mode. 35 extraction tests. Shipped as v1.4.0.
+- **Automatic context handoff (M14)** — spyc runs an HTTP MCP server
+  on a background thread (OS-assigned port, no external crates). Writes
+  `.spyc-context-<PID>.json` every event loop tick with cwd, cursor,
+  picks, inventory, filter, and git branch. Claude CLI connects via
+  `--mcp-config` injected at pane spawn time. Claude can call
+  `get_spyc_context` to see what the user is looking at. Also: pane
+  tabs now stay open with `[exited]` label when the child exits, so
+  error output is readable. Shipped as v1.5.0.
+- **Foundations overhaul** — 348 tests (from 74), 38% line coverage,
   clean `cargo clippy -D warnings`, panic hook, `cargo-audit` +
   `cargo-llvm-cov` in CI, `AppState` domain-layer extraction
   (Phases 0–4).

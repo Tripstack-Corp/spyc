@@ -256,6 +256,11 @@ pub struct App {
     theme: Theme,
     cursor_blink_on: bool,
     cursor_blink_instant: std::time::Instant,
+    /// Path to the `.spyc-context.json` file (project root).
+    /// Written each loop iteration so the MCP server can read it.
+    context_path: PathBuf,
+    /// MCP HTTP server port (0 = not running).
+    mcp_port: u16,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -346,6 +351,14 @@ impl App {
                 col_widths: vec![20],
             },
         };
+        let context_path = crate::context::context_path(&app_state.start_dir);
+        // Start the MCP HTTP server so Claude CLI can connect via
+        // --mcp-config. Port 0 = OS assigns a free port.
+        let mcp_port = crate::mcp::start_http_server(context_path.clone())
+            .unwrap_or_else(|e| {
+                spyc_debug!("MCP HTTP server failed to start: {e}");
+                0
+            });
         let mut app = Self {
             state: app_state,
             pager: None,
@@ -366,6 +379,8 @@ impl App {
             theme,
             cursor_blink_on: true,
             cursor_blink_instant: std::time::Instant::now(),
+            context_path,
+            mcp_port,
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -375,6 +390,29 @@ impl App {
             app.show_session_picker();
         }
         app
+    }
+
+    /// Build a context snapshot from the current state for MCP consumers.
+    fn snapshot_context(&self) -> crate::context::SpycContext {
+        let cursor_file = self
+            .state
+            .rows
+            .get(self.state.cursor.index)
+            .map(|r| r.display.clone());
+        crate::context::SpycContext {
+            cwd: self.state.listing.dir.clone(),
+            cursor_file,
+            picks: self.state.picks.iter().cloned().collect(),
+            inventory: self.state.inventory.paths().cloned().collect(),
+            filter: self.state.temp_filter.clone(),
+            git_branch: self.state.git_info.clone(),
+        }
+    }
+
+    /// Write the context file (best-effort, errors are silently ignored).
+    fn write_context(&self) {
+        let ctx = self.snapshot_context();
+        let _ = crate::context::write_context_file(&self.context_path, &ctx);
     }
 
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
@@ -468,15 +506,10 @@ impl App {
             }
             terminal.draw(|frame| self.render(frame))?;
 
-            // Auto-remove tabs whose subprocess has exited. If the last
-            // tab closes, tear down the entire pane area.
+            // Mark exited tabs so the user can read their output.
+            // Tabs stay open until the user explicitly closes (^W x).
             if let Some(tabs) = self.pane_tabs.as_mut() {
-                if !tabs.remove_closed() {
-                    self.pane_tabs = None;
-                    self.state.pane_focused = false;
-                    self.needs_full_repaint = true;
-                    self.state.flash_info("pane: last tab exited");
-                }
+                tabs.mark_exited();
             }
             // pending_overlay_close is no longer used — the overlay stays
             // visible until Enter via overlay_awaiting_dismiss.
@@ -680,7 +713,13 @@ impl App {
                 &mut watched_git,
                 &self.state.listing.dir,
             );
+
+            // Update the MCP context file so external consumers (e.g.
+            // `spyc --mcp`) see the latest state.
+            self.write_context();
         }
+        // Clean up the context file on exit.
+        crate::context::remove_context_file(&self.context_path);
         Ok(())
     }
 
@@ -1267,6 +1306,19 @@ impl App {
                 && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
             {
                 return Ok(self.handle_pane_scroll_key(key));
+            }
+        }
+        // When the active tab's subprocess has exited, any key closes
+        // the tab (so the user can read the error output, then dismiss).
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            if self.state.pane_focused && tabs.active().is_closed() {
+                if !tabs.close_active() {
+                    self.pane_tabs = None;
+                    self.state.pane_focused = false;
+                    self.needs_full_repaint = true;
+                    self.state.flash_info("pane: last tab closed");
+                }
+                return Ok(PostAction::None);
             }
         }
         // When the pane is open *and focused*, forward keys to the
@@ -1857,9 +1909,21 @@ impl App {
     }
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
+        // Inject --mcp-config when spawning Claude so it connects to
+        // our HTTP MCP server for context awareness.
+        let cmd = if self.mcp_port > 0 && Self::is_claude_command(cmd) {
+            let config = crate::mcp::mcp_config_json(self.mcp_port);
+            let full = format!("{cmd} --mcp-config '{config}'");
+            spyc_debug!("pane cmd: {full}");
+            full
+        } else {
+            cmd.to_string()
+        };
         let (rows, cols) = Self::pane_spawn_size(self.state.pane_height_pct);
-        match Pane::spawn(cmd, rows, cols, cwd) {
+        match Pane::spawn(&cmd, rows, cols, cwd) {
             Ok(p) => {
+                self.state.pane_focused = true;
+                self.state.flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry {
                     pane: p,
                     info: TabInfo::new(cmd, cwd),
@@ -1869,11 +1933,15 @@ impl App {
                 } else {
                     self.pane_tabs = Some(PaneTabs::new(entry));
                 }
-                self.state.pane_focused = true;
-                self.state.flash_info(format!("pane: {cmd} (^W k for list)"));
             }
             Err(e) => self.state.flash_error(format!("pane spawn failed: {e}")),
         }
+    }
+
+    /// Does this command look like it's launching Claude CLI?
+    fn is_claude_command(cmd: &str) -> bool {
+        let first = cmd.split_whitespace().next().unwrap_or("");
+        first == "claude" || first.ends_with("/claude")
     }
 
     /// ^W n — start the two-step prompt for a new pane tab.
@@ -2141,6 +2209,15 @@ impl App {
         let pane_cwd = tabs.active_info().cwd.clone();
         let spyc_cwd = self.state.listing.dir.clone();
 
+        // Debug: dump visible lines to the debug log so we can see what
+        // the vt100 screen actually contains.
+        spyc_debug!("gf: {} lines from pane, pane_cwd={}, spyc_cwd={}", lines.len(), pane_cwd.display(), spyc_cwd.display());
+        for (i, line) in lines.iter().enumerate() {
+            if !line.trim().is_empty() {
+                spyc_debug!("gf line[{i}]: {:?}", line);
+            }
+        }
+
         let pathref = crate::pane::pathref::extract_path_ref(&lines, &pane_cwd)
             .or_else(|| {
                 (pane_cwd != spyc_cwd)
@@ -2152,6 +2229,8 @@ impl App {
             self.state.flash_error("no path reference found in pane output");
             return;
         };
+
+        spyc_debug!("gf: found path={}, line={:?}", pathref.path.display(), pathref.line);
 
         let path = pathref.path;
         let line = pathref.line;

@@ -2,9 +2,11 @@
 
 mod app;
 mod config;
+mod context;
 mod debug_log;
 mod fs;
 mod keymap;
+mod mcp;
 mod pane;
 mod paths;
 mod shell;
@@ -60,10 +62,15 @@ fn main() -> Result<()> {
                -r, --resume   Open pane with `claude --resume`\n  \
                -d, --debug    Write debug log to /tmp/spyc-debug-<ts>.log\n  \
                -h, --help     Show this help\n  \
-               -v, --version  Show version",
+               -v, --version  Show version\n  \
+               --mcp          Run as MCP server (stdio JSON-RPC)",
             env!("CARGO_PKG_VERSION"),
         );
         return Ok(());
+    }
+    if args.iter().any(|a| a == "--mcp") {
+        let root = std::env::current_dir()?;
+        return mcp::run(root);
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
         println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));

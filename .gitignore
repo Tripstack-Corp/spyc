@@ -51,3 +51,6 @@ Thumbs.db
 # Rust / editor
 Cargo.lock.bak
 *.swp
+
+# spyc MCP context files (runtime, per-PID)
+.spyc-context-*.json

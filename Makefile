@@ -130,6 +130,9 @@ PREFIX ?= $(HOME)
 install: release ## Install to ~/bin
 	install -d $(PREFIX)/bin
 	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
+ifeq ($(shell uname),Darwin)
+	codesign -s - $(PREFIX)/bin/$(BINARY)
+endif
 	@echo "installed: $(PREFIX)/bin/$(BINARY)"
 
 .PHONY: uninstall
