@@ -58,21 +58,16 @@ priority order — the top three are pre-v2.0 blockers.
   cleanly separated from terminal state).
 - ~~71 clippy errors fixed~~ — clean `cargo clippy -D warnings` build.
 
-### Remaining (v2.0 blockers first)
+### Remaining
 
-- **Unicode width in the list view.** URGENT — first thing external
-  users with non-ASCII filenames will hit. `chars().count()` is used
-  as a width proxy; CJK filenames, flags, and family emoji will
-  misalign columns. Bring in `unicode-width` and route width
-  calculations through it.
-- **CHANGELOG.md** in Keep-a-Changelog format. OVERDUE — three
-  version bumps shipped (1.3.1, 1.4.0, 1.5.0) with no changelog
-  entries. Seed from ROADMAP's Done section. Every user-visible
-  change gets an entry; the release pipeline reads from it for
-  release notes.
-- **`spyc --version --verbose`** dumps version, git SHA (via
-  `build.rs`), build timestamp, rustc version, terminal detection,
-  and active feature flags. First line of every bug triage.
+- ~~**Unicode width in the list view.**~~ Done. `unicode-width` crate,
+  `display_width()`/`display_truncate()` helpers. All UI width sites
+  fixed: list_view, status bar, help, pager, `truncate_middle()`.
+- ~~**CHANGELOG.md**~~ Done. Seeded in Keep-a-Changelog format with
+  entries from v0.11.0 through v1.5.0.
+- ~~**`spyc --version --verbose`**~~ Done. `build.rs` embeds git SHA,
+  build timestamp, rustc version. Dumps version, git, build time,
+  rustc, TERM, COLORTERM, os/arch.
 - **`spyc --dump-default-config`** — complete `.spycrc.toml` with
   comments. Self-documentation for the keymap DSL and a user starting
   point.
