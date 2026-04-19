@@ -11,18 +11,14 @@
 </p>
 
 <p align="center">
-  macOS and Linux (x86_64, aarch64). Windows: use WSL.<br>
-  v1.7.0 -- actively developed, used daily by the author.
+  macOS and Linux · v1.7.0 · actively developed
+</p>
+
+<p align="center">
+  <img src="docs/screen_shot.png" alt="spyc split-pane screenshot" width="720">
 </p>
 
 ---
-
-<!--
-TODO: Replace this comment with a screenshot or asciinema embed once
-the demo cast is recorded. The ideal 30-second cast: user picks three
-files, asks Claude a question in the pane, Claude lists the picked
-files back by name via get_spyc_context.
--->
 
 ## Why spyc?
 
@@ -37,9 +33,8 @@ press `gf` to jump straight to it. The context flows both ways.
 
 This is possible because spyc runs an **MCP server** on a background
 thread. Claude connects at spawn via `--mcp-config`, and the context
-stays current as you navigate. No plugins, no config, no clipboard
-hacks. We don't know another TUI file manager that exposes itself to
-an AI agent this way.
+stays current as you navigate. We don't know another TUI file manager
+that exposes itself to an AI agent this way.
 
 Everything else -- vi motions, marks, picks, inventory, pager, shell
 integration -- is what you'd expect from a keyboard-driven file manager.
@@ -94,6 +89,10 @@ When spyc spawns Claude in the pane, it automatically:
 Claude can call `get_spyc_context` at any time to see exactly what
 you're looking at. Use `gf`/`gF` to jump from Claude's output back to
 the file list. The context is bidirectional and always current.
+
+Sessions are auto-saved on quit. `spyc -r` opens a session picker that
+restores all pane tabs and resumes Claude conversations via
+`--resume <sessionId>`.
 
 ## Keybindings
 
@@ -180,14 +179,6 @@ support. Press `?` inside the pager for its own help overlay.
 | `o` | Toggle build artifact filter |
 | `=` | Temporary glob filter (`=*.rs`, `=!` for picks) |
 
-## Session restore
-
-spyc auto-saves on quit. `spyc -r` opens a session picker with:
-
-- All pane tabs restored (command, cwd, label)
-- Claude conversations resumed via `--resume <sessionId>`
-- Human-readable timestamps ("2 hours ago", "3 days ago")
-
 ## Configuration
 
 spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
@@ -198,7 +189,7 @@ spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 [keymap]
 bindings = [
     'map "<Space>" pick',
-    'map "^A t" shell "cargo test"',
+    'map "^X t" shell "cargo test"',
 ]
 
 # Ignore masks: define what each mask group hides
@@ -217,6 +208,7 @@ pick = "#00ffaa"
 - **Font:** Any [Nerd Font](https://www.nerdfonts.com/) for the powerline status bar.
   Press `C` to toggle mono mode if you prefer not to install one.
 - **Claude Code:** `npm install -g @anthropic-ai/claude-code`
+- **Platforms:** macOS and Linux (x86_64, aarch64). Windows via WSL.
 
 See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
