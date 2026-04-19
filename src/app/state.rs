@@ -101,6 +101,9 @@ pub struct AppState {
     pub pane_height_pct: u16,
     pub rows: Vec<RowData>,
     pub last_grid: Grid,
+    /// Monotonic counter bumped whenever the display row list changes.
+    /// Used by App to skip redundant `build_rows()` calls.
+    pub list_generation: u64,
 }
 
 impl AppState {
@@ -253,6 +256,7 @@ impl AppState {
         }
         if let Some(row) = self.rows.get(self.cursor.index) {
             self.picks.toggle(&row.path);
+            self.list_generation = self.list_generation.wrapping_add(1);
         }
     }
 
@@ -268,6 +272,7 @@ impl AppState {
         } else {
             self.picks.clear();
         }
+        self.list_generation = self.list_generation.wrapping_add(1);
     }
 
     /// Yank files into the inventory cache. Takes picks if any, else
@@ -321,6 +326,7 @@ impl AppState {
     }
 
     pub fn rebuild_rows(&mut self) {
+        self.list_generation = self.list_generation.wrapping_add(1);
         self.rows = match self.view {
             View::Dir => {
                 let base: Vec<RowData> = self
@@ -896,6 +902,7 @@ impl AppState {
                             self.picks.insert(&e.path);
                         }
                     }
+                    self.list_generation = self.list_generation.wrapping_add(1);
                 }
                 PromptResult::Handled
             }
@@ -1090,6 +1097,7 @@ mod tests {
             pane_height_pct: 30,
             rows: Vec::new(),
             last_grid: Grid { cols: 1, rows: 20, col_widths: vec![20] },
+            list_generation: 0,
         }
     }
 

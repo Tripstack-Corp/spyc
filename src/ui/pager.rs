@@ -40,7 +40,9 @@ pub struct PagerView {
     /// Top line currently shown in the viewport (0-indexed).
     pub scroll: u16,
     search: Search,
-    /// When true, show whitespace markers + line numbers.
+    /// When true, show line numbers in the gutter.
+    pub show_line_numbers: bool,
+    /// When true, show whitespace markers (·, ↲, etc.).
     pub show_whitespace: bool,
     /// When true, `s` saves the content to a file. Only for command
     /// output — not for files the user opened with `d`/Enter (they
@@ -79,6 +81,7 @@ impl PagerView {
             lines,
             scroll: 0,
             search: Search::Off,
+            show_line_numbers: true,
             show_whitespace: false,
             saveable: false,
             full_width: false,
@@ -97,6 +100,7 @@ impl PagerView {
             lines: lines.into_iter().map(Line::from).collect(),
             scroll: 0,
             search: Search::Off,
+            show_line_numbers: true,
             show_whitespace: false,
             saveable: false,
             full_width: false,
@@ -119,6 +123,7 @@ impl PagerView {
             lines: text.lines,
             scroll: 0,
             search: Search::Off,
+            show_line_numbers: true,
             show_whitespace: false,
             saveable: true,
             full_width: false,
@@ -196,6 +201,10 @@ impl PagerView {
         }
         child.wait()?;
         Ok(())
+    }
+
+    pub const fn toggle_line_numbers(&mut self) {
+        self.show_line_numbers = !self.show_line_numbers;
     }
 
     pub const fn toggle_whitespace(&mut self) {
@@ -493,7 +502,7 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     let slice_end = (start + viewport_h).min(content_end);
 
     let total_lines = view.lines.len();
-    let gutter_w = if view.show_whitespace {
+    let gutter_w = if view.show_line_numbers {
         total_lines.max(1).ilog10() as usize + 2
     } else {
         0
@@ -743,6 +752,92 @@ fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static
 
     out.push(Span::styled("$", ws_style));
     Line::from(out)
+}
+
+/// Build a pager help overlay showing all pager-specific keybindings.
+pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
+    use super::display_pad_right;
+
+    let key_style = Style::default().fg(theme.pick).add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(theme.status_path);
+    let section_style = Style::default()
+        .fg(theme.status_user)
+        .add_modifier(Modifier::BOLD);
+
+    let sections: &[(&str, &[(&str, &str)])] = &[
+        (
+            "Navigation",
+            &[
+                ("j  ↓", "scroll down one line"),
+                ("k  ↑", "scroll up one line"),
+                ("^D", "half page down"),
+                ("^U", "half page up"),
+                ("^F  Space  PageDn", "page down"),
+                ("^B  b  PageUp", "page up"),
+                ("g  Home", "top of file"),
+                ("G  End", "bottom of file"),
+            ],
+        ),
+        (
+            "Search",
+            &[
+                ("/", "search forward"),
+                ("n", "next match"),
+                ("N", "previous match"),
+                (":N", "jump to line N"),
+            ],
+        ),
+        (
+            "Display",
+            &[
+                ("l", "toggle line numbers"),
+                ("w", "toggle whitespace markers (·, ↲, $)"),
+                ("f", "toggle full-width / centered"),
+            ],
+        ),
+        (
+            "Actions",
+            &[
+                ("v", "open in $EDITOR"),
+                ("y", "yank to clipboard"),
+                ("s", "save to file (command output only)"),
+            ],
+        ),
+        (
+            "Buffer history",
+            &[
+                ("[b", "previous buffer"),
+                ("]b", "next buffer"),
+            ],
+        ),
+        (
+            "Exit",
+            &[
+                ("q  Q  Esc", "close pager"),
+                ("?", "this help"),
+            ],
+        ),
+    ];
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (i, (title, rows)) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(*title, section_style)));
+        for (keys, desc) in *rows {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(display_pad_right(keys, 24), key_style),
+                Span::raw("  "),
+                Span::styled((*desc).to_string(), desc_style),
+            ]));
+        }
+    }
+
+    let mut view = PagerView::new_styled("Pager help", lines);
+    view.show_line_numbers = false;
+    view
 }
 
 const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {

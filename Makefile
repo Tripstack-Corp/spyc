@@ -55,6 +55,7 @@ fmt-check: ## Check formatting without modifying
 
 .PHONY: release
 release: ## Optimized release for the current platform
+	@echo "building $(BINARY) v$(VERSION) (release — final crate is the linker, may take a moment)…"
 	cargo build $(RELEASE_FLAGS)
 	@echo "→ target/release/$(BINARY)"
 	@ls -lh target/release/$(BINARY)
@@ -128,12 +129,15 @@ PREFIX ?= $(HOME)
 
 .PHONY: install
 install: release ## Install to ~/bin
+	@echo "copying $(BINARY) → $(PREFIX)/bin/"
 	install -d $(PREFIX)/bin
 	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(shell uname),Darwin)
-	codesign -s - $(PREFIX)/bin/$(BINARY)
+	@echo "code-signing (ad-hoc)…"
+	codesign -s - -v $(PREFIX)/bin/$(BINARY)
 endif
-	@echo "installed: $(PREFIX)/bin/$(BINARY)"
+	@ls -lh $(PREFIX)/bin/$(BINARY)
+	@echo "✓ installed $(BINARY) v$(VERSION) → $(PREFIX)/bin/$(BINARY)"
 
 .PHONY: uninstall
 uninstall: ## Remove from ~/bin

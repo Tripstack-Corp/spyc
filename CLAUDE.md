@@ -31,8 +31,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 
 - **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler in `app.rs`.
 - **Milestone spikes**: Development proceeds in numbered milestones (M4, M6, M8, M9, M10...).
-- **Repaint strategy**: One-shot `needs_full_repaint` flag instead of per-frame `terminal.clear()`. Set at teardown transitions (pager close, overlay close) and via `^L` / `Action::Redraw`.
-- **Pane I/O**: Keys go through `input::encode_key()`. Raw bytes use `pane.send_bytes()`. Bracketed paste wraps text in `\x1b[200~`...`\x1b[201~` before forwarding.
+- **Repaint strategy**: Event-driven dirty-frame rendering. `needs_draw` flag with reason codes (pane=1, event=2, other=3). `needs_full_repaint` for teardown transitions (pager close, overlay close). DEC 2026 synchronized output wraps every frame. `build_rows()` and grid stabilization are cached via `list_generation` counter. Target: 0 dps at idle.
+- **Pane I/O**: Keys go through `input::encode_key()`. Raw bytes use `pane.send_bytes()`. Bracketed paste wraps text in `\x1b[200~`...`\x1b[201~` before forwarding. Pane prefix is `^a` (screen-style), `^w` works as alias.
 - **Keep docs in sync**: When committing changes, update `ROADMAP.md`, `FEATURES.md`, `CLAUDE.md`, and help text (`src/ui/help.rs`) if the change affects user-visible behavior, keybindings, or project status.
 - **Bump version**: Always bump the version in `Cargo.toml` when shipping user-visible changes. Patch for fixes, minor for features. See `CONTRIBUTING.md` for SemVer policy.
 

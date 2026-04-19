@@ -26,6 +26,8 @@ enum PendingSeq {
     W,
     /// Seen uppercase `W`, waiting for a worktree sub-command (l/n/d).
     Worktree,
+    /// Seen `y`, waiting for: `y` = take (inventory yank), `p` = yank pane.
+    Yank,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -74,8 +76,9 @@ impl Resolver {
             PendingSeq::G => "g-",
             PendingSeq::Mark => "m-",
             PendingSeq::JumpMark => "'-",
-            PendingSeq::W => "^W-",
+            PendingSeq::W => "^a-",
             PendingSeq::Worktree => "W-",
+            PendingSeq::Yank => "y-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -103,7 +106,7 @@ impl Resolver {
                 // it to `chmod +w`; that went to `!chmod +w %` to free the
                 // key for split-nav. Note the match arm below starts the
                 // pending sequence and falls through after resetting.
-                KeyCode::Char('w' | 'W') => {
+                KeyCode::Char('w' | 'W') | KeyCode::Char('a' | 'A') => {
                     self.pending = PendingSeq::W;
                     return ResolverOutcome::Pending;
                 }
@@ -135,26 +138,34 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: Ctrl-W prefix waiting for a pane command.
+        // Mid-sequence: Ctrl-A / Ctrl-W prefix waiting for a pane command.
+        // Combines screen(1)-style (^a n=next, ^a p=prev, ^a c=new, ^a k=kill)
+        // with vim-style (j/k focus, +/- resize).
         if self.pending == PendingSeq::W {
             let out = match ev.code {
+                // Focus switching (vim-style).
                 KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
-                KeyCode::Char('k' | 'K') => ResolverOutcome::Action(Action::PaneFocusUp),
-                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
-                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
-                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
-                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
-                KeyCode::Char('\\' | 'c' | 'C') => ResolverOutcome::Action(Action::TogglePane),
-                KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::PaneNewTab),
-                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
+                KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
+                // Tab navigation (screen-style + vim bracket style).
+                KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
+                KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
+                KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
+                KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
                 KeyCode::Char(c @ '1'..='9') => {
                     ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
                 }
-                KeyCode::Char(']') => ResolverOutcome::Action(Action::PaneNextTab),
-                KeyCode::Char('[') => ResolverOutcome::Action(Action::PanePrevTab),
-                KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::PaneRenameTab),
-                KeyCode::Char('p' | 'P') => ResolverOutcome::Action(Action::PanePipeContent),
+                KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
+                // Pane toggle / resize / scroll.
+                KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
+                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
+                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
+                // Send / pipe content to pane.
+                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
+                KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
                 KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
+                // Screen-style: ^a ^a sends literal ^a to the pane.
+                KeyCode::Char('a' | 'A') => ResolverOutcome::Action(Action::PaneFocusDown),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -167,6 +178,18 @@ impl Resolver {
                 KeyCode::Char('l' | 'L') => ResolverOutcome::Action(Action::WorktreeList),
                 KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::WorktreeNew),
                 KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::WorktreeDelete),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: `y` prefix waiting for a yank sub-command.
+        if self.pending == PendingSeq::Yank {
+            let out = match ev.code {
+                KeyCode::Char('y') => ResolverOutcome::Action(Action::Take),
+                KeyCode::Char('p') => ResolverOutcome::Action(Action::YankPrompt),
+                KeyCode::Char('P') => ResolverOutcome::Action(Action::YankLastPrompt),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -284,10 +307,10 @@ impl Resolver {
                 ResolverOutcome::Action(Action::PickPatternPrompt)
             }
 
-            // Inventory (take / untake / drop / view / empty).
+            // Inventory / yank prefix (yy = take, yp = yank pane).
             KeyCode::Char('y') => {
-                self.reset();
-                ResolverOutcome::Action(Action::Take)
+                self.pending = PendingSeq::Yank;
+                return ResolverOutcome::Pending;
             }
             KeyCode::Char('Y') => {
                 self.reset();
@@ -429,6 +452,10 @@ impl Resolver {
             KeyCode::Char('C') => {
                 self.reset();
                 ResolverOutcome::Action(Action::ColorToggle)
+            }
+            KeyCode::Char('A') => {
+                self.reset();
+                ResolverOutcome::Action(Action::ToggleActivity)
             }
             KeyCode::Char('s') => {
                 self.reset();
@@ -768,11 +795,21 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_w_n_new_tab() {
+    fn ctrl_w_n_next_tab() {
         let mut r = Resolver::new();
         feed(&mut r, ctrl('w'));
         assert_eq!(
             feed(&mut r, key('n')),
+            ResolverOutcome::Action(Action::PaneNextTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_a_c_new_tab() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('a'));
+        assert_eq!(
+            feed(&mut r, key('c')),
             ResolverOutcome::Action(Action::PaneNewTab)
         );
     }
@@ -855,11 +892,21 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_w_p_pipes_content() {
+    fn ctrl_w_p_prev_tab() {
         let mut r = Resolver::new();
         feed(&mut r, ctrl('w'));
         assert_eq!(
             feed(&mut r, key('p')),
+            ResolverOutcome::Action(Action::PanePrevTab)
+        );
+    }
+
+    #[test]
+    fn ctrl_a_shift_p_pipes_content() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('a'));
+        assert_eq!(
+            feed(&mut r, key('P')),
             ResolverOutcome::Action(Action::PanePipeContent)
         );
     }
@@ -1119,9 +1166,17 @@ mod tests {
     #[test]
     fn inventory_keys() {
         let mut r = Resolver::new();
+        // y enters pending, yy = take
+        assert_eq!(feed(&mut r, key('y')), ResolverOutcome::Pending);
         assert_eq!(
             feed(&mut r, key('y')),
             ResolverOutcome::Action(Action::Take)
+        );
+        // yp = yank prompt
+        assert_eq!(feed(&mut r, key('y')), ResolverOutcome::Pending);
+        assert_eq!(
+            feed(&mut r, key('p')),
+            ResolverOutcome::Action(Action::YankPrompt)
         );
         assert_eq!(
             feed(&mut r, key('Y')),
@@ -1246,10 +1301,10 @@ mod tests {
     }
 
     #[test]
-    fn pending_display_ctrl_w() {
+    fn pending_display_ctrl_a() {
         let mut r = Resolver::new();
-        feed(&mut r, ctrl('w'));
-        assert_eq!(r.pending_display(), Some("^W-".to_string()));
+        feed(&mut r, ctrl('a'));
+        assert_eq!(r.pending_display(), Some("^a-".to_string()));
     }
 
     #[test]

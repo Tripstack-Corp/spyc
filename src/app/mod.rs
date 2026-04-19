@@ -254,13 +254,40 @@ pub struct App {
     pending_pager_return: Option<PagerReturn>,
     needs_full_repaint: bool,
     theme: Theme,
-    cursor_blink_on: bool,
-    cursor_blink_instant: std::time::Instant,
     /// Path to the `.spyc-context.json` file (project root).
     /// Written each loop iteration so the MCP server can read it.
     context_path: PathBuf,
+    /// Last serialized context JSON — skip disk write when unchanged.
+    last_context_json: String,
     /// MCP HTTP server port (0 = not running).
     mcp_port: u16,
+    /// Summary printed to stdout after the TUI exits.
+    pub exit_summary: Option<String>,
+    /// Accumulates characters the user types while the pane is focused.
+    pane_prompt_buf: String,
+    /// The last complete prompt the user sent to the pane (Enter commits).
+    last_pane_prompt: Option<String>,
+    /// Activity monitor: draws/sec, bytes/sec overlay.
+    show_activity: bool,
+    activity_draws: u32,
+    activity_bytes: u64,
+    activity_last_tick: std::time::Instant,
+    /// Snapshot from last 1-second window.
+    activity_dps: u32,
+    activity_bps: u64,
+    /// Draw reason counters for the current window.
+    activity_reason_pane: u32,
+    activity_reason_event: u32,
+    activity_reason_other: u32,
+    /// Snapshot reasons.
+    activity_snap_pane: u32,
+    activity_snap_event: u32,
+    activity_snap_other: u32,
+    /// Cached `build_rows()` output; invalidated by `list_generation`.
+    cached_rows: Vec<Row>,
+    cached_rows_gen: u64,
+    /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
+    cached_grid_key: (u64, usize, usize, u16, u16),
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -350,6 +377,7 @@ impl App {
                 rows: 1,
                 col_widths: vec![20],
             },
+            list_generation: 0,
         };
         let context_path = crate::context::context_path(&app_state.start_dir);
         // Start the MCP HTTP server so Claude CLI can connect via
@@ -377,10 +405,27 @@ impl App {
             pending_pager_return: None,
             needs_full_repaint: false,
             theme,
-            cursor_blink_on: true,
-            cursor_blink_instant: std::time::Instant::now(),
             context_path,
+            last_context_json: String::new(),
             mcp_port,
+            exit_summary: None,
+            pane_prompt_buf: String::new(),
+            last_pane_prompt: None,
+            show_activity: false,
+            activity_draws: 0,
+            activity_bytes: 0,
+            activity_last_tick: std::time::Instant::now(),
+            activity_dps: 0,
+            activity_bps: 0,
+            activity_reason_pane: 0,
+            activity_reason_event: 0,
+            activity_reason_other: 0,
+            activity_snap_pane: 0,
+            activity_snap_event: 0,
+            activity_snap_other: 0,
+            cached_rows: Vec::new(),
+            cached_rows_gen: u64::MAX, // force first build
+            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -410,9 +455,15 @@ impl App {
     }
 
     /// Write the context file (best-effort, errors are silently ignored).
-    fn write_context(&self) {
+    /// Skips the disk write when the serialized JSON is unchanged.
+    fn write_context(&mut self) {
         let ctx = self.snapshot_context();
+        let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
+        if json == self.last_context_json {
+            return;
+        }
         let _ = crate::context::write_context_file(&self.context_path, &ctx);
+        self.last_context_json = json;
     }
 
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
@@ -486,6 +537,13 @@ impl App {
             &self.state.listing.dir,
         );
 
+        let mut last_context_write = std::time::Instant::now();
+        let mut last_refresh = std::time::Instant::now();
+
+        let mut needs_draw = true; // draw at least once on startup
+        // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
+        let mut draw_reason: u8 = 3;
+
         while !self.state.should_quit {
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
@@ -495,16 +553,16 @@ impl App {
                 self.needs_full_repaint = true;
             }
             self.pager_was_open = self.pager.is_some();
+            let mut pending_clear = false;
             if self.needs_full_repaint {
                 self.needs_full_repaint = false;
-                terminal.clear()?;
+                pending_clear = true; // defer clear into the sync region
+                needs_draw = true;
+                draw_reason = 3;
             }
-            // Tick the pane cursor blink (~530ms cycle).
-            if self.cursor_blink_instant.elapsed() >= Duration::from_millis(530) {
-                self.cursor_blink_on = !self.cursor_blink_on;
-                self.cursor_blink_instant = std::time::Instant::now();
-            }
-            terminal.draw(|frame| self.render(frame))?;
+            // NOTE: periodic ^L to Claude pane tabs was removed — it clears
+            // any draft prompt the user has typed, even when focus is on the
+            // file list (the text is still in Claude's input buffer).
 
             // Mark exited tabs so the user can read their output.
             // Tabs stay open until the user explicitly closes (^W x).
@@ -518,6 +576,7 @@ impl App {
             // Check if a background `!` capture has finished.
             // Stream captured command output into the pager in real-time.
             if let Some(capture) = &mut self.pending_capture {
+                needs_draw = true; draw_reason = 3; // capture in progress
                 let mut got_data = false;
                 while let Ok(chunk) = capture.output_rx.try_recv() {
                     if chunk.is_empty() {
@@ -577,8 +636,38 @@ impl App {
                 }
             }
 
+            // Pre-drain pane output so we know if anything arrived.
+            // All tabs are drained (correctness), but only *active* tab
+            // output triggers a redraw — background tab trickle bytes
+            // (idle shell cursor blinks, prompt redraws) are silent.
+            let mut pane_had_output = false;
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                let active_idx = tabs.active_index();
+                for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
+                    // Fast path: skip try_recv() when the reader thread
+                    // hasn't posted anything. The atomic check is ~1ns vs
+                    // ~20ns for a channel operation.
+                    if !entry.pane.has_pending_output() {
+                        continue;
+                    }
+                    if entry.pane.drain_output() && i == active_idx {
+                        pane_had_output = true;
+                    }
+                }
+            }
+            if let Some(overlay) = self.top_overlay.as_mut() {
+                if overlay.has_pending_output() && overlay.drain_output() {
+                    pane_had_output = true;
+                }
+            }
+            if pane_had_output {
+                needs_draw = true; draw_reason = 1;
+            }
+
             // Drain any pending watcher events. Refresh listing / reload
-            // config at most once per poll iteration — natural debounce.
+            // config at most once per poll iteration, and debounce
+            // listing refreshes to avoid spawning git subprocesses on
+            // every rapid-fire .git/index change.
             let mut needs_reload = false;
             let mut needs_refresh = false;
             while let Ok(result) = rx.try_recv() {
@@ -595,20 +684,27 @@ impl App {
             }
             if needs_reload {
                 self.reload_config();
+                needs_draw = true; draw_reason = 3;
             }
-            if needs_refresh {
+            if needs_refresh && last_refresh.elapsed() >= Duration::from_millis(500) {
                 self.state.refresh_listing();
+                last_refresh = std::time::Instant::now();
+                needs_draw = true; draw_reason = 3;
             }
 
-            // Short poll while the pane or a capture is active so output
-            // streams without lag. Long poll otherwise to keep CPU near
-            // zero when the user is just browsing files.
-            let poll_ms = if self.pane_tabs.is_some() || self.pending_capture.is_some() {
-                16
+            // Adaptive poll rate:
+            // - 16ms when pane output just arrived (smooth streaming)
+            // - 100ms when pane exists but is idle
+            // - 250ms when no pane at all
+            let poll_ms = if pane_had_output || self.pending_capture.is_some() {
+                16  // smooth streaming
+            } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
+                100 // pane idle — responsive to new output
             } else {
-                250
+                500 // no pane — only user input matters
             };
             if event::poll(Duration::from_millis(poll_ms))? {
+                needs_draw = true; draw_reason = 2;
                 match event::read()? {
                     Event::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
@@ -671,6 +767,8 @@ impl App {
                             }
                         } else if let Some(pane) = self.pane_tabs.as_mut().map(PaneTabs::active_mut)
                         {
+                            // Track pasted text for yP (yank last prompt).
+                            self.pane_prompt_buf.push_str(&text);
                             // Wrap in bracketed paste so the child app (e.g. claude)
                             // receives the block as a single paste, not line-by-line.
                             let mut buf = Vec::with_capacity(text.len() + 12);
@@ -705,18 +803,83 @@ impl App {
                 }
             }
 
-            // chdir may have happened in the tick just finished — keep the
-            // watcher pointed at the current listing dir.
-            sync_listing_watch(
-                fs_watcher.as_mut(),
-                &mut watched_listing,
-                &mut watched_git,
-                &self.state.listing.dir,
-            );
 
-            // Update the MCP context file so external consumers (e.g.
-            // `spyc --mcp`) see the latest state.
-            self.write_context();
+            // Activity monitor: roll over the 2-second window.
+            // Uses 2s to avoid the monitor itself being the dominant draw source.
+            if self.show_activity
+                && self.activity_last_tick.elapsed() >= Duration::from_secs(2)
+            {
+                // Scale to per-second rates.
+                let new_dps = self.activity_draws / 2;
+                let new_bps = self.activity_bytes / 2;
+                self.activity_dps = new_dps;
+                self.activity_bps = new_bps;
+                self.activity_snap_pane = self.activity_reason_pane / 2;
+                self.activity_snap_event = self.activity_reason_event / 2;
+                self.activity_snap_other = self.activity_reason_other / 2;
+                self.activity_draws = 0;
+                self.activity_bytes = 0;
+                self.activity_reason_pane = 0;
+                self.activity_reason_event = 0;
+                self.activity_reason_other = 0;
+                self.activity_last_tick = std::time::Instant::now();
+                // The activity display updates piggyback on the next
+                // real draw — no forced redraw just for the overlay.
+            }
+
+            // Only redraw when something actually changed.
+            // Wrap in DEC 2026 synchronized update so the terminal
+            // emulator (iTerm2, etc.) buffers the entire frame and
+            // paints it atomically — eliminates tearing and reduces
+            // terminal-side CPU.
+            if needs_draw {
+                needs_draw = false;
+                use crossterm::terminal::{
+                    BeginSynchronizedUpdate, EndSynchronizedUpdate,
+                };
+                let _ = crossterm::execute!(
+                    terminal.backend_mut(),
+                    BeginSynchronizedUpdate
+                );
+                if pending_clear {
+                    terminal.clear()?;
+                }
+                let completed = terminal.draw(|frame| self.render(frame))?;
+                let frame_area = completed.area;
+                drop(completed);
+                let _ = crossterm::execute!(
+                    terminal.backend_mut(),
+                    EndSynchronizedUpdate
+                );
+                if self.show_activity {
+                    self.activity_draws += 1;
+                    self.activity_bytes +=
+                        u64::from(frame_area.width) * u64::from(frame_area.height);
+                    match draw_reason {
+                        1 => self.activity_reason_pane += 1,
+                        2 => self.activity_reason_event += 1,
+                        _ => self.activity_reason_other += 1,
+                    }
+                }
+                draw_reason = 0;
+            }
+
+            // Only re-sync the filesystem watcher when the cwd actually changed.
+            if watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
+                sync_listing_watch(
+                    fs_watcher.as_mut(),
+                    &mut watched_listing,
+                    &mut watched_git,
+                    &self.state.listing.dir,
+                );
+            }
+
+            // Update the MCP context file — throttled to at most once per
+            // second to avoid hammering the disk on every 16ms frame.
+            if last_context_write.elapsed() >= Duration::from_secs(1) {
+                self.write_context();
+                last_context_write = std::time::Instant::now();
+            }
         }
         // Clean up the context file on exit.
         crate::context::remove_context_file(&self.context_path);
@@ -732,6 +895,14 @@ impl App {
     /// `notify` events sometimes include just the directory and sometimes
     /// the affected child, so we accept both.
     fn is_listing_path(&self, path: &Path) -> bool {
+        // Ignore our own context file writes — they land in the listing
+        // directory and would otherwise trigger a self-perpetuating
+        // refresh_listing → git subprocess → redraw cycle.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with(".spyc-context-") {
+                return false;
+            }
+        }
         let dir = self.state.listing.dir.as_path();
         path == dir
             || path.parent() == Some(dir)
@@ -969,7 +1140,6 @@ impl App {
                 PaneWidget {
                     screen: overlay.screen(),
                     focused: true,
-                    blink_on: self.cursor_blink_on,
                 },
                 overlay_area,
             );
@@ -1010,8 +1180,7 @@ impl App {
                     PaneWidget {
                         screen: tabs.active().screen(),
                         focused: false,
-                        blink_on: false,
-                    },
+                        },
                     rect,
                 );
             }
@@ -1028,11 +1197,26 @@ impl App {
         }
         .render(frame, layout.status);
 
-        let rows = self.build_rows();
+        if self.cached_rows_gen != self.state.list_generation {
+            self.cached_rows = self.build_rows();
+            self.cached_rows_gen = self.state.list_generation;
+        }
+        let rows = &self.cached_rows;
         let list_focused = !self.state.pane_focused;
-        // Stabilize view_top ↔ grid.  The grid depends on view_top (different
-        // entries have different name lengths → different column count →
-        // different items_per_page), and view_top depends on the grid.
+        // Stabilize view_top ↔ grid.  Skip the expensive multi-round
+        // loop when inputs haven't changed since the last frame.
+        let grid_key = (
+            self.state.list_generation,
+            self.state.cursor.view_top,
+            self.state.cursor.index,
+            layout.list.width,
+            layout.list.height,
+        );
+        if grid_key != self.cached_grid_key {
+        self.cached_grid_key = grid_key;
+        // The grid depends on view_top (different entries have different
+        // name lengths → different column count → different items_per_page),
+        // and view_top depends on the grid.
         //
         // This can produce a 2-cycle: vt=A gives grid that wants vt=B, and
         // vt=B gives grid that wants vt=A.  When we detect that, always pick
@@ -1113,6 +1297,15 @@ impl App {
                 );
             }
         }
+        // Update cache key in case the stabilization loop changed view_top.
+        self.cached_grid_key = (
+            self.state.list_generation,
+            self.state.cursor.view_top,
+            self.state.cursor.index,
+            layout.list.width,
+            layout.list.height,
+        );
+        } // end grid cache guard
 
         frame.render_widget(
             ListView {
@@ -1133,10 +1326,10 @@ impl App {
                 PaneWidget {
                     screen: tabs.active().screen(),
                     focused: self.state.pane_focused,
-                    blink_on: self.cursor_blink_on,
                 },
                 rect,
             );
+            tabs.active_mut().output_dirty = false;
         }
 
         if let Some(divider_rect) = layout.divider {
@@ -1199,6 +1392,44 @@ impl App {
         // Pager comes after list but before help (help always wins).
         if let Some(view) = &self.pager {
             pager::render(frame, frame.area(), view, &self.theme);
+        }
+
+        // Activity monitor overlay (top-right corner).
+        if self.show_activity {
+            use ratatui::widgets::Paragraph as ActivityP;
+            let text = format!(
+                " {} dps [p:{} e:{} o:{}]  {} cells/s  poll {}ms ",
+                self.activity_dps,
+                self.activity_snap_pane,
+                self.activity_snap_event,
+                self.activity_snap_other,
+                self.activity_bps,
+                if self.pending_capture.is_some() {
+                    16
+                } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
+                    50
+                } else {
+                    250
+                },
+            );
+            let w = text.len() as u16;
+            if frame_area.width > w + 2 {
+                let rect = ratatui::layout::Rect {
+                    x: frame_area.width - w - 1,
+                    y: 0,
+                    width: w,
+                    height: 1,
+                };
+                let style = ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Black)
+                    .bg(ratatui::style::Color::Yellow);
+                frame.render_widget(
+                    ActivityP::new(ratatui::text::Line::from(
+                        ratatui::text::Span::styled(text, style),
+                    )),
+                    rect,
+                );
+            }
         }
     }
 
@@ -1345,6 +1576,26 @@ impl App {
             && !matches!(self.state.mode, Mode::Prompting(_))
             && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
         {
+            // Track what the user types so yP can yank the last prompt.
+            match key.code {
+                KeyCode::Enter => {
+                    let trimmed = strip_ansi_escapes(&self.pane_prompt_buf);
+                    if !trimmed.is_empty() {
+                        self.last_pane_prompt = Some(trimmed);
+                    }
+                    self.pane_prompt_buf.clear();
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.pane_prompt_buf.clear();
+                }
+                KeyCode::Backspace => {
+                    self.pane_prompt_buf.pop();
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.pane_prompt_buf.push(c);
+                }
+                _ => {}
+            }
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let _ = tabs.active_mut().send_key(key);
             }
@@ -1366,6 +1617,7 @@ impl App {
                 }
                 KeyCode::Char(' ') | KeyCode::Char('t') => {
                     self.state.inventory.toggle_pick(self.state.cursor.index);
+                    self.state.list_generation = self.state.list_generation.wrapping_add(1);
                     self.state.cursor_move_vertical(1, self.state.rows.len());
                     return Ok(PostAction::None);
                 }
@@ -1400,6 +1652,7 @@ impl App {
                             self.state.picks.insert(&e.path);
                         }
                     }
+                    self.state.list_generation = self.state.list_generation.wrapping_add(1);
                 }
             }
             BoundAction::Jump(path) => {
@@ -2013,7 +2266,62 @@ impl App {
         first == "claude" || first.ends_with("/claude")
     }
 
-    /// ^W n — start the two-step prompt for a new pane tab.
+    /// yp — yank visible pane output to the system clipboard.
+    fn yank_pane_to_clipboard(&mut self) -> PostAction {
+        let Some(tabs) = self.pane_tabs.as_ref() else {
+            self.state.flash_error("no pane open");
+            return PostAction::None;
+        };
+        let lines = tabs.active().visible_lines();
+        let text: String = lines
+            .iter()
+            .map(|l| l.trim_end())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.trim().is_empty() {
+            self.state.flash_error("pane is empty");
+            return PostAction::None;
+        }
+        match Self::copy_to_clipboard(&text) {
+            Ok(()) => {
+                let count = text.lines().count();
+                self.state
+                    .flash_info(format!("yanked {count} lines from pane"));
+            }
+            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+        }
+        PostAction::None
+    }
+
+    fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin.write_all(text.as_bytes())?;
+        }
+        child.wait()?;
+        Ok(())
+    }
+
+    /// yP — yank the last prompt the user typed into the pane.
+    fn yank_last_prompt_to_clipboard(&mut self) -> PostAction {
+        let Some(text) = self.last_pane_prompt.as_ref() else {
+            self.state.flash_error("no prompt to yank");
+            return PostAction::None;
+        };
+        match Self::copy_to_clipboard(text) {
+            Ok(()) => {
+                let preview: String = text.chars().take(60).collect();
+                let ellipsis = if text.len() > 60 { "…" } else { "" };
+                self.state
+                    .flash_info(format!("yanked prompt: {preview}{ellipsis}"));
+            }
+            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+        }
+        PostAction::None
+    }
+
     /// Put inventory items to the current working directory.
     /// Picked items only if any picks exist, else all.
     /// Items are removed from inventory after successful put.
@@ -2073,11 +2381,16 @@ impl App {
             return; // already there — no-op
         }
         self.state.pane_focused = want_pane;
-        self.state.flash_info(if self.state.pane_focused {
-            "focus: pane"
+        if self.state.pane_focused {
+            let label = self
+                .pane_tabs
+                .as_ref()
+                .map(|t| t.active_info().label.as_str())
+                .unwrap_or("pane");
+            self.state.flash_info(format!("focus: {label}"));
         } else {
-            "focus: list"
-        });
+            self.state.flash_info("focus: spyc");
+        }
     }
 
     /// Handle keys while the pane is in scroll mode. Vi-style navigation
@@ -2417,7 +2730,7 @@ impl App {
 
     // ---- Session management --------------------------------------------------
 
-    fn save_session(&self) {
+    fn save_session(&mut self) {
         use crate::state::sessions::{SavedTab, Session};
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2464,6 +2777,27 @@ impl App {
             pane_focused: self.state.pane_focused,
         };
         let _ = crate::state::sessions::save_session(&session);
+
+        // Build exit summary for post-TUI output.
+        let cwd_display = self.state.listing.dir.display().to_string();
+        let tab_count = session.tabs.len();
+        let claude_names: Vec<String> = session
+            .tabs
+            .iter()
+            .filter_map(|t| t.claude_session_name.clone())
+            .collect();
+        let mut parts = vec![format!("session saved — {cwd_display}")];
+        if tab_count > 0 {
+            parts.push(format!(
+                "{tab_count} pane tab{}",
+                if tab_count == 1 { "" } else { "s" }
+            ));
+        }
+        if !claude_names.is_empty() {
+            parts.push(format!("claude: {}", claude_names.join(", ")));
+        }
+        parts.push("restore with spyc -r".to_string());
+        self.exit_summary = Some(parts.join(" · "));
     }
 
     fn show_session_picker(&mut self) {
@@ -3234,7 +3568,8 @@ impl App {
             KeyCode::PageUp | KeyCode::Char('b') => view.scroll_by(-i32::from(viewport), viewport),
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
-            KeyCode::Char('l') => view.toggle_whitespace(),
+            KeyCode::Char('l') => view.toggle_line_numbers(),
+            KeyCode::Char('w') => view.toggle_whitespace(),
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
                 Ok(()) => self.state.flash_info("yanked to clipboard"),
@@ -3285,6 +3620,14 @@ impl App {
                     false,
                 );
             }
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                // Push current pager into history, open pager help on top.
+                if let Some(current) = self.pager.take() {
+                    self.pager_history.push(current);
+                }
+                self.pager = Some(crate::ui::pager::build_pager_help(&self.theme));
+                self.needs_full_repaint = true;
+            }
             _ => {}
         }
         PostAction::None
@@ -3307,6 +3650,15 @@ impl App {
         // In dir view, `p` (Drop) means "put inventory to cwd".
         if *action == Action::Drop && self.state.view == View::Dir {
             return Ok(self.put_inventory_to_cwd());
+        }
+
+        // yp — yank visible pane output to system clipboard.
+        if *action == Action::YankPrompt {
+            return Ok(self.yank_pane_to_clipboard());
+        }
+        // yP — yank last typed pane prompt to system clipboard.
+        if *action == Action::YankLastPrompt {
+            return Ok(self.yank_last_prompt_to_clipboard());
         }
 
         // Try pure-domain dispatch first.
@@ -3478,6 +3830,15 @@ impl App {
                     "colors off"
                 } else {
                     "colors on"
+                });
+            }
+
+            Action::ToggleActivity => {
+                self.show_activity = !self.show_activity;
+                self.state.flash_info(if self.show_activity {
+                    "activity monitor on"
+                } else {
+                    "activity monitor off"
                 });
             }
 
@@ -3663,9 +4024,9 @@ const fn is_spyc_meta_when_pane_focused(
     if matches!(key.code, KeyCode::F(10) | KeyCode::Char('\x1c')) {
         return true;
     }
-    // Ctrl-\ (toggle) and Ctrl-W (pane-command prefix).
+    // Ctrl-\ (toggle), Ctrl-W (vim pane prefix), Ctrl-A (screen prefix).
     key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W'))
+        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
 }
 
 fn sync_listing_watch(
@@ -3825,4 +4186,45 @@ fn hostname_best_effort() -> String {
         }
     }
     "localhost".to_string()
+}
+
+/// Strip ANSI escape sequences (CSI, OSC, bracketed paste markers, etc.)
+/// from a string, returning only printable content.
+fn strip_ansi_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            // Skip ESC + whatever follows (CSI sequence, OSC, etc.).
+            if let Some(&next) = chars.peek() {
+                if next == '[' {
+                    chars.next(); // consume '['
+                    // Consume until a letter or ~ terminates the sequence.
+                    while let Some(&c) = chars.peek() {
+                        chars.next();
+                        if c.is_ascii_alphabetic() || c == '~' {
+                            break;
+                        }
+                    }
+                } else if next == ']' {
+                    // OSC: skip until ST (ESC \ or BEL).
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' {
+                            break;
+                        }
+                        if c == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                } else {
+                    chars.next(); // consume the char after ESC
+                }
+            }
+        } else if ch >= ' ' || ch == '\n' || ch == '\t' {
+            out.push(ch);
+        }
+    }
+    out.trim().to_string()
 }

@@ -96,8 +96,12 @@ fn main() -> Result<()> {
         eprintln!("spyc: debug log → {p}");
     }
     let mut terminal = setup_terminal()?;
-    let result = App::new(resume).run(&mut terminal);
+    let mut app = App::new(resume);
+    let result = app.run(&mut terminal);
     restore_terminal(&mut terminal)?;
+    if let Some(summary) = &app.exit_summary {
+        println!("\u{1f336}\u{fe0f} {summary}");
+    }
     result
 }
 

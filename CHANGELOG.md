@@ -5,6 +5,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-19
+
+### Added
+- **Performance refactor.** Idle CPU dropped from ~12.5% to near-vim
+  levels (~2.5%). Root cause: context file writes were triggering
+  file-watcher → refresh_listing → git subprocess → redraw cycles.
+  Fixes: context file excluded from watcher, context writes skipped
+  when unchanged, DEC 2026 synchronized output, build_rows/grid
+  computation caching, active-tab-only draw triggering, has_pending
+  atomic guard on drain, increased idle poll interval.
+- **Activity monitor** (`A` toggle): live overlay showing draws/sec,
+  cells/sec, draw reason breakdown (pane/event/other), and poll rate.
+  Piggybacks on real draws — does not force its own redraws.
+- **`y` prefix for yank commands.** `yy` yanks files into inventory
+  (was bare `y`), `yp` yanks visible pane output to clipboard, `yP`
+  yanks the last prompt you typed into the pane to clipboard.
+- **Pager `?` help:** dedicated help overlay showing all pager keybindings.
+- **Exit summary:** on quit, spyc prints a one-line session summary to
+  stdout (cwd, tab count, Claude session name, restore hint).
+- **Pager line numbers default to on.** `l` toggles line numbers, `w`
+  toggles whitespace markers (previously `l` controlled both).
+- `make install` now shows verbose progress (linking stage note,
+  codesign step, version in final message).
+
+### Changed
+- **Pane prefix switched to `^a` (screen-style).** `^w` still works
+  as an alias. Bindings: `^a n`/`]` next tab, `^a p`/`[` prev tab,
+  `^a c` new tab, `^a K`/`x` close tab, `^a P` pipe content,
+  `^a r` rename, `^a s` send selection, `^a v` scroll mode.
+- Focus notice uses product naming: "focus: spyc" / "focus: claude"
+  (active tab label) instead of generic "focus: list" / "focus: pane".
+- `git status` uses `-unormal` instead of `-uall` to avoid expensive
+  recursive enumeration of untracked directories.
+
+### Removed
+- Cursor blink in the pane — was causing phantom redraws and added no
+  value. Unfocused cursor now shows as a static dim block.
+- Periodic `^L` refresh to Claude pane tabs — cleared draft prompts
+  when focus was elsewhere.
+
+### Fixed
+- Backtick (`` ` ``) now returns to the session's home directory, not
+  where spyc was launched from.
+- `gf`/`gF` scans the last 200 lines of scrollback (not just the
+  visible viewport), so paths in large diffs are still found.
+
+## [1.6.0] - 2026-04-18
+
 ### Added
 - Unicode-width support: CJK filenames, flags, and emoji now render
   with correct column alignment in the file list, status bar, help
@@ -33,12 +81,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - `p` in dir view now means "put inventory to cwd" (was "drop from
   inventory").
-
-### Fixed
-- Backtick (`` ` ``) now returns to the session's home directory, not
-  where spyc was launched from.
-- `gf`/`gF` scans the last 200 lines of scrollback (not just the
-  visible viewport), so paths in large diffs are still found.
 
 ## [1.5.0] - 2026-04-18
 

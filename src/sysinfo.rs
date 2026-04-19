@@ -73,7 +73,7 @@ pub fn git_file_statuses(
     use crate::ui::list_view::GitFileStatus;
     let mut map = std::collections::HashMap::new();
     let output = std::process::Command::new("git")
-        .args(["status", "--porcelain", "-uall"])
+        .args(["status", "--porcelain", "-unormal"])
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

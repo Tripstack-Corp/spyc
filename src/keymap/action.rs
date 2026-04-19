@@ -26,11 +26,13 @@ pub enum Action {
     PickToggleAll,     // ^T
 
     // Inventory (global, cross-directory).
-    Take,                // y — yank into inventory
+    Take,                // yy — yank into inventory
     Untake,              // Y — remove from inventory (from dir view)
     Drop,                // p — put inventory to cwd
     ToggleInventoryView, // i
     EmptyInventory,      // z
+    YankPrompt,          // yp — yank visible pane output to clipboard
+    YankLastPrompt,      // yP — yank last typed pane prompt to clipboard
 
     // Ignore masks & filtering.
     ToggleMask(u8), // a -> 1, o -> 2
@@ -69,11 +71,12 @@ pub enum Action {
     EditInPane, // V — open $EDITOR in pane tab (file list stays visible)
 
     // Info commands.
-    Date,         // D — show date/time
-    Version,      // gV / :version — show spyc version
-    ShowMemory,   // I — session info pager (version, pid, rss, counts)
-    ColorToggle,  // C — toggle color theme on/off
-    SetEnvPrompt, // s — NAME=VALUE prompt
+    Date,            // D — show date/time
+    Version,         // gV / :version — show spyc version
+    ShowMemory,      // I — session info pager (version, pid, rss, counts)
+    ColorToggle,     // C — toggle color theme on/off
+    SetEnvPrompt,    // s — NAME=VALUE prompt
+    ToggleActivity,  // A — toggle draws/sec, bytes/sec overlay
 
     // Help.
     Help, // ? or F1 — key bindings overlay
@@ -147,6 +150,8 @@ impl Action {
             Self::Drop => "drop from inventory",
             Self::ToggleInventoryView => "toggle inventory view",
             Self::EmptyInventory => "empty inventory",
+            Self::YankPrompt => "yank visible pane output to clipboard",
+            Self::YankLastPrompt => "yank last typed prompt to clipboard",
             Self::ToggleMask(_) => "toggle ignore mask",
             Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
             Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",
@@ -199,6 +204,7 @@ impl Action {
             Self::ShowMemory => "session info",
             Self::ColorToggle => "toggle colors",
             Self::SetEnvPrompt => "set env var",
+            Self::ToggleActivity => "toggle activity monitor",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
             Self::Noop => "no-op",

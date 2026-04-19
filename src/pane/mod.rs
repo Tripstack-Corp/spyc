@@ -18,7 +18,8 @@ pub use widget::PaneWidget;
 
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -36,6 +37,8 @@ pub struct Pane {
     _child: Box<dyn portable_pty::Child + Send + Sync>,
     /// Reader-thread events (bytes to process, or a "closed" signal).
     event_rx: mpsc::Receiver<PaneEvent>,
+    /// Set by the reader thread when data is available; cleared by drain.
+    has_pending: Arc<std::sync::atomic::AtomicBool>,
     /// Set when the reader thread observed EOF on the master — the
     /// subprocess has exited and the pane should be torn down.
     closed: bool,
@@ -43,6 +46,8 @@ pub struct Pane {
     debug_dump: bool,
     /// Last size passed to resize(), to skip redundant ioctl+SIGWINCH.
     last_size: (u16, u16),
+    /// Set by `drain_output()` when new bytes arrived; cleared after render.
+    pub output_dirty: bool,
     /// When > 0, the pane is in scroll mode: keys navigate the scrollback
     /// instead of being forwarded to the child. `drain_output()` still
     /// runs so no output is lost.
@@ -97,7 +102,9 @@ impl Pane {
         // Background thread pumps reader → channel. We don't block the
         // render loop on child output.
         let (tx, event_rx) = mpsc::channel::<PaneEvent>();
-        thread::spawn(move || reader_loop(reader, &tx));
+        let has_pending = Arc::new(AtomicBool::new(false));
+        let pending_flag = Arc::clone(&has_pending);
+        thread::spawn(move || reader_loop(reader, &tx, &pending_flag));
 
         let parser = vt100::Parser::new(rows, cols, 10_000);
         let debug_dump = std::env::var("SPYC_PTY_DEBUG").is_ok();
@@ -117,15 +124,23 @@ impl Pane {
             master: pair.master,
             _child: child,
             event_rx,
+            has_pending,
             closed: false,
             debug_dump,
             last_size: (rows, cols),
+            output_dirty: false,
             scroll_offset: 0,
         })
     }
 
     /// Drain any pending output from the child into the parser. Call
     /// each render tick before drawing. A `Closed` event marks the
+    /// Quick check whether the reader thread has posted data since the
+    /// last drain. Uses a relaxed atomic — no locking, no syscall.
+    pub fn has_pending_output(&self) -> bool {
+        self.has_pending.load(Ordering::Relaxed)
+    }
+
     /// subprocess as finished so the caller can tear the pane down.
     /// Returns `true` if any bytes were processed.
     pub fn drain_output(&mut self) -> bool {
@@ -151,6 +166,10 @@ impl Pane {
                 }
                 PaneEvent::Closed => self.closed = true,
             }
+        }
+        self.has_pending.store(false, Ordering::Relaxed);
+        if had_bytes {
+            self.output_dirty = true;
         }
         had_bytes
     }
@@ -325,16 +344,22 @@ impl Pane {
 }
 
 /// Pump bytes from the pty master until the child exits.
-fn reader_loop(mut reader: Box<dyn Read + Send>, tx: &mpsc::Sender<PaneEvent>) {
+fn reader_loop(
+    mut reader: Box<dyn Read + Send>,
+    tx: &mpsc::Sender<PaneEvent>,
+    pending: &AtomicBool,
+) {
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
             // Ok(0) is EOF; Err is any I/O failure. Both mean the child is gone.
             Ok(0) | Err(_) => {
+                pending.store(true, Ordering::Relaxed);
                 let _ = tx.send(PaneEvent::Closed);
                 return;
             }
             Ok(n) => {
+                pending.store(true, Ordering::Relaxed);
                 if tx.send(PaneEvent::Bytes(buf[..n].to_vec())).is_err() {
                     return; // Parent has dropped the Pane.
                 }

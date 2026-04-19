@@ -47,7 +47,9 @@ Two levels of selection for flexible file management.
 
 **Inventory** is a file cache — yanked files are copied to a local cache
 (`~/.local/state/spyc/inventory/`), persisted across sessions:
-- **y** yank file(s) into inventory cache (regular files only)
+- **yy** yank file(s) into inventory cache (regular files only)
+- **yp** yank visible pane output to the system clipboard
+- **yP** yank the last prompt you typed into the pane to the clipboard
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory
 - **i** toggle the inventory view (replaces the file listing)
@@ -80,11 +82,15 @@ spyc's workflow: browse files above, talk to Claude below.
 
 - **^\\ / F10** toggle the pane open/closed
 - **F9** open pane with `claude --resume`
-- **^W j / ^W k** switch focus between the file list and the pane
-- **^W s** send the current selection (file paths) to the pane as stdin
-- **^W + / ^W -** grow or shrink the pane
-- **^W v** enter scroll mode — browse up to 10K lines of scrollback
+- **^a j / ^a k** switch focus between the file list and the pane
+  (`^w` also works as an alias for `^a`)
+- **^a s** send the current selection (file paths) to the pane as stdin
+- **^a P** pipe file contents of the selection to the pane
+- **^a i** pipe inventory file contents to the pane
+- **^a + / ^a -** grow or shrink the pane
+- **^a v** enter scroll mode — browse up to 10K lines of scrollback
   without interrupting the child process; **s** saves to a file
+- **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.
@@ -93,11 +99,12 @@ spyc's workflow: browse files above, talk to Claude below.
 
 Multiple tabs, each running an independent pty:
 
-- **^W n** new tab (prompts for command and working directory)
-- **^W x** close the active tab
-- **^W 1..9** switch to tab N
-- **^W [ / ^W ]** prev / next tab
-- **^W r** rename the active tab
+- **^a c** new tab (prompts for command and working directory)
+- **^a K / ^a x** close the active tab
+- **^a 1..9** switch to tab N
+- **^a p / ^a [** prev tab
+- **^a n / ^a ]** next tab
+- **^a r** rename the active tab
 - Activity indicator (**+**) on background tabs that have new output
 - Set `SPYC_PANE_CMD` to change the default pane command from `claude`
 
@@ -113,7 +120,8 @@ spyc.
   hourglass timer, stderr merged so build progress appears in real-time
 - **/ search** within pager content, with **n / N** navigation
 - **:N** jump to line N
-- **l** toggle line numbers and whitespace markers
+- **l** toggle line numbers (on by default)
+- **w** toggle whitespace markers (·, ↲)
 - **f** toggle full-width mode vs. centered overlay
 - **v** open pager content in `$EDITOR`
 - **s** save pager content to a file
@@ -224,7 +232,8 @@ When switching between the file list and the pane, focus is
 unambiguous:
 
 - **File list cursor** dims to a muted color when the pane has focus
-- **Pane cursor** blinks when focused, shows as a static block when not
+- **Pane cursor** shows as a bright reverse-video block when focused,
+  dim block when unfocused
 - The divider rule brightens when the pane is focused
 
 ## Configuration
@@ -258,6 +267,8 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 - **D** show date and time (UTC)
 - **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
+- **A** activity monitor: live draws/sec, cells/sec, draw reason
+  breakdown (pane/event/other), and poll interval
 - **C** toggle between color and mono themes
 - **s** set an environment variable (`NAME=VALUE`)
 
