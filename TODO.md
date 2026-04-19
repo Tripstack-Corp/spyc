@@ -21,12 +21,10 @@ as they ship — not to a `Done` section here.
   `bitbucket-pipelines.yml` uses `rust:1.80-slim`; `rust-toolchain.toml`
   pins `1.85`. Bump the image. Verify a clean-cache build passes.
 
-- [ ] **[M] Unicode width in list view.**
-  Route width through `unicode-width`. Replace `chars().count()`
-  usage in `ui/list_view.rs` and anywhere column alignment is
-  computed.
-  *Done when:* a directory containing CJK, flag emoji, and family
-  emoji filenames renders with aligned columns.
+- [x] **[M] Unicode width in list view.**
+  *Done:* `unicode-width` crate, `display_width()`/`display_truncate()`
+  helpers in `ui/mod.rs`. All UI width sites fixed: list_view, status
+  bar (powerline + mono), help, pager, truncate_middle().
 
 - [x] **[S] `cargo-audit` in CI quality gate.**
   Fail on advisories. RUSTSEC-2026-0009 (time 0.3.45) ignored — fix
@@ -82,14 +80,13 @@ rest of the dispatch testing.
 
 ### Release hygiene
 
-- [ ] **[S] `CHANGELOG.md` in Keep-a-Changelog format.**
-  Seed from `ROADMAP.md`'s "Done (recent)". Update in every
-  user-visible PR alongside the version bump.
+- [x] **[S] `CHANGELOG.md` in Keep-a-Changelog format.**
+  *Done:* Seeded with entries for v0.11.0 through v1.5.0.
 
-- [ ] **[S] `spyc --version --verbose`.**
-  Version, git SHA (via `build.rs`), build timestamp, rustc version,
-  `$TERM` / `$COLORTERM`, active feature flags. First thing every
-  bug report asks for.
+- [x] **[S] `spyc --version --verbose`.**
+  *Done:* `build.rs` embeds git SHA, build timestamp, rustc version.
+  `--version --verbose` dumps version, git, built, rustc, TERM,
+  COLORTERM, os/arch.
 
 - [x] **[S] Panic backtraces in debug log.**
   Wire the panic hook to dump `RUST_BACKTRACE=full` to the debug log.

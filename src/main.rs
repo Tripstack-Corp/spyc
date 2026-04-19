@@ -62,7 +62,7 @@ fn main() -> Result<()> {
                -r, --resume   Open pane with `claude --resume`\n  \
                -d, --debug    Write debug log to /tmp/spyc-debug-<ts>.log\n  \
                -h, --help     Show this help\n  \
-               -v, --version  Show version\n  \
+               -v, --version  Show version (add --verbose for build info)\n  \
                --mcp          Run as MCP server (stdio JSON-RPC)",
             env!("CARGO_PKG_VERSION"),
         );
@@ -73,7 +73,19 @@ fn main() -> Result<()> {
         return mcp::run(root);
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
+        let verbose = args.iter().any(|a| a == "--verbose");
         println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));
+        if verbose {
+            println!("  git:     {}", env!("SPYC_GIT_SHA"));
+            println!("  built:   {}", env!("SPYC_BUILD_TIME"));
+            println!("  rustc:   {}", env!("SPYC_RUSTC_VERSION"));
+            println!("  TERM:    {}", std::env::var("TERM").unwrap_or_default());
+            println!(
+                "  COLOR:   {}",
+                std::env::var("COLORTERM").unwrap_or_default()
+            );
+            println!("  os:      {} {}", std::env::consts::OS, std::env::consts::ARCH);
+        }
         return Ok(());
     }
 
