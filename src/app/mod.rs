@@ -3753,15 +3753,6 @@ pub fn row_from_entry(e: &Entry) -> RowData {
     }
 }
 
-pub fn detect_kind(p: &Path) -> EntryKind {
-    match std::fs::symlink_metadata(p) {
-        Ok(md) if md.is_dir() => EntryKind::Dir,
-        Ok(md) if md.file_type().is_symlink() => EntryKind::Symlink,
-        Ok(md) if md.is_file() => EntryKind::File,
-        _ => EntryKind::Other,
-    }
-}
-
 const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }

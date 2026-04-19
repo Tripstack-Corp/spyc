@@ -49,7 +49,10 @@ impl StatusBar<'_> {
         let term_bg = Color::Reset;
 
         // Build fixed-width segments first so path gets the remainder.
-        let host_text = format!(" \u{f0311}{} ", self.user_host);
+        // Pepper emoji gets its own span with terminal-default bg so the
+        // emoji color rendering isn't clipped by the segment background.
+        let emoji_text = " \u{1f336}\u{fe0f} ";
+        let host_text = format!("{} ", self.user_host);
 
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} ")); // branch icon
         let git_w = git_text.as_ref().map_or(0, |s| dw(s) + 1); // +1 for sep
@@ -64,7 +67,8 @@ impl StatusBar<'_> {
 
         // Count separators: host→path + path→(git|suffix|term) + optional git→suffix
         let sep_count = 1 + 1 + usize::from(git_text.is_some() && has_suffix);
-        let fixed = dw(&host_text) + git_w + suffix_w + sep_count;
+        let host_w = 4 + dw(&host_text); // emoji span: space + 🌶️(2 cols) + space = 4
+        let fixed = host_w + git_w + suffix_w + sep_count;
         let path_budget = avail.saturating_sub(fixed + 1); // +1 for path→next sep
         let path_text = format!(
             " {} ",
@@ -73,7 +77,11 @@ impl StatusBar<'_> {
 
         let mut spans: Vec<Span> = Vec::new();
 
-        // Segment 1: user@host
+        // Segment 1: emoji (on terminal bg) + user@host (on purple)
+        spans.push(Span::styled(
+            emoji_text,
+            Style::default().bg(term_bg),
+        ));
         spans.push(Span::styled(
             &host_text,
             Style::default()
@@ -132,7 +140,7 @@ impl StatusBar<'_> {
         }
 
         // Fill remaining width.
-        let used: usize = dw(&host_text)
+        let used: usize = host_w
             + 1
             + dw(&path_text)
             + 1
@@ -152,7 +160,7 @@ impl StatusBar<'_> {
     fn render_plain(&self, frame: &mut Frame, area: Rect) {
         let avail = area.width as usize;
 
-        let prefix = format!("\u{f0311}{}: ", self.user_host);
+        let prefix = format!("{}: ", self.user_host);
         let host_w = dw(&prefix);
         let suffix_w = if self.suffix.is_empty() {
             0

@@ -239,6 +239,7 @@ impl Inventory {
     }
 
     /// Clear the graveyard (free disk space).
+    #[allow(dead_code)]
     pub fn empty_graveyard() {
         if let Some(dir) = graveyard_dir() {
             let _ = std::fs::remove_dir_all(&dir);
@@ -264,6 +265,7 @@ impl Inventory {
     }
 
     /// Check if item at index is picked.
+    #[allow(dead_code)]
     pub fn is_picked(&self, index: usize) -> bool {
         self.items
             .keys()
@@ -277,6 +279,7 @@ impl Inventory {
         self.items.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -297,6 +300,7 @@ impl Inventory {
     }
 
     /// Get item by index.
+    #[allow(dead_code)]
     pub fn get_at(&self, index: usize) -> Option<&CachedItem> {
         self.items.values().nth(index)
     }

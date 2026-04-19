@@ -33,3 +33,5 @@
 - support yp (yank prompt)
 - on exit should output that the session(s) were persisted with a few details to
   give the user confidence that all is well ... e.g. spyrc & claude
+- the "focus:" notice doesn't use our product naming
+- we should show a count of "hidden" files due to filters
