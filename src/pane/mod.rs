@@ -199,7 +199,8 @@ impl Pane {
     }
 
     /// Return visible screen content as individual lines (plain text,
-    /// no ANSI escapes). Used by `gf` to scan for path references.
+    /// no ANSI escapes).
+    #[allow(dead_code)]
     pub fn visible_lines(&self) -> Vec<String> {
         let screen = self.parser.screen();
         screen
@@ -207,6 +208,29 @@ impl Pane {
             .lines()
             .map(String::from)
             .collect()
+    }
+
+    /// Return the most recent `max_lines` of output (scrollback + visible
+    /// screen). Used by `gf`/`gF` so path references that scrolled past
+    /// the viewport are still found.
+    pub fn recent_lines(&mut self, max_lines: usize) -> Vec<String> {
+        let prev = self.scroll_offset;
+        let max_sb = self.max_scrollback();
+        self.parser.set_scrollback(max_sb);
+        let all: Vec<String> = self
+            .parser
+            .screen()
+            .contents()
+            .lines()
+            .map(String::from)
+            .collect();
+        self.parser.set_scrollback(prev);
+        // Return only the last `max_lines` lines.
+        if all.len() > max_lines {
+            all[all.len() - max_lines..].to_vec()
+        } else {
+            all
+        }
     }
 
     // ---- Scroll mode ------------------------------------------------

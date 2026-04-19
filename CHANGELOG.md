@@ -23,10 +23,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 - Graveyard: removed inventory items are preserved in
   `~/.local/state/spyc/graveyard/` for undo safety.
 - ESC exits inventory view (returns to directory view).
+- Status bar always shows hidden file count (even when 0).
 
 ### Changed
 - `p` in dir view now means "put inventory to cwd" (was "drop from
   inventory").
+
+### Fixed
+- Backtick (`` ` ``) now returns to the session's home directory, not
+  where spyc was launched from.
+- `gf`/`gF` scans the last 200 lines of scrollback (not just the
+  visible viewport), so paths in large diffs are still found.
 
 ## [1.5.0] - 2026-04-18
 

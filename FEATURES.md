@@ -84,6 +84,9 @@ spyc's workflow: browse files above, talk to Claude below.
 - **^W + / ^W -** grow or shrink the pane
 - **^W v** enter scroll mode — browse up to 10K lines of scrollback
   without interrupting the child process; **s** saves to a file
+- **gf** jump to a file path referenced in pane output; **gF** also
+  opens the pager at the referenced line. Scans the last 200 lines of
+  output (including scrollback) so paths in large diffs are still found.
 
 ### Multi-tab
 
@@ -209,7 +212,8 @@ The status bar uses powerline-style segments showing:
 - User and hostname
 - Current path (intelligently truncated)
 - Git branch with dirty flag (`main*`)
-- Active state: pick counts, inventory counts, mask status
+- Active state: pick counts, inventory counts, mask status, hidden
+  file count, active filter
 
 Falls back to a plain text layout in mono mode.
 

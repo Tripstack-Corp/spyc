@@ -1210,14 +1210,21 @@ impl App {
                     Some(f) => format!(" limit:{f}"),
                     None => String::new(),
                 };
-                format!(
-                    "[picks:{} inv:{} m1:{} m2:{}{}]",
-                    self.state.picks.len(),
-                    self.state.inventory.len(),
-                    on_off(self.state.masks.mask1.enabled),
-                    on_off(self.state.masks.mask2.enabled),
-                    filter_tag,
-                )
+                {
+                    let total = self.state.listing.entries.len();
+                    let shown = self.state.rows.len();
+                    let hidden = total.saturating_sub(shown);
+                    let hidden_tag = format!(" hidden:{hidden}");
+                    format!(
+                        "[picks:{} inv:{} m1:{} m2:{}{}{}]",
+                        self.state.picks.len(),
+                        self.state.inventory.len(),
+                        on_off(self.state.masks.mask1.enabled),
+                        on_off(self.state.masks.mask2.enabled),
+                        filter_tag,
+                        hidden_tag,
+                    )
+                }
             }),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
@@ -2276,11 +2283,13 @@ impl App {
     /// reference, navigate the file list there, and optionally open the
     /// pager at the referenced line.
     fn goto_file_from_pane(&mut self, open_at_line: bool) {
-        let Some(tabs) = self.pane_tabs.as_ref() else {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
             self.state.flash_error("no pane open");
             return;
         };
-        let lines = tabs.active().visible_lines();
+        // Scan the last 200 lines of output (not just the visible
+        // viewport) so paths in large diffs are still found.
+        let lines = tabs.active_mut().recent_lines(200);
         // Also try resolving against the spyc cwd (project root), not just
         // the pane tab's cwd — Claude often prints paths relative to the
         // project root regardless of the shell's cwd.
@@ -2546,12 +2555,14 @@ impl App {
     }
 
     fn restore_session(&mut self, session: &crate::state::sessions::Session) {
-        // Restore working directory.
+        // Restore working directory and update start_dir so backtick (`)
+        // jumps to the session's home, not where spyc was launched from.
         if session.cwd.is_dir() {
             if let Err(e) = self.state.chdir(&session.cwd) {
                 self.state.flash_error(format!("session chdir: {e}"));
                 return;
             }
+            self.state.start_dir = session.cwd.clone();
         } else {
             self.state.flash_error(format!("session dir gone: {}", session.cwd.display()));
             return;
