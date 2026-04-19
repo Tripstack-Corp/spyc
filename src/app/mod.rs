@@ -1975,6 +1975,30 @@ impl App {
         }
     }
 
+    /// V — open $EDITOR on the cursor file in a pane tab so the file
+    /// list stays visible above.
+    fn edit_in_pane(&mut self) {
+        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+            return;
+        };
+        let path = row.path.clone();
+        if row.kind == EntryKind::Dir {
+            self.state.flash_error("V: cannot edit a directory");
+            return;
+        }
+        let argv = shell::resolve_editor();
+        if argv.is_empty() {
+            self.state.flash_error("no $VISUAL or $EDITOR set");
+            return;
+        }
+        let cmd = format!(
+            "{} {}",
+            argv.join(" "),
+            shell::shell_quote(&path.display().to_string()),
+        );
+        self.open_pane_tab(&cmd);
+    }
+
     /// Does this command look like it's launching Claude CLI?
     fn is_claude_command(cmd: &str) -> bool {
         let first = cmd.split_whitespace().next().unwrap_or("");
@@ -3306,6 +3330,10 @@ impl App {
                 let post = self.activate(ActivateIntent::Edit);
                 self.state.cursor.clamp(self.state.rows.len());
                 return Ok(post);
+            }
+            Action::EditInPane => {
+                self.edit_in_pane();
+                return Ok(PostAction::None);
             }
 
             Action::ChmodAdd(mode_char) => {

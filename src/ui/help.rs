@@ -35,7 +35,8 @@ const SECTIONS: &[Section] = &[
         title: "Directories & files",
         rows: &[
             ("d  Enter", "enter dir / pager ($PAGER) on text file"),
-            ("e  v", "enter dir / editor ($EDITOR) on file"),
+            ("e  v", "enter dir / editor ($EDITOR) on file (suspends TUI)"),
+            ("V", "open $EDITOR in pane (file list stays visible)"),
             ("u  -", "climb to parent"),
             ("H  ~  Home", "go to home directory"),
             ("J", "jump to a path (~, $VAR expanded)"),
@@ -101,7 +102,7 @@ const SECTIONS: &[Section] = &[
         title: "Info",
         rows: &[
             ("D", "show date/time (UTC)"),
-            ("V", "show spyc version"),
+            ("g V", "show spyc version (also :version)"),
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
             ("s", "set environment variable (NAME=VALUE)"),

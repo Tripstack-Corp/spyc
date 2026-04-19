@@ -128,6 +128,7 @@ impl Resolver {
                 KeyCode::Char('D') => ResolverOutcome::Action(Action::GitDiffCached),
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),
                 KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
+                KeyCode::Char('V') => ResolverOutcome::Action(Action::Version),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -419,7 +420,7 @@ impl Resolver {
             }
             KeyCode::Char('V') => {
                 self.reset();
-                ResolverOutcome::Action(Action::Version)
+                ResolverOutcome::Action(Action::EditInPane)
             }
             KeyCode::Char('I') => {
                 self.reset();

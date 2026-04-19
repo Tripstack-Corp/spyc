@@ -65,9 +65,12 @@ pub enum Action {
     JumpPrevDir,    // '' — jump back to directory before last chdir
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
+    // Edit in pane.
+    EditInPane, // V — open $EDITOR in pane tab (file list stays visible)
+
     // Info commands.
     Date,         // D — show date/time
-    Version,      // V — show spyc version
+    Version,      // gV / :version — show spyc version
     ShowMemory,   // I — session info pager (version, pid, rss, counts)
     ColorToggle,  // C — toggle color theme on/off
     SetEnvPrompt, // s — NAME=VALUE prompt
@@ -132,7 +135,8 @@ impl Action {
             Self::GotoFirst => "top of column",
             Self::GotoLast => "bottom of column",
             Self::EnterOrDisplay => "enter dir / pager on text file",
-            Self::EnterOrEdit => "enter dir / editor on file",
+            Self::EnterOrEdit => "enter dir / editor on file (suspends TUI)",
+            Self::EditInPane => "open editor in pane (file list stays visible)",
             Self::Climb => "climb to parent",
             Self::Home => "home directory",
             Self::TogglePick => "toggle pick",

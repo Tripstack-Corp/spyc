@@ -812,6 +812,15 @@ impl AppState {
             return CommandResult::Handled;
         }
 
+        // :version
+        if input == "version" {
+            self.flash_info(format!(
+                "\u{1f336}\u{fe0f} spyc {}",
+                env!("CARGO_PKG_VERSION")
+            ));
+            return CommandResult::Handled;
+        }
+
         // :marks
         if input == "marks" {
             if self.marks.entries.is_empty() {

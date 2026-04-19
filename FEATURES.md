@@ -25,7 +25,8 @@ Everything is keyboard-driven with vi motions as the foundation.
 ## Directory browsing
 
 - **d / Enter** descend into a directory, or view a text file in the pager
-- **e / v** descend into a directory, or open a file in `$EDITOR`
+- **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
+- **V** open `$EDITOR` in the pane — file list stays visible above
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion)
@@ -255,7 +256,7 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 ## Info and diagnostics
 
 - **D** show date and time (UTC)
-- **V** show spyc version
+- **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
 - **C** toggle between color and mono themes
 - **s** set an environment variable (`NAME=VALUE`)
