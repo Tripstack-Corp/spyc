@@ -3,13 +3,17 @@
 ## Terminal
 
 spyc is designed for modern terminals with true-color (24-bit) and
-powerline glyph support. We recommend **Ghostty** on macOS:
+Nerd Font glyph support. We recommend **iTerm2** on macOS:
 
-- [ghostty.org](https://ghostty.org) — fast, GPU-accelerated, native
-  macOS app with excellent font rendering and true-color support.
+```sh
+brew install --cask iterm2
+```
 
-Other terminals that work well: iTerm2, WezTerm, Kitty, Alacritty.
-The default macOS Terminal.app supports true-color but lacks powerline
+iTerm2 supports true-color, Nerd Font glyphs, the mouse-pointer-hide
+escape (`XTSMPOINTER`), and is the most tested terminal for spyc.
+
+Other terminals that work well: WezTerm, Kitty, Alacritty, Ghostty.
+The default macOS Terminal.app supports true-color but lacks Nerd Font
 glyphs without a patched font.
 
 ## Font

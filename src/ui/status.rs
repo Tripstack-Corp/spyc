@@ -49,7 +49,7 @@ impl StatusBar<'_> {
         let term_bg = Color::Reset;
 
         // Build fixed-width segments first so path gets the remainder.
-        let host_text = format!(" \u{1f336}\u{fe0f} {} ", self.user_host);
+        let host_text = format!(" \u{f0311}{} ", self.user_host);
 
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} ")); // branch icon
         let git_w = git_text.as_ref().map_or(0, |s| dw(s) + 1); // +1 for sep
@@ -152,7 +152,8 @@ impl StatusBar<'_> {
     fn render_plain(&self, frame: &mut Frame, area: Rect) {
         let avail = area.width as usize;
 
-        let host_w = dw(self.user_host) + 2 + 3; // +3 for "🌶️ "
+        let prefix = format!("\u{f0311}{}: ", self.user_host);
+        let host_w = dw(&prefix);
         let suffix_w = if self.suffix.is_empty() {
             0
         } else {
@@ -171,10 +172,7 @@ impl StatusBar<'_> {
         };
 
         let mut spans = vec![
-            Span::styled(
-                format!("\u{1f336}\u{fe0f} {}: ", self.user_host),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(prefix, Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(path_disp),
         ];
         if !suffix_disp.is_empty() {

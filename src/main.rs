@@ -41,7 +41,8 @@ fn main() -> Result<()> {
         let _ = execute!(
             io::stdout(),
             LeaveAlternateScreen,
-            DisableBracketedPaste
+            DisableBracketedPaste,
+            ShowMousePointer
         );
 
         // Dump to the debug log if active.
@@ -102,10 +103,44 @@ fn main() -> Result<()> {
 
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
+/// Hide the mouse pointer while the TUI is active. Uses the "pointer
+/// mode" extension supported by xterm, iTerm2, Kitty, WezTerm, and
+/// most modern terminals. Terminals that don't recognize it silently
+/// ignore the sequence.
+struct HideMousePointer;
+struct ShowMousePointer;
+
+impl crossterm::Command for HideMousePointer {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        // XTSMPOINTER: set pointer mode to 0 (hide when typing).
+        // Widely supported; ignored by terminals that don't know it.
+        f.write_str("\x1b[>1p")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl crossterm::Command for ShowMousePointer {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str("\x1b[>0p")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        HideMousePointer
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -116,7 +151,8 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        ShowMousePointer
     )?;
     terminal.show_cursor()?;
     Ok(())

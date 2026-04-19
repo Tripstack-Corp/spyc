@@ -1,5 +1,7 @@
-- fix yank / put - should be able to drop inventory to current directory
-  (without overwriting)
+- (fixed) ESC to leave inventory
+- (fixed) inventory persistent — now a file-backed cache with graveyard
+- hide the mouse pointer when not moving
+- (fixed) yank / put — y yanks to cache, p puts to cwd, Y untakes
 - recovering a session knows the cwd but doesn't set that as the cwd from the
   start
 - shortcut needed for creating a new file in EDITOR
@@ -25,3 +27,9 @@
   [exited] label; any keypress dismisses.
 - g-f/g-F would be more useful if it was not just jump to visible but most
   recently displayed - large diffs tend to push paths out of view quickly
+- pager l should be for line numbers and we should pick something else to show
+  newline chars; line numbers should default to being on
+- there should be a short cut to help jump to files affected by git status
+- support yp (yank prompt)
+- on exit should output that the session(s) were persisted with a few details to
+  give the user confidence that all is well ... e.g. spyrc & claude
