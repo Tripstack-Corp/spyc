@@ -243,10 +243,13 @@
     <img src="spyc-logo.svg" alt="spyc logo" style="width:220px; height:220px; flex-shrink:0;" />
     <div>
       <p class="subtitle">Tripstack Tech Demo</p>
-      <h1>spyc</h1>
+      <h1>spyc 🌶️</h1>
       <p style="font-size:1.5em; font-weight:400; color:var(--airspace); margin-top:12px;">
-        A vi-keyboard-driven terminal file manager<br>
-        built in Rust with Claude Code
+        A vi-keyboard-driven file commander<br>
+        that shares context with Claude Code via MCP
+      </p>
+      <p style="font-size:1.1em; color:var(--airspace); margin-top:16px; opacity:0.7;">
+        Browse files above. Talk to Claude below. They see the same thing.
       </p>
       <div style="margin-top:48px; display:flex; gap:32px; align-items:center;">
         <span style="font-size:1.1em; color:var(--orange); font-weight:600;">Derek Marshall</span>
@@ -265,83 +268,119 @@
   </p>
   <div class="two-col">
     <div>
-      <h3>The Problem</h3>
+      <h3>🔴 The Problem</h3>
       <ul>
         <li>Terminal workflows are fragmented: ls, cd, vim, git, tmux</li>
         <li>AI coding assistants run in a separate window</li>
         <li>Context switching kills flow</li>
-        <li>Reaching for the mouse, Finder, or Cmd+Tab breaks your rhythm</li>
+        <li>The AI can't see what you're looking at</li>
       </ul>
     </div>
     <div>
-      <h3>The Solution</h3>
+      <h3>🟢 The Solution</h3>
       <ul>
-        <li>Hands on home row — never leave the keyboard</li>
-        <li>Browse files in the top pane, talk to Claude below</li>
-        <li>Pipe file contents directly into the AI</li>
-        <li>Vi keybindings everywhere — muscle memory transfers</li>
+        <li>File list + Claude pane in one terminal session</li>
+        <li>MCP bridge: Claude queries your cwd, cursor, picks, git branch</li>
+        <li>Bidirectional: <code>gf</code> jumps from Claude output to the file list</li>
+        <li>Session restore resumes the exact Claude conversation</li>
       </ul>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 3: Landscape -->
+<!-- SLIDE 3: The MCP Bridge -->
 <div class="slide dark" id="s3">
+  <h2>🔗 The MCP Bridge</h2>
+  <p style="margin-bottom:24px; color:var(--airspace); font-size:1.2em;">
+    This is what makes spyc more than "a terminal inside a terminal."
+  </p>
+  <div class="two-col">
+    <div>
+      <h3>How It Works</h3>
+      <ul>
+        <li>spyc starts an HTTP MCP server on a background thread</li>
+        <li>OS-assigned port — multiple instances coexist safely</li>
+        <li>Claude connects via <code>--mcp-config</code> at spawn</li>
+        <li>Context file updated every event loop tick</li>
+        <li>Zero external crates — hand-rolled JSON-RPC 2.0</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What Claude Sees</h3>
+      <ul>
+        <li>📂 Current directory</li>
+        <li>📄 Cursor file (what you're looking at)</li>
+        <li>📌 Picks (selected files)</li>
+        <li>📦 Inventory (yanked file cache)</li>
+        <li>🔍 Active filter</li>
+        <li>🌿 Git branch + dirty state</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top:36px; text-align:center;">
+    <p style="font-size:1.3em; font-weight:600; color:var(--orange);">
+      "Update this file" → Claude calls <code>get_spyc_context</code> → sees cursor is on BUGS.md → edits it.
+    </p>
+  </div>
+</div>
+
+<!-- SLIDE 4: Landscape -->
+<div class="slide light" id="s4">
   <h2>Nothing like this exists</h2>
   <p style="margin-bottom:24px; color:var(--airspace);">We searched. Here's what's out there:</p>
   <div class="three-col">
     <div class="card">
       <h3>Yazi / Joshuto / Felix</h3>
       <p>Rust TUI file managers with vim keybindings. Fast, popular (Yazi has 33k+ stars).</p>
-      <p style="margin-top:12px; color:var(--orange); font-weight:600;">No AI integration. No embedded pty.</p>
+      <p style="margin-top:12px; color:var(--royal); font-weight:600;">No AI integration. No embedded pty. No MCP.</p>
     </div>
     <div class="card">
       <h3>Xplorer</h3>
       <p>Rust + Tauri GUI file manager. Has Claude Code terminal, split panes, code editor.</p>
-      <p style="margin-top:12px; color:var(--orange); font-weight:600;">GUI app, not terminal-native. Electron-class weight.</p>
+      <p style="margin-top:12px; color:var(--royal); font-weight:600;">GUI app, not terminal-native. Electron-class weight.</p>
     </div>
     <div class="card">
       <h3>Wave / TmuxAI</h3>
       <p>Wave: terminal with built-in AI. TmuxAI: AI overlay that reads tmux panes.</p>
-      <p style="margin-top:12px; color:var(--orange); font-weight:600;">Terminals with AI bolted on. Not file managers.</p>
+      <p style="margin-top:12px; color:var(--royal); font-weight:600;">Terminals with AI bolted on. Not file managers. No structured context.</p>
     </div>
   </div>
   <div style="margin-top:36px; text-align:center;">
-    <p style="font-size:1.4em; font-weight:600; color:var(--orange);">
+    <p style="font-size:1.4em; font-weight:600; color:var(--royal);">
       spyc occupies an empty niche: terminal-native file manager<br>
-      with embedded AI pty and context piping.
+      with embedded AI pty, MCP context bridge, and session continuity.
     </p>
   </div>
 </div>
 
-<!-- SLIDE 4: By the Numbers -->
-<div class="slide dark" id="s4">
-  <h2>By the Numbers</h2>
+<!-- SLIDE 5: By the Numbers -->
+<div class="slide dark" id="s5">
+  <h2>📊 By the Numbers</h2>
   <div class="stat-row">
     <div class="stat">
-      <div class="stat-number">14,000+</div>
+      <div class="stat-number">16,000+</div>
       <div class="stat-label">Lines of Rust</div>
     </div>
     <div class="stat">
-      <div class="stat-number">35</div>
+      <div class="stat-number">42</div>
       <div class="stat-label">Source Files</div>
     </div>
     <div class="stat">
-      <div class="stat-number">12</div>
+      <div class="stat-number">14</div>
       <div class="stat-label">Milestones Shipped</div>
     </div>
     <div class="stat">
-      <div class="stat-number">74</div>
+      <div class="stat-number">350</div>
       <div class="stat-label">Tests Passing</div>
     </div>
   </div>
   <div class="stat-row" style="margin-top:16px;">
     <div class="stat">
-      <div class="stat-number">64</div>
+      <div class="stat-number">106</div>
       <div class="stat-label">Commits</div>
     </div>
     <div class="stat">
-      <div class="stat-number">~2MB</div>
+      <div class="stat-number">~3MB</div>
       <div class="stat-label">Release Binary</div>
     </div>
     <div class="stat">
@@ -354,22 +393,24 @@
     </div>
   </div>
   <p style="margin-top:32px; font-size:1.1em; color:var(--airspace);">
-    Built with <span class="accent">ratatui</span> + <span class="accent">crossterm</span> + <span class="accent">vt100</span>.
-    Static Linux binaries via musl. macOS universal binary.
+    Built with <span class="accent">ratatui</span> + <span class="accent">crossterm</span> + <span class="accent">vt100</span> + <span class="accent">portable-pty</span>.
+    Static Linux binaries via musl. macOS universal binary. Hand-rolled MCP server (no async runtime).
   </p>
 </div>
 
-<!-- SLIDE 5: Architecture -->
-<div class="slide light" id="s5">
-  <h2>Architecture</h2>
+<!-- SLIDE 6: Architecture -->
+<div class="slide light" id="s6">
+  <h2>🏗️ Architecture</h2>
   <p style="margin-bottom:16px;">Clean module boundaries. One event loop. Action-driven dispatch.</p>
   <div class="arch-box">
-    <div class="arch-row"><span class="arch-file">src/app.rs</span> <span class="arch-desc">Event loop, layout, all key dispatch (3,000 lines)</span></div>
-    <div class="arch-row"><span class="arch-file">src/keymap/</span> <span class="arch-desc">Action enum, resolver, user keymap DSL</span></div>
-    <div class="arch-row"><span class="arch-file">src/pane/</span> <span class="arch-desc">Pty-hosted subprocess, multi-tab, vt100 rendering</span></div>
+    <div class="arch-row"><span class="arch-file">src/app/</span> <span class="arch-desc">Event loop, layout, key dispatch, state management</span></div>
+    <div class="arch-row"><span class="arch-file">src/keymap/</span> <span class="arch-desc">Action enum (full verb vocabulary), resolver, user keymap DSL</span></div>
+    <div class="arch-row"><span class="arch-file">src/pane/</span> <span class="arch-desc">Pty subprocess, multi-tab, vt100 rendering, ANSI key encoding</span></div>
+    <div class="arch-row"><span class="arch-file">src/mcp.rs</span> <span class="arch-desc">HTTP + stdio MCP server, JSON-RPC 2.0 dispatch</span></div>
+    <div class="arch-row"><span class="arch-file">src/context.rs</span> <span class="arch-desc">Context snapshot (cwd, cursor, picks, git) written every tick</span></div>
     <div class="arch-row"><span class="arch-file">src/ui/</span> <span class="arch-desc">List view, pager, status bar, prompt, line editor, theme</span></div>
+    <div class="arch-row"><span class="arch-file">src/state/</span> <span class="arch-desc">Cursor, marks, picks, inventory (file cache), sessions, history</span></div>
     <div class="arch-row"><span class="arch-file">src/fs/</span> <span class="arch-desc">Directory listing, file operations</span></div>
-    <div class="arch-row"><span class="arch-file">src/state/</span> <span class="arch-desc">Cursor, marks, picks, inventory, history</span></div>
     <div class="arch-row"><span class="arch-file">src/config/</span> <span class="arch-desc">TOML config with keymap DSL, live reload</span></div>
     <div class="arch-row"><span class="arch-file">src/shell/</span> <span class="arch-desc">Shell expansion, command execution</span></div>
   </div>
@@ -378,9 +419,9 @@
   </p>
 </div>
 
-<!-- SLIDE 5: Key Design Patterns -->
-<div class="slide dark" id="s6">
-  <h2>Design Patterns</h2>
+<!-- SLIDE 7: Key Design Patterns -->
+<div class="slide dark" id="s7">
+  <h2>⚙️ Design Patterns</h2>
   <div class="three-col">
     <div class="card">
       <h3>Action Dispatch</h3>
@@ -392,80 +433,79 @@
     </div>
     <div class="card">
       <h3>Pty Multiplexing</h3>
-      <p>Each tab is an independent pty. <code>vt100</code> parser processes output. Cursor blink via software toggle. Bracketed paste forwarding.</p>
+      <p>Each tab is an independent pty. <code>vt100</code> parser processes output. Bracketed paste forwarding. 10K-line scrollback per tab.</p>
     </div>
   </div>
   <div class="three-col" style="margin-top:24px;">
+    <div class="card">
+      <h3>MCP Context Loop</h3>
+      <p>Atomic JSON write every tick. HTTP server on background thread reads the file on demand. Zero shared mutable state between UI and server.</p>
+    </div>
     <div class="card">
       <h3>Vi Everywhere</h3>
       <p>Line editor has insert/normal modes, operator+motion (<code>dw</code>, <code>cw</code>), word objects. Same muscle memory from prompt to pager to file list.</p>
     </div>
     <div class="card">
-      <h3>Live Config</h3>
-      <p><code>.spycrc.toml</code> with fs watcher. Per-user and per-project. Keymap DSL, color overrides, ignore mask patterns. No restart needed.</p>
-    </div>
-    <div class="card">
-      <h3>Context Piping</h3>
-      <p><code>^W p</code> reads file contents and sends to the pane as bracketed paste with <code>[file: path]</code> headers. Bridge between browsing and prompting.</p>
+      <h3>File-backed Inventory</h3>
+      <p>Yanked files copied to <code>~/.local/state/spyc/inventory/</code> with UUID metadata. Graveyard for safe deletes. Persists across sessions.</p>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 6: Feature Highlights -->
-<div class="slide light" id="s7">
-  <h2>Feature Highlights</h2>
+<!-- SLIDE 8: Feature Highlights -->
+<div class="slide light" id="s8">
+  <h2>✨ Feature Highlights</h2>
   <div class="two-col">
     <div>
-      <h3>File Management</h3>
+      <h3>📁 File Management</h3>
       <ul>
         <li>Multi-column listing with vi navigation</li>
-        <li>Picks (per-dir) + inventory (cross-dir)</li>
+        <li>Picks (per-dir) + inventory (persistent file cache)</li>
         <li>Copy, move, remove, chmod, mkdir</li>
         <li>Search with glob patterns</li>
         <li>Named marks with <code>m{a-z}</code> / <code>'{a-z}</code></li>
-        <li>Ignore masks (dotfiles, build artifacts)</li>
+        <li>Ignore masks + temporary glob filter (<code>=*.rs</code>)</li>
+        <li>Git status colors per file</li>
       </ul>
     </div>
     <div>
-      <h3>Split Pane</h3>
+      <h3>🖥️ Split Pane + Claude</h3>
       <ul>
         <li>Multi-tab pty (Claude, zsh, anything)</li>
-        <li>Tab rename, activity indicators</li>
+        <li>MCP context bridge — Claude sees what you see</li>
+        <li><code>gf</code> / <code>gF</code> — jump from pane output to file list</li>
+        <li>Context piping: <code>^W p</code> sends file contents to pane</li>
+        <li>Session save/restore with Claude conversation resume</li>
         <li>10K-line scrollback with save</li>
-        <li>Context piping: file contents to pane</li>
-        <li>Focus indicators: cursor blink + dim</li>
-        <li>Alt+Enter for multi-line input</li>
-        <li>Dedicated pane command history with dedup</li>
-        <li>Session save/restore (<code>--resume</code>)</li>
+        <li>Tab rename, activity indicators</li>
       </ul>
     </div>
   </div>
   <div class="two-col" style="margin-top:24px;">
     <div>
-      <h3>In-App Pager</h3>
+      <h3>📖 In-App Pager</h3>
       <ul>
         <li>Syntax highlighting (syntect), ANSI colors, streaming</li>
-        <li>Search, line numbers, hex dump</li>
-        <li>Multi-column layout, position indicator</li>
+        <li>Search, line numbers, hex dump, line wrapping</li>
+        <li>Buffer history: <code>[b</code> / <code>]b</code> navigate closed pagers</li>
         <li><code>v</code> opens in $EDITOR, returns to pager</li>
       </ul>
     </div>
     <div>
-      <h3>Git Integration</h3>
+      <h3>🌿 Git Integration</h3>
       <ul>
-        <li>Branch + dirty flag in status bar</li>
-        <li>File status colors (modified, untracked, etc.)</li>
+        <li>Branch + dirty flag in powerline status bar</li>
+        <li>File status colors (modified, untracked, added, deleted)</li>
         <li><code>g d</code> / <code>g D</code> diff view in pager</li>
-        <li>Worktree list, create, delete</li>
-        <li>Powerline-style status segments</li>
+        <li>Worktree list, create, switch, delete</li>
       </ul>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 7: Development Timeline -->
-<div class="slide dark" id="s8">
-  <h2>Development Timeline</h2>
+<!-- SLIDE 9: Development Timeline -->
+<div class="slide dark" id="s9">
+  <h2>📅 Development Timeline</h2>
   <div class="two-col">
     <div class="timeline">
       <div class="timeline-item">
@@ -484,12 +524,12 @@
         <div class="timeline-label">M9 — Multi-tab Pane</div>
         <div class="timeline-desc">Independent pty tabs, powerline status bar</div>
       </div>
-    </div>
-    <div class="timeline">
       <div class="timeline-item">
         <div class="timeline-label">M10 — Context Piping</div>
-        <div class="timeline-desc">Send file contents to pane as context</div>
+        <div class="timeline-desc">Send file contents to pane as bracketed paste</div>
       </div>
+    </div>
+    <div class="timeline">
       <div class="timeline-item">
         <div class="timeline-label">M11 — Git Worktrees</div>
         <div class="timeline-desc">List, create, switch, delete worktrees</div>
@@ -499,16 +539,24 @@
         <div class="timeline-desc">git diff in the ANSI pager</div>
       </div>
       <div class="timeline-item">
-        <div class="timeline-label">Next up</div>
-        <div class="timeline-desc">Session forking, : command line, demo mode</div>
+        <div class="timeline-label">M13 — Path References</div>
+        <div class="timeline-desc">gf/gF: jump from Claude output to file list</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">M14 — MCP Context Bridge</div>
+        <div class="timeline-desc">HTTP MCP server, Claude sees spyc state</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">v2.0 🎯</div>
+        <div class="timeline-desc">Public distribution — mid-to-late May 2026</div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 8: The Claude Code Story -->
-<div class="slide light" id="s9">
-  <h2>Building with <span class="accent">Claude Code</span></h2>
+<!-- SLIDE 10: The Claude Code Story -->
+<div class="slide light" id="s10">
+  <h2>🤖 Building with <span class="accent">Claude Code</span></h2>
   <div class="quote">
     "spyc is both a product of Claude Code and a host for it.
     The developer uses spyc with Claude running in the lower pane —
@@ -520,48 +568,95 @@
       <ul>
         <li>Milestone-driven development: clear scope per feature</li>
         <li>Action enum pattern: Claude adds features without breaking existing ones</li>
-        <li>Docs-in-sync convention: ROADMAP, FEATURES, help text updated with every commit</li>
-        <li>Iterative refinement: ship, dog-food, fix, repeat</li>
+        <li>Docs-in-sync convention: ROADMAP, FEATURES, CHANGELOG updated every commit</li>
+        <li>Dog-fooding: running Claude <em>inside</em> spyc surfaces UX issues fast</li>
       </ul>
     </div>
     <div>
       <h3>What's Interesting</h3>
       <ul>
-        <li>12,800 lines of idiomatic Rust (clippy pedantic + nursery)</li>
-        <li>Complex terminal state: pty multiplexing, vt100 parsing, cursor management</li>
-        <li>Subtle UX: focus indicators, ghost char fixes, blink timing</li>
-        <li>Cross-platform: macOS universal + Linux static binaries</li>
+        <li>16K lines of idiomatic Rust (clippy pedantic + nursery, zero warnings)</li>
+        <li>Complex terminal state: pty mux, vt100 parsing, cursor management</li>
+        <li>Hand-rolled MCP server — no async runtime, no external crates</li>
+        <li>350 tests including snapshot tests (insta) and state machine tests</li>
       </ul>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 9: Live Demo -->
-<div class="slide dark" id="s10">
+<!-- SLIDE 11: v2.0 Roadmap -->
+<div class="slide dark" id="s11">
+  <h2>🗺️ Road to v2.0</h2>
+  <p style="margin-bottom:24px; color:var(--airspace); font-size:1.2em;">
+    Target: public distribution, mid-to-late May 2026
+  </p>
+  <div class="three-col">
+    <div class="card">
+      <h3>🔧 Foundations</h3>
+      <p style="margin-bottom:12px;">~70% complete</p>
+      <ul>
+        <li>✅ 350 tests, 38% coverage</li>
+        <li>✅ Unicode-width everywhere</li>
+        <li>✅ CHANGELOG, --version --verbose</li>
+        <li>⬜ --dump-default-config</li>
+        <li>⬜ Expand snapshot tests</li>
+        <li>⬜ Pty integration test</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>🧠 Thesis</h3>
+      <p style="margin-bottom:12px;">Core shipped, polish remaining</p>
+      <ul>
+        <li>✅ MCP context bridge (M14)</li>
+        <li>✅ Bidirectional path refs (M13)</li>
+        <li>✅ Session restore with Claude resume</li>
+        <li>⬜ Session forking (branch conversations)</li>
+        <li>⬜ Prompt templates in .spycrc</li>
+        <li>⬜ Status bar agent segment</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>📦 Distribution</h3>
+      <p style="margin-bottom:12px;">One-time setup, then forget</p>
+      <ul>
+        <li>⬜ Release automation (Pipelines)</li>
+        <li>⬜ macOS notarization</li>
+        <li>⬜ Homebrew tap</li>
+        <li>⬜ Docs site (mdbook)</li>
+        <li>⬜ README + asciinema cast</li>
+        <li>⬜ GitHub mirror</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 12: Live Demo -->
+<div class="slide dark" id="s12">
   <div style="text-align:center;">
     <p class="subtitle">Time to see it in action</p>
-    <h1 style="font-size:4em;">Live Demo</h1>
+    <h1 style="font-size:4em;">🎬 Live Demo</h1>
     <div style="margin-top:48px; display:flex; justify-content:center; gap:48px;">
       <div style="text-align:left;">
         <p style="color:var(--airspace); font-size:1.1em; margin-bottom:12px;">Demo flow:</p>
         <ul style="font-size:1em;">
           <li>Navigate, pick files, search</li>
           <li>Open Claude in the pane</li>
-          <li>Pipe file contents to Claude</li>
-          <li>Git diff view</li>
-          <li>Worktree management</li>
-          <li>Pager: search, edit, return</li>
+          <li>"Update this file" → MCP context in action</li>
+          <li><code>gf</code> — jump from Claude output to file list</li>
+          <li>Pipe file contents to Claude with <code>^W p</code></li>
+          <li>Git diff view, worktree management</li>
+          <li>Session save → <code>spyc -r</code> → conversation resumes</li>
         </ul>
       </div>
     </div>
   </div>
 </div>
 
-<!-- SLIDE 10: Questions -->
-<div class="slide light" id="s11">
+<!-- SLIDE 13: Questions -->
+<div class="slide light" id="s13">
   <div style="text-align:center;">
     <img src="spyc-logo.svg" alt="spyc logo" style="width:160px; height:160px; margin-bottom:24px;" />
-    <h1 style="font-size:4em;">Questions?</h1>
+    <h1 style="font-size:4em;">Questions? 🌶️</h1>
     <p style="font-size:1.3em; margin-top:24px; color:var(--airspace);">
       <code>bitbucket.org/tripstack/spyc</code>
     </p>
@@ -580,7 +675,7 @@
   function show(idx) {
     slides.forEach(s => s.classList.remove('active'));
     slides[idx].classList.add('active');
-    numEl.textContent = `// ${idx + 1}`;
+    numEl.textContent = `// ${idx + 1} / ${slides.length}`;
     numEl.style.color = slides[idx].classList.contains('light') ? '#A8A8A8' : '#A8A8A8';
     hintEl.textContent = idx === 0 ? 'arrow keys to navigate' : '';
     hintEl.style.color = slides[idx].classList.contains('light') ? '#A8A8A8' : '#A8A8A8';
