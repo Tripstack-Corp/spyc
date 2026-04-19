@@ -41,7 +41,8 @@ impl PromptLine<'_> {
         let text_style = Style::default().fg(self.theme.status_path);
 
         if let Some(pos) = self.cursor_pos {
-            // Vi-mode prompt: show a cursor character with reverse video.
+            // Vi-mode prompt: cursor_pos is a char index; ratatui
+            // renders each Span at its natural display width.
             let chars: Vec<char> = self.buffer.chars().collect();
             let before: String = chars[..pos.min(chars.len())].iter().collect();
             let cursor_char = chars

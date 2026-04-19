@@ -103,7 +103,10 @@ impl ListView<'_> {
         let rows_per_col = height;
         let tail_start = self.view_top.min(self.rows.len());
         let tail = &self.rows[tail_start..];
-        let widths: Vec<usize> = tail.iter().map(|row| row.display.chars().count()).collect();
+        let widths: Vec<usize> = tail
+            .iter()
+            .map(|row| super::display_width(&row.display))
+            .collect();
         let count = widths.len();
 
         let mut col_widths: Vec<u16> = Vec::new();
@@ -210,11 +213,11 @@ impl Widget for ListView<'_> {
             buf.set_string(x, y, format!("{marker} "), marker_style);
 
             let name_w = cell_w.saturating_sub(MARKER_W) as usize;
-            let drawn: String = row.display.chars().take(name_w).collect();
-            let drawn_chars = drawn.chars().count() as u16;
-            buf.set_string(x + MARKER_W, y, &drawn, name_style);
+            let drawn = super::display_truncate(&row.display, name_w);
+            let drawn_w = super::display_width(drawn) as u16;
+            buf.set_string(x + MARKER_W, y, drawn, name_style);
 
-            let used = MARKER_W + drawn_chars;
+            let used = MARKER_W + drawn_w;
             if used < cell_w {
                 let pad: String = " ".repeat((cell_w - used) as usize);
                 buf.set_string(x + used, y, &pad, name_style);

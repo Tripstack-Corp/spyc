@@ -26,6 +26,7 @@ vt100 = "0.15"
 ansi-to-tui = "7"
 pretty-hex = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

@@ -52,7 +52,7 @@ impl StatusBar<'_> {
         let host_text = format!(" \u{1f336}\u{fe0f} {} ", self.user_host);
 
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} ")); // branch icon
-        let git_w = git_text.as_ref().map_or(0, |s| s.len() + 1); // +1 for sep
+        let git_w = git_text.as_ref().map_or(0, |s| dw(s) + 1); // +1 for sep
 
         let has_suffix = !self.suffix.is_empty();
         let suffix_text = if has_suffix {
@@ -60,11 +60,11 @@ impl StatusBar<'_> {
         } else {
             String::new()
         };
-        let suffix_w = if has_suffix { suffix_text.len() + 1 } else { 0 };
+        let suffix_w = if has_suffix { dw(&suffix_text) + 1 } else { 0 };
 
         // Count separators: host→path + path→(git|suffix|term) + optional git→suffix
         let sep_count = 1 + 1 + usize::from(git_text.is_some() && has_suffix);
-        let fixed = host_text.len() + git_w + suffix_w + sep_count;
+        let fixed = dw(&host_text) + git_w + suffix_w + sep_count;
         let path_budget = avail.saturating_sub(fixed + 1); // +1 for path→next sep
         let path_text = format!(
             " {} ",
@@ -132,12 +132,12 @@ impl StatusBar<'_> {
         }
 
         // Fill remaining width.
-        let used: usize = host_text.len()
+        let used: usize = dw(&host_text)
             + 1
-            + path_text.len()
+            + dw(&path_text)
             + 1
-            + git_text.as_ref().map_or(0, |s| s.len() + 1)
-            + if has_suffix { suffix_text.len() + 1 } else { 0 };
+            + git_text.as_ref().map_or(0, |s| dw(s) + 1)
+            + if has_suffix { dw(&suffix_text) + 1 } else { 0 };
         if used < avail {
             spans.push(Span::styled(
                 " ".repeat(avail - used),
@@ -152,11 +152,11 @@ impl StatusBar<'_> {
     fn render_plain(&self, frame: &mut Frame, area: Rect) {
         let avail = area.width as usize;
 
-        let host_w = self.user_host.chars().count() + 2 + 3; // +3 for "🌶️ "
+        let host_w = dw(self.user_host) + 2 + 3; // +3 for "🌶️ "
         let suffix_w = if self.suffix.is_empty() {
             0
         } else {
-            2 + self.suffix.chars().count()
+            2 + dw(self.suffix)
         };
 
         let path_budget = avail.saturating_sub(host_w + suffix_w);
@@ -189,22 +189,41 @@ impl StatusBar<'_> {
 }
 
 pub fn truncate_middle(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let n = chars.len();
-    if n <= max {
+    if dw(s) <= max {
         return s.to_string();
     }
-    if max <= ELLIPSIS.chars().count() {
-        return chars[n - max..].iter().collect();
+    let ellipsis_w = dw(ELLIPSIS);
+    if max <= ellipsis_w {
+        // Degenerate: just return the tail that fits.
+        return display_take_tail(s, max);
     }
-    let budget = max - ELLIPSIS.chars().count();
-    let head = budget / 3;
-    let tail = budget - head;
-    let mut out = String::with_capacity(max);
-    out.extend(chars[..head].iter());
-    out.push_str(ELLIPSIS);
-    out.extend(chars[n - tail..].iter());
-    out
+    let budget = max - ellipsis_w;
+    let head_budget = budget / 3;
+    let tail_budget = budget - head_budget;
+    let head = super::display_truncate(s, head_budget);
+    let tail = display_take_tail(s, tail_budget);
+    format!("{head}{ELLIPSIS}{tail}")
+}
+
+/// Take the last `max` display columns from a string.
+fn display_take_tail(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut width = 0;
+    let mut start = chars.len();
+    for i in (0..chars.len()).rev() {
+        let cw = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
+        if width + cw > max {
+            break;
+        }
+        width += cw;
+        start = i;
+    }
+    chars[start..].iter().collect()
+}
+
+/// Shorthand for `super::display_width(s)`.
+fn dw(s: &str) -> usize {
+    super::display_width(s)
 }
 
 #[cfg(test)]
@@ -220,7 +239,7 @@ mod tests {
     fn middle_truncation_favours_tail() {
         let s = "/Users/derek/src/spyc/a/b/c/very_long_directory_name";
         let out = truncate_middle(s, 25);
-        assert_eq!(out.chars().count(), 25);
+        assert_eq!(dw(&out), 25);
         assert!(out.starts_with("/User"));
         assert!(out.contains("..."));
         assert!(out.ends_with("directory_name") || out.ends_with("ctory_name"));

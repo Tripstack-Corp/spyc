@@ -732,6 +732,7 @@ fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static
         let content: &str = &last.content;
         if content.ends_with(' ') {
             let trimmed = content.trim_end();
+            // Trailing spaces are always ASCII, so byte len == display width.
             let trailing_count = content.len() - trimmed.len();
             let style = last.style;
             *last = Span::styled(trimmed.to_string(), style);

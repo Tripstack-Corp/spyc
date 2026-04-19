@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::keymap::UserKeymap;
+use super::display_pad_right;
 use crate::ui::theme::Theme;
 
 struct Section {
@@ -192,7 +193,7 @@ pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>
         for (keys, desc) in section.rows {
             out.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(format!("{keys:<24}"), key_style),
+                Span::styled(display_pad_right(keys, 24), key_style),
                 Span::raw("  "),
                 Span::styled((*desc).to_string(), desc_style),
             ]));
@@ -210,7 +211,7 @@ pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>
         for binding in user_bindings {
             out.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(format!("{:<24}", binding.chord.display()), key_style),
+                Span::styled(display_pad_right(&binding.chord.display(), 24), key_style),
                 Span::raw("  "),
                 Span::styled(binding.action.describe(), desc_style),
             ]));
