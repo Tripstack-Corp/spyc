@@ -23,3 +23,5 @@
 - (fixed) pane tab auto-closes too fast when child exits — error messages
   flash and vanish before you can read them. Now tabs stay open with
   [exited] label; any keypress dismisses.
+- g-f/g-F would be more useful if it was not just jump to visible but most
+  recently displayed - large diffs tend to push paths out of view quickly

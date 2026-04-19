@@ -2312,10 +2312,23 @@ impl App {
             .map(|pt| {
                 pt.tabs()
                     .iter()
-                    .map(|t| SavedTab {
-                        command: t.info.command.clone(),
-                        label: t.info.label.clone(),
-                        cwd: t.info.cwd.clone(),
+                    .map(|t| {
+                        let (claude_session_id, claude_session_name) =
+                            if Self::is_claude_command(&t.info.command) {
+                                match crate::state::sessions::find_claude_session(&t.info.cwd) {
+                                    Some(info) => (Some(info.session_id), info.name),
+                                    None => (None, None),
+                                }
+                            } else {
+                                (None, None)
+                            };
+                        SavedTab {
+                            command: t.info.command.clone(),
+                            label: t.info.label.clone(),
+                            cwd: t.info.cwd.clone(),
+                            claude_session_id,
+                            claude_session_name,
+                        }
                     })
                     .collect()
             })
@@ -2348,12 +2361,37 @@ impl App {
                 let age = sessions::format_relative_time(s.epoch_secs);
                 let tab_count = s.tabs.len();
                 let names: Vec<&str> = s.tabs.iter().map(|t| t.label.as_str()).collect();
+                // Show Claude session info for tabs that have it.
+                let claude_info: Vec<String> = s
+                    .tabs
+                    .iter()
+                    .filter_map(|t| {
+                        let sid = t.claude_session_id.as_deref()?;
+                        let short_id = &sid[..sid.len().min(8)];
+                        match &t.claude_session_name {
+                            Some(name) => Some(format!("{} ({})", name, short_id)),
+                            None => Some(short_id.to_string()),
+                        }
+                    })
+                    .collect();
                 let tab_info = if tab_count == 0 {
                     String::new()
                 } else {
                     format!("  [{}]", names.join(", "))
                 };
-                format!("  [{}]  {:<20} {}{}", i + 1, age, s.cwd.display(), tab_info)
+                let claude_suffix = if claude_info.is_empty() {
+                    String::new()
+                } else {
+                    format!("  claude: {}", claude_info.join(", "))
+                };
+                format!(
+                    "  [{}]  {:<20} {}{}{}",
+                    i + 1,
+                    age,
+                    s.cwd.display(),
+                    tab_info,
+                    claude_suffix
+                )
             })
             .collect();
         self.state.pending_sessions = Some(sessions);
@@ -2450,7 +2488,14 @@ impl App {
                 } else {
                     &session.cwd
                 };
-                self.open_pane_tab_in(&tab.command, cwd);
+                // If the tab has a Claude session ID, resume that
+                // conversation instead of starting fresh.
+                let cmd = if let Some(ref sid) = tab.claude_session_id {
+                    format!("claude --resume {sid}")
+                } else {
+                    tab.command.clone()
+                };
+                self.open_pane_tab_in(&cmd, cwd);
             }
             // Restore active tab.
             if let Some(tabs) = self.pane_tabs.as_mut() {
