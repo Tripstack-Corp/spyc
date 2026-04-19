@@ -136,7 +136,7 @@ impl Action {
             Self::GotoLast => "bottom of column",
             Self::EnterOrDisplay => "enter dir / pager on text file",
             Self::EnterOrEdit => "enter dir / editor on file (suspends TUI)",
-            Self::EditInPane => "open editor in pane (file list stays visible)",
+            Self::EditInPane => "open editor in top pane (Claude pane stays visible)",
             Self::Climb => "climb to parent",
             Self::Home => "home directory",
             Self::TogglePick => "toggle pick",

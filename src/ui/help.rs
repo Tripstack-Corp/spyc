@@ -36,7 +36,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("d  Enter", "enter dir / pager ($PAGER) on text file"),
             ("e  v", "enter dir / editor ($EDITOR) on file (suspends TUI)"),
-            ("V", "open $EDITOR in pane (file list stays visible)"),
+            ("V", "open $EDITOR in top pane (Claude pane stays visible)"),
             ("u  -", "climb to parent"),
             ("H  ~  Home", "go to home directory"),
             ("J", "jump to a path (~, $VAR expanded)"),

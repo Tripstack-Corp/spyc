@@ -4,7 +4,7 @@
 - (fixed) marks already persist via ~/.local/state/spyc/marks.toml
 - (fixed) g-f/g-F now scans last 200 lines of scrollback (not just visible
   viewport) so paths in large diffs are still found
-- (fixed) V opens $EDITOR in a pane tab — file list stays visible above.
+- (fixed) V opens $EDITOR in top overlay — Claude pane stays visible below.
   Version display moved to gV and :version.
 - if claude changes it's working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?

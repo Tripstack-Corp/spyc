@@ -1975,8 +1975,8 @@ impl App {
         }
     }
 
-    /// V — open $EDITOR on the cursor file in a pane tab so the file
-    /// list stays visible above.
+    /// V — open $EDITOR on the cursor file in the top overlay (replaces
+    /// the file list) while the bottom pane stays visible and running.
     fn edit_in_pane(&mut self) {
         let Some(row) = self.state.rows.get(self.state.cursor.index) else {
             return;
@@ -1996,7 +1996,15 @@ impl App {
             argv.join(" "),
             shell::shell_quote(&path.display().to_string()),
         );
-        self.open_pane_tab(&cmd);
+        let (rows, cols) =
+            Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+        let cwd = self.state.listing.dir.clone();
+        match Pane::spawn(&cmd, rows, cols, &cwd) {
+            Ok(p) => {
+                self.top_overlay = Some(p);
+            }
+            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+        }
     }
 
     /// Does this command look like it's launching Claude CLI?

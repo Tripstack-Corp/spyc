@@ -26,7 +26,7 @@ Everything is keyboard-driven with vi motions as the foundation.
 
 - **d / Enter** descend into a directory, or view a text file in the pager
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
-- **V** open `$EDITOR` in the pane — file list stays visible above
+- **V** open `$EDITOR` in the top pane — Claude pane below stays visible
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion)

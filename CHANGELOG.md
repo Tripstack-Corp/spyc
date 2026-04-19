@@ -24,8 +24,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   `~/.local/state/spyc/graveyard/` for undo safety.
 - ESC exits inventory view (returns to directory view).
 - Status bar always shows hidden file count (even when 0).
-- `V` opens `$EDITOR` in a pane tab — file list stays visible above.
-  `e`/`v` still opens the editor full-screen (suspends TUI).
+- `V` opens `$EDITOR` in the top pane (overlay) — the Claude pane below
+  stays visible so you can edit while watching Claude work. `e`/`v` still
+  opens the editor full-screen (suspends TUI).
 - `:version` command and `gV` keybinding show the spyc version
   (previously `V`, now reassigned to edit-in-pane).
 
