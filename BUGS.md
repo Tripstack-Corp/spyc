@@ -40,6 +40,10 @@
   from the start
 - (fixed) when in a subdir of a git repo the watcher doesn't seem to work to
   monitor changes - does our .git watch work?
+- (fixed) git status colors not updating after commits/checkouts — the
+  500ms debounce was dropping .git/index events because needs_refresh
+  was a local variable reset each loop iteration. Now persists as
+  pending_refresh across iterations.
 - (fixed) when in the pager and searching or yanking, the status seems to get
   reported to the main spyc pane
 - (fixed) `` ` `` should return to the spyc resumed session home and not the
