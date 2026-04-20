@@ -69,6 +69,9 @@ pub struct PagerView {
     pub streaming: bool,
     /// When set, show `:` + digits at the bottom of the pager (inline jump prompt).
     pub jump_buf: Option<String>,
+    /// Temporary message shown in the title bar (e.g. "yanked to clipboard").
+    /// Cleared on the next keypress.
+    pub flash: Option<String>,
 }
 
 impl PagerView {
@@ -91,6 +94,7 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             jump_buf: None,
+            flash: None,
         }
     }
 
@@ -110,6 +114,7 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             jump_buf: None,
+            flash: None,
         }
     }
 
@@ -133,6 +138,7 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             jump_buf: None,
+            flash: None,
         }
     }
 
@@ -432,7 +438,11 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     frame.render_widget(Clear, inner_area);
 
     let pos = view.position_indicator(inner_area.height.saturating_sub(2));
-    let title = format!("  {}   ({} lines)  ", view.title, view.lines.len());
+    let title = if let Some(ref msg) = view.flash {
+        format!("  {} — {}  ", view.title, msg)
+    } else {
+        format!("  {}   ({} lines)  ", view.title, view.lines.len())
+    };
     let title_right = format!("  {pos}  ");
     let block = if view.full_width {
         // No border in full-width mode so terminal text selection is clean.

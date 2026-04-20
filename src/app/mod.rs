@@ -3122,6 +3122,8 @@ impl App {
         let Some(view) = &mut self.pager else {
             return PostAction::None;
         };
+        // Clear any one-shot flash message from the previous keypress.
+        view.flash = None;
         // Compute the pager's actual viewport from the terminal size.
         // The pager overlay occupies ~92% of the frame height, with a
         // 1-row border on each side, and possibly a search bar at the
@@ -3590,12 +3592,12 @@ impl App {
             KeyCode::Char('w') => view.toggle_whitespace(),
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
-                Ok(()) => self.state.flash_info("yanked to clipboard"),
-                Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                Ok(()) => view.flash = Some("yanked to clipboard".into()),
+                Err(e) => view.flash = Some(format!("yank failed: {e}")),
             },
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {
-                Ok(path) => self.state.flash_info(format!("saved: {}", path.display())),
-                Err(e) => self.state.flash_error(format!("save failed: {e}")),
+                Ok(path) => view.flash = Some(format!("saved: {}", path.display())),
+                Err(e) => view.flash = Some(format!("save failed: {e}")),
             },
             KeyCode::Char('v') => {
                 let argv = shell::resolve_editor();
