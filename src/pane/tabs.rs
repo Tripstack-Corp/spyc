@@ -165,7 +165,10 @@ impl PaneTabs {
     /// Mark exited tabs with "[exited]" in their label so the user can
     /// still read the output. Does not remove them — the user closes
     /// with `^W x`.
-    pub fn mark_exited(&mut self) {
+    /// Mark exited tabs with their exit code. Returns `true` if any
+    /// tab was newly marked (caller should trigger a redraw).
+    pub fn mark_exited(&mut self) -> bool {
+        let mut changed = false;
         for entry in &mut self.tabs {
             if entry.pane.is_closed() && !entry.info.label.contains("[exited") {
                 let code = entry
@@ -175,8 +178,10 @@ impl PaneTabs {
                     .map(|s| s.exit_code().to_string())
                     .unwrap_or_else(|| "?".to_string());
                 entry.info.label = format!("{} [exited {}]", entry.info.label, code);
+                changed = true;
             }
         }
+        changed
     }
 
     /// Slice of all tab entries (for rendering the tab bar).

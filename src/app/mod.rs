@@ -679,11 +679,6 @@ impl App {
             // any draft prompt the user has typed, even when focus is on the
             // file list (the text is still in Claude's input buffer).
 
-            // Mark exited tabs so the user can read their output.
-            // Tabs stay open until the user explicitly closes (^W x).
-            if let Some(tabs) = self.pane_tabs.as_mut() {
-                tabs.mark_exited();
-            }
             // pending_overlay_close is no longer used — the overlay stays
             // visible until Enter via overlay_awaiting_dismiss.
             let _ = self.pending_overlay_close;
@@ -777,6 +772,16 @@ impl App {
             }
             if pane_had_output {
                 needs_draw = true; draw_reason = 1;
+            }
+
+            // Mark exited tabs AFTER drain so the Closed event has been
+            // processed and is_closed() returns true. Trigger a redraw
+            // so the "[exited N]" label appears immediately.
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                if tabs.mark_exited() {
+                    needs_draw = true;
+                    draw_reason = 3;
+                }
             }
 
             // Drain any pending watcher events. Refresh listing / reload
