@@ -557,6 +557,7 @@ impl App {
 
         let mut last_context_write = std::time::Instant::now();
         let mut last_refresh = std::time::Instant::now();
+        let mut pending_refresh = false;
 
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
@@ -687,7 +688,8 @@ impl App {
             // listing refreshes to avoid spawning git subprocesses on
             // every rapid-fire .git/index change.
             let mut needs_reload = false;
-            let mut needs_refresh = false;
+            // pending_refresh carries over from previous iterations when
+            // the debounce timer hadn't elapsed yet.
             while let Ok(result) = rx.try_recv() {
                 if let Ok(ev) = result {
                     for p in &ev.paths {
@@ -695,7 +697,7 @@ impl App {
                             needs_reload = true;
                         }
                         if self.is_listing_path(p) {
-                            needs_refresh = true;
+                            pending_refresh = true;
                         }
                     }
                 }
@@ -704,7 +706,8 @@ impl App {
                 self.reload_config();
                 needs_draw = true; draw_reason = 3;
             }
-            if needs_refresh && last_refresh.elapsed() >= Duration::from_millis(500) {
+            if pending_refresh && last_refresh.elapsed() >= Duration::from_millis(500) {
+                pending_refresh = false;
                 self.state.refresh_listing();
                 last_refresh = std::time::Instant::now();
                 needs_draw = true; draw_reason = 3;
