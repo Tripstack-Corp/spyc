@@ -290,6 +290,9 @@ pub struct App {
     cached_grid_key: (u64, usize, usize, u16, u16),
     /// Commands from the MCP server (writable actions from Claude).
     mcp_cmd_rx: std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>,
+    /// Tab completion state: (buffer after last Tab, matches).
+    /// Second Tab with same buffer shows the match list.
+    tab_matches: Option<(String, Vec<String>)>,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -444,6 +447,7 @@ impl App {
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             mcp_cmd_rx,
+            tab_matches: None,
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -1854,7 +1858,10 @@ impl App {
             return self.dispatch_prompt(p);
         }
 
-        // Tab completion.
+        // Tab completion. Non-Tab keys clear double-Tab state.
+        if !matches!(key.code, KeyCode::Tab) {
+            self.tab_matches = None;
+        }
         if matches!(key.code, KeyCode::Tab) {
             if let Mode::Prompting(p) = &self.state.mode {
                 match p.kind {
@@ -2000,6 +2007,11 @@ impl App {
             r
         };
 
+        // Clear double-Tab state on non-Tab input.
+        if result != EditResult::TabComplete {
+            self.tab_matches = None;
+        }
+
         match result {
             EditResult::Submit => {
                 let is_pane_prompt = matches!(
@@ -2108,6 +2120,20 @@ impl App {
             (is_shell, prompt.buffer.clone())
         };
 
+        // Double-Tab: if buffer hasn't changed since last Tab, show matches.
+        if let Some((ref prev_buf, ref prev_matches)) = self.tab_matches {
+            if *prev_buf == buffer && prev_matches.len() > 1 {
+                let display: Vec<&str> = prev_matches.iter().map(|s| s.as_str()).collect();
+                let shown = if display.len() > 12 {
+                    format!("{}  (+{} more)", display[..12].join("  "), display.len() - 12)
+                } else {
+                    display.join("  ")
+                };
+                self.state.flash_info(shown);
+                return;
+            }
+        }
+
         // For shell prompts, extract just the last word for completion.
         let (buf_prefix, word) = if is_shell {
             let last_space = buffer.rfind(' ').map(|i| i + 1).unwrap_or(0);
@@ -2176,12 +2202,16 @@ impl App {
             (format!("{word_base}{}", matches[0]), None)
         } else {
             let common = common_prefix(&matches);
-            let msg = Some(format!("{} matches", matches.len()));
+            let msg = format!("{} matches", matches.len());
             if common.len() > file_prefix.len() {
-                (format!("{word_base}{common}"), msg)
+                (format!("{word_base}{common}"), Some(msg))
             } else {
-                // No progress possible — just flash the count.
-                if let Some(m) = msg { self.state.flash_info(m); }
+                // No progress — store matches for double-Tab display.
+                self.state.flash_info(msg);
+                let Mode::Prompting(ref prompt) = self.state.mode else {
+                    return;
+                };
+                self.tab_matches = Some((prompt.buffer.clone(), matches));
                 return;
             }
         };
@@ -2197,50 +2227,73 @@ impl App {
         if let Some(ed) = prompt.editor.as_mut() {
             ed.set_content(&prompt.buffer);
         }
+        // Store for double-Tab.
+        if matches.len() > 1 {
+            self.tab_matches = Some((prompt.buffer.clone(), matches));
+        } else {
+            self.tab_matches = None;
+        }
     }
 
     /// Tab-complete in the search prompt: match against filenames in the
     /// current directory listing.
     fn tab_complete_search(&mut self) {
-        let (prefix, new_buffer, flash) = {
+        let buffer = {
             let Mode::Prompting(ref prompt) = self.state.mode else {
                 return;
             };
-            let prefix = prompt.buffer.clone();
-            if prefix.is_empty() {
-                return;
-            }
-            let mut matches: Vec<String> = self
-                .state
-                .rows
-                .iter()
-                .filter(|r| r.display.starts_with(prefix.as_str()))
-                .map(|r| r.display.clone())
-                .collect();
-            matches.sort();
-
-            if matches.is_empty() {
-                return;
-            }
-            if matches.len() == 1 {
-                (prefix, matches.into_iter().next().unwrap(), None)
-            } else {
-                let common = common_prefix(&matches);
-                let new = if common.len() > prefix.len() {
-                    common
-                } else {
-                    prefix.clone()
-                };
-                (prefix, new, Some(format!("{} matches", matches.len())))
-            }
+            prompt.buffer.clone()
         };
-        if let Some(msg) = flash {
-            self.state.flash_info(msg);
+        if buffer.is_empty() {
+            return;
         }
+
+        // Double-Tab: show match list.
+        if let Some((ref prev_buf, ref prev_matches)) = self.tab_matches {
+            if *prev_buf == buffer && prev_matches.len() > 1 {
+                let display: Vec<&str> = prev_matches.iter().map(|s| s.as_str()).collect();
+                let shown = if display.len() > 12 {
+                    format!("{}  (+{} more)", display[..12].join("  "), display.len() - 12)
+                } else {
+                    display.join("  ")
+                };
+                self.state.flash_info(shown);
+                return;
+            }
+        }
+
+        let mut matches: Vec<String> = self
+            .state
+            .rows
+            .iter()
+            .filter(|r| r.display.starts_with(buffer.as_str()))
+            .map(|r| r.display.clone())
+            .collect();
+        matches.sort();
+
+        if matches.is_empty() {
+            return;
+        }
+
+        let new_buffer = if matches.len() == 1 {
+            self.tab_matches = None;
+            matches.into_iter().next().unwrap()
+        } else {
+            let common = common_prefix(&matches);
+            let new = if common.len() > buffer.len() {
+                common
+            } else {
+                buffer.clone()
+            };
+            self.state.flash_info(format!("{} matches", matches.len()));
+            self.tab_matches = Some((new.clone(), matches));
+            new
+        };
+
         let Mode::Prompting(ref mut prompt) = self.state.mode else {
             return;
         };
-        if new_buffer != prefix {
+        if new_buffer != buffer {
             prompt.buffer = new_buffer;
         }
     }
