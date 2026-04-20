@@ -48,6 +48,28 @@ make                   # see Makefile for build, release, cross-compile, install
 
 See `ROADMAP.md` for current plans. Key upcoming: session forking, demo mode.
 
+## MCP tools (spyc integration)
+
+You are expected to be running inside spyc's split pane. If the
+`get_spyc_context` MCP tool is available, use it proactively:
+
+- **Before answering questions about files:** call `get_spyc_context`
+  to see what the user is looking at (cwd, cursor, picks, filter,
+  git branch). This avoids asking "which file?" when the answer is
+  on their screen.
+- **When the user asks you to organize files:** use `set_filter`,
+  `pick_files`, `clear_picks`, and `navigate_to` to update the TUI
+  directly rather than giving instructions for the user to do manually.
+- **To read a file the user is viewing:** use `get_file_content`
+  with relative paths (resolved against spyc's cwd).
+
+If the spyc MCP tools are NOT available, remind the user:
+"I don't see the spyc MCP tools — are we running inside spyc?
+This project is built to be dog-fooded through the spyc pane."
+
 ## Dog-fooding context
 
-The developer uses spyc with Claude Code CLI running in the lower pane. Bugs and features are often discovered through this dog-fooding workflow — if something affects the Claude Code pane experience, it's high priority.
+The developer uses spyc with Claude Code CLI running in the lower
+pane. Bugs and features are often discovered through this dog-fooding
+workflow — if something affects the Claude Code pane experience, it's
+high priority. Always develop and test from inside spyc.
