@@ -115,6 +115,22 @@ The pty pane is already the core of the tool (M8-M12 done). The work
 that remains is making the integration genuinely novel, not just "a
 terminal inside a terminal." In priority order:
 
+### Done
+
+- **Writable MCP actions** (v1.8.0). Five new tools: `navigate_to`,
+  `set_filter`, `pick_files`, `clear_picks`, `get_file_content`.
+  Command channel (mpsc) from HTTP server threads to event loop with
+  one-shot reply channels and 5s timeout. Claude can mutate the TUI
+  workspace directly. Flash messages inform the user.
+
+### Remaining
+
+- **Context enrichment.** `get_spyc_context` currently returns file
+  paths and metadata. Could additionally expose: file contents (or
+  snippets) for picked files, recent compiler errors from `cargo
+  check`, unstaged diffs. Makes Claude's context richer without the
+  user needing to pipe explicitly. Scope carefully -- large payloads
+  would need truncation or pagination.
 - **Session forking** (already in old roadmap as `^a f`). Duplicate a
   pane tab with scrollback replayed, so a Claude conversation can
   branch without losing the prior line of inquiry. High-value for
@@ -125,19 +141,6 @@ terminal inside a terminal." In priority order:
   substituted in -- e.g., `map "<space>cr" claude-template review`
   where `review` is defined in config. Turns spyc into a
   keyboard-driven Claude launcher for repeated workflows.
-- **Writable MCP actions.** The MCP server currently exposes a
-  read-only tool (`get_spyc_context`). Extend it so Claude can
-  *mutate* TUI state: set the limit filter, toggle picks, navigate
-  to a path. e.g. "filter for rust files and pick the ones modified
-  today" updates the TUI live. Requires a command channel from the
-  MCP server thread back to the event loop. High-value -- turns
-  spyc from a context source into a controllable workspace.
-- **Context enrichment.** `get_spyc_context` currently returns file
-  paths and metadata. Could additionally expose: file contents (or
-  snippets) for picked files, recent compiler errors from `cargo
-  check`, unstaged diffs. Makes Claude's context richer without the
-  user needing to pipe explicitly. Scope carefully -- large payloads
-  would need truncation or pagination.
 - **Status bar agent segment.** When the pane is running Claude, show
   a small indicator: session identity, maybe token usage if the CLI
   surface exposes it. Useful, not essential.
@@ -237,12 +240,15 @@ Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of
 the PR that ships the change. The `CHANGELOG.md` entry lands in the
 same commit.
 
-- **v1.7** (current) -- Performance refactor (idle CPU ~2.5%), ^a pane
-  prefix, yank commands (yy/yp/yP), activity monitor, pager
-  improvements, exit summary, startup health check, README rewrite.
-- **v1.8-v1.9** -- Distribution track in parallel with polish. Release
-  automation, macOS notarization, Homebrew tap, docs site, asciinema
-  demo.
+- **v1.8** (current) -- Writable MCP actions (navigate_to, set_filter,
+  pick_files, clear_picks, get_file_content). Command channel
+  architecture. CLAUDE.md updated to instruct Claude to use tools
+  proactively.
+- **v1.7** -- Performance refactor (idle CPU ~2.5%), ^a pane prefix,
+  yank commands (yy/yp/yP), activity monitor, pager improvements,
+  exit summary, startup health check, README rewrite.
+- **v1.9** -- Distribution track. Release automation, macOS
+  notarization, Homebrew tap, asciinema demo.
 - **v2.0** -- Public distribution launch. Gated on: thesis-track items
   #1-#2 shipped (session forking, prompt templates), remaining
   Distribution track complete. External announcement: TripStack
@@ -286,6 +292,11 @@ one of the tracks above when picked up.
 
 Items shipped in the current development cycle, newest first.
 
+- **v1.8.0** -- Writable MCP actions. Five new tools: navigate_to,
+  set_filter, pick_files, clear_picks, get_file_content. Command
+  channel from MCP server threads to event loop with one-shot reply
+  channels. CLAUDE.md updated to instruct Claude to use tools
+  proactively. Debounce fix for git status refresh.
 - **v1.7.0** -- Performance refactor, ^a pane prefix, yank commands,
   activity monitor, pager improvements, exit summary, startup health
   check, README rewrite.

@@ -306,10 +306,10 @@
       </ul>
     </div>
     <div>
-      <h3>What Claude Sees</h3>
+      <h3>What Claude Sees (read)</h3>
       <ul>
         <li>📂 Current directory</li>
-        <li>📄 Cursor file (what you're looking at)</li>
+        <li>📄 Cursor file + file contents</li>
         <li>📌 Picks (selected files)</li>
         <li>📦 Inventory (yanked file cache)</li>
         <li>🔍 Active filter</li>
@@ -317,9 +317,16 @@
       </ul>
     </div>
   </div>
-  <div style="margin-top:36px; text-align:center;">
+  <div style="margin-top:24px;">
+    <h3>What Claude Can Do (write)</h3>
+    <p style="color:var(--airspace);">Claude can <em>mutate</em> the TUI via MCP tools — command channel from server thread to event loop:</p>
+    <div style="display:flex; gap:24px; margin-top:12px;">
+      <code>navigate_to</code> <code>set_filter</code> <code>pick_files</code> <code>clear_picks</code> <code>get_file_content</code>
+    </div>
+  </div>
+  <div style="margin-top:24px; text-align:center;">
     <p style="font-size:1.3em; font-weight:600; color:var(--orange);">
-      "Update this file" → Claude calls <code>get_spyc_context</code> → sees cursor is on BUGS.md → edits it.
+      "Filter to Rust files and pick the tests" → Claude calls <code>set_filter</code> + <code>pick_files</code> → TUI updates live.
     </p>
   </div>
 </div>
@@ -358,11 +365,11 @@
   <h2>📊 By the Numbers</h2>
   <div class="stat-row">
     <div class="stat">
-      <div class="stat-number">16,000+</div>
+      <div class="stat-number">19,000+</div>
       <div class="stat-label">Lines of Rust</div>
     </div>
     <div class="stat">
-      <div class="stat-number">42</div>
+      <div class="stat-number">44</div>
       <div class="stat-label">Source Files</div>
     </div>
     <div class="stat">
@@ -370,13 +377,13 @@
       <div class="stat-label">Milestones Shipped</div>
     </div>
     <div class="stat">
-      <div class="stat-number">350</div>
+      <div class="stat-number">358</div>
       <div class="stat-label">Tests Passing</div>
     </div>
   </div>
   <div class="stat-row" style="margin-top:16px;">
     <div class="stat">
-      <div class="stat-number">106</div>
+      <div class="stat-number">121</div>
       <div class="stat-label">Commits</div>
     </div>
     <div class="stat">
@@ -428,8 +435,8 @@
       <p>Single <code>Action</code> enum is the full vocabulary of user behaviour. Keymap DSL binds any key to any action. One match arm per feature.</p>
     </div>
     <div class="card">
-      <h3>One-shot Repaint</h3>
-      <p><code>needs_full_repaint</code> flag instead of per-frame <code>terminal.clear()</code>. Set on overlay/pager close. Eliminates diff-buffer ghost artifacts.</p>
+      <h3>Dirty-frame Rendering</h3>
+      <p>Event-driven: 0 dps at idle. DEC 2026 synchronized output wraps every frame. <code>build_rows()</code> + grid cached via generation counter. ~2.5% idle CPU (vim-competitive).</p>
     </div>
     <div class="card">
       <h3>Pty Multiplexing</h3>
@@ -438,8 +445,8 @@
   </div>
   <div class="three-col" style="margin-top:24px;">
     <div class="card">
-      <h3>MCP Context Loop</h3>
-      <p>Atomic JSON write every tick. HTTP server on background thread reads the file on demand. Zero shared mutable state between UI and server.</p>
+      <h3>MCP Context + Commands</h3>
+      <p>Read: atomic JSON snapshot, throttled 1/sec. Write: command channel (mpsc) from HTTP threads to event loop with one-shot reply channels. 5s timeout.</p>
     </div>
     <div class="card">
       <h3>Vi Everywhere</h3>
@@ -472,9 +479,9 @@
       <h3>🖥️ Split Pane + Claude</h3>
       <ul>
         <li>Multi-tab pty (Claude, zsh, anything)</li>
-        <li>MCP context bridge — Claude sees what you see</li>
+        <li>MCP bridge — Claude reads <em>and writes</em> workspace state</li>
         <li><code>gf</code> / <code>gF</code> — jump from pane output to file list</li>
-        <li>Context piping: <code>^W p</code> sends file contents to pane</li>
+        <li>Context piping: <code>^a P</code> sends file contents to pane</li>
         <li>Session save/restore with Claude conversation resume</li>
         <li>10K-line scrollback with save</li>
         <li>Tab rename, activity indicators</li>
@@ -575,10 +582,10 @@
     <div>
       <h3>What's Interesting</h3>
       <ul>
-        <li>16K lines of idiomatic Rust (clippy pedantic + nursery, zero warnings)</li>
+        <li>19K lines of idiomatic Rust (clippy pedantic + nursery, zero warnings)</li>
         <li>Complex terminal state: pty mux, vt100 parsing, cursor management</li>
-        <li>Hand-rolled MCP server — no async runtime, no external crates</li>
-        <li>350 tests including snapshot tests (insta) and state machine tests</li>
+        <li>Hand-rolled MCP server with bidirectional command channel — no async runtime</li>
+        <li>358 tests including snapshot tests (insta) and state machine tests</li>
       </ul>
     </div>
   </div>
@@ -593,37 +600,37 @@
   <div class="three-col">
     <div class="card">
       <h3>🔧 Foundations</h3>
-      <p style="margin-bottom:12px;">~70% complete</p>
+      <p style="margin-bottom:12px;">~85% complete</p>
       <ul>
-        <li>✅ 350 tests, 38% coverage</li>
-        <li>✅ Unicode-width everywhere</li>
-        <li>✅ CHANGELOG, --version --verbose</li>
-        <li>⬜ --dump-default-config</li>
+        <li>✅ 358 tests, 38% coverage</li>
+        <li>✅ Startup health check (state dir validation)</li>
+        <li>✅ Performance refactor (~2.5% idle CPU)</li>
+        <li>⬜ Elm Architecture refactor (app/mod.rs)</li>
         <li>⬜ Expand snapshot tests</li>
-        <li>⬜ Pty integration test</li>
+        <li>⬜ --dump-default-config</li>
       </ul>
     </div>
     <div class="card">
       <h3>🧠 Thesis</h3>
-      <p style="margin-bottom:12px;">Core shipped, polish remaining</p>
+      <p style="margin-bottom:12px;">Core + writable MCP shipped</p>
       <ul>
-        <li>✅ MCP context bridge (M14)</li>
+        <li>✅ MCP read + write actions (6 tools)</li>
         <li>✅ Bidirectional path refs (M13)</li>
         <li>✅ Session restore with Claude resume</li>
+        <li>⬜ Context enrichment (diffs, errors)</li>
         <li>⬜ Session forking (branch conversations)</li>
         <li>⬜ Prompt templates in .spycrc</li>
-        <li>⬜ Status bar agent segment</li>
       </ul>
     </div>
     <div class="card">
       <h3>📦 Distribution</h3>
-      <p style="margin-bottom:12px;">One-time setup, then forget</p>
+      <p style="margin-bottom:12px;">README done, infra remaining</p>
       <ul>
+        <li>✅ README with MCP-first positioning</li>
         <li>⬜ Release automation (Pipelines)</li>
         <li>⬜ macOS notarization</li>
         <li>⬜ Homebrew tap</li>
-        <li>⬜ Docs site (mdbook)</li>
-        <li>⬜ README + asciinema cast</li>
+        <li>⬜ Asciinema demo cast</li>
         <li>⬜ GitHub mirror</li>
       </ul>
     </div>
@@ -635,16 +642,18 @@
   <div style="text-align:center;">
     <p class="subtitle">Time to see it in action</p>
     <h1 style="font-size:4em;">🎬 Live Demo</h1>
-    <div style="margin-top:48px; display:flex; justify-content:center; gap:48px;">
+    <div style="margin-top:32px;">
+      <img src="screen_shot.png" alt="spyc split-pane screenshot" style="max-width:680px; border-radius:12px; box-shadow: 0 4px 24px rgba(0,0,0,0.5);" />
+    </div>
+    <div style="margin-top:32px; display:flex; justify-content:center; gap:48px;">
       <div style="text-align:left;">
         <p style="color:var(--airspace); font-size:1.1em; margin-bottom:12px;">Demo flow:</p>
         <ul style="font-size:1em;">
           <li>Navigate, pick files, search</li>
-          <li>Open Claude in the pane</li>
-          <li>"Update this file" → MCP context in action</li>
+          <li>Open Claude in the pane — MCP connects automatically</li>
+          <li>"Filter to Rust files" → Claude calls <code>set_filter</code> → TUI updates</li>
           <li><code>gf</code> — jump from Claude output to file list</li>
-          <li>Pipe file contents to Claude with <code>^W p</code></li>
-          <li>Git diff view, worktree management</li>
+          <li>Pipe file contents to Claude with <code>^a P</code></li>
           <li>Session save → <code>spyc -r</code> → conversation resumes</li>
         </ul>
       </div>
