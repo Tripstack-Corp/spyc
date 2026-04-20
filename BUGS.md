@@ -4,6 +4,26 @@
 - yc (yank chmod) — preserve permissions through yank/put cycle
 
 ### TBD ###
+- graveyard should include files that have been removed with R
+- big miss that we don't have autocompletion yet - there's probably a good cargo
+  we could leverage for that
+- screen should flash if I'm doing something that hits a wall - e.g. j at the
+  top of a directory
+- directories should persist masking setting / we should be able to enable
+  disable masks and have an editable list of them
+- cw / dw doesn't stop at a word - it changes the whole line
+- hitting ESC should not pop you back to the top of the current directory
+- it's surprising when you paste text that it goes to the Claude pane but the
+  focus is still on the spyc pane - need to change this behaviour
+- you can get into a weird history loop where commands are mixed with !shell
+  comamands and you'll just get "unknown command" - we should preserve a unified
+  history but it should preserve shell vs. spyc commands
+- task timer should display in human friendly time: "⏳ ! make sync-all — running... (1139s)   (22 lines)"
+- ability to background running tasks and notify when done
+- task completion should include the exit code status
+- some shortcut to set my homedir to current directory (e.g. for
+  backtick-backtick to work)
+- some way to yank the whole context history of the claude chat pane
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
 - quit should say "are you sure? there are running process(es)" to prevent
