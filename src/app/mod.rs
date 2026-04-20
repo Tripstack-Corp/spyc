@@ -1854,20 +1854,18 @@ impl App {
             return self.dispatch_prompt(p);
         }
 
-        // Tab completion for path prompts.
+        // Tab completion.
         if matches!(key.code, KeyCode::Tab) {
-            if matches!(
-                &self.state.mode,
-                Mode::Prompting(p) if matches!(
-                    p.kind,
+            if let Mode::Prompting(p) = &self.state.mode {
+                match p.kind {
                     PromptKind::Jump
-                        | PromptKind::CopyTo
-                        | PromptKind::MoveTo
-                        | PromptKind::MakeDir
-                        | PromptKind::PaneNewTabCwd
-                )
-            ) {
-                self.tab_complete_path();
+                    | PromptKind::CopyTo
+                    | PromptKind::MoveTo
+                    | PromptKind::MakeDir
+                    | PromptKind::PaneNewTabCwd => self.tab_complete_path(),
+                    PromptKind::Search { .. } => self.tab_complete_search(),
+                    _ => {}
+                }
             }
             return PostAction::None;
         }
@@ -2076,6 +2074,7 @@ impl App {
                             | PromptKind::PaneNewTabCwd
                             | PromptKind::ShellCmd
                             | PromptKind::ShellCmdCaptured
+                            | PromptKind::Command
                     )
                 );
                 if wants_path {
@@ -2089,17 +2088,37 @@ impl App {
 
     /// Close the prompt without dispatching. For a Search prompt, also
     /// restore the cursor position that was saved when `/` was pressed.
-    /// Tab-complete a filesystem path in the prompt buffer. Expands `~`
-    /// and `$VAR`, reads the parent directory, and completes the prefix.
-    /// Single match → full completion (+ `/` for dirs). Multiple matches
-    /// → complete common prefix and flash the count.
+    /// Tab-complete a filesystem path in the prompt buffer. For shell
+    /// prompts, completes just the last whitespace-delimited word.
+    /// Expands `~` and `$VAR`, reads the parent directory, and completes
+    /// the prefix. Single match → full completion (+ `/` for dirs).
+    /// Multiple matches → complete common prefix and flash the count.
     fn tab_complete_path(&mut self) {
-        let Mode::Prompting(ref mut prompt) = self.state.mode else {
-            return;
+        // Extract data from prompt without holding the borrow.
+        let (is_shell, buffer) = {
+            let Mode::Prompting(ref prompt) = self.state.mode else {
+                return;
+            };
+            let is_shell = matches!(
+                prompt.kind,
+                PromptKind::ShellCmd
+                    | PromptKind::ShellCmdCaptured
+                    | PromptKind::Command
+            );
+            (is_shell, prompt.buffer.clone())
         };
-        let input = crate::paths::expand(&prompt.buffer);
-        let input_str = input.to_string_lossy();
-        let (dir, prefix) = if input_str.ends_with('/') || input_str.is_empty() {
+
+        // For shell prompts, extract just the last word for completion.
+        let (buf_prefix, word) = if is_shell {
+            let last_space = buffer.rfind(' ').map(|i| i + 1).unwrap_or(0);
+            (buffer[..last_space].to_string(), buffer[last_space..].to_string())
+        } else {
+            (String::new(), buffer)
+        };
+
+        let input = crate::paths::expand(&word);
+        let input_str = input.to_string_lossy().to_string();
+        let (dir, file_prefix) = if input_str.ends_with('/') || input_str.is_empty() {
             let dir = if input_str.is_empty() {
                 self.state.listing.dir.clone()
             } else {
@@ -2132,12 +2151,8 @@ impl App {
             .filter_map(Result::ok)
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if name.starts_with(&prefix) {
-                    let suffix = if e.path().is_dir() {
-                        "/".to_string()
-                    } else {
-                        String::new()
-                    };
+                if name.starts_with(&file_prefix) {
+                    let suffix = if e.path().is_dir() { "/" } else { "" };
                     Some(format!("{name}{suffix}"))
                 } else {
                     None
@@ -2150,31 +2165,83 @@ impl App {
             return;
         }
 
-        // Build the completed path. Keep the original prefix up to the
-        // parent dir so `~/sr<Tab>` → `~/src/`, not `/Users/derek/src/`.
-        let base = if prompt.buffer.ends_with('/') || prompt.buffer.is_empty() {
-            prompt.buffer.clone()
+        let word_base = if word.ends_with('/') || word.is_empty() {
+            word.clone()
         } else {
-            let last_sep = prompt.buffer.rfind('/').map(|i| i + 1).unwrap_or(0);
-            prompt.buffer[..last_sep].to_string()
+            let last_sep = word.rfind('/').map(|i| i + 1).unwrap_or(0);
+            word[..last_sep].to_string()
         };
 
-        if matches.len() == 1 {
-            prompt.buffer = format!("{base}{}", matches[0]);
+        let (completed_word, flash) = if matches.len() == 1 {
+            (format!("{word_base}{}", matches[0]), None)
         } else {
-            // Complete common prefix of all matches.
             let common = common_prefix(&matches);
-            if common.len() > prefix.len() {
-                prompt.buffer = format!("{base}{common}");
+            let msg = Some(format!("{} matches", matches.len()));
+            if common.len() > file_prefix.len() {
+                (format!("{word_base}{common}"), msg)
+            } else {
+                // No progress possible — just flash the count.
+                if let Some(m) = msg { self.state.flash_info(m); }
+                return;
             }
-            self.state.flash_info(format!("{} matches", matches.len()));
+        };
+
+        if let Some(msg) = flash {
+            self.state.flash_info(msg);
         }
 
-        // Sync editor if present.
-        if let Mode::Prompting(ref mut prompt) = self.state.mode {
-            if let Some(ed) = prompt.editor.as_mut() {
-                ed.set_content(&prompt.buffer);
+        let Mode::Prompting(ref mut prompt) = self.state.mode else {
+            return;
+        };
+        prompt.buffer = format!("{buf_prefix}{completed_word}");
+        if let Some(ed) = prompt.editor.as_mut() {
+            ed.set_content(&prompt.buffer);
+        }
+    }
+
+    /// Tab-complete in the search prompt: match against filenames in the
+    /// current directory listing.
+    fn tab_complete_search(&mut self) {
+        let (prefix, new_buffer, flash) = {
+            let Mode::Prompting(ref prompt) = self.state.mode else {
+                return;
+            };
+            let prefix = prompt.buffer.clone();
+            if prefix.is_empty() {
+                return;
             }
+            let mut matches: Vec<String> = self
+                .state
+                .rows
+                .iter()
+                .filter(|r| r.display.starts_with(prefix.as_str()))
+                .map(|r| r.display.clone())
+                .collect();
+            matches.sort();
+
+            if matches.is_empty() {
+                return;
+            }
+            if matches.len() == 1 {
+                (prefix, matches.into_iter().next().unwrap(), None)
+            } else {
+                let common = common_prefix(&matches);
+                let new = if common.len() > prefix.len() {
+                    common
+                } else {
+                    prefix.clone()
+                };
+                (prefix, new, Some(format!("{} matches", matches.len())))
+            }
+        };
+        if let Some(msg) = flash {
+            self.state.flash_info(msg);
+        }
+        let Mode::Prompting(ref mut prompt) = self.state.mode else {
+            return;
+        };
+        if new_buffer != prefix {
+            prompt.buffer = new_buffer;
         }
     }
 
