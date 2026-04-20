@@ -262,6 +262,28 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 - Sessions are de-duplicated by cwd + tab commands (most recent kept).
 - Capped at 20 most recent sessions.
 
+## MCP server (Claude integration)
+
+spyc runs a background HTTP MCP server that Claude Code connects to
+automatically via `--mcp-config` at pane spawn. Claude can query and
+control the workspace through these tools:
+
+**Read tools:**
+- **`get_spyc_context`** -- returns cwd, cursor file, picks, inventory,
+  active filter, and git branch
+- **`get_file_content`** -- reads a file's text content (up to 100KB)
+
+**Write tools (Claude can mutate the TUI):**
+- **`navigate_to`** -- change directory or focus cursor on a file
+- **`set_filter`** -- set or clear the file listing filter (glob)
+- **`pick_files`** -- pick files matching glob patterns (additive)
+- **`clear_picks`** -- clear all picks
+
+Write actions execute on the main thread via a command channel.
+Flash messages (`[mcp] navigated to src/`) inform the user when
+Claude changes the workspace. The `gf`/`gF` keys complete the loop:
+jump from Claude's output back to the file list.
+
 ## Info and diagnostics
 
 - **D** show date and time (UTC)

@@ -7,6 +7,7 @@ mod debug_log;
 mod fs;
 mod keymap;
 mod mcp;
+mod mcp_cmd;
 mod pane;
 mod paths;
 mod shell;

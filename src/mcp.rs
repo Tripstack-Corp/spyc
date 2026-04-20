@@ -18,6 +18,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::context;
+use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 const SERVER_NAME: &str = "spyc";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -39,7 +40,14 @@ fn mcp_log(msg: &str) {
 // ── Shared JSON-RPC dispatch ────────────────────────────────────
 
 /// Dispatch a JSON-RPC request and write the response to `w`.
-fn dispatch(w: &mut impl Write, msg: &str, ctx_path: &Path) -> io::Result<()> {
+/// `cmd_tx` is `Some` when running as the HTTP background server
+/// (writable actions available), `None` for stdio transport.
+fn dispatch(
+    w: &mut impl Write,
+    msg: &str,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+) -> io::Result<()> {
     let parsed: Value = match serde_json::from_str(msg) {
         Ok(v) => v,
         Err(_) => return send_error(w, Value::Null, -32700, "Parse error"),
@@ -58,7 +66,7 @@ fn dispatch(w: &mut impl Write, msg: &str, ctx_path: &Path) -> io::Result<()> {
         "resources/list" => handle_resources_list(w, &id),
         "resources/read" => handle_resources_read(w, &id, &parsed["params"], ctx_path),
         "tools/list" => handle_tools_list(w, &id),
-        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path),
+        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx),
         "ping" => send_result(w, &id, json!({})),
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }
@@ -96,7 +104,7 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
                 return Err(e.into());
             }
         };
-        dispatch(&mut writer, &msg, &context_path)?;
+        dispatch(&mut writer, &msg, &context_path, None)?;
     }
     Ok(())
 }
@@ -105,11 +113,16 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
 
 /// Start the HTTP MCP server on an OS-assigned port. Returns the port
 /// number. The server runs on a background thread and reads context
-/// from `ctx_path`.
-pub fn start_http_server(ctx_path: PathBuf) -> anyhow::Result<u16> {
+/// from `ctx_path`. `cmd_tx` is the write end of the command channel —
+/// writable MCP actions send commands through it to the main event loop.
+pub fn start_http_server(
+    ctx_path: PathBuf,
+    cmd_tx: std::sync::mpsc::Sender<McpRequest>,
+) -> anyhow::Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     let ctx_path = Arc::new(ctx_path);
+    let cmd_tx = Arc::new(cmd_tx);
 
     mcp_log(&format!("http: listening on 127.0.0.1:{port}"));
 
@@ -117,10 +130,11 @@ pub fn start_http_server(ctx_path: PathBuf) -> anyhow::Result<u16> {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             let ctx = Arc::clone(&ctx_path);
+            let tx = Arc::clone(&cmd_tx);
             // Handle each connection in a thread (Claude Code keeps one
             // connection open, but we handle concurrent requests safely).
             std::thread::spawn(move || {
-                if let Err(e) = handle_http_connection(stream, &ctx) {
+                if let Err(e) = handle_http_connection(stream, &ctx, &tx) {
                     mcp_log(&format!("http: connection error: {e}"));
                 }
             });
@@ -146,6 +160,7 @@ pub fn mcp_config_json(port: u16) -> String {
 fn handle_http_connection(
     mut stream: std::net::TcpStream,
     ctx_path: &Path,
+    cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
 ) -> io::Result<()> {
     use std::io::BufReader;
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -187,7 +202,7 @@ fn handle_http_connection(
         if is_post && is_mcp {
             // JSON-RPC request.
             let mut response_buf = Vec::new();
-            dispatch(&mut response_buf, &body_str, ctx_path)?;
+            dispatch(&mut response_buf, &body_str, ctx_path, Some(cmd_tx))?;
 
             // The dispatch writes Content-Length framed output (for stdio).
             // For HTTP, we need to extract just the JSON body.
@@ -314,6 +329,70 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         "properties": {},
                         "required": []
                     }
+                },
+                {
+                    "name": "navigate_to",
+                    "description": "Navigate spyc to a directory or file. If the path is a directory, changes to it. If a file, navigates to its parent directory and places the cursor on it.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute or relative path. Relative paths resolved against spyc's cwd. Supports ~ and $VAR expansion."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "set_filter",
+                    "description": "Set or clear the file listing filter. When set, only files matching the glob pattern are shown. Pass null or empty string to clear.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": ["string", "null"],
+                                "description": "Glob pattern (e.g. '*.rs', 'test_*'), or null/empty to clear the filter."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "pick_files",
+                    "description": "Select (pick) files in the current directory matching glob patterns. Picks are additive. Use clear_picks first for a clean selection.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "patterns": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Glob patterns to match against filenames (e.g. ['*.rs', 'Cargo.*'])."
+                            }
+                        },
+                        "required": ["patterns"]
+                    }
+                },
+                {
+                    "name": "clear_picks",
+                    "description": "Clear all picked (selected) files in spyc.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "get_file_content",
+                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute or relative path to the file."
+                            }
+                        },
+                        "required": ["path"]
+                    }
                 }
             ]
         }),
@@ -325,27 +404,132 @@ fn handle_tools_call(
     id: &Value,
     params: &Value,
     ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
 ) -> io::Result<()> {
     let name = params["name"].as_str().unwrap_or("");
-    if name != "get_spyc_context" {
-        return send_result(
-            w,
-            id,
-            json!({
-                "isError": true,
-                "content": [{"type": "text", "text": format!("Unknown tool: {name}")}]
-            }),
-        );
-    }
+    let args = &params["arguments"];
 
-    let text = read_context_or_empty(ctx_path);
+    match name {
+        "get_spyc_context" => {
+            let text = read_context_or_empty(ctx_path);
+            send_tool_result(w, id, &text)
+        }
+        "get_file_content" => {
+            // Read-only — handled inline, no command channel needed.
+            let path_str = args["path"].as_str().unwrap_or("");
+            if path_str.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: path");
+            }
+            // Resolve relative paths against the cwd from the context file.
+            let cwd = read_cwd_from_context(ctx_path);
+            let resolved = if Path::new(path_str).is_absolute() {
+                PathBuf::from(path_str)
+            } else {
+                cwd.join(path_str)
+            };
+            match read_file_content(&resolved) {
+                Ok(content) => send_tool_result(w, id, &content),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" => {
+            let Some(tx) = cmd_tx else {
+                return send_tool_error(w, id, "writable actions not available in stdio mode");
+            };
+            let command = match name {
+                "navigate_to" => {
+                    let path = args["path"].as_str().unwrap_or("").to_string();
+                    if path.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: path");
+                    }
+                    McpCommand::NavigateTo { path }
+                }
+                "set_filter" => {
+                    let pattern = args["pattern"].as_str().map(String::from);
+                    McpCommand::SetFilter { pattern }
+                }
+                "pick_files" => {
+                    let patterns: Vec<String> = args["patterns"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if patterns.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: patterns");
+                    }
+                    McpCommand::PickFiles { patterns }
+                }
+                "clear_picks" => McpCommand::ClearPicks,
+                _ => unreachable!(),
+            };
+
+            // Send command and block for reply with timeout.
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            if tx.send(McpRequest { command, reply: reply_tx }).is_err() {
+                return send_tool_error(w, id, "spyc is not running");
+            }
+            match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(McpResponse::Ok { message }) => send_tool_result(w, id, &message),
+                Ok(McpResponse::Error { message }) => send_tool_error(w, id, &message),
+                Err(_) => send_tool_error(w, id, "spyc did not respond within 5 seconds"),
+            }
+        }
+        _ => send_tool_error(w, id, &format!("unknown tool: {name}")),
+    }
+}
+
+/// Helper: send a successful tool result.
+fn send_tool_result(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()> {
+    send_result(w, id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// Helper: send a tool error.
+fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()> {
     send_result(
         w,
         id,
-        json!({
-            "content": [{"type": "text", "text": text}]
-        }),
+        json!({"isError": true, "content": [{"type": "text", "text": text}]}),
     )
+}
+
+/// Read the cwd from the context file (for resolving relative paths).
+fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
+    if let Ok(text) = std::fs::read_to_string(ctx_path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            if let Some(cwd) = v["cwd"].as_str() {
+                return PathBuf::from(cwd);
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+}
+
+/// Read file content (up to 100KB, text only).
+fn read_file_content(path: &Path) -> Result<String, String> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{}: not a regular file", path.display()));
+    }
+    if meta.len() > 100 * 1024 {
+        return Err(format!(
+            "{}: file too large ({} KB, limit 100 KB)",
+            path.display(),
+            meta.len() / 1024
+        ));
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    // Reject binary files (null bytes in first 8KB).
+    let check_len = bytes.len().min(8192);
+    if bytes[..check_len].contains(&0) {
+        return Err(format!("{}: binary file", path.display()));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| format!("{}: not valid UTF-8", path.display()))
 }
 
 fn read_context_or_empty(ctx_path: &Path) -> String {
@@ -447,7 +631,7 @@ mod tests {
         let msg = read_lsp_message(&mut reader).unwrap();
 
         let mut output = Vec::new();
-        dispatch(&mut output, &msg, Path::new("/tmp")).unwrap();
+        dispatch(&mut output, &msg, Path::new("/tmp"), None).unwrap();
         let resp = parse_response(&output);
         assert_eq!(resp["result"]["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(resp["result"]["serverInfo"]["name"], "spyc");
@@ -460,6 +644,7 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":2,"method":"resources/list"}).to_string(),
             Path::new("/tmp"),
+            None,
         )
         .unwrap();
         let resp = parse_response(&output);
@@ -487,6 +672,7 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":CONTEXT_URI}}).to_string(),
             &ctx_path,
+            None,
         )
         .unwrap();
         let resp = parse_response(&output);
@@ -503,12 +689,18 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":4,"method":"tools/list"}).to_string(),
             Path::new("/tmp"),
+            None,
         )
         .unwrap();
         let resp = parse_response(&output);
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
+        assert_eq!(tools.len(), 6);
         assert_eq!(tools[0]["name"], "get_spyc_context");
+        assert_eq!(tools[1]["name"], "navigate_to");
+        assert_eq!(tools[2]["name"], "set_filter");
+        assert_eq!(tools[3]["name"], "pick_files");
+        assert_eq!(tools[4]["name"], "clear_picks");
+        assert_eq!(tools[5]["name"], "get_file_content");
     }
 
     #[test]
@@ -530,6 +722,7 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_spyc_context","arguments":{}}}).to_string(),
             &ctx_path,
+            None,
         )
         .unwrap();
         let resp = parse_response(&output);
@@ -546,6 +739,7 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"spyc://bogus"}}).to_string(),
             Path::new("/tmp"),
+            None,
         )
         .unwrap();
         let resp = parse_response(&output);
@@ -562,6 +756,7 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string(),
             Path::new("/tmp"),
+            None,
         )
         .unwrap();
         assert!(output.is_empty());
@@ -591,7 +786,8 @@ mod tests {
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
 
-        let port = start_http_server(ctx_path).unwrap();
+        let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
+        let port = start_http_server(ctx_path, cmd_tx).unwrap();
 
         // Give the server thread a moment to start.
         std::thread::sleep(std::time::Duration::from_millis(50));

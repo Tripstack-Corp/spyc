@@ -288,6 +288,8 @@ pub struct App {
     cached_rows_gen: u64,
     /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
     cached_grid_key: (u64, usize, usize, u16, u16),
+    /// Commands from the MCP server (writable actions from Claude).
+    mcp_cmd_rx: std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -393,9 +395,11 @@ impl App {
             list_generation: 0,
         };
         let context_path = crate::context::context_path(&app_state.start_dir);
+        // Command channel for writable MCP actions (Claude → main loop).
+        let (mcp_cmd_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
         // Start the MCP HTTP server so Claude CLI can connect via
         // --mcp-config. Port 0 = OS assigns a free port.
-        let mcp_port = crate::mcp::start_http_server(context_path.clone())
+        let mcp_port = crate::mcp::start_http_server(context_path.clone(), mcp_cmd_tx)
             .unwrap_or_else(|e| {
                 spyc_debug!("MCP HTTP server failed to start: {e}");
                 0
@@ -439,6 +443,7 @@ impl App {
             cached_rows: Vec::new(),
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            mcp_cmd_rx,
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -482,6 +487,97 @@ impl App {
         }
         let _ = crate::context::write_context_file(&self.context_path, &ctx);
         self.last_context_json = json;
+    }
+
+    /// Execute a writable MCP command from Claude. Runs on the main
+    /// thread with full access to `AppState`. Returns a response that
+    /// the MCP server thread forwards to Claude.
+    fn execute_mcp_command(
+        &mut self,
+        cmd: crate::mcp_cmd::McpCommand,
+    ) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::{McpCommand, McpResponse};
+        match cmd {
+            McpCommand::NavigateTo { path } => {
+                match self.state.jump_to(&path) {
+                    Ok(()) => {
+                        self.state.flash_info(format!(
+                            "[mcp] navigated to {}",
+                            self.state.listing.dir.display()
+                        ));
+                        // Force context write so get_spyc_context reflects
+                        // the new state immediately.
+                        self.write_context();
+                        let ctx = self.snapshot_context();
+                        let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
+                        McpResponse::Ok { message: json }
+                    }
+                    Err(e) => McpResponse::Error {
+                        message: format!("navigate failed: {e}"),
+                    },
+                }
+            }
+            McpCommand::SetFilter { pattern } => {
+                match pattern {
+                    Some(ref p) if p.is_empty() => self.state.temp_filter = None,
+                    Some(p) => self.state.temp_filter = Some(p),
+                    None => self.state.temp_filter = None,
+                }
+                self.state.rebuild_rows();
+                let count = self.state.rows.len();
+                let label = self
+                    .state
+                    .temp_filter
+                    .as_deref()
+                    .unwrap_or("(cleared)");
+                self.state.flash_info(format!("[mcp] filter: {label}"));
+                self.write_context();
+                McpResponse::Ok {
+                    message: format!("filter applied, {count} items visible"),
+                }
+            }
+            McpCommand::PickFiles { patterns } => {
+                let mut total = 0usize;
+                let mut errors = Vec::new();
+                for pat_str in &patterns {
+                    match glob::Pattern::new(pat_str) {
+                        Ok(pat) => {
+                            for e in &self.state.listing.entries {
+                                if pat.matches(&e.name) {
+                                    self.state.picks.insert(&e.path);
+                                    total += 1;
+                                }
+                            }
+                        }
+                        Err(e) => errors.push(format!("{pat_str}: {e}")),
+                    }
+                }
+                self.state.list_generation = self.state.list_generation.wrapping_add(1);
+                if !errors.is_empty() {
+                    return McpResponse::Error {
+                        message: format!("invalid patterns: {}", errors.join(", ")),
+                    };
+                }
+                self.state.flash_info(format!("[mcp] picked {total} file(s)"));
+                self.write_context();
+                McpResponse::Ok {
+                    message: format!(
+                        "picked {total} file(s), {} total",
+                        self.state.picks.len()
+                    ),
+                }
+            }
+            McpCommand::ClearPicks => {
+                let count = self.state.picks.len();
+                self.state.picks.clear();
+                self.state.list_generation = self.state.list_generation.wrapping_add(1);
+                self.state.flash_info("[mcp] picks cleared");
+                self.write_context();
+                McpResponse::Ok {
+                    message: format!("cleared {count} pick(s)"),
+                }
+            }
+        }
     }
 
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
@@ -711,6 +807,14 @@ impl App {
                 self.state.refresh_listing();
                 last_refresh = std::time::Instant::now();
                 needs_draw = true; draw_reason = 3;
+            }
+
+            // Process writable MCP commands from Claude.
+            while let Ok(req) = self.mcp_cmd_rx.try_recv() {
+                let resp = self.execute_mcp_command(req.command);
+                let _ = req.reply.send(resp);
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // Adaptive poll rate:

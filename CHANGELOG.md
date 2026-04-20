@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-19
+
+### Added
+- **Writable MCP actions.** Claude can now mutate the TUI workspace
+  via five new MCP tools: `navigate_to` (chdir or focus file),
+  `set_filter` (set/clear glob filter), `pick_files` (pick by glob
+  patterns), `clear_picks`, and `get_file_content` (read up to 100KB
+  text). The MCP server uses a command channel to the main event loop
+  with one-shot reply channels and 5-second timeout. Flash messages
+  (`[mcp] navigated to src/`) keep the user informed when Claude
+  changes the workspace.
+
 ## [1.7.0] - 2026-04-19
 
 ### Added
