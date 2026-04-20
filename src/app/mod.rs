@@ -700,8 +700,15 @@ impl App {
                 // Update elapsed timer in the title while running.
                 if !capture.finished {
                     let elapsed = capture.started.elapsed().as_secs();
+                    let human_time = if elapsed >= 3600 {
+                        format!("{}h {}m {}s", elapsed / 3600, (elapsed % 3600) / 60, elapsed % 60)
+                    } else if elapsed >= 60 {
+                        format!("{}m {}s", elapsed / 60, elapsed % 60)
+                    } else {
+                        format!("{elapsed}s")
+                    };
                     let timer_title =
-                        format!("\u{23f3} {} — running... ({elapsed}s)", capture.title);
+                        format!("\u{23f3} {} — running... ({human_time})", capture.title);
                     if let Some(view) = self.pager.as_mut() {
                         view.title = timer_title;
                     }
@@ -895,12 +902,17 @@ impl App {
                             if let Some(ed) = p.editor.as_mut() {
                                 ed.set_content(&p.buffer);
                             }
-                        } else if let Some(pane) = self.pane_tabs.as_mut().map(PaneTabs::active_mut)
-                        {
+                        } else if self.pane_tabs.is_some() {
+                            // Switch focus to the pane — the user clearly
+                            // intends to interact with it if they're pasting.
+                            if !self.state.pane_focused {
+                                self.set_pane_focus(true);
+                            }
                             // Track pasted text for yP (yank last prompt).
                             self.pane_prompt_buf.push_str(&text);
                             // Wrap in bracketed paste so the child app (e.g. claude)
                             // receives the block as a single paste, not line-by-line.
+                            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
                             let mut buf = Vec::with_capacity(text.len() + 12);
                             buf.extend_from_slice(b"\x1b[200~");
                             buf.extend_from_slice(text.as_bytes());

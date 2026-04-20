@@ -172,7 +172,13 @@ impl LineEditor {
         if let Some(op) = self.pending_op.take() {
             match key.code {
                 KeyCode::Char('w') => {
-                    let end = self.next_word_start_delete();
+                    // cw stops at end of current word (vim convention).
+                    // dw deletes through trailing whitespace to next word.
+                    let end = if op == PendingOp::Change {
+                        self.word_end_exclusive()
+                    } else {
+                        self.next_word_start_delete()
+                    };
                     self.delete_range(self.cursor, end);
                     if op == PendingOp::Change {
                         self.mode = Mode::Insert;
@@ -319,6 +325,19 @@ impl LineEditor {
 
     /// Like `next_word_start` but for `dw`: includes trailing whitespace
     /// after the word (vim's delete-word semantics).
+    /// End of current word (exclusive) — for `cw`. Stops at the first
+    /// whitespace character after the cursor's word, without consuming
+    /// trailing whitespace.
+    fn word_end_exclusive(&self) -> usize {
+        let n = self.buf.len();
+        let mut i = self.cursor;
+        // Skip current word characters.
+        while i < n && !self.buf[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
+
     fn next_word_start_delete(&self) -> usize {
         let n = self.buf.len();
         let mut i = self.cursor;
