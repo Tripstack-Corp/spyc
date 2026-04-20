@@ -1870,7 +1870,18 @@ impl App {
                     | PromptKind::MoveTo
                     | PromptKind::MakeDir
                     | PromptKind::PaneNewTabCwd => self.tab_complete_path(),
-                    PromptKind::Search { .. } => self.tab_complete_search(),
+                    PromptKind::Search { .. } => {
+                        // Apply a temporary filter so the listing narrows
+                        // to show only matching entries — like typing =PREFIX*.
+                        let Mode::Prompting(ref p) = self.state.mode else {
+                            return PostAction::None;
+                        };
+                        if !p.buffer.is_empty() {
+                            let pattern = format!("{}*", p.buffer);
+                            self.state.temp_filter = Some(pattern);
+                            self.state.rebuild_rows();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -2235,68 +2246,8 @@ impl App {
         }
     }
 
-    /// Tab-complete in the search prompt: match against filenames in the
-    /// current directory listing.
-    fn tab_complete_search(&mut self) {
-        let buffer = {
-            let Mode::Prompting(ref prompt) = self.state.mode else {
-                return;
-            };
-            prompt.buffer.clone()
-        };
-        if buffer.is_empty() {
-            return;
-        }
-
-        // Double-Tab: show match list.
-        if let Some((ref prev_buf, ref prev_matches)) = self.tab_matches {
-            if *prev_buf == buffer && prev_matches.len() > 1 {
-                let display: Vec<&str> = prev_matches.iter().map(|s| s.as_str()).collect();
-                let shown = if display.len() > 12 {
-                    format!("{}  (+{} more)", display[..12].join("  "), display.len() - 12)
-                } else {
-                    display.join("  ")
-                };
-                self.state.flash_info(shown);
-                return;
-            }
-        }
-
-        let mut matches: Vec<String> = self
-            .state
-            .rows
-            .iter()
-            .filter(|r| r.display.starts_with(buffer.as_str()))
-            .map(|r| r.display.clone())
-            .collect();
-        matches.sort();
-
-        if matches.is_empty() {
-            return;
-        }
-
-        let new_buffer = if matches.len() == 1 {
-            self.tab_matches = None;
-            matches.into_iter().next().unwrap()
-        } else {
-            let common = common_prefix(&matches);
-            let new = if common.len() > buffer.len() {
-                common
-            } else {
-                buffer.clone()
-            };
-            self.state.flash_info(format!("{} matches", matches.len()));
-            self.tab_matches = Some((new.clone(), matches));
-            new
-        };
-
-        let Mode::Prompting(ref mut prompt) = self.state.mode else {
-            return;
-        };
-        if new_buffer != buffer {
-            prompt.buffer = new_buffer;
-        }
-    }
+    // tab_complete_search removed — Tab in search now applies a
+    // temporary filter (=PREFIX*) to the listing instead.
 
     fn cancel_prompt(&mut self) {
         let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
@@ -2305,6 +2256,11 @@ impl App {
         if let PromptKind::Search { saved_cursor } = p.kind {
             self.state.cursor.index = saved_cursor;
             self.state.cursor.clamp(self.state.rows.len());
+            // Clear any Tab-applied filter from search.
+            if self.state.temp_filter.is_some() {
+                self.state.temp_filter = None;
+                self.state.rebuild_rows();
+            }
         }
         // Clear any stashed state from the two-step new-tab prompt.
         self.state.pending_new_tab_cmd = None;
@@ -2471,6 +2427,14 @@ impl App {
     #[allow(clippy::needless_pass_by_value)]
     fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
         use state::PromptResult;
+
+        // Clear any Tab-applied filter from search before dispatching.
+        if matches!(prompt.kind, PromptKind::Search { .. }) {
+            if self.state.temp_filter.is_some() {
+                self.state.temp_filter = None;
+                self.state.rebuild_rows();
+            }
+        }
 
         // Try the pure-domain handler first.
         match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
