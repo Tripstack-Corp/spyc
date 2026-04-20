@@ -2,6 +2,9 @@
 - yr (yank recursive) — yank directories into inventory; would need
   recursive put and inventory UI changes
 - yc (yank chmod) — preserve permissions through yank/put cycle
+- count prefix doesn't work with vi line editor operators (e.g. 3cw,
+  2dw) — the count is consumed by the resolver but the line editor
+  doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
 - graveyard should include files that have been removed with R
