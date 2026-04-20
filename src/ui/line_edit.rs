@@ -29,6 +29,8 @@ pub enum EditResult {
     HistoryPrev,
     /// Request next history entry.
     HistoryNext,
+    /// User pressed Tab — request path/command completion.
+    TabComplete,
 }
 
 /// Pending operator waiting for a motion (d, c).
@@ -102,6 +104,9 @@ impl LineEditor {
                 }
                 _ => {}
             }
+        }
+        if matches!(key.code, KeyCode::Tab) {
+            return EditResult::TabComplete;
         }
         if matches!(key.code, KeyCode::Up) {
             return EditResult::HistoryPrev;

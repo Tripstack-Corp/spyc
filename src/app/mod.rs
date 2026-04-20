@@ -1854,6 +1854,24 @@ impl App {
             return self.dispatch_prompt(p);
         }
 
+        // Tab completion for path prompts.
+        if matches!(key.code, KeyCode::Tab) {
+            if matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(
+                    p.kind,
+                    PromptKind::Jump
+                        | PromptKind::CopyTo
+                        | PromptKind::MoveTo
+                        | PromptKind::MakeDir
+                        | PromptKind::PaneNewTabCwd
+                )
+            ) {
+                self.tab_complete_path();
+            }
+            return PostAction::None;
+        }
+
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
             let Mode::Prompting(prompt) = &mut self.state.mode else {
@@ -2045,6 +2063,25 @@ impl App {
                 }
                 p.buffer = replacement;
             }
+            EditResult::TabComplete => {
+                // Path completion for prompts that accept paths.
+                let wants_path = matches!(
+                    &self.state.mode,
+                    Mode::Prompting(p) if matches!(
+                        p.kind,
+                        PromptKind::Jump
+                            | PromptKind::CopyTo
+                            | PromptKind::MoveTo
+                            | PromptKind::MakeDir
+                            | PromptKind::PaneNewTabCwd
+                            | PromptKind::ShellCmd
+                            | PromptKind::ShellCmdCaptured
+                    )
+                );
+                if wants_path {
+                    self.tab_complete_path();
+                }
+            }
             EditResult::Continue => {}
         }
         PostAction::None
@@ -2052,6 +2089,95 @@ impl App {
 
     /// Close the prompt without dispatching. For a Search prompt, also
     /// restore the cursor position that was saved when `/` was pressed.
+    /// Tab-complete a filesystem path in the prompt buffer. Expands `~`
+    /// and `$VAR`, reads the parent directory, and completes the prefix.
+    /// Single match → full completion (+ `/` for dirs). Multiple matches
+    /// → complete common prefix and flash the count.
+    fn tab_complete_path(&mut self) {
+        let Mode::Prompting(ref mut prompt) = self.state.mode else {
+            return;
+        };
+        let input = crate::paths::expand(&prompt.buffer);
+        let input_str = input.to_string_lossy();
+        let (dir, prefix) = if input_str.ends_with('/') || input_str.is_empty() {
+            let dir = if input_str.is_empty() {
+                self.state.listing.dir.clone()
+            } else {
+                input.clone()
+            };
+            (dir, String::new())
+        } else {
+            let dir = input
+                .parent()
+                .map(|p| {
+                    if p.as_os_str().is_empty() {
+                        self.state.listing.dir.clone()
+                    } else {
+                        p.to_path_buf()
+                    }
+                })
+                .unwrap_or_else(|| self.state.listing.dir.clone());
+            let name = input
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            (dir, name)
+        };
+
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        let mut matches: Vec<String> = entries
+            .filter_map(Result::ok)
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with(&prefix) {
+                    let suffix = if e.path().is_dir() {
+                        "/".to_string()
+                    } else {
+                        String::new()
+                    };
+                    Some(format!("{name}{suffix}"))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        matches.sort();
+
+        if matches.is_empty() {
+            return;
+        }
+
+        // Build the completed path. Keep the original prefix up to the
+        // parent dir so `~/sr<Tab>` → `~/src/`, not `/Users/derek/src/`.
+        let base = if prompt.buffer.ends_with('/') || prompt.buffer.is_empty() {
+            prompt.buffer.clone()
+        } else {
+            let last_sep = prompt.buffer.rfind('/').map(|i| i + 1).unwrap_or(0);
+            prompt.buffer[..last_sep].to_string()
+        };
+
+        if matches.len() == 1 {
+            prompt.buffer = format!("{base}{}", matches[0]);
+        } else {
+            // Complete common prefix of all matches.
+            let common = common_prefix(&matches);
+            if common.len() > prefix.len() {
+                prompt.buffer = format!("{base}{common}");
+            }
+            self.state.flash_info(format!("{} matches", matches.len()));
+        }
+
+        // Sync editor if present.
+        if let Mode::Prompting(ref mut prompt) = self.state.mode {
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&prompt.buffer);
+            }
+        }
+    }
+
     fn cancel_prompt(&mut self) {
         let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
             return;
@@ -3599,7 +3725,7 @@ impl App {
                     view.picker_edit_cursor =
                         Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
                 }
-                EditResult::Continue => {}
+                EditResult::TabComplete | EditResult::Continue => {}
             }
             return PostAction::None;
         }
@@ -4330,6 +4456,24 @@ fn hostname_best_effort() -> String {
         }
     }
     "localhost".to_string()
+}
+
+/// Longest common prefix of a slice of strings.
+fn common_prefix(strings: &[String]) -> String {
+    let Some(first) = strings.first() else {
+        return String::new();
+    };
+    let mut len = first.len();
+    for s in &strings[1..] {
+        len = len.min(s.len());
+        for (i, (a, b)) in first.chars().zip(s.chars()).enumerate() {
+            if a != b {
+                len = len.min(i);
+                break;
+            }
+        }
+    }
+    first[..len].to_string()
 }
 
 /// Strip ANSI escape sequences (CSI, OSC, bracketed paste markers, etc.)
