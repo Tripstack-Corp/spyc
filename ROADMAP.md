@@ -80,12 +80,17 @@ priority -- nice to have, not blocking v2.0.
 - **`spyc --dump-default-config`** -- complete `.spycrc.toml` with
   comments. Self-documentation for the keymap DSL and a user starting
   point.
-- **Handler extraction Phases 5-6** (deferred). The pager handler
-  (~500 lines) is deeply coupled to `PagerView` widget state;
-  extracting it cleanly needs a `PagerState` restructuring, best done
-  when we're actively modifying the pager. `handle_key` thinning is
-  lower ROI -- mostly wiring. Both can land alongside thesis features
-  that touch those handlers.
+- **Elm Architecture refactor (Model-View-Update).** `app/mod.rs` is
+  4000+ lines with entangled concerns: domain state, TUI state,
+  process lifecycle, rendering caches, file watching. The handler
+  extraction (Phases 0-4) separated `AppState` domain logic, but the
+  event loop and render path are still fused. Refactor toward: (1)
+  pure Model structs, (2) an Update function that takes Messages and
+  mutates state, (3) a View function that reads state and renders.
+  This makes state transitions testable without a terminal, and splits
+  the monolith into focused modules. Subsumes the deferred handler
+  extraction Phases 5-6. Big lift -- do incrementally alongside
+  feature work, not as a standalone rewrite.
 - **Expand snapshot tests.** `insta` + `TestBackend` infra is wired.
   Status bar snapshots done (4). Remaining: `list_view`, `pager`
   (ANSI, hex, line numbers, search highlight), `line_edit` modes.
@@ -97,8 +102,12 @@ priority -- nice to have, not blocking v2.0.
   quoting round-trip, limit-filter glob matching, resolver count
   invariants. One block per site.
 - **Background directory loading.** Large directories (100K+ entries)
-  block the event loop. Async listing with a cancellable progress
-  indicator. Scoped conservatively -- the common case stays synchronous.
+  and slow filesystems (NFS, external drives) block the event loop
+  because `Listing::read()` and `git_file_statuses()` run
+  synchronously on the main thread. Move to a background thread with
+  `mpsc` channel, send results back as a message. Cancellable
+  progress indicator. Scoped conservatively -- the common case
+  (local NVMe, <1K entries) stays fast.
 
 ## Thesis -- deepening the agent integration
 
@@ -116,6 +125,19 @@ terminal inside a terminal." In priority order:
   substituted in -- e.g., `map "<space>cr" claude-template review`
   where `review` is defined in config. Turns spyc into a
   keyboard-driven Claude launcher for repeated workflows.
+- **Writable MCP actions.** The MCP server currently exposes a
+  read-only tool (`get_spyc_context`). Extend it so Claude can
+  *mutate* TUI state: set the limit filter, toggle picks, navigate
+  to a path. e.g. "filter for rust files and pick the ones modified
+  today" updates the TUI live. Requires a command channel from the
+  MCP server thread back to the event loop. High-value -- turns
+  spyc from a context source into a controllable workspace.
+- **Context enrichment.** `get_spyc_context` currently returns file
+  paths and metadata. Could additionally expose: file contents (or
+  snippets) for picked files, recent compiler errors from `cargo
+  check`, unstaged diffs. Makes Claude's context richer without the
+  user needing to pipe explicitly. Scope carefully -- large payloads
+  would need truncation or pagination.
 - **Status bar agent segment.** When the pane is running Claude, show
   a small indicator: session identity, maybe token usage if the CLI
   surface exposes it. Useful, not essential.
