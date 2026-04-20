@@ -167,8 +167,20 @@ impl PaneTabs {
     /// with `^W x`.
     pub fn mark_exited(&mut self) {
         for entry in &mut self.tabs {
-            if entry.pane.is_closed() && !entry.info.label.contains("[exited]") {
-                entry.info.label = format!("{} [exited]", entry.info.label);
+            if entry.pane.is_closed() && !entry.info.label.contains("[exited") {
+                let code = entry
+                    .pane
+                    .exit_status
+                    .as_ref()
+                    .map(|s| {
+                        if s.success() {
+                            "0".to_string()
+                        } else {
+                            format!("{s}")
+                        }
+                    })
+                    .unwrap_or_else(|| "?".to_string());
+                entry.info.label = format!("{} [exited {}]", entry.info.label, code);
             }
         }
     }

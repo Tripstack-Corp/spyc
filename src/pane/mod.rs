@@ -32,9 +32,8 @@ pub struct Pane {
     writer: Box<dyn Write + Send>,
     /// The master; held so the pty stays open as long as the Pane lives.
     master: Box<dyn MasterPty + Send>,
-    /// The child process handle. Kept for process lifetime; dropping it
-    /// is how the subprocess gets cleaned up on close.
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// The child process handle. Used to retrieve exit status on close.
+    child: Box<dyn portable_pty::Child + Send + Sync>,
     /// Reader-thread events (bytes to process, or a "closed" signal).
     event_rx: mpsc::Receiver<PaneEvent>,
     /// Set by the reader thread when data is available; cleared by drain.
@@ -42,6 +41,8 @@ pub struct Pane {
     /// Set when the reader thread observed EOF on the master — the
     /// subprocess has exited and the pane should be torn down.
     closed: bool,
+    /// Exit status captured when the child process exits.
+    pub exit_status: Option<portable_pty::ExitStatus>,
     /// Cached at construction so we don't call `std::env::var` per tick.
     debug_dump: bool,
     /// Last size passed to resize(), to skip redundant ioctl+SIGWINCH.
@@ -122,10 +123,11 @@ impl Pane {
             parser,
             writer,
             master: pair.master,
-            _child: child,
+            child,
             event_rx,
             has_pending,
             closed: false,
+            exit_status: None,
             debug_dump,
             last_size: (rows, cols),
             output_dirty: false,
@@ -164,7 +166,16 @@ impl Pane {
                     had_bytes = true;
                     self.parser.process(&bytes);
                 }
-                PaneEvent::Closed => self.closed = true,
+                PaneEvent::Closed => {
+                    self.closed = true;
+                    // Harvest exit status — child has already exited so
+                    // try_wait should return immediately.
+                    if let Ok(Some(status)) = self.child.try_wait() {
+                        self.exit_status = Some(status);
+                    } else if let Ok(status) = self.child.wait() {
+                        self.exit_status = Some(status);
+                    }
+                }
             }
         }
         self.has_pending.store(false, Ordering::Relaxed);
