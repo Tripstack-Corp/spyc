@@ -20,7 +20,7 @@ use std::io;
 use anyhow::Result;
 use crossterm::{
     cursor::MoveTo,
-    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
+    event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
     terminal::{
         Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -137,6 +137,33 @@ impl crossterm::Command for ShowMousePointer {
     }
 }
 
+/// DEC private mode 1007: translate scroll-wheel into arrow keys while in the
+/// alternate screen. This prevents the terminal from scrolling its main
+/// scrollback buffer without capturing mouse clicks/drags (text selection
+/// still works normally).
+struct EnableAlternateScroll;
+struct DisableAlternateScroll;
+
+impl crossterm::Command for EnableAlternateScroll {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str("\x1b[?1007h")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl crossterm::Command for DisableAlternateScroll {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str("\x1b[?1007l")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -144,7 +171,7 @@ fn setup_terminal() -> Result<Tui> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture,
+        EnableAlternateScroll,
         HideMousePointer
     )?;
     let backend = CrosstermBackend::new(stdout);
@@ -158,7 +185,7 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableBracketedPaste,
-        DisableMouseCapture,
+        DisableAlternateScroll,
         ShowMousePointer
     )?;
     terminal.show_cursor()?;
@@ -180,7 +207,7 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
         Clear(ClearType::All),
         MoveTo(0, 0),
         DisableBracketedPaste,
-        DisableMouseCapture,
+        DisableAlternateScroll,
     )?;
     terminal.show_cursor()?;
     Ok(())
@@ -197,7 +224,7 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
         terminal.backend_mut(),
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture
+        EnableAlternateScroll
     )?;
     terminal.hide_cursor()?;
     terminal.clear()?;

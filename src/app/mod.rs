@@ -293,6 +293,10 @@ pub struct App {
     /// Tab completion state: (buffer after last Tab, matches).
     /// Second Tab with same buffer shows the match list.
     tab_matches: Option<(String, Vec<String>)>,
+    /// Scroll throttle: timestamp + direction of last processed arrow key.
+    /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
+    /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
+    scroll_last: Option<(std::time::Instant, KeyCode)>,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -448,6 +452,7 @@ impl App {
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             mcp_cmd_rx,
             tab_matches: None,
+            scroll_last: None,
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -855,6 +860,23 @@ impl App {
                     Event::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
                     {
+                        // Throttle rapid-fire arrow keys from trackpad scroll
+                        // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
+                        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+                            && key.modifiers.is_empty()
+                        {
+                            let now = std::time::Instant::now();
+                            if let Some((prev, dir)) = self.scroll_last {
+                                if dir == key.code
+                                    && now.duration_since(prev).as_millis() < 40
+                                {
+                                    continue;
+                                }
+                            }
+                            self.scroll_last = Some((now, key.code));
+                        } else {
+                            self.scroll_last = None;
+                        }
                         let post = self.handle_key(key)?;
                         if let PostAction::Spawn {
                             program,

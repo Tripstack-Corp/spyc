@@ -7,6 +7,10 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- would like to be able to reorder tabs
+- J to ~/D<tab> does not autocomplete ... we really need something like
+  https://starship.rs/ integrated
+- add a restart pane process option ^a-# or something
 - commandline switches don't seem to work as I expect ... e.g. -rd didn't work
 - we need a better visual indicator that we're in visual mode in the bottom pane
 - graveyard should include files that have been removed with R
@@ -34,6 +38,9 @@
 - shortcut needed for creating a new file in EDITOR
 
 ### FIXED ###
+- (fixed) mouse text selection broken by EnableMouseCapture — replaced with
+  DEC 1007 alternate scroll mode, which prevents scrollback interference
+  while keeping normal text selection intact
 - (fixed) Tab completion for prompts (J jump, ! shell, / search, etc.)
   with filesystem path completion, double-Tab to show match list, and
   search Tab filters the listing like =PREFIX*.
