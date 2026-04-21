@@ -668,14 +668,19 @@ impl App {
             // other event that leaves ratatui's diff buffer stale).
             // Also force repaint when the pager opens while a pane exists,
             // because the pane stops rendering and its stale cells need clearing.
+            // When the pager opens over a pane, the pane's stale cells
+            // need clearing. But don't use terminal.clear() for this — the
+            // pager overlay will paint over everything anyway, and the
+            // clear causes a visible flash. Just force a draw instead.
             if self.pager.is_some() && self.pane_tabs.is_some() && !self.pager_was_open {
-                self.needs_full_repaint = true;
+                needs_draw = true;
+                draw_reason = 3;
             }
             self.pager_was_open = self.pager.is_some();
             let mut pending_clear = false;
             if self.needs_full_repaint {
                 self.needs_full_repaint = false;
-                pending_clear = true; // defer clear into the sync region
+                pending_clear = true;
                 needs_draw = true;
                 draw_reason = 3;
             }
@@ -4279,6 +4284,7 @@ impl App {
                         .into_owned();
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
+                            let content = expand_tabs(&content);
                             let mut view = if let Some(styled) =
                                 crate::ui::syntax::highlight_to_lines(&name, &content)
                             {
@@ -4546,6 +4552,28 @@ fn hostname_best_effort() -> String {
         }
     }
     "localhost".to_string()
+}
+
+/// Expand tab characters to spaces (8-column tab stops).
+fn expand_tabs(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut col = 0usize;
+    for ch in s.chars() {
+        if ch == '\t' {
+            let spaces = 8 - (col % 8);
+            for _ in 0..spaces {
+                out.push(' ');
+            }
+            col += spaces;
+        } else if ch == '\n' {
+            out.push(ch);
+            col = 0;
+        } else {
+            out.push(ch);
+            col += 1;
+        }
+    }
+    out
 }
 
 /// Longest common prefix of a slice of strings (byte-safe for UTF-8).
