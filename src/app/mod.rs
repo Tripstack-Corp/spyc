@@ -1858,34 +1858,39 @@ impl App {
             return self.dispatch_prompt(p);
         }
 
-        // Tab completion. Non-Tab keys clear double-Tab state.
-        if !matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
-            self.tab_matches = None;
-        }
+        // Tab completion.
         if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
-            if let Mode::Prompting(p) = &self.state.mode {
-                match p.kind {
-                    PromptKind::Jump
-                    | PromptKind::CopyTo
-                    | PromptKind::MoveTo
-                    | PromptKind::MakeDir
-                    | PromptKind::PaneNewTabCwd => self.tab_complete_path(),
-                    PromptKind::Search { .. } => {
-                        // Apply a temporary filter so the listing narrows
-                        // to show only matching entries — like typing =PREFIX*.
-                        let Mode::Prompting(ref p) = self.state.mode else {
-                            return PostAction::None;
-                        };
-                        if !p.buffer.is_empty() {
-                            let pattern = format!("{}*", p.buffer);
-                            self.state.temp_filter = Some(pattern);
-                            self.state.rebuild_rows();
-                        }
-                    }
-                    _ => {}
+            // Extract kind and buffer before taking &mut self.
+            let (_kind, buffer) = if let Mode::Prompting(p) = &self.state.mode {
+                (std::mem::discriminant(&p.kind), p.buffer.clone())
+            } else {
+                return PostAction::None;
+            };
+            let is_search = matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::Search { .. })
+            );
+            if is_search {
+                if !buffer.is_empty() {
+                    self.state.temp_filter = Some(format!("{buffer}*"));
+                    self.state.rebuild_rows();
                 }
+            } else if matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(
+                    p.kind,
+                    PromptKind::Jump
+                        | PromptKind::CopyTo
+                        | PromptKind::MoveTo
+                        | PromptKind::MakeDir
+                        | PromptKind::PaneNewTabCwd
+                )
+            ) {
+                self.tab_complete_path();
             }
             return PostAction::None;
+        } else {
+            self.tab_matches = None;
         }
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
@@ -2112,13 +2117,8 @@ impl App {
         PostAction::None
     }
 
-    /// Close the prompt without dispatching. For a Search prompt, also
-    /// restore the cursor position that was saved when `/` was pressed.
     /// Tab-complete a filesystem path in the prompt buffer. For shell
     /// prompts, completes just the last whitespace-delimited word.
-    /// Expands `~` and `$VAR`, reads the parent directory, and completes
-    /// the prefix. Single match → full completion (+ `/` for dirs).
-    /// Multiple matches → complete common prefix and flash the count.
     fn tab_complete_path(&mut self) {
         // Extract data from prompt without holding the borrow.
         let (is_shell, buffer) = {
@@ -2192,7 +2192,8 @@ impl App {
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.starts_with(&file_prefix) {
-                    let suffix = if e.path().is_dir() { "/" } else { "" };
+                    let is_dir = e.file_type().map_or(false, |ft| ft.is_dir());
+                    let suffix = if is_dir { "/" } else { "" };
                     Some(format!("{name}{suffix}"))
                 } else {
                     None
@@ -2252,9 +2253,8 @@ impl App {
         }
     }
 
-    // tab_complete_search removed — Tab in search now applies a
-    // temporary filter (=PREFIX*) to the listing instead.
-
+    /// Close the prompt without dispatching. Restores search cursor,
+    /// clears Tab-applied filters.
     fn cancel_prompt(&mut self) {
         let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
             return;
@@ -4548,22 +4548,22 @@ fn hostname_best_effort() -> String {
     "localhost".to_string()
 }
 
-/// Longest common prefix of a slice of strings.
+/// Longest common prefix of a slice of strings (byte-safe for UTF-8).
 fn common_prefix(strings: &[String]) -> String {
     let Some(first) = strings.first() else {
         return String::new();
     };
-    let mut len = first.len();
+    let mut byte_len = first.len();
     for s in &strings[1..] {
-        len = len.min(s.len());
-        for (i, (a, b)) in first.chars().zip(s.chars()).enumerate() {
+        byte_len = byte_len.min(s.len());
+        for ((i, a), b) in first.char_indices().zip(s.chars()) {
             if a != b {
-                len = len.min(i);
+                byte_len = byte_len.min(i);
                 break;
             }
         }
     }
-    first[..len].to_string()
+    first[..byte_len].to_string()
 }
 
 /// Strip ANSI escape sequences (CSI, OSC, bracketed paste markers, etc.)

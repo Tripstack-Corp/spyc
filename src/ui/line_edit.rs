@@ -328,27 +328,20 @@ impl LineEditor {
         }
     }
 
-    /// Like `next_word_start` but for `dw`: includes trailing whitespace
-    /// after the word (vim's delete-word semantics).
-    /// End of current word (exclusive) — for `cw`. Stops at the first
-    /// whitespace character after the cursor's word, without consuming
-    /// trailing whitespace.
+    /// End of current word (exclusive) — for `cw`.
     fn word_end_exclusive(&self) -> usize {
         let n = self.buf.len();
         let mut i = self.cursor;
-        // Skip current word characters.
         while i < n && !self.buf[i].is_whitespace() {
             i += 1;
         }
         i
     }
 
+    /// Like `word_end_exclusive` but also skips trailing whitespace — for `dw`.
     fn next_word_start_delete(&self) -> usize {
+        let mut i = self.word_end_exclusive();
         let n = self.buf.len();
-        let mut i = self.cursor;
-        while i < n && !self.buf[i].is_whitespace() {
-            i += 1;
-        }
         while i < n && self.buf[i].is_whitespace() {
             i += 1;
         }

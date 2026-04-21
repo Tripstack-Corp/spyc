@@ -33,7 +33,7 @@ pub struct Pane {
     /// The master; held so the pty stays open as long as the Pane lives.
     master: Box<dyn MasterPty + Send>,
     /// The child process handle. Used to retrieve exit status on close.
-    child: Box<dyn portable_pty::Child + Send + Sync>,
+    pub(crate) child: Box<dyn portable_pty::Child + Send + Sync>,
     /// Reader-thread events (bytes to process, or a "closed" signal).
     event_rx: mpsc::Receiver<PaneEvent>,
     /// Set by the reader thread when data is available; cleared by drain.
@@ -168,11 +168,10 @@ impl Pane {
                 }
                 PaneEvent::Closed => {
                     self.closed = true;
-                    // Harvest exit status — child has already exited so
-                    // try_wait should return immediately.
+                    // Non-blocking harvest — if the child hasn't been
+                    // reaped yet, mark_exited will retry on subsequent
+                    // iterations. Never call wait() here — it blocks.
                     if let Ok(Some(status)) = self.child.try_wait() {
-                        self.exit_status = Some(status);
-                    } else if let Ok(status) = self.child.wait() {
                         self.exit_status = Some(status);
                     }
                 }
