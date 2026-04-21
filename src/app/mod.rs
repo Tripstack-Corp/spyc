@@ -1989,6 +1989,32 @@ impl App {
     fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> PostAction {
         use crate::ui::line_edit::EditResult;
 
+        // Tab completion — intercept before feeding to the editor so we
+        // don't depend on the editor's Tab handling (which varies by
+        // terminal key delivery).
+        if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
+            let wants_path = matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(
+                    p.kind,
+                    PromptKind::Jump
+                        | PromptKind::CopyTo
+                        | PromptKind::MoveTo
+                        | PromptKind::MakeDir
+                        | PromptKind::PaneNewTabCwd
+                        | PromptKind::ShellCmd
+                        | PromptKind::ShellCmdCaptured
+                        | PromptKind::Command
+                )
+            );
+            if wants_path {
+                self.tab_complete_path();
+            }
+            return PostAction::None;
+        }
+        // Non-Tab clears double-Tab state.
+        self.tab_matches = None;
+
         // `!?` — when the buffer is empty and the user types '?',
         // immediately open the history editor (no Enter needed).
         if key.code == KeyCode::Char('?') {
@@ -2017,11 +2043,6 @@ impl App {
             prompt.buffer = editor.text();
             r
         };
-
-        // Clear double-Tab state on non-Tab input.
-        if result != EditResult::TabComplete {
-            self.tab_matches = None;
-        }
 
         match result {
             EditResult::Submit => {
@@ -2084,27 +2105,9 @@ impl App {
                 }
                 p.buffer = replacement;
             }
-            EditResult::TabComplete => {
-                // Path completion for prompts that accept paths.
-                let wants_path = matches!(
-                    &self.state.mode,
-                    Mode::Prompting(p) if matches!(
-                        p.kind,
-                        PromptKind::Jump
-                            | PromptKind::CopyTo
-                            | PromptKind::MoveTo
-                            | PromptKind::MakeDir
-                            | PromptKind::PaneNewTabCwd
-                            | PromptKind::ShellCmd
-                            | PromptKind::ShellCmdCaptured
-                            | PromptKind::Command
-                    )
-                );
-                if wants_path {
-                    self.tab_complete_path();
-                }
-            }
-            EditResult::Continue => {}
+            // Tab is intercepted before editor.feed() — this arm is
+            // only reachable if the editor somehow returns it.
+            EditResult::TabComplete | EditResult::Continue => {}
         }
         PostAction::None
     }
