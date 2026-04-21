@@ -7,23 +7,17 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- commandline switches don't seem to work as I expect ... e.g. -rd didn't work
+- we need a better visual indicator that we're in visual mode in the bottom pane
 - graveyard should include files that have been removed with R
-- big miss that we don't have autocompletion yet - there's probably a good cargo
-  we could leverage for that
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
-- cw / dw doesn't stop at a word - it changes the whole line
-- hitting ESC should not pop you back to the top of the current directory
-- it's surprising when you paste text that it goes to the Claude pane but the
-  focus is still on the spyc pane - need to change this behaviour
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
   history but it should preserve shell vs. spyc commands
-- task timer should display in human friendly time: "⏳ ! make sync-all — running... (1139s)   (22 lines)"
 - ability to background running tasks and notify when done
-- task completion should include the exit code status
 - some shortcut to set my homedir to current directory (e.g. for
   backtick-backtick to work)
 - some way to yank the whole context history of the claude chat pane
@@ -40,6 +34,17 @@
 - shortcut needed for creating a new file in EDITOR
 
 ### FIXED ###
+- (fixed) Tab completion for prompts (J jump, ! shell, / search, etc.)
+  with filesystem path completion, double-Tab to show match list, and
+  search Tab filters the listing like =PREFIX*.
+- (fixed) cw stops at word end (vim convention), dw still deletes
+  through trailing whitespace. word_end_exclusive + next_word_start_delete.
+- (fixed) paste auto-focuses the pane — no longer surprising that text
+  goes to Claude but focus stays on spyc.
+- (fixed) human-friendly timer: "18m 59s" instead of "1139s".
+- (fixed) pane exit status shows in tab label: "zsh [exited 0]".
+- (fixed) ESC cursor reset was PEBKAC — user was hitting backtick.
+- (fixed) task completion exit code already shown in pager title.
 - (fixed) performance refactor: idle CPU dropped from ~12.5% to near-vim
   levels (~2.5%). Root cause was context file writes triggering
   file-watcher refresh cycles. Also added DEC 2026 synchronized output,
