@@ -105,7 +105,7 @@ impl LineEditor {
                 _ => {}
             }
         }
-        if matches!(key.code, KeyCode::Tab) {
+        if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
             return EditResult::TabComplete;
         }
         if matches!(key.code, KeyCode::Up) {

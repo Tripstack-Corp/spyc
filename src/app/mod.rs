@@ -1859,10 +1859,10 @@ impl App {
         }
 
         // Tab completion. Non-Tab keys clear double-Tab state.
-        if !matches!(key.code, KeyCode::Tab) {
+        if !matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
             self.tab_matches = None;
         }
-        if matches!(key.code, KeyCode::Tab) {
+        if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
             if let Mode::Prompting(p) = &self.state.mode {
                 match p.kind {
                     PromptKind::Jump
