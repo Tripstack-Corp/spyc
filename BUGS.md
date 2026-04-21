@@ -7,6 +7,9 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- Claude PTY can get messed up — scrollback accumulates rendering artifacts
+  from Claude CLI's progress bars, spinners, and cursor repositioning. ^L
+  redraws the visible screen but can't fix corrupted scrollback. Solution t.b.d.
 - would like to be able to reorder tabs
 - add a restart pane process option ^a-# or something
 - commandline switches don't seem to work as I expect ... e.g. -rd didn't work

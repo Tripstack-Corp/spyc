@@ -993,27 +993,41 @@ impl App {
             }
 
 
-            // Activity monitor: roll over the 2-second window.
-            // Uses 2s to avoid the monitor itself being the dominant draw source.
+            // Activity monitor: roll over the 1-second window.
+            let mut activity_only_draw = false;
             if self.show_activity
-                && self.activity_last_tick.elapsed() >= Duration::from_secs(2)
+                && self.activity_last_tick.elapsed() >= Duration::from_secs(1)
             {
-                // Scale to per-second rates.
-                let new_dps = self.activity_draws / 2;
-                let new_bps = self.activity_bytes / 2;
+                let new_dps = self.activity_draws;
+                let new_bps = self.activity_bytes;
+                let new_sp = self.activity_reason_pane;
+                let new_se = self.activity_reason_event;
+                let new_so = self.activity_reason_other;
+                // Only force a redraw if something changed.
+                if new_dps != self.activity_dps
+                    || new_bps != self.activity_bps
+                    || new_sp != self.activity_snap_pane
+                    || new_se != self.activity_snap_event
+                    || new_so != self.activity_snap_other
+                {
+                    if !needs_draw {
+                        // This draw exists only to refresh the overlay —
+                        // don't count it in the stats or it oscillates.
+                        needs_draw = true;
+                        activity_only_draw = true;
+                    }
+                }
                 self.activity_dps = new_dps;
                 self.activity_bps = new_bps;
-                self.activity_snap_pane = self.activity_reason_pane / 2;
-                self.activity_snap_event = self.activity_reason_event / 2;
-                self.activity_snap_other = self.activity_reason_other / 2;
+                self.activity_snap_pane = new_sp;
+                self.activity_snap_event = new_se;
+                self.activity_snap_other = new_so;
                 self.activity_draws = 0;
                 self.activity_bytes = 0;
                 self.activity_reason_pane = 0;
                 self.activity_reason_event = 0;
                 self.activity_reason_other = 0;
                 self.activity_last_tick = std::time::Instant::now();
-                // The activity display updates piggyback on the next
-                // real draw — no forced redraw just for the overlay.
             }
 
             // Only redraw when something actually changed.
@@ -1040,7 +1054,7 @@ impl App {
                     terminal.backend_mut(),
                     EndSynchronizedUpdate
                 );
-                if self.show_activity {
+                if self.show_activity && !activity_only_draw {
                     self.activity_draws += 1;
                     self.activity_bytes +=
                         u64::from(frame_area.width) * u64::from(frame_area.height);
