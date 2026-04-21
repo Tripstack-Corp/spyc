@@ -5,6 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-04-21
+
+### Added
+- **Frecency-based path ranking for J prompt.** The J (jump) prompt
+  now learns from your navigation history. Directories are scored by
+  frequency x recency (zoxide-style tiered decay). When filesystem
+  completion finds no matches, frecency suggests directories you've
+  visited before — type a fragment, Tab completes the best match.
+  Persisted to `~/.local/state/spyc/frecency.json`, capped at 500
+  entries with LRU pruning. Health check validates on startup.
+- **DEC 1007 alternate scroll mode** replaces `EnableMouseCapture`.
+  Scroll wheel becomes arrow keys in the alternate screen — prevents
+  scrollback interference while keeping text selection working.
+- **Trackpad scroll throttle.** Rate-limits rapid-fire arrow keys
+  from trackpad inertia to ~25/sec (40ms gap) for smooth two-finger
+  scrolling.
+
+### Fixed
+- **Tab completion for remote directories.** `~/D<tab>` no longer
+  filters the current listing when completing paths in a different
+  directory. Now flashes match names directly (Desktop, Documents,
+  Downloads).
+
 ## [1.8.0] - 2026-04-19
 
 ### Added

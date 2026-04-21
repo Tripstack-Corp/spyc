@@ -29,7 +29,8 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **V** open `$EDITOR` in the top pane — Claude pane below stays visible
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
-- **J** jump to any path (with `~` and `$VAR` expansion)
+- **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
+  suggestions from visit history)
 - Multi-column layout that adapts to terminal width
 - Color-coded entries: directories, executables, symlinks, files
 - **Git status colors** — modified files show amber, untracked/added

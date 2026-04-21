@@ -290,13 +290,28 @@ pub struct App {
     cached_grid_key: (u64, usize, usize, u16, u16),
     /// Commands from the MCP server (writable actions from Claude).
     mcp_cmd_rx: std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>,
-    /// Tab completion state: (buffer after last Tab, matches).
-    /// Second Tab with same buffer shows the match list.
-    tab_matches: Option<(String, Vec<String>)>,
+    /// Tab completion / cycle state. Tracks matches from the last Tab
+    /// press and supports cycling through them on repeated Tab.
+    tab_state: Option<TabState>,
     /// Scroll throttle: timestamp + direction of last processed arrow key.
     /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
     /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
     scroll_last: Option<(std::time::Instant, KeyCode)>,
+}
+
+/// State for Tab-completion cycling. Tracks the original buffer, the
+/// computed completions, and which one is currently filled in.
+struct TabState {
+    /// Buffer content when the first Tab was pressed.
+    original_buf: String,
+    /// Shell command prefix (e.g., "ls " for `!ls ~/Do<tab>`), empty for J prompt.
+    buf_prefix: String,
+    /// Path prefix up to the last `/` in the typed word (e.g., "~/").
+    word_base: String,
+    /// Matched file/dir names (e.g., ["Documents/", "Downloads/"]).
+    matches: Vec<String>,
+    /// 0 = list was just shown (first Tab). 1+ = cycling through matches.
+    cycle_index: usize,
 }
 
 /// Internal per-item record used to build ListView rows each frame.
@@ -372,6 +387,7 @@ impl App {
             user_keymap,
             config,
             mode: Mode::Normal,
+            frecency: crate::state::Frecency::load(),
             pane_focused: false,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
@@ -451,7 +467,7 @@ impl App {
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             mcp_cmd_rx,
-            tab_matches: None,
+            tab_state: None,
             scroll_last: None,
         };
         app.state.rebuild_rows();
@@ -1917,7 +1933,7 @@ impl App {
             }
             return PostAction::None;
         } else {
-            self.tab_matches = None;
+            self.tab_state = None;
         }
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
@@ -2045,7 +2061,7 @@ impl App {
             return PostAction::None;
         }
         // Non-Tab clears double-Tab state.
-        self.tab_matches = None;
+        self.tab_state = None;
 
         // `!?` — when the buffer is empty and the user types '?',
         // immediately open the history editor (no Enter needed).
@@ -2148,7 +2164,7 @@ impl App {
     /// prompts, completes just the last whitespace-delimited word.
     fn tab_complete_path(&mut self) {
         // Extract data from prompt without holding the borrow.
-        let (is_shell, buffer) = {
+        let (is_shell, is_jump, buffer) = {
             let Mode::Prompting(ref prompt) = self.state.mode else {
                 return;
             };
@@ -2158,20 +2174,36 @@ impl App {
                     | PromptKind::ShellCmdCaptured
                     | PromptKind::Command
             );
-            (is_shell, prompt.buffer.clone())
+            let is_jump = matches!(prompt.kind, PromptKind::Jump);
+            (is_shell, is_jump, prompt.buffer.clone())
         };
 
-        // Double-Tab: if buffer hasn't changed since last Tab, show matches.
-        if let Some((ref prev_buf, ref prev_matches)) = self.tab_matches {
-            if *prev_buf == buffer && prev_matches.len() > 1 {
-                let display: Vec<&str> = prev_matches.iter().map(|s| s.as_str()).collect();
-                let shown = if display.len() > 12 {
-                    format!("{}  (+{} more)", display[..12].join("  "), display.len() - 12)
-                } else {
-                    display.join("  ")
-                };
-                self.state.flash_info(shown);
-                return;
+        // Repeated Tab with active cycle state: cycle through matches
+        // or re-flash the list for local dirs.
+        if let Some(ref mut ts) = self.tab_state {
+            if ts.original_buf == buffer || ts.cycle_index > 0 {
+                if ts.matches.len() > 1 {
+                    // Cycle to next match, fill it in.
+                    let idx = ts.cycle_index % ts.matches.len();
+                    let completed =
+                        format!("{}{}{}", ts.buf_prefix, ts.word_base, ts.matches[idx]);
+                    ts.cycle_index = idx + 1;
+                    let flash = format!(
+                        "{} — {}/{}",
+                        ts.matches[idx],
+                        idx + 1,
+                        ts.matches.len()
+                    );
+                    self.state.flash_info(flash);
+                    let Mode::Prompting(ref mut prompt) = self.state.mode else {
+                        return;
+                    };
+                    prompt.buffer = completed;
+                    if let Some(ed) = prompt.editor.as_mut() {
+                        ed.set_content(&prompt.buffer);
+                    }
+                    return;
+                }
             }
         }
 
@@ -2230,6 +2262,10 @@ impl App {
         matches.sort();
 
         if matches.is_empty() {
+            // No filesystem matches — try frecency for Jump prompts.
+            if is_jump {
+                self.frecency_complete(&word, &buf_prefix);
+            }
             return;
         }
 
@@ -2248,15 +2284,37 @@ impl App {
                 let msg = format!("{} matches", matches.len());
                 (format!("{word_base}{common}"), Some(msg))
             } else {
-                // No text progress — filter the listing to show matches
-                // (same UX as /search + Tab).
-                self.state.temp_filter = Some(format!("{file_prefix}*"));
-                self.state.rebuild_rows();
-                self.state.flash_info(format!("{} matches — Tab again for list", matches.len()));
+                // No text progress — show matches and set up cycle state.
+                let display: Vec<&str> = matches.iter().map(|s| s.as_str()).collect();
+                let shown = if display.len() > 12 {
+                    format!(
+                        "{}  (+{} more)",
+                        display[..12].join("  "),
+                        display.len() - 12
+                    )
+                } else {
+                    display.join("  ")
+                };
+                if dir != self.state.listing.dir {
+                    self.state
+                        .flash_info(format!("{shown}  — Tab to cycle"));
+                } else {
+                    // Local dir — also filter the listing.
+                    self.state.temp_filter = Some(format!("{file_prefix}*"));
+                    self.state.rebuild_rows();
+                    self.state
+                        .flash_info(format!("{shown}  — Tab to cycle"));
+                }
                 let Mode::Prompting(ref prompt) = self.state.mode else {
                     return;
                 };
-                self.tab_matches = Some((prompt.buffer.clone(), matches));
+                self.tab_state = Some(TabState {
+                    original_buf: prompt.buffer.clone(),
+                    buf_prefix: buf_prefix.clone(),
+                    word_base,
+                    matches,
+                    cycle_index: 0,
+                });
                 return;
             }
         };
@@ -2272,11 +2330,70 @@ impl App {
         if let Some(ed) = prompt.editor.as_mut() {
             ed.set_content(&prompt.buffer);
         }
-        // Store for double-Tab.
+        // Store cycle state for multi-match (common prefix advanced but
+        // further Tabs should still be able to cycle).
         if matches.len() > 1 {
-            self.tab_matches = Some((prompt.buffer.clone(), matches));
+            self.tab_state = Some(TabState {
+                original_buf: prompt.buffer.clone(),
+                buf_prefix,
+                word_base,
+                matches,
+                cycle_index: 0,
+            });
         } else {
-            self.tab_matches = None;
+            self.tab_state = None;
+        }
+    }
+
+    /// Frecency fallback for the J prompt: when filesystem completion finds
+    /// no matches, search the frecency database for directories matching
+    /// the typed fragment.
+    fn frecency_complete(&mut self, word: &str, buf_prefix: &str) {
+        let hits = self.state.frecency.search(word);
+        if hits.is_empty() {
+            return;
+        }
+
+        // Convert to display strings with trailing slash.
+        let names: Vec<String> = hits
+            .iter()
+            .map(|p| format!("{}/", p.to_string_lossy()))
+            .collect();
+
+        if names.len() == 1 {
+            // Single match — fill it in directly.
+            let completed = format!("{buf_prefix}{}", names[0]);
+            let Mode::Prompting(ref mut prompt) = self.state.mode else {
+                return;
+            };
+            prompt.buffer = completed;
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&prompt.buffer);
+            }
+            self.tab_state = None;
+        } else {
+            // Multiple frecency matches — fill best, set up cycling.
+            let completed = format!("{buf_prefix}{}", names[0]);
+            self.state.flash_info(format!(
+                "{} — 1/{} frecency",
+                names[0],
+                names.len()
+            ));
+            let Mode::Prompting(ref mut prompt) = self.state.mode else {
+                return;
+            };
+            let original = prompt.buffer.clone();
+            prompt.buffer = completed;
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&prompt.buffer);
+            }
+            self.tab_state = Some(TabState {
+                original_buf: original,
+                buf_prefix: buf_prefix.to_string(),
+                word_base: String::new(),
+                matches: names,
+                cycle_index: 1, // already showing first match
+            });
         }
     }
 
@@ -2295,7 +2412,7 @@ impl App {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }
-        self.tab_matches = None;
+        self.tab_state = None;
         // Clear any stashed state from the two-step new-tab prompt.
         self.state.pending_new_tab_cmd = None;
     }
@@ -2467,7 +2584,7 @@ impl App {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }
-        self.tab_matches = None;
+        self.tab_state = None;
 
         // Try the pure-domain handler first.
         match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {

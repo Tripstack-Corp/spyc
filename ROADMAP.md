@@ -276,6 +276,10 @@ one of the tracks above when picked up.
   speed for hands-free reading.
 - **Jump-back in pager** (`''`) -- return to the pre-search/jump
   position, matching the file-list behavior.
+- **J prompt live directory preview** -- Show contents of the target
+  directory as the user types in the J prompt (like fzf's preview
+  window). Builds on the frecency database to make path navigation
+  even faster.
 - **Macro recording** (`qa` ... `q` ... `@a`) -- vim-style action
   recording and replay.
 - **Startup/exit command flags** -- `spyc -c "sort mtime"` runs

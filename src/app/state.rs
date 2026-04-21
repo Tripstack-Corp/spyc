@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::fs::Listing;
 use crate::fs;
 use crate::keymap::{Action, Resolver, UserKeymap};
-use crate::state::{Cursor, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
+use crate::state::{Cursor, Frecency, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::list_view::Grid;
 
 use super::{
@@ -97,6 +97,7 @@ pub struct AppState {
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Session>>,
+    pub frecency: Frecency,
     pub pane_focused: bool,
     pub pane_height_pct: u16,
     pub rows: Vec<RowData>,
@@ -443,6 +444,7 @@ impl AppState {
         self.cursor = Cursor::new();
         self.view = View::Dir;
         self.rebuild_rows();
+        self.frecency.record(&canonical);
         Ok(())
     }
 
@@ -1161,6 +1163,7 @@ mod tests {
             pending_new_tab_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            frecency: Frecency::default(),
             pane_focused: false,
             pane_height_pct: 30,
             rows: Vec::new(),

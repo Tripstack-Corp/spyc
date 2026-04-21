@@ -25,6 +25,7 @@ pub fn check(state_dir: &Path) -> HealthReport {
     check_marks(&state_dir.join("marks.toml"), &mut warnings);
     check_sessions(&state_dir.join("sessions"), &mut warnings);
     check_graveyard_size(&state_dir.join("graveyard"), &mut warnings);
+    check_frecency(&state_dir.join("frecency.json"), &mut warnings);
 
     HealthReport { warnings, cleaned }
 }
@@ -159,6 +160,18 @@ fn check_graveyard_size(dir: &Path, warnings: &mut Vec<String>) {
     }
 }
 
+/// Validate the frecency database (JSON).
+fn check_frecency(path: &Path, warnings: &mut Vec<String>) {
+    if !path.exists() {
+        return;
+    }
+    if let Ok(text) = std::fs::read_to_string(path) {
+        if serde_json::from_str::<crate::state::frecency::Frecency>(&text).is_err() {
+            warnings.push(format!("frecency: corrupt {}", path.display()));
+        }
+    }
+}
+
 /// Resolve the state directory path, consistent with other state modules.
 pub fn state_dir() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
@@ -245,5 +258,21 @@ mod tests {
         let report = check(tmp.path());
         assert!(report.warnings.iter().any(|w| w.contains("session")));
         assert!(!sess.join("123.json").exists());
+    }
+
+    #[test]
+    fn corrupt_frecency_warns() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("frecency.json"), "not valid json{{{").unwrap();
+        let report = check(tmp.path());
+        assert!(report.warnings.iter().any(|w| w.contains("frecency")));
+    }
+
+    #[test]
+    fn valid_frecency_no_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("frecency.json"), r#"{"entries":{}}"#).unwrap();
+        let report = check(tmp.path());
+        assert!(!report.warnings.iter().any(|w| w.contains("frecency")));
     }
 }

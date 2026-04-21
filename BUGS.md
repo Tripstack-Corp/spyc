@@ -8,8 +8,6 @@
 
 ### TBD ###
 - would like to be able to reorder tabs
-- J to ~/D<tab> does not autocomplete ... we really need something like
-  https://starship.rs/ integrated
 - add a restart pane process option ^a-# or something
 - commandline switches don't seem to work as I expect ... e.g. -rd didn't work
 - we need a better visual indicator that we're in visual mode in the bottom pane
@@ -38,6 +36,10 @@
 - shortcut needed for creating a new file in EDITOR
 
 ### FIXED ###
+- we should be able to send control signals to running processes e.g. ^t
+- (fixed) J to ~/D<tab> now shows matches for remote directories instead of
+  wrongly filtering the current listing. Also added frecency-based path
+  ranking — J prompt learns your most-visited dirs and suggests them on Tab.
 - (fixed) mouse text selection broken by EnableMouseCapture — replaced with
   DEC 1007 alternate scroll mode, which prevents scrollback interference
   while keeping normal text selection intact

@@ -1,6 +1,7 @@
 //! Transient and persistent UI state (cursor, picks, inventory, masks, marks).
 
 pub mod cursor;
+pub mod frecency;
 pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
@@ -11,6 +12,7 @@ pub mod picks;
 pub mod sessions;
 
 pub use cursor::Cursor;
+pub use frecency::Frecency;
 pub use history::History;
 pub use ignore::IgnoreMasks;
 pub use inventory::Inventory;
