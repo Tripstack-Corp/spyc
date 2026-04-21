@@ -2216,12 +2216,15 @@ impl App {
             (format!("{word_base}{}", matches[0]), None)
         } else {
             let common = common_prefix(&matches);
-            let msg = format!("{} matches", matches.len());
             if common.len() > file_prefix.len() {
+                let msg = format!("{} matches", matches.len());
                 (format!("{word_base}{common}"), Some(msg))
             } else {
-                // No progress — store matches for double-Tab display.
-                self.state.flash_info(msg);
+                // No text progress — filter the listing to show matches
+                // (same UX as /search + Tab).
+                self.state.temp_filter = Some(format!("{file_prefix}*"));
+                self.state.rebuild_rows();
+                self.state.flash_info(format!("{} matches — Tab again for list", matches.len()));
                 let Mode::Prompting(ref prompt) = self.state.mode else {
                     return;
                 };
@@ -2259,12 +2262,13 @@ impl App {
         if let PromptKind::Search { saved_cursor } = p.kind {
             self.state.cursor.index = saved_cursor;
             self.state.cursor.clamp(self.state.rows.len());
-            // Clear any Tab-applied filter from search.
-            if self.state.temp_filter.is_some() {
-                self.state.temp_filter = None;
-                self.state.rebuild_rows();
-            }
         }
+        // Clear any Tab-applied filter (search or shell prompt).
+        if self.state.temp_filter.is_some() {
+            self.state.temp_filter = None;
+            self.state.rebuild_rows();
+        }
+        self.tab_matches = None;
         // Clear any stashed state from the two-step new-tab prompt.
         self.state.pending_new_tab_cmd = None;
     }
@@ -2431,13 +2435,12 @@ impl App {
     fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
         use state::PromptResult;
 
-        // Clear any Tab-applied filter from search before dispatching.
-        if matches!(prompt.kind, PromptKind::Search { .. }) {
-            if self.state.temp_filter.is_some() {
-                self.state.temp_filter = None;
-                self.state.rebuild_rows();
-            }
+        // Clear any Tab-applied filter before dispatching.
+        if self.state.temp_filter.is_some() {
+            self.state.temp_filter = None;
+            self.state.rebuild_rows();
         }
+        self.tab_matches = None;
 
         // Try the pure-domain handler first.
         match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
