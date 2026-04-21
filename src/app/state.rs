@@ -109,7 +109,27 @@ pub struct AppState {
 impl AppState {
     // --- Cursor/navigation (Phase 1) ---
 
-    pub const fn cursor_move_vertical(&mut self, delta: isize, len: usize) {
+    /// j/k — move within the current column only. Wraps at column
+    /// boundaries. Returns false (flash) if the column has only one row.
+    pub fn cursor_move_vertical(&mut self, delta: isize, len: usize) -> bool {
+        if len == 0 {
+            return false;
+        }
+        let rows_per_col = self.last_grid.rows.max(1) as usize;
+        let col_start = (self.cursor.index / rows_per_col) * rows_per_col;
+        let col_end = (col_start + rows_per_col).min(len);
+        let col_len = col_end - col_start;
+        if col_len <= 1 {
+            return false; // single-item column — flash
+        }
+        let row_in_col = self.cursor.index - col_start;
+        let new_row = (row_in_col as isize + delta).rem_euclid(col_len as isize) as usize;
+        self.cursor.index = col_start + new_row;
+        true
+    }
+
+    /// Move across the entire list (PageUp/PageDown). Wraps globally.
+    pub fn cursor_move_global(&mut self, delta: isize, len: usize) {
         if len == 0 {
             return;
         }
@@ -144,25 +164,57 @@ impl AppState {
     }
 
     /// Move the cursor by `delta` columns.
-    pub fn cursor_move_columns(&mut self, delta: isize, rows_per_col: usize, len: usize) {
+    /// h/l — move across columns on the same row. Wraps at row
+    /// boundaries. Returns false (flash) if only one column on this row.
+    pub fn cursor_move_columns(&mut self, delta: isize, rows_per_col: usize, len: usize) -> bool {
         if rows_per_col == 0 || len == 0 {
-            return;
+            return false;
         }
         let num_cols = len.div_ceil(rows_per_col);
-        if num_cols <= 1 {
-            return;
-        }
-        let current_col = (self.cursor.index / rows_per_col) as isize;
+        let current_col = self.cursor.index / rows_per_col;
         let current_row = self.cursor.index % rows_per_col;
-        let target_col = (current_col + delta).clamp(0, num_cols as isize - 1) as usize;
-        if target_col == current_col as usize {
-            return;
+        // Count how many columns actually have an item on this row.
+        let cols_on_row = {
+            let mut n = 0usize;
+            for c in 0..num_cols {
+                if c * rows_per_col + current_row < len {
+                    n += 1;
+                }
+            }
+            n
+        };
+        if cols_on_row <= 1 {
+            return false; // single-column row — flash
+        }
+        // Wrap within the columns that exist on this row.
+        let col_in_row = {
+            // Map current_col to its ordinal among valid columns on this row.
+            let mut ord = 0usize;
+            for c in 0..current_col {
+                if c * rows_per_col + current_row < len {
+                    ord += 1;
+                }
+            }
+            ord
+        };
+        let new_ord = (col_in_row as isize + delta).rem_euclid(cols_on_row as isize) as usize;
+        // Map ordinal back to column index.
+        let mut target_col = 0usize;
+        let mut count = 0usize;
+        for c in 0..num_cols {
+            if c * rows_per_col + current_row < len {
+                if count == new_ord {
+                    target_col = c;
+                    break;
+                }
+                count += 1;
+            }
         }
         let target_idx = target_col * rows_per_col + current_row;
-        if target_idx >= len {
-            return;
+        if target_idx < len {
+            self.cursor.index = target_idx;
         }
-        self.cursor.index = target_idx;
+        true
     }
 
     pub fn ensure_cursor_visible(&mut self) {
@@ -438,12 +490,28 @@ impl AppState {
 
         match action {
             // -- Cursor motion --
-            Action::Up(n) => self.cursor_move_vertical(-(*n as isize), len),
-            Action::Down(n) => self.cursor_move_vertical(*n as isize, len),
-            Action::Left(n) => self.cursor_move_columns(-(*n as isize), rows_per_col, len),
-            Action::Right(n) => self.cursor_move_columns(*n as isize, rows_per_col, len),
-            Action::PageUp => self.cursor_move_vertical(-(per_page as isize), len),
-            Action::PageDown => self.cursor_move_vertical(per_page as isize, len),
+            Action::Up(n) => {
+                if !self.cursor_move_vertical(-(*n as isize), len) {
+                    self.flash_info("~");
+                }
+            }
+            Action::Down(n) => {
+                if !self.cursor_move_vertical(*n as isize, len) {
+                    self.flash_info("~");
+                }
+            }
+            Action::Left(n) => {
+                if !self.cursor_move_columns(-(*n as isize), rows_per_col, len) {
+                    self.flash_info("~");
+                }
+            }
+            Action::Right(n) => {
+                if !self.cursor_move_columns(*n as isize, rows_per_col, len) {
+                    self.flash_info("~");
+                }
+            }
+            Action::PageUp => self.cursor_move_global(-(per_page as isize), len),
+            Action::PageDown => self.cursor_move_global(per_page as isize, len),
             Action::GotoFirst => self.goto_col_top(),
             Action::GotoLast => self.goto_col_bottom(len),
 
@@ -1207,12 +1275,12 @@ mod tests {
     }
 
     #[test]
-    fn column_move_clamps_at_edge() {
+    fn column_move_wraps_at_edge() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
         s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
         s.cursor.index = 4; // col 1, row 1
-        s.cursor_move_columns(1, 3, 6); // try to go further right
-        assert_eq!(s.cursor.index, 4); // stays put
+        s.cursor_move_columns(1, 3, 6); // wraps to col 0
+        assert_eq!(s.cursor.index, 1); // col 0, row 1
     }
 
     #[test]
