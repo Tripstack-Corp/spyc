@@ -58,7 +58,8 @@ pub enum Action {
     CopyPrompt,    // c — prompt for destination, cp -r selection
     MovePrompt,    // M — prompt for destination, mv selection
     RemovePrompt,  // R — confirm, rm -rf selection
-    MakeDirPrompt, // + — prompt for a directory name
+    MakeDirPrompt,  // + — prompt for a directory name
+    NewFilePrompt,  // N — prompt for a filename, open in $EDITOR
     LongList,      // L — ls -lh selection | $PAGER
     FileType,      // f — file(1) on selection, paged output
 
@@ -170,6 +171,7 @@ impl Action {
             Self::MovePrompt => "move (prompt)",
             Self::RemovePrompt => "remove (confirm)",
             Self::MakeDirPrompt => "make directory (prompt)",
+            Self::NewFilePrompt => "new file in editor (prompt)",
             Self::LongList => "long listing",
             Self::FileType => "file type",
             Self::Help => "help",

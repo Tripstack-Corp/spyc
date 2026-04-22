@@ -38,7 +38,8 @@
   Claude CLI procs
 - there should be a short cut to help jump to files affected by git status
 - interactive git status browser to jump to file
-- shortcut needed for creating a new file in EDITOR
+- (fixed) O creates a new file: prompts for filename, touches it, opens
+  $EDITOR. Supports paths with subdirs (creates parents). Tab completes.
 
 ### FIXED ###
 - support for named sessions

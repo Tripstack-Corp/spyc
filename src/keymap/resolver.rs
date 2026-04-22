@@ -423,6 +423,10 @@ impl Resolver {
                 self.reset();
                 ResolverOutcome::Action(Action::MakeDirPrompt)
             }
+            KeyCode::Char('O') => {
+                self.reset();
+                ResolverOutcome::Action(Action::NewFilePrompt)
+            }
             KeyCode::Char('L') => {
                 self.reset();
                 ResolverOutcome::Action(Action::LongList)

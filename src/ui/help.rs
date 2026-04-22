@@ -87,6 +87,7 @@ const SECTIONS: &[Section] = &[
             ("M", "move selection to a destination (prompt)"),
             ("R", "remove selection (confirm with y)"),
             ("+", "make a new directory (prompt)"),
+            ("O", "create new file in $EDITOR (prompt)"),
             ("L", "long listing through $PAGER"),
             ("f", "file(1) on selection"),
             ("^X", "chmod +x on selection"),

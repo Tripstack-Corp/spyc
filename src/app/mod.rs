@@ -159,6 +159,7 @@ pub enum PromptKind {
     CopyTo,
     MoveTo,
     MakeDir,
+    NewFile,
     /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
     /// anything else is treated as a cancel.
     RemoveConfirm,
@@ -1940,6 +1941,7 @@ impl App {
                         | PromptKind::CopyTo
                         | PromptKind::MoveTo
                         | PromptKind::MakeDir
+                        | PromptKind::NewFile
                         | PromptKind::PaneNewTabCwd
                 )
             ) {
@@ -2063,6 +2065,7 @@ impl App {
                         | PromptKind::CopyTo
                         | PromptKind::MoveTo
                         | PromptKind::MakeDir
+                        | PromptKind::NewFile
                         | PromptKind::PaneNewTabCwd
                         | PromptKind::ShellCmd
                         | PromptKind::ShellCmdCaptured
@@ -2689,6 +2692,37 @@ impl App {
                     }
                 }
                 PostAction::None
+            }
+            PromptKind::NewFile => {
+                let name = prompt.buffer.trim().to_string();
+                if name.is_empty() {
+                    return PostAction::None;
+                }
+                let target = crate::paths::expand(&name);
+                let resolved = if target.is_absolute() {
+                    target
+                } else {
+                    self.state.listing.dir.join(&target)
+                };
+                // Create parent dirs if needed, then touch the file.
+                if let Some(parent) = resolved.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if !resolved.exists() {
+                    let _ = std::fs::write(&resolved, "");
+                }
+                let mut argv = shell::resolve_editor();
+                if argv.is_empty() {
+                    self.state.flash_error("$EDITOR not set");
+                    return PostAction::None;
+                }
+                let program = argv.remove(0);
+                argv.push(resolved.to_string_lossy().into_owned());
+                PostAction::Spawn {
+                    program,
+                    args: argv,
+                    pause_after: false,
+                }
             }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
             // These should have been handled by AppState — unreachable in practice.

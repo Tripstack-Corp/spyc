@@ -669,6 +669,9 @@ impl AppState {
             Action::MakeDirPrompt => {
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
             }
+            Action::NewFilePrompt => {
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::NewFile, "new file: "));
+            }
             Action::RemovePrompt => {
                 let count = self.selection_paths().len();
                 if count > 0 {
@@ -1006,6 +1009,7 @@ impl AppState {
                 }
                 PromptResult::Handled
             }
+            PromptKind::NewFile => return PromptResult::NotHandled,
             PromptKind::SetEnv => {
                 let line = buffer.trim();
                 if let Some((name, value)) = line.split_once('=') {
