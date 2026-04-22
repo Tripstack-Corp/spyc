@@ -2809,6 +2809,33 @@ impl App {
         PostAction::None
     }
 
+    /// ya — yank the full scrollback + visible screen from the active pane.
+    fn yank_scrollback_to_clipboard(&mut self) -> PostAction {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            self.state.flash_error("no pane open");
+            return PostAction::None;
+        };
+        let lines = tabs.active_mut().recent_lines(10_000);
+        let text: String = lines
+            .iter()
+            .map(|l| l.trim_end())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.trim().is_empty() {
+            self.state.flash_error("pane scrollback is empty");
+            return PostAction::None;
+        }
+        match Self::copy_to_clipboard(&text) {
+            Ok(()) => {
+                let count = text.lines().count();
+                self.state
+                    .flash_info(format!("yanked {count} lines (full scrollback)"));
+            }
+            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+        }
+        PostAction::None
+    }
+
     fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
         use std::io::Write;
         use std::process::{Command, Stdio};
@@ -2886,6 +2913,26 @@ impl App {
                 self.state.flash_info("pane: last tab closed");
             }
         }
+    }
+
+    /// ^a R — restart the active tab's command. Closes the tab and spawns
+    /// a fresh one with the same command and working directory.
+    fn restart_active_tab(&mut self) {
+        let Some(tabs) = self.pane_tabs.as_ref() else {
+            return;
+        };
+        let cmd = tabs.active_info().command.clone();
+        let cwd = tabs.active_info().cwd.clone();
+        // Close the old tab first.
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            if !tabs.close_active() {
+                self.pane_tabs = None;
+                self.state.pane_focused = false;
+            }
+        }
+        // Spawn a replacement with the same command and cwd.
+        self.open_pane_tab_in(&cmd, &cwd);
+        self.state.flash_info(format!("pane: restarted {cmd}"));
     }
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
@@ -4178,6 +4225,10 @@ impl App {
         if *action == Action::YankLastPrompt {
             return Ok(self.yank_last_prompt_to_clipboard());
         }
+        // ya — yank full pane scrollback to system clipboard.
+        if *action == Action::YankScrollback {
+            return Ok(self.yank_scrollback_to_clipboard());
+        }
 
         // Try pure-domain dispatch first.
         match self.state.apply(action) {
@@ -4256,6 +4307,7 @@ impl App {
             | Action::PaneNextTab
             | Action::PanePrevTab
             | Action::PaneRenameTab
+            | Action::PaneRestartTab
             | Action::PanePipeContent
             | Action::PanePipeInventory
                 if matches!(
@@ -4326,6 +4378,8 @@ impl App {
                     self.state.mode = Mode::Prompting(p);
                 }
             }
+
+            Action::PaneRestartTab => self.restart_active_tab(),
 
             Action::PanePipeContent => self.pipe_content_to_pane(false),
             Action::PanePipeInventory => self.pipe_content_to_pane(true),

@@ -155,6 +155,7 @@ impl Resolver {
                     ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
                 }
                 KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
+                KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
                 // Pane toggle / resize / scroll.
                 KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
@@ -190,6 +191,7 @@ impl Resolver {
                 KeyCode::Char('y') => ResolverOutcome::Action(Action::Take),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::YankPrompt),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::YankLastPrompt),
+                KeyCode::Char('a') => ResolverOutcome::Action(Action::YankScrollback),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

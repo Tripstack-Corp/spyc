@@ -33,6 +33,7 @@ pub enum Action {
     EmptyInventory,      // z
     YankPrompt,          // yp — yank visible pane output to clipboard
     YankLastPrompt,      // yP — yank last typed pane prompt to clipboard
+    YankScrollback,      // ya — yank full pane scrollback to clipboard
 
     // Ignore masks & filtering.
     ToggleMask(u8), // a -> 1, o -> 2
@@ -100,6 +101,7 @@ pub enum Action {
     PaneNextTab,        // ^W ] — next tab
     PanePrevTab,        // ^W [ — previous tab
     PaneRenameTab,      // ^W r — rename the active tab
+    PaneRestartTab,     // ^W R — restart the active tab's command
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
@@ -152,6 +154,7 @@ impl Action {
             Self::EmptyInventory => "empty inventory",
             Self::YankPrompt => "yank visible pane output to clipboard",
             Self::YankLastPrompt => "yank last typed prompt to clipboard",
+            Self::YankScrollback => "yank full pane scrollback to clipboard",
             Self::ToggleMask(_) => "toggle ignore mask",
             Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
             Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",
@@ -186,6 +189,7 @@ impl Action {
             Self::PaneNextTab => "next pane tab",
             Self::PanePrevTab => "prev pane tab",
             Self::PaneRenameTab => "rename pane tab",
+            Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
             Self::WorktreeList => "list git worktrees",

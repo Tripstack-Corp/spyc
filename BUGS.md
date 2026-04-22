@@ -11,8 +11,8 @@
   from Claude CLI's progress bars, spinners, and cursor repositioning. ^L
   redraws the visible screen but can't fix corrupted scrollback. Solution t.b.d.
 - would like to be able to reorder tabs
-- add a restart pane process option ^a-# or something
-- commandline switches don't seem to work as I expect ... e.g. -rd didn't work
+- (fixed) restart pane process: ^a R closes the active tab and respawns it
+  with the same command and working directory
 - we need a better visual indicator that we're in visual mode in the bottom pane
 - graveyard should include files that have been removed with R
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
@@ -25,7 +25,8 @@
 - ability to background running tasks and notify when done
 - some shortcut to set my homedir to current directory (e.g. for
   backtick-backtick to work)
-- some way to yank the whole context history of the claude chat pane
+- (fixed) yank full pane scrollback: `ya` copies up to 10K lines of
+  scrollback + visible screen to clipboard (vs `yp` which only gets visible)
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
 - quit should say "are you sure? there are running process(es)" to prevent
@@ -39,6 +40,9 @@
 - shortcut needed for creating a new file in EDITOR
 
 ### FIXED ###
+- support for named sessions
+- (fixed) CLI switches like -rd didn't work — replaced hand-rolled arg parsing
+  with clap derive. Combined short flags, auto-generated help, proper errors.
 - we should be able to send control signals to running processes e.g. ^t
 - (fixed) J to ~/D<tab> now shows matches for remote directories instead of
   wrongly filtering the current listing. Also added frecency-based path

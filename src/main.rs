@@ -18,6 +18,7 @@ mod ui;
 use std::io;
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     cursor::MoveTo,
     event::{DisableBracketedPaste, EnableBracketedPaste},
@@ -30,6 +31,27 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::app::App;
+
+/// spyc — vi-keyboard-driven file commander
+#[derive(Parser)]
+#[command(name = "spyc", version, about = "vi-keyboard-driven file commander")]
+struct Cli {
+    /// Open pane with `claude --resume`
+    #[arg(short, long)]
+    resume: bool,
+
+    /// Write debug log to /tmp/spyc-debug-<ts>.log
+    #[arg(short, long)]
+    debug: bool,
+
+    /// Run as MCP server (stdio JSON-RPC)
+    #[arg(long)]
+    mcp: bool,
+
+    /// Show extended build info with --version
+    #[arg(long)]
+    verbose: bool,
+}
 
 fn main() -> Result<()> {
     // Restore the terminal on panic so the user's shell isn't left in raw
@@ -54,50 +76,31 @@ fn main() -> Result<()> {
         default_hook(info);
     }));
 
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!(
-            "spyc {} — vi-keyboard-driven file commander\n\n\
-             Usage: spyc [OPTIONS]\n\n\
-             Options:\n  \
-               -r, --resume   Open pane with `claude --resume`\n  \
-               -d, --debug    Write debug log to /tmp/spyc-debug-<ts>.log\n  \
-               -h, --help     Show this help\n  \
-               -v, --version  Show version (add --verbose for build info)\n  \
-               --mcp          Run as MCP server (stdio JSON-RPC)",
-            env!("CARGO_PKG_VERSION"),
-        );
-        return Ok(());
-    }
-    if args.iter().any(|a| a == "--mcp") {
+    if cli.mcp {
         let root = std::env::current_dir()?;
         return mcp::run(root);
     }
-    if args.iter().any(|a| a == "--version" || a == "-v") {
-        let verbose = args.iter().any(|a| a == "--verbose");
+    if cli.verbose {
         println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));
-        if verbose {
-            println!("  git:     {}", env!("SPYC_GIT_SHA"));
-            println!("  built:   {}", env!("SPYC_BUILD_TIME"));
-            println!("  rustc:   {}", env!("SPYC_RUSTC_VERSION"));
-            println!("  TERM:    {}", std::env::var("TERM").unwrap_or_default());
-            println!(
-                "  COLOR:   {}",
-                std::env::var("COLORTERM").unwrap_or_default()
-            );
-            println!("  os:      {} {}", std::env::consts::OS, std::env::consts::ARCH);
-        }
+        println!("  git:     {}", env!("SPYC_GIT_SHA"));
+        println!("  built:   {}", env!("SPYC_BUILD_TIME"));
+        println!("  rustc:   {}", env!("SPYC_RUSTC_VERSION"));
+        println!("  TERM:    {}", std::env::var("TERM").unwrap_or_default());
+        println!(
+            "  COLOR:   {}",
+            std::env::var("COLORTERM").unwrap_or_default()
+        );
+        println!("  os:      {} {}", std::env::consts::OS, std::env::consts::ARCH);
         return Ok(());
     }
 
-    let resume = args.iter().any(|a| a == "--resume" || a == "-r");
-    let debug = args.iter().any(|a| a == "--debug" || a == "-d");
-    if let Some(p) = debug_log::init(debug) {
+    if let Some(p) = debug_log::init(cli.debug) {
         eprintln!("spyc: debug log → {p}");
     }
     let mut terminal = setup_terminal()?;
-    let mut app = App::new(resume);
+    let mut app = App::new(cli.resume);
     let result = app.run(&mut terminal);
     restore_terminal(&mut terminal)?;
     if let Some(summary) = &app.exit_summary {
