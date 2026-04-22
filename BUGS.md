@@ -29,8 +29,9 @@
   scrollback + visible screen to clipboard (vs `yp` which only gets visible)
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
-- quit should say "are you sure? there are running process(es)" to prevent
-  accidentally interrupting real work (on detecting work being done)
+- (fixed) quit now warns about running processes: "2 running processes —
+  press again to quit". Still double-press to confirm, but the flash
+  message tells you what you'd be killing.
 - claude cli should always be pinned to bottom of the terminal - it seems to get
   scrolled halfway up sometimes
 - would be nice to add a "are you sure you want to interrupt?" protection with

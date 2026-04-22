@@ -4427,7 +4427,18 @@ impl App {
                     self.state.should_quit = true;
                 } else {
                     self.state.quit_pending = Some(now);
-                    self.state.flash_info("press again to quit");
+                    let running = self
+                        .pane_tabs
+                        .as_ref()
+                        .map_or(0, |tabs| tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count());
+                    if running > 0 {
+                        self.state.flash_info(format!(
+                            "{running} running process{} — press again to quit",
+                            if running == 1 { "" } else { "es" }
+                        ));
+                    } else {
+                        self.state.flash_info("press again to quit");
+                    }
                 }
             }
 
