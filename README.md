@@ -92,7 +92,9 @@ When spyc starts, it automatically:
 
 Multiple instances coexist safely. If a new spyc opens in the same
 directory, it sends a disconnect notification to the old instance and
-takes over. Enterprise managed-settings.json policies are respected.
+takes over. Enterprise `managed-mcp.json` and `managed-settings.json`
+policies are respected — see [INSTALL.md](INSTALL.md#enterprise-managed-environments)
+for details.
 
 Claude can call `get_spyc_context` at any time to see exactly what
 you're looking at. Use `gf`/`gF` to jump from Claude's output back to
