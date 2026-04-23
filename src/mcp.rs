@@ -306,7 +306,12 @@ pub fn start_socket_server(
     // Remove stale socket from a previous run.
     let _ = std::fs::remove_file(&sock);
 
-    let listener = UnixListener::bind(&sock)?;
+    // Restrict socket permissions to owner-only (0o700) so other users
+    // on a shared machine cannot connect and read files or mutate the TUI.
+    let old_umask = unsafe { libc::umask(0o077) };
+    let bind_result = UnixListener::bind(&sock);
+    unsafe { libc::umask(old_umask) };
+    let listener = bind_result?;
     let ctx_path = Arc::new(ctx_path);
     let cmd_tx = Arc::new(cmd_tx);
 
@@ -692,7 +697,21 @@ fn handle_tools_call(
             } else {
                 cwd.join(path_str)
             };
-            match read_file_content(&resolved) {
+            // Canonicalize to resolve symlinks and ".." components, then
+            // verify the path is under the working directory to prevent
+            // directory traversal attacks.
+            let canonical = match std::fs::canonicalize(&resolved) {
+                Ok(p) => p,
+                Err(e) => return send_tool_error(w, id, &format!("{}: {e}", resolved.display())),
+            };
+            let canonical_cwd = match std::fs::canonicalize(&cwd) {
+                Ok(p) => p,
+                Err(e) => return send_tool_error(w, id, &format!("cwd: {e}")),
+            };
+            if !canonical.starts_with(&canonical_cwd) {
+                return send_tool_error(w, id, "path is outside the working directory");
+            }
+            match read_file_content(&canonical) {
                 Ok(content) => send_tool_result(w, id, &content),
                 Err(e) => send_tool_error(w, id, &e),
             }
@@ -1130,5 +1149,57 @@ mod tests {
         let path = socket_path();
         let pid = std::process::id();
         assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    }
+
+    #[test]
+    fn get_file_content_blocks_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        // Create a file outside the project directory.
+        let secret = tmp.path().join("secret.txt");
+        std::fs::write(&secret, "top secret").unwrap();
+
+        // Create a file inside the project directory.
+        std::fs::write(project.join("ok.txt"), "public").unwrap();
+
+        // Set up context with cwd = project.
+        let ctx = context::SpycContext {
+            cwd: project.clone(),
+            cursor_file: None,
+            picks: vec![],
+            inventory: vec![],
+            filter: None,
+            git_branch: None,
+        };
+        let ctx_path = context::context_path(tmp.path());
+        context::write_context_file(&ctx_path, &ctx).unwrap();
+
+        // Reading a file inside cwd should succeed.
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+                "name":"get_file_content","arguments":{"path":"ok.txt"}
+            }}).to_string(),
+            &ctx_path,
+            None,
+        ).unwrap();
+        let resp = parse_response(&output);
+        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("public"));
+
+        // Traversal via ../secret.txt should be blocked.
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+                "name":"get_file_content","arguments":{"path":"../secret.txt"}
+            }}).to_string(),
+            &ctx_path,
+            None,
+        ).unwrap();
+        let resp = parse_response(&output);
+        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("outside the working directory"));
     }
 }

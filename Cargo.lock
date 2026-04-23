@@ -1196,6 +1196,7 @@ dependencies = [
  "crossterm",
  "glob",
  "insta",
+ "libc",
  "notify",
  "portable-pty",
  "pretty-hex",
