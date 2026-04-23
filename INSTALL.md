@@ -163,9 +163,47 @@ spyc's own repo already has this entry.
 
 ### Enterprise managed environments
 
-Organizations can deploy Claude Code with a `managed-settings.json`
-that controls which MCP servers are allowed. spyc checks this policy
-before writing `.mcp.json`:
+In enterprise environments, Claude Code supports two system-wide
+configuration files that IT can deploy to all machines. Both live in
+the same directory:
+
+| Platform   | Directory                                          |
+|------------|----------------------------------------------------|
+| macOS      | `/Library/Application Support/ClaudeCode/`         |
+| Linux/WSL  | `/etc/claude-code/`                                |
+
+#### `managed-mcp.json` — deploy MCP servers centrally
+
+This file pushes MCP server entries to every Claude Code installation
+on the machine, so individual users don't need a per-project
+`.mcp.json`. To include spyc alongside other org-wide MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "spyc": {
+      "command": "/usr/local/bin/spyc",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Note that the centrally deployed entry does **not** include
+`env.SPYC_MCP_SOCK` (IT doesn't know the PID of each user's running
+instance). The stdio proxy handles this automatically via **discovery
+mode**: it scans `~/.local/state/spyc/mcp-*.sock` for any live
+instance and connects to the first one it finds.
+
+When spyc is deployed via `managed-mcp.json`, the per-directory
+`.mcp.json` that spyc writes on startup is still useful — it carries
+the exact socket path for faster, deterministic connections. The two
+configs coexist without conflict.
+
+#### `managed-settings.json` — control which servers are allowed
+
+This file controls permissions and policies. spyc checks it before
+writing `.mcp.json`:
 
 - **`deniedMcpServers`** — if `"spyc"` appears in the denylist,
   the MCP server will not configure itself. A flash message warns
@@ -174,14 +212,7 @@ before writing `.mcp.json`:
   must be included or configuration is blocked.
 - If neither list mentions spyc, it is allowed by default.
 
-Managed settings are read from:
-
-| Platform   | Path                                                        |
-|------------|-------------------------------------------------------------|
-| macOS      | `/Library/Application Support/ClaudeCode/managed-settings.json` |
-| Linux/WSL  | `/etc/claude-code/managed-settings.json`                    |
-
-To allow spyc in a managed environment, add it to the allowlist:
+To allow spyc in a managed environment:
 
 ```json
 {
@@ -190,12 +221,6 @@ To allow spyc in a managed environment, add it to the allowlist:
   ]
 }
 ```
-
-When `SPYC_MCP_SOCK` is not set — as is the case when the MCP server
-entry comes from a centrally deployed `managed-settings.json` rather
-than spyc's own `.mcp.json` — the stdio proxy falls back to
-**discovery mode**: it scans `~/.local/state/spyc/mcp-*.sock` for
-any live instance and connects to the first one it finds.
 
 ## Verifying the setup
 
