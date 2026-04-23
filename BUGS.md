@@ -7,45 +7,46 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
-- Claude PTY can get messed up — scrollback accumulates rendering artifacts
-  from Claude CLI's progress bars, spinners, and cursor repositioning. ^L
-  redraws the visible screen but can't fix corrupted scrollback. Solution t.b.d.
-- would like to be able to reorder tabs
-- (fixed) restart pane process: ^a R closes the active tab and respawns it
-  with the same command and working directory
-- we need a better visual indicator that we're in visual mode in the bottom pane
-- graveyard should include files that have been removed with R
-- screen should flash if I'm doing something that hits a wall - e.g. j at the
-  top of a directory
+- yanking from the pane should support # so that you can yank the last 150
+  lines, etc.
+- support for named sessions
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
   history but it should preserve shell vs. spyc commands
 - ability to background running tasks and notify when done
+- would like to be able to reorder tabs
+- we need a better visual indicator that we're in visual mode in the bottom pane
+- graveyard should include files that have been removed with R
+- screen should flash if I'm doing something that hits a wall - e.g. j at the
+  top of a directory
 - some shortcut to set my homedir to current directory (e.g. for
   backtick-backtick to work)
-- (fixed) yank full pane scrollback: `ya` copies up to 10K lines of
-  scrollback + visible screen to clipboard (vs `yp` which only gets visible)
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
-- (fixed) quit now warns about running processes: "2 running processes —
-  press again to quit". Still double-press to confirm, but the flash
-  message tells you what you'd be killing.
-- claude cli should always be pinned to bottom of the terminal - it seems to get
-  scrolled halfway up sometimes
 - would be nice to add a "are you sure you want to interrupt?" protection with
   Claude CLI procs
 - there should be a short cut to help jump to files affected by git status
-- interactive git status browser to jump to file
-- (fixed) O creates a new file: prompts for filename, touches it, opens
-  $EDITOR. Supports paths with subdirs (creates parents). Tab completes.
+- we should be able to send control signals to running processes e.g. ^t
+- Claude PTY can get messed up — scrollback accumulates rendering artifacts
+  from Claude CLI's progress bars, spinners, and cursor repositioning. ^L
+  redraws the visible screen but can't fix corrupted scrollback. Solution t.b.d.
+- claude cli should always be pinned to bottom of the terminal - it seems to get
+  scrolled halfway up sometimes
 
 ### FIXED ###
-- support for named sessions
+- (fixed) yank full pane scrollback: `ya` copies up to 10K lines of
+  scrollback + visible screen to clipboard (vs `yp` which only gets visible)
+- (fixed) quit now warns about running processes: "2 running processes —
+  press again to quit". Still double-press to confirm, but the flash
+  message tells you what you'd be killing.
+- (fixed) restart pane process: ^a R closes the active tab and respawns it
+  with the same command and working directory
+- (fixed) O creates a new file: prompts for filename, touches it, opens
+  $EDITOR. Supports paths with subdirs (creates parents). Tab completes.
 - (fixed) CLI switches like -rd didn't work — replaced hand-rolled arg parsing
   with clap derive. Combined short flags, auto-generated help, proper errors.
-- we should be able to send control signals to running processes e.g. ^t
 - (fixed) J to ~/D<tab> now shows matches for remote directories instead of
   wrongly filtering the current listing. Also added frecency-based path
   ranking — J prompt learns your most-visited dirs and suggests them on Tab.

@@ -74,49 +74,16 @@ pub fn load_sessions() -> Vec<Session> {
         .collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.epoch_secs));
     // Dedup by cwd + tab commands (keep most recent).
-    // Normalize commands by stripping --mcp-config args (which contain
-    // ephemeral port numbers that change every launch).
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| {
         let key = format!(
             "{}|{}",
             s.cwd.display(),
-            s.tabs
-                .iter()
-                .map(|t| normalize_command(&t.command))
-                .collect::<Vec<_>>()
-                .join(",")
+            s.tabs.iter().map(|t| t.command.as_str()).collect::<Vec<_>>().join(",")
         );
         seen.insert(key)
     });
     sessions
-}
-
-/// Strip ephemeral arguments (like `--mcp-config '...'`) from a command
-/// string so dedup isn't broken by changing port numbers.
-fn normalize_command(cmd: &str) -> String {
-    // Remove --mcp-config and its argument (single-quoted JSON blob).
-    let mut result = cmd.to_string();
-    if let Some(start) = result.find("--mcp-config") {
-        // Find the end of the argument — it's a single-quoted JSON string.
-        let rest = &result[start..];
-        let end = if let Some(q1) = rest.find('\'') {
-            // Find closing quote.
-            if let Some(q2) = rest[q1 + 1..].find('\'') {
-                start + q1 + 1 + q2 + 1
-            } else {
-                result.len()
-            }
-        } else {
-            // No quotes — just the flag and next whitespace-delimited arg.
-            start + rest.find(' ').map_or(rest.len(), |sp| {
-                let after = &rest[sp + 1..];
-                sp + 1 + after.find(' ').unwrap_or(after.len())
-            })
-        };
-        result = format!("{}{}", &result[..start], &result[end..]);
-    }
-    result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn prune_old(dir: &std::path::Path) {

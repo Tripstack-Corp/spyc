@@ -1,17 +1,22 @@
 //! Minimal MCP (Model Context Protocol) server.
 //!
 //! Two transports:
-//!   - **stdio** (`spyc --mcp`): JSON-RPC over Content-Length framed
-//!     stdin/stdout, for manual testing or when the pty pipe issue is
-//!     resolved.
-//!   - **HTTP** (`start_http_server`): Spawns a background thread with
-//!     a `TcpListener` on an OS-assigned port. Claude Code connects
-//!     via `--mcp-config` with the assigned URL.
+//!   - **stdio** (`spyc --mcp`): Spawned by Claude Code. Reads
+//!     JSON-RPC from stdin, proxies to the running spyc instance
+//!     via a Unix domain socket, and writes responses to stdout.
+//!   - **Unix socket** (`start_socket_server`): Spawns a background
+//!     thread listening on `~/.local/state/spyc/mcp-<PID>.sock`.
+//!     The stdio process connects here; writable actions go through
+//!     the command channel to the main event loop.
+//!
+//! Multiple spyc instances coexist via PID-scoped sockets. The
+//! `.mcp.json` carries `SPYC_MCP_SOCK` in its `env` block so the
+//! stdio proxy connects to the right instance.
 //!
 //! Both transports share the same JSON-RPC dispatch logic.
 
-use std::io::{self, BufRead, Read, Write};
-use std::net::TcpListener;
+use std::io::{self, BufRead, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -39,9 +44,21 @@ fn mcp_log(msg: &str) {
 
 // ── Shared JSON-RPC dispatch ────────────────────────────────────
 
+/// Socket path for a given PID: `~/.local/state/spyc/mcp-<pid>.sock`.
+pub fn socket_path_for(pid: u32) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let state_dir = PathBuf::from(home).join(".local/state/spyc");
+    state_dir.join(format!("mcp-{pid}.sock"))
+}
+
+/// Socket path for the current process.
+pub fn socket_path() -> PathBuf {
+    socket_path_for(std::process::id())
+}
+
 /// Dispatch a JSON-RPC request and write the response to `w`.
-/// `cmd_tx` is `Some` when running as the HTTP background server
-/// (writable actions available), `None` for stdio transport.
+/// `cmd_tx` is `Some` when running as the socket server
+/// (writable actions available), `None` for read-only fallback.
 fn dispatch(
     w: &mut impl Write,
     msg: &str,
@@ -53,8 +70,19 @@ fn dispatch(
         Err(_) => return send_error(w, Value::Null, -32700, "Parse error"),
     };
 
-    // Notifications (no "id") — acknowledge silently.
+    // Notifications (no "id") — no response, but some have side effects.
     if parsed.get("id").is_none() {
+        let method = parsed["method"].as_str().unwrap_or("");
+        if method == "spyc/disconnected" {
+            if let Some(tx) = cmd_tx {
+                let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
+                let (reply_tx, _) = std::sync::mpsc::channel();
+                let _ = tx.send(McpRequest {
+                    command: McpCommand::Disconnected { new_pid },
+                    reply: reply_tx,
+                });
+            }
+        }
         return Ok(());
     }
 
@@ -73,6 +101,10 @@ fn dispatch(
 }
 
 // ── Stdio transport (spyc --mcp) ────────────────────────────────
+//
+// Proxies JSON-RPC from stdin/stdout to the running spyc instance's
+// Unix domain socket. Falls back to read-only local dispatch if the
+// socket isn't available (no running spyc).
 
 /// Resolve context path from env var or project root.
 fn resolve_context_path(project_root: &Path) -> PathBuf {
@@ -84,181 +116,414 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
     context::context_path(project_root)
 }
 
-/// Run the stdio MCP server loop. Blocks until stdin closes.
+/// Run the stdio MCP server. Reads JSONL from stdin, dispatches
+/// locally, writes JSONL to stdout. If the running spyc instance's
+/// Unix socket is available, proxies through it for writable access.
+///
+/// Socket resolution order:
+/// 1. `$SPYC_MCP_SOCK` (set in `.mcp.json`'s `env` block) — exact match
+/// 2. Discovery scan of `~/.local/state/spyc/mcp-*.sock` — finds any
+///    live instance (handles enterprise managed-mcp.json, manual testing)
+/// 3. Falls back to read-only direct mode if nothing is alive.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
+    // Try explicit socket path from env first.
+    if let Ok(p) = std::env::var("SPYC_MCP_SOCK") {
+        if !p.is_empty() {
+            let sock = PathBuf::from(&p);
+            mcp_log(&format!("stdio: trying env socket {}", sock.display()));
+            if let Ok(stream) = UnixStream::connect(&sock) {
+                mcp_log("stdio: connected via env socket, proxying");
+                return run_proxy(stream);
+            }
+        }
+    }
+
+    // Discovery: scan for any live mcp-*.sock.
+    if let Some(stream) = discover_live_socket() {
+        return run_proxy(stream);
+    }
+
+    // Direct mode: read-only local dispatch (no writable actions).
+    mcp_log("stdio: no live socket found, running direct JSONL");
+    run_direct(project_root)
+}
+
+/// Scan `~/.local/state/spyc/` for `mcp-*.sock` files and try to
+/// connect to each. Returns the first live connection found.
+fn discover_live_socket() -> Option<UnixStream> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let state_dir = PathBuf::from(home).join(".local/state/spyc");
+    let entries = std::fs::read_dir(&state_dir).ok()?;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if !name_str.starts_with("mcp-") || !name_str.ends_with(".sock") {
+            continue;
+        }
+        let sock = entry.path();
+        mcp_log(&format!("stdio: discover trying {}", sock.display()));
+        if let Ok(stream) = UnixStream::connect(&sock) {
+            mcp_log(&format!("stdio: discovered live socket {}", sock.display()));
+            return Some(stream);
+        }
+        // Stale socket — clean it up.
+        let _ = std::fs::remove_file(&sock);
+    }
+    None
+}
+
+/// Direct JSONL stdio server — no socket proxy.
+fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
     let context_path = resolve_context_path(&project_root);
-    mcp_log(&format!("stdio: starting, context_path={}", context_path.display()));
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
 
     loop {
-        let msg = match read_lsp_message(&mut reader) {
-            Ok(msg) => msg,
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                mcp_log("direct: stdin closed");
+                break;
+            }
+            Ok(_) => {}
             Err(e) => {
-                mcp_log(&format!("stdio: read error: {e}"));
+                mcp_log(&format!("direct: stdin read error: {e}"));
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     break;
                 }
                 return Err(e.into());
             }
-        };
-        dispatch(&mut writer, &msg, &context_path, None)?;
+        }
+        let msg = line.trim();
+        if msg.is_empty() {
+            continue;
+        }
+        mcp_log(&format!("direct: recv ({} bytes)", msg.len()));
+
+        // Dispatch writes Content-Length framed output. We need to
+        // capture it and re-emit as JSONL.
+        let mut buf = Vec::new();
+        dispatch(&mut buf, msg, &context_path, None)?;
+
+        // Extract the JSON body from Content-Length framing.
+        let framed = String::from_utf8_lossy(&buf);
+        if let Some(pos) = framed.find("\r\n\r\n") {
+            let json_body = &framed[pos + 4..];
+            if !json_body.is_empty() {
+                mcp_log(&format!("direct: send ({} bytes)", json_body.len()));
+                writeln!(writer, "{json_body}")?;
+                writer.flush()?;
+            }
+        }
     }
     Ok(())
 }
 
-// ── HTTP transport (background thread) ──────────────────────────
+/// Proxy stdin/stdout ↔ Unix socket. Messages use Content-Length
+/// framing on both sides.
+fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut stdin_reader = stdin.lock();
+    let mut stdout_writer = stdout.lock();
+    let sock_clone = match stream.try_clone() {
+        Ok(c) => c,
+        Err(e) => {
+            mcp_log(&format!("proxy: stream clone failed: {e}"));
+            return Err(e.into());
+        }
+    };
+    let mut sock_reader = io::BufReader::new(sock_clone);
+    let mut sock_writer = stream;
+    mcp_log("proxy: ready, waiting for stdin");
 
-/// Start the HTTP MCP server on an OS-assigned port. Returns the port
-/// number. The server runs on a background thread and reads context
-/// from `ctx_path`. `cmd_tx` is the write end of the command channel —
-/// writable MCP actions send commands through it to the main event loop.
-pub fn start_http_server(
+    loop {
+        // Read a JSON-RPC message from stdin. Claude Code uses newline-
+        // delimited JSON (one JSON object per line), not Content-Length
+        // framing.
+        let mut line = String::new();
+        match stdin_reader.read_line(&mut line) {
+            Ok(0) => {
+                mcp_log("proxy: stdin closed");
+                break;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                mcp_log(&format!("proxy: stdin read error: {e}"));
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break;
+                }
+                return Err(e.into());
+            }
+        }
+        let msg = line.trim();
+        if msg.is_empty() {
+            continue; // skip blank lines
+        }
+        mcp_log(&format!("proxy: stdin → socket ({} bytes): {}", msg.len(), msg));
+
+        // Check if this is a request (has "id") or notification (no "id").
+        let is_request = serde_json::from_str::<Value>(msg)
+            .map(|v| v.get("id").is_some())
+            .unwrap_or(true); // assume request if parse fails
+
+        // Forward to socket (Content-Length framed for the socket server).
+        send_message(&mut sock_writer, msg)?;
+
+        // Only read a response for requests (notifications get no reply).
+        if is_request {
+            let response = read_lsp_message(&mut sock_reader)?;
+            mcp_log(&format!("proxy: socket → stdout ({} bytes): {}", response.len(), response));
+            // Write back as newline-delimited JSON (what Claude Code expects).
+            writeln!(stdout_writer, "{response}")?;
+            stdout_writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
+// ── Unix socket server (background thread) ──────────────────────
+
+/// Start the MCP server on a Unix domain socket. The socket path is
+/// `~/.local/state/spyc/mcp-<PID>.sock`. The server runs on a
+/// background thread and reads context from `ctx_path`. `cmd_tx` is the
+/// write end of the command channel — writable actions go through it to
+/// the main event loop.
+pub fn start_socket_server(
     ctx_path: PathBuf,
     cmd_tx: std::sync::mpsc::Sender<McpRequest>,
-) -> anyhow::Result<u16> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let port = listener.local_addr()?.port();
+) -> anyhow::Result<()> {
+    let sock = socket_path();
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = sock.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Remove stale socket from a previous run.
+    let _ = std::fs::remove_file(&sock);
+
+    let listener = UnixListener::bind(&sock)?;
     let ctx_path = Arc::new(ctx_path);
     let cmd_tx = Arc::new(cmd_tx);
 
-    mcp_log(&format!("http: listening on 127.0.0.1:{port}"));
+    mcp_log(&format!("socket: listening on {}", sock.display()));
 
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
+            mcp_log("socket: accepted connection");
             let ctx = Arc::clone(&ctx_path);
             let tx = Arc::clone(&cmd_tx);
-            // Handle each connection in a thread (Claude Code keeps one
-            // connection open, but we handle concurrent requests safely).
             std::thread::spawn(move || {
-                if let Err(e) = handle_http_connection(stream, &ctx, &tx) {
-                    mcp_log(&format!("http: connection error: {e}"));
+                if let Err(e) = handle_socket_connection(stream, &ctx, &tx) {
+                    mcp_log(&format!("socket: connection error: {e}"));
                 }
             });
         }
     });
 
-    Ok(port)
+    Ok(())
 }
 
-/// Return the `--mcp-config` JSON string for this server.
-pub fn mcp_config_json(port: u16) -> String {
-    json!({
-        "mcpServers": {
-            "spyc": {
-                "type": "http",
-                "url": format!("http://127.0.0.1:{port}/mcp")
+/// Clean up the socket file on shutdown.
+pub fn cleanup_socket() {
+    let sock = socket_path();
+    let _ = std::fs::remove_file(&sock);
+}
+
+
+
+/// Status of MCP configuration for this directory.
+pub enum McpConfigStatus {
+    /// .mcp.json written/updated to point at our socket.
+    Configured,
+    /// Took over from another instance (notified it). PID of old instance.
+    TookOver { old_pid: u32 },
+    /// Enterprise managed-settings.json blocks spyc.
+    BlockedByEnterprise,
+}
+
+/// Well-known paths for Claude Code enterprise managed settings.
+const MANAGED_SETTINGS_PATHS: &[&str] = &[
+    // macOS system-wide
+    "/Library/Application Support/ClaudeCode/managed-settings.json",
+    // Linux / WSL system-wide
+    "/etc/claude-code/managed-settings.json",
+];
+
+/// Check whether enterprise managed-settings.json blocks "spyc".
+/// Checks `deniedMcpServers` (by serverName) and `allowedMcpServers`.
+/// Returns `None` if no enterprise config exists or if there's no
+/// restriction. Returns `Some(false)` if spyc is denied or not in
+/// an allowlist.
+fn enterprise_allows_spyc() -> Option<bool> {
+    for path in MANAGED_SETTINGS_PATHS {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        // Denylist takes absolute precedence.
+        if let Some(denied) = parsed.get("deniedMcpServers") {
+            if let Some(arr) = denied.as_array() {
+                if arr.iter().any(|entry| entry["serverName"].as_str() == Some("spyc")) {
+                    return Some(false);
+                }
             }
         }
-    })
-    .to_string()
+        // Allowlist: if present, spyc must be in it.
+        if let Some(allowed) = parsed.get("allowedMcpServers") {
+            if let Some(arr) = allowed.as_array() {
+                let ok = arr.iter().any(|entry| entry["serverName"].as_str() == Some("spyc"));
+                return Some(ok);
+            }
+        }
+        return None; // Enterprise config exists but no MCP restrictions.
+    }
+    None // No enterprise config found.
 }
 
-fn handle_http_connection(
-    mut stream: std::net::TcpStream,
+/// Extract the PID from a socket path like `mcp-12345.sock`.
+fn pid_from_sock_path(path: &str) -> Option<u32> {
+    let fname = Path::new(path).file_name()?.to_str()?;
+    let stripped = fname.strip_prefix("mcp-")?.strip_suffix(".sock")?;
+    stripped.parse().ok()
+}
+
+/// Try to send a `spyc/disconnected` notification to the old instance's
+/// socket. Best-effort — if it fails, we proceed with takeover anyway.
+fn notify_disconnect(old_sock: &Path, new_pid: u32) {
+    let Ok(mut stream) = UnixStream::connect(old_sock) else {
+        return;
+    };
+    let notification = json!({
+        "jsonrpc": "2.0",
+        "method": "spyc/disconnected",
+        "params": { "new_pid": new_pid }
+    });
+    let _ = send_message(&mut stream, &notification.to_string());
+    mcp_log(&format!(
+        "sent spyc/disconnected to {}",
+        old_sock.display()
+    ));
+}
+
+/// Ensure `.mcp.json` has the spyc entry using stdio transport.
+/// Checks enterprise policy first. If another spyc instance owns
+/// the entry, sends it a disconnect notification and takes over.
+pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
+    if let Some(false) = enterprise_allows_spyc() {
+        return Ok(McpConfigStatus::BlockedByEnterprise);
+    }
+
+    let our_sock = socket_path();
+    let our_pid = std::process::id();
+    let path = dir.join(".mcp.json");
+    let exe = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("spyc"));
+
+    // Check for an existing live spyc instance in this directory.
+    let mut took_over: Option<u32> = None;
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+            if let Some(old_sock_str) = parsed
+                .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
+                .and_then(|v| v.as_str())
+            {
+                let old_sock = PathBuf::from(old_sock_str);
+                if old_sock != our_sock {
+                    // Another instance — check if it's still alive.
+                    if UnixStream::connect(&old_sock).is_ok() {
+                        let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+                        notify_disconnect(&old_sock, our_pid);
+                        took_over = Some(old_pid);
+                        mcp_log(&format!(
+                            "taking over from PID {old_pid} ({})",
+                            old_sock.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let spyc_entry = json!({
+        "command": exe.to_string_lossy(),
+        "args": ["--mcp"],
+        "env": {
+            "SPYC_MCP_SOCK": our_sock.to_string_lossy()
+        }
+    });
+
+    let content = if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(mut parsed) = serde_json::from_str::<Value>(&text) {
+            parsed
+                .as_object_mut()
+                .unwrap()
+                .entry("mcpServers")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .unwrap()
+                .insert("spyc".to_string(), spyc_entry);
+            serde_json::to_string_pretty(&parsed).unwrap()
+        } else {
+            serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } })).unwrap()
+        }
+    } else {
+        serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } })).unwrap()
+    };
+
+    std::fs::write(&path, content + "\n")?;
+    mcp_log(&format!(
+        "wrote .mcp.json (sock={}, exe={})",
+        our_sock.display(),
+        exe.display()
+    ));
+
+    match took_over {
+        Some(old_pid) => Ok(McpConfigStatus::TookOver { old_pid }),
+        None => Ok(McpConfigStatus::Configured),
+    }
+}
+
+/// Handle a single Unix socket connection. Uses the same Content-Length
+/// framing as the stdio transport.
+fn handle_socket_connection(
+    stream: UnixStream,
     ctx_path: &Path,
     cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
 ) -> io::Result<()> {
-    use std::io::BufReader;
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = io::BufReader::new(stream.try_clone()?);
+    let mut writer = stream;
 
-    // Read HTTP requests in a loop (HTTP/1.1 keep-alive).
     loop {
-        // Read request line.
-        let mut request_line = String::new();
-        let n = reader.read_line(&mut request_line)?;
-        if n == 0 {
-            break; // Connection closed.
-        }
-
-        // Read headers.
-        let mut content_length: usize = 0;
-        let mut header = String::new();
-        loop {
-            header.clear();
-            reader.read_line(&mut header)?;
-            if header.trim().is_empty() {
-                break;
+        let msg = match read_lsp_message(&mut reader) {
+            Ok(msg) => msg,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break; // Connection closed.
+                }
+                return Err(e);
             }
-            if let Some(val) = header.to_ascii_lowercase().strip_prefix("content-length:") {
-                content_length = val.trim().parse().unwrap_or(0);
-            }
-        }
-
-        // Read body.
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body)?;
-        }
-        let body_str = String::from_utf8_lossy(&body);
-
-        // Route.
-        let is_post = request_line.starts_with("POST");
-        let is_mcp = request_line.contains("/mcp");
-
-        if is_post && is_mcp {
-            // JSON-RPC request.
-            let mut response_buf = Vec::new();
-            dispatch(&mut response_buf, &body_str, ctx_path, Some(cmd_tx))?;
-
-            // The dispatch writes Content-Length framed output (for stdio).
-            // For HTTP, we need to extract just the JSON body.
-            let response_body = extract_json_body(&response_buf);
-
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: application/json\r\n\
-                 Content-Length: {}\r\n\
-                 \r\n\
-                 {}",
-                response_body.len(),
-                response_body
-            )?;
-            stream.flush()?;
-        } else {
-            // Health check or unknown route.
-            let body = json!({"status": "ok", "server": SERVER_NAME}).to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: application/json\r\n\
-                 Content-Length: {}\r\n\
-                 \r\n\
-                 {}",
-                body.len(),
-                body
-            )?;
-            stream.flush()?;
-        }
+        };
+        dispatch(&mut writer, &msg, ctx_path, Some(cmd_tx))?;
     }
     Ok(())
 }
 
-/// Extract the JSON body from a Content-Length framed message.
-fn extract_json_body(framed: &[u8]) -> String {
-    let s = String::from_utf8_lossy(framed);
-    if let Some(pos) = s.find("\r\n\r\n") {
-        s[pos + 4..].to_string()
-    } else {
-        s.to_string()
-    }
-}
-
 // ── Protocol handlers ────────────────────────────────────────────
 
-fn handle_initialize(w: &mut impl Write, id: &Value, params: &Value) -> io::Result<()> {
-    let version = params["protocolVersion"]
-        .as_str()
-        .unwrap_or(PROTOCOL_VERSION);
+fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Result<()> {
     send_result(
         w,
         id,
         json!({
-            "protocolVersion": version,
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {
                 "resources": {},
                 "tools": {}
@@ -772,8 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn http_server_responds() {
-        use std::io::{Read, Write};
+    fn socket_server_responds() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = context::SpycContext {
             cwd: PathBuf::from("/test"),
@@ -786,38 +1050,85 @@ mod tests {
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
 
+        // Use a temp socket path to avoid interfering with a running instance.
+        let sock_path = tmp.path().join("test-mcp.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
         let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
-        let port = start_http_server(ctx_path, cmd_tx).unwrap();
+        let ctx_for_thread = ctx_path.clone();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
+        });
 
         // Give the server thread a moment to start.
         std::thread::sleep(std::time::Duration::from_millis(50));
 
+        let stream = UnixStream::connect(&sock_path).unwrap();
+        let mut reader = io::BufReader::new(stream.try_clone().unwrap());
+        let mut writer = stream;
+
         let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}).to_string();
-        let request = format!(
-            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
+        send_message(&mut writer, &body).unwrap();
 
-        let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
-        stream.write_all(request.as_bytes()).unwrap();
-        stream.flush().unwrap();
-
-        let mut response = String::new();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
-        let _ = stream.read_to_string(&mut response);
-
+        let response = read_lsp_message(&mut reader).unwrap();
         assert!(response.contains("get_spyc_context"));
     }
 
     #[test]
-    fn mcp_config_json_format() {
-        let config = mcp_config_json(12345);
-        let parsed: Value = serde_json::from_str(&config).unwrap();
-        assert_eq!(parsed["mcpServers"]["spyc"]["type"], "http");
-        assert_eq!(
-            parsed["mcpServers"]["spyc"]["url"],
-            "http://127.0.0.1:12345/mcp"
-        );
+    fn disconnect_notification_routes_through_channel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = context::SpycContext {
+            cwd: PathBuf::from("/test"),
+            cursor_file: None,
+            picks: vec![],
+            inventory: vec![],
+            filter: None,
+            git_branch: None,
+        };
+        let ctx_path = context::context_path(tmp.path());
+        context::write_context_file(&ctx_path, &ctx).unwrap();
+
+        let sock_path = tmp.path().join("test-disconnect.sock");
+        let listener = UnixListener::bind(&sock_path).unwrap();
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+        let ctx_for_thread = ctx_path.clone();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let mut stream = UnixStream::connect(&sock_path).unwrap();
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "spyc/disconnected",
+            "params": { "new_pid": 99999 }
+        });
+        send_message(&mut stream, &notification.to_string()).unwrap();
+        drop(stream); // close connection so handler exits
+
+        let req = cmd_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        match req.command {
+            McpCommand::Disconnected { new_pid } => assert_eq!(new_pid, 99999),
+            other => panic!("expected Disconnected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pid_from_sock_path_parses() {
+        assert_eq!(pid_from_sock_path("/home/user/.local/state/spyc/mcp-12345.sock"), Some(12345));
+        assert_eq!(pid_from_sock_path("mcp-1.sock"), Some(1));
+        assert_eq!(pid_from_sock_path("mcp.sock"), None);
+        assert_eq!(pid_from_sock_path("mcp-.sock"), None);
+    }
+
+    #[test]
+    fn socket_path_contains_pid() {
+        let path = socket_path();
+        let pid = std::process::id();
+        assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
     }
 }

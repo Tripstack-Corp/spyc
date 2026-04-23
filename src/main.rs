@@ -102,6 +102,7 @@ fn main() -> Result<()> {
     let mut terminal = setup_terminal()?;
     let mut app = App::new(cli.resume);
     let result = app.run(&mut terminal);
+    mcp::cleanup_socket();
     restore_terminal(&mut terminal)?;
     if let Some(summary) = &app.exit_summary {
         println!("\u{1f336}\u{fe0f} {summary}");

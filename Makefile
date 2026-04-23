@@ -11,7 +11,7 @@
 #   make release      — optimized release for current platform
 #   make dist         — all platforms → dist/
 #   make check        — fmt + clippy + test (CI gate)
-#   make install      — install to /usr/local/bin
+#   make install      — install to /usr/local/bin (override: PREFIX=~/local make install)
 
 BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -125,10 +125,10 @@ dist-checksums: dist ## Generate SHA-256 checksums
 
 # ---------- Install ----------------------------------------------------------
 
-PREFIX ?= $(HOME)
+PREFIX ?= /usr/local
 
 .PHONY: install
-install: release ## Install to ~/bin
+install: release ## Install to /usr/local/bin
 	@echo "copying $(BINARY) → $(PREFIX)/bin/"
 	install -d $(PREFIX)/bin
 	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
@@ -140,7 +140,7 @@ endif
 	@echo "✓ installed $(BINARY) v$(VERSION) → $(PREFIX)/bin/$(BINARY)"
 
 .PHONY: uninstall
-uninstall: ## Remove from ~/bin
+uninstall: ## Remove from /usr/local/bin
 	rm -f $(PREFIX)/bin/$(BINARY)
 
 # --- Remote deploy ---

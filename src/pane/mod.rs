@@ -67,6 +67,16 @@ impl Pane {
     /// Spawn `command` in a fresh pty of `rows × cols`, with `cwd` as
     /// the working directory.
     pub fn spawn(command: &str, rows: u16, cols: u16, cwd: &Path) -> anyhow::Result<Self> {
+        Self::spawn_with_env(command, rows, cols, cwd, &[])
+    }
+
+    pub fn spawn_with_env(
+        command: &str,
+        rows: u16,
+        cols: u16,
+        cwd: &Path,
+        extra_env: &[(&str, &str)],
+    ) -> anyhow::Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -93,6 +103,9 @@ impl Pane {
             crate::context::CONTEXT_ENV_VAR,
             crate::context::context_path(cwd).to_string_lossy().as_ref(),
         );
+        for (k, v) in extra_env {
+            cmd.env(k, v);
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave); // We don't need our own handle on the slave.

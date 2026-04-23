@@ -148,6 +148,14 @@ terminal inside a terminal." In priority order:
   workflow -- `autocmd "*.test.ts" "claude-template test-review"`
   etc. Defer until the template feature lands and the shape is
   clear.
+- **MCP security model review.** The move from HTTP (localhost TCP)
+  to Unix domain sockets is a significant security improvement --
+  access is bounded by filesystem permissions (user-only) rather
+  than being reachable by any process on localhost. Review and
+  document the threat model: socket file permissions, `.mcp.json`
+  write-access assumptions, enterprise policy enforcement, and
+  whether additional hardening (e.g., socket peer credential
+  checking via `SO_PEERCRED`) is warranted.
 
 ## Distribution
 

@@ -1,6 +1,6 @@
 //! Shared types for the MCP command channel.
 //!
-//! The MCP HTTP server runs on background threads. Writable actions
+//! The MCP socket server runs on background threads. Writable actions
 //! (navigate, filter, pick) must execute on the main thread which owns
 //! `AppState`. These types bridge the two via `std::sync::mpsc`.
 //!
@@ -27,6 +27,9 @@ pub enum McpCommand {
     PickFiles { patterns: Vec<String> },
     /// Clear all picks.
     ClearPicks,
+    /// Another spyc instance has taken over the MCP socket for this
+    /// directory. The TUI should warn the user.
+    Disconnected { new_pid: u32 },
 }
 
 /// Response sent back to the MCP thread after command execution.

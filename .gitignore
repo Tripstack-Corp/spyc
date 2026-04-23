@@ -54,3 +54,5 @@ Cargo.lock.bak
 
 # spyc MCP context files (runtime, per-PID)
 .spyc-context-*.json
+
+.mcp.json

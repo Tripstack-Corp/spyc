@@ -260,8 +260,8 @@ pub struct App {
     context_path: PathBuf,
     /// Last serialized context JSON — skip disk write when unchanged.
     last_context_json: String,
-    /// MCP HTTP server port (0 = not running).
-    mcp_port: u16,
+    /// Whether the MCP socket server is running.
+    mcp_running: bool,
     /// Summary printed to stdout after the TUI exits.
     pub exit_summary: Option<String>,
     /// Accumulates characters the user types while the pane is focused.
@@ -421,12 +421,13 @@ impl App {
         let context_path = crate::context::context_path(&app_state.start_dir);
         // Command channel for writable MCP actions (Claude → main loop).
         let (mcp_cmd_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
-        // Start the MCP HTTP server so Claude CLI can connect via
-        // --mcp-config. Port 0 = OS assigns a free port.
-        let mcp_port = crate::mcp::start_http_server(context_path.clone(), mcp_cmd_tx)
+        // Start the MCP Unix socket server so `spyc --mcp` (spawned by
+        // Claude Code) can proxy to us for full read/write MCP access.
+        let mcp_running = crate::mcp::start_socket_server(context_path.clone(), mcp_cmd_tx)
+            .map(|()| true)
             .unwrap_or_else(|e| {
-                spyc_debug!("MCP HTTP server failed to start: {e}");
-                0
+                spyc_debug!("MCP socket server failed to start: {e}");
+                false
             });
         let mut app = Self {
             state: app_state,
@@ -448,7 +449,7 @@ impl App {
             theme,
             context_path,
             last_context_json: String::new(),
-            mcp_port,
+            mcp_running,
             exit_summary: None,
             pane_prompt_buf: String::new(),
             last_pane_prompt: None,
@@ -483,7 +484,31 @@ impl App {
         if resume {
             app.show_session_picker();
         }
+        // Write .mcp.json so Claude Code spawns `spyc --mcp` (stdio),
+        // which proxies to our Unix socket.
+        if app.mcp_running {
+            app.ensure_mcp_config();
+        }
         app
+    }
+
+    /// Write `.mcp.json` with stdio transport on startup.
+    /// If enterprise policy blocks spyc, flash an error instead.
+    fn ensure_mcp_config(&mut self) {
+        match crate::mcp::ensure_mcp_json(&self.state.listing.dir) {
+            Ok(crate::mcp::McpConfigStatus::Configured) => {}
+            Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
+                self.state.flash_info(format!(
+                    "MCP: took over from PID {old_pid}"
+                ));
+            }
+            Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
+                self.state.flash_error(
+                    "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
+                );
+            }
+            Err(e) => self.state.flash_error(format!(".mcp.json: {e}")),
+        }
     }
 
     /// Build a context snapshot from the current state for MCP consumers.
@@ -601,6 +626,15 @@ impl App {
                 self.write_context();
                 McpResponse::Ok {
                     message: format!("cleared {count} pick(s)"),
+                }
+            }
+            McpCommand::Disconnected { new_pid } => {
+                self.mcp_running = false;
+                self.state.flash_error(format!(
+                    "MCP taken over by spyc PID {new_pid} — Claude is connected to that instance"
+                ));
+                McpResponse::Ok {
+                    message: "acknowledged".into(),
                 }
             }
         }
@@ -1882,15 +1916,13 @@ impl App {
     }
 
     fn handle_prompt_key(&mut self, key: KeyEvent) -> PostAction {
-        // Destructive-confirm prompts are single-key: `y` / `Y` proceeds
-        // immediately, anything else cancels. No Enter needed.
+        // Single-key confirm prompts: `y` / `Y` proceeds, anything else cancels.
         if matches!(
             &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::RemoveConfirm)
         ) {
             return self.handle_remove_confirm_key(key);
         }
-
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
             &self.state.mode,
@@ -2749,18 +2781,8 @@ impl App {
     }
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
-        // Inject --mcp-config when spawning Claude so it connects to
-        // our HTTP MCP server for context awareness.
-        let cmd = if self.mcp_port > 0 && Self::is_claude_command(cmd) {
-            let config = crate::mcp::mcp_config_json(self.mcp_port);
-            let full = format!("{cmd} --mcp-config '{config}'");
-            spyc_debug!("pane cmd: {full}");
-            full
-        } else {
-            cmd.to_string()
-        };
         let (rows, cols) = Self::pane_spawn_size(self.state.pane_height_pct);
-        match Pane::spawn(&cmd, rows, cols, cwd) {
+        match Pane::spawn_with_env(cmd, rows, cols, cwd, &[]) {
             Ok(p) => {
                 self.state.pane_focused = true;
                 self.state.flash_info(format!("pane: {cmd} (^W k for list)"));
