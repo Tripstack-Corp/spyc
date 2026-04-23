@@ -469,9 +469,13 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
 
-    // Reserve the bottom row of the body for the search status when any
-    // search state is visible; otherwise the whole body shows content.
-    let (content_area, search_area) = if view.status_text().is_some() {
+    // Reserve the bottom row for the search/status bar. In multi-column
+    // views (help) the row is always reserved so the viewport height stays
+    // constant when search is activated — otherwise the column layout
+    // would reflow. In single-column views it's only shown when active.
+    let ncols = view.columns.max(1) as usize;
+    let show_search_row = view.status_text().is_some() || ncols > 1;
+    let (content_area, search_area) = if show_search_row {
         (
             Rect {
                 x: body_area.x,
@@ -490,18 +494,19 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         (body_area, None)
     };
 
-    let ncols = view.columns.max(1) as usize;
     if ncols > 1 {
         render_multi_column(frame, content_area, view, theme, ncols);
     } else {
         render_single_column(frame, content_area, view, theme);
     }
 
-    if let (Some(rect), Some(text)) = (search_area, view.status_text()) {
-        let style = Style::default()
-            .fg(theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD);
-        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
+    if let Some(rect) = search_area {
+        if let Some(text) = view.status_text() {
+            let style = Style::default()
+                .fg(theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
+        }
     }
 }
 

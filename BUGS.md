@@ -7,8 +7,6 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
-- in the help pager ... lines are not wrapping correctly
-- / shouldn't change the pager display (in help)
 - support git blame shortcut
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
@@ -42,6 +40,13 @@
   scrolled halfway up sometimes
 
 ### FIXED ###
+- (fixed) help pager lines wrapping incorrectly — multi-column
+  rendering was using ratatui's `.wrap()` which broke key/description
+  alignment. Now clips at column edge to keep tabular layout clean.
+- (fixed) / search in help pager disrupted the display — the search
+  bar stole a viewport row which broke multi-column scroll. Now always
+  reserves a dedicated search row in multi-column views so the
+  viewport height stays constant. Search works in help.
 - (fixed) yank full pane scrollback: `ya` copies up to 10K lines of
   scrollback + visible screen to clipboard (vs `yp` which only gets visible)
 - (fixed) quit now warns about running processes: "2 running processes —
