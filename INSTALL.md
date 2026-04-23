@@ -111,9 +111,15 @@ export SPYC_PANE_CMD="bash"
 
 ## MCP configuration
 
-spyc runs an MCP server on a PID-scoped Unix domain socket and
-writes a `.mcp.json` in the working directory on startup so Claude
-Code discovers it automatically. No manual configuration is needed.
+spyc runs an MCP server on a PID-scoped Unix domain socket
+(`~/.local/state/spyc/mcp-<PID>.sock`) so Claude Code can query and
+control the file manager. How it connects depends on whether your
+Claude Code installation is managed by an organization or not.
+
+### Unmanaged (personal) environments
+
+No configuration is needed. spyc writes a `.mcp.json` in the working
+directory on startup and Claude Code discovers it automatically.
 
 The generated `.mcp.json` looks like this:
 
@@ -146,11 +152,6 @@ automatically, including:
   directory, it updates `.mcp.json` to point at its own socket and
   notifies the old instance.
 - **Cleanup** — the socket file is removed on normal exit.
-- **Discovery fallback** — if `SPYC_MCP_SOCK` is not set (e.g.,
-  enterprise managed-mcp.json), the proxy scans
-  `~/.local/state/spyc/mcp-*.sock` for any live instance.
-
-### `.gitignore`
 
 `.mcp.json` is a runtime artifact — add it to `.gitignore`:
 
@@ -160,19 +161,41 @@ automatically, including:
 
 spyc's own repo already has this entry.
 
-### Enterprise environments
+### Enterprise managed environments
 
-If your organization uses Claude Code's enterprise managed settings,
-spyc checks the policy before writing `.mcp.json`:
+Organizations can deploy Claude Code with a `managed-settings.json`
+that controls which MCP servers are allowed. spyc checks this policy
+before writing `.mcp.json`:
 
-- **`deniedMcpServers`** — if `"spyc"` is listed, the MCP server
-  will not configure itself. A flash message warns in the TUI.
-- **`allowedMcpServers`** — if an allowlist exists, `"spyc"` must
-  be on it.
+- **`deniedMcpServers`** — if `"spyc"` appears in the denylist,
+  the MCP server will not configure itself. A flash message warns
+  in the TUI: *"MCP: blocked by enterprise policy"*.
+- **`allowedMcpServers`** — if an allowlist is present, `"spyc"`
+  must be included or configuration is blocked.
+- If neither list mentions spyc, it is allowed by default.
 
 Managed settings are read from:
-- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
-- Linux: `/etc/claude-code/managed-settings.json`
+
+| Platform   | Path                                                        |
+|------------|-------------------------------------------------------------|
+| macOS      | `/Library/Application Support/ClaudeCode/managed-settings.json` |
+| Linux/WSL  | `/etc/claude-code/managed-settings.json`                    |
+
+To allow spyc in a managed environment, add it to the allowlist:
+
+```json
+{
+  "allowedMcpServers": [
+    { "serverName": "spyc" }
+  ]
+}
+```
+
+When `SPYC_MCP_SOCK` is not set — as is the case when the MCP server
+entry comes from a centrally deployed `managed-settings.json` rather
+than spyc's own `.mcp.json` — the stdio proxy falls back to
+**discovery mode**: it scans `~/.local/state/spyc/mcp-*.sock` for
+any live instance and connects to the first one it finds.
 
 ## Verifying the setup
 
