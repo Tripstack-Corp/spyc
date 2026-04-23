@@ -7,6 +7,9 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- / shouldn't change the pager display (in help)
+- support git blame shortcut
+- in the help pager ... lines are not wrapping correctly
 - programs requiring interactive input like sudo executed in our pager env don't
   work e.g. sudo; need to solve for this
 - yanking from the pane should support # so that you can yank the last 150
