@@ -7,6 +7,8 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- programs requiring interactive input like sudo executed in our pager env don't
+  work e.g. sudo; need to solve for this
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
 - support for named sessions

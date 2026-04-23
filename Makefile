@@ -11,7 +11,7 @@
 #   make release      — optimized release for current platform
 #   make dist         — all platforms → dist/
 #   make check        — fmt + clippy + test (CI gate)
-#   make install      — install to /usr/local/bin (override: PREFIX=~/local make install)
+#   make install      — copy to /usr/local/bin (needs sudo; run `make release` first)
 
 BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -128,15 +128,13 @@ dist-checksums: dist ## Generate SHA-256 checksums
 PREFIX ?= /usr/local
 
 .PHONY: install
-install: release ## Install to /usr/local/bin
-	@echo "copying $(BINARY) → $(PREFIX)/bin/"
+install: ## Install to /usr/local/bin (run `make release` first, then `sudo make install`)
+	@test -f target/release/$(BINARY) || { echo "error: run 'make release' first"; exit 1; }
 	install -d $(PREFIX)/bin
 	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(shell uname),Darwin)
-	@echo "code-signing (ad-hoc)…"
 	codesign -s - -v $(PREFIX)/bin/$(BINARY)
 endif
-	@ls -lh $(PREFIX)/bin/$(BINARY)
 	@echo "✓ installed $(BINARY) v$(VERSION) → $(PREFIX)/bin/$(BINARY)"
 
 .PHONY: uninstall
