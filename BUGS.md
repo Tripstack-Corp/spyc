@@ -7,14 +7,15 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- in the help pager ... lines are not wrapping correctly
 - / shouldn't change the pager display (in help)
 - support git blame shortcut
-- in the help pager ... lines are not wrapping correctly
-- programs requiring interactive input like sudo executed in our pager env don't
-  work e.g. sudo; need to solve for this
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
-- support for named sessions
+- programs requiring interactive input like sudo executed in our pager env don't
+  work e.g. sudo; need to solve for this
+- support for named sessions which show in all caps in the top line after the
+  logo
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
 - you can get into a weird history loop where commands are mixed with !shell
