@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  macOS and Linux · v1.7.0 · actively developed
+  macOS and Linux · v1.10.0 · actively developed
 </p>
 
 <p align="center">
@@ -31,10 +31,11 @@ inventory, active filter, and git branch -- without you copying or
 pasting anything. When Claude mentions a file path in its response,
 press `gf` to jump straight to it. The context flows both ways.
 
-This is possible because spyc runs an **MCP server** on a background
-thread. Claude connects at spawn via `--mcp-config`, and the context
-stays current as you navigate. We don't know another TUI file manager
-that exposes itself to an AI agent this way.
+This is possible because spyc runs an **MCP server** on a PID-scoped
+Unix domain socket. Claude discovers it automatically via `.mcp.json`
+-- no flags needed. Multiple spyc instances coexist safely, and the
+context stays current as you navigate. We don't know another TUI file
+manager that exposes itself to an AI agent this way.
 
 Everything else -- vi motions, marks, picks, inventory, pager, shell
 integration -- is what you'd expect from a keyboard-driven file manager.
@@ -60,7 +61,8 @@ The name: **spy** (inspired by SideFX's in-house file manager) +
 ```sh
 git clone https://bitbucket.org/tripstack/spyc.git
 cd spyc
-make install    # builds release, copies to ~/bin/spyc
+make release          # build optimized binary
+sudo make install     # copy to /usr/local/bin
 ```
 
 ### Launch
@@ -79,12 +81,18 @@ Press **`^a j`** / **`^a k`** to switch focus between file list and pane.
 
 ## How the MCP bridge works
 
-When spyc spawns Claude in the pane, it automatically:
+When spyc starts, it automatically:
 
-1. **Starts an MCP server** on a background thread (HTTP, localhost)
-2. **Injects `--mcp-config`** so Claude connects at spawn
-3. **Writes a context snapshot** -- cwd, cursor file, picks, inventory,
-   filter, git branch -- updated when state changes
+1. **Starts an MCP server** on a PID-scoped Unix domain socket
+   (`~/.local/state/spyc/mcp-<PID>.sock`)
+2. **Writes `.mcp.json`** so Claude Code discovers spyc via standard
+   config -- no flags needed
+3. **Keeps a context snapshot current** -- cwd, cursor file, picks,
+   inventory, filter, git branch -- updated as you navigate
+
+Multiple instances coexist safely. If a new spyc opens in the same
+directory, it sends a disconnect notification to the old instance and
+takes over. Enterprise managed-settings.json policies are respected.
 
 Claude can call `get_spyc_context` at any time to see exactly what
 you're looking at. Use `gf`/`gF` to jump from Claude's output back to
