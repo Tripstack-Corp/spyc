@@ -59,16 +59,17 @@ Minimum supported Rust version: **1.80**.
 ## Build and install
 
 ```sh
-git clone https://github.com/tripstack/spyc.git
+git clone https://bitbucket.org/tripstack/spyc.git
 cd spyc
-make install        # builds release and installs to ~/bin
+make release          # build optimized binary
+sudo make install     # copy to /usr/local/bin
 ```
 
 Or build manually:
 
 ```sh
 cargo build --release
-cp target/release/spyc /usr/local/bin/
+sudo install -m 755 target/release/spyc /usr/local/bin/
 ```
 
 ## Cross-compilation (optional)
@@ -108,6 +109,71 @@ Set `SPYC_PANE_CMD` to change the default pane command:
 export SPYC_PANE_CMD="bash"
 ```
 
+## MCP configuration
+
+spyc runs an MCP server on a PID-scoped Unix domain socket and
+writes a `.mcp.json` in the working directory on startup so Claude
+Code discovers it automatically. No manual configuration is needed.
+
+The generated `.mcp.json` looks like this:
+
+```json
+{
+  "mcpServers": {
+    "spyc": {
+      "command": "/usr/local/bin/spyc",
+      "args": ["--mcp"],
+      "env": {
+        "SPYC_MCP_SOCK": "/Users/you/.local/state/spyc/mcp-12345.sock"
+      }
+    }
+  }
+}
+```
+
+- **`command`** — path to the spyc binary (auto-detected from
+  the running executable).
+- **`args`** — `--mcp` runs spyc in stdio MCP proxy mode. Claude
+  Code spawns this process; it proxies JSON-RPC to the running
+  instance's Unix socket.
+- **`env.SPYC_MCP_SOCK`** — tells the proxy which socket to
+  connect to (PID-scoped, so multiple instances don't collide).
+
+**You should not need to edit this file.** spyc manages it
+automatically, including:
+
+- **Instance takeover** — if a second spyc opens in the same
+  directory, it updates `.mcp.json` to point at its own socket and
+  notifies the old instance.
+- **Cleanup** — the socket file is removed on normal exit.
+- **Discovery fallback** — if `SPYC_MCP_SOCK` is not set (e.g.,
+  enterprise managed-mcp.json), the proxy scans
+  `~/.local/state/spyc/mcp-*.sock` for any live instance.
+
+### `.gitignore`
+
+`.mcp.json` is a runtime artifact — add it to `.gitignore`:
+
+```
+.mcp.json
+```
+
+spyc's own repo already has this entry.
+
+### Enterprise environments
+
+If your organization uses Claude Code's enterprise managed settings,
+spyc checks the policy before writing `.mcp.json`:
+
+- **`deniedMcpServers`** — if `"spyc"` is listed, the MCP server
+  will not configure itself. A flash message warns in the TUI.
+- **`allowedMcpServers`** — if an allowlist exists, `"spyc"` must
+  be on it.
+
+Managed settings are read from:
+- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- Linux: `/etc/claude-code/managed-settings.json`
+
 ## Verifying the setup
 
 Launch spyc and check:
@@ -120,5 +186,8 @@ Launch spyc and check:
    true-color.
 3. **Pane** — press `^\` (Ctrl+Backslash) to open the lower pane. It
    should spawn `claude` (or whatever `SPYC_PANE_CMD` is set to).
-4. **Ctrl+J** — in the pane with Claude, Ctrl+J should insert a
+4. **MCP** — in the Claude pane, Claude should have access to spyc's
+   MCP tools (`get_spyc_context`, `navigate_to`, etc.). Ask Claude
+   "what file am I looking at?" to verify the connection.
+5. **Ctrl+J** — in the pane with Claude, Ctrl+J should insert a
    newline for multi-line input.
