@@ -22,6 +22,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - **`src/pane/`** — Pty-hosted subprocess. `mod.rs` is the `Pane` struct (spawn, I/O, scroll mode), `input.rs` encodes crossterm keys to ANSI, `widget.rs` renders `vt100::Screen` to ratatui.
 - **`src/ui/`** — Widgets: list view, status bar, pager, prompt, line editor, help, theme.
 - **`src/fs/`** — Directory listing, entry types, file operations.
+- **`src/mcp.rs`** — MCP server: PID-scoped Unix socket listener, stdio proxy for Claude Code, `.mcp.json` management, enterprise policy checking, instance takeover.
+- **`src/mcp_cmd.rs`** — Command channel types bridging MCP threads to the main event loop.
 - **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks.
 - **`src/config/`** — Config loading and DSL parser.
 - **`src/shell/`** — Shell expansion and command execution.

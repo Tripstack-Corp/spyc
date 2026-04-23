@@ -265,9 +265,16 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 
 ## MCP server (Claude integration)
 
-spyc runs a background HTTP MCP server that Claude Code connects to
-automatically via `--mcp-config` at pane spawn. Claude can query and
-control the workspace through these tools:
+spyc runs a background MCP server on a PID-scoped Unix domain socket
+(`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes
+`.mcp.json` with a stdio transport entry so Claude Code discovers
+spyc automatically — no `--mcp-config` flag needed. Multiple spyc
+instances coexist safely; when a new instance opens in the same
+directory it sends a `spyc/disconnected` notification to the old one
+and takes over the `.mcp.json` entry. Enterprise managed-settings.json
+policies (`deniedMcpServers`/`allowedMcpServers`) are respected.
+
+Claude can query and control the workspace through these tools:
 
 **Read tools:**
 - **`get_spyc_context`** -- returns cwd, cursor file, picks, inventory,
