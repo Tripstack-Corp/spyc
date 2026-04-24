@@ -3738,24 +3738,18 @@ impl App {
     /// terminal resize (to re-wrap descriptions for the new width and
     /// pick the right column count).
     fn open_help(&mut self) {
-        // Mirror the pager's layout math (see ui/pager.rs):
-        //   inner_area = centered_rect(frame, 90, 92)  -> 90% of term width
-        //   body_area  = block.inner(inner_area)       -> minus 2 for borders
-        //   col_w      = (body_area.width - col_gap) / ncols
-        // Matching this here is load-bearing: if we wrap against a wider
-        // col_w than the pager actually uses, the pager clips trailing chars.
         let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-        let body_w = (term_w * 90 / 100).saturating_sub(2);
-        let col_gap: u16 = 2;
-        // Fall back to one column on narrow terminals — two columns at this
-        // width would leave no room for description text after the key prefix.
-        // Require at least ~40 chars of description space per column before
-        // committing to 2-col. At prefix_w=~30 that's col_w ≥ 70, i.e. body
-        // width ≥ 140. Below that, 2-col would cramp descriptions and make
-        // the table harder to read than a single wider column.
-        let ncols: u16 = if body_w < 140 { 1 } else { 2 };
-        let col_w = body_w.saturating_sub(col_gap * (ncols - 1)) / ncols;
-        let lines = help::build_lines(&self.theme, &self.state.user_keymap, col_w as usize);
+        // Require at least ~40 chars of description space per column
+        // before committing to 2-col (prefix is ~30 chars, so col_w ≥ 70,
+        // body ≥ 140). Below that, 2-col cramps descriptions more than a
+        // single wider column would.
+        let ncols: u16 = if pager::centered_body_width(term_w) < 140 {
+            1
+        } else {
+            2
+        };
+        let col_w = pager::centered_col_width(term_w, ncols) as usize;
+        let lines = help::build_lines(&self.theme, &self.state.user_keymap, col_w);
         let mut view = pager::PagerView::new_styled(Self::HELP_TITLE, lines);
         view.columns = ncols as u8;
         self.pager = Some(view);

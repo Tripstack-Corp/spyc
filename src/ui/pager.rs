@@ -441,11 +441,36 @@ fn line_plain_text(line: &Line) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
+/// Centered pager occupies this percent of the terminal width.
+/// Exposed so callers (help content generation) can compute the same
+/// column width the pager will actually render at.
+const CENTERED_W_PCT: u16 = 90;
+/// Gap (in cells) between columns in multi-column mode.
+const COL_GAP: u16 = 2;
+
+/// Column width a centered pager will use for `ncols` columns at the
+/// given terminal width. Mirrors the render-path math: centered rect
+/// → minus 2 for block borders → divided evenly across columns.
+#[must_use]
+pub const fn centered_col_width(term_w: u16, ncols: u16) -> u16 {
+    let body_w = centered_body_width(term_w);
+    let ncols = if ncols < 1 { 1 } else { ncols };
+    let gaps = COL_GAP * ncols.saturating_sub(1);
+    body_w.saturating_sub(gaps) / ncols
+}
+
+/// Body width inside the centered pager (useful for deciding how many
+/// columns actually fit before calling `centered_col_width`).
+#[must_use]
+pub const fn centered_body_width(term_w: u16) -> u16 {
+    (term_w * CENTERED_W_PCT / 100).saturating_sub(2)
+}
+
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let inner_area = if view.full_width {
         area
     } else {
-        centered_rect(area, 90, 92)
+        centered_rect(area, CENTERED_W_PCT, 92)
     };
 
     frame.render_widget(Clear, inner_area);
@@ -675,9 +700,8 @@ fn render_multi_column(
     let viewport_h = content_area.height as usize;
     let scroll = view.scroll as usize;
     let content_end = view.lines.len();
-    let col_gap = 2u16;
     // Divide available width evenly (minus gaps between columns).
-    let total_gap = col_gap * (ncols as u16).saturating_sub(1);
+    let total_gap = COL_GAP * (ncols as u16).saturating_sub(1);
     let col_w = content_area.width.saturating_sub(total_gap) / ncols as u16;
 
     let eof_style = Style::default()
@@ -694,7 +718,7 @@ fn render_multi_column(
         let local_scroll = scroll.min(chunk_len);
         let col_start = chunk_start + local_scroll;
         let col_end = (col_start + viewport_h).min(chunk_end);
-        let x = content_area.x + (col as u16) * (col_w + col_gap);
+        let x = content_area.x + (col as u16) * (col_w + COL_GAP);
         let col_rect = Rect {
             x,
             y: content_area.y,
@@ -716,11 +740,10 @@ fn render_multi_column(
         };
 
         // Pad with tilde markers when this column has fewer lines than the
-        // viewport (shorter chunk, or scrolled past the chunk end). Only
-        // mark [EOF] on the last column — per-column EOFs would imply the
-        // overall document ended early, which isn't true here.
-        let is_last_col = col + 1 == ncols;
-        if col_end >= chunk_end && display_lines.len() < viewport_h && !view.streaming {
+        // viewport. Only mark [EOF] on the last column — per-column EOFs
+        // would wrongly imply the overall document ended early.
+        if display_lines.len() < viewport_h && !view.streaming {
+            let is_last_col = col + 1 == ncols;
             if is_last_col && col_start < content_end {
                 display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
             }
