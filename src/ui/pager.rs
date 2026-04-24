@@ -226,9 +226,26 @@ impl PagerView {
         viewport_height.saturating_mul(u16::from(self.columns.max(1)))
     }
 
+    /// Maximum useful `scroll` value for the current layout. In multi-col
+    /// the static partition means each column has its own chunk; the
+    /// visible range is capped by the longest chunk minus viewport_h.
+    /// In single-col it's simply `lines - viewport_h`.
+    fn scroll_max(&self, viewport_height: u16) -> u16 {
+        let ncols = self.columns.max(1) as usize;
+        let longest = if ncols <= 1 {
+            self.lines.len()
+        } else {
+            partition_lines_static(&self.lines, ncols)
+                .into_iter()
+                .map(|(s, e)| e - s)
+                .max()
+                .unwrap_or(0)
+        };
+        u16::try_from(longest.saturating_sub(viewport_height.into())).unwrap_or(u16::MAX)
+    }
+
     fn clamp_scroll(&mut self, viewport_height: u16) {
-        let total = self.line_count();
-        let max_scroll = total.saturating_sub(self.page_lines(viewport_height).max(1));
+        let max_scroll = self.scroll_max(viewport_height);
         if self.scroll > max_scroll {
             self.scroll = max_scroll;
         }
@@ -246,29 +263,25 @@ impl PagerView {
     }
 
     pub fn scroll_to_bottom(&mut self, viewport_height: u16) {
-        self.scroll = self
-            .line_count()
-            .saturating_sub(self.page_lines(viewport_height).max(1));
+        self.scroll = self.scroll_max(viewport_height);
     }
 
     /// Position indicator: "Top", "Bot", "All", or "NN%".
-    /// Percentage is based on the bottom visible line relative to the total
-    /// (like `less`), so it reflects how much of the document you've seen.
+    /// Percentage is based on scroll progress through the "effective"
+    /// document length — in multi-col that's the longest chunk, not the
+    /// total line count, since each column's chunk scrolls independently.
     pub fn position_indicator(&self, viewport_height: u16) -> String {
-        let total = self.line_count();
-        let page = self.page_lines(viewport_height);
-        if total <= page {
+        let max_scroll = self.scroll_max(viewport_height);
+        if max_scroll == 0 {
             return "All".to_string();
         }
         if self.scroll == 0 {
             return "Top".to_string();
         }
-        let bottom = u32::from(self.scroll) + u32::from(page);
-        let total32 = u32::from(total);
-        if bottom >= total32 {
+        if self.scroll >= max_scroll {
             return "Bot".to_string();
         }
-        let pct = (bottom * 100) / total32;
+        let pct = (u32::from(self.scroll) * 100) / u32::from(max_scroll);
         format!("{pct}%")
     }
 
@@ -602,6 +615,56 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     frame.render_widget(paragraph, content_area);
 }
 
+/// Partition lines into `ncols` chunks at section boundaries (blank lines),
+/// targeting roughly equal chunk sizes. The partition is **static** — it
+/// does not depend on the current scroll position. Callers apply the
+/// user's scroll offset independently within each chunk so the content-
+/// to-column mapping stays fixed as the user scrolls.
+fn partition_lines_static(lines: &[Line<'static>], ncols: usize) -> Vec<(usize, usize)> {
+    let total = lines.len();
+    if ncols <= 1 || total == 0 {
+        return vec![(0, total)];
+    }
+    let target = total / ncols;
+    let mut chunks = Vec::with_capacity(ncols);
+    let mut cursor = 0usize;
+    for c in 0..ncols {
+        if c + 1 == ncols {
+            chunks.push((cursor, total));
+            break;
+        }
+        let ideal = cursor + target;
+        // Search within a window ±(target/2) of the ideal break for the
+        // closest blank line. Fall back to the ideal cut if no blank
+        // exists in the window (rare: implies a single section >target).
+        let window_lo = cursor + 1;
+        let window_hi = (ideal + target / 2).min(total);
+        let mut best = ideal.min(total);
+        let mut best_dist = usize::MAX;
+        for (i, line_or_end) in (window_lo..=window_hi).map(|idx| (idx, lines.get(idx))) {
+            let is_break = line_or_end.is_none_or(is_blank_line);
+            if !is_break {
+                continue;
+            }
+            let dist = i.abs_diff(ideal);
+            if dist < best_dist {
+                best_dist = dist;
+                best = i;
+            }
+        }
+        chunks.push((cursor, best));
+        cursor = best;
+        while cursor < total && is_blank_line(&lines[cursor]) {
+            cursor += 1;
+        }
+    }
+    chunks
+}
+
+fn is_blank_line(line: &Line<'static>) -> bool {
+    line.spans.iter().all(|s| s.content.trim().is_empty())
+}
+
 fn render_multi_column(
     frame: &mut Frame,
     content_area: Rect,
@@ -610,7 +673,7 @@ fn render_multi_column(
     ncols: usize,
 ) {
     let viewport_h = content_area.height as usize;
-    let start = view.scroll as usize;
+    let scroll = view.scroll as usize;
     let content_end = view.lines.len();
     let col_gap = 2u16;
     // Divide available width evenly (minus gaps between columns).
@@ -621,9 +684,16 @@ fn render_multi_column(
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
 
-    for col in 0..ncols {
-        let col_start = start + col * viewport_h;
-        let col_end = (col_start + viewport_h).min(content_end);
+    // Static partition: content-to-column mapping is fixed (doesn't shift
+    // as the user scrolls). Each column then applies the scroll offset
+    // independently within its own chunk.
+    let chunks = partition_lines_static(&view.lines, ncols);
+
+    for (col, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
+        let chunk_len = chunk_end - chunk_start;
+        let local_scroll = scroll.min(chunk_len);
+        let col_start = chunk_start + local_scroll;
+        let col_end = (col_start + viewport_h).min(chunk_end);
         let x = content_area.x + (col as u16) * (col_w + col_gap);
         let col_rect = Rect {
             x,
@@ -632,7 +702,7 @@ fn render_multi_column(
             height: content_area.height,
         };
 
-        let mut display_lines: Vec<Line<'static>> = if col_start < content_end {
+        let mut display_lines: Vec<Line<'static>> = if col_start < chunk_end {
             view.lines[col_start..col_end]
                 .iter()
                 .enumerate()
@@ -645,9 +715,13 @@ fn render_multi_column(
             Vec::new()
         };
 
-        // Fill remaining rows with tilde markers.
-        if col_end >= content_end && display_lines.len() < viewport_h && !view.streaming {
-            if col_start < content_end {
+        // Pad with tilde markers when this column has fewer lines than the
+        // viewport (shorter chunk, or scrolled past the chunk end). Only
+        // mark [EOF] on the last column — per-column EOFs would imply the
+        // overall document ended early, which isn't true here.
+        let is_last_col = col + 1 == ncols;
+        if col_end >= chunk_end && display_lines.len() < viewport_h && !view.streaming {
+            if is_last_col && col_start < content_end {
                 display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
             }
             while display_lines.len() < viewport_h {

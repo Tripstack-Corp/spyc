@@ -214,7 +214,16 @@ const SECTIONS: &[Section] = &[
     },
 ];
 
-pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>> {
+/// Floor for the key column: keeps the description stripe visually
+/// consistent even when every visible key is short (default bindings
+/// only). Widens automatically when any row — user binding or built-in —
+/// needs more room.
+const MIN_KEY_W: usize = 24;
+
+/// Build help content formatted to fit within `col_w` per column.
+/// Descriptions longer than the available width are wrapped at word
+/// boundaries with continuations indented to the description column.
+pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap, col_w: usize) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     let key_style = Style::default().fg(theme.pick).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(theme.status_path);
@@ -222,38 +231,159 @@ pub fn build_lines(theme: &Theme, user_keymap: &UserKeymap) -> Vec<Line<'static>
         .fg(theme.status_user)
         .add_modifier(Modifier::BOLD);
 
+    let user_bindings: Vec<_> = user_keymap.iter().collect();
+    let key_w = max_key_width(&user_bindings);
+
     for (i, section) in SECTIONS.iter().enumerate() {
         if i > 0 {
             out.push(Line::from(""));
         }
         out.push(Line::from(Span::styled(section.title, section_style)));
         for (keys, desc) in section.rows {
-            out.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(display_pad_right(keys, 24), key_style),
-                Span::raw("  "),
-                Span::styled((*desc).to_string(), desc_style),
-            ]));
+            emit_row(&mut out, keys, desc, col_w, key_w, key_style, desc_style);
         }
     }
 
-    // Per-user bindings from .spycrc.toml, if any.
-    let user_bindings: Vec<_> = user_keymap.iter().collect();
     if !user_bindings.is_empty() {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled(
             "Custom (.spycrc.toml)",
             section_style,
         )));
-        for binding in user_bindings {
-            out.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(display_pad_right(&binding.chord.display(), 24), key_style),
-                Span::raw("  "),
-                Span::styled(binding.action.describe(), desc_style),
-            ]));
+        for binding in &user_bindings {
+            let chord = binding.chord.display();
+            let action = binding.action.describe();
+            emit_row(
+                &mut out, &chord, &action, col_w, key_w, key_style, desc_style,
+            );
         }
     }
 
     out
+}
+
+/// Widest key string across all built-in rows plus the user's custom
+/// bindings, clamped to `MIN_KEY_W` as a floor.
+fn max_key_width(user_bindings: &[&crate::keymap::user::UserBinding]) -> usize {
+    let builtin = SECTIONS
+        .iter()
+        .flat_map(|s| s.rows.iter())
+        .map(|(k, _)| super::display_width(k));
+    let user = user_bindings
+        .iter()
+        .map(|b| super::display_width(&b.chord.display()));
+    builtin.chain(user).max().unwrap_or(0).max(MIN_KEY_W)
+}
+
+/// Push a help row (key + description) into `out`. Wraps the description
+/// onto continuation lines when it would overflow `col_w`; continuations
+/// indent to the description column so the table stays readable.
+fn emit_row(
+    out: &mut Vec<Line<'static>>,
+    keys: &str,
+    desc: &str,
+    col_w: usize,
+    key_w: usize,
+    key_style: Style,
+    desc_style: Style,
+) {
+    let prefix_w = 2 + key_w + 2;
+    let desc_w = col_w.saturating_sub(prefix_w).max(10);
+    let chunks = wrap_description(desc, desc_w);
+    let mut iter = chunks.into_iter();
+    let first = iter.next().unwrap_or_default();
+    out.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(display_pad_right(keys, key_w), key_style),
+        Span::raw("  "),
+        Span::styled(first, desc_style),
+    ]));
+    for cont in iter {
+        out.push(Line::from(vec![
+            Span::raw(" ".repeat(prefix_w)),
+            Span::styled(cont, desc_style),
+        ]));
+    }
+}
+
+/// Split `text` into chunks no wider than `max`. Breaks at word boundaries
+/// when possible; a single word longer than `max` is hard-split.
+fn wrap_description(text: &str, max: usize) -> Vec<String> {
+    if crate::ui::display_width(text) <= max {
+        return vec![text.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+    for word in text.split_whitespace() {
+        let w = crate::ui::display_width(word);
+        let need = if current.is_empty() { w } else { w + 1 };
+        if current_w + need > max && !current.is_empty() {
+            out.push(std::mem::take(&mut current));
+            current_w = 0;
+        }
+        if w > max {
+            // Word alone exceeds the budget — hard-split by chars.
+            if !current.is_empty() {
+                out.push(std::mem::take(&mut current));
+                current_w = 0;
+            }
+            let mut buf = String::new();
+            let mut buf_w = 0usize;
+            for ch in word.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if buf_w + cw > max && !buf.is_empty() {
+                    out.push(std::mem::take(&mut buf));
+                    buf_w = 0;
+                }
+                buf.push(ch);
+                buf_w += cw;
+            }
+            if !buf.is_empty() {
+                current = buf;
+                current_w = buf_w;
+            }
+            continue;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+            current_w += 1;
+        }
+        current.push_str(word);
+        current_w += w;
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_description_not_wrapped() {
+        assert_eq!(wrap_description("short", 40), vec!["short".to_string()]);
+    }
+
+    #[test]
+    fn wraps_at_word_boundary() {
+        let out = wrap_description("one two three four five six seven", 10);
+        assert!(out.iter().all(|c| c.len() <= 10), "got {out:?}");
+        assert_eq!(out.join(" "), "one two three four five six seven");
+    }
+
+    #[test]
+    fn hard_splits_long_word() {
+        let out = wrap_description("supercalifragilistic", 6);
+        assert!(out.iter().all(|c| c.len() <= 6));
+        assert_eq!(out.join(""), "supercalifragilistic");
+    }
+
+    #[test]
+    fn preserves_single_word_exactly_fits() {
+        let out = wrap_description("abcdef", 6);
+        assert_eq!(out, vec!["abcdef".to_string()]);
+    }
 }

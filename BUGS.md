@@ -7,9 +7,8 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
-- (reopened) help pager lines wrapping incorrectly — multi-column
-  rendering was using ratatui's `.wrap()` which broke key/description
-  alignment. Now clips at column edge to keep tabular layout clean.
+- home directory should shorten to ~ e.g. "/Users/derekmarshall/src/spyc" should
+  be "~/src/spyc"
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
   history but it should preserve shell vs. spyc commands
@@ -41,6 +40,14 @@
   scrolled halfway up sometimes
 
 ### FIXED ###
+- (fixed) help pager multi-column layout: descriptions no longer clip at
+  the column edge (per-row wrap with indented continuations); sections
+  stay together across columns (no more orphan "Pane path references"
+  at the bottom of col 0); the 2-col / 1-col choice is based on actual
+  body width and re-decides on window resize. j/k scrolls both columns
+  in lockstep against a static content partition, so columns don't
+  reshuffle as you scroll; G / Bot / percentage indicator all agree
+  against `longest_chunk_len - viewport`.
 - (fixed) PROJECT_HOME concept added. Sticky per-session project root,
   auto-set on startup if cwd/.git exists. Bindings: `gh` jump, `gP` set.
   Command: `:project [.|<path>|clear]`. New panes default their cwd to

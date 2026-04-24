@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-04-23
+
+### Fixed
+- **Help pager multi-column layout.** Descriptions wider than a column
+  now wrap onto continuation lines that align under the description
+  column (no more silent truncation at the column edge). Section
+  headers stay with their bodies — a section that wouldn't fit in the
+  remaining column space moves as a unit to the next column.
+- **Content-to-column mapping is now static.** `j`/`k` scrolls both
+  columns in lockstep against a fixed partition instead of reshuffling
+  lines between columns on every scroll. `G` and the `Top`/`Bot`/`NN%`
+  position indicator all share the same "longest chunk" math, so
+  pressing `k` from `Bot` no longer jumps back to 91%.
+- **Responsive column count.** The 2-col / 1-col choice is made from
+  the actual body width (90% of terminal × borders), not the raw
+  terminal width, and is re-decided whenever the window is resized
+  while help is open. Help rebuilds in place with the new wrap points.
+
 ## [1.11.0] - 2026-04-23
 
 ### Added
