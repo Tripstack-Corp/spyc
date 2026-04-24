@@ -98,8 +98,8 @@ impl Inventory {
             return Err("no state directory".into());
         };
         // Only regular files.
-        let meta = std::fs::metadata(path)
-            .map_err(|e| format!("can't read {}: {e}", path.display()))?;
+        let meta =
+            std::fs::metadata(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
         if !meta.is_file() {
             return Err(format!("{}: not a regular file", path.display()));
         }
@@ -124,12 +124,9 @@ impl Inventory {
         let _ = std::fs::create_dir_all(&dir);
         let dat_path = dir.join(format!("{id}.dat"));
         let json_path = dir.join(format!("{id}.json"));
-        std::fs::copy(path, &dat_path)
-            .map_err(|e| format!("copy failed: {e}"))?;
-        let json = serde_json::to_string_pretty(&item)
-            .map_err(|e| format!("json: {e}"))?;
-        std::fs::write(&json_path, json)
-            .map_err(|e| format!("write meta: {e}"))?;
+        std::fs::copy(path, &dat_path).map_err(|e| format!("copy failed: {e}"))?;
+        let json = serde_json::to_string_pretty(&item).map_err(|e| format!("json: {e}"))?;
+        std::fs::write(&json_path, json).map_err(|e| format!("write meta: {e}"))?;
         self.items.insert(id, item);
         Ok(())
     }
@@ -155,7 +152,9 @@ impl Inventory {
     /// Put a cached item to a destination directory. Copies the cached
     /// content with the original filename. Returns the destination path.
     pub fn put_item(&self, id: &str, dest_dir: &Path) -> Result<PathBuf, String> {
-        let item = self.items.get(id)
+        let item = self
+            .items
+            .get(id)
             .ok_or_else(|| "item not found".to_string())?;
         let Some(dir) = inventory_dir() else {
             return Err("no state directory".into());
@@ -165,8 +164,7 @@ impl Inventory {
         if dst.exists() {
             return Err(format!("{} already exists", dst.display()));
         }
-        std::fs::copy(&src, &dst)
-            .map_err(|e| format!("put failed: {e}"))?;
+        std::fs::copy(&src, &dst).map_err(|e| format!("put failed: {e}"))?;
         Ok(dst)
     }
 
@@ -228,8 +226,12 @@ impl Inventory {
         if self.items.remove(id).is_none() {
             return;
         }
-        let Some(inv_dir) = inventory_dir() else { return };
-        let Some(gy_dir) = graveyard_dir() else { return };
+        let Some(inv_dir) = inventory_dir() else {
+            return;
+        };
+        let Some(gy_dir) = graveyard_dir() else {
+            return;
+        };
         let _ = std::fs::create_dir_all(&gy_dir);
         for ext in &["json", "dat"] {
             let src = inv_dir.join(format!("{id}.{ext}"));
@@ -396,7 +398,10 @@ mod tests {
         assert!(err.is_none());
         assert!(!removed.is_empty());
         assert!(dest.join("src.txt").exists());
-        assert_eq!(std::fs::read_to_string(dest.join("src.txt")).unwrap(), "content");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("src.txt")).unwrap(),
+            "content"
+        );
         assert!(inv.is_empty()); // removed after put
 
         // --- put refuses overwrite ---

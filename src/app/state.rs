@@ -10,15 +10,15 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::config::Config;
-use crate::fs::Listing;
 use crate::fs;
+use crate::fs::Listing;
 use crate::keymap::{Action, Resolver, UserKeymap};
 use crate::state::{Cursor, Frecency, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
 use crate::ui::list_view::Grid;
 
 use super::{
-    row_from_entry, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt,
-    PromptKind, RowData, View,
+    FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt, PromptKind, RowData, View,
+    row_from_entry,
 };
 
 /// Result of `AppState::dispatch_command` — tells the `App` caller what to do.
@@ -132,7 +132,7 @@ impl AppState {
     }
 
     /// Move across the entire list (PageUp/PageDown). Wraps globally.
-    pub fn cursor_move_global(&mut self, delta: isize, len: usize) {
+    pub const fn cursor_move_global(&mut self, delta: isize, len: usize) {
         if len == 0 {
             return;
         }
@@ -398,7 +398,11 @@ impl AppState {
                 .items()
                 .map(|item| RowData {
                     path: item.orig_path.clone(),
-                    display: format!("{}  ← {}", item.filename, item.orig_path.parent().unwrap_or(Path::new("/")).display()),
+                    display: format!(
+                        "{}  ← {}",
+                        item.filename,
+                        item.orig_path.parent().unwrap_or(Path::new("/")).display()
+                    ),
                     kind: crate::fs::EntryKind::File,
                 })
                 .collect(),
@@ -540,13 +544,11 @@ impl AppState {
             Action::PickToggleAll => self.toggle_all_picks(),
 
             // -- Inventory --
-            Action::Take => {
-                match self.take() {
-                    Some(msg) if msg.starts_with("yanked") => self.flash_info(msg),
-                    Some(err) => self.flash_error(err),
-                    None => {}
-                }
-            }
+            Action::Take => match self.take() {
+                Some(msg) if msg.starts_with("yanked") => self.flash_info(msg),
+                Some(err) => self.flash_error(err),
+                None => {}
+            },
             Action::Untake => {
                 if self.view != View::Dir {
                     return ApplyResult::Handled;
@@ -555,7 +557,9 @@ impl AppState {
                     let path = row.path.clone();
                     if self.inventory.contains(&path) {
                         // Find and remove by original path.
-                        let id = self.inventory.items()
+                        let id = self
+                            .inventory
+                            .items()
                             .find(|i| i.orig_path == path)
                             .map(|i| i.id.clone());
                         if let Some(id) = id {
@@ -1030,10 +1034,7 @@ impl AppState {
         }
 
         // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd, :bprev, :bnext
-        if input.starts_with('!')
-            || input.starts_with(';')
-            || input == "bprev"
-            || input == "bnext"
+        if input.starts_with('!') || input.starts_with(';') || input == "bprev" || input == "bnext"
         {
             return CommandResult::NotHandled;
         }
@@ -1090,7 +1091,6 @@ impl AppState {
                 }
                 PromptResult::Handled
             }
-            PromptKind::NewFile => return PromptResult::NotHandled,
             PromptKind::SetEnv => {
                 let line = buffer.trim();
                 if let Some((name, value)) = line.split_once('=') {
@@ -1175,7 +1175,8 @@ impl AppState {
             }
             PromptKind::RemoveConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.
-            PromptKind::ShellCmd
+            PromptKind::NewFile
+            | PromptKind::ShellCmd
             | PromptKind::ShellCmdCaptured
             | PromptKind::CopyTo
             | PromptKind::MoveTo
@@ -1290,7 +1291,11 @@ mod tests {
             pane_focused: false,
             pane_height_pct: 30,
             rows: Vec::new(),
-            last_grid: Grid { cols: 1, rows: 20, col_widths: vec![20] },
+            last_grid: Grid {
+                cols: 1,
+                rows: 20,
+                col_widths: vec![20],
+            },
             list_generation: 0,
         }
     }
@@ -1347,7 +1352,11 @@ mod tests {
     #[test]
     fn goto_col_top_first_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 2; // last in first column
         s.goto_col_top();
         assert_eq!(s.cursor.index, 0);
@@ -1356,7 +1365,11 @@ mod tests {
     #[test]
     fn goto_col_top_second_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 4; // second column, row 1
         s.goto_col_top();
         assert_eq!(s.cursor.index, 3); // top of second column
@@ -1365,7 +1378,11 @@ mod tests {
     #[test]
     fn goto_col_bottom_first_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 0;
         s.goto_col_bottom(5);
         assert_eq!(s.cursor.index, 2); // last in first column (3 rows)
@@ -1374,7 +1391,11 @@ mod tests {
     #[test]
     fn goto_col_bottom_partial_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 3; // second column
         s.goto_col_bottom(5);
         assert_eq!(s.cursor.index, 4); // last entry in partial column
@@ -1385,7 +1406,11 @@ mod tests {
     #[test]
     fn column_move_right() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 1; // col 0, row 1
         s.cursor_move_columns(1, 3, 6);
         assert_eq!(s.cursor.index, 4); // col 1, row 1
@@ -1394,7 +1419,11 @@ mod tests {
     #[test]
     fn column_move_left() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 4; // col 1, row 1
         s.cursor_move_columns(-1, 3, 6);
         assert_eq!(s.cursor.index, 1); // col 0, row 1
@@ -1403,7 +1432,11 @@ mod tests {
     #[test]
     fn column_move_wraps_at_edge() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.cursor.index = 4; // col 1, row 1
         s.cursor_move_columns(1, 3, 6); // wraps to col 0
         assert_eq!(s.cursor.index, 1); // col 0, row 1
@@ -1412,7 +1445,11 @@ mod tests {
     #[test]
     fn column_move_single_column_noop() {
         let mut s = state_with_rows(&["a", "b"]);
-        s.last_grid = Grid { cols: 1, rows: 10, col_widths: vec![20] };
+        s.last_grid = Grid {
+            cols: 1,
+            rows: 10,
+            col_widths: vec![20],
+        };
         s.cursor.index = 0;
         s.cursor_move_columns(1, 10, 2);
         assert_eq!(s.cursor.index, 0); // no-op
@@ -1423,7 +1460,11 @@ mod tests {
     #[test]
     fn ensure_visible_snaps_view_top() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f", "g", "h"]);
-        s.last_grid = Grid { cols: 1, rows: 3, col_widths: vec![20] }; // 3 items per page
+        s.last_grid = Grid {
+            cols: 1,
+            rows: 3,
+            col_widths: vec![20],
+        }; // 3 items per page
         s.cursor.index = 5; // page 1 (items 3-5)
         s.ensure_cursor_visible();
         assert_eq!(s.cursor.view_top, 3);
@@ -1432,7 +1473,11 @@ mod tests {
     #[test]
     fn ensure_visible_first_page() {
         let mut s = state_with_rows(&["a", "b", "c", "d"]);
-        s.last_grid = Grid { cols: 1, rows: 3, col_widths: vec![20] };
+        s.last_grid = Grid {
+            cols: 1,
+            rows: 3,
+            col_widths: vec![20],
+        };
         s.cursor.index = 1;
         s.ensure_cursor_visible();
         assert_eq!(s.cursor.view_top, 0);
@@ -1573,7 +1618,9 @@ mod tests {
     #[test]
     fn take_cursor_item_to_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
         s.take();
         assert_eq!(s.inventory.len(), 1);
@@ -1583,7 +1630,9 @@ mod tests {
     #[test]
     fn take_picks_to_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
         s.picks.toggle(&tmp.path().join("a.txt"));
         s.picks.toggle(&tmp.path().join("b.txt"));
@@ -1594,7 +1643,9 @@ mod tests {
     #[test]
     fn drop_removes_from_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
         s.take(); // yank it first
         assert_eq!(s.inventory.len(), 1);
@@ -1775,10 +1826,7 @@ mod tests {
     #[test]
     fn prompt_search_saves_last_search() {
         let mut s = test_state();
-        let result = s.dispatch_prompt(
-            &PromptKind::Search { saved_cursor: 0 },
-            "foo",
-        );
+        let result = s.dispatch_prompt(&PromptKind::Search { saved_cursor: 0 }, "foo");
         assert!(matches!(result, PromptResult::Handled));
         assert_eq!(s.last_search.as_deref(), Some("foo"));
     }
@@ -1916,7 +1964,11 @@ mod tests {
     #[test]
     fn apply_page_down() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid { cols: 1, rows: 3, col_widths: vec![20] };
+        s.last_grid = Grid {
+            cols: 1,
+            rows: 3,
+            col_widths: vec![20],
+        };
         s.apply(&Action::PageDown);
         assert_eq!(s.cursor.index, 3);
     }
@@ -1939,7 +1991,11 @@ mod tests {
     #[test]
     fn apply_left_right_columns() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid { cols: 2, rows: 3, col_widths: vec![10, 10] };
+        s.last_grid = Grid {
+            cols: 2,
+            rows: 3,
+            col_widths: vec![10, 10],
+        };
         s.apply(&Action::Right(1));
         assert_eq!(s.cursor.index, 3);
         s.apply(&Action::Left(1));
@@ -1965,7 +2021,9 @@ mod tests {
     #[test]
     fn apply_take_adds_to_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
         s.apply(&Action::Take);
         assert_eq!(s.inventory.len(), 1);
@@ -1975,7 +2033,9 @@ mod tests {
     #[test]
     fn apply_drop_removes_from_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
         s.take(); // yank first
         s.toggle_inventory_view();
@@ -1995,7 +2055,9 @@ mod tests {
     #[test]
     fn apply_empty_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", tmp.path()); }
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", tmp.path());
+        }
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
         s.take(); // yank first
         assert_eq!(s.inventory.len(), 1);
@@ -2032,7 +2094,10 @@ mod tests {
     fn apply_start_shell_returns_spawn() {
         let mut s = test_state();
         let result = s.apply(&Action::StartShell);
-        assert!(matches!(result, ApplyResult::Post(PostAction::Spawn { .. })));
+        assert!(matches!(
+            result,
+            ApplyResult::Post(PostAction::Spawn { .. })
+        ));
     }
 
     #[test]
@@ -2119,14 +2184,8 @@ mod tests {
             s.apply(&Action::PaneFocusDown),
             ApplyResult::NotHandled
         ));
-        assert!(matches!(
-            s.apply(&Action::Help),
-            ApplyResult::NotHandled
-        ));
-        assert!(matches!(
-            s.apply(&Action::Redraw),
-            ApplyResult::NotHandled
-        ));
+        assert!(matches!(s.apply(&Action::Help), ApplyResult::NotHandled));
+        assert!(matches!(s.apply(&Action::Redraw), ApplyResult::NotHandled));
         assert!(matches!(
             s.apply(&Action::ColorToggle),
             ApplyResult::NotHandled

@@ -87,3 +87,29 @@ doc_markdown = "allow"
 # `branches_sharing_code` is overly aggressive about "same last statement"
 # suggestions.
 branches_sharing_code = "allow"
+
+# Pedantic style lints we don't enforce — they're code-shape opinions, not
+# correctness. Each line notes the lint and why we skip it.
+
+# `use` near the point of use reads better than at the top of a long fn.
+items_after_statements = "allow"
+
+# JSON-RPC helpers take `Value` by value; that's the idiomatic shape even
+# when a particular arm doesn't consume the whole thing.
+needless_pass_by_value = "allow"
+
+# Short locals like `new_bps` / `new_sp` in tight windows are fine; moving
+# to verbose names hurts readability more than the lint helps.
+similar_names = "allow"
+
+# The CLI struct is clap-derived and has 4 bool flags. Fine.
+struct_excessive_bools = "allow"
+
+# Public methods that take `&self` for API consistency (future-proofing
+# when other struct state is needed) — don't strip it just because the
+# current body doesn't touch any fields.
+unused_self = "allow"
+
+# Nursery lint that hits every path manipulation against an integration
+# boundary — a tuple/slice of (Path, fallback) would be strictly worse.
+or_fun_call = "allow"

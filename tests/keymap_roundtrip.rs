@@ -17,11 +17,11 @@ fn parse_toml(content: &str) -> toml::Value {
 #[test]
 fn minimal_config_is_valid_toml() {
     let val = parse_toml(
-        r##"
+        r#"
 keymap = [
     "map f unix file %",
 ]
-"##,
+"#,
     );
     let keymap = val.get("keymap").unwrap().as_array().unwrap();
     assert_eq!(keymap.len(), 1);
@@ -71,7 +71,7 @@ enabled = true
 #[test]
 fn keymap_dsl_grammar_entries() {
     // Verify the DSL grammar accepts all documented forms.
-    let lines = vec![
+    let lines = [
         "map f unix file %",
         "map ^P unix ps aux",
         "map <Enter> display",
@@ -81,13 +81,12 @@ fn keymap_dsl_grammar_entries() {
         "map 1 ignoretoggle =1",
         "map q quit",
     ];
-    let toml_str = format!(
-        "keymap = [\n{}]\n",
-        lines
-            .iter()
-            .map(|l| format!("    \"{l}\",\n"))
-            .collect::<String>()
-    );
+    use std::fmt::Write;
+    let mut body = String::new();
+    for l in &lines {
+        writeln!(body, "    \"{l}\",").unwrap();
+    }
+    let toml_str = format!("keymap = [\n{body}]\n");
     let val = parse_toml(&toml_str);
     let keymap = val.get("keymap").unwrap().as_array().unwrap();
     assert_eq!(keymap.len(), lines.len());
@@ -123,7 +122,7 @@ dir = "#aabbcc"
 #[test]
 fn ignore_masks_structure() {
     let val = parse_toml(
-        r##"
+        r#"
 [[ignore_masks]]
 group = 1
 patterns = [".*"]
@@ -133,7 +132,7 @@ enabled = true
 group = 2
 patterns = ["*.o", "target"]
 enabled = false
-"##,
+"#,
     );
     let masks = val.get("ignore_masks").unwrap().as_array().unwrap();
     assert_eq!(masks.len(), 2);

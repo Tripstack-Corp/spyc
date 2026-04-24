@@ -178,8 +178,7 @@ impl PaneTabs {
                     .pane
                     .exit_status
                     .as_ref()
-                    .map(|s| s.exit_code().to_string())
-                    .unwrap_or_else(|| "?".to_string());
+                    .map_or_else(|| "?".to_string(), |s| s.exit_code().to_string());
                 entry.info.label = format!("{} [exited {}]", entry.info.label, code);
                 changed = true;
             }

@@ -283,10 +283,7 @@ mod tests {
 
     #[test]
     fn split_path_with_line() {
-        assert_eq!(
-            split_path_line("src/main.rs:42"),
-            ("src/main.rs", Some(42))
-        );
+        assert_eq!(split_path_line("src/main.rs:42"), ("src/main.rs", Some(42)));
     }
 
     #[test]
@@ -306,10 +303,7 @@ mod tests {
 
     #[test]
     fn strips_color_codes() {
-        assert_eq!(
-            strip_ansi("\x1b[32msrc/main.rs\x1b[0m"),
-            "src/main.rs"
-        );
+        assert_eq!(strip_ansi("\x1b[32msrc/main.rs\x1b[0m"), "src/main.rs");
     }
 
     #[test]
@@ -418,7 +412,7 @@ mod tests {
     #[test]
     fn extracts_from_ansi_colored_output() {
         let tmp = setup_tree();
-        let line = format!("\x1b[32mReading\x1b[0m src/main.rs:55");
+        let line = "\x1b[32mReading\x1b[0m src/main.rs:55".to_string();
         let pr = extract_from_line(&line, tmp.path()).unwrap();
         assert_eq!(pr.path, tmp.path().join("src/main.rs"));
         assert_eq!(pr.line, Some(55));
@@ -491,8 +485,7 @@ mod tests {
     #[test]
     fn claude_create_mode() {
         let tmp = setup_tree();
-        let pr =
-            extract_from_line("     create mode 100644 src/main.rs", tmp.path()).unwrap();
+        let pr = extract_from_line("     create mode 100644 src/main.rs", tmp.path()).unwrap();
         assert_eq!(pr.path, tmp.path().join("src/main.rs"));
     }
 

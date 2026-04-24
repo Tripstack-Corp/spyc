@@ -174,6 +174,7 @@ fn discover_live_socket() -> Option<UnixStream> {
 }
 
 /// Direct JSONL stdio server — no socket proxy.
+#[allow(clippy::significant_drop_tightening)]
 fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
     let context_path = resolve_context_path(&project_root);
     let stdin = io::stdin();
@@ -224,6 +225,7 @@ fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
 
 /// Proxy stdin/stdout ↔ Unix socket. Messages use Content-Length
 /// framing on both sides.
+#[allow(clippy::significant_drop_tightening)]
 fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -263,12 +265,14 @@ fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
         if msg.is_empty() {
             continue; // skip blank lines
         }
-        mcp_log(&format!("proxy: stdin → socket ({} bytes): {}", msg.len(), msg));
+        mcp_log(&format!(
+            "proxy: stdin → socket ({} bytes): {}",
+            msg.len(),
+            msg
+        ));
 
         // Check if this is a request (has "id") or notification (no "id").
-        let is_request = serde_json::from_str::<Value>(msg)
-            .map(|v| v.get("id").is_some())
-            .unwrap_or(true); // assume request if parse fails
+        let is_request = serde_json::from_str::<Value>(msg).map_or(true, |v| v.get("id").is_some()); // assume request if parse fails
 
         // Forward to socket (Content-Length framed for the socket server).
         send_message(&mut sock_writer, msg)?;
@@ -276,7 +280,11 @@ fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
         // Only read a response for requests (notifications get no reply).
         if is_request {
             let response = read_lsp_message(&mut sock_reader)?;
-            mcp_log(&format!("proxy: socket → stdout ({} bytes): {}", response.len(), response));
+            mcp_log(&format!(
+                "proxy: socket → stdout ({} bytes): {}",
+                response.len(),
+                response
+            ));
             // Write back as newline-delimited JSON (what Claude Code expects).
             writeln!(stdout_writer, "{response}")?;
             stdout_writer.flush()?;
@@ -340,8 +348,6 @@ pub fn cleanup_socket() {
     let _ = std::fs::remove_file(&sock);
 }
 
-
-
 /// Status of MCP configuration for this directory.
 pub enum McpConfigStatus {
     /// .mcp.json written/updated to point at our socket.
@@ -376,7 +382,10 @@ fn enterprise_allows_spyc() -> Option<bool> {
         // Denylist takes absolute precedence.
         if let Some(denied) = parsed.get("deniedMcpServers") {
             if let Some(arr) = denied.as_array() {
-                if arr.iter().any(|entry| entry["serverName"].as_str() == Some("spyc")) {
+                if arr
+                    .iter()
+                    .any(|entry| entry["serverName"].as_str() == Some("spyc"))
+                {
                     return Some(false);
                 }
             }
@@ -384,7 +393,9 @@ fn enterprise_allows_spyc() -> Option<bool> {
         // Allowlist: if present, spyc must be in it.
         if let Some(allowed) = parsed.get("allowedMcpServers") {
             if let Some(arr) = allowed.as_array() {
-                let ok = arr.iter().any(|entry| entry["serverName"].as_str() == Some("spyc"));
+                let ok = arr
+                    .iter()
+                    .any(|entry| entry["serverName"].as_str() == Some("spyc"));
                 return Some(ok);
             }
         }
@@ -412,25 +423,21 @@ fn notify_disconnect(old_sock: &Path, new_pid: u32) {
         "params": { "new_pid": new_pid }
     });
     let _ = send_message(&mut stream, &notification.to_string());
-    mcp_log(&format!(
-        "sent spyc/disconnected to {}",
-        old_sock.display()
-    ));
+    mcp_log(&format!("sent spyc/disconnected to {}", old_sock.display()));
 }
 
 /// Ensure `.mcp.json` has the spyc entry using stdio transport.
 /// Checks enterprise policy first. If another spyc instance owns
 /// the entry, sends it a disconnect notification and takes over.
 pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
-    if let Some(false) = enterprise_allows_spyc() {
+    if enterprise_allows_spyc() == Some(false) {
         return Ok(McpConfigStatus::BlockedByEnterprise);
     }
 
     let our_sock = socket_path();
     let our_pid = std::process::id();
     let path = dir.join(".mcp.json");
-    let exe = std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("spyc"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
 
     // Check for an existing live spyc instance in this directory.
     let mut took_over: Option<u32> = None;
@@ -752,7 +759,13 @@ fn handle_tools_call(
 
             // Send command and block for reply with timeout.
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-            if tx.send(McpRequest { command, reply: reply_tx }).is_err() {
+            if tx
+                .send(McpRequest {
+                    command,
+                    reply: reply_tx,
+                })
+                .is_err()
+            {
                 return send_tool_error(w, id, "spyc is not running");
             }
             match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
@@ -793,8 +806,7 @@ fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
 
 /// Read file content (up to 100KB, text only).
 fn read_file_content(path: &Path) -> Result<String, String> {
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !meta.is_file() {
         return Err(format!("{}: not a regular file", path.display()));
     }
@@ -805,15 +817,13 @@ fn read_file_content(path: &Path) -> Result<String, String> {
             meta.len() / 1024
         ));
     }
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // Reject binary files (null bytes in first 8KB).
     let check_len = bytes.len().min(8192);
     if bytes[..check_len].contains(&0) {
         return Err(format!("{}: binary file", path.display()));
     }
-    String::from_utf8(bytes)
-        .map_err(|_| format!("{}: not valid UTF-8", path.display()))
+    String::from_utf8(bytes).map_err(|_| format!("{}: not valid UTF-8", path.display()))
 }
 
 fn read_context_or_empty(ctx_path: &Path) -> String {
@@ -852,14 +862,12 @@ fn read_lsp_message(reader: &mut impl BufRead) -> io::Result<String> {
         }
     }
 
-    let len = content_length.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length")
-    })?;
+    let len = content_length
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
 
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
-    String::from_utf8(buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 fn send_message(w: &mut impl Write, body: &str) -> io::Result<()> {
@@ -958,7 +966,8 @@ mod tests {
         let mut output = Vec::new();
         dispatch(
             &mut output,
-            &json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":CONTEXT_URI}}).to_string(),
+            &json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":CONTEXT_URI}})
+                .to_string(),
             &ctx_path,
             None,
         )
@@ -1033,10 +1042,12 @@ mod tests {
         )
         .unwrap();
         let resp = parse_response(&output);
-        assert!(resp["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Unknown resource"));
+        assert!(
+            resp["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown resource")
+        );
     }
 
     #[test]
@@ -1082,7 +1093,7 @@ mod tests {
         let listener = UnixListener::bind(&sock_path).unwrap();
 
         let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
-        let ctx_for_thread = ctx_path.clone();
+        let ctx_for_thread = ctx_path;
         std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
@@ -1122,7 +1133,7 @@ mod tests {
         let listener = UnixListener::bind(&sock_path).unwrap();
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
-        let ctx_for_thread = ctx_path.clone();
+        let ctx_for_thread = ctx_path;
         std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
@@ -1139,7 +1150,9 @@ mod tests {
         send_message(&mut stream, &notification.to_string()).unwrap();
         drop(stream); // close connection so handler exits
 
-        let req = cmd_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        let req = cmd_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
         match req.command {
             McpCommand::Disconnected { new_pid } => assert_eq!(new_pid, 99999),
             other => panic!("expected Disconnected, got {other:?}"),
@@ -1148,7 +1161,10 @@ mod tests {
 
     #[test]
     fn pid_from_sock_path_parses() {
-        assert_eq!(pid_from_sock_path("/home/user/.local/state/spyc/mcp-12345.sock"), Some(12345));
+        assert_eq!(
+            pid_from_sock_path("/home/user/.local/state/spyc/mcp-12345.sock"),
+            Some(12345)
+        );
         assert_eq!(pid_from_sock_path("mcp-1.sock"), Some(1));
         assert_eq!(pid_from_sock_path("mcp.sock"), None);
         assert_eq!(pid_from_sock_path("mcp-.sock"), None);
@@ -1176,7 +1192,7 @@ mod tests {
 
         // Set up context with cwd = project.
         let ctx = context::SpycContext {
-            cwd: project.clone(),
+            cwd: project,
             cursor_file: None,
             picks: vec![],
             inventory: vec![],
@@ -1194,12 +1210,19 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
                 "name":"get_file_content","arguments":{"path":"ok.txt"}
-            }}).to_string(),
+            }})
+            .to_string(),
             &ctx_path,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let resp = parse_response(&output);
-        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("public"));
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("public")
+        );
 
         // Traversal via ../secret.txt should be blocked.
         let mut output = Vec::new();
@@ -1207,11 +1230,18 @@ mod tests {
             &mut output,
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
                 "name":"get_file_content","arguments":{"path":"../secret.txt"}
-            }}).to_string(),
+            }})
+            .to_string(),
             &ctx_path,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let resp = parse_response(&output);
-        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("outside the working directory"));
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("outside the working directory")
+        );
     }
 }

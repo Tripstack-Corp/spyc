@@ -37,7 +37,9 @@ check: fmt-check lint test ## Full quality gate (CI)
 
 .PHONY: test
 test: ## Run all tests
-	cargo test --all-targets
+	# Single-threaded: two state-module tests (inventory, sessions) mutate
+	# the global XDG_STATE_HOME env var. Parallel execution races them.
+	cargo test --all-targets -- --test-threads=1
 
 .PHONY: lint
 lint: ## Clippy with pedantic + nursery

@@ -46,8 +46,7 @@ pub fn context_path(project_root: &Path) -> PathBuf {
 /// then rename over the target. This prevents readers from seeing partial
 /// JSON.
 pub fn write_context_file(path: &Path, ctx: &SpycContext) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(ctx)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(ctx).map_err(std::io::Error::other)?;
     let dir = path.parent().unwrap_or(Path::new("."));
     let tmp = dir.join(format!(".spyc-context-{}.tmp", std::process::id()));
     std::fs::write(&tmp, json.as_bytes())?;

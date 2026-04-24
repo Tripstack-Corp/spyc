@@ -277,12 +277,12 @@ exec = "#112233"
         let path = tmp.path().join("test.toml");
         std::fs::write(
             &path,
-            r##"
+            r#"
 keymap = [
     "map f unix file %",
     "map g unix git status",
 ]
-"##,
+"#,
         )
         .unwrap();
 

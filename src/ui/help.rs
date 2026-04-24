@@ -7,8 +7,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::keymap::UserKeymap;
 use super::display_pad_right;
+use crate::keymap::UserKeymap;
 use crate::ui::theme::Theme;
 
 struct Section {
@@ -35,7 +35,10 @@ const SECTIONS: &[Section] = &[
         title: "Directories & files",
         rows: &[
             ("d  Enter", "enter dir / pager ($PAGER) on text file"),
-            ("e  v", "enter dir / editor ($EDITOR) on file (suspends TUI)"),
+            (
+                "e  v",
+                "enter dir / editor ($EDITOR) on file (suspends TUI)",
+            ),
             ("V", "open $EDITOR in top pane (Claude pane stays visible)"),
             ("u  -", "climb to parent"),
             ("H  ~  Home", "go to home directory"),
@@ -111,7 +114,10 @@ const SECTIONS: &[Section] = &[
             ("g U", "flash user@host in status line"),
             (":project [.|<path>|clear]", "manage PROJECT_HOME"),
             (":startdir [.|<path>]", "manage start directory"),
-            (":name <NEW>", "rename the active session (SPICE_SPICE style)"),
+            (
+                ":name <NEW>",
+                "rename the active session (SPICE_SPICE style)",
+            ),
             (":whoami", "show user@host"),
         ],
     },

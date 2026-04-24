@@ -72,7 +72,11 @@ pub fn normalize(input: &str) -> Option<String> {
         }
     }
     let trimmed = out.trim_matches('_').to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 fn seed() -> u64 {
@@ -103,10 +107,7 @@ mod tests {
     fn generate_uses_known_spices() {
         let name = generate();
         for part in name.split('_') {
-            assert!(
-                SPICES.contains(&part),
-                "unexpected spice {part} in {name}"
-            );
+            assert!(SPICES.contains(&part), "unexpected spice {part} in {name}");
         }
     }
 

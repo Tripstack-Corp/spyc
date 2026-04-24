@@ -26,13 +26,7 @@ const PL_SEP: &str = "\u{e0b0}";
 
 const ELLIPSIS: &str = "...";
 
-fn push_segment(
-    spans: &mut Vec<Span>,
-    text: &str,
-    fg: Color,
-    bg: Color,
-    next_bg: Color,
-) {
+fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg: Color) {
     spans.push(Span::styled(
         text.to_string(),
         Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
@@ -106,7 +100,11 @@ impl StatusBar<'_> {
         spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
 
         if let Some(ref text) = project_text {
-            let next_bg = if session_text.is_some() { sess_bg } else { path_bg };
+            let next_bg = if session_text.is_some() {
+                sess_bg
+            } else {
+                path_bg
+            };
             push_segment(&mut spans, text, proj_fg, proj_bg, next_bg);
         }
         if let Some(ref text) = session_text {
@@ -118,7 +116,10 @@ impl StatusBar<'_> {
             &path_text,
             Style::default().fg(path_fg).bg(path_bg),
         ));
-        spans.push(Span::styled(PL_SEP, Style::default().fg(path_bg).bg(path_next_bg)));
+        spans.push(Span::styled(
+            PL_SEP,
+            Style::default().fg(path_bg).bg(path_next_bg),
+        ));
 
         if let Some(ref text) = git_text {
             let next_bg = suffix_text.as_ref().map_or(term_bg, |_| suffix_bg);
@@ -129,8 +130,7 @@ impl StatusBar<'_> {
         }
 
         // Fill remaining width.
-        let used: usize =
-            emoji_w + project_w + session_w + dw(&path_text) + 1 + git_w + suffix_w;
+        let used: usize = emoji_w + project_w + session_w + dw(&path_text) + 1 + git_w + suffix_w;
         if used < avail {
             spans.push(Span::styled(
                 " ".repeat(avail - used),
@@ -267,9 +267,10 @@ mod tests {
         let backend = TestBackend::new(width, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = if mono {
-            let mut t = Theme::default();
-            t.mono = true;
-            t
+            Theme {
+                mono: true,
+                ..Theme::default()
+            }
         } else {
             Theme::default()
         };
@@ -297,8 +298,7 @@ mod tests {
 
     #[test]
     fn snapshot_status_mono_basic() {
-        let out =
-            render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, true, 60);
+        let out = render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, true, 60);
         insta::assert_snapshot!(out);
     }
 
@@ -318,8 +318,7 @@ mod tests {
 
     #[test]
     fn snapshot_status_powerline_basic() {
-        let out =
-            render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, false, 80);
+        let out = render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, false, 80);
         insta::assert_snapshot!(out);
     }
 

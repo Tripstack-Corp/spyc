@@ -87,7 +87,11 @@ pub fn load_sessions() -> Vec<Session> {
         let key = format!(
             "{}|{}",
             s.cwd.display(),
-            s.tabs.iter().map(|t| t.command.as_str()).collect::<Vec<_>>().join(",")
+            s.tabs
+                .iter()
+                .map(|t| t.command.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
         );
         seen.insert(key)
     });
@@ -134,13 +138,11 @@ pub fn find_claude_session(cwd: &std::path::Path) -> Option<ClaudeSessionInfo> {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => continue,
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
         };
-        let val: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(_) => continue,
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
         };
         let session_cwd = val["cwd"].as_str().unwrap_or("");
         let session_id = val["sessionId"].as_str().unwrap_or("");
@@ -155,10 +157,8 @@ pub fn find_claude_session(cwd: &std::path::Path) -> Option<ClaudeSessionInfo> {
         let matches = session_cwd == cwd_str
             || session_cwd.strip_prefix("/private").unwrap_or(session_cwd) == cwd_str.as_ref();
 
-        if matches {
-            if best.as_ref().is_none_or(|(ts, _, _)| started_at > *ts) {
-                best = Some((started_at, session_id.to_string(), name));
-            }
+        if matches && best.as_ref().is_none_or(|(ts, _, _)| started_at > *ts) {
+            best = Some((started_at, session_id.to_string(), name));
         }
     }
 

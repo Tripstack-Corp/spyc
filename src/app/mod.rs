@@ -309,7 +309,7 @@ struct TabState {
     buf_prefix: String,
     /// Path prefix up to the last `/` in the typed word (e.g., "~/").
     word_base: String,
-    /// Matched file/dir names (e.g., ["Documents/", "Downloads/"]).
+    /// Matched file/dir names (e.g. `Documents/`, `Downloads/`).
     matches: Vec<String>,
     /// 0 = list was just shown (first Tab). 1+ = cycling through matches.
     cycle_index: usize,
@@ -430,11 +430,13 @@ impl App {
         // Start the MCP Unix socket server so `spyc --mcp` (spawned by
         // Claude Code) can proxy to us for full read/write MCP access.
         let mcp_running = crate::mcp::start_socket_server(context_path.clone(), mcp_cmd_tx)
-            .map(|()| true)
-            .unwrap_or_else(|e| {
-                spyc_debug!("MCP socket server failed to start: {e}");
-                false
-            });
+            .map_or_else(
+                |e| {
+                    spyc_debug!("MCP socket server failed to start: {e}");
+                    false
+                },
+                |()| true,
+            );
         let mut app = Self {
             state: app_state,
             pager: None,
@@ -504,9 +506,8 @@ impl App {
         match crate::mcp::ensure_mcp_json(&self.state.listing.dir) {
             Ok(crate::mcp::McpConfigStatus::Configured) => {}
             Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                self.state.flash_info(format!(
-                    "MCP: took over from PID {old_pid}"
-                ));
+                self.state
+                    .flash_info(format!("MCP: took over from PID {old_pid}"));
             }
             Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
                 self.state.flash_error(
@@ -584,11 +585,7 @@ impl App {
                 }
                 self.state.rebuild_rows();
                 let count = self.state.rows.len();
-                let label = self
-                    .state
-                    .temp_filter
-                    .as_deref()
-                    .unwrap_or("(cleared)");
+                let label = self.state.temp_filter.as_deref().unwrap_or("(cleared)");
                 self.state.flash_info(format!("[mcp] filter: {label}"));
                 self.write_context();
                 McpResponse::Ok {
@@ -617,13 +614,11 @@ impl App {
                         message: format!("invalid patterns: {}", errors.join(", ")),
                     };
                 }
-                self.state.flash_info(format!("[mcp] picked {total} file(s)"));
+                self.state
+                    .flash_info(format!("[mcp] picked {total} file(s)"));
                 self.write_context();
                 McpResponse::Ok {
-                    message: format!(
-                        "picked {total} file(s), {} total",
-                        self.state.picks.len()
-                    ),
+                    message: format!("picked {total} file(s), {} total", self.state.picks.len()),
                 }
             }
             McpCommand::ClearPicks => {
@@ -663,7 +658,8 @@ impl App {
                 let count = new_config.sources.len();
                 self.state.config = new_config;
                 self.state.rebuild_rows();
-                self.state.flash_info(format!("reloaded {count} config file(s)"));
+                self.state
+                    .flash_info(format!("reloaded {count} config file(s)"));
             }
             Err(e) => self.state.flash_error(format!("config error: {e}")),
         }
@@ -759,7 +755,8 @@ impl App {
             // Check if a background `!` capture has finished.
             // Stream captured command output into the pager in real-time.
             if let Some(capture) = &mut self.pending_capture {
-                needs_draw = true; draw_reason = 3; // capture in progress
+                needs_draw = true;
+                draw_reason = 3; // capture in progress
                 let mut got_data = false;
                 while let Ok(chunk) = capture.output_rx.try_recv() {
                     if chunk.is_empty() {
@@ -774,7 +771,12 @@ impl App {
                 if !capture.finished {
                     let elapsed = capture.started.elapsed().as_secs();
                     let human_time = if elapsed >= 3600 {
-                        format!("{}h {}m {}s", elapsed / 3600, (elapsed % 3600) / 60, elapsed % 60)
+                        format!(
+                            "{}h {}m {}s",
+                            elapsed / 3600,
+                            (elapsed % 3600) / 60,
+                            elapsed % 60
+                        )
                     } else if elapsed >= 60 {
                         format!("{}m {}s", elapsed / 60, elapsed % 60)
                     } else {
@@ -851,7 +853,8 @@ impl App {
                 }
             }
             if pane_had_output {
-                needs_draw = true; draw_reason = 1;
+                needs_draw = true;
+                draw_reason = 1;
             }
 
             // Mark exited tabs AFTER drain so the Closed event has been
@@ -885,13 +888,15 @@ impl App {
             }
             if needs_reload {
                 self.reload_config();
-                needs_draw = true; draw_reason = 3;
+                needs_draw = true;
+                draw_reason = 3;
             }
             if pending_refresh && last_refresh.elapsed() >= Duration::from_millis(500) {
                 pending_refresh = false;
                 self.state.refresh_listing();
                 last_refresh = std::time::Instant::now();
-                needs_draw = true; draw_reason = 3;
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // Process writable MCP commands from Claude.
@@ -907,14 +912,15 @@ impl App {
             // - 100ms when pane exists but is idle
             // - 250ms when no pane at all
             let poll_ms = if pane_had_output || self.pending_capture.is_some() {
-                16  // smooth streaming
+                16 // smooth streaming
             } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
                 100 // pane idle — responsive to new output
             } else {
                 500 // no pane — only user input matters
             };
             if event::poll(Duration::from_millis(poll_ms))? {
-                needs_draw = true; draw_reason = 2;
+                needs_draw = true;
+                draw_reason = 2;
                 match event::read()? {
                     Event::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
@@ -926,9 +932,7 @@ impl App {
                         {
                             let now = std::time::Instant::now();
                             if let Some((prev, dir)) = self.scroll_last {
-                                if dir == key.code
-                                    && now.duration_since(prev).as_millis() < 40
-                                {
+                                if dir == key.code && now.duration_since(prev).as_millis() < 40 {
                                     continue;
                                 }
                             }
@@ -1016,7 +1020,8 @@ impl App {
                         // correct width.
                         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
                         if let Some(tabs) = self.pane_tabs.as_mut() {
-                            let layout = Self::compute_layout(area, true, self.state.pane_height_pct);
+                            let layout =
+                                Self::compute_layout(area, true, self.state.pane_height_pct);
                             if let Some(pane_rect) = layout.pane {
                                 for entry in tabs.tabs_mut() {
                                     let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
@@ -1035,30 +1040,26 @@ impl App {
                 }
             }
 
-
             // Activity monitor: roll over the 1-second window.
             let mut activity_only_draw = false;
-            if self.show_activity
-                && self.activity_last_tick.elapsed() >= Duration::from_secs(1)
-            {
+            if self.show_activity && self.activity_last_tick.elapsed() >= Duration::from_secs(1) {
                 let new_dps = self.activity_draws;
                 let new_bps = self.activity_bytes;
                 let new_sp = self.activity_reason_pane;
                 let new_se = self.activity_reason_event;
                 let new_so = self.activity_reason_other;
                 // Only force a redraw if something changed.
-                if new_dps != self.activity_dps
+                if (new_dps != self.activity_dps
                     || new_bps != self.activity_bps
                     || new_sp != self.activity_snap_pane
                     || new_se != self.activity_snap_event
-                    || new_so != self.activity_snap_other
+                    || new_so != self.activity_snap_other)
+                    && !needs_draw
                 {
-                    if !needs_draw {
-                        // This draw exists only to refresh the overlay —
-                        // don't count it in the stats or it oscillates.
-                        needs_draw = true;
-                        activity_only_draw = true;
-                    }
+                    // This draw exists only to refresh the overlay —
+                    // don't count it in the stats or it oscillates.
+                    needs_draw = true;
+                    activity_only_draw = true;
                 }
                 self.activity_dps = new_dps;
                 self.activity_bps = new_bps;
@@ -1080,23 +1081,13 @@ impl App {
             // terminal-side CPU.
             if needs_draw {
                 needs_draw = false;
-                use crossterm::terminal::{
-                    BeginSynchronizedUpdate, EndSynchronizedUpdate,
-                };
-                let _ = crossterm::execute!(
-                    terminal.backend_mut(),
-                    BeginSynchronizedUpdate
-                );
+                use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+                let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
                 if pending_clear {
                     terminal.clear()?;
                 }
-                let completed = terminal.draw(|frame| self.render(frame))?;
-                let frame_area = completed.area;
-                drop(completed);
-                let _ = crossterm::execute!(
-                    terminal.backend_mut(),
-                    EndSynchronizedUpdate
-                );
+                let frame_area = terminal.draw(|frame| self.render(frame))?.area;
+                let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
                 if self.show_activity && !activity_only_draw {
                     self.activity_draws += 1;
                     self.activity_bytes +=
@@ -1363,8 +1354,11 @@ impl App {
         //   The status row is always at the top of the file-list region —
         //   so when the pane is open it sits *inside* the top pane rather
         //   than above the divider.
-        let layout =
-            Self::compute_layout(frame_area, self.pane_tabs.is_some(), self.state.pane_height_pct);
+        let layout = Self::compute_layout(
+            frame_area,
+            self.pane_tabs.is_some(),
+            self.state.pane_height_pct,
+        );
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
@@ -1426,7 +1420,7 @@ impl App {
                     PaneWidget {
                         screen: tabs.active().screen(),
                         focused: false,
-                        },
+                    },
                     rect,
                 );
             }
@@ -1434,7 +1428,11 @@ impl App {
         }
 
         let (path, suffix) = self.header_parts();
-        let project_label = self.state.project_home.as_deref().map(path_basename_display);
+        let project_label = self
+            .state
+            .project_home
+            .as_deref()
+            .map(path_basename_display);
         StatusBar {
             project_home: project_label.as_deref(),
             session_name: self.state.session_name.as_deref(),
@@ -1461,62 +1459,21 @@ impl App {
             layout.list.height,
         );
         if grid_key != self.cached_grid_key {
-        self.cached_grid_key = grid_key;
-        // The grid depends on view_top (different entries have different
-        // name lengths → different column count → different items_per_page),
-        // and view_top depends on the grid.
-        //
-        // This can produce a 2-cycle: vt=A gives grid that wants vt=B, and
-        // vt=B gives grid that wants vt=A.  When we detect that, always pick
-        // the lower of the two (shows more context, deterministic across
-        // frames) and recompute the grid for that choice.
-        {
-            let mut prev_vt: Option<usize> = None; // for 2-cycle detection
-            let mut settled = false;
-            for round in 0..4 {
-                let probe = ListView {
-                    rows: &rows,
-                    cursor: self.state.cursor.index,
-                    view_top: self.state.cursor.view_top,
-                    empty_marker: self.state.view == View::Dir,
-                    focused: list_focused,
-                    theme: &self.theme,
-                };
-                self.state.last_grid = probe.grid(layout.list);
-                let old_vt = self.state.cursor.view_top;
-                let pp = self.state.last_grid.items_per_page();
-                self.state.ensure_cursor_visible();
-                if self.state.cursor.view_top == old_vt {
-                    spyc_debug!(
-                        "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
-                        round + 1,
-                        old_vt,
-                        self.state.cursor.index,
-                        self.state.last_grid.cols,
-                        self.state.last_grid.rows,
-                        pp,
-                    );
-                    settled = true;
-                    break;
-                }
-                spyc_debug!(
-                    "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
-                    round + 1,
-                    old_vt,
-                    self.state.cursor.view_top,
-                    self.state.cursor.index,
-                    self.state.last_grid.cols,
-                    self.state.last_grid.rows,
-                    pp,
-                );
-                // 2-cycle: new vt equals the vt from two rounds ago.
-                if Some(self.state.cursor.view_top) == prev_vt {
-                    // Always pick the lower vt — deterministic across frames.
-                    let forced = old_vt.min(self.state.cursor.view_top);
-                    self.state.cursor.view_top = forced;
-                    // Recompute grid for the forced view_top.
+            self.cached_grid_key = grid_key;
+            // The grid depends on view_top (different entries have different
+            // name lengths → different column count → different items_per_page),
+            // and view_top depends on the grid.
+            //
+            // This can produce a 2-cycle: vt=A gives grid that wants vt=B, and
+            // vt=B gives grid that wants vt=A.  When we detect that, always pick
+            // the lower of the two (shows more context, deterministic across
+            // frames) and recompute the grid for that choice.
+            {
+                let mut prev_vt: Option<usize> = None; // for 2-cycle detection
+                let mut settled = false;
+                for round in 0..4 {
                     let probe = ListView {
-                        rows: &rows,
+                        rows,
                         cursor: self.state.cursor.index,
                         view_top: self.state.cursor.view_top,
                         empty_marker: self.state.view == View::Dir,
@@ -1524,40 +1481,81 @@ impl App {
                         theme: &self.theme,
                     };
                     self.state.last_grid = probe.grid(layout.list);
+                    let old_vt = self.state.cursor.view_top;
+                    let pp = self.state.last_grid.items_per_page();
+                    self.state.ensure_cursor_visible();
+                    if self.state.cursor.view_top == old_vt {
+                        spyc_debug!(
+                            "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
+                            round + 1,
+                            old_vt,
+                            self.state.cursor.index,
+                            self.state.last_grid.cols,
+                            self.state.last_grid.rows,
+                            pp,
+                        );
+                        settled = true;
+                        break;
+                    }
                     spyc_debug!(
-                        "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
-                        forced,
+                        "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
+                        round + 1,
+                        old_vt,
+                        self.state.cursor.view_top,
                         self.state.cursor.index,
                         self.state.last_grid.cols,
                         self.state.last_grid.rows,
-                        self.state.last_grid.items_per_page(),
+                        pp,
                     );
-                    settled = true;
-                    break;
+                    // 2-cycle: new vt equals the vt from two rounds ago.
+                    if Some(self.state.cursor.view_top) == prev_vt {
+                        // Always pick the lower vt — deterministic across frames.
+                        let forced = old_vt.min(self.state.cursor.view_top);
+                        self.state.cursor.view_top = forced;
+                        // Recompute grid for the forced view_top.
+                        let probe = ListView {
+                            rows,
+                            cursor: self.state.cursor.index,
+                            view_top: self.state.cursor.view_top,
+                            empty_marker: self.state.view == View::Dir,
+                            focused: list_focused,
+                            theme: &self.theme,
+                        };
+                        self.state.last_grid = probe.grid(layout.list);
+                        spyc_debug!(
+                            "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
+                            forced,
+                            self.state.cursor.index,
+                            self.state.last_grid.cols,
+                            self.state.last_grid.rows,
+                            self.state.last_grid.items_per_page(),
+                        );
+                        settled = true;
+                        break;
+                    }
+                    prev_vt = Some(old_vt);
                 }
-                prev_vt = Some(old_vt);
+                if !settled {
+                    spyc_debug!(
+                        "grid did NOT settle after 4 rounds: vt={} cursor={}",
+                        self.state.cursor.view_top,
+                        self.state.cursor.index,
+                    );
+                }
             }
-            if !settled {
-                spyc_debug!(
-                    "grid did NOT settle after 4 rounds: vt={} cursor={}",
-                    self.state.cursor.view_top,
-                    self.state.cursor.index,
-                );
-            }
-        }
-        // Update cache key in case the stabilization loop changed view_top.
-        self.cached_grid_key = (
-            self.state.list_generation,
-            self.state.cursor.view_top,
-            self.state.cursor.index,
-            layout.list.width,
-            layout.list.height,
-        );
+            // Update cache key in case the stabilization loop changed view_top.
+            self.cached_grid_key = (
+                self.state.list_generation,
+                self.state.cursor.view_top,
+                self.state.cursor.index,
+                layout.list.width,
+                layout.list.height,
+            );
         } // end grid cache guard
 
         frame.render_widget(
             ListView {
-                rows: &rows,
+                rows,
                 cursor: self.state.cursor.index,
                 view_top: self.state.cursor.view_top,
                 empty_marker: self.state.view == View::Dir,
@@ -1672,9 +1670,9 @@ impl App {
                     .fg(ratatui::style::Color::Black)
                     .bg(ratatui::style::Color::Yellow);
                 frame.render_widget(
-                    ActivityP::new(ratatui::text::Line::from(
-                        ratatui::text::Span::styled(text, style),
-                    )),
+                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+                        text, style,
+                    ))),
                     rect,
                 );
             }
@@ -1722,10 +1720,12 @@ impl App {
 
     fn build_rows(&self) -> Vec<Row> {
         use crate::ui::list_view::GitFileStatus;
-        self.state.rows
+        self.state
+            .rows
             .iter()
             .map(|rd| {
-                let git_status = self.state
+                let git_status = self
+                    .state
                     .git_files
                     .get(&rd.display)
                     .copied()
@@ -1859,11 +1859,11 @@ impl App {
                     self.state.toggle_inventory_view();
                     return Ok(PostAction::None);
                 }
-                KeyCode::Char('x') | KeyCode::Char('d') => {
+                KeyCode::Char('x' | 'd') => {
                     self.state.drop_cursor();
                     return Ok(PostAction::None);
                 }
-                KeyCode::Char(' ') | KeyCode::Char('t') => {
+                KeyCode::Char(' ' | 't') => {
                     self.state.inventory.toggle_pick(self.state.cursor.index);
                     self.state.list_generation = self.state.list_generation.wrapping_add(1);
                     self.state.cursor_move_vertical(1, self.state.rows.len());
@@ -1990,9 +1990,8 @@ impl App {
                 self.tab_complete_path();
             }
             return PostAction::None;
-        } else {
-            self.tab_state = None;
         }
+        self.tab_state = None;
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
@@ -2160,7 +2159,8 @@ impl App {
                         ..
                     })
                 );
-                let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
+                let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
+                else {
                     return PostAction::None;
                 };
                 // Push to the appropriate history before dispatching.
@@ -2229,9 +2229,7 @@ impl App {
             };
             let is_shell = matches!(
                 prompt.kind,
-                PromptKind::ShellCmd
-                    | PromptKind::ShellCmdCaptured
-                    | PromptKind::Command
+                PromptKind::ShellCmd | PromptKind::ShellCmdCaptured | PromptKind::Command
             );
             let is_jump = matches!(prompt.kind, PromptKind::Jump);
             (is_shell, is_jump, prompt.buffer.clone())
@@ -2240,36 +2238,31 @@ impl App {
         // Repeated Tab with active cycle state: cycle through matches
         // or re-flash the list for local dirs.
         if let Some(ref mut ts) = self.tab_state {
-            if ts.original_buf == buffer || ts.cycle_index > 0 {
-                if ts.matches.len() > 1 {
-                    // Cycle to next match, fill it in.
-                    let idx = ts.cycle_index % ts.matches.len();
-                    let completed =
-                        format!("{}{}{}", ts.buf_prefix, ts.word_base, ts.matches[idx]);
-                    ts.cycle_index = idx + 1;
-                    let flash = format!(
-                        "{} — {}/{}",
-                        ts.matches[idx],
-                        idx + 1,
-                        ts.matches.len()
-                    );
-                    self.state.flash_info(flash);
-                    let Mode::Prompting(ref mut prompt) = self.state.mode else {
-                        return;
-                    };
-                    prompt.buffer = completed;
-                    if let Some(ed) = prompt.editor.as_mut() {
-                        ed.set_content(&prompt.buffer);
-                    }
+            if (ts.original_buf == buffer || ts.cycle_index > 0) && ts.matches.len() > 1 {
+                // Cycle to next match, fill it in.
+                let idx = ts.cycle_index % ts.matches.len();
+                let completed = format!("{}{}{}", ts.buf_prefix, ts.word_base, ts.matches[idx]);
+                ts.cycle_index = idx + 1;
+                let flash = format!("{} — {}/{}", ts.matches[idx], idx + 1, ts.matches.len());
+                self.state.flash_info(flash);
+                let Mode::Prompting(ref mut prompt) = self.state.mode else {
                     return;
+                };
+                prompt.buffer = completed;
+                if let Some(ed) = prompt.editor.as_mut() {
+                    ed.set_content(&prompt.buffer);
                 }
+                return;
             }
         }
 
         // For shell prompts, extract just the last word for completion.
         let (buf_prefix, word) = if is_shell {
-            let last_space = buffer.rfind(' ').map(|i| i + 1).unwrap_or(0);
-            (buffer[..last_space].to_string(), buffer[last_space..].to_string())
+            let last_space = buffer.rfind(' ').map_or(0, |i| i + 1);
+            (
+                buffer[..last_space].to_string(),
+                buffer[last_space..].to_string(),
+            )
         } else {
             (String::new(), buffer)
         };
@@ -2280,20 +2273,20 @@ impl App {
             let dir = if input_str.is_empty() {
                 self.state.listing.dir.clone()
             } else {
-                input.clone()
+                input
             };
             (dir, String::new())
         } else {
-            let dir = input
-                .parent()
-                .map(|p| {
+            let dir = input.parent().map_or_else(
+                || self.state.listing.dir.clone(),
+                |p| {
                     if p.as_os_str().is_empty() {
                         self.state.listing.dir.clone()
                     } else {
                         p.to_path_buf()
                     }
-                })
-                .unwrap_or_else(|| self.state.listing.dir.clone());
+                },
+            );
             let name = input
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -2310,7 +2303,7 @@ impl App {
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.starts_with(&file_prefix) {
-                    let is_dir = e.file_type().map_or(false, |ft| ft.is_dir());
+                    let is_dir = e.file_type().is_ok_and(|ft| ft.is_dir());
                     let suffix = if is_dir { "/" } else { "" };
                     Some(format!("{name}{suffix}"))
                 } else {
@@ -2331,7 +2324,7 @@ impl App {
         let word_base = if word.ends_with('/') || word.is_empty() {
             word.clone()
         } else {
-            let last_sep = word.rfind('/').map(|i| i + 1).unwrap_or(0);
+            let last_sep = word.rfind('/').map_or(0, |i| i + 1);
             word[..last_sep].to_string()
         };
 
@@ -2344,7 +2337,7 @@ impl App {
                 (format!("{word_base}{common}"), Some(msg))
             } else {
                 // No text progress — show matches and set up cycle state.
-                let display: Vec<&str> = matches.iter().map(|s| s.as_str()).collect();
+                let display: Vec<&str> = matches.iter().map(std::string::String::as_str).collect();
                 let shown = if display.len() > 12 {
                     format!(
                         "{}  (+{} more)",
@@ -2354,15 +2347,13 @@ impl App {
                 } else {
                     display.join("  ")
                 };
-                if dir != self.state.listing.dir {
-                    self.state
-                        .flash_info(format!("{shown}  — Tab to cycle"));
-                } else {
+                if dir == self.state.listing.dir {
                     // Local dir — also filter the listing.
                     self.state.temp_filter = Some(format!("{file_prefix}*"));
                     self.state.rebuild_rows();
-                    self.state
-                        .flash_info(format!("{shown}  — Tab to cycle"));
+                    self.state.flash_info(format!("{shown}  — Tab to cycle"));
+                } else {
+                    self.state.flash_info(format!("{shown}  — Tab to cycle"));
                 }
                 let Mode::Prompting(ref prompt) = self.state.mode else {
                     return;
@@ -2433,11 +2424,8 @@ impl App {
         } else {
             // Multiple frecency matches — fill best, set up cycling.
             let completed = format!("{buf_prefix}{}", names[0]);
-            self.state.flash_info(format!(
-                "{} — 1/{} frecency",
-                names[0],
-                names.len()
-            ));
+            self.state
+                .flash_info(format!("{} — 1/{} frecency", names[0], names.len()));
             let Mode::Prompting(ref mut prompt) = self.state.mode else {
                 return;
             };
@@ -2500,7 +2488,8 @@ impl App {
         if input == "!!" || input == "!" {
             match self.state.last_captured_cmd.clone() {
                 Some(cmd) => {
-                    let expanded = crate::shell::expand_percent(&cmd, &self.state.selection_paths());
+                    let expanded =
+                        crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
                         Ok((child, rx)) => {
@@ -2598,7 +2587,8 @@ impl App {
             } else if let Some(prev) = self.pager_history.back.pop() {
                 self.pager = Some(prev);
                 self.needs_full_repaint = true;
-                self.state.flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+                self.state
+                    .flash_info(format!("buffer ←{}", self.pager_history.back_len()));
             } else {
                 self.state.flash_info("no buffers in history");
             }
@@ -2804,7 +2794,8 @@ impl App {
         match Pane::spawn_with_env(cmd, rows, cols, cwd, &[]) {
             Ok(p) => {
                 self.state.pane_focused = true;
-                self.state.flash_info(format!("pane: {cmd} (^W k for list)"));
+                self.state
+                    .flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry {
                     pane: p,
                     info: TabInfo::new(cmd, cwd),
@@ -2959,7 +2950,8 @@ impl App {
         self.state.rebuild_rows();
         if count > 0 {
             self.state.refresh_listing();
-            self.state.flash_info(format!("put {count} file(s) to {}", dest.display()));
+            self.state
+                .flash_info(format!("put {count} file(s) to {}", dest.display()));
         }
         if let Some(e) = err {
             self.state.flash_error(e);
@@ -3023,8 +3015,7 @@ impl App {
             let label = self
                 .pane_tabs
                 .as_ref()
-                .map(|t| t.active_info().label.as_str())
-                .unwrap_or("pane");
+                .map_or("pane", |t| t.active_info().label.as_str());
             self.state.flash_info(format!("focus: {label}"));
         } else {
             self.state.flash_info("focus: spyc");
@@ -3042,7 +3033,11 @@ impl App {
             self.scroll_pending_g = false;
             match key.code {
                 KeyCode::Char('g') => {
-                    self.pane_tabs.as_mut().unwrap().active_mut().scroll_to_top();
+                    self.pane_tabs
+                        .as_mut()
+                        .unwrap()
+                        .active_mut()
+                        .scroll_to_top();
                 }
                 KeyCode::Char('f') => {
                     self.goto_file_from_pane(false);
@@ -3120,7 +3115,9 @@ impl App {
             pane.send_bytes(payload.as_bytes())
         };
         match result {
-            Ok(()) => self.state.flash_info(format!("sent {count} path(s) to pane")),
+            Ok(()) => self
+                .state
+                .flash_info(format!("sent {count} path(s) to pane")),
             Err(e) => self.state.flash_error(format!("send failed: {e}")),
         }
     }
@@ -3146,15 +3143,14 @@ impl App {
                 return;
             }
             for id in &ids {
-                if let Some(item) = self.state.inventory.items()
-                    .find(|i| &i.id == id)
-                {
+                if let Some(item) = self.state.inventory.items().find(|i| &i.id == id) {
                     if let Some(bytes) = self.state.inventory.read_content(id) {
                         if let Ok(text) = String::from_utf8(bytes) {
                             if !payload.is_empty() {
                                 payload.push('\n');
                             }
-                            let _ = write!(payload, "[file: {}]\n{}", item.orig_path.display(), text);
+                            let _ =
+                                write!(payload, "[file: {}]\n{}", item.orig_path.display(), text);
                             count += 1;
                         } else {
                             skipped += 1;
@@ -3165,7 +3161,9 @@ impl App {
                 }
             }
         } else {
-            let paths: Vec<PathBuf> = self.state.selection_paths()
+            let paths: Vec<PathBuf> = self
+                .state
+                .selection_paths()
                 .into_iter()
                 .map(Path::to_path_buf)
                 .collect();
@@ -3187,7 +3185,8 @@ impl App {
         }
 
         if count == 0 {
-            self.state.flash_error("no readable text files in selection");
+            self.state
+                .flash_error("no readable text files in selection");
             return;
         }
         // Send as bracketed paste so it arrives as a single block.
@@ -3281,26 +3280,35 @@ impl App {
 
         // Debug: dump visible lines to the debug log so we can see what
         // the vt100 screen actually contains.
-        spyc_debug!("gf: {} lines from pane, pane_cwd={}, spyc_cwd={}", lines.len(), pane_cwd.display(), spyc_cwd.display());
+        spyc_debug!(
+            "gf: {} lines from pane, pane_cwd={}, spyc_cwd={}",
+            lines.len(),
+            pane_cwd.display(),
+            spyc_cwd.display()
+        );
         for (i, line) in lines.iter().enumerate() {
             if !line.trim().is_empty() {
                 spyc_debug!("gf line[{i}]: {:?}", line);
             }
         }
 
-        let pathref = crate::pane::pathref::extract_path_ref(&lines, &pane_cwd)
-            .or_else(|| {
-                (pane_cwd != spyc_cwd)
-                    .then(|| crate::pane::pathref::extract_path_ref(&lines, &spyc_cwd))
-                    .flatten()
-            });
+        let pathref = crate::pane::pathref::extract_path_ref(&lines, &pane_cwd).or_else(|| {
+            (pane_cwd != spyc_cwd)
+                .then(|| crate::pane::pathref::extract_path_ref(&lines, &spyc_cwd))
+                .flatten()
+        });
 
         let Some(pathref) = pathref else {
-            self.state.flash_error("no path reference found in pane output");
+            self.state
+                .flash_error("no path reference found in pane output");
             return;
         };
 
-        spyc_debug!("gf: found path={}, line={:?}", pathref.path.display(), pathref.line);
+        spyc_debug!(
+            "gf: found path={}, line={:?}",
+            pathref.path.display(),
+            pathref.line
+        );
 
         let path = pathref.path;
         let line = pathref.line;
@@ -3336,9 +3344,10 @@ impl App {
 
         // gF: also open the file in the pager at the referenced line.
         if open_at_line {
-            let name = path
-                .file_name()
-                .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
 
             match std::fs::read_to_string(&path) {
                 Ok(text) => {
@@ -3359,8 +3368,10 @@ impl App {
         } else if let Some(ln) = line {
             self.state.flash_info(format!(
                 "{}:{}",
-                path.file_name()
-                    .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned()),
+                path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned()
+                ),
                 ln
             ));
         }
@@ -3462,7 +3473,7 @@ impl App {
                         let sid = t.claude_session_id.as_deref()?;
                         let short_id = &sid[..sid.len().min(8)];
                         match &t.claude_session_name {
-                            Some(name) => Some(format!("{} ({})", name, short_id)),
+                            Some(name) => Some(format!("{name} ({short_id})")),
                             None => Some(short_id.to_string()),
                         }
                     })
@@ -3477,7 +3488,11 @@ impl App {
                 } else {
                     format!("  claude: {}", claude_info.join(", "))
                 };
-                let name_col = if s.name.is_empty() { "(unnamed)" } else { s.name.as_str() };
+                let name_col = if s.name.is_empty() {
+                    "(unnamed)"
+                } else {
+                    s.name.as_str()
+                };
                 format!(
                     "  [{}]  {:<22} {:<14} {}{}{}",
                     i + 1,
@@ -3570,9 +3585,10 @@ impl App {
                 self.state.flash_error(format!("session chdir: {e}"));
                 return;
             }
-            self.state.start_dir = session.cwd.clone();
+            self.state.start_dir.clone_from(&session.cwd);
         } else {
-            self.state.flash_error(format!("session dir gone: {}", session.cwd.display()));
+            self.state
+                .flash_error(format!("session dir gone: {}", session.cwd.display()));
             return;
         }
         // Keep the startup-generated name when an older session file
@@ -3580,10 +3596,7 @@ impl App {
         if !session.name.is_empty() {
             self.state.session_name = Some(session.name.clone());
         }
-        self.state.project_home = session
-            .project_home
-            .clone()
-            .filter(|p| p.is_dir());
+        self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
         // Restore pane layout.
         self.state.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
@@ -3622,7 +3635,8 @@ impl App {
     fn worktree_list(&mut self) {
         match crate::sysinfo::git_worktree_list(&self.state.listing.dir) {
             Some(worktrees) => {
-                self.state.pending_worktrees = Some(worktrees.iter().map(|w| w.path.clone()).collect());
+                self.state.pending_worktrees =
+                    Some(worktrees.iter().map(|w| w.path.clone()).collect());
                 let lines: Vec<String> = worktrees
                     .iter()
                     .enumerate()
@@ -3648,7 +3662,9 @@ impl App {
                 );
                 self.pager = Some(view);
             }
-            None => self.state.flash_error("not in a git repository (or no worktrees)"),
+            None => self
+                .state
+                .flash_error("not in a git repository (or no worktrees)"),
         }
     }
 
@@ -4062,7 +4078,8 @@ impl App {
                     // Execute the (possibly edited) command directly.
                     self.state.last_captured_cmd = Some(cmd.clone());
                     self.state.history.push(cmd.trim());
-                    let expanded = crate::shell::expand_percent(&cmd, &self.state.selection_paths());
+                    let expanded =
+                        crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
                         Ok((child, rx)) => {
@@ -4427,7 +4444,8 @@ impl App {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.active_mut().enter_scroll_mode();
                     self.state.pane_focused = true;
-                    self.state.flash_info("scroll: on (j/k nav, s save, Esc exit)");
+                    self.state
+                        .flash_info("scroll: on (j/k nav, s save, Esc exit)");
                 }
             }
             Action::PaneScrollSave => {
@@ -4511,7 +4529,8 @@ impl App {
             }
             Action::Quit => {
                 let now = std::time::Instant::now();
-                if self.state
+                if self
+                    .state
                     .quit_pending
                     .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
                 {
@@ -4519,10 +4538,9 @@ impl App {
                     self.state.should_quit = true;
                 } else {
                     self.state.quit_pending = Some(now);
-                    let running = self
-                        .pane_tabs
-                        .as_ref()
-                        .map_or(0, |tabs| tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count());
+                    let running = self.pane_tabs.as_ref().map_or(0, |tabs| {
+                        tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
+                    });
                     if running > 0 {
                         self.state.flash_info(format!(
                             "{running} running process{} — press again to quit",
@@ -4645,9 +4663,6 @@ impl App {
             }
         }
     }
-
-
-
 }
 
 /// Search matcher: prefix match for plain text, glob for anything with
@@ -4844,8 +4859,10 @@ const fn on_off(b: bool) -> &'static str {
 /// Last segment of a path as a displayable String, falling back to the full
 /// display if the path has no terminating file-name component (root, `..`).
 fn path_basename_display(p: &std::path::Path) -> String {
-    p.file_name()
-        .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
+    p.file_name().map_or_else(
+        || p.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 fn user_host_string() -> String {

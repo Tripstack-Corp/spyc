@@ -19,7 +19,7 @@ pub use widget::PaneWidget;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -245,11 +245,7 @@ impl Pane {
     #[allow(dead_code)]
     pub fn visible_lines(&self) -> Vec<String> {
         let screen = self.parser.screen();
-        screen
-            .contents()
-            .lines()
-            .map(String::from)
-            .collect()
+        screen.contents().lines().map(String::from).collect()
     }
 
     /// Return the most recent `max_lines` of output (scrollback + visible

@@ -106,7 +106,7 @@ impl Resolver {
                 // it to `chmod +w`; that went to `!chmod +w %` to free the
                 // key for split-nav. Note the match arm below starts the
                 // pending sequence and falls through after resetting.
-                KeyCode::Char('w' | 'W') | KeyCode::Char('a' | 'A') => {
+                KeyCode::Char('w' | 'W' | 'a' | 'A') => {
                     self.pending = PendingSeq::W;
                     return ResolverOutcome::Pending;
                 }
@@ -147,8 +147,12 @@ impl Resolver {
         // with vim-style (j/k focus, +/- resize).
         if self.pending == PendingSeq::W {
             let out = match ev.code {
-                // Focus switching (vim-style).
-                KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
+                // Focus switching — vim-style j/J, plus screen-style ^a ^a
+                // which sends literal ^a to the pane (grouped here to shut
+                // up clippy::match_same_arms).
+                KeyCode::Char('j' | 'J' | 'a' | 'A') => {
+                    ResolverOutcome::Action(Action::PaneFocusDown)
+                }
                 KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
                 // Tab navigation (screen-style + vim bracket style).
                 KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
@@ -169,8 +173,6 @@ impl Resolver {
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
                 KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
-                // Screen-style: ^a ^a sends literal ^a to the pane.
-                KeyCode::Char('a' | 'A') => ResolverOutcome::Action(Action::PaneFocusDown),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -316,7 +318,7 @@ impl Resolver {
             // Inventory / yank prefix (yy = take, yp = yank pane).
             KeyCode::Char('y') => {
                 self.pending = PendingSeq::Yank;
-                return ResolverOutcome::Pending;
+                ResolverOutcome::Pending
             }
             KeyCode::Char('Y') => {
                 self.reset();

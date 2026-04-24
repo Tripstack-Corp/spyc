@@ -92,7 +92,11 @@ fn main() -> Result<()> {
             "  COLOR:   {}",
             std::env::var("COLORTERM").unwrap_or_default()
         );
-        println!("  os:      {} {}", std::env::consts::OS, std::env::consts::ARCH);
+        println!(
+            "  os:      {} {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
         return Ok(());
     }
 

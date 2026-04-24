@@ -46,10 +46,10 @@ impl Frecency {
     /// over the entry cap, and persists to disk.
     pub fn record(&mut self, dir: &Path) {
         let now = epoch_secs();
-        let e = self
-            .entries
-            .entry(dir.to_path_buf())
-            .or_insert(Entry { count: 0, last_visit: 0 });
+        let e = self.entries.entry(dir.to_path_buf()).or_insert(Entry {
+            count: 0,
+            last_visit: 0,
+        });
         e.count += 1;
         e.last_visit = now;
 
@@ -152,7 +152,10 @@ mod tests {
         let now = epoch_secs();
         f.entries.insert(
             PathBuf::from("/tmp/a"),
-            Entry { count: 5, last_visit: now },
+            Entry {
+                count: 5,
+                last_visit: now,
+            },
         );
         let s = f.score(Path::new("/tmp/a"), now);
         // Visited just now → recency 4.0, count 5 → score 20.0
@@ -165,7 +168,10 @@ mod tests {
         let now = epoch_secs();
         f.entries.insert(
             PathBuf::from("/tmp/b"),
-            Entry { count: 1, last_visit: now },
+            Entry {
+                count: 1,
+                last_visit: now,
+            },
         );
         // Simulate a second visit.
         let e = f.entries.get_mut(Path::new("/tmp/b")).unwrap();
@@ -181,7 +187,10 @@ mod tests {
         for i in 0..MAX_ENTRIES + 10 {
             f.entries.insert(
                 PathBuf::from(format!("/tmp/dir{i}")),
-                Entry { count: 1, last_visit: now },
+                Entry {
+                    count: 1,
+                    last_visit: now,
+                },
             );
         }
         assert!(f.entries.len() > MAX_ENTRIES);
@@ -195,15 +204,24 @@ mod tests {
         let now = epoch_secs();
         f.entries.insert(
             PathBuf::from("/home/user/src/spyc"),
-            Entry { count: 10, last_visit: now },
+            Entry {
+                count: 10,
+                last_visit: now,
+            },
         );
         f.entries.insert(
             PathBuf::from("/home/user/src/spy-tools"),
-            Entry { count: 2, last_visit: now },
+            Entry {
+                count: 2,
+                last_visit: now,
+            },
         );
         f.entries.insert(
             PathBuf::from("/tmp/unrelated"),
-            Entry { count: 50, last_visit: now },
+            Entry {
+                count: 50,
+                last_visit: now,
+            },
         );
         let results = f.search("spy");
         assert_eq!(results.len(), 2);
@@ -217,7 +235,10 @@ mod tests {
         let now = epoch_secs();
         f.entries.insert(
             PathBuf::from("/home/user/Documents"),
-            Entry { count: 3, last_visit: now },
+            Entry {
+                count: 3,
+                last_visit: now,
+            },
         );
         let results = f.search("doc");
         assert_eq!(results.len(), 1);
@@ -230,7 +251,10 @@ mod tests {
         let now = epoch_secs();
         f.entries.insert(
             PathBuf::from("/tmp/roundtrip"),
-            Entry { count: 7, last_visit: now },
+            Entry {
+                count: 7,
+                last_visit: now,
+            },
         );
         let json = serde_json::to_string(&f).unwrap();
         let loaded: Frecency = serde_json::from_str(&json).unwrap();

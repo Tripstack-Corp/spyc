@@ -90,9 +90,7 @@ fn check_paired_dir(dir: &Path, warnings: &mut Vec<String>, label: &str) -> usiz
     }
     if removed > corrupt_json {
         let orphans = removed - corrupt_json;
-        warnings.push(format!(
-            "{label}: cleaned up {orphans} orphaned file(s)"
-        ));
+        warnings.push(format!("{label}: cleaned up {orphans} orphaned file(s)"));
     }
 
     removed

@@ -58,8 +58,8 @@ pub enum Action {
     CopyPrompt,    // c — prompt for destination, cp -r selection
     MovePrompt,    // M — prompt for destination, mv selection
     RemovePrompt,  // R — confirm, rm -rf selection
-    MakeDirPrompt,  // + — prompt for a directory name
-    NewFilePrompt,  // N — prompt for a filename, open in $EDITOR
+    MakeDirPrompt, // + — prompt for a directory name
+    NewFilePrompt, // N — prompt for a filename, open in $EDITOR
     LongList,      // L — ls -lh selection | $PAGER
     FileType,      // f — file(1) on selection, paged output
 
@@ -70,25 +70,25 @@ pub enum Action {
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
     // Project home (sticky project root).
-    JumpProjectHome,     // gh — jump to PROJECT_HOME
-    SetProjectHomeHere,  // gP — set PROJECT_HOME to current directory
+    JumpProjectHome,    // gh — jump to PROJECT_HOME
+    SetProjectHomeHere, // gP — set PROJECT_HOME to current directory
 
     // Start dir (target of backtick `).
-    SetStartDirHere,     // gS — set start_dir to current directory
+    SetStartDirHere, // gS — set start_dir to current directory
 
     // Identity.
-    ShowUserHost,   // gU — flash user@host in the status line
+    ShowUserHost, // gU — flash user@host in the status line
 
     // Edit in pane.
     EditInPane, // V — open $EDITOR in pane tab (file list stays visible)
 
     // Info commands.
-    Date,            // D — show date/time
-    Version,         // gV / :version — show spyc version
-    ShowMemory,      // I — session info pager (version, pid, rss, counts)
-    ColorToggle,     // C — toggle color theme on/off
-    SetEnvPrompt,    // s — NAME=VALUE prompt
-    ToggleActivity,  // A — toggle draws/sec, bytes/sec overlay
+    Date,           // D — show date/time
+    Version,        // gV / :version — show spyc version
+    ShowMemory,     // I — session info pager (version, pid, rss, counts)
+    ColorToggle,    // C — toggle color theme on/off
+    SetEnvPrompt,   // s — NAME=VALUE prompt
+    ToggleActivity, // A — toggle draws/sec, bytes/sec overlay
 
     // Help.
     Help, // ? or F1 — key bindings overlay

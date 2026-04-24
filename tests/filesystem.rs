@@ -39,7 +39,7 @@ fn tempdir_tree_has_expected_entries() {
 
     let entries: Vec<String> = fs::read_dir(tmp.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
 
@@ -83,7 +83,7 @@ fn sort_name_dirs_first() {
 
     let mut entries: Vec<(bool, String)> = fs::read_dir(tmp.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| {
             let md = e.metadata().unwrap();
             let name = e.file_name().to_string_lossy().into_owned();
@@ -109,7 +109,7 @@ fn sort_name_dirs_first() {
 fn extension_extraction() {
     // Mirrors the ext_of() helper in listing.rs
     fn ext_of(name: &str) -> &str {
-        name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("")
+        name.rsplit_once('.').map_or("", |(_, ext)| ext)
     }
 
     assert_eq!(ext_of("main.rs"), "rs");
@@ -123,7 +123,7 @@ fn empty_directory_lists_nothing() {
     let tmp = tempdir().unwrap();
     let entries: Vec<_> = fs::read_dir(tmp.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
     assert!(entries.is_empty());
 }

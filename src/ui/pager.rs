@@ -820,18 +820,9 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
         ),
         (
             "Buffer history",
-            &[
-                ("[b", "previous buffer"),
-                ("]b", "next buffer"),
-            ],
+            &[("[b", "previous buffer"), ("]b", "next buffer")],
         ),
-        (
-            "Exit",
-            &[
-                ("q  Q  Esc", "close pager"),
-                ("?", "this help"),
-            ],
-        ),
+        ("Exit", &[("q  Q  Esc", "close pager"), ("?", "this help")]),
     ];
 
     let mut lines: Vec<Line<'static>> = Vec::new();
