@@ -123,7 +123,7 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: `g` already seen (gg, gd, gD).
+        // Mid-sequence: `g` already seen.
         if self.pending == PendingSeq::G {
             let out = match ev.code {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
@@ -132,6 +132,10 @@ impl Resolver {
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),
                 KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
                 KeyCode::Char('V') => ResolverOutcome::Action(Action::Version),
+                KeyCode::Char('h') => ResolverOutcome::Action(Action::JumpProjectHome),
+                KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
+                KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
+                KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

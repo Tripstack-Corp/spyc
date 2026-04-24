@@ -1,5 +1,6 @@
 ---
 source: src/ui/status.rs
+assertion_line: 300
 expression: out
 ---
-derek@mac: /tmp
+SAFFRON_CUMIN: /tmp

@@ -14,7 +14,9 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:q`)
 - `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=` clears)
 - Picks (per-directory multi-select) and inventory (file cache with graveyard)
-- Session save/restore — auto-saved on quit, `spyc -r` resumes tabs and Claude conversations
+- Session save/restore — auto-saved on quit with a spice-themed name (e.g. `SAFFRON_CUMIN`), `spyc -r` resumes tabs and Claude conversations
+- `PROJECT_HOME` — sticky per-session project root. Auto-set when launch dir has `.git`. `gh` jumps, `gP` sets, `:project` manages. New pane tabs default their cwd to `PROJECT_HOME`. Exposed via MCP context.
+- Top bar: `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`. `user@host` dropped from the bar; flash with `gU` / `:whoami`, or see it in the `I` overlay.
 - `.spycrc.toml` config with keymap DSL, themes, ignore masks, live reload
 
 ## Architecture
@@ -28,8 +30,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - **`src/fs/`** — Directory listing, entry types, file operations.
 - **`src/mcp.rs`** — MCP server: PID-scoped Unix socket listener, stdio proxy for Claude Code, `.mcp.json` management, enterprise policy checking, instance takeover.
 - **`src/mcp_cmd.rs`** — Command channel types bridging MCP threads to the main event loop.
-- **`src/context.rs`** — Context snapshot (cwd, cursor, picks, filter, git branch) written to disk for MCP consumers.
-- **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks, sessions.
+- **`src/context.rs`** — Context snapshot (cwd, cursor, picks, filter, git branch, project_home, session_name) written to disk for MCP consumers.
+- **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks, sessions, session_names (spice-pair generator).
 - **`src/config/`** — Config loading and DSL parser.
 - **`src/shell/`** — Shell expansion and command execution.
 - **`src/paths.rs`** — XDG-compliant path resolution for state, config, and cache directories.

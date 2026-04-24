@@ -302,6 +302,23 @@ one of the tracks above when picked up.
 
 Items shipped in the current development cycle, newest first.
 
+- **v1.11.0** -- `PROJECT_HOME`, named sessions, editable start dir,
+  top-bar redesign.
+  - `PROJECT_HOME` is a sticky per-session project root, auto-set at
+    startup when the launch dir contains `.git`. `gh` jumps to it,
+    `gP` sets it to cwd. `:project` command manages it from the
+    command line. New pane tabs default their cwd to `PROJECT_HOME`.
+    Exposed via MCP context.
+  - Named sessions: every session now carries a spice-themed display
+    name like `SAFFRON_CUMIN`, generated from a list of ~30 spices on
+    session creation. Rename with `:name <NEW>`. Shown as the primary
+    column in the `-r` session picker and in the top bar (all caps).
+  - Start dir is now editable at runtime: `gS` sets it to the current
+    directory, `:startdir` manages it from the command line.
+    Previously only settable at spyc launch or on session restore.
+  - Top bar redesigned: dropped `user@host` (flash with `gU` / use
+    `:whoami`, or see it in the `I` overlay). New order:
+    `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`.
 - **v1.8.0** -- Writable MCP actions. Five new tools: navigate_to,
   set_filter, pick_files, clear_picks, get_file_content. Command
   channel from MCP server threads to event loop with one-shot reply

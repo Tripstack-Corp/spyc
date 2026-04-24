@@ -83,6 +83,8 @@ pub struct AppState {
     pub config: Config,
     pub mode: Mode,
     pub start_dir: PathBuf,
+    pub project_home: Option<PathBuf>,
+    pub session_name: Option<String>,
     pub prev_dir: Option<PathBuf>,
     pub last_search: Option<String>,
     pub last_captured_cmd: Option<String>,
@@ -749,6 +751,25 @@ impl AppState {
                     self.flash_error(format!("jump to start failed: {e}"));
                 }
             }
+            Action::JumpProjectHome => match self.project_home.clone() {
+                Some(dir) => {
+                    if let Err(e) = self.chdir(&dir) {
+                        self.flash_error(format!("jump to project home failed: {e}"));
+                    }
+                }
+                None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
+            },
+            Action::SetProjectHomeHere => {
+                let dir = self.listing.dir.clone();
+                self.flash_info(format!("PROJECT_HOME: {}", dir.display()));
+                self.project_home = Some(dir);
+            }
+            Action::SetStartDirHere => {
+                let dir = self.listing.dir.clone();
+                self.flash_info(format!("start dir: {}", dir.display()));
+                self.start_dir = dir;
+            }
+            Action::ShowUserHost => self.flash_info(self.user_host.clone()),
             Action::JumpPrevDir => {
                 if let Some(prev) = self.prev_dir.clone() {
                     if let Err(e) = self.chdir(&prev) {
@@ -897,6 +918,66 @@ impl AppState {
                 "\u{1f336}\u{fe0f} spyc {}",
                 env!("CARGO_PKG_VERSION")
             ));
+            return CommandResult::Handled;
+        }
+
+        // :whoami — flash user@host.
+        if input == "whoami" {
+            self.flash_info(self.user_host.clone());
+            return CommandResult::Handled;
+        }
+
+        // :startdir [.|<path>] — manage the `` ` `` jump target.
+        if input == "startdir" {
+            self.flash_info(format!("start dir: {}", self.start_dir.display()));
+            return CommandResult::Handled;
+        }
+        if let Some(arg) = input.strip_prefix("startdir ") {
+            match self.resolve_dir_arg(arg.trim()) {
+                Ok(canon) => {
+                    self.flash_info(format!("start dir: {}", canon.display()));
+                    self.start_dir = canon;
+                }
+                Err(e) => self.flash_error(format!("startdir: {e}")),
+            }
+            return CommandResult::Handled;
+        }
+
+        // :project [.|<path>|clear] — manage PROJECT_HOME.
+        if input == "project" {
+            self.flash_info(format!("PROJECT_HOME: {}", self.project_home_display()));
+            return CommandResult::Handled;
+        }
+        if let Some(arg) = input.strip_prefix("project ") {
+            let arg = arg.trim();
+            if arg == "clear" {
+                self.project_home = None;
+                self.flash_info("PROJECT_HOME cleared");
+                return CommandResult::Handled;
+            }
+            match self.resolve_dir_arg(arg) {
+                Ok(canon) => {
+                    self.flash_info(format!("PROJECT_HOME: {}", canon.display()));
+                    self.project_home = Some(canon);
+                }
+                Err(e) => self.flash_error(format!("project: {e}")),
+            }
+            return CommandResult::Handled;
+        }
+
+        // :name [NEW] — rename session, or print current name when bare.
+        if input == "name" {
+            self.flash_info(format!("session name: {}", self.session_display()));
+            return CommandResult::Handled;
+        }
+        if let Some(arg) = input.strip_prefix("name ") {
+            match crate::state::session_names::normalize(arg) {
+                Some(norm) => {
+                    self.flash_info(format!("session name: {norm}"));
+                    self.session_name = Some(norm);
+                }
+                None => self.flash_error("name: empty after normalization"),
+            }
             return CommandResult::Handled;
         }
 
@@ -1104,6 +1185,42 @@ impl AppState {
         }
     }
 
+    /// Resolve a `:project`/`:startdir` argument to an absolute directory.
+    /// Accepts `.` (current listing dir), `~`-expanded paths, absolute paths,
+    /// or relative paths (resolved against the listing dir). Rejects files
+    /// and non-existent paths with a descriptive error.
+    pub fn resolve_dir_arg(&self, arg: &str) -> std::result::Result<PathBuf, String> {
+        let target = if arg == "." {
+            self.listing.dir.clone()
+        } else {
+            crate::paths::expand(arg)
+        };
+        let abs = if target.is_absolute() {
+            target
+        } else {
+            self.listing.dir.join(&target)
+        };
+        let canon = std::fs::canonicalize(&abs).map_err(|e| e.to_string())?;
+        if !canon.is_dir() {
+            return Err(format!("not a directory: {}", abs.display()));
+        }
+        Ok(canon)
+    }
+
+    /// Human-readable session name for status bar / overlays; falls back to
+    /// `"(unnamed)"` when no name is set (e.g. restored from an old session
+    /// file that predates the name field).
+    pub fn session_display(&self) -> &str {
+        self.session_name.as_deref().unwrap_or("(unnamed)")
+    }
+
+    /// Human-readable PROJECT_HOME path or `"(unset)"` when none.
+    pub fn project_home_display(&self) -> String {
+        self.project_home
+            .as_ref()
+            .map_or_else(|| "(unset)".to_string(), |p| p.display().to_string())
+    }
+
     pub fn jump_to(&mut self, target: &str) -> Result<()> {
         let expanded = crate::paths::expand(target);
         let abs = if expanded.is_absolute() {
@@ -1153,6 +1270,8 @@ mod tests {
             config: Config::default(),
             mode: Mode::Normal,
             start_dir: PathBuf::from("/tmp/test"),
+            project_home: None,
+            session_name: None,
             prev_dir: None,
             last_search: None,
             last_captured_cmd: None,

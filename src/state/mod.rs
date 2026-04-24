@@ -9,6 +9,7 @@ pub mod ignore;
 pub mod inventory;
 pub mod marks;
 pub mod picks;
+pub mod session_names;
 pub mod sessions;
 
 pub use cursor::Cursor;

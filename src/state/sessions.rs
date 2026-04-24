@@ -34,6 +34,14 @@ pub struct Session {
     pub active_tab: usize,
     pub pane_height_pct: u16,
     pub pane_focused: bool,
+    /// Spice-pair display name (e.g. `SAFFRON_PAPRIKA`). Assigned on
+    /// session creation; user-editable via `:name <NEW>`.
+    #[serde(default)]
+    pub name: String,
+    /// Sticky "project root" — target of `gh`, default cwd for new panes.
+    /// Auto-set at startup when launch dir contains `.git`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_home: Option<PathBuf>,
 }
 
 fn sessions_dir() -> Option<PathBuf> {
@@ -321,6 +329,8 @@ mod tests {
             active_tab: 0,
             pane_height_pct: 30,
             pane_focused: false,
+            name: "SAFFRON_CUMIN".to_string(),
+            project_home: None,
         };
         save_session(&session).unwrap();
         let loaded = load_sessions();
@@ -352,6 +362,8 @@ mod tests {
                 active_tab: 0,
                 pane_height_pct: 30,
                 pane_focused: false,
+                name: String::new(),
+                project_home: None,
             };
             save_session(&s).unwrap();
         }
@@ -378,6 +390,8 @@ mod tests {
                 active_tab: 0,
                 pane_height_pct: 30,
                 pane_focused: false,
+                name: String::new(),
+                project_home: None,
             };
             save_session(&s).unwrap();
         }

@@ -99,7 +99,20 @@ const SECTIONS: &[Section] = &[
             ("m{a-z}", "set mark at current dir + cursor"),
             ("'{a-z}", "jump to mark (chdir + focus)"),
             ("''", "jump back to previous directory (cd -)"),
-            ("`", "jump to starting directory (project root)"),
+            ("`", "jump to starting dir (set with gS or :startdir)"),
+        ],
+    },
+    Section {
+        title: "Project home & session",
+        rows: &[
+            ("g h", "jump to PROJECT_HOME"),
+            ("g P", "set PROJECT_HOME to current directory"),
+            ("g S", "set start dir (target of `) to current directory"),
+            ("g U", "flash user@host in status line"),
+            (":project [.|<path>|clear]", "manage PROJECT_HOME"),
+            (":startdir [.|<path>]", "manage start directory"),
+            (":name <NEW>", "rename the active session (SPICE_SPICE style)"),
+            (":whoami", "show user@host"),
         ],
     },
     Section {

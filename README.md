@@ -184,10 +184,30 @@ support. Press `?` inside the pager for its own help overlay.
 | `m{a-z}` | Set a bookmark |
 | `'{a-z}` | Jump to bookmark |
 | `''` | Jump back (like `cd -`) |
-| `` ` `` | Jump to session home |
+| `` ` `` | Jump to start dir (set with `gS` or `:startdir`) |
 | `a` | Toggle dotfile filter |
 | `o` | Toggle build artifact filter |
 | `=` | Temporary glob filter (`=*.rs`, `=!` for picks) |
+
+### Project home & session
+
+Each spyc run has a `PROJECT_HOME` (a sticky project root) and a
+session name (a spice-themed label like `SAFFRON_CUMIN`). Both appear
+on the top bar and persist across `spyc -r`.
+
+| Key | Action |
+|-----|--------|
+| `gh` | Jump to `PROJECT_HOME` |
+| `gP` | Set `PROJECT_HOME` to current directory |
+| `gS` | Set start dir (target of `` ` ``) to current directory |
+| `gU` | Flash `user@host` in the status line |
+| `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
+| `:startdir [.\|<path>]` | Manage start dir |
+| `:name <NEW>` | Rename the active session |
+| `:whoami` | Show `user@host` |
+
+`PROJECT_HOME` is auto-set on startup if the launch directory contains
+`.git`. New pane tabs default their cwd to `PROJECT_HOME` when set.
 
 ## Configuration
 

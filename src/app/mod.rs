@@ -358,6 +358,10 @@ impl App {
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
 
+        // Literal .git check, no upward walk — keep the concept explicit.
+        let project_home = cwd.join(".git").exists().then(|| cwd.clone());
+        let session_name = Some(crate::state::session_names::generate());
+
         // Run health check before loading state — cleans up orphaned
         // files so Inventory::load() et al. see a consistent directory.
         let health_warnings = if let Some(sd) = crate::state::health::state_dir() {
@@ -388,6 +392,8 @@ impl App {
             user_keymap,
             config,
             mode: Mode::Normal,
+            project_home,
+            session_name,
             frecency: crate::state::Frecency::load(),
             pane_focused: false,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
@@ -525,6 +531,8 @@ impl App {
             inventory: self.state.inventory.paths().cloned().collect(),
             filter: self.state.temp_filter.clone(),
             git_branch: self.state.git_info.clone(),
+            project_home: self.state.project_home.clone(),
+            session_name: self.state.session_name.clone().unwrap_or_default(),
         }
     }
 
@@ -1426,8 +1434,10 @@ impl App {
         }
 
         let (path, suffix) = self.header_parts();
+        let project_label = self.state.project_home.as_deref().map(path_basename_display);
         StatusBar {
-            user_host: &self.state.user_host,
+            project_home: project_label.as_deref(),
+            session_name: self.state.session_name.as_deref(),
             path: &path,
             suffix: &suffix,
             git_info: self.state.git_info.as_deref(),
@@ -2705,7 +2715,10 @@ impl App {
                 let cwd = prompt.buffer.trim().to_string();
                 if let Some(cmd) = self.state.pending_new_tab_cmd.take() {
                     let cwd_path = if cwd.is_empty() {
-                        self.state.listing.dir.clone()
+                        self.state
+                            .project_home
+                            .clone()
+                            .unwrap_or_else(|| self.state.listing.dir.clone())
                     } else if cwd.starts_with('~') {
                         let home = std::env::var("HOME").unwrap_or_default();
                         std::path::PathBuf::from(cwd.replacen('~', &home, 1))
@@ -2776,8 +2789,14 @@ impl App {
     }
 
     /// Spawn a new pane tab. If no tabs exist, creates the container.
+    /// Default cwd is `PROJECT_HOME` when set, else the current listing dir.
     fn open_pane_tab(&mut self, cmd: &str) {
-        self.open_pane_tab_in(cmd, &self.state.listing.dir.clone());
+        let cwd = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.listing.dir.clone());
+        self.open_pane_tab_in(cmd, &cwd);
     }
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
@@ -3394,6 +3413,8 @@ impl App {
             active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
             pane_height_pct: self.state.pane_height_pct,
             pane_focused: self.state.pane_focused,
+            name: self.state.session_name.clone().unwrap_or_default(),
+            project_home: self.state.project_home.clone(),
         };
         let _ = crate::state::sessions::save_session(&session);
 
@@ -3456,9 +3477,11 @@ impl App {
                 } else {
                     format!("  claude: {}", claude_info.join(", "))
                 };
+                let name_col = if s.name.is_empty() { "(unnamed)" } else { s.name.as_str() };
                 format!(
-                    "  [{}]  {:<20} {}{}{}",
+                    "  [{}]  {:<22} {:<14} {}{}{}",
                     i + 1,
+                    name_col,
                     age,
                     s.cwd.display(),
                     tab_info,
@@ -3552,6 +3575,15 @@ impl App {
             self.state.flash_error(format!("session dir gone: {}", session.cwd.display()));
             return;
         }
+        // Keep the startup-generated name when an older session file
+        // has no name field; otherwise take the saved one.
+        if !session.name.is_empty() {
+            self.state.session_name = Some(session.name.clone());
+        }
+        self.state.project_home = session
+            .project_home
+            .clone()
+            .filter(|p| p.is_dir());
         // Restore pane layout.
         self.state.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
@@ -3653,6 +3685,10 @@ impl App {
             "\u{1f336}\u{fe0f} spyc {}",
             env!("CARGO_PKG_VERSION")
         ));
+        lines.push(format!("session  : {}", self.state.session_display()));
+        lines.push(format!("project  : {}", self.state.project_home_display()));
+        lines.push(format!("user@host: {}", self.state.user_host));
+        lines.push(format!("start dir: {}", self.state.start_dir.display()));
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!("cwd      : {}", self.state.listing.dir.display()));
         lines.push(format!("entries  : {}", self.state.listing.entries.len()));
@@ -4803,6 +4839,13 @@ pub fn row_from_entry(e: &Entry) -> RowData {
 
 const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
+}
+
+/// Last segment of a path as a displayable String, falling back to the full
+/// display if the path has no terminating file-name component (root, `..`).
+fn path_basename_display(p: &std::path::Path) -> String {
+    p.file_name()
+        .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 fn user_host_string() -> String {

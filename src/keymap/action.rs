@@ -69,6 +69,16 @@ pub enum Action {
     JumpPrevDir,    // '' — jump back to directory before last chdir
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
+    // Project home (sticky project root).
+    JumpProjectHome,     // gh — jump to PROJECT_HOME
+    SetProjectHomeHere,  // gP — set PROJECT_HOME to current directory
+
+    // Start dir (target of backtick `).
+    SetStartDirHere,     // gS — set start_dir to current directory
+
+    // Identity.
+    ShowUserHost,   // gU — flash user@host in the status line
+
     // Edit in pane.
     EditInPane, // V — open $EDITOR in pane tab (file list stays visible)
 
@@ -205,6 +215,10 @@ impl Action {
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",
             Self::JumpStartDir => "jump to starting directory",
+            Self::JumpProjectHome => "jump to PROJECT_HOME",
+            Self::SetProjectHomeHere => "set PROJECT_HOME to current dir",
+            Self::SetStartDirHere => "set start dir to current dir (target of `)",
+            Self::ShowUserHost => "flash user@host",
             Self::Date => "show date",
             Self::Version => "show version",
             Self::ShowMemory => "session info",

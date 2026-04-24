@@ -5,6 +5,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-04-23
+
+### Added
+- **`PROJECT_HOME` concept.** A sticky per-session project root,
+  distinct from `start_dir` (the backtick target). Auto-set on
+  startup when the launch dir contains `.git`; otherwise unset.
+  New bindings: `gh` (jump), `gP` (set to current dir). Command
+  line: `:project`, `:project .`, `:project <path>`, `:project clear`.
+  New pane tabs default their cwd to `PROJECT_HOME` when set.
+  Persisted with the session (round-trips through `spyc -r`).
+- **Named sessions (spice-themed).** Every session now has a
+  display name like `SAFFRON_CUMIN` or `HARISSA_SUMAC`, generated
+  on creation from ~30 spice words. Shown on the top bar in
+  all-caps and as the primary column in the session picker.
+  Rename with `:name <NEW>`.
+- **Start dir is now editable at runtime.** `gS` sets it to
+  current dir; `:startdir` prints; `:startdir .` / `:startdir <path>`
+  sets it. Previously only settable at spyc launch or on session
+  restore.
+- **`gU` / `:whoami` to flash user@host** in the status line.
+  User@host also appears in the `I` info overlay.
+- **MCP context exposes `project_home` and `session_name`** so
+  Claude can see the sticky project root and the session label.
+
+### Changed
+- **Top bar redesign.** Drops the user@host segment (rarely useful
+  once you're inside spyc). New order:
+  `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`.
+  Truncation priority under width pressure: suffix → path-basename
+  → git branch. PROJECT_HOME and SESSION_NAME are retained as the
+  primary identifiers for the workspace.
+
 ## [1.9.0] - 2026-04-21
 
 ### Added

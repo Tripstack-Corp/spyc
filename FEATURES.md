@@ -198,7 +198,29 @@ Vi-style named bookmarks for fast navigation:
 - **m{a-z}** set a mark at the current directory + cursor position
 - **'{a-z}** jump to a mark
 - **''** jump back to the previous directory (like `cd -`)
-- **\`** jump to the directory where spyc was launched
+- **\`** jump to the start directory (editable via `gS` or `:startdir`)
+
+## Project home & session name
+
+Each spyc run has a **`PROJECT_HOME`** (a sticky project root) and a
+**session name** (a spice-themed label like `SAFFRON_CUMIN`). Both are
+shown on the top bar and persist across `spyc -r`.
+
+- **Auto-detect** — `PROJECT_HOME` is set to the launch directory
+  automatically when that directory contains a `.git` entry. No
+  upward walk — the concept is explicit and predictable.
+- **Keys** — `gh` jumps to `PROJECT_HOME`; `gP` sets it to the current
+  directory; `gS` re-points the start directory (target of `` ` ``).
+- **Commands** — `:project` prints; `:project .`, `:project <path>`,
+  `:project clear` manage the value. `:startdir` manages start dir.
+  `:name <NEW>` renames the session (normalized to
+  `[A-Z0-9_]`). `:whoami` / `gU` flashes `user@host`.
+- **New pane tabs** default their cwd to `PROJECT_HOME` when set,
+  otherwise to the current listing dir.
+- **Session names** are generated at session creation from ~30
+  spices, joined pairwise: `CUMIN_SAFFRON`, `HARISSA_SUMAC`, etc.
+  Shown as the primary column in the `-r` session picker so you can
+  pick by memory instead of by timestamp.
 
 ## Ignore masks & filtering
 
@@ -217,13 +239,24 @@ Cleared automatically when changing directories.
 
 ## Powerline status bar
 
-The status bar uses powerline-style segments showing:
+The status bar uses powerline-style segments in this order:
 
-- User and hostname
+- Pepper emoji (logo)
+- `PROJECT_HOME` basename (hidden when unset)
+- Session name in all caps (hidden when empty)
 - Current path (intelligently truncated)
 - Git branch with dirty flag (`main*`)
 - Active state: pick counts, inventory counts, mask status, hidden
   file count, active filter
+
+Under width pressure, segments are dropped in reverse priority:
+suffix → path becomes basename → git branch. `PROJECT_HOME` and
+session name are retained as the primary workspace identifiers.
+
+`user@host` is no longer in the top bar — press `gU` (or run
+`:whoami`) to flash it in the status line, or open the `I` info
+overlay where it appears alongside the session name, project home,
+and start directory.
 
 Falls back to a plain text layout in mono mode.
 
@@ -255,9 +288,11 @@ unambiguous:
 spyc auto-saves your workspace on quit and can restore it on startup.
 
 - **Auto-save** — on quit, spyc saves the current directory, all pane
-  tabs (command, label, cwd), active tab, pane height, and focus state.
-- **`spyc --resume`** (or `-r`) — opens a session picker with
-  human-readable timestamps ("just now", "2 hours ago", "3 days ago").
+  tabs (command, label, cwd), active tab, pane height, focus state,
+  the spice-themed session name, and `PROJECT_HOME`.
+- **`spyc --resume`** (or `-r`) — opens a session picker showing
+  the session name (primary column), a human-readable timestamp
+  ("just now", "2 hours ago", "3 days ago"), and the cwd.
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
 - Sessions are de-duplicated by cwd + tab commands (most recent kept).
@@ -278,7 +313,7 @@ Claude can query and control the workspace through these tools:
 
 **Read tools:**
 - **`get_spyc_context`** -- returns cwd, cursor file, picks, inventory,
-  active filter, and git branch
+  active filter, git branch, `project_home`, and `session_name`
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**

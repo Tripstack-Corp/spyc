@@ -7,26 +7,27 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
+- (reopened) help pager lines wrapping incorrectly — multi-column
+  rendering was using ratatui's `.wrap()` which broke key/description
+  alignment. Now clips at column edge to keep tabular layout clean.
+- you can get into a weird history loop where commands are mixed with !shell
+  comamands and you'll just get "unknown command" - we should preserve a unified
+  history but it should preserve shell vs. spyc commands
+- cw didn't seem to be worked as expected in !
 - support git blame shortcut
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
 - programs requiring interactive input like sudo executed in our pager env don't
   work e.g. sudo; need to solve for this
-- support for named sessions which show in all caps in the top line after the
-  logo
+- : also screws up input from sudo
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
-- you can get into a weird history loop where commands are mixed with !shell
-  comamands and you'll just get "unknown command" - we should preserve a unified
-  history but it should preserve shell vs. spyc commands
 - ability to background running tasks and notify when done
 - would like to be able to reorder tabs
 - we need a better visual indicator that we're in visual mode in the bottom pane
 - graveyard should include files that have been removed with R
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory
-- some shortcut to set my homedir to current directory (e.g. for
-  backtick-backtick to work)
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
 - would be nice to add a "are you sure you want to interrupt?" protection with
@@ -40,9 +41,20 @@
   scrolled halfway up sometimes
 
 ### FIXED ###
-- (fixed) help pager lines wrapping incorrectly — multi-column
-  rendering was using ratatui's `.wrap()` which broke key/description
-  alignment. Now clips at column edge to keep tabular layout clean.
+- (fixed) PROJECT_HOME concept added. Sticky per-session project root,
+  auto-set on startup if cwd/.git exists. Bindings: `gh` jump, `gP` set.
+  Command: `:project [.|<path>|clear]`. New panes default their cwd to
+  PROJECT_HOME when set. Persists through session restore.
+- (fixed) PROJECT_HOME basename shown in the top bar next to the pepper
+  logo. Status bar also gained SESSION_NAME and dropped user@host (which
+  moved to `gU`/`:whoami` and the `I` info overlay).
+- (fixed) Named sessions — spice-themed display names like
+  `SAFFRON_CUMIN`, generated on session creation, shown in the top bar
+  (all caps) and as the primary column in the `-r` session picker.
+  Rename with `:name <NEW>`.
+- (fixed) start_dir (target of `) is now editable at runtime via `gS`
+  and `:startdir` — previously only settable at spyc launch or on
+  session restore.
 - (fixed) / search in help pager disrupted the display — the search
   bar stole a viewport row which broke multi-column scroll. Now always
   reserves a dedicated search row in multi-column views so the

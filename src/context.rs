@@ -24,6 +24,10 @@ pub struct SpycContext {
     pub filter: Option<String>,
     /// Git branch name, if in a repo.
     pub git_branch: Option<String>,
+    /// Sticky project root (target of `gh`, default cwd for new panes).
+    pub project_home: Option<PathBuf>,
+    /// Spice-pair session name (e.g. `SAFFRON_CUMIN`).
+    pub session_name: String,
 }
 
 /// Environment variable that tells `spyc --mcp` where to find the
@@ -71,6 +75,8 @@ mod tests {
             inventory: vec![PathBuf::from("/tmp/notes.txt")],
             filter: Some("*.rs".into()),
             git_branch: Some("main".into()),
+            project_home: Some(PathBuf::from("/home/user/project")),
+            session_name: "SAFFRON_CUMIN".into(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -81,6 +87,8 @@ mod tests {
         assert_eq!(parsed["inventory"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["filter"], "*.rs");
         assert_eq!(parsed["git_branch"], "main");
+        assert_eq!(parsed["project_home"], "/home/user/project");
+        assert_eq!(parsed["session_name"], "SAFFRON_CUMIN");
     }
 
     #[test]
@@ -94,6 +102,8 @@ mod tests {
             inventory: vec![],
             filter: None,
             git_branch: None,
+            project_home: None,
+            session_name: String::new(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -101,6 +111,8 @@ mod tests {
         assert!(parsed["cursor_file"].is_null());
         assert!(parsed["filter"].is_null());
         assert!(parsed["git_branch"].is_null());
+        assert!(parsed["project_home"].is_null());
+        assert_eq!(parsed["session_name"], "");
     }
 
     #[test]

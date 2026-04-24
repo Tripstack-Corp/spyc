@@ -550,7 +550,7 @@ fn handle_resources_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 {
                     "uri": CONTEXT_URI,
                     "name": "spyc context",
-                    "description": "Current spyc state: working directory, cursor position, picks, inventory, filter, git branch.",
+                    "description": "Current spyc state: working directory, cursor position, picks, inventory, filter, git branch, project home, session name.",
                     "mimeType": "application/json"
                 }
             ]
@@ -593,7 +593,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
             "tools": [
                 {
                     "name": "get_spyc_context",
-                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, and git branch. Use this to understand what the user is looking at in their file manager.",
+                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), and session_name. Use this to understand what the user is looking at in their file manager.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},
@@ -824,7 +824,9 @@ fn read_context_or_empty(ctx_path: &Path) -> String {
             "picks": [],
             "inventory": [],
             "filter": null,
-            "git_branch": null
+            "git_branch": null,
+            "project_home": null,
+            "session_name": ""
         })
         .to_string()
     })
@@ -947,6 +949,8 @@ mod tests {
             inventory: vec![],
             filter: None,
             git_branch: Some("develop".into()),
+            project_home: None,
+            session_name: String::new(),
         };
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -997,6 +1001,8 @@ mod tests {
             inventory: vec![],
             filter: Some("*.rs".into()),
             git_branch: Some("feature".into()),
+            project_home: None,
+            session_name: String::new(),
         };
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -1065,6 +1071,8 @@ mod tests {
             inventory: vec![],
             filter: None,
             git_branch: None,
+            project_home: None,
+            session_name: String::new(),
         };
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -1104,6 +1112,8 @@ mod tests {
             inventory: vec![],
             filter: None,
             git_branch: None,
+            project_home: None,
+            session_name: String::new(),
         };
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -1172,6 +1182,8 @@ mod tests {
             inventory: vec![],
             filter: None,
             git_branch: None,
+            project_home: None,
+            session_name: String::new(),
         };
         let ctx_path = context::context_path(tmp.path());
         context::write_context_file(&ctx_path, &ctx).unwrap();
