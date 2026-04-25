@@ -88,14 +88,29 @@ priority -- nice to have, not blocking v2.0.
 - **Elm Architecture refactor (Model-View-Update).** `app/mod.rs` is
   4000+ lines with entangled concerns: domain state, TUI state,
   process lifecycle, rendering caches, file watching. The handler
-  extraction (Phases 0-4) separated `AppState` domain logic, but the
-  event loop and render path are still fused. Refactor toward: (1)
-  pure Model structs, (2) an Update function that takes Messages and
-  mutates state, (3) a View function that reads state and renders.
-  This makes state transitions testable without a terminal, and splits
-  the monolith into focused modules. Subsumes the deferred handler
+  extraction (Phases 0-4) separated `AppState` domain logic
+  (`AppState::apply` already returns an `ApplyResult` enum — the
+  Update half is essentially done). The event loop and render path
+  are still fused. Target shape:
+  1. **View** — pure functions in `src/ui/` that take `&AppState` and
+     render. Replace the inline rendering in `app/mod.rs::render` with
+     a single `ui::render(terminal, &self.state)` call. Snapshot tests
+     extend cleanly because every widget renders from `&AppState`.
+  2. **Single message channel** — one `mpsc::Receiver<Message>` for
+     the event loop. The crossterm event reader, file watcher (already
+     a thread), pane capture readers (already threads), MCP socket
+     thread, and timer ticks all push their events as a `Message`
+     variant into the same receiver. The loop blocks on `recv` instead
+     of polling.
+  3. **`App::run` reduces to ~100 lines:** `loop { recv → update →
+     render }`. No more open-coded watcher polling, no more inline
+     `output_rx.try_recv()` per tick, no more `event::poll` with
+     manual timeout math.
+  Stick with `std::thread + mpsc` — spyc is sync end-to-end, tokio
+  would be a regression here. Subsumes the deferred handler
   extraction Phases 5-6. Big lift -- do incrementally alongside
-  feature work, not as a standalone rewrite.
+  feature work, not as a standalone rewrite. The View extraction is
+  the natural first slice (no behavior change, mechanical move).
 - **Expand snapshot tests.** `insta` + `TestBackend` infra is wired.
   Status bar snapshots done (4). Remaining: `list_view`, `pager`
   (ANSI, hex, line numbers, search highlight), `line_edit` modes.
@@ -109,10 +124,22 @@ priority -- nice to have, not blocking v2.0.
 - **Background directory loading.** Large directories (100K+ entries)
   and slow filesystems (NFS, external drives) block the event loop
   because `Listing::read()` and `git_file_statuses()` run
-  synchronously on the main thread. Move to a background thread with
-  `mpsc` channel, send results back as a message. Cancellable
-  progress indicator. Scoped conservatively -- the common case
-  (local NVMe, <1K entries) stays fast.
+  synchronously on the main thread. Target flow:
+  1. `chdir()` clears the current rows and sets a "loading" sentinel
+     in `AppState` so the View can render a spinner / dimmed list.
+  2. A worker thread (one per chdir; supersedes any in-flight one)
+     runs `Listing::read` + `git_file_statuses` and pushes
+     `Message::ListingReady(Listing)` into the main channel (lands
+     for free once the Elm refactor's single-channel shape is in).
+  3. Main loop receives, swaps in the new listing, redraws.
+  4. **Cancellation:** if the user `chdir`s again before the worker
+     finishes, the new chdir bumps a generation counter; stale
+     `ListingReady` messages whose generation doesn't match are
+     dropped (don't bother killing the worker — the read is bounded
+     and its result just gets discarded).
+  Scoped conservatively -- the common case (local NVMe, <1K entries)
+  stays fast; the spinner only appears when the read actually takes
+  long enough to notice (~50ms threshold).
 
 ## Thesis -- deepening the agent integration
 

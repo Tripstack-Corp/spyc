@@ -21,6 +21,13 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 
 ## Architecture
 
+For stable architectural decisions (sync-only / `std::thread + mpsc`,
+MVU target shape, threading model, repaint strategy, persistence layout,
+MCP transport) see [`ARCHITECTURE.md`](ARCHITECTURE.md). For UI design
+language (component names, surface vocabulary, key-binding philosophy,
+extension checklist) see [`DESIGN.md`](DESIGN.md). The list below is a
+per-module navigation index.
+
 - **`src/app/mod.rs`** — Top-level `App` struct, event loop, layout, all key dispatch. This is the big file.
 - **`src/app/state.rs`** — `AppState`: domain state (cursor, picks, listing, mode) separated from terminal state.
 - **`src/keymap/action.rs`** — `Action` enum: the full vocabulary of user-observable behaviors. Every keybinding maps to an `Action`.
@@ -36,6 +43,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - **`src/shell/`** — Shell expansion and command execution.
 - **`src/paths.rs`** — XDG-compliant path resolution for state, config, and cache directories.
 - **`src/sysinfo.rs`** — System info (RSS, PID) for the `I` info overlay.
+- **`src/proc_cwd.rs`** — Cross-platform "cwd of pid N" lookup (Linux `/proc/<pid>/cwd`, macOS `lsof -Fn`). Used to surface the live pane subprocess cwd in the divider.
 - **`src/debug_log.rs`** — `spyc_debug!` macro; writes to `$XDG_STATE_HOME/spyc/debug.log`.
 - **`src/main.rs`** — Terminal setup/teardown, `suspend_tui`/`resume_tui` for child processes.
 
@@ -48,7 +56,9 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - **Keep docs in sync**: When committing changes that affect user-visible behavior, keybindings, or project status, update **all** of the following that are affected:
   - `README.md` — positioning, install instructions, keybinding tables
   - `FEATURES.md` — complete feature reference
-  - `CLAUDE.md` — architecture, conventions, "what it does" summary
+  - `CLAUDE.md` — module index, conventions, "what it does" summary
+  - `ARCHITECTURE.md` — only when an *architectural decision* changes (concurrency model, MVU shape, persistence, etc.); not for routine features
+  - `DESIGN.md` — only when the *UI design language* changes (a new surface type, a new naming convention, palette change); not for routine features
   - `ROADMAP.md` — move shipped items to Done, update track status
   - `BUGS.md` — move fixed bugs to FIXED section
   - `CHANGELOG.md` — add entry under Unreleased

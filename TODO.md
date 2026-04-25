@@ -7,10 +7,12 @@ as they ship — not to a `Done` section here.
 **Sizes:** `[S]` hours · `[M]` a day or two · `[L]` a week or more.
 
 ## Now — Foundations (v1.x)
-- [ ] better document the code base and structure of the UI
+- [x] better document the code base and structure of the UI
   i.e. the design language of the UI and the names of the components
   and the philosophy so that as extensions continue to be made they
   fit a general design plan
+  → shipped as `ARCHITECTURE.md` (engine principles) and `DESIGN.md`
+  (UI design language).
 
 ### Safety and correctness
 

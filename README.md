@@ -256,6 +256,8 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
 - [FEATURES.md](FEATURES.md) -- complete feature reference
 - [INSTALL.md](INSTALL.md) -- terminal, font, build, and cross-compilation setup
+- [ARCHITECTURE.md](ARCHITECTURE.md) -- concurrency model, MVU target shape, persistence, MCP transport
+- [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist
 - [CHANGELOG.md](CHANGELOG.md) -- release history
 - [ROADMAP.md](ROADMAP.md) -- what's next
 - [CONTRIBUTING.md](CONTRIBUTING.md) -- contribution guidelines and SemVer policy
