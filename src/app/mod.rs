@@ -3395,16 +3395,34 @@ impl App {
 
         let tabs: Vec<SavedTab> = self
             .pane_tabs
-            .as_ref()
+            .as_mut()
             .map(|pt| {
-                pt.tabs()
-                    .iter()
+                pt.tabs_mut()
+                    .iter_mut()
                     .map(|t| {
                         let (claude_session_id, claude_session_name) =
                             if Self::is_claude_command(&t.info.command) {
-                                match crate::state::sessions::find_claude_session(&t.info.cwd) {
-                                    Some(info) => (Some(info.session_id), info.name),
-                                    None => (None, None),
+                                // Prefer the exit banner token from pane scrollback —
+                                // it is the authoritative resume target. Fall back to
+                                // scanning ~/.claude/sessions/ only if no banner found.
+                                let banner_lines = t.pane.recent_lines(200);
+                                if let Some(tok) =
+                                    crate::state::sessions::extract_resume_token(&banner_lines)
+                                {
+                                    let name = if crate::state::sessions::is_uuid(&tok) {
+                                        crate::state::sessions::find_claude_session_name_public(
+                                            &tok,
+                                        )
+                                    } else {
+                                        // Token is the session name itself.
+                                        Some(tok.clone())
+                                    };
+                                    (Some(tok), name)
+                                } else {
+                                    match crate::state::sessions::find_claude_session(&t.info.cwd) {
+                                        Some(info) => (Some(info.session_id), info.name),
+                                        None => (None, None),
+                                    }
                                 }
                             } else {
                                 (None, None)

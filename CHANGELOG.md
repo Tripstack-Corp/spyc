@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-04-24
+
+### Fixed
+- **Claude session resume reliability.** `spyc -r` no longer fails
+  with "No conversation found with session ID …" for sessions that
+  resume cleanly via `claude --resume` by hand. Root cause: the old
+  resolver scanned `~/.claude/sessions/*.json`, which is a PID-scoped
+  index of *running* claude processes, not resumable conversations.
+  After `/compact` or `/clear` rotates the session ID, that file
+  still pointed at the original (now-orphan) ID. Fix: on session
+  save we now read the `Resume this session with: claude --resume
+  <token>` banner Claude prints on exit straight from the pane
+  scrollback. The token is the authoritative resume target and works
+  for both UUID and named sessions. Falls back to the old scan only
+  when no banner is captured.
+
 ## [1.11.1] - 2026-04-23
 
 ### Fixed

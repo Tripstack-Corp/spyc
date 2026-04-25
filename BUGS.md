@@ -40,6 +40,14 @@
   scrolled halfway up sometimes
 
 ### FIXED ###
+- (fixed) Claude session resume intermittently failed with "No
+  conversation found with session ID …" when the same session
+  resumed fine via `claude --resume` by hand. Old resolver picked
+  IDs out of `~/.claude/sessions/*.json` (PID-scoped index of
+  running processes) which goes stale after /compact rotates the
+  session ID. Now we read the `claude --resume <token>` banner
+  Claude prints on exit straight from the pane scrollback — works
+  for UUID and named sessions alike.
 - (fixed) help pager multi-column layout: descriptions no longer clip at
   the column edge (per-row wrap with indented continuations); sections
   stay together across columns (no more orphan "Pane path references"

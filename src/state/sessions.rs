@@ -173,6 +173,12 @@ pub fn find_claude_session(cwd: &std::path::Path) -> Option<ClaudeSessionInfo> {
     })
 }
 
+/// Public wrapper for `find_claude_session_name` used by save_session
+/// when the exit-banner token is a UUID.
+pub fn find_claude_session_name_public(session_id: &str) -> Option<String> {
+    find_claude_session_name(session_id)
+}
+
 /// Look up a Claude session's custom title from its conversation JSONL.
 /// Searches `~/.claude/projects/*/\<sessionId\>.jsonl` for `custom-title` entries.
 fn find_claude_session_name(session_id: &str) -> Option<String> {
@@ -200,6 +206,46 @@ fn find_claude_session_name(session_id: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Scan pane scrollback (most recent lines last) for the exit banner Claude
+/// prints on quit: `Resume this session with:` / `claude --resume <token>`.
+/// Returns the token (a UUID or a session name). Searches in reverse so the
+/// most recent banner wins.
+pub fn extract_resume_token(lines: &[String]) -> Option<String> {
+    for line in lines.iter().rev() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("claude --resume ") {
+            let tok = rest.split_whitespace().next()?.trim();
+            if !tok.is_empty() {
+                return Some(tok.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// True if `token` looks like a UUID (8-4-4-4-12 hex).
+pub fn is_uuid(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (i, b) in bytes.iter().enumerate() {
+        match i {
+            8 | 13 | 18 | 23 => {
+                if *b != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !b.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Human-readable relative time: "just now", "5 minutes ago", "2 days ago".
@@ -238,6 +284,50 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
+    }
+
+    #[test]
+    fn extracts_uuid_resume_token() {
+        let lines: Vec<String> = [
+            "some output",
+            "Resume this session with:",
+            "claude --resume 2afd7b70-f1e0-44a3-95c6-d9e538d231db",
+            "",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_resume_token(&lines).unwrap();
+        assert_eq!(tok, "2afd7b70-f1e0-44a3-95c6-d9e538d231db");
+        assert!(is_uuid(&tok));
+    }
+
+    #[test]
+    fn extracts_named_resume_token() {
+        let lines: Vec<String> = ["claude --resume saffron-cumin".to_string()].to_vec();
+        let tok = extract_resume_token(&lines).unwrap();
+        assert_eq!(tok, "saffron-cumin");
+        assert!(!is_uuid(&tok));
+    }
+
+    #[test]
+    fn picks_last_resume_banner() {
+        let lines: Vec<String> = [
+            "claude --resume 11111111-1111-1111-1111-111111111111",
+            "…later…",
+            "claude --resume 22222222-2222-2222-2222-222222222222",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_resume_token(&lines).unwrap();
+        assert_eq!(tok, "22222222-2222-2222-2222-222222222222");
+    }
+
+    #[test]
+    fn returns_none_when_no_banner() {
+        let lines: Vec<String> = vec!["random scrollback".to_string(), "no banner".to_string()];
+        assert!(extract_resume_token(&lines).is_none());
     }
 
     #[test]
