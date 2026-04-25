@@ -1,20 +1,20 @@
 ### SMALL ###
+- gd should also show a list of new files or we should have a different
+  short-cut; it's weird to see a directory or file that is flagged ~ and type
+  gd only to have no results
+- support git blame shortcut
+- we need a better visual indicator that we're in visual mode in the bottom pane
+- screen should flash if I'm doing something that hits a wall - e.g. j at the
+  top of a directory (the ~ in the status is not enough)
+- graveyard should include files that have been removed with R
 - we should be able to send control signals to running processes e.g. ^t
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
   history but it should preserve shell vs. spyc commands
-- gd should also show a list of new files or we should have a different
-  short-cut; it's weird to see a directory or file that is flagged ~ and type
-  gd only to have no results
 - cw didn't seem to be worked as expected in ! (? need to confirm - may have
   been using an old version); maybe we should put a build commit hash in the
   top right?
-- support git blame shortcut
-- we need a better visual indicator that we're in visual mode in the bottom pane
-- graveyard should include files that have been removed with R
 - there should be a short cut to help jump to files affected by git status
-- screen should flash if I'm doing something that hits a wall - e.g. j at the
-  top of a directory (the ~ in the status is not enough)
 - if claude changes its working directory - that's not reflected in the
   terminal status line - can we monitor the cwd?
 
