@@ -1,5 +1,4 @@
 ### SMALL ###
-- we should ask the user before taking over the tty: "MCP: took over from PID 11935"
 - we should be able to send control signals to running processes e.g. ^t
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
@@ -20,7 +19,8 @@
   terminal status line - can we monitor the cwd?
 
 ### BIGGER ###
-- ability to background running tasks and notify when done
+- ability to background running tasks and notify when exited or updates have
+  happened
 - would like to be able to reorder tabs
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
@@ -44,6 +44,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) MCP takeover now prompts before clobbering another live
+  spyc instance: `PID N already owns MCP here. Take over? [Y/n]`
+  on stderr before the TUI starts. Default Y; "n" leaves the old
+  instance in charge and starts the new spyc without MCP. Non-tty
+  stdin (CI / scripts) auto-takes-over.
 - (fixed) Claude session resume followup: v1.11.2's banner-based
   ID was sometimes a session Claude never persisted (user /clear'd
   or /resume'd before exit). Now we verify the JSONL exists; if

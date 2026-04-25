@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-04-24
+
+### Changed
+- **MCP takeover now prompts before clobbering another instance.**
+  Previously, starting a second spyc in a directory already owned by
+  a live spyc silently rewrote `.mcp.json` and notified the old
+  instance to disconnect — easy to do accidentally and then wonder
+  why your other session lost MCP. Now spyc detects the live
+  instance before entering raw mode and prompts on stderr:
+  `🌶️ spyc: PID 11935 already owns MCP here. Take over? [Y/n]`.
+  Default Y on empty input. Decline ("n") and the old instance keeps
+  ownership; the new spyc starts normally without MCP and flashes
+  `MCP: kept PID 11935 as owner (Claude here will talk to it)`.
+  Non-tty stdin (CI, piped input) keeps the historical auto-takeover
+  behavior — there's no one to prompt.
+
 ## [1.13.0] - 2026-04-24
 
 ### Added

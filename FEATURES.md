@@ -317,9 +317,13 @@ spyc runs a background MCP server on a PID-scoped Unix domain socket
 (`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes
 `.mcp.json` with a stdio transport entry so Claude Code discovers
 spyc automatically — no `--mcp-config` flag needed. Multiple spyc
-instances coexist safely; when a new instance opens in the same
-directory it sends a `spyc/disconnected` notification to the old one
-and takes over the `.mcp.json` entry. Enterprise managed-settings.json
+instances coexist safely; when a new instance opens in a directory
+already owned by a live spyc, it prompts on stderr before taking over
+(`PID N already owns MCP here. Take over? [Y/n]`, default Y). On
+takeover it sends a `spyc/disconnected` notification to the old
+instance and rewrites `.mcp.json`; on decline (`n`), the old instance
+keeps ownership and the new spyc starts without MCP. Non-tty stdin
+(scripts/CI) auto-takes-over. Enterprise managed-settings.json
 policies (`deniedMcpServers`/`allowedMcpServers`) are respected.
 
 Claude can query and control the workspace through these tools:

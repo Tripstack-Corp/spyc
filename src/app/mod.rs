@@ -328,7 +328,7 @@ pub struct RowData {
 }
 
 impl App {
-    pub fn new(resume: bool) -> Self {
+    pub fn new(resume: bool, mcp_takeover_allowed: bool) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
         } else {
@@ -500,19 +500,24 @@ impl App {
         // Write .mcp.json so Claude Code spawns `spyc --mcp` (stdio),
         // which proxies to our Unix socket.
         if app.mcp_running {
-            app.ensure_mcp_config();
+            app.ensure_mcp_config(mcp_takeover_allowed);
         }
         app
     }
 
     /// Write `.mcp.json` with stdio transport on startup.
     /// If enterprise policy blocks spyc, flash an error instead.
-    fn ensure_mcp_config(&mut self) {
-        match crate::mcp::ensure_mcp_json(&self.state.listing.dir) {
+    fn ensure_mcp_config(&mut self, takeover_allowed: bool) {
+        match crate::mcp::ensure_mcp_json(&self.state.listing.dir, takeover_allowed) {
             Ok(crate::mcp::McpConfigStatus::Configured) => {}
             Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
                 self.state
                     .flash_info(format!("MCP: took over from PID {old_pid}"));
+            }
+            Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
+                self.state.flash_info(format!(
+                    "MCP: kept PID {old_pid} as owner (Claude here will talk to it)"
+                ));
             }
             Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
                 self.state.flash_error(

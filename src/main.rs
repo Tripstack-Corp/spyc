@@ -114,8 +114,9 @@ fn main() -> Result<()> {
     if let Some(p) = debug_log::init(cli.debug) {
         eprintln!("spyc: debug log → {p}");
     }
+    let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
-    let mut app = App::new(cli.resume);
+    let mut app = App::new(cli.resume, mcp_takeover_allowed);
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
     restore_terminal(&mut terminal)?;
@@ -126,6 +127,40 @@ fn main() -> Result<()> {
 }
 
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
+
+/// If another live spyc owns MCP for the current directory, ask the
+/// user whether to take it over. Default Y on empty input. Returns
+/// `false` to mean "leave the existing instance alone."
+///
+/// Non-tty stdin (CI, piped input) keeps the historical auto-takeover
+/// behavior — there's no one to prompt.
+fn prompt_mcp_takeover_if_needed() -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+
+    let Ok(cwd) = std::env::current_dir() else {
+        return true;
+    };
+    let Some(old_pid) = mcp::detect_existing_spyc(&cwd) else {
+        return true;
+    };
+    if !io::stdin().is_terminal() {
+        return true;
+    }
+
+    let mut stderr = io::stderr();
+    let _ = write!(
+        stderr,
+        "\u{1f336}\u{fe0f} spyc: PID {old_pid} already owns MCP here. Take over? [Y/n] "
+    );
+    let _ = stderr.flush();
+
+    let mut line = String::new();
+    if io::stdin().lock().read_line(&mut line).is_err() {
+        return true;
+    }
+    let trimmed = line.trim();
+    !matches!(trimmed, "n" | "N" | "no" | "No" | "NO")
+}
 
 /// Hide the mouse pointer while the TUI is active. Uses the "pointer
 /// mode" extension supported by xterm, iTerm2, Kitty, WezTerm, and

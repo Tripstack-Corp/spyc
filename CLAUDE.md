@@ -6,7 +6,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 
 - Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
 - Embedded pty pane (horizontal split) with tabs for running subprocesses — primarily used to host `claude` CLI for dog-fooding
-- MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; enterprise policies respected.
+- MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; takeover is prompted (`PID N already owns MCP here. Take over? [Y/n]`) so a second spyc doesn't silently steal MCP from the first; enterprise policies respected.
 - `gf`/`gF` — jump from Claude's output to the referenced file (or file:line)
 - In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)

@@ -354,8 +354,31 @@ pub enum McpConfigStatus {
     Configured,
     /// Took over from another instance (notified it). PID of old instance.
     TookOver { old_pid: u32 },
+    /// Detected another live instance and the caller asked us not to
+    /// take over — `.mcp.json` left pointing at the old PID.
+    SkippedTakeover { old_pid: u32 },
     /// Enterprise managed-settings.json blocks spyc.
     BlockedByEnterprise,
+}
+
+/// Detect a live spyc instance currently owning MCP for `dir` without
+/// modifying `.mcp.json`. Returns the old instance's PID if its socket
+/// is reachable, else None. Used by the startup takeover prompt so we
+/// can ask the user before clobbering another instance's registration.
+pub fn detect_existing_spyc(dir: &Path) -> Option<u32> {
+    let our_sock = socket_path();
+    let path = dir.join(".mcp.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let parsed: Value = serde_json::from_str(&text).ok()?;
+    let old_sock_str = parsed
+        .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
+        .and_then(|v| v.as_str())?;
+    let old_sock = PathBuf::from(old_sock_str);
+    if old_sock == our_sock {
+        return None;
+    }
+    UnixStream::connect(&old_sock).ok()?;
+    pid_from_sock_path(old_sock_str)
 }
 
 /// Well-known paths for Claude Code enterprise managed settings.
@@ -429,7 +452,7 @@ fn notify_disconnect(old_sock: &Path, new_pid: u32) {
 /// Ensure `.mcp.json` has the spyc entry using stdio transport.
 /// Checks enterprise policy first. If another spyc instance owns
 /// the entry, sends it a disconnect notification and takes over.
-pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
+pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigStatus, io::Error> {
     if enterprise_allows_spyc() == Some(false) {
         return Ok(McpConfigStatus::BlockedByEnterprise);
     }
@@ -452,6 +475,13 @@ pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
                     // Another instance — check if it's still alive.
                     if UnixStream::connect(&old_sock).is_ok() {
                         let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+                        if !takeover_allowed {
+                            mcp_log(&format!(
+                                "skipped takeover from PID {old_pid} ({})",
+                                old_sock.display()
+                            ));
+                            return Ok(McpConfigStatus::SkippedTakeover { old_pid });
+                        }
                         notify_disconnect(&old_sock, our_pid);
                         took_over = Some(old_pid);
                         mcp_log(&format!(

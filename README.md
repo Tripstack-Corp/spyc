@@ -90,10 +90,12 @@ When spyc starts, it automatically:
 3. **Keeps a context snapshot current** -- cwd, cursor file, picks,
    inventory, filter, git branch -- updated as you navigate
 
-Multiple instances coexist safely. If a new spyc opens in the same
-directory, it sends a disconnect notification to the old instance and
-takes over. Enterprise `managed-mcp.json` and `managed-settings.json`
-policies are respected — see [INSTALL.md](INSTALL.md#enterprise-managed-environments)
+Multiple instances coexist safely. If a new spyc opens in a directory
+already owned by a live spyc, it prompts on stderr (`PID N already owns
+MCP here. Take over? [Y/n]`) before sending the disconnect and
+rewriting `.mcp.json`. Decline and the old instance keeps ownership.
+Enterprise `managed-mcp.json` and `managed-settings.json` policies are
+respected — see [INSTALL.md](INSTALL.md#enterprise-managed-environments)
 for details.
 
 Claude can call `get_spyc_context` at any time to see exactly what
