@@ -129,6 +129,7 @@ impl Resolver {
                 KeyCode::Char('g') => ResolverOutcome::Action(Action::GotoFirst),
                 KeyCode::Char('d') => ResolverOutcome::Action(Action::GitDiff),
                 KeyCode::Char('D') => ResolverOutcome::Action(Action::GitDiffCached),
+                KeyCode::Char('b') => ResolverOutcome::Action(Action::GitBlame),
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),
                 KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
                 KeyCode::Char('V') => ResolverOutcome::Action(Action::Version),
@@ -644,6 +645,16 @@ mod tests {
         assert_eq!(
             feed(&mut r, key('d')),
             ResolverOutcome::Action(Action::GitDiff)
+        );
+    }
+
+    #[test]
+    fn gb_is_git_blame() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key('b')),
+            ResolverOutcome::Action(Action::GitBlame)
         );
     }
 

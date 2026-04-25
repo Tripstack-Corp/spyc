@@ -3372,39 +3372,87 @@ impl App {
     // ---- Git diff (M12) ----------------------------------------------------
 
     /// g d / g D — run `git diff` on selection and show in pager.
+    ///
+    /// `gd` (cached=false) also surfaces *untracked* files in the
+    /// selection — without this, the cursor sitting on a `?`/`~`-flagged
+    /// new file gives empty diff output and looks broken. We synthesize
+    /// an "added" diff per untracked file via `git diff --no-index
+    /// /dev/null <file>`, which exits 1 but still produces the diff bytes
+    /// we want to render.
     fn open_git_diff(&mut self, cached: bool) {
         let paths = self.state.selection_paths();
         if paths.is_empty() {
             return;
         }
-        let mut args = vec!["diff", "--color=always"];
+        let cwd = &self.state.listing.dir;
+        let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+
+        let mut args: Vec<&str> = vec!["diff", "--color=always"];
         if cached {
             args.push("--cached");
         }
         args.push("--");
-        let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         for s in &path_strings {
             args.push(s);
         }
-        match std::process::Command::new("git")
+        let modified_out = match std::process::Command::new("git")
             .args(&args)
+            .current_dir(cwd)
+            .output()
+        {
+            Ok(o) => o.stdout,
+            Err(e) => {
+                self.state.flash_error(format!("git diff: {e}"));
+                return;
+            }
+        };
+
+        let mut combined = modified_out;
+        if !cached {
+            combined.extend(untracked_diff_bytes(cwd, &path_strings));
+        }
+
+        if combined.is_empty() {
+            let label = if cached { "staged" } else { "unstaged" };
+            self.state.flash_info(format!("no {label} changes"));
+            return;
+        }
+        let label = if cached {
+            "git diff --cached"
+        } else {
+            "git diff (+ new)"
+        };
+        self.pager = Some(pager::PagerView::new_ansi(label, &combined));
+    }
+
+    /// g b — `git blame` on the cursor file. Selection is ignored
+    /// (blame on multiple files / a directory is meaningless).
+    fn open_git_blame(&mut self) {
+        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+            self.state.flash_error("git blame: no cursor file");
+            return;
+        };
+        let path = row.path.clone();
+        if path.is_dir() {
+            self.state.flash_error("git blame: cursor is a directory");
+            return;
+        }
+        let path_str = path.display().to_string();
+        match std::process::Command::new("git")
+            .args(["blame", "--color-lines", "--", &path_str])
             .current_dir(&self.state.listing.dir)
             .output()
         {
-            Ok(out) => {
-                if out.stdout.is_empty() {
-                    let label = if cached { "staged" } else { "unstaged" };
-                    self.state.flash_info(format!("no {label} changes"));
-                } else {
-                    let label = if cached {
-                        "git diff --cached"
-                    } else {
-                        "git diff"
-                    };
-                    self.pager = Some(pager::PagerView::new_ansi(label, &out.stdout));
-                }
+            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
+                let title = format!("git blame {}", row.display);
+                self.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
             }
-            Err(e) => self.state.flash_error(format!("git diff: {e}")),
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let msg = stderr.lines().next().unwrap_or("no output").trim();
+                self.state.flash_error(format!("git blame: {msg}"));
+            }
+            Err(e) => self.state.flash_error(format!("git blame: {e}")),
         }
     }
 
@@ -4684,6 +4732,13 @@ impl App {
                     self.open_git_diff(cached);
                 }
             }
+            Action::GitBlame => {
+                if self.state.git_info.is_none() {
+                    self.state.flash_error("not in a git repository");
+                } else {
+                    self.open_git_blame();
+                }
+            }
 
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
@@ -5167,6 +5222,51 @@ fn strip_ansi_escapes(s: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+/// Render an "added" diff for every untracked file under `paths`.
+/// Two-step: list with `git ls-files --others --exclude-standard`,
+/// then `git diff --no-index /dev/null <file>` per result. Returns the
+/// concatenated colored diff bytes (empty if no untracked files match).
+fn untracked_diff_bytes(cwd: &std::path::Path, paths: &[String]) -> Vec<u8> {
+    let mut args: Vec<&str> = vec!["ls-files", "--others", "--exclude-standard", "--"];
+    for s in paths {
+        args.push(s);
+    }
+    let listing = match std::process::Command::new("git")
+        .args(&args)
+        .current_dir(cwd)
+        .output()
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for line in listing.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(file) = std::str::from_utf8(line) else {
+            continue;
+        };
+        // --no-index exits 1 when files differ — that's the success
+        // case for us. Just take whatever it printed.
+        if let Ok(o) = std::process::Command::new("git")
+            .args([
+                "diff",
+                "--no-index",
+                "--color=always",
+                "--",
+                "/dev/null",
+                file,
+            ])
+            .current_dir(cwd)
+            .output()
+        {
+            out.extend(o.stdout);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

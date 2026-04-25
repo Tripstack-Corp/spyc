@@ -1,8 +1,4 @@
 ### SMALL ###
-- gd should also show a list of new files or we should have a different
-  short-cut; it's weird to see a directory or file that is flagged ~ and type
-  gd only to have no results
-- support git blame shortcut
 - we need a better visual indicator that we're in visual mode in the bottom pane
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
@@ -44,6 +40,14 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) `g d` now includes untracked / new files. Previously,
+  cursor on a `?`-flagged file gave empty diff output. spyc now
+  also runs `git ls-files --others --exclude-standard` and
+  synthesizes an "added" diff per untracked file via
+  `git diff --no-index /dev/null <file>`.
+- (fixed) `g b` — git blame on the cursor file. Single-file by
+  design (selection ignored). Flashes a clear error if the cursor
+  is on a directory.
 - (fixed) MCP takeover now prompts before clobbering another live
   spyc instance: `PID N already owns MCP here. Take over? [Y/n]`
   on stderr before the TUI starts. Default Y; "n" leaves the old

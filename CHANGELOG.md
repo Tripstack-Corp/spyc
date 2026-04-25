@@ -5,6 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-04-24
+
+### Added
+- **`g b` — git blame on the cursor file.** Runs
+  `git blame --color-lines -- <file>` and shows the colored output
+  in the pager. Blame is single-file by design; the selection is
+  ignored. Flashes a clear error if the cursor is on a directory or
+  the file isn't tracked.
+
+### Changed
+- **`g d` now includes new (untracked) files.** Previously, sitting
+  on an untracked file (`?` flag) and pressing `gd` produced empty
+  output and looked broken — git diff doesn't know about untracked
+  files. spyc now also runs
+  `git ls-files --others --exclude-standard -- <selection>` to find
+  untracked content under the selection, then synthesizes an "added"
+  diff per file via `git diff --no-index /dev/null <file>`. The
+  unstaged diff and the new-files diff are concatenated. `gD`
+  (`--cached`) is unchanged — staging untracked files is a separate
+  flow. Pager title is now `git diff (+ new)` to make the difference
+  visible.
+
 ## [1.14.0] - 2026-04-24
 
 ### Changed

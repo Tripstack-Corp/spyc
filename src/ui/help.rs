@@ -142,8 +142,9 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Git",
         rows: &[
-            ("g d", "git diff (unstaged changes)"),
+            ("g d", "git diff (unstaged + new files)"),
             ("g D", "git diff --cached (staged changes)"),
+            ("g b", "git blame (cursor file)"),
             ("W l", "list worktrees (1-9 to switch)"),
             ("W n", "new worktree (prompt for branch)"),
             ("W d", "delete current worktree (confirm)"),
