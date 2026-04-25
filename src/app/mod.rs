@@ -11,7 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use glob::Pattern;
 use ratatui::Frame;
 
-use crate::config::Config;
+use crate::config::{Config, StatusPosition};
 use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneTabs, PaneWidget, TabEntry, TabInfo};
@@ -1173,9 +1173,8 @@ impl App {
         area: ratatui::layout::Rect,
         pane_open: bool,
         pane_pct: u16,
-        status_position: crate::config::StatusPosition,
+        status_position: StatusPosition,
     ) -> FrameLayout {
-        use crate::config::StatusPosition;
         use ratatui::layout::Rect;
         let w = area.width;
         let h = area.height;
@@ -3811,10 +3810,7 @@ impl App {
     }
 
     /// Compute the (rows, cols) the bottom pane will occupy.
-    fn pane_spawn_size(
-        height_pct: u16,
-        status_position: crate::config::StatusPosition,
-    ) -> (u16, u16) {
+    fn pane_spawn_size(height_pct: u16, status_position: StatusPosition) -> (u16, u16) {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let layout = Self::compute_layout(area, true, height_pct, status_position);
@@ -5170,8 +5166,7 @@ fn strip_ansi_escapes(s: &str) -> String {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::App;
-    use crate::config::StatusPosition;
+    use super::{App, StatusPosition};
     use ratatui::layout::Rect;
 
     fn area(w: u16, h: u16) -> Rect {

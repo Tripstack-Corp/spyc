@@ -53,14 +53,23 @@ pub enum StatusPosition {
     Bottom,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default)]
 pub struct LayoutConfig {
     /// `"top"` (default) or `"bottom"`. With `"bottom"` the prompt
     /// sits one row above the status bar (vim-style cmdline-above-
     /// statusline ordering).
-    #[serde(default)]
     pub status_position: StatusPosition,
+}
+
+/// On-disk shape of `[layout]`. Each field is `Option` so we can tell
+/// "user didn't set this" apart from "user set this to the default" —
+/// otherwise a project file with no `[layout]` would clobber a value
+/// from the user file with the Deserialize default.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileLayout {
+    #[serde(default)]
+    status_position: Option<StatusPosition>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -106,7 +115,7 @@ struct FileConfig {
     #[serde(default)]
     colors: ColorOverrides,
     #[serde(default)]
-    layout: LayoutConfig,
+    layout: FileLayout,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
 }
@@ -161,11 +170,12 @@ impl Config {
         merge_color(&mut self.colors.status_suffix, file.colors.status_suffix);
         merge_color(&mut self.colors.prompt_prefix, file.colors.prompt_prefix);
 
-        // Layout: later wins (only one option for now, so just overwrite
-        // when the field is present — Deserialize's default means we
-        // can't distinguish "absent" from "explicitly Top", which is
-        // fine since Top is the default anyway).
-        self.layout = file.layout;
+        // Layout: per-field merge — only overwrite when the file
+        // explicitly set the value (Some). Otherwise a project file
+        // with no `[layout]` would clobber a value the user file set.
+        if let Some(pos) = file.layout.status_position {
+            self.layout.status_position = pos;
+        }
 
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
@@ -202,15 +212,25 @@ mod tests {
     fn default_template_round_trips() {
         // The dump emitted by `spyc --print-config` must always parse
         // cleanly with the current schema — every option is commented
-        // out so the parsed Config equals Config::default().
+        // out so the parsed FileConfig equals FileConfig::default().
+        let file: FileConfig = toml::from_str(super::DEFAULT_TEMPLATE).unwrap();
+        assert!(file.keymap.is_empty());
+        assert!(file.colors.dir.is_none());
+        assert!(file.ignore_masks.is_empty());
+        assert!(file.layout.status_position.is_none());
+    }
+
+    #[test]
+    fn project_without_layout_does_not_clobber_user_layout() {
         let tmp = tempdir().unwrap();
-        let path = tmp.path().join(".spycrc.toml");
-        std::fs::write(&path, super::DEFAULT_TEMPLATE).unwrap();
-        let cfg = Config::load_from(&[Some(&path)]).unwrap();
-        assert!(cfg.bindings.is_empty());
-        assert!(cfg.colors.dir.is_none());
-        assert!(cfg.ignore_masks.is_empty());
-        assert_eq!(cfg.layout.status_position, StatusPosition::Top);
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[layout]\nstatus_position = \"bottom\"\n").unwrap();
+        // Project file has no [layout] — must not reset to default.
+        std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(cfg.layout.status_position, StatusPosition::Bottom);
+        assert_eq!(cfg.colors.dir.as_deref(), Some("#abcdef"));
     }
 
     #[test]
