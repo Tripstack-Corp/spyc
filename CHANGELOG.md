@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-04-24
+
+### Changed
+- **`!` captured commands now run under a PTY and accept input.**
+  Previously `!sudo …` (or anything else that opens `/dev/tty` for
+  prompts: ssh, scp, gpg, passwd) wrote its password prompt straight
+  to the real terminal — bleeding "Password:" / "Sorry, try again."
+  text on top of the file list and into the pager body, with no way
+  to actually answer because keystrokes went to spyc's normal key
+  handling. Now `!` allocates a slave PTY for the child, so
+  `/dev/tty` resolves to that slave and prompt bytes flow into the
+  pager via the master like any other output. While the capture is
+  live, every keystroke is encoded and written to the master, so
+  the user can type a password (no echo — `sudo` controls termios
+  on the slave) and press Enter. New control bindings inside a
+  running `!`: **^C** sends SIGINT through the tty (cancels sudo's
+  prompt, etc.); **^\\** hard-kills the child if it has detached
+  from the tty. Status line updated accordingly.
+
 ## [1.11.3] - 2026-04-24
 
 ### Changed

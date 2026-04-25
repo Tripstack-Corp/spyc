@@ -8,7 +8,7 @@
 //! to `claude`, and spyc will be able to pipe its selection into the
 //! pane's stdin. For the spike it is intentionally generic.
 
-mod input;
+pub mod input;
 pub mod pathref;
 pub mod tabs;
 mod widget;

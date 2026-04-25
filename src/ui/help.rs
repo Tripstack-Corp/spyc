@@ -174,8 +174,15 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Shell-out & commands",
         rows: &[
-            ("!", "capture output → pager (colors preserved)"),
+            (
+                "!",
+                "capture output → pager (PTY-backed; sudo/ssh prompts work)",
+            ),
             ("!!", "repeat last captured command"),
+            (
+                "  while running",
+                "keys → child, ^C interrupt (SIGINT), ^\\ kill",
+            ),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),

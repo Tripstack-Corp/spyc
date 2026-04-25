@@ -1,43 +1,57 @@
+### SMALL ###
+- we should ask the user before taking over the tty: "MCP: took over from PID 11935"
+- we should be able to send control signals to running processes e.g. ^t
+- you can get into a weird history loop where commands are mixed with !shell
+  comamands and you'll just get "unknown command" - we should preserve a unified
+  history but it should preserve shell vs. spyc commands
+- gd should also show a list of new files or we should have a different
+  short-cut; it's weird to see a directory or file that is flagged ~ and type
+  gd only to have no results
+- cw didn't seem to be worked as expected in ! (? need to confirm - may have
+  been using an old version); maybe we should put a build commit hash in the
+  top right?
+- support git blame shortcut
+- we need a better visual indicator that we're in visual mode in the bottom pane
+- graveyard should include files that have been removed with R
+- there should be a short cut to help jump to files affected by git status
+- screen should flash if I'm doing something that hits a wall - e.g. j at the
+  top of a directory (the ~ in the status is not enough)
+- if claude changes its working directory - that's not reflected in the
+  terminal status line - can we monitor the cwd?
+
+### BIGGER ###
+- ability to background running tasks and notify when done
+- would like to be able to reorder tabs
+- directories should persist masking setting / we should be able to enable
+  disable masks and have an editable list of them
+- yanking from the pane should support # so that you can yank the last 150
+  lines, etc.
+- ^v should change focus and paste to the lower pane (image paste for Claude)
+
 ### MAYBE ###
+- would be nice to add a "are you sure you want to interrupt?" protection with
+  Claude CLI procs
 - yr (yank recursive) — yank directories into inventory; would need
   recursive put and inventory UI changes
 - yc (yank chmod) — preserve permissions through yank/put cycle
 - count prefix doesn't work with vi line editor operators (e.g. 3cw,
   2dw) — the count is consumed by the resolver but the line editor
   doesn't read it. Low priority for a single-line editor.
-
-### TBD ###
-- you can get into a weird history loop where commands are mixed with !shell
-  comamands and you'll just get "unknown command" - we should preserve a unified
-  history but it should preserve shell vs. spyc commands
-- cw didn't seem to be worked as expected in !
-- support git blame shortcut
-- yanking from the pane should support # so that you can yank the last 150
-  lines, etc.
-- programs requiring interactive input like sudo executed in our pager env don't
-  work e.g. sudo; need to solve for this
-- : also screws up input from sudo
-- directories should persist masking setting / we should be able to enable
-  disable masks and have an editable list of them
-- ability to background running tasks and notify when done
-- would like to be able to reorder tabs
-- we need a better visual indicator that we're in visual mode in the bottom pane
-- graveyard should include files that have been removed with R
-- screen should flash if I'm doing something that hits a wall - e.g. j at the
-  top of a directory
-- if claude changes its working directory - that's not reflected in the
-  terminal status line - can we monitor the cwd?
-- would be nice to add a "are you sure you want to interrupt?" protection with
-  Claude CLI procs
-- there should be a short cut to help jump to files affected by git status
-- we should be able to send control signals to running processes e.g. ^t
-- Claude PTY can get messed up — scrollback accumulates rendering artifacts
-  from Claude CLI's progress bars, spinners, and cursor repositioning. ^L
-  redraws the visible screen but can't fix corrupted scrollback. Solution t.b.d.
 - claude cli should always be pinned to bottom of the terminal - it seems to get
-  scrolled halfway up sometimes
+  scrolled halfway up sometimes and Claude PTY can get messed up — scrollback
+  accumulates rendering artifacts from Claude CLI's progress bars, spinners, and
+  cursor repositioning. ^L redraws the visible screen but can't fix corrupted
+  scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) `! sudo …` (and ssh / gpg / passwd) no longer bleed
+  "Password:" / "Sorry, try again." over the file list and pager.
+  The captured child now runs under a slave PTY, so `/dev/tty`
+  resolves to the slave and prompt bytes flow into the pager via
+  the master. Typed keys are forwarded to the child while the
+  capture is live, so passwords can actually be entered. ^C sends
+  SIGINT through the tty (cancels the prompt cleanly); ^\\ hard-
+  kills if the child detaches from the tty.
 - (fixed) home directory now shortens to `~` in displayed paths
   (status bar, I overlay, :project display, exit summary). Match
   is anchored at directory boundaries.

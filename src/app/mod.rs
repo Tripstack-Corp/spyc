@@ -29,11 +29,16 @@ use crate::ui::{
 use crate::{Tui, resume_tui, suspend_tui};
 
 /// Precomputed rects for the current frame. Built by `App::compute_layout`.
-/// Background capture for a `!` command. The child runs with piped
-/// stdout; a reader thread feeds bytes into the channel. Ctrl+C from
-/// the user kills the child.
+/// Background capture for a `!` command. The child runs under a PTY
+/// (so programs that open `/dev/tty` for prompts — sudo, ssh, gpg —
+/// see the slave PTY instead of bleeding onto our real terminal).
+/// A reader thread feeds bytes into the channel. While the capture is
+/// live, typed keys are forwarded to the child via the master writer
+/// so the user can answer prompts. Ctrl+C kills the child outright.
 struct PendingCapture {
-    child: std::process::Child,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    /// Master-side writer — typed keys go here as encoded ANSI bytes.
+    writer: Box<dyn std::io::Write + Send>,
     /// Receives chunks of stdout as they arrive (not all at once).
     output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
     /// Accumulated raw bytes for the pager (ANSI included).
@@ -808,10 +813,7 @@ impl App {
                     let status = capture.child.wait();
                     let exit_info = match status {
                         Ok(s) if s.success() => "exit 0".to_string(),
-                        Ok(s) => format!(
-                            "exit {}",
-                            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
-                        ),
+                        Ok(s) => format!("exit {}", s.exit_code()),
                         Err(e) => format!("error: {e}"),
                     };
                     let title = format!("{} — {exit_info}", capture.title);
@@ -1620,7 +1622,10 @@ impl App {
                 widgets::Paragraph,
             };
             let line = Line::from(Span::styled(
-                format!("⏳ running: {}  (^C to cancel)", capture.cmd_display),
+                format!(
+                    "⏳ running: {}  (keys → child, ^C interrupt, ^\\ kill)",
+                    capture.cmd_display
+                ),
                 Style::default()
                     .fg(self.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
@@ -1753,10 +1758,18 @@ impl App {
         // Any keypress clears a lingering flash message.
         self.state.flash = None;
 
-        // While a `!` capture is running, Ctrl+C kills it.
-        // The pager is already open with streamed output.
+        // While a `!` capture is running, forward typed keys to the
+        // child via the master PTY writer so the user can answer
+        // prompts (sudo password, ssh password, etc.). Ctrl+\ kills
+        // the child outright; Ctrl+C is forwarded as 0x03 so the
+        // child's tty driver can deliver SIGINT (matches a normal
+        // terminal's behavior, and lets sudo cancel its prompt
+        // cleanly).
         if let Some(capture) = &mut self.pending_capture {
-            if matches!(key.code, KeyCode::Char('c' | 'C'))
+            use std::io::Write as _;
+            // Hard-kill escape: Ctrl+\ tears the child down even if
+            // it has somehow detached from the controlling tty.
+            if matches!(key.code, KeyCode::Char('\\'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
                 let _ = capture.child.kill();
@@ -1768,6 +1781,12 @@ impl App {
                     view.streaming = false;
                 }
                 self.pending_capture = None;
+                return Ok(PostAction::None);
+            }
+            let bytes = crate::pane::input::encode_key(key);
+            if !bytes.is_empty() {
+                let _ = capture.writer.write_all(&bytes);
+                let _ = capture.writer.flush();
             }
             return Ok(PostAction::None);
         }
@@ -2498,7 +2517,7 @@ impl App {
                         crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
-                        Ok((child, rx)) => {
+                        Ok((child, writer, rx)) => {
                             let mut view = PagerView::new_plain(
                                 format!("\u{23f3} {title} — running... (0s)"),
                                 Vec::new(),
@@ -2507,6 +2526,7 @@ impl App {
                             self.pager = Some(view);
                             self.pending_capture = Some(PendingCapture {
                                 child,
+                                writer,
                                 output_rx: rx,
                                 buffer: Vec::new(),
                                 title,
@@ -2534,7 +2554,7 @@ impl App {
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let title = format!("! {cmd}");
             match spawn_capture(&expanded) {
-                Ok((child, rx)) => {
+                Ok((child, writer, rx)) => {
                     let mut view = PagerView::new_plain(
                         format!("\u{23f3} {title} — running... (0s)"),
                         Vec::new(),
@@ -2543,6 +2563,7 @@ impl App {
                     self.pager = Some(view);
                     self.pending_capture = Some(PendingCapture {
                         child,
+                        writer,
                         output_rx: rx,
                         buffer: Vec::new(),
                         title,
@@ -2677,7 +2698,7 @@ impl App {
                 let expanded = shell::expand_percent(&cmd, &self.state.selection_paths());
                 let title = format!("! {cmd}");
                 match spawn_capture(&expanded) {
-                    Ok((child, rx)) => {
+                    Ok((child, writer, rx)) => {
                         let cmd_display = prompt.buffer.clone();
                         let mut view = PagerView::new_plain(
                             format!("\u{23f3} {title} — running... (0s)"),
@@ -2687,6 +2708,7 @@ impl App {
                         self.pager = Some(view);
                         self.pending_capture = Some(PendingCapture {
                             child,
+                            writer,
                             output_rx: rx,
                             buffer: Vec::new(),
                             title,
@@ -4144,7 +4166,7 @@ impl App {
                         crate::shell::expand_percent(&cmd, &self.state.selection_paths());
                     let title = format!("! {cmd}");
                     match spawn_capture(&expanded) {
-                        Ok((child, rx)) => {
+                        Ok((child, writer, rx)) => {
                             let mut cview = PagerView::new_plain(
                                 format!("\u{23f3} {title} — running... (0s)"),
                                 Vec::new(),
@@ -4153,6 +4175,7 @@ impl App {
                             self.pager = Some(cview);
                             self.pending_capture = Some(PendingCapture {
                                 child,
+                                writer,
                                 output_rx: rx,
                                 buffer: Vec::new(),
                                 title,
@@ -4816,33 +4839,53 @@ fn sync_listing_watch(
 /// Spawn a shell command with stdout+stderr merged into one pipe.
 /// The reader thread sends chunks as they arrive so the pager can
 /// stream output in real-time. An empty Vec signals EOF.
-fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
+/// Spawn `cmd` under a PTY for `!` captures. Returns the child handle,
+/// a receiver streaming stdout/stderr/`/dev/tty` bytes, and the master
+/// writer for forwarding the user's keystrokes to the child.
+///
+/// PTY (vs. a plain piped `Command`) is what stops sudo / ssh / gpg
+/// from writing their password prompts directly to our real terminal:
+/// inside the child, `/dev/tty` resolves to the slave PTY, so those
+/// bytes flow back through the master and into the pager buffer.
+type CaptureHandles = (
+    Box<dyn portable_pty::Child + Send + Sync>,
+    Box<dyn std::io::Write + Send>,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+);
+
+fn spawn_capture(cmd: &str) -> Result<CaptureHandles> {
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read as _;
-    use std::process::{Command, Stdio};
     use std::sync::mpsc;
 
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    // Redirect stderr into stdout (`2>&1`) so all output streams together.
-    let merged_cmd = format!("({cmd}) 2>&1");
-    let mut child = Command::new("sh")
-        .args(["-c", &merged_cmd])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("CLICOLOR_FORCE", "1")
-        .env("FORCE_COLOR", "1")
-        .env("COLORTERM", "truecolor")
-        .env("COLUMNS", cols.to_string())
-        .env("LINES", rows.to_string())
-        .spawn()?;
+    let pty_system = native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("no stdout"))?;
+    let mut builder = CommandBuilder::new("sh");
+    builder.args(["-c", cmd]);
+    builder.env("TERM", "xterm-256color");
+    builder.env("CLICOLOR_FORCE", "1");
+    builder.env("FORCE_COLOR", "1");
+    builder.env("COLORTERM", "truecolor");
+    builder.env("COLUMNS", cols.to_string());
+    builder.env("LINES", rows.to_string());
+
+    let child = pair.slave.spawn_command(builder)?;
+    // Drop the slave handle — once the child exits, the master read
+    // side will see EOF, which is how we detect "done".
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader()?;
+    let writer = pair.master.take_writer()?;
 
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut reader = stdout;
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
@@ -4858,7 +4901,7 @@ fn spawn_capture(cmd: &str) -> Result<(std::process::Child, std::sync::mpsc::Rec
         let _ = tx.send(Vec::new());
     });
 
-    Ok((child, rx))
+    Ok((child, writer, rx))
 }
 
 /// Build a PostAction that runs `cmd` through `sh -c` so shell features
