@@ -44,6 +44,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) Claude session resume followup: v1.11.2's banner-based
+  ID was sometimes a session Claude never persisted (user /clear'd
+  or /resume'd before exit). Now we verify the JSONL exists; if
+  not, fall back to the most-recently-modified JSONL in the
+  project slug (what `claude --resume`'s no-arg picker uses).
 - (fixed) `! sudo …` (and ssh / gpg / passwd) no longer bleed
   "Password:" / "Sorry, try again." over the file list and pager.
   The captured child now runs under a slave PTY, so `/dev/tty`

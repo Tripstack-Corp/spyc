@@ -2876,6 +2876,49 @@ impl App {
         first == "claude" || first.ends_with("/claude")
     }
 
+    /// Resolve the `claude --resume <token>` target to use on session save.
+    ///
+    /// Strategy, in order:
+    /// 1. Read the exit-banner token from pane scrollback. If it's a UUID,
+    ///    verify a JSONL exists for it under `~/.claude/projects/<slug>/`.
+    ///    Claude sometimes prints the banner with a session ID it never
+    ///    persisted (e.g. user `/clear`'d or `/resume`'d to a different
+    ///    session before exit), so trusting the banner unconditionally
+    ///    leads to "No conversation found with session ID …" on restore.
+    /// 2. Fall back to the most-recently-modified JSONL in the project
+    ///    slug — that's what the no-arg `claude --resume` picker picks.
+    /// 3. Last-ditch: scan `~/.claude/sessions/` (PID-scoped, often stale).
+    fn resolve_claude_resume_target(
+        pane: &mut crate::pane::Pane,
+        cwd: &std::path::Path,
+    ) -> (Option<String>, Option<String>) {
+        use crate::state::sessions as s;
+
+        let banner_lines = pane.recent_lines(200);
+        if let Some(tok) = s::extract_resume_token(&banner_lines) {
+            if s::is_uuid(&tok) {
+                if s::claude_jsonl_exists(cwd, &tok) {
+                    let name = s::find_claude_session_name_public(&tok);
+                    return (Some(tok), name);
+                }
+                // Banner UUID has no JSONL — fall through to most-recent.
+            } else {
+                // Named sessions: claude resolves names itself, trust it.
+                return (Some(tok.clone()), Some(tok));
+            }
+        }
+
+        if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
+            let name = s::find_claude_session_name_public(&id);
+            return (Some(id), name);
+        }
+
+        match s::find_claude_session(cwd) {
+            Some(info) => (Some(info.session_id), info.name),
+            None => (None, None),
+        }
+    }
+
     /// yp — yank visible pane output to the system clipboard.
     fn yank_pane_to_clipboard(&mut self) -> PostAction {
         let Some(tabs) = self.pane_tabs.as_ref() else {
@@ -3424,28 +3467,7 @@ impl App {
                     .map(|t| {
                         let (claude_session_id, claude_session_name) =
                             if Self::is_claude_command(&t.info.command) {
-                                // Prefer the exit banner token from pane scrollback —
-                                // it is the authoritative resume target. Fall back to
-                                // scanning ~/.claude/sessions/ only if no banner found.
-                                let banner_lines = t.pane.recent_lines(200);
-                                if let Some(tok) =
-                                    crate::state::sessions::extract_resume_token(&banner_lines)
-                                {
-                                    let name = if crate::state::sessions::is_uuid(&tok) {
-                                        crate::state::sessions::find_claude_session_name_public(
-                                            &tok,
-                                        )
-                                    } else {
-                                        // Token is the session name itself.
-                                        Some(tok.clone())
-                                    };
-                                    (Some(tok), name)
-                                } else {
-                                    match crate::state::sessions::find_claude_session(&t.info.cwd) {
-                                        Some(info) => (Some(info.session_id), info.name),
-                                        None => (None, None),
-                                    }
-                                }
+                                Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
                             } else {
                                 (None, None)
                             };

@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-04-24
+
+### Fixed
+- **Claude session resume — verify the banner token actually exists.**
+  v1.11.2 trusted the `claude --resume <id>` banner unconditionally,
+  but Claude sometimes prints the banner with a session ID it never
+  persisted (the user `/clear`'d or `/resume`'d to a different
+  session before exit). Restore would then fail with "No
+  conversation found with session ID …". Now we verify the JSONL
+  exists at `~/.claude/projects/<slug>/<id>.jsonl` before saving;
+  if it doesn't, we fall back to the most-recently-modified JSONL
+  in the project slug — the same file `claude --resume`'s no-arg
+  picker would surface first. The PID-scoped scan is now only the
+  last-ditch fallback.
+
 ## [1.12.0] - 2026-04-24
 
 ### Changed

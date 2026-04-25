@@ -179,6 +179,52 @@ pub fn find_claude_session_name_public(session_id: &str) -> Option<String> {
     find_claude_session_name(session_id)
 }
 
+/// Slug for a cwd as Claude stores its conversations:
+/// `/Users/derek/src/spyc` → `-Users-derek-src-spyc`.
+fn project_slug(cwd: &std::path::Path) -> String {
+    cwd.to_string_lossy().replace('/', "-")
+}
+
+/// True if a JSONL exists for `session_id` under the project slug for `cwd`.
+/// This is the file `claude --resume <id>` actually reads.
+pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let path = PathBuf::from(home)
+        .join(".claude/projects")
+        .join(project_slug(cwd))
+        .join(format!("{session_id}.jsonl"));
+    path.exists()
+}
+
+/// Find the most-recently-modified JSONL under `~/.claude/projects/<slug>/`.
+/// Returns the session ID (filename stem). This is the same conversation
+/// the no-arg `claude --resume` picker would surface first for this cwd.
+pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let dir = PathBuf::from(home)
+        .join(".claude/projects")
+        .join(project_slug(cwd));
+    let entries = std::fs::read_dir(&dir).ok()?;
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(mtime) = meta.modified() else { continue };
+        if best.as_ref().is_none_or(|(ts, _)| mtime > *ts) {
+            best = Some((mtime, stem.to_string()));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
 /// Look up a Claude session's custom title from its conversation JSONL.
 /// Searches `~/.claude/projects/*/\<sessionId\>.jsonl` for `custom-title` entries.
 fn find_claude_session_name(session_id: &str) -> Option<String> {
@@ -284,6 +330,14 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
+    }
+
+    #[test]
+    fn slug_replaces_path_separators() {
+        assert_eq!(
+            project_slug(std::path::Path::new("/Users/derek/src/spyc")),
+            "-Users-derek-src-spyc"
+        );
     }
 
     #[test]
