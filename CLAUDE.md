@@ -16,8 +16,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - Picks (per-directory multi-select) and inventory (file cache with graveyard)
 - Session save/restore — auto-saved on quit with a spice-themed name (e.g. `SAFFRON_CUMIN`), `spyc -r` resumes tabs and Claude conversations
 - `PROJECT_HOME` — sticky per-session project root. Auto-set when launch dir has `.git`. `gh` jumps, `gP` sets, `:project` manages. New pane tabs default their cwd to `PROJECT_HOME`. Exposed via MCP context.
-- Top bar: `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`. `user@host` dropped from the bar; flash with `gU` / `:whoami`, or see it in the `I` overlay.
-- `.spycrc.toml` config with keymap DSL, themes, ignore masks, live reload
+- Top bar: `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`. `user@host` dropped from the bar; flash with `gU` / `:whoami`, or see it in the `I` overlay. Position is configurable: `[layout] status_position = "bottom"` flips it to the last row (vim/tmux convention; useful inside tmux to avoid double status bars).
+- `.spycrc.toml` config with keymap DSL, themes, ignore masks, layout, live reload. `spyc --print-config` emits a fully-commented default template.
 
 ## Architecture
 

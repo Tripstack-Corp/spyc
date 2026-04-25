@@ -214,22 +214,30 @@ on the top bar and persist across `spyc -r`.
 spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 (project). Changes are picked up live -- no restart needed (`^R` to force).
 
+To bootstrap a config with every option commented out at its default:
+
+```sh
+spyc --print-config > ~/.spycrc.toml
+```
+
+Selected options:
+
 ```toml
+# Layout: where the status bar lives. "top" (default) or "bottom".
+# Use "bottom" inside tmux so spyc's bar doesn't double up with tmux's.
+[layout]
+status_position = "bottom"
+
 # Keymap: rebind keys to any action. Chord bindings supported.
-[keymap]
-bindings = [
-    'map "<Space>" pick',
-    'map "^X t" shell "cargo test"',
+keymap = [
+    "map f unix file %",
+    "map gh jump ~",
 ]
 
-# Ignore masks: define what each mask group hides
-[masks]
-mask2 = ["node_modules", "target", ".git", "__pycache__"]
-
-# Color overrides: customize the palette
+# Color overrides: customize the palette.
 [colors]
-cursor = "#ff6600"
-pick = "#00ffaa"
+cursor_bg = "#ff6600"
+pick      = "#ffcb6b"
 ```
 
 ## Recommended setup

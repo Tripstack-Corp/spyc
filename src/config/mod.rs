@@ -10,6 +10,12 @@
 
 pub mod dsl;
 
+/// Embedded default config template — emitted by `spyc --print-config`.
+/// Every option commented out at its default value, with a one-liner
+/// explaining what it does. Round-trip parsed in tests so the dump
+/// always loads cleanly with the current `Config` schema.
+pub const DEFAULT_TEMPLATE: &str = include_str!("default.spycrc.toml");
+
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -24,12 +30,37 @@ pub struct Config {
     /// Color palette overrides.
     pub colors: ColorOverrides,
 
+    /// Layout overrides (status bar position, etc.).
+    pub layout: LayoutConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
 
     /// File paths we actually loaded from (for the watcher to track).
     pub sources: Vec<PathBuf>,
+}
+
+/// Where the status bar lives. Defaults to `Top` (matches stock spyc).
+/// `Bottom` is convenient when running inside tmux/screen — the host
+/// status line typically owns the top row, so spyc's bar moving to the
+/// bottom (vim/tmux convention) prevents a double-bar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusPosition {
+    #[default]
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutConfig {
+    /// `"top"` (default) or `"bottom"`. With `"bottom"` the prompt
+    /// sits one row above the status bar (vim-style cmdline-above-
+    /// statusline ordering).
+    #[serde(default)]
+    pub status_position: StatusPosition,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -74,6 +105,8 @@ struct FileConfig {
     keymap: Vec<String>,
     #[serde(default)]
     colors: ColorOverrides,
+    #[serde(default)]
+    layout: LayoutConfig,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
 }
@@ -128,6 +161,12 @@ impl Config {
         merge_color(&mut self.colors.status_suffix, file.colors.status_suffix);
         merge_color(&mut self.colors.prompt_prefix, file.colors.prompt_prefix);
 
+        // Layout: later wins (only one option for now, so just overwrite
+        // when the field is present — Deserialize's default means we
+        // can't distinguish "absent" from "explicitly Top", which is
+        // fine since Top is the default anyway).
+        self.layout = file.layout;
+
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
 
@@ -158,6 +197,30 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn default_template_round_trips() {
+        // The dump emitted by `spyc --print-config` must always parse
+        // cleanly with the current schema — every option is commented
+        // out so the parsed Config equals Config::default().
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join(".spycrc.toml");
+        std::fs::write(&path, super::DEFAULT_TEMPLATE).unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(cfg.bindings.is_empty());
+        assert!(cfg.colors.dir.is_none());
+        assert!(cfg.ignore_masks.is_empty());
+        assert_eq!(cfg.layout.status_position, StatusPosition::Top);
+    }
+
+    #[test]
+    fn parses_bottom_status_position() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[layout]\nstatus_position = \"bottom\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.layout.status_position, StatusPosition::Bottom);
+    }
 
     #[test]
     fn loads_empty_config_when_no_files() {

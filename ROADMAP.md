@@ -69,6 +69,14 @@ priority -- nice to have, not blocking v2.0.
 - Startup health check -- scans `~/.local/state/spyc/` on startup.
   Validates inventory, marks, sessions, graveyard. Cleans up orphaned
   files, warns about corrupt state. 7 tests.
+- `spyc --print-config` -- emits a fully-commented default
+  `.spycrc.toml` to stdout. Self-documentation for every option
+  (layout, colors, ignore masks, keymap DSL) and a user starting
+  point: `spyc --print-config > ~/.spycrc.toml`.
+- Configurable status bar position (`[layout] status_position`) --
+  `"top"` (default) or `"bottom"` (vim/tmux convention; useful when
+  running spyc inside tmux to avoid double status bars). Prompt
+  follows status (cmdline-above-statusline ordering).
 - Performance refactor -- idle CPU dropped from ~12.5% to ~2.5%
   (vim-competitive). Context file watcher exclusion, context write
   caching, DEC 2026 synchronized output, build_rows/grid caching,
@@ -77,9 +85,6 @@ priority -- nice to have, not blocking v2.0.
 
 ### Remaining
 
-- **`spyc --dump-default-config`** -- complete `.spycrc.toml` with
-  comments. Self-documentation for the keymap DSL and a user starting
-  point.
 - **Elm Architecture refactor (Model-View-Update).** `app/mod.rs` is
   4000+ lines with entangled concerns: domain state, TUI state,
   process lifecycle, rendering caches, file watching. The handler

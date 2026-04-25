@@ -1022,8 +1022,12 @@ impl App {
                         // correct width.
                         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
                         if let Some(tabs) = self.pane_tabs.as_mut() {
-                            let layout =
-                                Self::compute_layout(area, true, self.state.pane_height_pct);
+                            let layout = Self::compute_layout(
+                                area,
+                                true,
+                                self.state.pane_height_pct,
+                                self.state.config.layout.status_position,
+                            );
                             if let Some(pane_rect) = layout.pane {
                                 for entry in tabs.tabs_mut() {
                                     let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
@@ -1165,27 +1169,45 @@ impl App {
     /// divider. That way the prompt row sits with the file list it's
     /// about rather than attached to the bottom of the screen where the
     /// pane's subprocess is typing.
-    fn compute_layout(area: ratatui::layout::Rect, pane_open: bool, pane_pct: u16) -> FrameLayout {
+    fn compute_layout(
+        area: ratatui::layout::Rect,
+        pane_open: bool,
+        pane_pct: u16,
+        status_position: crate::config::StatusPosition,
+    ) -> FrameLayout {
+        use crate::config::StatusPosition;
         use ratatui::layout::Rect;
         let w = area.width;
         let h = area.height;
+        let bottom_status = matches!(status_position, StatusPosition::Bottom);
 
         if !pane_open {
+            // Top:    [status][list…][prompt]
+            // Bottom: [list…][prompt][status]   (vim-style)
+            let (status_y, list_y, prompt_y) = if bottom_status {
+                (
+                    area.y + h.saturating_sub(1),
+                    area.y,
+                    area.y + h.saturating_sub(2),
+                )
+            } else {
+                (area.y, area.y + 1.min(h), area.y + h.saturating_sub(1))
+            };
             let status = Rect {
                 x: area.x,
-                y: area.y,
+                y: status_y,
                 width: w,
                 height: 1.min(h),
             };
             let list = Rect {
                 x: area.x,
-                y: area.y + status.height,
+                y: list_y,
                 width: w,
                 height: h.saturating_sub(2),
             };
             let prompt = Rect {
                 x: area.x,
-                y: area.y + h.saturating_sub(1),
+                y: prompt_y,
                 width: w,
                 height: u16::from(h != 0),
             };
@@ -1198,14 +1220,62 @@ impl App {
             };
         }
 
-        // With pane: [status + list + prompt] (top unit) + divider + pane.
-        // Divider eats one row from whatever height is available.
+        // With pane: top unit holds list+prompt(+status if top).
+        // Pane and divider sit below; if status is bottom, status is the
+        // very last row, prompt one above, pane above that.
         let usable = h.saturating_sub(1); // minus divider
         let pane_h = (u32::from(usable) * u32::from(pane_pct) / 100) as u16;
         let top_h = usable.saturating_sub(pane_h);
 
-        // Inside the top region: status(1) + list(top_h - 2) + prompt(1).
-        // If top_h is too small (< 2), the list simply collapses to 0.
+        if bottom_status {
+            // Layout (top → bottom): [list…][divider][pane…][prompt][status]
+            // Reserve: 1 divider + 1 prompt + 1 status = 3 rows of chrome.
+            // The remainder splits between list and pane by `pane_pct`.
+            let chrome = 3u16;
+            let usable_b = h.saturating_sub(chrome);
+            let pane_h_b = (u32::from(usable_b) * u32::from(pane_pct) / 100) as u16;
+            let list_h = usable_b.saturating_sub(pane_h_b);
+
+            let list = Rect {
+                x: area.x,
+                y: area.y,
+                width: w,
+                height: list_h,
+            };
+            let divider = Rect {
+                x: area.x,
+                y: area.y + list_h,
+                width: w,
+                height: 1,
+            };
+            let pane = Rect {
+                x: area.x,
+                y: divider.y + 1,
+                width: w,
+                height: pane_h_b,
+            };
+            let prompt = Rect {
+                x: area.x,
+                y: area.y + h.saturating_sub(2),
+                width: w,
+                height: u16::from(h >= 2),
+            };
+            let status = Rect {
+                x: area.x,
+                y: area.y + h.saturating_sub(1),
+                width: w,
+                height: 1.min(h),
+            };
+            return FrameLayout {
+                status,
+                list,
+                divider: Some(divider),
+                pane: Some(pane),
+                prompt,
+            };
+        }
+
+        // Top status (default): [status][list…][prompt][divider][pane]
         let status = Rect {
             x: area.x,
             y: area.y,
@@ -1366,6 +1436,7 @@ impl App {
             frame_area,
             self.pane_tabs.is_some(),
             self.state.pane_height_pct,
+            self.state.config.layout.status_position,
         );
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
@@ -2818,7 +2889,10 @@ impl App {
     }
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
-        let (rows, cols) = Self::pane_spawn_size(self.state.pane_height_pct);
+        let (rows, cols) = Self::pane_spawn_size(
+            self.state.pane_height_pct,
+            self.state.config.layout.status_position,
+        );
         match Pane::spawn_with_env(cmd, rows, cols, cwd, &[]) {
             Ok(p) => {
                 self.state.pane_focused = true;
@@ -3737,10 +3811,13 @@ impl App {
     }
 
     /// Compute the (rows, cols) the bottom pane will occupy.
-    fn pane_spawn_size(height_pct: u16) -> (u16, u16) {
+    fn pane_spawn_size(
+        height_pct: u16,
+        status_position: crate::config::StatusPosition,
+    ) -> (u16, u16) {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
-        let layout = Self::compute_layout(area, true, height_pct);
+        let layout = Self::compute_layout(area, true, height_pct, status_position);
         match layout.pane {
             Some(r) => (r.height.max(1), r.width.max(1)),
             None => (rows.saturating_sub(3).max(1), cols.max(1)),
@@ -5089,4 +5166,58 @@ fn strip_ansi_escapes(s: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::App;
+    use crate::config::StatusPosition;
+    use ratatui::layout::Rect;
+
+    fn area(w: u16, h: u16) -> Rect {
+        Rect::new(0, 0, w, h)
+    }
+
+    #[test]
+    fn no_pane_top_status_at_row_0() {
+        let l = App::compute_layout(area(80, 24), false, 50, StatusPosition::Top);
+        assert_eq!(l.status.y, 0);
+        assert_eq!(l.list.y, 1);
+        assert_eq!(l.prompt.y, 23);
+    }
+
+    #[test]
+    fn no_pane_bottom_status_at_last_row() {
+        let l = App::compute_layout(area(80, 24), false, 50, StatusPosition::Bottom);
+        assert_eq!(l.list.y, 0);
+        assert_eq!(l.prompt.y, 22);
+        assert_eq!(l.status.y, 23);
+    }
+
+    #[test]
+    fn pane_open_top_status_above_list() {
+        let l = App::compute_layout(area(80, 24), true, 50, StatusPosition::Top);
+        assert_eq!(l.status.y, 0);
+        assert!(l.list.y > l.status.y);
+        let pane = l.pane.unwrap();
+        let div = l.divider.unwrap();
+        assert_eq!(div.y + 1, pane.y);
+        // prompt sits in the top region, above the divider.
+        assert!(l.prompt.y < div.y);
+    }
+
+    #[test]
+    fn pane_open_bottom_status_below_pane() {
+        let l = App::compute_layout(area(80, 24), true, 50, StatusPosition::Bottom);
+        let pane = l.pane.unwrap();
+        let div = l.divider.unwrap();
+        assert_eq!(l.list.y, 0);
+        assert_eq!(l.list.y + l.list.height, div.y);
+        assert_eq!(div.y + 1, pane.y);
+        // prompt one above status, both at the very bottom.
+        assert_eq!(l.prompt.y, 22);
+        assert_eq!(l.status.y, 23);
+        // pane ends at the row above prompt.
+        assert!(pane.y + pane.height <= l.prompt.y);
+    }
 }

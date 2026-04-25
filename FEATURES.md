@@ -280,8 +280,21 @@ unambiguous:
 - **Color overrides** — customize the palette for directories, cursors,
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.
+- **Layout** — `[layout] status_position = "top" | "bottom"`. Default
+  is `"top"`. `"bottom"` matches vim/tmux convention and avoids a
+  double status bar when running spyc inside tmux. With `"bottom"` the
+  prompt sits one row above the status bar (vim cmdline ordering).
 - **Live reload** — config changes are picked up automatically without
   restarting spyc. Manual reload with **^R**.
+
+### Bootstrapping
+
+```sh
+spyc --print-config > ~/.spycrc.toml
+```
+
+emits a fully-commented template with every option at its default —
+self-documenting starting point.
 
 ## Session management
 

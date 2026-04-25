@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-04-24
+
+### Added
+- **`spyc --print-config`** — emits a fully-commented default
+  `.spycrc.toml` to stdout. Every option is shown commented out at
+  its default value with a one-liner explaining what it does, grouped
+  by section. Bootstrap a config with
+  `spyc --print-config > ~/.spycrc.toml`. Round-trip parsed in tests
+  so the dump always loads cleanly with the current schema.
+- **Configurable status bar position.** New `[layout]
+  status_position = "top" | "bottom"` option in `.spycrc.toml`.
+  Default `"top"` (stock spyc). `"bottom"` matches the vim/tmux
+  convention and is the right choice when running spyc inside tmux —
+  the host status line typically owns the top row, so keeping spyc's
+  bar there causes a double-bar. With `"bottom"` the prompt sits one
+  row above the status bar (vim cmdline-above-statusline ordering),
+  consistent with both pane-open and pane-closed layouts.
+
 ## [1.12.1] - 2026-04-24
 
 ### Fixed

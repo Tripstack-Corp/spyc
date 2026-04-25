@@ -51,6 +51,12 @@ struct Cli {
     /// Show extended build info with --version
     #[arg(long)]
     verbose: bool,
+
+    /// Print a fully-commented default `.spycrc.toml` to stdout and exit.
+    /// Pipe to a file to bootstrap your config:
+    ///   spyc --print-config > ~/.spycrc.toml
+    #[arg(long)]
+    print_config: bool,
 }
 
 fn main() -> Result<()> {
@@ -77,6 +83,11 @@ fn main() -> Result<()> {
     }));
 
     let cli = Cli::parse();
+
+    if cli.print_config {
+        print!("{}", config::DEFAULT_TEMPLATE);
+        return Ok(());
+    }
 
     if cli.mcp {
         let root = std::env::current_dir()?;
