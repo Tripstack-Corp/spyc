@@ -269,6 +269,11 @@ unambiguous:
 - **Pane cursor** shows as a bright reverse-video block when focused,
   dim block when unfocused
 - The divider rule brightens when the pane is focused
+- The divider also shows the active tab's *live* cwd (polled from
+  `/proc/<pid>/cwd` on Linux, `lsof` on macOS). If the subprocess
+  has `cd`'d away from where spyc launched it, the cwd is prefixed
+  with `↪` and rendered in the active-tab color so it's easy to
+  spot — useful when a `bash` tab has wandered.
 
 ## Configuration
 

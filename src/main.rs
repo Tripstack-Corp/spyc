@@ -10,6 +10,7 @@ mod mcp;
 mod mcp_cmd;
 mod pane;
 mod paths;
+mod proc_cwd;
 mod shell;
 mod state;
 mod sysinfo;

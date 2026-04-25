@@ -229,6 +229,12 @@ impl Pane {
         Ok(())
     }
 
+    /// PID of the spawned child, if available. `None` after the child
+    /// has been reaped or if portable_pty couldn't surface it.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
     #[allow(dead_code)] // wired into the S-key handler in the next step
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {

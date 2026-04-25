@@ -5,7 +5,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 ## What it does
 
 - Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
-- Embedded pty pane (horizontal split) with tabs for running subprocesses — primarily used to host `claude` CLI for dog-fooding
+- Embedded pty pane (horizontal split) with tabs for running subprocesses — primarily used to host `claude` CLI for dog-fooding. The divider line shows the active tab's *live* cwd (polled via `/proc/<pid>/cwd` on Linux, `lsof` on macOS, ~1Hz cache); when it drifts from the spawn cwd it gets a `↪` marker.
 - MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; takeover is prompted (`PID N already owns MCP here. Take over? [Y/n]`) so a second spyc doesn't silently steal MCP from the first; enterprise policies respected.
 - `gf`/`gF` — jump from Claude's output to the referenced file (or file:line)
 - In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
@@ -97,3 +97,27 @@ The developer uses spyc with Claude Code CLI running in the lower
 pane. Bugs and features are often discovered through this dog-fooding
 workflow — if something affects the Claude Code pane experience, it's
 high priority. Always develop and test from inside spyc.
+
+## Working directory continuity (you, Claude)
+
+You don't have shell continuity between Bash tool calls. Each
+invocation is a fresh subprocess that inherits your *original*
+launch cwd — `cd /foo` in one call does **not** persist to the
+next. This is a real source of loops: `make` fails with "no
+targets specified" or commands run in the wrong place, and you
+keep retrying without realizing the cwd reverted.
+
+How to avoid it:
+- For one-off commands in another directory, use the compound
+  form: `cd /foo && cmd`. The cd applies only to that subshell.
+- Prefer absolute paths in the command itself
+  (`make -C /Users/.../spyc test`).
+- If a `make`/`cargo`/test command fails unexpectedly, run
+  `pwd && ls` first before retrying — verify the cwd before
+  diagnosing the command. If you find yourself "stuck", check
+  `pwd` before anything else.
+
+Spyc surfaces the lower pane's *actual* subprocess cwd in the
+divider line as `── ↪ <path>` when it has drifted from the
+spawn cwd, but for Claude specifically the process cwd never
+moves — only your internal expectation does. Hence this note.

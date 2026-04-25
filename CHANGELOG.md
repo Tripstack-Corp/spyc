@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-04-24
+
+### Added
+- **Live pane cwd in the divider line.** The pane status line now
+  polls the active subprocess's actual cwd via `/proc/<pid>/cwd` on
+  Linux and `lsof -Fn` on macOS (1-second TTL cache, render-path
+  cost is negligible). When the live cwd differs from where spyc
+  launched the tab — e.g. a `bash` tab where the user `cd`'d
+  somewhere — the path gets a `↪` prefix and is rendered in the
+  active-tab color so it's easy to spot. The previous tilde-collapse
+  for `$HOME` is preserved via `paths::display_tilde`.
+- **CLAUDE.md note on shell-continuity loops.** Claude Code doesn't
+  have shell continuity between Bash tool calls — `cd /foo` in one
+  call doesn't persist to the next, which is a real source of
+  Claude getting stuck on `make`/`cargo`/test loops. Added an
+  explicit instruction in `CLAUDE.md` covering compound `cd && cmd`,
+  absolute paths, and the "run `pwd && ls` first when stuck" habit.
+  The live-cwd indicator helps the *user* spot drift; this note
+  helps Claude avoid the trap in the first place.
+
 ## [1.15.0] - 2026-04-24
 
 ### Added

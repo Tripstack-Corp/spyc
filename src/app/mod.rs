@@ -1324,7 +1324,7 @@ impl App {
 
     /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
     /// Replaces the old plain-rule divider.
-    fn render_pane_status_line(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_pane_status_line(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
@@ -1350,10 +1350,16 @@ impl App {
             .fg(self.theme.pick)
             .add_modifier(Modifier::BOLD);
 
-        // Tab indicators: ─[1*] claude ─[2+] bash
+        // Tab indicators: ─[1*] claude ─[2+] bash, then "── <live cwd>".
+        // We render the indicators first (immutable iter) and capture
+        // the active index, then re-borrow mut to fetch the live cwd.
+        let mut active_idx: Option<usize> = None;
         if let Some(tabs) = &self.pane_tabs {
             for (i, entry) in tabs.tabs().iter().enumerate() {
                 let is_active = i == tabs.active_index();
+                if is_active {
+                    active_idx = Some(i);
+                }
                 let star = if is_active { "*" } else { "" };
                 let activity = if entry.info.has_activity { "+" } else { "" };
                 let sep = "─";
@@ -1373,21 +1379,18 @@ impl App {
                 spans.push(Span::styled(tab_text, style));
                 used += tab_len;
             }
+        }
 
-            // CWD of active tab.
-            let cwd_display = {
-                let cwd = &tabs.active_info().cwd;
-                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                match home {
-                    Some(h) if cwd.starts_with(&h) => {
-                        format!("~/{}", cwd.strip_prefix(&h).unwrap().display())
-                    }
-                    _ => cwd.display().to_string(),
-                }
-            };
-            // "── ~/path"
-            let cwd_prefix = "── ";
-            let avail = width.saturating_sub(used + 12); // leave room for [SCROLL] + trailing rule
+        if let (Some(idx), Some(tabs)) = (active_idx, self.pane_tabs.as_mut()) {
+            let entry = &mut tabs.tabs_mut()[idx];
+            let live = entry.live_cwd().to_path_buf();
+            let cwd_display = crate::paths::display_tilde(&live);
+            // Mark when the live cwd has drifted from the spawn cwd
+            // (e.g. user `cd`'d in a bash tab). Helps spot the case
+            // the bug list called out.
+            let drift = live != entry.info.cwd;
+            let cwd_prefix = if drift { "── ↪ " } else { "── " };
+            let avail = width.saturating_sub(used + 12); // room for [SCROLL] + trailing rule
             if avail > 4 {
                 let truncated = if cwd_display.len() > avail {
                     format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])
@@ -1396,7 +1399,12 @@ impl App {
                 };
                 let cwd_fragment = format!("{cwd_prefix}{truncated} ");
                 used += cwd_fragment.len();
-                spans.push(Span::styled(cwd_fragment, inactive_tab_style));
+                let style = if drift {
+                    active_tab_style
+                } else {
+                    inactive_tab_style
+                };
+                spans.push(Span::styled(cwd_fragment, style));
             }
         }
 
@@ -2902,10 +2910,7 @@ impl App {
                 self.state.pane_focused = true;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
-                let entry = TabEntry {
-                    pane: p,
-                    info: TabInfo::new(cmd, cwd),
-                };
+                let entry = TabEntry::new(p, TabInfo::new(cmd, cwd));
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.push(entry);
                 } else {

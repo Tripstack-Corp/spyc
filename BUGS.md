@@ -11,8 +11,6 @@
   been using an old version); maybe we should put a build commit hash in the
   top right?
 - there should be a short cut to help jump to files affected by git status
-- if claude changes its working directory - that's not reflected in the
-  terminal status line - can we monitor the cwd?
 
 ### BIGGER ###
 - ability to background running tasks and notify when exited or updates have
@@ -40,6 +38,13 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) pane divider now shows the *live* cwd of the active
+  subprocess (polled via `/proc/<pid>/cwd` on Linux, `lsof` on
+  macOS, 1s cache). Drifted-from-spawn paths get a `↪` marker so
+  a wandering bash tab is obvious. Caveat: Claude's process cwd
+  never moves (each Bash call is a fresh subprocess), so this is
+  a read on real cwd drift, not on Claude's internal confusion —
+  for that, see the new shell-continuity note in CLAUDE.md.
 - (fixed) `g d` now includes untracked / new files. Previously,
   cursor on a `?`-flagged file gave empty diff output. spyc now
   also runs `git ls-files --others --exclude-standard` and

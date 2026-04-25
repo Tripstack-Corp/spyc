@@ -42,6 +42,45 @@ impl TabInfo {
 pub struct TabEntry {
     pub pane: Pane,
     pub info: TabInfo,
+    /// Cached live cwd of the child process, refreshed at most once
+    /// per `LIVE_CWD_TTL`. `None` until first refresh succeeds, or if
+    /// the platform / process refuses the lookup.
+    live_cwd_cache: Option<(std::time::Instant, PathBuf)>,
+}
+
+/// How long a cached live-cwd lookup is reused before re-polling.
+/// Render-path cost on macOS is a fork-exec (~5ms), so cap polling
+/// to ~1 Hz.
+const LIVE_CWD_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl TabEntry {
+    pub const fn new(pane: Pane, info: TabInfo) -> Self {
+        Self {
+            pane,
+            info,
+            live_cwd_cache: None,
+        }
+    }
+
+    /// Live cwd of the subprocess (TTL-cached). Returns the spawn-time
+    /// cwd as a fallback when the lookup is unsupported or fails.
+    pub fn live_cwd(&mut self) -> &std::path::Path {
+        let now = std::time::Instant::now();
+        let stale = self
+            .live_cwd_cache
+            .as_ref()
+            .is_none_or(|(at, _)| now.duration_since(*at) >= LIVE_CWD_TTL);
+        if stale {
+            if let Some(pid) = self.pane.process_id() {
+                if let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid) {
+                    self.live_cwd_cache = Some((now, cwd));
+                }
+            }
+        }
+        self.live_cwd_cache
+            .as_ref()
+            .map_or(self.info.cwd.as_path(), |(_, p)| p.as_path())
+    }
 }
 
 /// Container for multiple pane tabs.
