@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-04-24
+
+### Changed
+- **Home directory shortens to `~` in displayed paths.** The status
+  bar path, `I` info overlay (`start dir`, `cwd`, config sources),
+  `:project` display, and the on-quit exit summary now collapse a
+  leading `$HOME` to `~` (e.g. `~/src/spyc` instead of
+  `/Users/derek/src/spyc`). Match is anchored at directory
+  boundaries so unrelated paths sharing the home prefix as a
+  substring are unaffected. MCP context output is unchanged —
+  consumers continue to receive absolute paths.
+
 ## [1.11.2] - 2026-04-24
 
 ### Fixed

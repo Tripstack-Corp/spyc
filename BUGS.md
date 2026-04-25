@@ -7,8 +7,6 @@
   doesn't read it. Low priority for a single-line editor.
 
 ### TBD ###
-- home directory should shorten to ~ e.g. "/Users/derekmarshall/src/spyc" should
-  be "~/src/spyc"
 - you can get into a weird history loop where commands are mixed with !shell
   comamands and you'll just get "unknown command" - we should preserve a unified
   history but it should preserve shell vs. spyc commands
@@ -40,6 +38,9 @@
   scrolled halfway up sometimes
 
 ### FIXED ###
+- (fixed) home directory now shortens to `~` in displayed paths
+  (status bar, I overlay, :project display, exit summary). Match
+  is anchored at directory boundaries.
 - (fixed) Claude session resume intermittently failed with "No
   conversation found with session ID …" when the same session
   resumed fine via `claude --resume` by hand. Old resolver picked

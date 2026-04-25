@@ -1219,7 +1219,7 @@ impl AppState {
     pub fn project_home_display(&self) -> String {
         self.project_home
             .as_ref()
-            .map_or_else(|| "(unset)".to_string(), |p| p.display().to_string())
+            .map_or_else(|| "(unset)".to_string(), |p| crate::paths::display_tilde(p))
     }
 
     pub fn jump_to(&mut self, target: &str) -> Result<()> {

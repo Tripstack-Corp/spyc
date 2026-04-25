@@ -18,6 +18,32 @@ pub fn expand(input: &str) -> PathBuf {
     PathBuf::from(expand_env_vars(&tilde_done))
 }
 
+/// Inverse of `expand_tilde` for *display*: if `path` starts with `$HOME`,
+/// replace that prefix with `~`. Otherwise return the path verbatim.
+///
+/// Matches at directory boundaries so `/Users/derekmarshall_other` is not
+/// rewritten when `$HOME` is `/Users/derekmarshall`.
+pub fn display_tilde(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    let Some(home) = std::env::var_os("HOME") else {
+        return s.into_owned();
+    };
+    let home = home.to_string_lossy();
+    if home.is_empty() {
+        return s.into_owned();
+    }
+    let home = home.trim_end_matches('/');
+    if let Some(rest) = s.strip_prefix(home) {
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        if rest.starts_with('/') {
+            return format!("~{rest}");
+        }
+    }
+    s.into_owned()
+}
+
 fn expand_tilde(s: &str) -> String {
     let Some(rest) = s.strip_prefix('~') else {
         return s.to_string();
@@ -101,6 +127,36 @@ fn expand_env_vars(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_tilde_collapses_home_prefix() {
+        if std::env::var_os("HOME").is_none() {
+            return;
+        }
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            display_tilde(&PathBuf::from(format!("{home}/src/spyc"))),
+            "~/src/spyc"
+        );
+        assert_eq!(display_tilde(&PathBuf::from(&home)), "~");
+    }
+
+    #[test]
+    fn display_tilde_only_at_directory_boundary() {
+        if std::env::var_os("HOME").is_none() {
+            return;
+        }
+        let home = std::env::var("HOME").unwrap();
+        // A sibling directory whose name starts with HOME's basename
+        // must NOT be rewritten.
+        let sibling = format!("{home}_other/foo");
+        assert_eq!(display_tilde(&PathBuf::from(&sibling)), sibling);
+    }
+
+    #[test]
+    fn display_tilde_passes_through_non_home_paths() {
+        assert_eq!(display_tilde(&PathBuf::from("/etc/hosts")), "/etc/hosts");
+    }
 
     #[test]
     fn tilde_alone_expands_to_home() {

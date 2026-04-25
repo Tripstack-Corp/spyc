@@ -1687,7 +1687,7 @@ impl App {
 
     fn header_parts(&self) -> (String, String) {
         match self.state.view {
-            View::Dir => (self.state.listing.dir.display().to_string(), {
+            View::Dir => (crate::paths::display_tilde(&self.state.listing.dir), {
                 let filter_tag = match &self.state.temp_filter {
                     Some(f) if f == "!" => " limit:picks".to_string(),
                     Some(f) => format!(" limit:{f}"),
@@ -3454,7 +3454,7 @@ impl App {
         let _ = crate::state::sessions::save_session(&session);
 
         // Build exit summary for post-TUI output.
-        let cwd_display = self.state.listing.dir.display().to_string();
+        let cwd_display = crate::paths::display_tilde(&self.state.listing.dir);
         let tab_count = session.tabs.len();
         let claude_names: Vec<String> = session
             .tabs
@@ -3728,9 +3728,15 @@ impl App {
         lines.push(format!("session  : {}", self.state.session_display()));
         lines.push(format!("project  : {}", self.state.project_home_display()));
         lines.push(format!("user@host: {}", self.state.user_host));
-        lines.push(format!("start dir: {}", self.state.start_dir.display()));
+        lines.push(format!(
+            "start dir: {}",
+            crate::paths::display_tilde(&self.state.start_dir)
+        ));
         lines.push(format!("pid      : {}", std::process::id()));
-        lines.push(format!("cwd      : {}", self.state.listing.dir.display()));
+        lines.push(format!(
+            "cwd      : {}",
+            crate::paths::display_tilde(&self.state.listing.dir)
+        ));
         lines.push(format!("entries  : {}", self.state.listing.entries.len()));
         lines.push(format!("visible  : {}", self.state.rows.len()));
         lines.push(format!("picks    : {}", self.state.picks.len()));
@@ -3742,7 +3748,7 @@ impl App {
             lines.push(String::new());
             lines.push("config sources:".into());
             for src in &self.state.config.sources {
-                lines.push(format!("  {}", src.display()));
+                lines.push(format!("  {}", crate::paths::display_tilde(src)));
             }
         }
         self.pager = Some(PagerView::new_plain("session info", lines));
