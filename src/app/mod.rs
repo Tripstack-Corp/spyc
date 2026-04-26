@@ -1205,11 +1205,21 @@ impl App {
             }
         }
         let dir = self.state.listing.dir.as_path();
-        path == dir
-            || path.parent() == Some(dir)
-            // .git/index changes (git add, commit, checkout, etc.)
-            // trigger a refresh so git status markers stay current.
-            || path == dir.join(".git/index")
+        if path == dir || path.parent() == Some(dir) {
+            return true;
+        }
+        // We watch `.git/` as a directory (see `sync_listing_watch`);
+        // events for `index` (status / staging changes) and `HEAD`
+        // (branch switch) are the ones that actually move the needle
+        // for what we render. Filter the rest out so giant `.git/`
+        // operations (rebase, gc) don't cascade into refreshes.
+        let git_dir = dir.join(".git");
+        if path.parent() == Some(git_dir.as_path()) {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                return matches!(name, "index" | "HEAD");
+            }
+        }
+        false
     }
 
     // --- Rendering --------------------------------------------------------
@@ -5224,18 +5234,23 @@ fn sync_listing_watch(
             *active = None;
         }
     }
-    // Watch .git/index — this single file is touched by virtually every
-    // git operation that changes status (add, commit, checkout, reset,
-    // merge, stash, rebase). Watching one file is safe even in huge repos.
-    let git_index = new_dir.join(".git/index");
-    let want_git = git_index.is_file();
-    let have_git = active_git.as_deref() == Some(&git_index);
+    // Watch the `.git/` directory non-recursively. We can't watch
+    // `.git/index` as a file because git commits via atomic rename
+    // (write `.git/index.lock`, then rename to `.git/index`), which
+    // replaces the inode — a file-level watch follows the *old* inode
+    // and goes deaf. A directory watch sees the rename land. Touched
+    // by basically every git op that changes status (add, commit,
+    // checkout, reset, merge, stash, rebase, ...). NonRecursive
+    // bounds the noise even in repos with huge `.git/objects` trees.
+    let git_dir = new_dir.join(".git");
+    let want_git = git_dir.is_dir();
+    let have_git = active_git.as_deref() == Some(&git_dir);
     if !have_git {
         if let Some(old) = active_git.take() {
             let _ = w.unwatch(&old);
         }
-        if want_git && w.watch(&git_index, RecursiveMode::NonRecursive).is_ok() {
-            *active_git = Some(git_index);
+        if want_git && w.watch(&git_dir, RecursiveMode::NonRecursive).is_ok() {
+            *active_git = Some(git_dir);
         }
     }
 }

@@ -13,6 +13,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.1] - 2026-04-26
+
+### Fixed
+- **Git status now actually updates after a commit.** 1.17.6
+  taught `refresh_listing` to refresh `git_info` too, but the
+  watch itself was unreliable: we were watching `.git/index`
+  *as a file*, and `git commit` writes
+  `.git/index.lock` then atomically renames it to `.git/index`.
+  The rename replaces the inode, but our watcher kept its
+  handle on the old (now-deleted) inode and stopped delivering
+  events. Result: top-bar `main*` and the per-file dirty
+  markers stayed stale until you switched directories, even
+  though `refresh_listing` was correct. spyc now watches the
+  `.git/` directory non-recursively and filters events to
+  `index` (status / staging) and `HEAD` (branch switch); the
+  rename lands as a directory event and the refresh fires.
+
 ## [1.18.0] - 2026-04-26
 
 ### Changed
