@@ -13,6 +13,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.19.0] - 2026-04-26
+
+### Changed
+- **`L` long listing rewritten as an aligned table.** One header row
+  + one data row per file with columns: inode, mode (symbolic),
+  octal, links, owner, group (resolved via `getpwuid_r` / `getgrgid_r`),
+  size (human), bytes, 512B blocks, mtime, atime, ctime, birth, name.
+  Symlinks render as `name -> target` in the NAME column. Column
+  widths are computed once across the whole selection so everything
+  aligns. Renders inside the standard centered pager (90% width, top
+  edge in the usual place), not full-screen — UX consistency with
+  every other pager surface.
+- **Pager `fit_to_content` mode.** New flag on `PagerView` /
+  `PagerRequest` that shrinks the box from the bottom: same x, y, and
+  width as the standard centered pager, but height = lines + borders
+  + status row (capped at 92% of the terminal). Line-number gutter is
+  suppressed since it's noise for short summaries. Long listing opts
+  in so a single-file table (or even a 5-row directory listing)
+  doesn't sit inside a 92%-tall frame.
+
 ## [1.18.6] - 2026-04-26
 
 ### Fixed

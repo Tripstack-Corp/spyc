@@ -16,7 +16,6 @@
 //!   Unix, which is enough for almost everything; xattrs / ACLs / xdev
 //!   reflinks are out of scope.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::io::Read as _;
@@ -169,29 +168,224 @@ pub fn chmod_add_bits(_paths: &[&Path], _bits: u32) -> io::Result<()> {
 
 // ---- Long listing (`L`) ---------------------------------------------------
 
-/// Produce `ls -l`-style lines for each path. One line per path; columns
-/// are mode, size, name. Unreadable paths render as `?? <path>: <error>`
-/// so one bad entry doesn't kill the whole listing.
-pub fn format_long_listing(paths: &[&Path]) -> Vec<String> {
-    paths.iter().map(|p| format_long_line(p)).collect()
+/// Per-row data for the long-listing table. One field per column.
+struct LongRow {
+    inode: String,
+    mode: String,
+    oct: String,
+    links: String,
+    owner: String,
+    group: String,
+    size: String,
+    bytes: String,
+    blocks: String,
+    mtime: String,
+    atime: String,
+    ctime: String,
+    birth: String,
+    name: String,
 }
 
-fn format_long_line(path: &Path) -> String {
-    let md = match fs::symlink_metadata(path) {
-        Ok(m) => m,
-        Err(e) => return format!("?? {}: {e}", path.display()),
-    };
-    let mode = format_mode(&md);
-    let size = format_size(md.len());
-    let name = display_name(path, &md);
-    let mut out = String::with_capacity(40 + name.len());
-    let _ = write!(out, "{mode:<10}  {size:>8}  {name}");
-    if md.file_type().is_symlink() {
-        if let Ok(target) = fs::read_link(path) {
-            let _ = write!(out, " -> {}", target.display());
+const LONG_HEADERS: [&str; 14] = [
+    "INODE", "MODE", "OCT", "LINKS", "OWNER", "GROUP", "SIZE", "BYTES", "BLOCKS", "MTIME", "ATIME",
+    "CTIME", "BIRTH", "NAME",
+];
+
+/// Per-column alignment. `true` = right-align (numeric), `false` = left.
+const LONG_RIGHT: [bool; 14] = [
+    true, false, false, true, false, false, true, true, true, false, false, false, false, false,
+];
+
+impl LongRow {
+    fn cells(&self) -> [&str; 14] {
+        [
+            &self.inode,
+            &self.mode,
+            &self.oct,
+            &self.links,
+            &self.owner,
+            &self.group,
+            &self.size,
+            &self.bytes,
+            &self.blocks,
+            &self.mtime,
+            &self.atime,
+            &self.ctime,
+            &self.birth,
+            &self.name,
+        ]
+    }
+}
+
+/// Produce a tabular `ls -l`-on-steroids listing: one header row plus one
+/// data row per path. Columns: inode, mode (symbolic), octal mode, links,
+/// owner and group (resolved via `getpwuid_r`/`getgrgid_r`), size (human),
+/// bytes, 512B blocks, mtime, atime, ctime, birth, name. Symlinks render
+/// as `name -> target` in the NAME column. Column widths are computed once
+/// across all rows so everything aligns. Unreadable paths render as
+/// `?? <path>: <error>` lines after the table.
+pub fn format_long_listing(paths: &[&Path]) -> Vec<String> {
+    let mut rows: Vec<LongRow> = Vec::with_capacity(paths.len());
+    let mut errors: Vec<String> = Vec::new();
+    for path in paths {
+        match fs::symlink_metadata(path) {
+            Ok(md) => rows.push(make_long_row(path, &md)),
+            Err(e) => errors.push(format!("?? {}: {e}", path.display())),
         }
     }
+
+    if rows.is_empty() {
+        return errors;
+    }
+
+    let widths = compute_column_widths(&rows);
+    let mut out = Vec::with_capacity(rows.len() + errors.len() + 1);
+    out.push(format_long_header(&widths));
+    for row in &rows {
+        out.push(format_long_row(row, &widths));
+    }
+    out.extend(errors);
     out
+}
+
+fn compute_column_widths(rows: &[LongRow]) -> [usize; 14] {
+    use unicode_width::UnicodeWidthStr;
+    let mut widths = [0usize; 14];
+    for (i, h) in LONG_HEADERS.iter().enumerate() {
+        widths[i] = h.width();
+    }
+    for row in rows {
+        for (i, cell) in row.cells().iter().enumerate() {
+            widths[i] = widths[i].max(cell.width());
+        }
+    }
+    widths
+}
+
+fn format_long_header(widths: &[usize; 14]) -> String {
+    let mut s = String::new();
+    for (i, h) in LONG_HEADERS.iter().enumerate() {
+        if i > 0 {
+            s.push_str("  ");
+        }
+        write_cell(&mut s, h, widths[i], LONG_RIGHT[i]);
+    }
+    // Trim trailing whitespace from the last (left-aligned) column
+    // so we don't render an oddly long header line.
+    s.truncate(s.trim_end().len());
+    s
+}
+
+fn format_long_row(row: &LongRow, widths: &[usize; 14]) -> String {
+    let mut s = String::new();
+    for (i, cell) in row.cells().iter().enumerate() {
+        if i > 0 {
+            s.push_str("  ");
+        }
+        write_cell(&mut s, cell, widths[i], LONG_RIGHT[i]);
+    }
+    s.truncate(s.trim_end().len());
+    s
+}
+
+fn write_cell(s: &mut String, val: &str, width: usize, right: bool) {
+    use unicode_width::UnicodeWidthStr;
+    let pad = width.saturating_sub(val.width());
+    if right {
+        for _ in 0..pad {
+            s.push(' ');
+        }
+        s.push_str(val);
+    } else {
+        s.push_str(val);
+        for _ in 0..pad {
+            s.push(' ');
+        }
+    }
+}
+
+#[cfg(unix)]
+fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let inode = md.ino().to_string();
+    let mode = format_mode(md);
+    let oct = format!("{:04o}", md.permissions().mode() & 0o7777);
+    let links = md.nlink().to_string();
+    let uid = md.uid();
+    let owner = lookup_user_name(uid).unwrap_or_else(|| uid.to_string());
+    let gid = md.gid();
+    let group = lookup_group_name(gid).unwrap_or_else(|| gid.to_string());
+    let size = format_size(md.len());
+    let bytes = md.len().to_string();
+    let blocks = md.blocks().to_string();
+    let mtime = md
+        .modified()
+        .ok()
+        .map_or_else(|| "-".to_string(), format_local_time);
+    let atime = md
+        .accessed()
+        .ok()
+        .map_or_else(|| "-".to_string(), format_local_time);
+    let ctime = format_local_time_from_unix(md.ctime(), md.ctime_nsec());
+    let birth = md
+        .created()
+        .ok()
+        .map_or_else(|| "-".to_string(), format_local_time);
+    let name = name_with_target(path, md);
+    LongRow {
+        inode,
+        mode,
+        oct,
+        links,
+        owner,
+        group,
+        size,
+        bytes,
+        blocks,
+        mtime,
+        atime,
+        ctime,
+        birth,
+        name,
+    }
+}
+
+#[cfg(not(unix))]
+fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
+    let mode = format_mode(md);
+    let size = format_size(md.len());
+    let bytes = md.len().to_string();
+    let mtime = md
+        .modified()
+        .ok()
+        .map_or_else(|| "-".to_string(), format_local_time);
+    let name = name_with_target(path, md);
+    LongRow {
+        inode: "-".to_string(),
+        mode,
+        oct: "-".to_string(),
+        links: "-".to_string(),
+        owner: "-".to_string(),
+        group: "-".to_string(),
+        size,
+        bytes,
+        blocks: "-".to_string(),
+        mtime,
+        atime: "-".to_string(),
+        ctime: "-".to_string(),
+        birth: "-".to_string(),
+        name,
+    }
+}
+
+fn name_with_target(path: &Path, md: &fs::Metadata) -> String {
+    let base = display_name(path, md);
+    if md.file_type().is_symlink() {
+        if let Ok(target) = fs::read_link(path) {
+            return format!("{base} -> {}", target.display());
+        }
+    }
+    base
 }
 
 fn display_name(path: &Path, md: &fs::Metadata) -> String {
@@ -208,6 +402,84 @@ fn display_name(path: &Path, md: &fs::Metadata) -> String {
     } else {
         base
     }
+}
+
+#[cfg(unix)]
+fn lookup_user_name(uid: u32) -> Option<String> {
+    let mut buf = vec![0i8; 1024];
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::passwd = std::ptr::null_mut();
+    let r = unsafe {
+        libc::getpwuid_r(
+            uid,
+            &raw mut pwd,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &raw mut result,
+        )
+    };
+    if r != 0 || result.is_null() {
+        return None;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
+    cstr.to_str().ok().map(String::from)
+}
+
+#[cfg(unix)]
+fn lookup_group_name(gid: u32) -> Option<String> {
+    let mut buf = vec![0i8; 1024];
+    let mut grp: libc::group = unsafe { std::mem::zeroed() };
+    let mut result: *mut libc::group = std::ptr::null_mut();
+    let r = unsafe {
+        libc::getgrgid_r(
+            gid,
+            &raw mut grp,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &raw mut result,
+        )
+    };
+    if r != 0 || result.is_null() {
+        return None;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(grp.gr_name) };
+    cstr.to_str().ok().map(String::from)
+}
+
+#[cfg(unix)]
+fn format_local_time(t: std::time::SystemTime) -> String {
+    let secs = match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(_) => return "—".to_string(),
+    };
+    format_local_time_from_unix(secs, 0)
+}
+
+#[cfg(not(unix))]
+fn format_local_time(t: std::time::SystemTime) -> String {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => format!("unix:{}", d.as_secs()),
+        Err(_) => "—".to_string(),
+    }
+}
+
+#[cfg(unix)]
+fn format_local_time_from_unix(secs: i64, _nsec: i64) -> String {
+    let t = secs as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let r = unsafe { libc::localtime_r(&raw const t, &raw mut tm) };
+    if r.is_null() {
+        return "—".to_string();
+    }
+    format!(
+        "{year:04}-{mon:02}-{day:02} {hour:02}:{min:02}:{sec:02}",
+        year = tm.tm_year + 1900,
+        mon = tm.tm_mon + 1,
+        day = tm.tm_mday,
+        hour = tm.tm_hour,
+        min = tm.tm_min,
+        sec = tm.tm_sec,
+    )
 }
 
 #[cfg(unix)]
@@ -555,6 +827,75 @@ mod tests {
         assert_eq!(format_size(10 * 1024), "10K");
         assert_eq!(format_size(1024 * 1024), "1.0M");
         assert_eq!(format_size(12 * 1024 * 1024), "12M");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn long_listing_emits_table_with_header_and_one_row_per_file() {
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("hello.txt");
+        let b = tmp.path().join("world.md");
+        File::create(&a).unwrap().write_all(b"hi").unwrap();
+        File::create(&b).unwrap().write_all(b"yo!").unwrap();
+
+        let lines = format_long_listing(&[&a, &b]);
+        // 1 header + 2 data rows.
+        assert_eq!(lines.len(), 3, "got: {lines:?}");
+
+        // Header has all expected column names.
+        let header = &lines[0];
+        for col in [
+            "INODE", "MODE", "OCT", "LINKS", "OWNER", "GROUP", "SIZE", "BYTES", "BLOCKS", "MTIME",
+            "ATIME", "CTIME", "BIRTH", "NAME",
+        ] {
+            assert!(header.contains(col), "header missing {col}: {header}");
+        }
+
+        // Data rows include the filenames and concrete bytes/mode.
+        assert!(lines[1].contains("hello.txt"), "row 1: {}", lines[1]);
+        assert!(lines[2].contains("world.md"), "row 2: {}", lines[2]);
+        assert!(lines[1].contains("-rw"), "no mode in row 1: {}", lines[1]);
+        // 2-byte file shows up in BYTES column literally as "2".
+        assert!(lines[1].split_whitespace().any(|s| s == "2"));
+        // 3-byte file shows up in BYTES column literally as "3".
+        assert!(lines[2].split_whitespace().any(|s| s == "3"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn long_listing_columns_align_across_rows() {
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("longer_name.txt");
+        File::create(&a).unwrap();
+        File::create(&b).unwrap();
+
+        let lines = format_long_listing(&[&a, &b]);
+        // The MODE column is at the same byte offset on every row, since
+        // the INODE column to its left is right-aligned to a fixed width.
+        let mode_col_offset = lines[0].find("MODE").unwrap();
+        // Both data rows should have a mode glyph (`-` or `d`) at that offset.
+        for row in &lines[1..] {
+            let ch = row.as_bytes().get(mode_col_offset).copied().unwrap_or(b' ');
+            assert!(
+                matches!(ch, b'-' | b'd' | b'l' | b'b' | b'c' | b'p' | b's'),
+                "mode column misaligned in row at offset {mode_col_offset}: {row:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn long_listing_unreadable_path_appends_error_line() {
+        let tmp = tempdir().unwrap();
+        let missing = tmp.path().join("nope");
+        let lines = format_long_listing(&[&missing]);
+        assert!(!lines.is_empty());
+        // Only errors -> no header line; the error itself is the first line.
+        assert!(
+            lines[0].starts_with("?? "),
+            "expected error line, got {:?}",
+            lines[0]
+        );
     }
 
     #[test]

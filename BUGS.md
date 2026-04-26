@@ -1,4 +1,6 @@
 ### SMALL ###
+- q should be reserved for a future implementation of "quick" vim style macros
+  / recordings; this should also be on the roadmap
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -37,6 +39,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.19.0) `L` long listing now emits an aligned table
+  (header + one row per file) with inode, mode, octal, links, owner,
+  group (names via `getpwuid_r` / `getgrgid_r`), size, bytes, 512B
+  blocks, mtime, atime, ctime, birth, and name (symlinks as
+  `name -> target`). Column widths computed once across the whole
+  selection so rows align. Renders inside the standard centered
+  pager with `fit_to_content` shrinking the height from the bottom,
+  so a single-file or short listing doesn't sit inside a 92%-tall
+  frame. Line-number gutter suppressed since it's noise for the
+  tabular content.
 - (fixed) git status updates correctly after chained git operations.
   The 500ms debounce fired from the *first* event of a burst, so
   `git add && git commit && git push` had refresh's subprocess

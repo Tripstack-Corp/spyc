@@ -4872,6 +4872,11 @@ impl App {
                     state::PagerLines::Plain(lines) => {
                         let mut v = PagerView::new_plain(req.title, lines);
                         v.columns = req.columns;
+                        if req.fit_to_content {
+                            v.fit_to_content = true;
+                            // Line-number gutter is noise for short summaries.
+                            v.show_line_numbers = false;
+                        }
                         v
                     }
                 };

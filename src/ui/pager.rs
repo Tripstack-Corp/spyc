@@ -51,6 +51,13 @@ pub struct PagerView {
     /// When true, the pager fills the entire terminal instead of the
     /// centered 90×92% box. Toggled with `f`.
     pub full_width: bool,
+    /// When true (and not `full_width`), shrink the pager box to fit its
+    /// content -- height grows with line count, width grows with the
+    /// widest line, both clamped to the centered 90×92% bound and floored
+    /// at a usable minimum. For short summaries (single-file long
+    /// listing, version info) so a 5-line block doesn't sit inside a
+    /// nearly-full-screen frame.
+    pub fit_to_content: bool,
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,
@@ -88,6 +95,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: false,
             full_width: false,
+            fit_to_content: false,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -108,6 +116,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: false,
             full_width: false,
+            fit_to_content: false,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -132,6 +141,7 @@ impl PagerView {
             show_whitespace: false,
             saveable: true,
             full_width: false,
+            fit_to_content: false,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -469,6 +479,8 @@ pub const fn centered_body_width(term_w: u16) -> u16 {
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let inner_area = if view.full_width {
         area
+    } else if view.fit_to_content {
+        fit_height_rect(area, view)
     } else {
         centered_rect(area, CENTERED_W_PCT, 92)
     };
@@ -953,5 +965,25 @@ const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
         y,
         width: w,
         height: h,
+    }
+}
+
+/// Same x / y / width as the standard centered pager, but shrinks from
+/// the bottom: height = lines + borders + status row, capped at the
+/// standard 92% height. Top edge stays where the user expects (matching
+/// the regular pager origin); short summaries don't sit inside a
+/// near-full-screen frame.
+fn fit_height_rect(area: Rect, view: &PagerView) -> Rect {
+    const MIN_H: u16 = 5;
+
+    let centered = centered_rect(area, CENTERED_W_PCT, 92);
+    let need_h = (view.lines.len() as u16).saturating_add(3);
+    let height = need_h.clamp(MIN_H.min(centered.height), centered.height);
+
+    Rect {
+        x: centered.x,
+        y: centered.y,
+        width: centered.width,
+        height,
     }
 }

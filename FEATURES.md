@@ -71,7 +71,9 @@ become `%` in shell expansion.
 - **M** move selection to a destination
 - **R** remove selection (with confirmation)
 - **+** create a new directory
-- **L** long listing (`ls -lh`) piped through `$PAGER`
+- **L** long listing -- aligned table with inode, mode, octal,
+  links, owner, group, size, bytes, blocks, mtime/atime/ctime/birth,
+  name (symlinks as `name -> target`). Pager height fits to content.
 - **f** run `file(1)` on the selection
 - **^X** chmod +x
 

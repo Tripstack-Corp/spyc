@@ -60,6 +60,11 @@ pub struct PagerRequest {
     pub title: String,
     pub lines: PagerLines,
     pub columns: u8,
+    /// When true, the pager height auto-shrinks to fit content (top edge
+    /// stays anchored to the standard centered position; the box just
+    /// grows shorter from the bottom). Line-number gutter is suppressed
+    /// since it's noise for short summaries.
+    pub fit_to_content: bool,
 }
 
 /// Content for a pager — either plain strings or pre-styled lines.
@@ -734,6 +739,7 @@ impl AppState {
                     title,
                     lines: PagerLines::Plain(lines),
                     columns: 1,
+                    fit_to_content: true,
                 });
             }
 
@@ -767,6 +773,7 @@ impl AppState {
                         title: "file types".to_string(),
                         lines: PagerLines::Plain(lines),
                         columns: 1,
+                        fit_to_content: false,
                     });
                 }
             }
