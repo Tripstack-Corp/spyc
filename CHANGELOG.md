@@ -13,6 +13,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.6] - 2026-04-26
+
+### Fixed
+- **Captured shell (`!cmd`) pager no longer bleeds tail of
+  longer lines through shorter ones.** spawn_capture runs the
+  child under a pty whose slave has `ONLCR` on by default, so
+  the child's `\n` becomes `\r\n` on the master side. The
+  literal `\r` survived into our buffer; when ratatui rendered
+  a line followed by a shorter line, the terminal interpreted
+  the `\r` as carriage-return and the new line overlaid only
+  as far as it was long, leaving the tail of the prior line
+  visible. (`make help` in `~/src/system_setup` was a great
+  repro — short lines following a long URL line.) Now we
+  normalize `\r\n` → `\n` before feeding the buffer to
+  `ansi_to_tui`. Standalone `\r` is preserved so in-place
+  progress-bar updates still work.
+
 ## [1.18.5] - 2026-04-26
 
 ### Fixed

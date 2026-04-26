@@ -825,7 +825,8 @@ impl App {
                 if got_data || capture.finished {
                     // Rebuild pager content from the accumulated buffer.
                     use ansi_to_tui::IntoText;
-                    let text = capture.buffer.as_slice().into_text().unwrap_or_default();
+                    let normalized = strip_crlf(&capture.buffer);
+                    let text = normalized.as_slice().into_text().unwrap_or_default();
                     let at_bottom = self.pager.as_ref().is_some_and(|v| {
                         let total = v.line_count();
                         let page = v.page_lines(40); // approximate
@@ -847,7 +848,8 @@ impl App {
                     };
                     let title = format!("{} — {exit_info}", capture.title);
                     // Final rebuild with stderr included.
-                    let text = capture.buffer.as_slice().into_text().unwrap_or_default();
+                    let normalized = strip_crlf(&capture.buffer);
+                    let text = normalized.as_slice().into_text().unwrap_or_default();
                     if let Some(view) = self.pager.as_mut() {
                         view.title = title;
                         view.lines = text.lines;
@@ -5301,6 +5303,30 @@ type CaptureHandles = (
     Box<dyn std::io::Write + Send>,
     std::sync::mpsc::Receiver<Vec<u8>>,
 );
+
+/// Normalize CRLF line endings to LF in captured pty output.
+///
+/// The pty's slave side enables ONLCR by default, so a child writing
+/// `\n` produces `\r\n` on the master side we read from. The literal
+/// `\r` survives into our buffer; when ratatui later renders the line,
+/// the terminal interprets it as a carriage return and the next line's
+/// shorter content overlays without clearing the tail of the previous
+/// line. We replace only `\r\n` (not standalone `\r`) so progress-bar
+/// in-place updates that use bare CR still work.
+fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
+            out.push(b'\n');
+            i += 2;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
 
 fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
