@@ -157,6 +157,45 @@ terminal inside a terminal." In priority order:
 
 ### Remaining
 
+- **Background tasks (`^Z` / `:fg`).** Day-driver fundamentals --
+  running `cargo test` or a long `find` shouldn't lock you out of
+  spyc. The plumbing is mostly there: `spawn_capture` already returns
+  `(child, writer, mpsc::Receiver<bytes>)` and `PendingCapture` owns
+  exactly that shape; backgrounding is fundamentally "move
+  `PendingCapture` from a singular field into a collection, detach
+  the pager, keep the reader thread draining into a per-task
+  buffer." Phasing:
+  1. **M1 -- `^Z` to background, `:fg` to resume.** Ship together so
+     the round-trip works end to end. `^Z` in the streaming capture
+     pager moves the task into a new `BackgroundTasks` collection on
+     `AppState`; pager closes; flash `task #N backgrounded`. `:fg`
+     (no arg) re-attaches the most-recent task; `:fg N` targets a
+     specific id. Resume is uniform: still-running tasks come back as
+     a streaming pager seeded with the buffered output so far;
+     already-exited tasks come back as a static pager with the final
+     `exited <code> (Xs)` title. Status segment `bg: 1●` appears
+     when there's at least one task. Output buffer head-truncates at
+     ~1 MB so unbounded `cargo build` doesn't eat memory.
+  2. **M2 -- `:bg` overlay.** Picker-style list with columns
+     `# STATUS TIME CMD`. `Enter` reuses the `:fg` code path; `R`
+     dismisses or kills (running -> SIGTERM with grace then SIGKILL,
+     completed -> drop from list); `r` re-runs. Auto-prune oldest
+     completed tasks past a soft cap (~50).
+  3. **M3 -- `!&cmd` direct-launch.** Skip the foreground pager
+     entirely; task starts in background. Symmetric `:!&cmd` and
+     `:bg cmd` command-line variants.
+  4. **M4 -- Polish.** Optional bell / OS notify on completion
+     behind a config flag (`[notify] on_task_complete = "bell"`),
+     off by default. Pane-tab integration: treat exited tabs as
+     background-task-style records for post-mortem viewing. MCP
+     exposure: a `get_running_tasks` tool so Claude can ask "what's
+     running?" and tail recent output.
+  Open decisions: `^Z` is the right vim/shell muscle memory but
+  overrides the literal terminal-suspend semantics some users may
+  expect (we already trap most ctrl- combos in the file list, so
+  this is consistent). Backgrounded tasks **don't** survive
+  `spyc -r` -- running children are tied to the spyc PID and
+  reattach is a rabbit hole; quit-time prompt covers cleanup.
 - **Context enrichment.** `get_spyc_context` currently returns file
   paths and metadata. Could additionally expose: file contents (or
   snippets) for picked files, recent compiler errors from `cargo

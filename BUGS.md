@@ -1,4 +1,8 @@
 ### SMALL ###
+- while editing for a command ! if you paste while insert mode it only appends
+  it doesn't paste at where the cursor is positioned
+- while I am drafting a command for a new pane it would be nice to still be
+  able to switch to another pane to check on something
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -12,8 +16,6 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
-- ability to background running tasks and notify when exited or updates have
-  happened
 - would like to be able to reorder tabs
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
