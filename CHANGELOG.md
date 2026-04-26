@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.2] - 2026-04-26
+
+### Fixed
+- **Git status refresh on commit, take two.** 1.18.1's directory
+  watch on `.git/` was right but the path filter still missed the
+  case where macOS FSEvents *coalesces* multiple intra-directory
+  changes into a single event whose path is `.git/` itself rather
+  than `.git/index`. `is_listing_path` now also accepts `path ==
+  .git/` (treating it as "something changed in there, refresh");
+  the existing `index`/`HEAD` filter still applies to file-level
+  events for backends/cases that deliver them.
+- **Debug log now records every watcher event** (path, listing /
+  config classification, event kind) — run spyc with `-d` to send
+  events to `$XDG_STATE_HOME/spyc/debug.log` for diagnosis.
+
 ## [1.18.1] - 2026-04-26
 
 ### Fixed

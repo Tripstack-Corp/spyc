@@ -927,10 +927,17 @@ impl App {
             while let Ok(result) = rx.try_recv() {
                 if let Ok(ev) = result {
                     for p in &ev.paths {
-                        if self.is_config_path(p) {
+                        let listing = self.is_listing_path(p);
+                        let config = self.is_config_path(p);
+                        spyc_debug!(
+                            "watcher event: {} (listing={listing}, config={config}, kind={:?})",
+                            p.display(),
+                            ev.kind
+                        );
+                        if config {
                             needs_reload = true;
                         }
-                        if self.is_listing_path(p) {
+                        if listing {
                             pending_refresh = true;
                         }
                     }
@@ -1208,12 +1215,20 @@ impl App {
         if path == dir || path.parent() == Some(dir) {
             return true;
         }
-        // We watch `.git/` as a directory (see `sync_listing_watch`);
-        // events for `index` (status / staging changes) and `HEAD`
-        // (branch switch) are the ones that actually move the needle
-        // for what we render. Filter the rest out so giant `.git/`
-        // operations (rebase, gc) don't cascade into refreshes.
+        // We watch `.git/` as a directory (see `sync_listing_watch`).
+        // macOS FSEvents sometimes coalesces multiple intra-directory
+        // changes into a single event whose path *is* `.git/` itself
+        // (rather than the specific child file), so accept both:
+        // - `path == .git/` — coalesced directory event, treat as
+        //   "something happened in there, refresh"
+        // - `path` parented at `.git/` with basename `index` (status /
+        //   staging) or `HEAD` (branch switch) — file-level events
+        // Everything else under `.git/` (objects, packs, lockfiles,
+        // gc activity) is rejected so a rebase or gc doesn't cascade.
         let git_dir = dir.join(".git");
+        if path == git_dir.as_path() {
+            return true;
+        }
         if path.parent() == Some(git_dir.as_path()) {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 return matches!(name, "index" | "HEAD");
