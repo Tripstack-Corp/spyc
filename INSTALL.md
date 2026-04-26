@@ -61,15 +61,27 @@ Minimum supported Rust version: **1.80**.
 ```sh
 git clone https://bitbucket.org/tripstack/spyc.git
 cd spyc
-make release          # build optimized binary
-sudo make install     # copy to /usr/local/bin
+make install          # builds release + copies to ~/.local/bin (no sudo)
 ```
 
-Or build manually:
+Make sure `~/.local/bin` is on your `PATH`. Most Linux distros include
+it by default; on macOS add this to `~/.zshrc` (or `~/.bash_profile`):
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To install system-wide instead, override `PREFIX` and use sudo:
+
+```sh
+sudo make install PREFIX=/usr/local
+```
+
+Or build and copy manually:
 
 ```sh
 cargo build --release
-sudo install -m 755 target/release/spyc /usr/local/bin/
+install -m 755 target/release/spyc ~/.local/bin/
 ```
 
 ## Cross-compilation (optional)
@@ -127,7 +139,7 @@ The generated `.mcp.json` looks like this:
 {
   "mcpServers": {
     "spyc": {
-      "command": "/usr/local/bin/spyc",
+      "command": "/Users/you/.local/bin/spyc",
       "args": ["--mcp"],
       "env": {
         "SPYC_MCP_SOCK": "/Users/you/.local/state/spyc/mcp-12345.sock"
@@ -188,6 +200,10 @@ on the machine, so individual users don't need a per-project
   }
 }
 ```
+
+(In a managed deployment, IT typically installs the binary system-wide
+to `/usr/local/bin` via `sudo make install PREFIX=/usr/local`.
+For per-user installs, the path is `$HOME/.local/bin/spyc`.)
 
 Note that the centrally deployed entry does **not** include
 `env.SPYC_MCP_SOCK` (IT doesn't know the PID of each user's running

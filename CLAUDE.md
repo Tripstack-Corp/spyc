@@ -6,7 +6,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 
 - Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
 - Embedded pty pane (horizontal split) with tabs for running subprocesses — primarily used to host `claude` CLI for dog-fooding. The divider line shows the active tab's *live* cwd (polled via `/proc/<pid>/cwd` on Linux, `lsof` on macOS, ~1Hz cache); when it drifts from the spawn cwd it gets a `↪` marker.
-- MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; takeover is prompted (`PID N already owns MCP here. Take over? [Y/n]`) so a second spyc doesn't silently steal MCP from the first; enterprise policies respected.
+- MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; takeover is prompted (`PID N already owns MCP here. Take over? [Y/n]`) so a second spyc doesn't silently steal MCP from the first. Enterprise policies respected: `deniedMcpServers`/`allowedMcpServers` in `managed-settings.json` gate the entry; if a Jamf-deployed `managed-mcp.json` already defines a server named `spyc`, the per-project `.mcp.json` write is suppressed (org config wins on the name; we'd just collide) and any prior local `spyc` entry is removed.
 - `gf`/`gF` — jump from Claude's output to the referenced file (or file:line)
 - In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)
@@ -17,6 +17,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - Session save/restore — auto-saved on quit with a spice-themed name (e.g. `SAFFRON_CUMIN`), `spyc -r` resumes tabs and Claude conversations
 - `PROJECT_HOME` — sticky per-session project root. Auto-set when launch dir has `.git`. `gh` jumps, `gP` sets, `:project` manages. New pane tabs default their cwd to `PROJECT_HOME`. Exposed via MCP context.
 - Top bar: `🌶️ | PROJECT_HOME | SESSION_NAME | path | git | suffix`. `user@host` dropped from the bar; flash with `gU` / `:whoami`, or see it in the `I` overlay. Position is configurable: `[layout] status_position = "bottom"` flips it to the last row (vim/tmux convention; useful inside tmux to avoid double status bars).
+- Host terminal title is set to `🌶️: <project> · <session>` (basename of `PROJECT_HOME` · `SESSION_NAME`); pre-spyc title is restored on quit. Inside tmux the OSC 2 is wrapped in DCS passthrough so iTerm2 (etc.) sees it — needs `set -g set-titles on` in tmux for the outer-tab title to actually update.
 - `.spycrc.toml` config with keymap DSL, themes, ignore masks, layout, live reload. `spyc --print-config` emits a fully-commented default template.
 
 ## Architecture
@@ -44,6 +45,7 @@ per-module navigation index.
 - **`src/paths.rs`** — XDG-compliant path resolution for state, config, and cache directories.
 - **`src/sysinfo.rs`** — System info (RSS, PID) for the `I` info overlay.
 - **`src/proc_cwd.rs`** — Cross-platform "cwd of pid N" lookup (Linux `/proc/<pid>/cwd`, macOS `lsof -Fn`). Used to surface the live pane subprocess cwd in the divider.
+- **`src/term_title.rs`** — Host-terminal window title (push/pop/set). Wraps OSC 2 in tmux's DCS passthrough when `$TMUX` is set so iTerm2 etc. receive the title.
 - **`src/debug_log.rs`** — `spyc_debug!` macro; writes to `$XDG_STATE_HOME/spyc/debug.log`.
 - **`src/main.rs`** — Terminal setup/teardown, `suspend_tui`/`resume_tui` for child processes.
 
@@ -73,7 +75,7 @@ per-module navigation index.
 cargo build            # dev build
 cargo build --release  # release build
 make release           # release build via Makefile
-sudo make install      # copy to /usr/local/bin (run `make release` first)
+make install           # build release + copy to ~/.local/bin
 make check             # fmt + clippy + test (CI gate)
 make                   # see Makefile for all targets
 ```

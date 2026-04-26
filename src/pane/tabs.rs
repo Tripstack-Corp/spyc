@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use super::Pane;
 
 /// Per-tab metadata displayed in the status line.
-#[allow(dead_code)] // `command` stored for future session restore
 pub struct TabInfo {
     /// Full command string passed to `Pane::spawn`.
     pub command: String,
@@ -18,6 +17,22 @@ pub struct TabInfo {
     pub cwd: PathBuf,
     /// True when a background tab received output since last viewed.
     pub has_activity: bool,
+    /// Set when the tab was spawned by session restore as a `claude
+    /// --resume`. On a non-zero exit shortly after spawn we treat the
+    /// resume as failed and replace the tab with a fresh spawn of this
+    /// fallback command.
+    pub restore_fallback: Option<String>,
+    /// Set on session restore when we want claude to resume a specific
+    /// conversation: spawn a *fresh* `claude` (the `--resume` CLI flag
+    /// trips a known regression that crashes at mount), then once
+    /// claude has had time to finish its banner, type `/resume <sid>`
+    /// followed by Enter — the slash-command path doesn't hit the bug.
+    /// Holds `(session_id, spawn_time)`; cleared once sent.
+    pub pending_resume_send: Option<(String, std::time::Instant)>,
+    /// When the tab's subprocess was launched. Bounds the
+    /// restore-fallback window so a real user-driven exit much later
+    /// doesn't trigger an automatic respawn.
+    pub spawn_at: std::time::Instant,
 }
 
 impl TabInfo {
@@ -34,6 +49,9 @@ impl TabInfo {
             label,
             cwd,
             has_activity: false,
+            restore_fallback: None,
+            pending_resume_send: None,
+            spawn_at: std::time::Instant::now(),
         }
     }
 }
@@ -163,18 +181,7 @@ impl PaneTabs {
     /// Remove the active tab. Returns `true` if tabs remain, `false` if
     /// the last tab was removed (caller should tear down the pane area).
     pub fn close_active(&mut self) -> bool {
-        if self.tabs.is_empty() {
-            return false;
-        }
-        self.tabs.remove(self.active);
-        if self.tabs.is_empty() {
-            return false;
-        }
-        // Keep active in bounds.
-        if self.active >= self.tabs.len() {
-            self.active = self.tabs.len() - 1;
-        }
-        true
+        self.remove_at(self.active)
     }
 
     /// Drain output from *every* tab so background tabs don't lose data.
@@ -223,6 +230,34 @@ impl PaneTabs {
             }
         }
         changed
+    }
+
+    /// Replace the tab at `idx` in place. Active index and the order of
+    /// remaining tabs are preserved. No-op if `idx` is out of range.
+    pub fn replace_at(&mut self, idx: usize, entry: TabEntry) {
+        if idx < self.tabs.len() {
+            self.tabs[idx] = entry;
+        }
+    }
+
+    /// Remove the tab at `idx`. Returns `true` if tabs remain, `false` if
+    /// the container is now empty (caller should tear down the pane area).
+    /// Active index follows the removed tab when the active tab itself is
+    /// removed; otherwise it shifts to keep pointing at the same tab.
+    pub fn remove_at(&mut self, idx: usize) -> bool {
+        if idx >= self.tabs.len() {
+            return !self.tabs.is_empty();
+        }
+        self.tabs.remove(idx);
+        if self.tabs.is_empty() {
+            return false;
+        }
+        if idx < self.active {
+            self.active -= 1;
+        } else if self.active >= self.tabs.len() {
+            self.active = self.tabs.len() - 1;
+        }
+        true
     }
 
     /// Slice of all tab entries (for rendering the tab bar).

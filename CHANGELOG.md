@@ -5,6 +5,214 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`make install` now defaults to `~/.local/bin` (no sudo).** The
+  Makefile's `PREFIX` defaults to `$HOME/.local`. To install
+  system-wide, override: `sudo make install PREFIX=/usr/local`. The
+  install target prints a hint if `~/.local/bin` is not on `$PATH`.
+  README, INSTALL.md, and CLAUDE.md updated to reflect the new
+  recommended flow.
+
+## [1.17.9] - 2026-04-25
+
+### Changed
+- **Session restore stops using `claude --resume`; types
+  `/resume <sid>` after launch instead.** The CLI flag triggers
+  a Claude regression where the mount-time
+  `useEffect(...,[],g9H(K))` reads `onSessionRestored` from
+  `FXK({enabled:false})`'s return value, gets `undefined`, and
+  throws `g9H is not a function` — which wedges React while
+  bun keeps the pty alive. Same effect doesn't fire on a fresh
+  start (initialMessages is empty), so we now spawn fresh
+  `claude` and, after a 1.5s settle delay, write
+  `/resume <sid>\r` to the pane. The slash-command goes through
+  `tM_` (a different code path that doesn't hit the bug). The
+  crash-recovery prompt from 1.17.1 stays as a safety net for
+  any path we missed.
+
+## [1.17.8] - 2026-04-25
+
+### Fixed
+- **Claude crash-recovery prompt fires reliably again.** The
+  1.17.5 simplify pass added an `output_dirty` gate to the
+  crash-detection scan as a hot-path optimization, but
+  `output_dirty` is cleared on every render. Claude prints its
+  whole crash dump in well under a second and then sits
+  quiescent, so by the time `dump_grace` (3s) elapses the flag
+  is `false` — we'd skip the scan forever and the prompt would
+  never fire. With 1.17.7's slug fix landing, restore now
+  successfully spawns `claude --resume <sid>`, which trips the
+  g9H regression and crashes — and *that's* exactly the case
+  the silenced prompt was supposed to catch. Reverted the gate;
+  the scan is bounded to the 30-second restore window and to
+  tabs with `restore_fallback` armed, so it's not a meaningful
+  cost.
+
+## [1.17.7] - 2026-04-25
+
+### Fixed
+- **Session restore for projects with `_` (or any non-alphanumeric)
+  in the path.** spyc's `project_slug` only rewrote `/` to `-`, but
+  Claude rewrites *any* non-alphanumeric/hyphen char (so
+  `tripstack_platform` lands at
+  `~/.claude/projects/-Users-…-tripstack-platform/`, not
+  `…-tripstack_platform/`). spyc was looking in the wrong directory,
+  finding zero JSONLs, returning `None` from
+  `resolve_claude_resume_target`, and saving sessions with no
+  `claude_session_id` — so `spyc -r` always spawned a fresh
+  `claude` for these projects regardless of how recent the
+  conversation was. `project_slug` now matches Claude's
+  normalization (any non-alphanumeric char → `-`); tests cover
+  underscore, dot, and space.
+
+## [1.17.6] - 2026-04-25
+
+### Fixed
+- **Top-bar git status now updates on file changes.** The
+  watcher-triggered `refresh_listing()` only refreshed
+  `git_files` (per-file dirty markers next to filenames); it
+  never refreshed `git_info` (the branch + dirty string in the
+  top bar — e.g. `main` vs `main*`). So after editing a tracked
+  file, the per-row markers updated but the top bar stayed on
+  `main`; switching directories forced a `chdir` which did
+  refresh `git_info`. `refresh_listing()` now also calls
+  `git_status()` so the top bar tracks repo state in place.
+
+## [1.17.5] - 2026-04-25
+
+### Changed
+- **`make install` now depends on `make release`.** No more
+  separate two-step dance — `make install` builds the optimized
+  binary and copies it to `$(PREFIX)/bin` in one shot. README
+  and INSTALL.md updated to drop the redundant `make release`
+  line. The standalone `make release` target is unchanged for
+  anyone who just wants a binary in `target/release/`.
+
+## [1.17.4] - 2026-04-25
+
+### Fixed
+- **`!` (captured shell) now runs in spyc's listing dir.** The
+  `!cmd` path went through `spawn_capture`, which built its
+  `CommandBuilder` without setting a `cwd` — so the child
+  inherited spyc's process cwd, which can drift from the
+  navigated `state.listing.dir` (and only happens to match
+  because `chdir()` also calls `set_current_dir`, which is
+  best-effort and silently ignored on failure). `;cmd` worked
+  fine because it explicitly passed `&self.state.listing.dir`
+  to `Pane::spawn`. `spawn_capture` now takes a `cwd: &Path`
+  and all four callers (`!`/`:!`/`:!!`/the `!?` history
+  re-execute) pass `&self.state.listing.dir`. `make` from
+  the project root now finds the Makefile.
+
+## [1.17.3] - 2026-04-25
+
+### Changed
+- **Don't write `.mcp.json` under enterprise control.** When
+  `/Library/Application Support/ClaudeCode/managed-mcp.json` (macOS)
+  or `/etc/claude-code/managed-mcp.json` (Linux) defines a server
+  named `spyc`, Claude already knows how to reach us through the
+  org config. The per-project `.mcp.json` we used to write at every
+  startup just collided on the server name (Claude resolves the org
+  definition; the local file is dead weight). spyc now detects the
+  managed definition, skips the write entirely, and removes any
+  prior `spyc` entry from an existing `.mcp.json` (preserving any
+  other servers the user has added; deleting the file if it only
+  contained spyc). Status flashes `MCP: enterprise-managed (skipped
+  local .mcp.json)` so it's visible. The takeover prompt is
+  suppressed under enterprise control too — there's nothing to
+  take over.
+  Note: this *only* skips the local `.mcp.json` write. The Unix
+  socket server (`mcp-<pid>.sock`) still runs so the org-defined
+  `spyc --mcp` proxy can connect.
+
+## [1.17.2] - 2026-04-25
+
+### Fixed
+- **Session restore no longer corrupts itself across cycles.** A
+  saved tab's `command` was captured verbatim from the spawn
+  string, so a tab spawned by restore as `claude --resume <sid>`
+  would on the next save persist `command =
+  "claude --resume <sid>"` instead of the user's original
+  `"claude"`. When `resolve_claude_resume_target` later returned
+  `None` (Claude had no fresh JSONL — e.g. a wedged or never-used
+  conversation), the next restore fell back to `tab.command` and
+  ran `claude --resume <stale-sid>` → fail → crash dump → tab
+  closed → save again with same polluted command → infinite
+  degradation. Save now strips `--resume <token>` from
+  `tab.command` when it's a `claude` invocation, and the restore
+  path applies the same strip defensively so already-corrupted
+  session files heal on first reload.
+
+## [1.17.1] - 2026-04-25
+
+### Changed
+- **Claude crash on resume now prompts before recovering.** The
+  prior auto-respawn (1.16.2) only caught the case where
+  `claude --resume <sid>` exited non-zero — but Claude has a
+  regression where the resume path throws an unhandled
+  `g9H is not a function`, leaving bun's pty alive while React is
+  wedged. spyc now also detects "alive but printed a crash dump"
+  by scanning the last ~200 lines of pane scrollback for stable
+  markers (`/$bunfs/root/`, `is not a function`,
+  `Error: sandbox required but unavailable`) at least 3 seconds
+  after spawn. On detection it pops a one-key prompt:
+  `claude crash detected — start fresh and recover with /resume?
+  [Y/n]`. `y/Y/Enter` kills the child and spawns a fresh `claude`
+  in the same slot; anything else kills it and removes the tab so
+  the wall of minified JS is gone. The prompt is gated on
+  `Mode::Normal` so it doesn't preempt other UI work — if you're
+  busy with another prompt or pager, detection retries next loop.
+
+## [1.17.0] - 2026-04-25
+
+### Added
+- **Host terminal title.** spyc now sets the outer terminal's window
+  title to `🌶️: <project> · <session>` (e.g. `🌶️: spyc ·
+  SAFFRON_CUMIN`). `<project>` is the basename of `PROJECT_HOME` when
+  set, otherwise the basename of the cwd. Session is omitted when
+  there's no `SESSION_NAME`. The pre-spyc title is pushed onto the
+  terminal's title stack (xterm CSI 22;0t) on startup and popped on
+  quit, including from the panic handler. Inside tmux, OSC 2 is
+  wrapped in tmux's DCS passthrough so the outer terminal (iTerm2,
+  etc.) sees it — requires `set -g set-titles on` in tmux. Updates
+  are change-only (no redundant emits per draw); after a foregrounded
+  child (vim, less) returns we force a re-emit in case it clobbered
+  the title.
+
+## [1.16.2] - 2026-04-25
+
+### Fixed
+- **Session restore now recovers from a failed `claude --resume`.** If
+  a tab spawned by `spyc -r` as `claude --resume <sid>` exits non-zero
+  within 10 seconds of spawn (bad/missing session id, sandbox crash,
+  binary mismatch, …), spyc replaces the dead tab in place with a
+  fresh `claude` and flashes `automatic session restore failed. try
+  with /restore`. Previously the user was left staring at whatever
+  Claude dumped on its way out — for sandbox crashes that's a wall of
+  minified JS. The fallback preserves any extra flags from the
+  original command (e.g. `--dangerously-skip-permissions`) and only
+  strips the `--resume <token>` pair, so the replacement isn't
+  doomed to fail the same way.
+
+## [1.16.1] - 2026-04-25
+
+### Fixed
+- **Claude session resume no longer saves ghost UUIDs.** The
+  resolver's last-ditch fallback (`find_claude_session`, which
+  reads `~/.claude/sessions/<pid>.json`) trusted the PID-scoped
+  index without checking that a JSONL actually existed. Claude
+  writes the index entry as soon as `claude` starts, but the
+  conversation JSONL only appears on the first turn — quitting
+  spyc *before that first turn* produced a saved session ID with
+  no file behind it, leading to "No conversation found with
+  session ID …" on `spyc -r`. `resolve_claude_resume_target` now
+  applies a final `claude_jsonl_exists` guard regardless of which
+  branch produced the ID; if the file isn't there, we save no ID
+  and restore opens a fresh `claude`. `claude_jsonl_exists` also
+  checks the canonical (symlink-resolved) cwd, so macOS
+  `/var` → `/private/var` paths don't slip through. A debug-log
+  line records the dropped ID for future diagnosis.
+
 ## [1.16.0] - 2026-04-24
 
 ### Added

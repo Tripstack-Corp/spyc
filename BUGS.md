@@ -38,6 +38,73 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) session restore now sidesteps Claude's
+  `--resume`-on-mount crash by spawning fresh `claude` and
+  typing `/resume <sid>` after a 1.5s settle delay. The
+  slash-command path doesn't hit the same broken useEffect.
+- (fixed) crash-recovery prompt fires reliably again. The
+  1.17.5 simplify pass gated the scan on `pane.output_dirty`,
+  but that flag is cleared on every render — claude prints its
+  whole dump in <1s and goes quiescent, so by the time
+  `dump_grace` elapses the flag is false and the prompt would
+  never fire. Reverted the gate.
+- (fixed) session restore for projects with underscores (or any
+  non-alphanumeric char) in the path. `project_slug` only
+  rewrote `/` → `-`; Claude rewrites *any* non-alphanumeric to
+  `-` (so `tripstack_platform` → `-Users-…-tripstack-platform`
+  on disk, not `-…-tripstack_platform`). spyc looked in the
+  wrong dir, found zero JSONLs, and saved every session with
+  `claude_session_id: null`, so `spyc -r` always spawned fresh
+  claude for those projects. Slug now mirrors Claude's full
+  normalization.
+- (fixed) top-bar git status now updates on file changes.
+  `refresh_listing()` only refreshed per-file markers
+  (`git_files`), never the branch/dirty string in the top bar
+  (`git_info`); only `chdir` refreshed it. Editing a tracked
+  file therefore left the top bar stale; switching dirs made
+  it pop. `refresh_listing()` now refreshes both.
+- (fixed) `!cmd` (captured shell) now runs in spyc's listing
+  dir. `spawn_capture` was building its CommandBuilder with no
+  cwd, so the child inherited spyc's *process* cwd — which
+  drifts from the navigated `state.listing.dir` if
+  `set_current_dir` ever silently fails. `;cmd` worked because
+  it explicitly passed listing.dir to `Pane::spawn`. Plumbed cwd
+  through `spawn_capture` and all four callers.
+- (fixed) Session restore no longer rots itself through cycles.
+  A tab spawned by restore as `claude --resume <sid>` had its
+  `info.command` captured verbatim, then save serialized that
+  string back into the session JSON. When the resolver returned
+  None for `claude_session_id` on a subsequent save (no fresh
+  JSONL — wedged conversation, etc.), the next restore fell back
+  to the polluted `command` and ran `claude --resume <stale-sid>`
+  forever. Save now strips `--resume <token>` from `command`
+  when it's a `claude` invocation; restore strips defensively so
+  pre-1.17.2 session files heal automatically.
+- (fixed) Claude resume crash now prompts to start a fresh
+  session. Claude has a regression on the resume path where an
+  unhandled `g9H is not a function` wedges React but bun keeps
+  the process alive — `is_closed()` never fires, so the prior
+  exit-only detection missed it. spyc now also scans the pane's
+  recent scrollback for `/$bunfs/root/`, `is not a function`,
+  or `Error: sandbox required but unavailable` after a 3s grace
+  period, and on detection asks
+  "claude crash detected — start fresh and recover with /resume?
+  [Y/n]". y/Y/Enter spawns a fresh `claude`; anything else
+  closes the tab and the dump is off-screen.
+- (superseded) Session restore now recovers from a failed
+  `claude --resume`. (Replaced by the prompt-based flow above
+  in 1.17.1.)
+- (fixed) Claude session resume saved ghost UUIDs in the
+  last-ditch fallback. `find_claude_session` reads
+  `~/.claude/sessions/<pid>.json`, which Claude writes at
+  startup before the JSONL exists; quitting spyc before the
+  first turn produced a saved ID with nothing on disk →
+  "No conversation found with session ID …" on `spyc -r`.
+  `resolve_claude_resume_target` now applies a final
+  `claude_jsonl_exists` guard regardless of branch — if the
+  file isn't there, save no ID and let restore open a fresh
+  `claude`. Also checks the canonical cwd to handle macOS
+  `/var` → `/private/var` symlinks.
 - (fixed) pane divider now shows the *live* cwd of the active
   subprocess (polled via `/proc/<pid>/cwd` on Linux, `lsof` on
   macOS, 1s cache). Drifted-from-spawn paths get a `↪` marker so

@@ -11,7 +11,7 @@
 #   make release      — optimized release for current platform
 #   make dist         — all platforms → dist/
 #   make check        — fmt + clippy + test (CI gate)
-#   make install      — copy to /usr/local/bin (needs sudo; run `make release` first)
+#   make install      — copy to ~/.local/bin (run `make release` first)
 
 BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -127,20 +127,24 @@ dist-checksums: dist ## Generate SHA-256 checksums
 
 # ---------- Install ----------------------------------------------------------
 
-PREFIX ?= /usr/local
+PREFIX ?= $(HOME)/.local
 
 .PHONY: install
-install: ## Install to /usr/local/bin (run `make release` first, then `sudo make install`)
-	@test -f target/release/$(BINARY) || { echo "error: run 'make release' first"; exit 1; }
+install: release ## Install to ~/.local/bin (builds release first; override with PREFIX=/usr/local)
 	install -d $(PREFIX)/bin
 	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(shell uname),Darwin)
 	codesign -s - -v $(PREFIX)/bin/$(BINARY)
 endif
 	@echo "✓ installed $(BINARY) v$(VERSION) → $(PREFIX)/bin/$(BINARY)"
+	@case ":$$PATH:" in \
+		*":$(PREFIX)/bin:"*) ;; \
+		*) echo "  note: $(PREFIX)/bin is not on your PATH — add it to your shell rc:"; \
+		   echo "        export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
+	esac
 
 .PHONY: uninstall
-uninstall: ## Remove from /usr/local/bin
+uninstall: ## Remove from $(PREFIX)/bin
 	rm -f $(PREFIX)/bin/$(BINARY)
 
 # --- Remote deploy ---

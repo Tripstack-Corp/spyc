@@ -181,21 +181,46 @@ pub fn find_claude_session_name_public(session_id: &str) -> Option<String> {
 
 /// Slug for a cwd as Claude stores its conversations:
 /// `/Users/derek/src/spyc` → `-Users-derek-src-spyc`.
+///
+/// Claude rewrites *any* non-alphanumeric/hyphen character to `-`,
+/// not just `/`. So `tripstack_platform` becomes `tripstack-platform`
+/// in the on-disk path. We mirror that exactly — anything else
+/// produces a slug that doesn't match Claude's directory and the
+/// resume resolver returns None, leaving a session unresumable.
 fn project_slug(cwd: &std::path::Path) -> String {
-    cwd.to_string_lossy().replace('/', "-")
+    cwd.to_string_lossy()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// True if a JSONL exists for `session_id` under the project slug for `cwd`.
 /// This is the file `claude --resume <id>` actually reads.
+///
+/// Checks both `cwd` and its canonical (symlink-resolved) form, since
+/// macOS's `/var` → `/private/var` symlink means `getcwd()` inside Claude
+/// may produce a different slug than what spyc passes in.
 pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return false;
     };
-    let path = PathBuf::from(home)
-        .join(".claude/projects")
-        .join(project_slug(cwd))
-        .join(format!("{session_id}.jsonl"));
-    path.exists()
+    let projects = PathBuf::from(&home).join(".claude/projects");
+    let file = format!("{session_id}.jsonl");
+    if projects.join(project_slug(cwd)).join(&file).exists() {
+        return true;
+    }
+    if let Ok(canon) = std::fs::canonicalize(cwd) {
+        if canon != cwd && projects.join(project_slug(&canon)).join(&file).exists() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Find the most-recently-modified JSONL under `~/.claude/projects/<slug>/`.
@@ -337,6 +362,29 @@ mod tests {
         assert_eq!(
             project_slug(std::path::Path::new("/Users/derek/src/spyc")),
             "-Users-derek-src-spyc"
+        );
+    }
+
+    #[test]
+    fn slug_rewrites_underscores_like_claude() {
+        // Claude rewrites underscores to hyphens in its on-disk slug.
+        // `~/.claude/projects/-Users-derek-src-tripstack-platform/`
+        // is what we must match for `tripstack_platform`.
+        assert_eq!(
+            project_slug(std::path::Path::new("/Users/derek/src/tripstack_platform")),
+            "-Users-derek-src-tripstack-platform"
+        );
+        assert_eq!(
+            project_slug(std::path::Path::new("/Users/derek/src/system_setup")),
+            "-Users-derek-src-system-setup"
+        );
+    }
+
+    #[test]
+    fn slug_rewrites_other_non_alphanumeric() {
+        assert_eq!(
+            project_slug(std::path::Path::new("/x/foo.bar/baz qux")),
+            "-x-foo-bar-baz-qux"
         );
     }
 

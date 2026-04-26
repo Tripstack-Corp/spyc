@@ -429,6 +429,10 @@ impl AppState {
     pub fn refresh_listing(&mut self) {
         if let Ok(new) = Listing::read(&self.listing.dir) {
             self.listing = new;
+            // Refresh the top-bar branch/dirty string too — without this
+            // the bar stays on `main` after edits and only updates when
+            // the user changes directories.
+            self.git_info = crate::sysinfo::git_status(&self.listing.dir);
             self.git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
             self.rebuild_rows();
         }
@@ -1173,7 +1177,9 @@ impl AppState {
                 self.mode = Mode::Prompting(p);
                 PromptResult::Handled
             }
-            PromptKind::RemoveConfirm => PromptResult::Handled,
+            PromptKind::RemoveConfirm | PromptKind::ClaudeCrashRecover { .. } => {
+                PromptResult::Handled
+            }
             // These need terminal/overlay/pager — caller handles them.
             PromptKind::NewFile
             | PromptKind::ShellCmd

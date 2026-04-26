@@ -185,6 +185,12 @@ pub enum PromptKind {
     Limit,
     /// `:` — vim-style command line.
     Command,
+    /// Auto-fired when a restored `claude --resume` tab looks broken;
+    /// y/Enter respawns into the same slot. Cwd and fallback command
+    /// live on the tab's `TabInfo` and are read at confirm time.
+    ClaudeCrashRecover {
+        tab_idx: usize,
+    },
 }
 
 /// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
@@ -303,6 +309,11 @@ pub struct App {
     /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
     /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
     scroll_last: Option<(std::time::Instant, KeyCode)>,
+    /// Last terminal-window title we emitted; used to skip redundant
+    /// OSC 2 writes when project / session / cwd haven't changed.
+    /// `None` forces an emit on next draw (used after a child process
+    /// like vim may have clobbered the title).
+    last_term_title: Option<String>,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -484,6 +495,7 @@ impl App {
             mcp_cmd_rx,
             tab_state: None,
             scroll_last: None,
+            last_term_title: None,
         };
         app.state.rebuild_rows();
         if let Some(msg) = load_note {
@@ -523,6 +535,10 @@ impl App {
                 self.state.flash_error(
                     "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
                 );
+            }
+            Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
+                self.state
+                    .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
             }
             Err(e) => self.state.flash_error(format!(".mcp.json: {e}")),
         }
@@ -874,6 +890,33 @@ impl App {
                 }
             }
 
+            // For tabs spawned by session restore that need a deferred
+            // `/resume <sid>` (we avoid the `--resume` CLI flag because
+            // of a known crash regression), wait ~1.5s for claude's
+            // banner to render then send the slash command.
+            self.send_pending_resumes();
+
+            // If a restored claude tab looks broken (bad exit / crash
+            // dump), prompt to respawn. See `pane_has_crash_marker` for
+            // the signature; the 30s window auto-disarms once a resume
+            // is clearly working.
+            let crash_idx = self.find_crashed_restore_tab();
+            if let Some(tab_idx) = crash_idx {
+                if matches!(self.state.mode, Mode::Normal) {
+                    if let Some(tabs) = self.pane_tabs.as_mut() {
+                        if let Some(entry) = tabs.tabs_mut().get_mut(tab_idx) {
+                            entry.info.restore_fallback = None;
+                        }
+                    }
+                    self.state.mode = Mode::Prompting(Prompt::simple(
+                        PromptKind::ClaudeCrashRecover { tab_idx },
+                        "claude crash detected — start fresh and recover with /resume? [Y/n] ",
+                    ));
+                    needs_draw = true;
+                    draw_reason = 3;
+                }
+            }
+
             // Drain any pending watcher events. Refresh listing / reload
             // config at most once per poll iteration, and debounce
             // listing refreshes to avoid spawning git subprocesses on
@@ -955,6 +998,9 @@ impl App {
                         } = post
                         {
                             run_child_in_foreground(terminal, &program, &args, pause_after)?;
+                            // Child may have clobbered our title; force a
+                            // re-emit on next draw.
+                            self.last_term_title = None;
                             // The listing may have changed (mv, rm, chmod, etc).
                             self.state.refresh_listing();
                             // If we were editing a pager buffer, restore it.
@@ -1098,6 +1144,7 @@ impl App {
             // terminal-side CPU.
             if needs_draw {
                 needs_draw = false;
+                self.update_term_title();
                 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
                 let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
                 if pending_clear {
@@ -2041,6 +2088,12 @@ impl App {
         ) {
             return self.handle_remove_confirm_key(key);
         }
+        if matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ClaudeCrashRecover { .. })
+        ) {
+            return self.handle_claude_crash_recover_key(key);
+        }
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
             &self.state.mode,
@@ -2179,6 +2232,67 @@ impl App {
         );
         self.state.picks.clear();
         self.state.refresh_listing();
+        PostAction::None
+    }
+
+    /// Single-key confirmation for the auto-fired claude crash recovery
+    /// prompt. `y` / `Y` / Enter kills the broken tab and replaces it with
+    /// a fresh `claude` (the user can then `/resume` manually); anything
+    /// else kills it and removes the tab so the dump is off-screen.
+    fn handle_claude_crash_recover_key(&mut self, key: KeyEvent) -> PostAction {
+        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
+        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::ClaudeCrashRecover { tab_idx },
+            ..
+        }) = prev_mode
+        else {
+            return PostAction::None;
+        };
+
+        // Snapshot cwd + fallback from the tab and best-effort kill the
+        // child (bunfs claude is often still alive post-crash; an
+        // already-closed pane errors here, ignored).
+        let Some((cwd, fallback)) = self.pane_tabs.as_mut().and_then(|tabs| {
+            let entry = tabs.tabs_mut().get_mut(tab_idx)?;
+            let _ = entry.pane.child.kill();
+            let fallback = entry
+                .info
+                .restore_fallback
+                .clone()
+                .unwrap_or_else(|| "claude".to_string());
+            Some((entry.info.cwd.clone(), fallback))
+        }) else {
+            return PostAction::None;
+        };
+
+        if !confirmed {
+            if let Some(tabs) = self.pane_tabs.as_mut() {
+                let still_have_tabs = tabs.remove_at(tab_idx);
+                if !still_have_tabs {
+                    self.pane_tabs = None;
+                }
+            }
+            self.state.flash_info("claude crash dismissed; tab closed");
+            self.needs_full_repaint = true;
+            return PostAction::None;
+        }
+
+        let (rows, cols) = Self::pane_spawn_size(
+            self.state.pane_height_pct,
+            self.state.config.layout.status_position,
+        );
+        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &[]) {
+            Ok(p) => {
+                let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    tabs.replace_at(tab_idx, entry);
+                }
+                self.state
+                    .flash_info("started fresh claude — type /resume to recover");
+            }
+            Err(e) => self.state.flash_error(format!("claude spawn failed: {e}")),
+        }
         PostAction::None
     }
 
@@ -2598,28 +2712,7 @@ impl App {
                 Some(cmd) => {
                     let expanded =
                         crate::shell::expand_percent(&cmd, &self.state.selection_paths());
-                    let title = format!("! {cmd}");
-                    match spawn_capture(&expanded) {
-                        Ok((child, writer, rx)) => {
-                            let mut view = PagerView::new_plain(
-                                format!("\u{23f3} {title} — running... (0s)"),
-                                Vec::new(),
-                            );
-                            view.streaming = true;
-                            self.pager = Some(view);
-                            self.pending_capture = Some(PendingCapture {
-                                child,
-                                writer,
-                                output_rx: rx,
-                                buffer: Vec::new(),
-                                title,
-                                cmd_display: cmd,
-                                started: std::time::Instant::now(),
-                                finished: false,
-                            });
-                        }
-                        Err(e) => self.state.flash_error(format!("exec: {e}")),
-                    }
+                    self.start_capture(&expanded, &cmd, &cmd);
                 }
                 None => self.state.flash_error("no previous ! command"),
             }
@@ -2635,28 +2728,7 @@ impl App {
             }
             self.state.last_captured_cmd = Some(cmd.to_string());
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
-            let title = format!("! {cmd}");
-            match spawn_capture(&expanded) {
-                Ok((child, writer, rx)) => {
-                    let mut view = PagerView::new_plain(
-                        format!("\u{23f3} {title} — running... (0s)"),
-                        Vec::new(),
-                    );
-                    view.streaming = true;
-                    self.pager = Some(view);
-                    self.pending_capture = Some(PendingCapture {
-                        child,
-                        writer,
-                        output_rx: rx,
-                        buffer: Vec::new(),
-                        title,
-                        cmd_display: cmd.to_string(),
-                        started: std::time::Instant::now(),
-                        finished: false,
-                    });
-                }
-                Err(e) => self.state.flash_error(format!("exec: {e}")),
-            }
+            self.start_capture(&expanded, cmd, cmd);
             return PostAction::None;
         }
 
@@ -2779,29 +2851,7 @@ impl App {
                 };
                 self.state.last_captured_cmd = Some(cmd.clone());
                 let expanded = shell::expand_percent(&cmd, &self.state.selection_paths());
-                let title = format!("! {cmd}");
-                match spawn_capture(&expanded) {
-                    Ok((child, writer, rx)) => {
-                        let cmd_display = prompt.buffer.clone();
-                        let mut view = PagerView::new_plain(
-                            format!("\u{23f3} {title} — running... (0s)"),
-                            Vec::new(),
-                        );
-                        view.streaming = true;
-                        self.pager = Some(view);
-                        self.pending_capture = Some(PendingCapture {
-                            child,
-                            writer,
-                            output_rx: rx,
-                            buffer: Vec::new(),
-                            title,
-                            cmd_display,
-                            started: std::time::Instant::now(),
-                            finished: false,
-                        });
-                    }
-                    Err(e) => self.state.flash_error(format!("exec: {e}")),
-                }
+                self.start_capture(&expanded, &cmd, &prompt.buffer);
                 PostAction::None
             }
             PromptKind::CopyTo => {
@@ -2959,6 +3009,160 @@ impl App {
         first == "claude" || first.ends_with("/claude")
     }
 
+    /// Spawn a captured shell command and install the streaming pager
+    /// view + `pending_capture` so the loop can drain output. Used by
+    /// the `!` prompt, `:!`, `:!!`, and the `!?` history re-execute —
+    /// `cmd_display` lets `:!!` show `!` while titling with the actual
+    /// resolved command.
+    fn start_capture(&mut self, expanded: &str, title_cmd: &str, cmd_display: &str) {
+        let title = format!("! {title_cmd}");
+        match spawn_capture(expanded, &self.state.listing.dir) {
+            Ok((child, writer, rx)) => {
+                let mut view =
+                    PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
+                view.streaming = true;
+                self.pager = Some(view);
+                self.pending_capture = Some(PendingCapture {
+                    child,
+                    writer,
+                    output_rx: rx,
+                    buffer: Vec::new(),
+                    title,
+                    cmd_display: cmd_display.to_string(),
+                    started: std::time::Instant::now(),
+                    finished: false,
+                });
+            }
+            Err(e) => self.state.flash_error(format!("exec: {e}")),
+        }
+    }
+
+    /// For tabs that have a `pending_resume_send` armed (set by
+    /// `restore_session`), send `/resume <sid>\r` to the pty once
+    /// enough time has elapsed for claude's banner to render. We
+    /// avoid the `--resume` CLI flag because it trips a known
+    /// regression that crashes at mount; the slash-command path
+    /// goes through `tM_` and works fine.
+    fn send_pending_resumes(&mut self) {
+        const SETTLE_DELAY: Duration = Duration::from_millis(1500);
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        for entry in tabs.tabs_mut() {
+            let Some((sid, spawn_at)) = entry.info.pending_resume_send.as_ref() else {
+                continue;
+            };
+            if now.duration_since(*spawn_at) < SETTLE_DELAY {
+                continue;
+            }
+            let payload = format!("/resume {sid}\r");
+            let _ = entry.pane.send_bytes(payload.as_bytes());
+            entry.info.pending_resume_send = None;
+        }
+    }
+
+    /// Locate a `claude --resume` tab from session restore that looks
+    /// broken (non-zero exit, or alive-but-printed-a-crash-dump within
+    /// the 30s window). Disarms the marker on tabs whose window has
+    /// passed without trouble, so a real user-driven exit later isn't
+    /// mistaken for a restore failure. Returns the index of the first
+    /// crashed tab found, if any.
+    fn find_crashed_restore_tab(&mut self) -> Option<usize> {
+        let tabs = self.pane_tabs.as_mut()?;
+        let now = std::time::Instant::now();
+        let window = Duration::from_secs(30);
+        let dump_grace = Duration::from_secs(3);
+        for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
+            if entry.info.restore_fallback.is_none() {
+                continue;
+            }
+            let age = now.duration_since(entry.info.spawn_at);
+            if age > window {
+                entry.info.restore_fallback = None;
+                continue;
+            }
+            let bad_exit = entry.pane.is_closed()
+                && entry
+                    .pane
+                    .exit_status
+                    .as_ref()
+                    .is_some_and(|s| s.exit_code() != 0);
+            // Always re-scan once dump_grace has elapsed: claude often
+            // prints the entire crash dump in <1s then sits quiescent,
+            // and `output_dirty` gets cleared on every render — gating
+            // on it would silently swallow the prompt.
+            let dump_signature = !entry.pane.is_closed()
+                && age >= dump_grace
+                && pane_has_crash_marker(&entry.pane.recent_lines(200));
+            if bad_exit || dump_signature {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Recompute the host-terminal window title from project / session
+    /// state and emit OSC 2 if it has changed since the last write.
+    fn update_term_title(&mut self) {
+        let title = crate::term_title::compose(
+            self.state.project_home.as_deref(),
+            self.state.session_name.as_deref(),
+            &self.state.listing.dir,
+        );
+        if self.last_term_title.as_deref() == Some(&title) {
+            return;
+        }
+        let _ = crate::term_title::set(&title);
+        self.last_term_title = Some(title);
+    }
+}
+
+/// True when scrollback contains a known Claude/bun crash signature.
+/// These markers don't appear in healthy Claude startup output.
+fn pane_has_crash_marker(lines: &[String]) -> bool {
+    const MARKERS: &[&str] = &[
+        // bun's single-file runtime path; appears in unhandled-exception dumps.
+        "/$bunfs/root/",
+        // e.g. `g9H is not a function` on the resume path regression.
+        "is not a function",
+        // sandbox helper failed and `failIfUnavailable` is set.
+        "Error: sandbox required but unavailable",
+    ];
+    lines
+        .iter()
+        .any(|line| MARKERS.iter().any(|m| line.contains(m)))
+}
+
+/// Strip `--resume <token>` from a command line. Used to derive a
+/// fresh-session fallback when an automatic resume fails — we want to
+/// preserve any other flags the user had on their original `claude`
+/// invocation but drop the resume itself so the fallback doesn't fail
+/// for the same reason.
+fn command_without_resume(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
+    let mut skip_next = false;
+    for p in parts {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if p == "--resume" {
+            skip_next = true;
+            continue;
+        }
+        out.push(p);
+    }
+    let stripped = out.join(" ");
+    if stripped.is_empty() {
+        "claude".to_string()
+    } else {
+        stripped
+    }
+}
+
+impl App {
     /// Resolve the `claude --resume <token>` target to use on session save.
     ///
     /// Strategy, in order:
@@ -2971,35 +3175,56 @@ impl App {
     /// 2. Fall back to the most-recently-modified JSONL in the project
     ///    slug — that's what the no-arg `claude --resume` picker picks.
     /// 3. Last-ditch: scan `~/.claude/sessions/` (PID-scoped, often stale).
+    ///
+    /// Final guard: any UUID we'd return is verified to have a JSONL on
+    /// disk before returning. The PID-scoped index in step 3 lists session
+    /// IDs as soon as `claude` starts, but the JSONL is only created on
+    /// the first turn — quitting before that produces a ghost ID that
+    /// passes step 3 but fails on `claude --resume`. Rather than save a
+    /// known-broken ID, return None so restore opens a fresh `claude`.
     fn resolve_claude_resume_target(
         pane: &mut crate::pane::Pane,
         cwd: &std::path::Path,
     ) -> (Option<String>, Option<String>) {
         use crate::state::sessions as s;
 
-        let banner_lines = pane.recent_lines(200);
-        if let Some(tok) = s::extract_resume_token(&banner_lines) {
-            if s::is_uuid(&tok) {
-                if s::claude_jsonl_exists(cwd, &tok) {
-                    let name = s::find_claude_session_name_public(&tok);
-                    return (Some(tok), name);
+        let resolved: (Option<String>, Option<String>) = (|| {
+            let banner_lines = pane.recent_lines(200);
+            if let Some(tok) = s::extract_resume_token(&banner_lines) {
+                if s::is_uuid(&tok) {
+                    if s::claude_jsonl_exists(cwd, &tok) {
+                        let name = s::find_claude_session_name_public(&tok);
+                        return (Some(tok), name);
+                    }
+                    // Banner UUID has no JSONL — fall through to most-recent.
+                } else {
+                    // Named sessions: claude resolves names itself, trust it.
+                    return (Some(tok.clone()), Some(tok));
                 }
-                // Banner UUID has no JSONL — fall through to most-recent.
-            } else {
-                // Named sessions: claude resolves names itself, trust it.
-                return (Some(tok.clone()), Some(tok));
+            }
+
+            if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
+                let name = s::find_claude_session_name_public(&id);
+                return (Some(id), name);
+            }
+
+            match s::find_claude_session(cwd) {
+                Some(info) => (Some(info.session_id), info.name),
+                None => (None, None),
+            }
+        })();
+
+        if let (Some(id), _) = &resolved {
+            if s::is_uuid(id) && !s::claude_jsonl_exists(cwd, id) {
+                spyc_debug!(
+                    "resolve_claude_resume_target: dropping ghost id {} (no JSONL under {})",
+                    id,
+                    cwd.display()
+                );
+                return (None, None);
             }
         }
-
-        if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
-            let name = s::find_claude_session_name_public(&id);
-            return (Some(id), name);
-        }
-
-        match s::find_claude_session(cwd) {
-            Some(info) => (Some(info.session_id), info.name),
-            None => (None, None),
-        }
+        resolved
     }
 
     /// yp — yank visible pane output to the system clipboard.
@@ -3596,14 +3821,22 @@ impl App {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
-                        let (claude_session_id, claude_session_name) =
-                            if Self::is_claude_command(&t.info.command) {
-                                Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
-                            } else {
-                                (None, None)
-                            };
+                        let is_claude = Self::is_claude_command(&t.info.command);
+                        let (claude_session_id, claude_session_name) = if is_claude {
+                            Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
+                        } else {
+                            (None, None)
+                        };
+                        // The sid lives in claude_session_id; baking
+                        // --resume into `command` would survive past a
+                        // resolver miss and pollute the next restore.
+                        let saved_command = if is_claude {
+                            command_without_resume(&t.info.command)
+                        } else {
+                            t.info.command.clone()
+                        };
                         SavedTab {
-                            command: t.info.command.clone(),
+                            command: saved_command,
                             label: t.info.label.clone(),
                             cwd: t.info.cwd.clone(),
                             claude_session_id,
@@ -3806,14 +4039,25 @@ impl App {
                 } else {
                     &session.cwd
                 };
-                // If the tab has a Claude session ID, resume that
-                // conversation instead of starting fresh.
-                let cmd = if let Some(ref sid) = tab.claude_session_id {
-                    format!("claude --resume {sid}")
+                // Always spawn a fresh `claude` (no `--resume`) — the
+                // CLI flag trips a regression that crashes at mount
+                // when initialMessages is non-empty. Instead we type
+                // `/resume <sid>` once claude has settled; that goes
+                // through a different code path that works.
+                let cmd = if Self::is_claude_command(&tab.command) {
+                    command_without_resume(&tab.command)
                 } else {
                     tab.command.clone()
                 };
                 self.open_pane_tab_in(&cmd, cwd);
+                if let Some(ref sid) = tab.claude_session_id {
+                    if let Some(tabs) = self.pane_tabs.as_mut() {
+                        if let Some(entry) = tabs.tabs_mut().last_mut() {
+                            entry.info.pending_resume_send =
+                                Some((sid.clone(), std::time::Instant::now()));
+                        }
+                    }
+                }
             }
             // Restore active tab.
             if let Some(tabs) = self.pane_tabs.as_mut() {
@@ -4317,28 +4561,7 @@ impl App {
                     self.state.history.push(cmd.trim());
                     let expanded =
                         crate::shell::expand_percent(&cmd, &self.state.selection_paths());
-                    let title = format!("! {cmd}");
-                    match spawn_capture(&expanded) {
-                        Ok((child, writer, rx)) => {
-                            let mut cview = PagerView::new_plain(
-                                format!("\u{23f3} {title} — running... (0s)"),
-                                Vec::new(),
-                            );
-                            cview.streaming = true;
-                            self.pager = Some(cview);
-                            self.pending_capture = Some(PendingCapture {
-                                child,
-                                writer,
-                                output_rx: rx,
-                                buffer: Vec::new(),
-                                title,
-                                cmd_display: cmd,
-                                started: std::time::Instant::now(),
-                                finished: false,
-                            });
-                        }
-                        Err(e) => self.state.flash_error(format!("exec: {e}")),
-                    }
+                    self.start_capture(&expanded, &cmd, &cmd);
                 }
                 EditResult::Cancel => {
                     // Esc in Insert → Normal (handled by editor, returns Continue).
@@ -5013,7 +5236,7 @@ type CaptureHandles = (
     std::sync::mpsc::Receiver<Vec<u8>>,
 );
 
-fn spawn_capture(cmd: &str) -> Result<CaptureHandles> {
+fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read as _;
     use std::sync::mpsc;
@@ -5029,6 +5252,7 @@ fn spawn_capture(cmd: &str) -> Result<CaptureHandles> {
 
     let mut builder = CommandBuilder::new("sh");
     builder.args(["-c", cmd]);
+    builder.cwd(cwd);
     builder.env("TERM", "xterm-256color");
     builder.env("CLICOLOR_FORCE", "1");
     builder.env("FORCE_COLOR", "1");

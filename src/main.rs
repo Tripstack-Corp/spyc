@@ -14,6 +14,7 @@ mod proc_cwd;
 mod shell;
 mod state;
 mod sysinfo;
+mod term_title;
 mod ui;
 
 use std::io;
@@ -74,6 +75,7 @@ fn main() -> Result<()> {
             DisableBracketedPaste,
             ShowMousePointer
         );
+        let _ = term_title::pop();
 
         // Dump to the debug log if active.
         let bt = std::backtrace::Backtrace::force_capture();
@@ -138,6 +140,11 @@ pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 fn prompt_mcp_takeover_if_needed() -> bool {
     use std::io::{BufRead, IsTerminal, Write};
 
+    // Under enterprise control we don't write `.mcp.json` at all, so
+    // there's nothing to take over and the prompt would just confuse.
+    if mcp::enterprise_defines_spyc() {
+        return true;
+    }
     let Ok(cwd) = std::env::current_dir() else {
         return true;
     };
@@ -229,6 +236,10 @@ fn setup_terminal() -> Result<Tui> {
         EnableAlternateScroll,
         HideMousePointer
     )?;
+    // Save the current window title so we can restore it on quit.
+    // Best-effort: terminals that don't implement xterm CSI 22;0t just
+    // ignore it.
+    let _ = term_title::push();
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -243,6 +254,7 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
         DisableAlternateScroll,
         ShowMousePointer
     )?;
+    let _ = term_title::pop();
     terminal.show_cursor()?;
     Ok(())
 }

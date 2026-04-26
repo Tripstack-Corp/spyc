@@ -359,6 +359,10 @@ pub enum McpConfigStatus {
     SkippedTakeover { old_pid: u32 },
     /// Enterprise managed-settings.json blocks spyc.
     BlockedByEnterprise,
+    /// Enterprise managed-mcp.json already defines spyc — Claude
+    /// resolves through the org config; we run the socket server but
+    /// skip writing local `.mcp.json` (and clean up any prior write).
+    ManagedByEnterprise,
 }
 
 /// Detect a live spyc instance currently owning MCP for `dir` without
@@ -387,6 +391,15 @@ const MANAGED_SETTINGS_PATHS: &[&str] = &[
     "/Library/Application Support/ClaudeCode/managed-settings.json",
     // Linux / WSL system-wide
     "/etc/claude-code/managed-settings.json",
+];
+
+/// Well-known paths for Claude Code enterprise-deployed MCP definitions.
+/// When this file exists and defines a server named "spyc", the org has
+/// already wired Claude → spyc and our per-project `.mcp.json` writes
+/// are redundant (and just collide on the server name).
+const MANAGED_MCP_PATHS: &[&str] = &[
+    "/Library/Application Support/ClaudeCode/managed-mcp.json",
+    "/etc/claude-code/managed-mcp.json",
 ];
 
 /// Check whether enterprise managed-settings.json blocks "spyc".
@@ -427,6 +440,26 @@ fn enterprise_allows_spyc() -> Option<bool> {
     None // No enterprise config found.
 }
 
+/// True when an enterprise-deployed `managed-mcp.json` defines a
+/// server named "spyc". In that case Claude already knows how to
+/// reach us and we should not also write per-project `.mcp.json`
+/// files (a name collision results in Claude picking the org
+/// definition, with the per-project entry only adding noise).
+pub fn enterprise_defines_spyc() -> bool {
+    for path in MANAGED_MCP_PATHS {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        if parsed.pointer("/mcpServers/spyc").is_some() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Extract the PID from a socket path like `mcp-12345.sock`.
 fn pid_from_sock_path(path: &str) -> Option<u32> {
     let fname = Path::new(path).file_name()?.to_str()?;
@@ -455,6 +488,16 @@ fn notify_disconnect(old_sock: &Path, new_pid: u32) {
 pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigStatus, io::Error> {
     if enterprise_allows_spyc() == Some(false) {
         return Ok(McpConfigStatus::BlockedByEnterprise);
+    }
+
+    if enterprise_defines_spyc() {
+        // Org config (managed-mcp.json) is the source of truth for the
+        // "spyc" server identifier — anything we write to .mcp.json just
+        // collides with it. Remove any prior spyc entry we (or an older
+        // spyc) wrote, preserving any other servers the user has defined.
+        // If the file only contained spyc, remove it entirely.
+        clean_local_mcp_entry(dir);
+        return Ok(McpConfigStatus::ManagedByEnterprise);
     }
 
     let our_sock = socket_path();
@@ -530,6 +573,47 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
     match took_over {
         Some(old_pid) => Ok(McpConfigStatus::TookOver { old_pid }),
         None => Ok(McpConfigStatus::Configured),
+    }
+}
+
+/// Remove just the "spyc" entry from `<dir>/.mcp.json` if present,
+/// preserving any other servers the user (or another tool) may have
+/// added. If after removal `mcpServers` is empty *and* no other
+/// top-level keys remain, delete the file. All errors are best-effort
+/// — this is cleanup, not load-bearing.
+fn clean_local_mcp_entry(dir: &Path) {
+    let path = dir.join(".mcp.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut parsed) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    let Some(root) = parsed.as_object_mut() else {
+        return;
+    };
+    let Some(servers) = root.get_mut("mcpServers").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if servers.remove("spyc").is_none() {
+        return;
+    }
+    let servers_empty = servers.is_empty();
+    let only_servers = root.len() == 1; // i.e. just `mcpServers`
+    if only_servers && servers_empty {
+        let _ = std::fs::remove_file(&path);
+        mcp_log(&format!(
+            "removed empty .mcp.json after cleaning spyc entry ({})",
+            path.display()
+        ));
+        return;
+    }
+    if let Ok(out) = serde_json::to_string_pretty(&parsed) {
+        let _ = std::fs::write(&path, out + "\n");
+        mcp_log(&format!(
+            "cleaned spyc entry from .mcp.json (preserved other servers, {})",
+            path.display()
+        ));
     }
 }
 

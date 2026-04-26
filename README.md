@@ -61,8 +61,7 @@ The name: **spy** (inspired by SideFX's in-house file manager) +
 ```sh
 git clone https://bitbucket.org/tripstack/spyc.git
 cd spyc
-make release          # build optimized binary
-sudo make install     # copy to /usr/local/bin
+make install          # builds release + copies to ~/.local/bin (no sudo)
 ```
 
 ### Launch
