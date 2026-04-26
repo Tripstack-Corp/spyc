@@ -13,6 +13,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.3] - 2026-04-26
+
+### Changed
+- **Debug-log diagnostics in `refresh_listing`.** Logs the
+  before/after `git_info` and `git_files.len()` on every refresh
+  (or the `Listing::read` error if it fails). Run with `-d` to
+  diagnose when a watcher event fires but the display doesn't
+  appear to update.
+
 ## [1.18.2] - 2026-04-26
 
 ### Fixed

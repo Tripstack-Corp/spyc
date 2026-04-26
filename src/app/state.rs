@@ -427,14 +427,32 @@ impl AppState {
     }
 
     pub fn refresh_listing(&mut self) {
-        if let Ok(new) = Listing::read(&self.listing.dir) {
-            self.listing = new;
-            // Refresh the top-bar branch/dirty string too — without this
-            // the bar stays on `main` after edits and only updates when
-            // the user changes directories.
-            self.git_info = crate::sysinfo::git_status(&self.listing.dir);
-            self.git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
-            self.rebuild_rows();
+        match Listing::read(&self.listing.dir) {
+            Ok(new) => {
+                self.listing = new;
+                // Refresh the top-bar branch/dirty string too — without
+                // this the bar stays on `main` after edits and only
+                // updates when the user changes directories.
+                let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
+                let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+                crate::spyc_debug!(
+                    "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {}",
+                    self.listing.dir.display(),
+                    self.git_info,
+                    new_git_info,
+                    self.git_files.len(),
+                    new_git_files.len(),
+                );
+                self.git_info = new_git_info;
+                self.git_files = new_git_files;
+                self.rebuild_rows();
+            }
+            Err(e) => {
+                crate::spyc_debug!(
+                    "refresh_listing: Listing::read({}) failed: {e}",
+                    self.listing.dir.display(),
+                );
+            }
         }
     }
 
