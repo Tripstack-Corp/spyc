@@ -163,6 +163,27 @@ terminal inside a terminal." In priority order:
   check`, unstaged diffs. Makes Claude's context richer without the
   user needing to pipe explicitly. Scope carefully -- large payloads
   would need truncation or pagination.
+- **Generalized "beam" -- send content to any stdin sink.** Extends
+  the existing `^a s` (paths), `^a P` (pick contents), `^a i`
+  (inventory) family along three axes:
+  1. **Region beam from the pager.** Beam visually-selected or
+     `:N,M`-specified line ranges of the open file, wrapped with a
+     `path:N-M` header and a fenced code block. Lets the user quote
+     exact sections into the receiver without leaving the keyboard.
+  2. **Configurable sink targets.** Today the destination is always
+     the active pane tab. Make it pluggable: active tab (default),
+     a specific tab by index, system clipboard (OSC 52), or an
+     arbitrary shell command (`:beam !pbcopy`, `:beam !nc host port`,
+     `:beam !jq .`). Named sinks live in `.spycrc.toml`. This is
+     what generalizes the feature beyond Claude -- any tool that
+     reads stdin is a target.
+  3. **Format wrappers.** Per-target toggle: raw, paths-only,
+     fenced-with-path-header, diff-style. So beaming picks to a
+     "claude" sink dumps a path header + a fenced block; beaming
+     paths to an `!xargs` sink stays raw newline-separated.
+  Lower-level primitive that "Prompt templates" (below) sits on top
+  of. Implementation reuses `pane.send_bytes()` plus a sink dispatch
+  table.
 - **Session forking** (already in old roadmap as `^a f`). Duplicate a
   pane tab with scrollback replayed, so a Claude conversation can
   branch without losing the prior line of inquiry. High-value for
@@ -238,6 +259,19 @@ forgetting about.
   Getting started, keymap reference, `.spycrc.toml` DSL reference,
   agent workflow guide. Auto-built from the `docs/` directory on
   release.
+- **Built-in `:tutor` (vimtutor-style).** Interactive walkthrough on a
+  pre-baked scratch directory that teaches motions, marks, picks, the
+  `=` filter, the pager, the pane (`^a` family), MCP context, and
+  sessions. Each lesson sets a concrete goal ("pick three files
+  matching `*.rs`", "open the pager and search for `foo`", "beam
+  picks to the pane"), watches for the action, and advances; user can
+  quit at any step with `:q`. Invoked as `spyc --tutor` or `:tutor`
+  from inside a session. Goal: give a Show-HN / blog-post reader one
+  command that demonstrates the power of the vi-keyboard terminal
+  workflow without forcing them to internalise a keymap reference
+  first -- complements the docs site rather than replacing it.
+  Maintenance: tutor content tracks bindings, so add it to the
+  "Keep docs in sync" checklist in CLAUDE.md when keybindings move.
 - **Repo hygiene.** `SECURITY.md` (how to report vulnerabilities),
   `CODE_OF_CONDUCT.md` (one of the standard ones, link only),
   PR template, issue templates for bug reports and feature
