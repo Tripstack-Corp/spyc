@@ -1,5 +1,4 @@
 ### SMALL ###
-- we need a better visual indicator that we're in visual mode in the bottom pane
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -38,6 +37,12 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) pane scroll-mode is hard to miss now: divider rule
+  line and active tab label retint to theme.pick (yellow) while
+  scrolling, active tab label is bold-uppercased, the [SCROLL]
+  tag picks up the same color. Entering scroll mode no longer
+  shifts the viewport (the cue is now visual instead of
+  positional), so there's no "jump" on entry.
 - (fixed) session restore now sidesteps Claude's
   `--resume`-on-mount crash by spawning fresh `claude` and
   typing `/resume <sid>` after a 1.5s settle delay. The

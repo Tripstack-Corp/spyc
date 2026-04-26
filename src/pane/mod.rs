@@ -49,10 +49,15 @@ pub struct Pane {
     last_size: (u16, u16),
     /// Set by `drain_output()` when new bytes arrived; cleared after render.
     pub output_dirty: bool,
-    /// When > 0, the pane is in scroll mode: keys navigate the scrollback
-    /// instead of being forwarded to the child. `drain_output()` still
-    /// runs so no output is lost.
+    /// When > 0, the visible viewport is shifted into the scrollback
+    /// by this many lines. Independent of `scrolling` so entering
+    /// scroll mode doesn't jump the view (we set the flag without
+    /// shifting).
     scroll_offset: usize,
+    /// True when the pane is in scroll mode: keys navigate the
+    /// scrollback instead of being forwarded to the child.
+    /// `drain_output()` still runs so no output is lost.
+    scrolling: bool,
 }
 
 /// Messages posted by the pty reader thread.
@@ -145,6 +150,7 @@ impl Pane {
             last_size: (rows, cols),
             output_dirty: false,
             scroll_offset: 0,
+            scrolling: false,
         })
     }
 
@@ -281,18 +287,20 @@ impl Pane {
 
     /// True when the user is browsing scrollback history.
     pub const fn is_scrolling(&self) -> bool {
-        self.scroll_offset > 0
+        self.scrolling
     }
 
-    /// Enter scroll mode — start one line above live so the user
-    /// immediately sees "you left live view".
-    pub fn enter_scroll_mode(&mut self) {
-        self.scroll_offset = 1;
-        self.apply_scroll();
+    /// Enter scroll mode without shifting the view. The mode flag
+    /// drives the divider re-color and tab uppercase that signal
+    /// "you've left live view" — shifting the viewport would just
+    /// add a jarring jump.
+    pub const fn enter_scroll_mode(&mut self) {
+        self.scrolling = true;
     }
 
-    /// Exit scroll mode and snap back to the live view.
+    /// Exit scroll mode and snap back to live.
     pub fn exit_scroll_mode(&mut self) {
+        self.scrolling = false;
         self.scroll_offset = 0;
         self.apply_scroll();
     }
@@ -304,15 +312,12 @@ impl Pane {
         self.apply_scroll();
     }
 
-    /// Scroll down (toward live) by `n` lines. Exits scroll mode
-    /// automatically if we reach the bottom.
+    /// Scroll down (toward live) by `n` lines. If we're at the live
+    /// position, this is a no-op while still in scroll mode (use
+    /// `exit_scroll_mode` to leave).
     pub fn scroll_down_or_exit(&mut self, n: usize) {
-        if self.scroll_offset <= n {
-            self.exit_scroll_mode();
-        } else {
-            self.scroll_offset -= n;
-            self.apply_scroll();
-        }
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+        self.apply_scroll();
     }
 
     /// Jump to the oldest line in scrollback.
@@ -321,9 +326,11 @@ impl Pane {
         self.apply_scroll();
     }
 
-    /// Jump back to live view.
+    /// Jump back to live view (stays in scroll mode; user must
+    /// explicitly `exit_scroll_mode` to leave).
     pub fn scroll_to_bottom(&mut self) {
-        self.exit_scroll_mode();
+        self.scroll_offset = 0;
+        self.apply_scroll();
     }
 
     /// Save full scrollback + screen contents to a timestamped file.

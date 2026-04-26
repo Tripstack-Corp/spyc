@@ -13,6 +13,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.0] - 2026-04-26
+
+### Changed
+- **Pane scroll-mode indicator is much harder to miss.** The
+  divider rule line and the active tab label both retint to
+  `theme.pick` (typically yellow) while in scroll mode, the
+  active tab label is bold-uppercased (`[1*] CLAUDE`), and the
+  right-side `[SCROLL]` tag picks up the same color. Three
+  redundant signals across the divider — eye lands on at least
+  one no matter where you're looking.
+- **Entering scroll mode no longer jumps the pane.** Previously
+  `enter_scroll_mode` shifted the viewport up by one line so
+  there was *some* visual cue you'd left live view; with the
+  new divider treatment the shift was just noise. The flag is
+  now decoupled from `scroll_offset`, so entry is purely modal
+  with no content motion. Also: `j` past the live position no
+  longer auto-exits scroll mode — the mode is now purely modal,
+  exit explicitly with Esc / q.
+
 ## [1.17.9] - 2026-04-25
 
 ### Changed

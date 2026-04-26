@@ -1378,16 +1378,33 @@ impl App {
             widgets::Paragraph,
         };
         let width = area.width as usize;
-        let rule_style = if self.state.pane_focused {
+        // Tinting the rule + active tab in scroll mode is deliberate
+        // redundancy with the [SCROLL] tag — three signals in different
+        // parts of the divider make "you've left live view" hard to miss.
+        let is_scrolling = self
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|t| t.active().is_scrolling());
+        let rule_style = if is_scrolling {
+            Style::default()
+                .fg(self.theme.pick)
+                .add_modifier(Modifier::BOLD)
+        } else if self.state.pane_focused {
             Style::default()
                 .fg(self.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.theme.status_suffix)
         };
-        let active_tab_style = Style::default()
-            .fg(self.theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD);
+        let active_tab_style = if is_scrolling {
+            Style::default()
+                .fg(self.theme.pick)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(self.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD)
+        };
         let inactive_tab_style = Style::default().fg(self.theme.status_suffix);
 
         let mut spans: Vec<Span> = Vec::new();
@@ -1410,7 +1427,15 @@ impl App {
                 let star = if is_active { "*" } else { "" };
                 let activity = if entry.info.has_activity { "+" } else { "" };
                 let sep = "─";
-                let tab_text = format!("[{}{star}{activity}] {} ", i + 1, entry.info.label);
+                // Uppercase the active tab label in scroll mode — the
+                // shape change is a peripheral-vision cue even before
+                // the color registers.
+                let label = if is_active && is_scrolling {
+                    entry.info.label.to_uppercase()
+                } else {
+                    entry.info.label.clone()
+                };
+                let tab_text = format!("[{}{star}{activity}] {label} ", i + 1);
                 let tab_len = sep.len() + tab_text.len();
                 if used + tab_len > width {
                     break;
@@ -1456,10 +1481,6 @@ impl App {
         }
 
         // Right-aligned [SCROLL] tag.
-        let is_scrolling = self
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|t| t.active().is_scrolling());
         let tag = if is_scrolling { " [SCROLL]" } else { "" };
         let fill = width.saturating_sub(used + tag.len());
         if fill > 0 {
@@ -1470,7 +1491,7 @@ impl App {
             spans.push(Span::styled(
                 tag,
                 Style::default()
-                    .fg(self.theme.prompt_prefix)
+                    .fg(self.theme.pick)
                     .add_modifier(Modifier::BOLD),
             ));
             used += tag.len();
