@@ -435,13 +435,16 @@ impl AppState {
                 // updates when the user changes directories.
                 let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
                 let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+                let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
+                new_keys.sort_unstable();
                 crate::spyc_debug!(
-                    "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {}",
+                    "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
                     self.listing.dir.display(),
                     self.git_info,
                     new_git_info,
                     self.git_files.len(),
                     new_git_files.len(),
+                    new_keys,
                 );
                 self.git_info = new_git_info;
                 self.git_files = new_git_files;

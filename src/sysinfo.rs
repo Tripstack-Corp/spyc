@@ -60,6 +60,12 @@ pub fn git_status(dir: &std::path::Path) -> Option<String> {
         .output()
         .ok()?;
     let dirty = porcelain.status.success() && !porcelain.stdout.is_empty();
+    let raw = std::str::from_utf8(&porcelain.stdout).unwrap_or("<utf8>");
+    crate::spyc_debug!(
+        "git_status({}): branch={branch:?} dirty={dirty} porcelain={:?}",
+        dir.display(),
+        raw,
+    );
 
     Some(if dirty { format!("{branch}*") } else { branch })
 }

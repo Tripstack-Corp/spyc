@@ -13,6 +13,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.4] - 2026-04-26
+
+### Changed
+- **Refresh debug log now includes the dirty file list** and
+  the raw `git status --porcelain` output. We saw `git_files: 1`
+  after a commit that should leave 0, but the prior logging
+  didn't tell us *which* file was dirty — too many possible
+  explanations (race with `.spyc-context-*.tmp`, stale BUGS.md,
+  some other transient). Now `refresh_listing` logs the sorted
+  dirty file basenames, and `git_status` logs both branch and
+  the raw porcelain string. Run with `-d`, reproduce, and we'll
+  know exactly what git was reporting at refresh time.
+
 ## [1.18.3] - 2026-04-26
 
 ### Changed
