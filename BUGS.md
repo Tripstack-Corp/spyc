@@ -1,4 +1,5 @@
 ### SMALL ###
+....
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
