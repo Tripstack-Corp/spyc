@@ -1,6 +1,4 @@
 ### SMALL ###
-- git change notices are still not updating properly; but git checkout seems to
-  work great? .... seems strange
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -39,6 +37,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed) git status updates correctly after chained git operations.
+  The 500ms debounce fired from the *first* event of a burst, so
+  `git add && git commit && git push` had refresh's subprocess
+  sometimes land mid-burst returning `M  BUGS.md` (staged but
+  not committed). After that single off-sample, no further
+  `.git/index` rename fired (later side-effects only touched
+  lockfiles we filter), so the bar stayed stale. Switched to
+  trailing debounce — fire 500ms after the *last* event — so
+  refresh only samples once the burst has settled. `git checkout`
+  worked because it's a single event, not a burst.
 - (fixed) pane scroll-mode is hard to miss now: divider rule
   line and active tab label retint to theme.pick (yellow) while
   scrolling, active tab label is bold-uppercased, the [SCROLL]

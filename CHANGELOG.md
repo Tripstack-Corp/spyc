@@ -13,6 +13,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.18.5] - 2026-04-26
+
+### Fixed
+- **Trailing debounce on watcher refresh.** The previous
+  debounce fired 500ms after the *first* event in a burst, which
+  meant chained git operations (`git add && git commit && git
+  push`) would have the refresh subprocess run during a
+  transient mid-burst state — sometimes returning `M  BUGS.md`
+  (staged but not committed) instead of clean. Once that
+  transient sample landed, no further `.git/index` rename event
+  fired (the commit's later side-effects only touched lockfiles
+  we filter out), so the refresh never re-ran and the top bar
+  stayed stale forever. Refresh now fires 500ms after the *last*
+  listing event — wait for the storm to pass, then sample. Also
+  rate-limits to 500ms between refreshes regardless.
+
 ## [1.18.4] - 2026-04-26
 
 ### Changed

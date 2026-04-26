@@ -743,7 +743,15 @@ impl App {
 
         let mut last_context_write = std::time::Instant::now();
         let mut last_refresh = std::time::Instant::now();
-        let mut pending_refresh = false;
+        // Trailing debounce: fire refresh once events have stopped
+        // arriving for `REFRESH_QUIET`. Bursty git operations
+        // (`git add && git commit && git push`) emit several
+        // `.git/index` rename events spread over hundreds of ms;
+        // firing on the *first* event meant the subprocess sometimes
+        // ran during an in-flight, transient state ("M " staged but
+        // not yet committed). Waiting for quiet ensures we only
+        // sample git after the storm has passed.
+        let mut last_event_at: Option<std::time::Instant> = None;
 
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
@@ -922,7 +930,7 @@ impl App {
             // listing refreshes to avoid spawning git subprocesses on
             // every rapid-fire .git/index change.
             let mut needs_reload = false;
-            // pending_refresh carries over from previous iterations when
+            // last_event_at carries over from previous iterations when
             // the debounce timer hadn't elapsed yet.
             while let Ok(result) = rx.try_recv() {
                 if let Ok(ev) = result {
@@ -938,7 +946,7 @@ impl App {
                             needs_reload = true;
                         }
                         if listing {
-                            pending_refresh = true;
+                            last_event_at = Some(std::time::Instant::now());
                         }
                     }
                 }
@@ -948,12 +956,19 @@ impl App {
                 needs_draw = true;
                 draw_reason = 3;
             }
-            if pending_refresh && last_refresh.elapsed() >= Duration::from_millis(500) {
-                pending_refresh = false;
-                self.state.refresh_listing();
-                last_refresh = std::time::Instant::now();
-                needs_draw = true;
-                draw_reason = 3;
+            const REFRESH_QUIET: Duration = Duration::from_millis(500);
+            // Always rate-limit at least 500ms apart from previous refresh.
+            if let Some(at) = last_event_at {
+                let now = std::time::Instant::now();
+                if now.duration_since(at) >= REFRESH_QUIET
+                    && last_refresh.elapsed() >= REFRESH_QUIET
+                {
+                    last_event_at = None;
+                    self.state.refresh_listing();
+                    last_refresh = now;
+                    needs_draw = true;
+                    draw_reason = 3;
+                }
             }
 
             // Process writable MCP commands from Claude.
