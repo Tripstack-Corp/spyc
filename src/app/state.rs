@@ -853,6 +853,12 @@ impl AppState {
             // -- No-op --
             Action::Noop => {}
 
+            // -- Reserved keys (flash a hint instead of doing something
+            //    unintended; the actual feature is on the roadmap) --
+            Action::MacroRecordReserved => {
+                self.flash_info("q reserved for future macro recording — Q or :q to quit");
+            }
+
             // -- Everything else stays in App --
             _ => return ApplyResult::NotHandled,
         }
@@ -2189,6 +2195,16 @@ mod tests {
         let mut s = test_state();
         let result = s.apply(&Action::Noop);
         assert!(matches!(result, ApplyResult::Handled));
+    }
+
+    #[test]
+    fn apply_macro_record_reserved_flashes_hint() {
+        let mut s = test_state();
+        let result = s.apply(&Action::MacroRecordReserved);
+        assert!(matches!(result, ApplyResult::Handled));
+        let flash = s.flash.as_ref().unwrap();
+        assert!(flash.text.contains("reserved"), "got: {}", flash.text);
+        assert!(flash.text.contains('Q'), "should hint at Q: {}", flash.text);
     }
 
     #[test]

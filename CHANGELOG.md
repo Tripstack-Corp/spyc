@@ -13,6 +13,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.19.1] - 2026-04-26
+
+### Changed
+- **`q` no longer quits** -- it's now reserved for a future vim-style
+  macro recording feature (already on the roadmap as `qa ... q ... @a`).
+  Pressing `q` flashes a hint ("q reserved for future macro recording
+  -- Q or :q to quit") instead. Quit is still bound to `Q`, `^D`, and
+  `:q`. Motivation: an accidental `q` was easy to fat-finger when
+  switching from vim contexts and produced the most destructive
+  possible outcome (silent quit). Help overlay updated accordingly.
+
 ## [1.19.0] - 2026-04-26
 
 ### Changed

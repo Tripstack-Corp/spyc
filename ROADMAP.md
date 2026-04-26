@@ -353,7 +353,9 @@ one of the tracks above when picked up.
   window). Builds on the frecency database to make path navigation
   even faster.
 - **Macro recording** (`qa` ... `q` ... `@a`) -- vim-style action
-  recording and replay.
+  recording and replay. The lowercase `q` key is already reserved for
+  this in v1.19.1 (it flashes a hint instead of doing anything else)
+  so the binding is free to wire up when the feature lands.
 - **Startup/exit command flags** -- `spyc -c "sort mtime"` runs
   commands at launch, `-F` for exit hooks.
 - **Stdout on exit** -- emit picks/inventory paths on quit so spyc

@@ -1,6 +1,4 @@
 ### SMALL ###
-- q should be reserved for a future implementation of "quick" vim style macros
-  / recordings; this should also be on the roadmap
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -39,6 +37,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.19.1) `q` no longer quits -- it's reserved for the
+  future macro-recording feature already on the ROADMAP. Pressing
+  `q` flashes "q reserved for future macro recording -- Q or :q to
+  quit" and does nothing else. `Q`, `^D`, and `:q` still quit. Avoids
+  a fat-finger silent-quit when switching from vim.
 - (fixed, v1.19.0) `L` long listing now emits an aligned table
   (header + one row per file) with inode, mode, octal, links, owner,
   group (names via `getpwuid_r` / `getgrgid_r`), size, bytes, 512B

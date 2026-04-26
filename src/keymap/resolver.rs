@@ -481,10 +481,16 @@ impl Resolver {
                 ResolverOutcome::Pending
             }
 
-            // Quit.
-            KeyCode::Char('Q' | 'q') => {
+            // Quit. Lowercase `q` is reserved for future macro recording
+            // (see MacroRecordReserved); only `Q` quits via this binding.
+            // `^D` and `:q` also quit.
+            KeyCode::Char('Q') => {
                 self.reset();
                 ResolverOutcome::Action(Action::Quit)
+            }
+            KeyCode::Char('q') => {
+                self.reset();
+                ResolverOutcome::Action(Action::MacroRecordReserved)
             }
 
             KeyCode::Esc => {
@@ -1155,9 +1161,10 @@ mod tests {
     #[test]
     fn quit_keys() {
         let mut r = Resolver::new();
+        // Lowercase q is reserved for future macro recording; only Q quits.
         assert_eq!(
             feed(&mut r, key('q')),
-            ResolverOutcome::Action(Action::Quit)
+            ResolverOutcome::Action(Action::MacroRecordReserved)
         );
         assert_eq!(
             feed(&mut r, key('Q')),

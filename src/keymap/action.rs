@@ -132,7 +132,12 @@ pub enum Action {
 
     // Meta.
     Redraw, // ^L
-    Quit,   // ^D / Q / q
+    Quit,   // ^D / Q / :q
+
+    // Reserved for a future vim-style macro recording feature
+    // (qa ... q ... @a). For now, flashes a hint so an accidental `q`
+    // press doesn't quit the app.
+    MacroRecordReserved,
 
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
@@ -229,6 +234,7 @@ impl Action {
             Self::ToggleActivity => "toggle activity monitor",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
+            Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::Noop => "no-op",
         }
     }

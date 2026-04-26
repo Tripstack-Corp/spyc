@@ -207,7 +207,7 @@ const SECTIONS: &[Section] = &[
             ("?  F1", "this help"),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
-            ("q  Q  ^D", "quit"),
+            ("Q  ^D  :q", "quit (q reserved for future macros)"),
             ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
     },
