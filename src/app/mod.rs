@@ -85,6 +85,11 @@ struct BackgroundTask {
     status: TaskStatus,
     started: std::time::Instant,
     finished_at: Option<std::time::Instant>,
+    /// True whenever bytes arrived while the task was sitting in the
+    /// background. Reset on `:fg`. Drives the `[N+]` vs `[N●]` glyph
+    /// in the divider so the user can see at a glance which task has
+    /// fresh output to look at.
+    has_unread_output: bool,
 }
 
 /// Soft cap on per-task buffered output. When exceeded, drop bytes from
@@ -985,6 +990,7 @@ impl App {
                         break;
                     }
                     task.buffer.extend_from_slice(&chunk);
+                    task.has_unread_output = true;
                     if task.buffer.len() > TASK_BUFFER_CAP {
                         let drop_n = task.buffer.len() - TASK_BUFFER_CAP;
                         task.buffer.drain(..drop_n);
@@ -1663,13 +1669,59 @@ impl App {
             }
         }
 
-        // Right-aligned [SCROLL] tag.
+        // Right-aligned background-task tags. Distinct color from pane
+        // tabs so the numbering doesn't visually collide (pane tabs are
+        // 1..N left-to-right; bg tasks are 1..N right-anchored). Keeps
+        // the rendered group ordered ascending L→R, but if there isn't
+        // room for all of them we drop the *oldest* first (keep newest
+        // visible). Glyphs:
+        //   `[N+]`  running, output arrived since last :fg
+        //   `[N\u{25cf}]`  running, quiescent
+        //   `[N\u{2713}]`  exited cleanly
+        //   `[N\u{2717}]`  non-zero exit / killed / crashed
+        let bg_running_color = self.theme.dir; // soft blue
+        let bg_unread_color = self.theme.take; // teal -- pulls the eye
+        let bg_ok_color = self.theme.exec; // soft green
+        let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
+        let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
+        let mut bg_width = 0usize;
         let tag = if is_scrolling { " [SCROLL]" } else { "" };
-        let fill = width.saturating_sub(used + tag.len());
+        // Reserve room for at least 4 dashes + the tag.
+        let bg_budget = width.saturating_sub(used + tag.len() + 4);
+        for task in self.background_tasks.tasks.iter().rev() {
+            let (glyph, color) = match (&task.status, task.has_unread_output) {
+                (TaskStatus::Running, true) => ("+", bg_unread_color),
+                (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
+                (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
+                (TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_), _) => {
+                    ("\u{2717}", bg_err_color)
+                }
+            };
+            let text = format!(" [{}{glyph}]", task.id);
+            if bg_width + text.len() > bg_budget {
+                break;
+            }
+            bg_width += text.len();
+            bg_pieces_rev.push((text, color));
+        }
+
+        // Dash fill between pane-tab area and bg group / scroll tag.
+        let fill = width.saturating_sub(used + tag.len() + bg_width);
         if fill > 0 {
             spans.push(Span::styled("─".repeat(fill), rule_style));
             used += fill;
         }
+
+        // Render bg tasks left-to-right (id-ascending) by reversing the
+        // collection we built right-to-left.
+        for (text, color) in bg_pieces_rev.into_iter().rev() {
+            used += text.len();
+            spans.push(Span::styled(
+                text,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+
         if is_scrolling {
             spans.push(Span::styled(
                 tag,
@@ -2037,7 +2089,13 @@ impl App {
                     let shown = self.state.rows.len();
                     let hidden = total.saturating_sub(shown);
                     let hidden_tag = format!(" hidden:{hidden}");
-                    let bg_tag = {
+                    // Bg tasks normally render in the divider line above
+                    // the pane (distinct color, right-aligned). When the
+                    // pane is hidden there is no divider, so fall back
+                    // to the status-bar suffix here.
+                    let bg_tag = if self.pane_tabs.is_some() {
+                        String::new()
+                    } else {
                         let running = self.background_tasks.running_count();
                         let done = self.background_tasks.done_count();
                         if running == 0 && done == 0 {
@@ -3300,6 +3358,7 @@ impl App {
             status: TaskStatus::Running,
             started: capture.started,
             finished_at: None,
+            has_unread_output: false,
         };
         self.background_tasks.tasks.push(task);
         self.pager = None;

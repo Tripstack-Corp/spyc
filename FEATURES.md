@@ -196,8 +196,12 @@ to lock you out of spyc.
 
 - **^Z** while a `!` capture pager is open sends the task to the
   background. The reader thread keeps draining output into a per-task
-  buffer (head-truncated at 1 MB). Status-bar suffix shows
-  `bg:N●M✓` -- N running, M completed-but-not-resumed.
+  buffer (head-truncated at 1 MB). Tasks render in the pane divider,
+  right-aligned, in a distinct color family from pane tabs:
+  `[N+]` running with new output (teal), `[N●]` running quiescent
+  (blue), `[N✓]` exited cleanly (green), `[N✗]` non-zero / killed
+  (red). When the pane is hidden, falls back to a status-bar
+  `bg:N●M✓` suffix.
 - **`:fg`** resumes the most-recently-backgrounded task; **`:fg N`**
   targets a specific task id. Still-running tasks come back as a
   streaming pager seeded with everything captured so far; already-

@@ -13,6 +13,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.20.2] - 2026-04-26
+
+### Changed
+- **Background tasks render in the pane divider, not the status-bar
+  suffix.** Right-aligned, growing leftward, with a distinct color
+  family (blue/teal/green/red) so the numbering doesn't visually
+  collide with pane tabs (yellow/amber, left-aligned). Glyphs:
+  - `[N+]` running, output arrived since you last `:fg`'d (teal)
+  - `[N\u{25cf}]` running, quiescent (blue)
+  - `[N\u{2713}]` exited cleanly (green)
+  - `[N\u{2717}]` non-zero exit / killed / crashed (red)
+  Per-task `has_unread_output` flag flips true when bytes arrive
+  during the bg drain, false on `:fg` -- so `+` is a real "go look
+  at this" cue, not just "still alive". When the pane is hidden
+  (no divider rendered), the old `bg:N\u{25cf}` status-bar suffix
+  is the fallback. If too many tasks to fit on the divider,
+  oldest are dropped first; newest stay visible at the right.
+
 ## [1.20.1] - 2026-04-26
 
 ### Fixed
