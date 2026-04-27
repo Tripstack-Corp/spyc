@@ -5897,7 +5897,7 @@ type CaptureHandles = (
 
 /// Normalize captured pty output for the pager.
 ///
-/// Two passes:
+/// Three passes:
 ///
 /// 1. CRLF (`\r\n`) → LF (`\n`). The pty's slave side enables ONLCR by
 ///    default, so a child writing `\n` produces `\r\n` on the master
@@ -5913,9 +5913,20 @@ type CaptureHandles = (
 ///    after the *last* `\r` -- the same final state a real terminal
 ///    would show. Streaming pagers re-run this every tick, so the
 ///    user sees live progress (latest frame each redraw).
+/// 3. Strip stray ASCII control bytes that aren't whitespace or ANSI
+///    escape. Some `git log` commit messages, mboxen, and old-school
+///    formatter output carry `\b` (man-page bold trick), `\v`, `\f`,
+///    NUL, etc. ratatui can't render them and the host terminal may
+///    treat them as cursor controls (backspacing, line-feeding) when
+///    we send the bytes through, which fragments rendered Lines and
+///    leaves "Buil$er.cs"-style misalignment. We drop them so output
+///    is predictable. Kept: `\t` (TAB), `\n` (LF), `\x1b` (ESC for
+///    ANSI sequences). Dropped: 0x00-0x08, 0x0B-0x0C, 0x0E-0x1A,
+///    0x1C-0x1F, 0x7F.
 ///
-/// ANSI escape sequences never embed bare `\r`, so the second pass
-/// is safe to run at byte level.
+/// ANSI escape sequences never embed bare `\r` and never embed the
+/// other control bytes pass 3 strips, so the byte-level passes are
+/// safe.
 fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
     // Pass 1: \r\n -> \n.
     let mut step1 = Vec::with_capacity(bytes.len());
@@ -5930,20 +5941,31 @@ fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
         }
     }
     // Pass 2: collapse bare \r within each line to the last frame.
-    if !step1.contains(&b'\r') {
-        return step1;
-    }
-    let mut out = Vec::with_capacity(step1.len());
-    let mut first = true;
-    for line in step1.split(|&b| b == b'\n') {
-        if !first {
-            out.push(b'\n');
+    let step2: Vec<u8> = if step1.contains(&b'\r') {
+        let mut out = Vec::with_capacity(step1.len());
+        let mut first = true;
+        for line in step1.split(|&b| b == b'\n') {
+            if !first {
+                out.push(b'\n');
+            }
+            first = false;
+            let start = line.iter().rposition(|&b| b == b'\r').map_or(0, |i| i + 1);
+            out.extend_from_slice(&line[start..]);
         }
-        first = false;
-        let start = line.iter().rposition(|&b| b == b'\r').map_or(0, |i| i + 1);
-        out.extend_from_slice(&line[start..]);
-    }
-    out
+        out
+    } else {
+        step1
+    };
+    // Pass 3: drop other ASCII control bytes (keep \t, \n, ESC).
+    step2
+        .into_iter()
+        .filter(|b| {
+            !matches!(
+                b,
+                0x00..=0x08 | 0x0b..=0x0c | 0x0e..=0x1a | 0x1c..=0x1f | 0x7f
+            )
+        })
+        .collect()
 }
 
 fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
@@ -6348,5 +6370,30 @@ mod strip_crlf_tests {
     fn mixed_crlf_and_bare_cr_across_lines() {
         let input = b"line1\r\nProgress: 10%\rProgress: 100%\r\nline3";
         assert_eq!(strip_crlf(input), b"line1\nProgress: 100%\nline3");
+    }
+
+    #[test]
+    fn strips_soh_from_git_log_commit_message() {
+        // Real-world: git log emits \x01 (SOH) in some commit-message
+        // rendering paths -- e.g. when the original message contained
+        // pasted control bytes. Without stripping, ratatui draws a
+        // visible-but-zero-width glyph the host terminal consumes,
+        // misaligning the rest of the line.
+        let input = b"    \x01\tsrc/Foo.cs\n    \x01\tsrc/Bar.cs";
+        assert_eq!(strip_crlf(input), b"    \tsrc/Foo.cs\n    \tsrc/Bar.cs");
+    }
+
+    #[test]
+    fn strips_other_ascii_control_bytes() {
+        // \b (BS), \v (VT), \f (FF), \x1c (FS), \x7f (DEL).
+        let input = b"a\x08b\x0bc\x0cd\x1ce\x7ff";
+        assert_eq!(strip_crlf(input), b"abcdef");
+    }
+
+    #[test]
+    fn keeps_tab_newline_and_esc() {
+        // \t, \n, and \x1b (ESC for ANSI) survive pass 3.
+        let input = b"a\tb\nc\x1b[31md";
+        assert_eq!(strip_crlf(input), b"a\tb\nc\x1b[31md");
     }
 }

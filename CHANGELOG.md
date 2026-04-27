@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.5] - 2026-04-27
+
+### Fixed
+- **`!cmd` capture pager strips stray ASCII control bytes** (NUL,
+  SOH, backspace, vertical tab, form feed, etc.) that ansi-to-tui
+  used to pass through to ratatui. Real-world repro: a long
+  `git log` whose commit-message rendering emits `\x01` (SOH)
+  before each conflict-list line. The host terminal swallowed the
+  byte but ratatui's width accounting didn't, drifting the rest of
+  the rendered line (`Buil$er.cs`-style misalignment with `w` on).
+  `strip_crlf` gained a third pass that filters 0x00-0x08,
+  0x0b-0x0c, 0x0e-0x1a, 0x1c-0x1f, 0x7f while keeping `\t`, `\n`,
+  and `\x1b` (ESC for ANSI sequences). Same fix path covers the
+  task viewer.
+
 ## [1.21.4] - 2026-04-27
 
 ### Fixed

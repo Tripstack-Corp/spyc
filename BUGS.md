@@ -47,6 +47,18 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.5) `!cmd` capture pager no longer renders garbled
+  output for content with stray ASCII control bytes (NUL, SOH,
+  backspace, vertical tab, form feed, etc.). Real-world repro: a
+  long `git log` whose commit-message indent path emits `\x01` (SOH)
+  before each `Conflicts:` line. ansi-to-tui passed those through,
+  the host terminal consumed the byte but ratatui's width
+  accounting didn't, and the rest of the rendered line drifted --
+  showing things like `Buil$er.cs` (line-end marker mid-word).
+  `strip_crlf` gained a third pass that filters control bytes
+  (0x00-0x08, 0x0b-0x0c, 0x0e-0x1a, 0x1c-0x1f, 0x7f) while keeping
+  `\t`, `\n`, and `\x1b` for ANSI sequences. Three new tests cover
+  the SOH case, other control chars, and the keep-list.
 - (fixed, v1.21.4) `!` captures no longer launch a sub-pager. `git log`,
   `man`, and friends probe `isatty(stdout)` and auto-invoke `$PAGER`
   (less by default) when stdout is a TTY -- which it always is for
