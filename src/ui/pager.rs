@@ -58,6 +58,16 @@ pub struct PagerView {
     /// listing, version info) so a 5-line block doesn't sit inside a
     /// nearly-full-screen frame.
     pub fit_to_content: bool,
+    /// When true, this view should NOT be saved to the buffer-history
+    /// stack on close. Used for the help overlay so accidentally hitting
+    /// `[b` doesn't surface a stale help screen and confuse "what page
+    /// am I on?".
+    pub no_history: bool,
+    /// When set, this pager view is a "task viewer" -- a peek into the
+    /// buffered output of a backgrounded shell task. `[t`/`]t` cycles
+    /// among task viewers; the main loop refreshes the contents from
+    /// the task buffer while the task is running.
+    pub task_id: Option<u32>,
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,
@@ -96,6 +106,8 @@ impl PagerView {
             saveable: false,
             full_width: false,
             fit_to_content: false,
+            no_history: false,
+            task_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -117,6 +129,8 @@ impl PagerView {
             saveable: false,
             full_width: false,
             fit_to_content: false,
+            no_history: false,
+            task_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -142,6 +156,8 @@ impl PagerView {
             saveable: true,
             full_width: false,
             fit_to_content: false,
+            no_history: false,
+            task_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,

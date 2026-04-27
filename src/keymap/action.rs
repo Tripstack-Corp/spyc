@@ -139,6 +139,10 @@ pub enum Action {
     // press doesn't quit the app.
     MacroRecordReserved,
 
+    /// `gB` from the file list -- open the task viewer for the
+    /// most-recently-backgrounded task.
+    OpenTaskViewer,
+
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
     Noop,
@@ -235,6 +239,7 @@ impl Action {
             Self::Redraw => "redraw",
             Self::Quit => "quit",
             Self::MacroRecordReserved => "(reserved: macro recording)",
+            Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
             Self::Noop => "no-op",
         }
     }

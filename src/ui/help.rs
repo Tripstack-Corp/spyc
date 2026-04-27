@@ -188,6 +188,10 @@ const SECTIONS: &[Section] = &[
                 ":fg / :fg N",
                 "resume backgrounded task (most recent / by id)",
             ),
+            (
+                "g B  /  :task N  /  [t  ]t",
+                "peek a backgrounded task (cycle by id; live-refreshing)",
+            ),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),

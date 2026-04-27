@@ -207,6 +207,13 @@ to lock you out of spyc.
   streaming pager seeded with everything captured so far; already-
   exited tasks come back as a static pager titled with the final
   exit code and elapsed time.
+- **Task viewer (peek mode).** `gB` from the file list opens the
+  most-recent task in a peek view. `[t`/`]t` while in any pager
+  cycles through bg tasks by id; `:task N` jumps to a specific task.
+  While the task is running, the viewer auto-refreshes from the live
+  buffer. On close, *exited* tasks are promoted: snapshot pushed to
+  buffer history, task dropped from the bg list. Running tasks stay
+  put -- you can come back via `gB` / `[t`.
 - A task that completes while in the background fires a flash:
   `task #N: cmd — exit 0 (43s)`.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks

@@ -90,6 +90,11 @@ struct BackgroundTask {
     /// in the divider so the user can see at a glance which task has
     /// fresh output to look at.
     has_unread_output: bool,
+    /// Set true once the user opens the task in the task viewer
+    /// (`[t`/`]t`, `gB`, or `:task N`). Combined with `Exited`/`Killed`
+    /// status, this is what triggers the on-close promotion to buffer
+    /// history -- viewing acts as the user's "I've seen this" ack.
+    viewed_in_task_viewer: bool,
 }
 
 /// Soft cap on per-task buffered output. When exceeded, drop bytes from
@@ -301,8 +306,13 @@ impl PagerHistory {
         }
     }
 
-    /// Save a closed pager view. Clears the forward stack.
+    /// Save a closed pager view. Skips views flagged `no_history`
+    /// (e.g. the help overlay) so accidentally hitting `[b` doesn't
+    /// surface stale chrome. Clears the forward stack.
     fn push(&mut self, view: pager::PagerView) {
+        if view.no_history {
+            return;
+        }
         self.back.push(view);
         self.forward.clear();
         if self.back.len() > MAX_PAGER_HISTORY {
@@ -310,18 +320,37 @@ impl PagerHistory {
         }
     }
 
-    /// Go back: push current to forward, pop from back.
-    fn go_back(&mut self, current: pager::PagerView) -> Option<pager::PagerView> {
-        let prev = self.back.pop()?;
-        self.forward.push(current);
-        Some(prev)
+    /// Go back. On success returns the prior view and tucks `current`
+    /// onto the forward stack. On failure (back stack empty) hands
+    /// `current` back unchanged so the caller can keep it on screen --
+    /// hitting `[b` at the start of history shouldn't close the pager.
+    /// PagerView is ~232B so clippy flags the Err variant size; the
+    /// alternative (Box on Err only) buys nothing on an in-process,
+    /// cold-path call.
+    #[allow(clippy::result_large_err)]
+    fn go_back(&mut self, current: pager::PagerView) -> Result<pager::PagerView, pager::PagerView> {
+        match self.back.pop() {
+            Some(prev) => {
+                self.forward.push(current);
+                Ok(prev)
+            }
+            None => Err(current),
+        }
     }
 
-    /// Go forward: push current to back, pop from forward.
-    fn go_forward(&mut self, current: pager::PagerView) -> Option<pager::PagerView> {
-        let next = self.forward.pop()?;
-        self.back.push(current);
-        Some(next)
+    /// Go forward. Same edge semantics as `go_back`.
+    #[allow(clippy::result_large_err)]
+    fn go_forward(
+        &mut self,
+        current: pager::PagerView,
+    ) -> Result<pager::PagerView, pager::PagerView> {
+        match self.forward.pop() {
+            Some(next) => {
+                self.back.push(current);
+                Ok(next)
+            }
+            None => Err(current),
+        }
     }
 
     fn back_len(&self) -> usize {
@@ -1005,6 +1034,30 @@ impl App {
                     self.state.flash_info(format!(
                         "task #{id}: {cmd_display} — {status_text} ({secs}s)"
                     ));
+                }
+            }
+
+            // If a task viewer pager is open, refresh its content from
+            // the live task buffer (the bg drain above may have updated
+            // the buffer this tick).
+            if let Some(viewer_id) = self.pager.as_ref().and_then(|v| v.task_id) {
+                if let Some(task) = self
+                    .background_tasks
+                    .tasks
+                    .iter_mut()
+                    .find(|t| t.id == viewer_id)
+                {
+                    if task.has_unread_output {
+                        task.has_unread_output = false;
+                        task.viewed_in_task_viewer = true;
+                        let new_view = Self::build_task_viewer_for(viewer_id, task);
+                        if let Some(view) = self.pager.as_mut() {
+                            view.lines = new_view.lines;
+                            view.title = new_view.title;
+                        }
+                        needs_draw = true;
+                        draw_reason = 3;
+                    }
                 }
             }
 
@@ -3050,19 +3103,39 @@ impl App {
             return PostAction::None;
         }
 
+        // :task [N] — open the task viewer (peek mode). No arg picks
+        // the most-recent task; numeric arg targets a specific id.
+        if input == "task" {
+            self.open_task_viewer(None);
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("task ") {
+            match arg.trim().parse::<u32>() {
+                Ok(id) => self.open_task_viewer(Some(id)),
+                Err(_) => self
+                    .state
+                    .flash_error(format!("task: expected task id (got {arg:?})")),
+            }
+            return PostAction::None;
+        }
+
         // :bprev / :bnext — pager buffer history
         if input == "bprev" {
             if let Some(current) = self.pager.take() {
-                if let Some(prev) = self.pager_history.go_back(current) {
-                    self.pager = Some(prev);
-                    self.needs_full_repaint = true;
-                    let back = self.pager_history.back_len();
-                    let fwd = self.pager_history.forward_len();
-                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                } else {
-                    // go_back returned None — restore current
-                    self.pager = self.pager_history.forward.pop();
-                    self.state.flash_info("no older buffers");
+                match self.pager_history.go_back(current) {
+                    Ok(prev) => {
+                        self.pager = Some(prev);
+                        self.needs_full_repaint = true;
+                        let back = self.pager_history.back_len();
+                        let fwd = self.pager_history.forward_len();
+                        self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                    }
+                    Err(current) => {
+                        // At the start of history -- keep the current
+                        // pager visible instead of closing it.
+                        self.pager = Some(current);
+                        self.state.flash_info("no older buffers");
+                    }
                 }
             } else if let Some(prev) = self.pager_history.back.pop() {
                 self.pager = Some(prev);
@@ -3076,17 +3149,18 @@ impl App {
         }
         if input == "bnext" {
             if let Some(current) = self.pager.take() {
-                if let Some(next) = self.pager_history.go_forward(current) {
-                    self.pager = Some(next);
-                    self.needs_full_repaint = true;
-                    let back = self.pager_history.back_len();
-                    let fwd = self.pager_history.forward_len();
-                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                } else {
-                    // go_forward returned None — restore current
-                    self.pager = self.pager_history.back.pop();
-                    self.needs_full_repaint = true;
-                    self.state.flash_info("no newer buffers");
+                match self.pager_history.go_forward(current) {
+                    Ok(next) => {
+                        self.pager = Some(next);
+                        self.needs_full_repaint = true;
+                        let back = self.pager_history.back_len();
+                        let fwd = self.pager_history.forward_len();
+                        self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                    }
+                    Err(current) => {
+                        self.pager = Some(current);
+                        self.state.flash_info("no newer buffers");
+                    }
                 }
             } else {
                 self.state.flash_info("no pager open");
@@ -3359,6 +3433,7 @@ impl App {
             started: capture.started,
             finished_at: None,
             has_unread_output: false,
+            viewed_in_task_viewer: false,
         };
         self.background_tasks.tasks.push(task);
         self.pager = None;
@@ -3437,6 +3512,101 @@ impl App {
             }
         }
         self.needs_full_repaint = true;
+    }
+
+    /// Build a "task viewer" pager view -- a peek into a backgrounded
+    /// task's buffered output without taking ownership (the way `:fg`
+    /// does). The view's `task_id` is set so the main loop can refresh
+    /// it from the live buffer while the task is running.
+    fn build_task_viewer(&self, id: u32) -> Option<PagerView> {
+        let task = self.background_tasks.tasks.iter().find(|t| t.id == id)?;
+        Some(Self::build_task_viewer_for(id, task))
+    }
+
+    fn build_task_viewer_for(id: u32, task: &BackgroundTask) -> PagerView {
+        use ansi_to_tui::IntoText;
+        let elapsed = task
+            .finished_at
+            .map_or_else(|| task.started.elapsed(), |f| f - task.started)
+            .as_secs();
+        let status_text = match &task.status {
+            TaskStatus::Running => format!("running ({elapsed}s)"),
+            TaskStatus::Exited(0) => format!("exit 0 ({elapsed}s)"),
+            TaskStatus::Exited(code) => format!("exit {code} ({elapsed}s)"),
+            TaskStatus::Killed => format!("killed ({elapsed}s)"),
+            TaskStatus::Crashed(msg) => format!("error: {msg} ({elapsed}s)"),
+        };
+        let title = format!("[task #{id}] {} — {status_text}", task.cmd_display);
+        let normalized = strip_crlf(&task.buffer);
+        let text = normalized.as_slice().into_text().unwrap_or_default();
+        let mut view = PagerView::new_plain(title, Vec::new());
+        view.lines = text.lines;
+        view.task_id = Some(id);
+        // Task viewer is a peek -- don't push it to buffer history on
+        // close UNLESS the task has exited (handled separately on
+        // close: a snapshot is built and pushed). Suppress the default
+        // close-time push.
+        view.no_history = true;
+        view.saveable = true;
+        view.scroll_to_bottom(40);
+        view
+    }
+
+    /// `gB` from the file list, or `:task N` colon command. Open the
+    /// task viewer for `target` (or the most-recent task if `None`).
+    /// Pushes the current pager (if any, and not no_history) to buffer
+    /// history first so `[b` can walk back.
+    fn open_task_viewer(&mut self, target: Option<u32>) {
+        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+            self.state.flash_error("no background tasks");
+            return;
+        };
+        let Some(view) = self.build_task_viewer(id) else {
+            self.state.flash_error(format!("no task #{id}"));
+            return;
+        };
+        // Mark viewed so promotion-to-history can fire on close.
+        if let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) {
+            task.viewed_in_task_viewer = true;
+            task.has_unread_output = false;
+        }
+        // Push the prior pager (if any, eligible) so `[b` can walk back.
+        if let Some(prev) = self.pager.take() {
+            self.pager_history.push(prev);
+        }
+        self.pager = Some(view);
+        self.needs_full_repaint = true;
+    }
+
+    /// `[t`/`]t` chord while a pager is open. Cycles the task viewer
+    /// among bg tasks ordered by id. `direction = -1` for prev, `+1`
+    /// for next.
+    fn cycle_task_viewer(&mut self, direction: i32) {
+        if self.background_tasks.tasks.is_empty() {
+            self.state.flash_info("no background tasks");
+            return;
+        }
+        let current = self
+            .pager
+            .as_ref()
+            .and_then(|v| v.task_id)
+            .and_then(|id| self.background_tasks.tasks.iter().position(|t| t.id == id));
+        let next_pos = match current {
+            Some(pos) => {
+                let n = self.background_tasks.tasks.len() as i32;
+                let raw = pos as i32 + direction;
+                ((raw % n + n) % n) as usize
+            }
+            None => {
+                if direction < 0 {
+                    self.background_tasks.tasks.len() - 1
+                } else {
+                    0
+                }
+            }
+        };
+        let id = self.background_tasks.tasks[next_pos].id;
+        self.open_task_viewer(Some(id));
     }
 
     /// For tabs that have a `pending_resume_send` armed (set by
@@ -4597,6 +4767,7 @@ impl App {
         let lines = help::build_lines(&self.theme, &self.state.user_keymap, col_w);
         let mut view = pager::PagerView::new_styled(Self::HELP_TITLE, lines);
         view.columns = ncols as u8;
+        view.no_history = true;
         self.pager = Some(view);
     }
 
@@ -4756,41 +4927,54 @@ impl App {
         }
 
         // [b / ]b — pager buffer history navigation (two-key sequence).
+        // [t / ]t — task viewer cycle (peek through backgrounded tasks).
         if let Some(bracket) = self.pager_pending_bracket.take() {
             if key.code == KeyCode::Char('b') {
                 match bracket {
                     '[' => {
                         if let Some(current) = self.pager.take() {
-                            if let Some(prev) = self.pager_history.go_back(current) {
-                                self.pager = Some(prev);
-                                self.needs_full_repaint = true;
-                                let back = self.pager_history.back_len();
-                                let fwd = self.pager_history.forward_len();
-                                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                            } else {
-                                // Restore — go_back returned None.
-                                self.pager = self.pager_history.forward.pop();
-                                self.state.flash_info("no older buffers");
+                            match self.pager_history.go_back(current) {
+                                Ok(prev) => {
+                                    self.pager = Some(prev);
+                                    self.needs_full_repaint = true;
+                                    let back = self.pager_history.back_len();
+                                    let fwd = self.pager_history.forward_len();
+                                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                                }
+                                Err(current) => {
+                                    self.pager = Some(current);
+                                    self.state.flash_info("no older buffers");
+                                }
                             }
                         }
                     }
                     ']' => {
                         if let Some(current) = self.pager.take() {
-                            if let Some(next) = self.pager_history.go_forward(current) {
-                                self.pager = Some(next);
-                                self.needs_full_repaint = true;
-                                let back = self.pager_history.back_len();
-                                let fwd = self.pager_history.forward_len();
-                                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                            } else {
-                                self.pager = self.pager_history.back.pop();
-                                self.state.flash_info("no newer buffers");
+                            match self.pager_history.go_forward(current) {
+                                Ok(next) => {
+                                    self.pager = Some(next);
+                                    self.needs_full_repaint = true;
+                                    let back = self.pager_history.back_len();
+                                    let fwd = self.pager_history.forward_len();
+                                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                                }
+                                Err(current) => {
+                                    self.pager = Some(current);
+                                    self.state.flash_info("no newer buffers");
+                                }
                             }
                         }
                     }
                     _ => {}
                 }
+                return PostAction::None;
             }
+            if key.code == KeyCode::Char('t') {
+                let direction = if bracket == '[' { -1 } else { 1 };
+                self.cycle_task_viewer(direction);
+                return PostAction::None;
+            }
+            // Unrecognized chord follow-up -- swallow it.
             return PostAction::None;
         }
 
@@ -5054,20 +5238,48 @@ impl App {
 
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
-                // Save eligible pagers to history before closing.
-                let is_picker = self.state.pending_worktrees.is_some()
-                    || self.state.pending_sessions.is_some()
-                    || self.pending_history_pick.is_some();
-                if !is_picker {
-                    if let Some(ref v) = self.pager {
-                        if v.picker_cursor.is_none() && !v.streaming {
-                            if let Some(v) = self.pager.take() {
-                                self.pager_history.push(v);
+                // Task viewer special close: if the viewed task has
+                // exited (and the user has seen it), promote -- snapshot
+                // its rendered view into buffer history and drop the
+                // task from the bg list. Running tasks stay in bg.
+                let promote_task: Option<u32> = self.pager.as_ref().and_then(|v| {
+                    let id = v.task_id?;
+                    let task = self.background_tasks.tasks.iter().find(|t| t.id == id)?;
+                    if task.viewed_in_task_viewer && !matches!(task.status, TaskStatus::Running) {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(id) = promote_task {
+                    if let Some(task) = self.background_tasks.take(id) {
+                        let mut snapshot = Self::build_task_viewer_for(id, &task);
+                        snapshot.task_id = None; // not a live viewer anymore
+                        snapshot.no_history = false; // must be eligible for history
+                        self.pager_history.push(snapshot);
+                        // Reap the child handle if still around (already
+                        // wait()'d when EOF arrived; this is just to drop
+                        // the writer/rx). Implicit via task drop.
+                        drop(task);
+                    }
+                    // Don't double-push the original viewer.
+                    self.pager = None;
+                } else {
+                    // Save eligible pagers to history before closing.
+                    let is_picker = self.state.pending_worktrees.is_some()
+                        || self.state.pending_sessions.is_some()
+                        || self.pending_history_pick.is_some();
+                    if !is_picker {
+                        if let Some(ref v) = self.pager {
+                            if v.picker_cursor.is_none() && !v.streaming {
+                                if let Some(v) = self.pager.take() {
+                                    self.pager_history.push(v);
+                                }
                             }
                         }
                     }
+                    self.pager = None;
                 }
-                self.pager = None;
                 self.state.pending_worktrees = None;
                 self.state.pending_sessions = None;
                 self.pending_history_pick = None;
@@ -5261,6 +5473,8 @@ impl App {
             }
 
             Action::Help => self.open_help(),
+
+            Action::OpenTaskViewer => self.open_task_viewer(None),
 
             Action::ReloadConfig => self.reload_config(),
 

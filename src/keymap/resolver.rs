@@ -137,6 +137,7 @@ impl Resolver {
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
                 KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
+                KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

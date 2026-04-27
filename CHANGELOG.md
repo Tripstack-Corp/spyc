@@ -13,6 +13,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.0] - 2026-04-26
+
+### Added
+- **Task viewer (`gB`, `[t`/`]t`, `:task N`).** A peek view into a
+  backgrounded shell task's buffer that doesn't take ownership the way
+  `:fg` does. From the file list, `gB` opens the most-recent task in
+  the viewer; from inside any pager `[t`/`]t` cycles through bg tasks
+  by id (wraps around). `:task N` jumps to a specific task. While the
+  task is running, the viewer's content auto-refreshes from the live
+  buffer; the title shows `running ({Xs})` / `exit 0 ({Xs})` etc.
+- **Task viewer → buffer history promotion.** When you close
+  (Esc / `q`) a task viewer for a task that has *exited* and that
+  you've actually viewed, spyc snapshots the current rendered view
+  into the buffer-history stack and removes the task from the bg
+  list. `[b` from any subsequent pager walks back to the snapshot.
+  Running tasks never auto-promote -- they stay in the bg list until
+  exit + view.
+
+### Changed
+- **Help overlay no longer pollutes buffer history.** Hitting `[b`
+  after closing the help could surface stale help content; help is
+  now flagged `no_history` so it's skipped on close.
+- **`[b`/`]b` at the edge of history keeps the current pager open.**
+  Previously, hitting `[b` at the start (or `]b` at the end) silently
+  closed the pager because the current view was consumed before the
+  empty-stack case was checked. Now the pager stays put with a flash
+  ("no older buffers" / "no newer buffers"); same fix for
+  `:bprev` / `:bnext`.
+
 ## [1.20.2] - 2026-04-26
 
 ### Changed
