@@ -5476,6 +5476,17 @@ impl App {
 
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
+            Action::ReopenLastBuffer => {
+                if let Some(prev) = self.pager_history.back.pop() {
+                    self.pager = Some(prev);
+                    self.needs_full_repaint = true;
+                    self.state
+                        .flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+                } else {
+                    self.state.flash_info("no buffers in history");
+                }
+            }
+
             Action::ReloadConfig => self.reload_config(),
 
             Action::TogglePane

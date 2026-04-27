@@ -143,6 +143,11 @@ pub enum Action {
     /// most-recently-backgrounded task.
     OpenTaskViewer,
 
+    /// `gp` from the file list -- reopen the most-recently-closed
+    /// pager view from the buffer-history stack. Same as `:bprev`
+    /// when no pager is currently open.
+    ReopenLastBuffer,
+
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
     Noop,
@@ -240,6 +245,7 @@ impl Action {
             Self::Quit => "quit",
             Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
+            Self::ReopenLastBuffer => "reopen the most-recent closed pager buffer",
             Self::Noop => "no-op",
         }
     }

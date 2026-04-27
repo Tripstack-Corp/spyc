@@ -184,20 +184,39 @@ const SECTIONS: &[Section] = &[
                 "  while running",
                 "keys → child, ^C interrupt, ^\\ kill, ^Z background",
             ),
-            (
-                ":fg / :fg N",
-                "resume backgrounded task (most recent / by id)",
-            ),
-            (
-                "g B  /  :task N  /  [t  ]t",
-                "peek a backgrounded task (cycle by id; live-refreshing)",
-            ),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
             (
                 ":",
-                "command line (:cd, :sort, :marks, :bprev, :bnext, :limit, :set, :!, :;, :fg, :q)",
+                "command line (:cd, :sort, :marks, :limit, :set, :!, :;, :q)",
+            ),
+        ],
+    },
+    Section {
+        title: "Background tasks & buffer history",
+        rows: &[
+            ("^Z", "(in ! pager) send running task to the background"),
+            (":fg", "resume the most-recent backgrounded task"),
+            (":fg N", "resume task #N specifically"),
+            (
+                "g B",
+                "open task viewer for the most-recent task (peek mode)",
+            ),
+            (":task N", "open task viewer for task #N"),
+            (
+                "[t  ]t",
+                "(in pager) cycle task viewer prev/next by id (chord)",
+            ),
+            (
+                "  divider glyphs",
+                "[N+] new output, [N●] running, [N✓] exit 0, [N✗] error",
+            ),
+            ("g p", "reopen the most-recently-closed pager buffer"),
+            (":bprev / :bnext", "walk pager buffer history back/forward"),
+            (
+                "[b  ]b",
+                "(in pager) walk buffer history back/forward (chord)",
             ),
         ],
     },

@@ -138,6 +138,7 @@ impl Resolver {
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
                 KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
+                KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

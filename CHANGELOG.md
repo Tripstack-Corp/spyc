@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.1] - 2026-04-26
+
+### Added
+- **`gp` reopens the most-recently-closed pager buffer** from the
+  file list. Pairs with `gB` for "go to bg-task viewer" -- both pop
+  the most-recent thing of their kind. When no buffers are in
+  history, flashes "no buffers in history" instead of doing nothing.
+
+### Changed
+- **New `Background tasks & buffer history` help section** groups
+  `^Z`, `:fg`, `g B`, `:task N`, `[t]t`, `g p`, `:bprev`, `:bnext`,
+  `[b]b`, plus the divider-glyph legend (`[N+]`/`[N●]`/`[N✓]`/`[N✗]`)
+  in one place. The `g B` and `:task N` bindings used to be tucked
+  inside `Shell-out & commands` next to `:fg` -- easy to miss.
+
 ## [1.21.0] - 2026-04-26
 
 ### Added
