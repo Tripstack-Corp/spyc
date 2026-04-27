@@ -13,6 +13,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.6] - 2026-04-27
+
+### Fixed
+- **Single-column pager truncates long lines instead of wrapping.**
+  The `!cmd` / task-viewer / file-view pager used
+  `Paragraph::new(...).wrap(Wrap { trim: false })`, which made
+  ratatui hard-break long unbreakable words (paths, log lines)
+  mid-character; continuation rows don't carry their own line-
+  number gutter, so the `$` whitespace marker landed mid-row and
+  the gutter accounting drifted on subsequent rows ("Builde$.cs"-
+  style mismatches in long `git log` output, especially with
+  `w` toggled on). Behavior now matches the multi-column path
+  and `less -S`: clip at the right edge. Yank / save / search
+  operate on `view.lines`, so the full untruncated content
+  remains available regardless of how the visual rendering
+  clips.
+
 ## [1.21.5] - 2026-04-27
 
 ### Fixed

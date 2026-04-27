@@ -47,6 +47,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.6) Single-column pager no longer wraps long lines.
+  Wrap was previously on (`Wrap { trim: false }`) but ratatui
+  hard-breaks long unbreakable "words" (paths, log lines)
+  mid-character, and continuation rows don't carry their own
+  line-number gutter -- the visual result was things like
+  `Builde$.cs` (line-end `$` mid-row) on long paths in `git log`
+  output. Now long lines truncate at the right edge instead,
+  matching the multi-column path and `less -S` semantics. Yank /
+  save / search still operate on the underlying `view.lines`, so
+  the full content is always available even when the visual
+  rendering is clipped.
 - (fixed, v1.21.5) `!cmd` capture pager no longer renders garbled
   output for content with stray ASCII control bytes (NUL, SOH,
   backspace, vertical tab, form feed, etc.). Real-world repro: a

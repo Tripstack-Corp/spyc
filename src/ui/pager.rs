@@ -11,7 +11,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::ui::theme::Theme;
@@ -664,7 +664,16 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         }
     }
 
-    let paragraph = Paragraph::new(display_lines).wrap(Wrap { trim: false });
+    // No wrap: long Lines truncate at the right edge of the body. Wrap
+    // was previously on (Wrap { trim: false }) but it interacted poorly
+    // with the line-number gutter and the `$` whitespace marker, since
+    // ratatui hard-breaks long unbreakable "words" (paths, log lines)
+    // mid-character and continuation rows don't carry their own gutter.
+    // The result was visible misalignment ("Builde$.cs"-style mid-row
+    // line-end markers) on long paths in `git log` output. Behavior now
+    // matches the multi-column path and `less -S`. Yank / save / search
+    // still operate on `view.lines` so they get the untruncated source.
+    let paragraph = Paragraph::new(display_lines);
     frame.render_widget(paragraph, content_area);
 }
 
