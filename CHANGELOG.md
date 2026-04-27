@@ -13,6 +13,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.2] - 2026-04-26
+
+### Fixed
+- **`!` capture and task viewer collapse bare `\r` progress-bar
+  updates to the last frame.** `git pull` / `npm install` / `cargo
+  build` use bare carriage return (no newline) to overwrite
+  progress on the same line; `ansi-to-tui` doesn't process `\r`,
+  so we were rendering every frame side-by-side as one super-wide
+  line. `strip_crlf` gained a second pass: for each `\n`-delimited
+  segment, keep only the bytes after the *last* `\r`. Live
+  streaming reads the latest frame each tick, and the saved view
+  shows the final clean line. ANSI sequences never embed bare
+  `\r`, so the byte-level pass is safe. Five new tests cover the
+  passes individually and combined.
+- **Task viewer no longer shows `[EOF]` while the task is still
+  running.** `build_task_viewer_for` sets `view.streaming` based
+  on `TaskStatus::Running`, and the per-tick refresh now fires on
+  Running → Exited transitions (not just on new bytes), so the
+  title and `[EOF]` marker keep up with reality when a task
+  quietly finishes mid-view.
+
 ## [1.21.1] - 2026-04-26
 
 ### Added

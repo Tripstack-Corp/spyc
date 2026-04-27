@@ -24,6 +24,14 @@
 - ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
+- explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
+  output (the same one the pane already uses). Today we collapse bare `\r`
+  to the last frame to handle progress bars (v1.21.2), and that handles
+  git/npm/cargo cleanly -- but a tool that uses cursor positioning
+  (`\x1b[A`, alt-screen, etc.) would still render wonky. vt100 emulation
+  would be the "correct" fix for everything; tradeoff is a per-tick screen
+  grid maintained instead of a flat byte buffer, which is heavier on
+  long-running captures.
 - would be nice to add a "are you sure you want to interrupt?" protection with
   Claude CLI procs
 - yr (yank recursive) — yank directories into inventory; would need
@@ -39,6 +47,23 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.2) `!cmd` capture pager (and task viewer) now collapse
+  bare `\r` progress-bar updates to the last frame, so `git pull` /
+  `npm install` / `cargo build` no longer paint dozens of partial
+  frames side-by-side as one super-wide line. `strip_crlf` gained a
+  second pass: for each `\n`-delimited segment, keep only the bytes
+  after the last `\r` -- the same final state a real terminal would
+  show. Streaming pagers re-run this every tick, so the user sees
+  live progress (latest frame each redraw) and a clean final line on
+  exit. ANSI escape sequences never embed bare `\r` so the byte-level
+  pass is safe. (For tools that go further -- cursor positioning,
+  alt-screen -- see the full vt100-emulator MAYBE item above.)
+- (fixed, v1.21.2) Task viewer (`gB` / `[t]t` / `:task N`) no longer
+  shows `[EOF]` while the underlying task is still running. The
+  viewer's `streaming` flag now reflects task status, and the
+  per-tick refresh fires on Running → Exited transitions too (not
+  just on new bytes), so the title and `[EOF]` marker keep up with
+  reality even when a task quietly finishes mid-view.
 - (fixed, v1.19.1) `q` no longer quits -- it's reserved for the
   future macro-recording feature already on the ROADMAP. Pressing
   `q` flashes "q reserved for future macro recording -- Q or :q to

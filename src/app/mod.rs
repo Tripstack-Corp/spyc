@@ -1047,13 +1047,22 @@ impl App {
                     .iter_mut()
                     .find(|t| t.id == viewer_id)
                 {
-                    if task.has_unread_output {
+                    // Rebuild on new bytes OR on status transition (e.g.
+                    // Running → Exited while the user is looking at it)
+                    // so the title and the [EOF] marker keep up with
+                    // reality. Drop has_unread_output even on
+                    // status-only refreshes so the divider `+` clears.
+                    let task_running = matches!(task.status, TaskStatus::Running);
+                    let viewer_streaming = self.pager.as_ref().is_some_and(|v| v.streaming);
+                    let status_changed = task_running != viewer_streaming;
+                    if task.has_unread_output || status_changed {
                         task.has_unread_output = false;
                         task.viewed_in_task_viewer = true;
                         let new_view = Self::build_task_viewer_for(viewer_id, task);
                         if let Some(view) = self.pager.as_mut() {
                             view.lines = new_view.lines;
                             view.title = new_view.title;
+                            view.streaming = new_view.streaming;
                         }
                         needs_draw = true;
                         draw_reason = 3;
@@ -3548,6 +3557,9 @@ impl App {
         // close-time push.
         view.no_history = true;
         view.saveable = true;
+        // Suppress [EOF]/tilde markers while the underlying task is
+        // still running -- the buffer is live, not finalized.
+        view.streaming = matches!(task.status, TaskStatus::Running);
         view.scroll_to_bottom(40);
         view
     }
@@ -5875,26 +5887,53 @@ type CaptureHandles = (
     std::sync::mpsc::Receiver<Vec<u8>>,
 );
 
-/// Normalize CRLF line endings to LF in captured pty output.
+/// Normalize captured pty output for the pager.
 ///
-/// The pty's slave side enables ONLCR by default, so a child writing
-/// `\n` produces `\r\n` on the master side we read from. The literal
-/// `\r` survives into our buffer; when ratatui later renders the line,
-/// the terminal interprets it as a carriage return and the next line's
-/// shorter content overlays without clearing the tail of the previous
-/// line. We replace only `\r\n` (not standalone `\r`) so progress-bar
-/// in-place updates that use bare CR still work.
+/// Two passes:
+///
+/// 1. CRLF (`\r\n`) → LF (`\n`). The pty's slave side enables ONLCR by
+///    default, so a child writing `\n` produces `\r\n` on the master
+///    we read from. Without this, ratatui rendering interprets the
+///    literal `\r` as carriage return and shorter following lines
+///    overlay just the prefix of longer prior ones.
+/// 2. Bare `\r` collapse. `git pull`, `npm`, `cargo`, etc. use bare
+///    `\r` (no newline) to overwrite a progress line on the same
+///    terminal row -- `Counting: 18%\rCounting: 27%\rCounting: 100%`.
+///    Real terminals handle this; `ansi-to-tui` does not, so without
+///    a fix we render every frame side-by-side as one super-wide
+///    line. For each `\n`-delimited segment, we keep only the text
+///    after the *last* `\r` -- the same final state a real terminal
+///    would show. Streaming pagers re-run this every tick, so the
+///    user sees live progress (latest frame each redraw).
+///
+/// ANSI escape sequences never embed bare `\r`, so the second pass
+/// is safe to run at byte level.
 fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
+    // Pass 1: \r\n -> \n.
+    let mut step1 = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
-            out.push(b'\n');
+            step1.push(b'\n');
             i += 2;
         } else {
-            out.push(bytes[i]);
+            step1.push(bytes[i]);
             i += 1;
         }
+    }
+    // Pass 2: collapse bare \r within each line to the last frame.
+    if !step1.contains(&b'\r') {
+        return step1;
+    }
+    let mut out = Vec::with_capacity(step1.len());
+    let mut first = true;
+    for line in step1.split(|&b| b == b'\n') {
+        if !first {
+            out.push(b'\n');
+        }
+        first = false;
+        let start = line.iter().rposition(|&b| b == b'\r').map_or(0, |i| i + 1);
+        out.extend_from_slice(&line[start..]);
     }
     out
 }
@@ -6249,5 +6288,46 @@ mod background_tasks_tests {
         let bg = BackgroundTasks::new();
         assert_eq!(bg.running_count(), 0);
         assert_eq!(bg.done_count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod strip_crlf_tests {
+    use super::strip_crlf;
+
+    #[test]
+    fn crlf_collapses_to_lf() {
+        assert_eq!(strip_crlf(b"a\r\nb\r\nc"), b"a\nb\nc");
+    }
+
+    #[test]
+    fn passthrough_when_no_carriage_return() {
+        assert_eq!(
+            strip_crlf(b"hello world\nplain text"),
+            b"hello world\nplain text"
+        );
+    }
+
+    #[test]
+    fn bare_cr_collapses_to_last_frame() {
+        // git/npm/cargo progress: same line, multiple updates separated
+        // by bare CR. We keep only the final frame.
+        let input = b"Counting: 18%\rCounting: 27%\rCounting: 100%, done.\n";
+        assert_eq!(strip_crlf(input), b"Counting: 100%, done.\n");
+    }
+
+    #[test]
+    fn bare_cr_with_no_trailing_newline() {
+        // Mid-stream view: last frame still wins, no terminator yet.
+        assert_eq!(
+            strip_crlf(b"Counting: 18%\rCounting: 50%"),
+            b"Counting: 50%"
+        );
+    }
+
+    #[test]
+    fn mixed_crlf_and_bare_cr_across_lines() {
+        let input = b"line1\r\nProgress: 10%\rProgress: 100%\r\nline3";
+        assert_eq!(strip_crlf(input), b"line1\nProgress: 100%\nline3");
     }
 }
