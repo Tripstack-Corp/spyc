@@ -222,9 +222,11 @@ to lock you out of spyc.
 ## Pager buffer history
 
 Closed pager views are saved to a history stack (up to 10). Navigate
-with `:bprev`/`:bnext` from the main prompt, or `[b`/`]b` while in
-the pager. Works like browser back/forward — scroll positions are
-preserved.
+with `:bprev`/`:bnext` from the main prompt, `[b`/`]b` (chord)
+while in the pager, or **`gp`** to reopen the most-recent closed
+buffer in one keystroke. The help overlay is excluded from the
+stack. Walking off the end keeps the current pager open with a
+flash instead of silently closing. Scroll positions are preserved.
 
 ## Marks
 

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  macOS and Linux · v1.10.0 · actively developed
+  macOS and Linux · v1.21.1 · actively developed
 </p>
 
 <p align="center">
@@ -174,9 +174,30 @@ support. Press `?` inside the pager for its own help overlay.
 | `!?` | History editor (vi-editable, searchable) |
 | `;` | Foreground command (top, vim, etc.) |
 | `$` | Drop into `$SHELL` |
-| `:` | Command line (`:cd`, `:sort`, `:limit`, `:q`) |
+| `:` | Command line (`:cd`, `:sort`, `:limit`, `:fg`, `:task`, `:q`) |
 
 `%` in any command expands to the current selection.
+
+### Background tasks & buffer history
+
+Long captured commands shouldn't lock you out of spyc.
+
+| Key | Action |
+|-----|--------|
+| `^Z` | (in `!` pager) send the running task to the background |
+| `:fg` / `:fg N` | resume the most-recent (or specific) backgrounded task |
+| `gB` / `:task N` | open the *task viewer* -- a peek view without taking ownership |
+| `[t` / `]t` | (in pager, chord) cycle the task viewer prev/next by id |
+| `gp` | reopen the most-recently-closed pager buffer |
+| `:bprev` / `:bnext` | walk pager buffer history back/forward |
+| `[b` / `]b` | (in pager, chord) walk buffer history back/forward |
+
+Backgrounded tasks render in the pane divider as `[N+]` (running, new
+output), `[N●]` (running, quiescent), `[N✓]` (exit 0), `[N✗]`
+(non-zero / killed / crashed), in a distinct color from pane tabs.
+When a viewed task exits, closing the task viewer pushes its
+final rendered view into the buffer-history stack so `[b` walks
+back to it later.
 
 ### Marks & filters
 

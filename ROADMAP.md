@@ -172,15 +172,25 @@ terminal inside a terminal." In priority order:
      most-recent task; `:fg N` targets a specific id. Still-running
      tasks come back as a streaming pager seeded with the buffered
      output so far; already-exited tasks come back as a static pager
-     with the final `exited <code> (Xs)` title. Status suffix
-     `bg:N●M✓` shows running/done counts. Buffer head-truncates at
-     1 MB. Original task id is preserved across `^Z` → `:fg` → `^Z`
-     cycles via `PendingCapture.original_id`.
-  2. **M2 -- `:bg` overlay.** Picker-style list with columns
-     `# STATUS TIME CMD`. `Enter` reuses the `:fg` code path; `R`
-     dismisses or kills (running -> SIGTERM with grace then SIGKILL,
-     completed -> drop from list); `r` re-runs. Auto-prune oldest
-     completed tasks past a soft cap (~50).
+     with the final `exited <code> (Xs)` title. Buffer head-truncates
+     at 1 MB. Original task id is preserved across `^Z` → `:fg` → `^Z`
+     cycles via `PendingCapture.original_id`. v1.20.2 moved the
+     status indicator from the status bar into the pane divider:
+     right-aligned, distinct color from pane tabs, glyphs `[N+]`/
+     `[N●]`/`[N✓]`/`[N✗]` keyed off a per-task `has_unread_output`
+     flag.
+  2. **M2 -- task viewer.** ✅ shipped in v1.21.0 (different shape
+     from the original `:bg` picker overlay sketch). `gB` from the
+     file list opens the most-recent task in a peek pager; `[t`/`]t`
+     chord (or `:task N`) cycles by id. Live-refreshes from the task
+     buffer while running. On close of a viewed-and-exited task, its
+     rendered view is promoted into buffer-history (`[b` walks back
+     to it) and the task is dropped from the bg list. v1.21.1 added
+     `gp` to reopen the most-recent closed pager buffer from the
+     file list. **Still TODO** from the original M2 sketch:
+     `R`-to-kill (SIGTERM/SIGKILL on running task), `r`-to-re-run.
+     The auto-promote-on-view-of-exited semantic replaced the
+     explicit dismiss step.
   3. **M3 -- `!&cmd` direct-launch.** Skip the foreground pager
      entirely; task starts in background. Symmetric `:!&cmd` and
      `:bg cmd` command-line variants.

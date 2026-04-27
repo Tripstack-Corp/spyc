@@ -99,6 +99,16 @@ ongoing tuning.
   flow through the master into the pager instead of bleeding onto
   spyc's screen. Typed keys are forwarded to the child via the
   master writer while the capture is live.
+- **Background tasks** (since v1.20.0) reuse the captured-shell
+  plumbing exactly: `^Z` from a streaming `!` pager moves the
+  `(child, writer, output_rx, buffer)` tuple from `App.pending_capture`
+  into a `BackgroundTasks` collection on `App`. The reader thread
+  spawned by `spawn_capture` is unchanged — it keeps draining into
+  the per-task buffer regardless of whether the pager is attached.
+  No new threads. `:fg` reverses the move; the task viewer (`gB` /
+  `[t]t`) reads the buffer non-destructively for live peek. Buffer
+  is head-truncated at 1 MB (the tail of a `cargo build` is what
+  the user wants).
 
 ## State persistence (XDG)
 

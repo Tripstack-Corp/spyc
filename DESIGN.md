@@ -113,6 +113,10 @@ Used sparingly — every glyph below has a specific meaning.
 | `*` | active pane tab |
 | `[SCROLL]` | pane is in scrollback mode |
 | `[exited N]` | pane subprocess exited with code N |
+| `[N+]` | bg task #N running with new output (teal, divider) |
+| `[N●]` | bg task #N running, quiescent (blue, divider) |
+| `[N✓]` | bg task #N exited cleanly (green, divider) |
+| `[N✗]` | bg task #N non-zero exit / killed / crashed (red, divider) |
 
 Powerline arrows (``) separate status segments and require a
 Nerd Font; mono mode switches to plain spaces and a single rule.
