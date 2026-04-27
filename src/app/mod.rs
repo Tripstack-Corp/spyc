@@ -1433,42 +1433,50 @@ impl App {
             || self.state.config.sources.iter().any(|c| c == path)
     }
 
-    /// True iff `path` is the listing directory or a direct child of it.
-    /// `notify` events sometimes include just the directory and sometimes
-    /// the affected child, so we accept both.
+    /// True iff `path` is the listing directory or anything beneath it
+    /// that we care about for refresh purposes. `notify` events sometimes
+    /// include just the directory and sometimes the affected child;
+    /// recursive listing watches (since v1.21.7) also send events for
+    /// arbitrary depths, so we accept the whole subtree -- with
+    /// `.git/` carved out for tighter filtering since rebase/gc/pack
+    /// activity inside there would otherwise spam refresh.
     fn is_listing_path(&self, path: &Path) -> bool {
-        // Ignore our own context file writes — they land in the listing
-        // directory and would otherwise trigger a self-perpetuating
-        // refresh_listing → git subprocess → redraw cycle.
+        // Ignore our own context file writes -- they land in the
+        // listing directory and would otherwise trigger a self-
+        // perpetuating refresh_listing → git subprocess → redraw cycle.
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             if name.starts_with(".spyc-context-") {
                 return false;
             }
         }
         let dir = self.state.listing.dir.as_path();
-        if path == dir || path.parent() == Some(dir) {
-            return true;
-        }
-        // We watch `.git/` as a directory (see `sync_listing_watch`).
-        // macOS FSEvents sometimes coalesces multiple intra-directory
-        // changes into a single event whose path *is* `.git/` itself
-        // (rather than the specific child file), so accept both:
-        // - `path == .git/` — coalesced directory event, treat as
-        //   "something happened in there, refresh"
-        // - `path` parented at `.git/` with basename `index` (status /
-        //   staging) or `HEAD` (branch switch) — file-level events
-        // Everything else under `.git/` (objects, packs, lockfiles,
-        // gc activity) is rejected so a rebase or gc doesn't cascade.
         let git_dir = dir.join(".git");
+
+        // `.git/` filtering: macOS FSEvents sometimes coalesces multiple
+        // intra-directory changes into a single event whose path *is*
+        // `.git/` itself (rather than the specific child file), so
+        // accept that as "something happened in there, refresh."
+        // Direct children: only `index` (staging/status) or `HEAD`
+        // (branch switch) -- everything else (objects, packs, lockfiles,
+        // gc activity, refs/, logs/) is rejected so background git
+        // housekeeping doesn't cascade.
         if path == git_dir.as_path() {
             return true;
         }
-        if path.parent() == Some(git_dir.as_path()) {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                return matches!(name, "index" | "HEAD");
+        if path.starts_with(&git_dir) {
+            if path.parent() == Some(git_dir.as_path()) {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    return matches!(name, "index" | "HEAD");
+                }
             }
+            return false;
         }
-        false
+
+        // Anywhere at or below the listing dir (recursive watch) --
+        // accept. The 500ms trailing debounce + git-status's index-
+        // cache mean even noisy subtrees don't produce unbounded
+        // refresh subprocesses.
+        path.starts_with(dir)
     }
 
     // --- Rendering --------------------------------------------------------
@@ -5851,7 +5859,17 @@ fn sync_listing_watch(
         if let Some(old) = active.as_ref() {
             let _ = w.unwatch(old);
         }
-        if w.watch(new_dir, RecursiveMode::NonRecursive).is_ok() {
+        // Recursive: catches changes anywhere below the listing dir so
+        // git status markers update on the parent directory row when a
+        // file is added/modified in a subdirectory (e.g. touching
+        // `docs/foo.md` while sitting at the repo root). Events under
+        // `.git/` are filtered to specific files (`index`, `HEAD`) by
+        // `is_listing_path` to avoid `.git/objects` / pack / lockfile
+        // churn cascading into needless `git status` calls. macOS
+        // FSEvents handles recursive watches at OS level (cheap);
+        // Linux inotify needs a watch per subdir, which can hit
+        // `fs.inotify.max_user_watches` on enormous monorepos.
+        if w.watch(new_dir, RecursiveMode::Recursive).is_ok() {
             *active = Some(new_dir.to_path_buf());
         } else {
             *active = None;

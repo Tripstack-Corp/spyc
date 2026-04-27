@@ -1,6 +1,4 @@
 ### SMALL ###
-- if an update happens in a subdirectory, the git update doesn't seem to
-  trigger in the display until you go into a subdirectory
 - while I am drafting a command for a new pane it would be nice to still be
   able to switch to another pane to check on something
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
@@ -16,6 +14,7 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
+- maybe we need a better markdown viewer builtin?
 - would like to be able to reorder tabs
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
@@ -47,6 +46,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.7) Git status markers on parent-directory rows update
+  when a file changes in a subtree below. The listing watch was
+  `RecursiveMode::NonRecursive` (no events for subdir changes) and
+  `is_listing_path` only accepted the dir itself or direct children
+  (would have rejected subtree events anyway). Now: recursive watch
+  with subtree-wide acceptance, `.git/` carved out for tight
+  filtering (`index`/`HEAD` only) so background gc/pack churn
+  doesn't cascade. Repro: add `docs/foo.md` from outside spyc; the
+  `docs/` row gets the `~` marker within ~500ms (debounce) instead
+  of staying clean until you `chdir` into it.
 - (fixed, v1.21.6) Single-column pager no longer wraps long lines.
   Wrap was previously on (`Wrap { trim: false }`) but ratatui
   hard-breaks long unbreakable "words" (paths, log lines)

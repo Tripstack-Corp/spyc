@@ -13,6 +13,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.7] - 2026-04-27
+
+### Fixed
+- **Git status markers on parent-directory rows update on
+  subtree changes.** Previously, adding/modifying a file in a
+  subdirectory (e.g. `docs/foo.md` while sitting at the repo
+  root) didn't update the `docs/` row's git marker -- you had to
+  navigate into the subdirectory before the change registered.
+  Two pieces: (1) the `notify` listing watch was `NonRecursive`,
+  so subtree events never reached the loop; (2) `is_listing_path`
+  only matched the dir itself or direct children, so even a
+  recursive watch's events would have been rejected. Now: watch
+  is `Recursive`, and `is_listing_path` accepts anywhere under
+  the listing dir while keeping `.git/` carved out (only `index`
+  and `HEAD` direct children count, so background gc / pack /
+  refs activity doesn't cascade into needless `git status`
+  subprocesses). The 500ms trailing debounce already in place
+  bounds the cost on noisy subtrees. macOS FSEvents handles
+  recursive watches at the OS level (cheap); Linux inotify
+  needs a watch per subdir, which can hit
+  `fs.inotify.max_user_watches` on enormous monorepos.
+
 ## [1.21.6] - 2026-04-27
 
 ### Fixed
