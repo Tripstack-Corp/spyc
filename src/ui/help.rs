@@ -182,14 +182,18 @@ const SECTIONS: &[Section] = &[
             ("!!", "repeat last captured command"),
             (
                 "  while running",
-                "keys → child, ^C interrupt (SIGINT), ^\\ kill",
+                "keys → child, ^C interrupt, ^\\ kill, ^Z background",
+            ),
+            (
+                ":fg / :fg N",
+                "resume backgrounded task (most recent / by id)",
             ),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (";", "interactive → runs in top pane (top, vim, htop)"),
             ("$", "drop into $SHELL in current dir"),
             (
                 ":",
-                "command line (:cd, :sort, :marks, :bprev, :bnext, :limit, :set, :!, :;, :q)",
+                "command line (:cd, :sort, :marks, :bprev, :bnext, :limit, :set, :!, :;, :fg, :q)",
             ),
         ],
     },

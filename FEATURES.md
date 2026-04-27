@@ -140,7 +140,9 @@ Three modes of running commands, each for a different use case:
 - **!** captured — run a command and stream output into the pager in
   real-time with an hourglass timer. Stderr is merged so build
   progress, errors, and output all appear together. `%` expands to
-  the current selection. `^C` interrupts.
+  the current selection. `^C` interrupts; `^\` hard-kills; `^Z`
+  sends the task to the background (reader thread keeps draining
+  output into a buffer; resume with `:fg` -- see Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
   Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
@@ -181,10 +183,30 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 - **`:!<cmd>`** — captured shell command (same as `!`)
 - **`:!!`** — repeat last captured command
 - **`:;<cmd>`** — foreground shell command (same as `;`)
+- **`:fg`** / **`:fg N`** — resume a backgrounded task (see Background tasks)
 - **`:q`** — quit
 
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
+
+## Background tasks
+
+Long-running captured commands (`!cargo test`, `!find ...`) don't have
+to lock you out of spyc.
+
+- **^Z** while a `!` capture pager is open sends the task to the
+  background. The reader thread keeps draining output into a per-task
+  buffer (head-truncated at 1 MB). Status-bar suffix shows
+  `bg:N●M✓` -- N running, M completed-but-not-resumed.
+- **`:fg`** resumes the most-recently-backgrounded task; **`:fg N`**
+  targets a specific task id. Still-running tasks come back as a
+  streaming pager seeded with everything captured so far; already-
+  exited tasks come back as a static pager titled with the final
+  exit code and elapsed time.
+- A task that completes while in the background fires a flash:
+  `task #N: cmd — exit 0 (43s)`.
+- The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
+  alongside pane-tab processes.
 
 ## Pager buffer history
 

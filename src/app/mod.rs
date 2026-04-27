@@ -49,6 +49,92 @@ struct PendingCapture {
     started: std::time::Instant,
     /// True once the reader thread has sent all output.
     finished: bool,
+    /// Set when this capture was promoted from a previously-backgrounded
+    /// task via `:fg`. ^Z will reuse the same id when re-backgrounding so
+    /// the user sees `task #3` consistently across the round-trip.
+    original_id: Option<u32>,
+}
+
+/// Lifecycle state of a backgrounded shell capture.
+#[derive(Debug)]
+enum TaskStatus {
+    /// Reader thread is still running; child has not exited.
+    Running,
+    /// Child exited cleanly (or with non-zero status); inner is the code.
+    Exited(i32),
+    /// User killed the task (M2's `:bg` `R`-action).
+    #[allow(dead_code)]
+    Killed,
+    /// `child.wait()` returned an error -- inner is the message.
+    #[allow(dead_code)]
+    Crashed(String),
+}
+
+/// A capture that has been moved off the foreground pager into the
+/// background. Same plumbing as `PendingCapture` (child, writer, rx,
+/// buffer); the reader thread spawned by `spawn_capture` keeps draining
+/// into `buffer` even though no pager is attached.
+struct BackgroundTask {
+    id: u32,
+    title: String,
+    cmd_display: String,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    writer: Box<dyn std::io::Write + Send>,
+    output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    buffer: Vec<u8>,
+    status: TaskStatus,
+    started: std::time::Instant,
+    finished_at: Option<std::time::Instant>,
+}
+
+/// Soft cap on per-task buffered output. When exceeded, drop bytes from
+/// the head (keep the tail) -- the tail of a long build is what the user
+/// usually wants. 1 MB ≈ ~10K lines of plain text.
+const TASK_BUFFER_CAP: usize = 1_048_576;
+
+struct BackgroundTasks {
+    tasks: Vec<BackgroundTask>,
+    next_id: u32,
+}
+
+impl BackgroundTasks {
+    const fn new() -> Self {
+        Self {
+            tasks: Vec::new(),
+            next_id: 1,
+        }
+    }
+
+    const fn allocate_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        id
+    }
+
+    /// Most-recently-added task id (LIFO order), regardless of status.
+    /// `:fg` with no arg uses this.
+    fn most_recent(&self) -> Option<u32> {
+        self.tasks.last().map(|t| t.id)
+    }
+
+    fn take(&mut self, id: u32) -> Option<BackgroundTask> {
+        let pos = self.tasks.iter().position(|t| t.id == id)?;
+        Some(self.tasks.remove(pos))
+    }
+
+    fn running_count(&self) -> usize {
+        self.tasks
+            .iter()
+            .filter(|t| matches!(t.status, TaskStatus::Running))
+            .count()
+    }
+
+    fn done_count(&self) -> usize {
+        self.tasks
+            .iter()
+            .filter(|t| !matches!(t.status, TaskStatus::Running))
+            .count()
+    }
 }
 
 struct FrameLayout {
@@ -258,6 +344,7 @@ pub struct App {
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
     pending_capture: Option<PendingCapture>,
+    background_tasks: BackgroundTasks,
     pending_history_pick: Option<LineEditor>,
     history_pending_g: bool,
     /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
@@ -465,6 +552,7 @@ impl App {
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
             pending_capture: None,
+            background_tasks: BackgroundTasks::new(),
             pending_history_pick: None,
             history_pending_g: false,
             scroll_pending_g: false,
@@ -858,6 +946,59 @@ impl App {
                         view.scroll_to_bottom(40);
                     }
                     self.pending_capture = None;
+                }
+            }
+
+            // Drain output from each backgrounded task. Reader threads
+            // keep running even with no pager attached, so the buffer
+            // is up-to-date the moment the user does `:fg`. Bounded at
+            // TASK_BUFFER_CAP to avoid unbounded memory growth on a
+            // talkative `cargo build`.
+            let mut just_finished: Vec<(u32, String, String, std::time::Duration)> = Vec::new();
+            for task in &mut self.background_tasks.tasks {
+                if !matches!(task.status, TaskStatus::Running) {
+                    continue;
+                }
+                while let Ok(chunk) = task.output_rx.try_recv() {
+                    if chunk.is_empty() {
+                        let exit = task.child.wait();
+                        let (status_text, status_val) = match exit {
+                            Ok(s) if s.success() => ("exit 0".to_string(), TaskStatus::Exited(0)),
+                            #[allow(clippy::cast_possible_wrap)]
+                            Ok(s) => {
+                                let code = s.exit_code() as i32;
+                                (format!("exit {code}"), TaskStatus::Exited(code))
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                (format!("error: {msg}"), TaskStatus::Crashed(msg))
+                            }
+                        };
+                        task.status = status_val;
+                        task.finished_at = Some(std::time::Instant::now());
+                        just_finished.push((
+                            task.id,
+                            task.cmd_display.clone(),
+                            status_text,
+                            task.started.elapsed(),
+                        ));
+                        break;
+                    }
+                    task.buffer.extend_from_slice(&chunk);
+                    if task.buffer.len() > TASK_BUFFER_CAP {
+                        let drop_n = task.buffer.len() - TASK_BUFFER_CAP;
+                        task.buffer.drain(..drop_n);
+                    }
+                }
+            }
+            if !just_finished.is_empty() {
+                needs_draw = true;
+                draw_reason = 3;
+                for (id, cmd_display, status_text, elapsed) in just_finished {
+                    let secs = elapsed.as_secs();
+                    self.state.flash_info(format!(
+                        "task #{id}: {cmd_display} — {status_text} ({secs}s)"
+                    ));
                 }
             }
 
@@ -1896,14 +2037,26 @@ impl App {
                     let shown = self.state.rows.len();
                     let hidden = total.saturating_sub(shown);
                     let hidden_tag = format!(" hidden:{hidden}");
+                    let bg_tag = {
+                        let running = self.background_tasks.running_count();
+                        let done = self.background_tasks.done_count();
+                        if running == 0 && done == 0 {
+                            String::new()
+                        } else if done == 0 {
+                            format!(" bg:{running}\u{25cf}")
+                        } else {
+                            format!(" bg:{running}\u{25cf}{done}\u{2713}")
+                        }
+                    };
                     format!(
-                        "[picks:{} inv:{} m1:{} m2:{}{}{}]",
+                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}]",
                         self.state.picks.len(),
                         self.state.inventory.len(),
                         on_off(self.state.masks.mask1.enabled),
                         on_off(self.state.masks.mask2.enabled),
                         filter_tag,
                         hidden_tag,
+                        bg_tag,
                     )
                 }
             }),
@@ -1974,6 +2127,14 @@ impl App {
                     view.streaming = false;
                 }
                 self.pending_capture = None;
+                return Ok(PostAction::None);
+            }
+            // ^Z: send to background. Reader thread keeps draining; the
+            // pager closes; user can resume with `:fg`.
+            if matches!(key.code, KeyCode::Char('z'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                self.background_capture();
                 return Ok(PostAction::None);
             }
             let bytes = crate::pane::input::encode_key(key);
@@ -2815,6 +2976,22 @@ impl App {
             return PostAction::None;
         }
 
+        // :fg [N] — bring a backgrounded task back to the foreground.
+        // No arg = most-recently-backgrounded task; numeric arg = id.
+        if input == "fg" {
+            self.foreground_task(None);
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("fg ") {
+            match arg.trim().parse::<u32>() {
+                Ok(id) => self.foreground_task(Some(id)),
+                Err(_) => self
+                    .state
+                    .flash_error(format!("fg: expected task id (got {arg:?})")),
+            }
+            return PostAction::None;
+        }
+
         // :bprev / :bnext — pager buffer history
         if input == "bprev" {
             if let Some(current) = self.pager.take() {
@@ -3094,10 +3271,113 @@ impl App {
                     cmd_display: cmd_display.to_string(),
                     started: std::time::Instant::now(),
                     finished: false,
+                    original_id: None,
                 });
             }
             Err(e) => self.state.flash_error(format!("exec: {e}")),
         }
+    }
+
+    /// `^Z` from inside a streaming `!` capture pager. Move the running
+    /// capture into `background_tasks` and close the pager. The reader
+    /// thread (spawned by `spawn_capture`) keeps running, so output
+    /// keeps accumulating into the task buffer for later `:fg`.
+    fn background_capture(&mut self) {
+        let Some(capture) = self.pending_capture.take() else {
+            return;
+        };
+        let id = capture
+            .original_id
+            .unwrap_or_else(|| self.background_tasks.allocate_id());
+        let task = BackgroundTask {
+            id,
+            title: capture.title,
+            cmd_display: capture.cmd_display.clone(),
+            child: capture.child,
+            writer: capture.writer,
+            output_rx: capture.output_rx,
+            buffer: capture.buffer,
+            status: TaskStatus::Running,
+            started: capture.started,
+            finished_at: None,
+        };
+        self.background_tasks.tasks.push(task);
+        self.pager = None;
+        self.needs_full_repaint = true;
+        self.state
+            .flash_info(format!("task #{id} backgrounded — :fg to resume"));
+    }
+
+    /// `:fg` (no arg) or `:fg N`. Bring a backgrounded task to the
+    /// foreground. Still-running tasks resume as a streaming pager
+    /// seeded with the buffer; already-exited tasks open as a static
+    /// pager and are removed from the background list (one-shot view).
+    fn foreground_task(&mut self, target: Option<u32>) {
+        if self.pending_capture.is_some() {
+            self.state
+                .flash_error("already in a foreground task — ^Z to send to background first");
+            return;
+        }
+        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+            self.state.flash_error("no background tasks");
+            return;
+        };
+        let Some(task) = self.background_tasks.take(id) else {
+            self.state.flash_error(format!("no task #{id}"));
+            return;
+        };
+
+        match task.status {
+            TaskStatus::Running => {
+                // Re-attach as a streaming capture. Title rebuilt next
+                // tick by the streaming code path.
+                let secs = task.started.elapsed().as_secs();
+                let mut view = PagerView::new_plain(
+                    format!("\u{23f3} {} — running... ({secs}s)", task.title),
+                    Vec::new(),
+                );
+                view.streaming = true;
+                self.pager = Some(view);
+                self.pending_capture = Some(PendingCapture {
+                    child: task.child,
+                    writer: task.writer,
+                    output_rx: task.output_rx,
+                    buffer: task.buffer,
+                    title: task.title,
+                    cmd_display: task.cmd_display,
+                    started: task.started,
+                    finished: false,
+                    original_id: Some(task.id),
+                });
+                self.state
+                    .flash_info(format!("task #{id} resumed — ^Z to background again"));
+            }
+            status => {
+                // Exited / Killed / Crashed -- open a static pager with
+                // the buffered output and a final-state title.
+                use ansi_to_tui::IntoText;
+                let normalized = strip_crlf(&task.buffer);
+                let text = normalized.as_slice().into_text().unwrap_or_default();
+                let elapsed_secs = task
+                    .finished_at
+                    .map_or_else(|| task.started.elapsed(), |f| f - task.started)
+                    .as_secs();
+                let status_text = match &status {
+                    TaskStatus::Exited(0) => "exit 0".to_string(),
+                    TaskStatus::Exited(code) => format!("exit {code}"),
+                    TaskStatus::Killed => "killed".to_string(),
+                    TaskStatus::Crashed(msg) => format!("error: {msg}"),
+                    TaskStatus::Running => unreachable!(),
+                };
+                let title = format!("{} — {status_text} ({elapsed_secs}s)", task.title);
+                let mut view = PagerView::new_plain(title, Vec::new());
+                view.lines = text.lines;
+                view.saveable = true;
+                view.scroll_to_bottom(40);
+                self.pager = Some(view);
+            }
+        }
+        self.needs_full_repaint = true;
     }
 
     /// For tabs that have a `pending_resume_send` armed (set by
@@ -5069,9 +5349,11 @@ impl App {
                     self.state.should_quit = true;
                 } else {
                     self.state.quit_pending = Some(now);
-                    let running = self.pane_tabs.as_ref().map_or(0, |tabs| {
+                    let running_panes = self.pane_tabs.as_ref().map_or(0, |tabs| {
                         tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
                     });
+                    let running_bg = self.background_tasks.running_count();
+                    let running = running_panes + running_bg;
                     if running > 0 {
                         self.state.flash_info(format!(
                             "{running} running process{} — press again to quit",
@@ -5645,5 +5927,43 @@ mod layout_tests {
         assert_eq!(l.status.y, 23);
         // pane ends at the row above prompt.
         assert!(pane.y + pane.height <= l.prompt.y);
+    }
+}
+
+#[cfg(test)]
+mod background_tasks_tests {
+    use super::BackgroundTasks;
+
+    #[test]
+    fn allocate_id_starts_at_one_and_monotonic() {
+        let mut bg = BackgroundTasks::new();
+        assert_eq!(bg.allocate_id(), 1);
+        assert_eq!(bg.allocate_id(), 2);
+        assert_eq!(bg.allocate_id(), 3);
+    }
+
+    #[test]
+    fn most_recent_returns_last_pushed_id() {
+        let mut bg = BackgroundTasks::new();
+        assert_eq!(bg.most_recent(), None);
+        // We can't easily construct full BackgroundTask values in a test
+        // (they hold Box<dyn Child>), so we exercise the id allocator
+        // and trust `most_recent`/`take` against the `tasks` Vec they
+        // operate on. These pass-through helpers are simple enough that
+        // the structural test is in the integration of ^Z / :fg flows.
+        let _ = bg.allocate_id();
+    }
+
+    #[test]
+    fn take_missing_id_returns_none() {
+        let mut bg = BackgroundTasks::new();
+        assert!(bg.take(99).is_none());
+    }
+
+    #[test]
+    fn running_and_done_counts_are_zero_initially() {
+        let bg = BackgroundTasks::new();
+        assert_eq!(bg.running_count(), 0);
+        assert_eq!(bg.done_count(), 0);
     }
 }

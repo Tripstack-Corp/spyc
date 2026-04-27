@@ -165,17 +165,17 @@ terminal inside a terminal." In priority order:
   `PendingCapture` from a singular field into a collection, detach
   the pager, keep the reader thread draining into a per-task
   buffer." Phasing:
-  1. **M1 -- `^Z` to background, `:fg` to resume.** Ship together so
-     the round-trip works end to end. `^Z` in the streaming capture
-     pager moves the task into a new `BackgroundTasks` collection on
-     `AppState`; pager closes; flash `task #N backgrounded`. `:fg`
-     (no arg) re-attaches the most-recent task; `:fg N` targets a
-     specific id. Resume is uniform: still-running tasks come back as
-     a streaming pager seeded with the buffered output so far;
-     already-exited tasks come back as a static pager with the final
-     `exited <code> (Xs)` title. Status segment `bg: 1●` appears
-     when there's at least one task. Output buffer head-truncates at
-     ~1 MB so unbounded `cargo build` doesn't eat memory.
+  1. **M1 -- `^Z` to background, `:fg` to resume.** ✅ shipped in
+     v1.20.0. `^Z` in the streaming capture pager moves the task into
+     a `BackgroundTasks` collection on `App`; pager closes; flash
+     `task #N backgrounded`. `:fg` (no arg) re-attaches the
+     most-recent task; `:fg N` targets a specific id. Still-running
+     tasks come back as a streaming pager seeded with the buffered
+     output so far; already-exited tasks come back as a static pager
+     with the final `exited <code> (Xs)` title. Status suffix
+     `bg:N●M✓` shows running/done counts. Buffer head-truncates at
+     1 MB. Original task id is preserved across `^Z` → `:fg` → `^Z`
+     cycles via `PendingCapture.original_id`.
   2. **M2 -- `:bg` overlay.** Picker-style list with columns
      `# STATUS TIME CMD`. `Enter` reuses the `:fg` code path; `R`
      dismisses or kills (running -> SIGTERM with grace then SIGKILL,

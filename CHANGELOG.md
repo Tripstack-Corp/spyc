@@ -13,6 +13,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.20.0] - 2026-04-26
+
+### Added
+- **Background tasks (M1) -- `^Z` to background, `:fg` to resume.**
+  Long captured commands (`!cargo test`, `!find ...`) no longer lock
+  you out of spyc. Press `^Z` while a streaming `!` capture pager is
+  open to send the task to the background; reader thread keeps
+  draining output into a per-task buffer (head-truncated at 1 MB).
+  `:fg` (no arg) resumes the most-recently-backgrounded task; `:fg N`
+  targets a specific id. Round-trip semantics:
+  - Still-running tasks resume as a streaming pager seeded with
+    everything captured so far; the original task id is preserved
+    across `^Z` -> `:fg` -> `^Z` cycles.
+  - Already-exited tasks resume as a static pager titled
+    `! cmd — exit 0 (43s)` and are removed from the background list
+    on view (one-shot).
+  - A task that completes while in the background fires a flash
+    `task #N: cmd — exit 0 (43s)`.
+  - Status-bar suffix shows `bg:N●M✓` (N running, M completed).
+  - Quit confirmation counts backgrounded running tasks alongside
+    pane-tab processes.
+  - Already in a foreground task and `:fg` is hit? Error-flash
+    `already in a foreground task — ^Z to send to background first`
+    (no silent swap).
+
+  M2-M4 (`:bg` overlay, `!&cmd` direct-launch, polish) remain on the
+  ROADMAP.
+
 ## [1.19.1] - 2026-04-26
 
 ### Changed
