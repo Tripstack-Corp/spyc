@@ -5969,6 +5969,17 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
     builder.env("COLORTERM", "truecolor");
     builder.env("COLUMNS", cols.to_string());
     builder.env("LINES", rows.to_string());
+    // We're already running this child *inside* spyc's pager. Tools
+    // that probe `isatty(stdout)` and auto-invoke a sub-pager (`git
+    // log`, `man`, anything that defers to $PAGER) would otherwise
+    // launch `less` against our PTY and freeze the capture waiting
+    // for keystrokes. Force a no-op pager so tools just dump their
+    // output and our pager wraps the whole thing. `cat` is safer
+    // than empty/unset, since some tools fall back to a default
+    // when $PAGER is unset.
+    builder.env("PAGER", "cat");
+    builder.env("GIT_PAGER", "cat");
+    builder.env("MANPAGER", "cat");
 
     let child = pair.slave.spawn_command(builder)?;
     // Drop the slave handle — once the child exits, the master read

@@ -47,6 +47,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.4) `!` captures no longer launch a sub-pager. `git log`,
+  `man`, and friends probe `isatty(stdout)` and auto-invoke `$PAGER`
+  (less by default) when stdout is a TTY -- which it always is for
+  our captures, since we run children under a slave PTY for prompt
+  handling. Less would then take the PTY hostage waiting for keys
+  inside our pager. `spawn_capture` now sets `PAGER=cat`,
+  `GIT_PAGER=cat`, `MANPAGER=cat` in the child env so tools dump
+  directly and spyc's pager wraps the whole result. Foreground (`;`)
+  commands and pane tabs are unaffected -- those should keep
+  paginating since the user owns the TTY there.
 - (fixed, v1.21.3) Bracketed-paste into the `!` / `;` / `:` prompt now
   splices at the cursor instead of appending to the end. The paste
   handler had `p.buffer.push_str(&clean)` regardless of cursor; now,

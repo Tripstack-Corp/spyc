@@ -13,6 +13,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.4] - 2026-04-27
+
+### Fixed
+- **`!` captures no longer launch a sub-pager.** `git log`, `man`, and
+  any tool that probes `isatty(stdout)` and defers to `$PAGER` would
+  detect our slave PTY as a real TTY and invoke `less`, which then
+  took the PTY hostage waiting for keystrokes *inside* spyc's
+  pager. `spawn_capture` now sets `PAGER=cat`, `GIT_PAGER=cat`,
+  `MANPAGER=cat` in the child env so the tools dump directly and
+  spyc's pager wraps the whole result. Foreground (`;`) commands
+  and pane tabs are unaffected -- they should keep paginating
+  since the user owns the TTY there.
+
 ## [1.21.3] - 2026-04-27
 
 ### Fixed
