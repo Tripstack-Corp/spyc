@@ -1071,8 +1071,14 @@ impl AppState {
             return CommandResult::Handled;
         }
 
-        // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd, :bprev, :bnext
-        if input.starts_with('!') || input.starts_with(';') || input == "bprev" || input == "bnext"
+        // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd,
+        // :bprev, :bnext, :fg [N]
+        if input.starts_with('!')
+            || input.starts_with(';')
+            || input == "bprev"
+            || input == "bnext"
+            || input == "fg"
+            || input.starts_with("fg ")
         {
             return CommandResult::NotHandled;
         }
