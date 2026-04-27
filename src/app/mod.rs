@@ -1278,9 +1278,17 @@ impl App {
                             // Paste into the active prompt buffer.
                             // Strip newlines (prompts are single-line).
                             let clean = text.replace(['\n', '\r'], " ");
-                            p.buffer.push_str(&clean);
                             if let Some(ed) = p.editor.as_mut() {
-                                ed.set_content(&p.buffer);
+                                // Editor present (`!` / `;` / `:`): splice
+                                // at the cursor so a mid-line paste lands
+                                // where the user is, then sync the
+                                // canonical buffer from the editor.
+                                ed.insert_str(&clean);
+                                p.buffer = ed.text();
+                            } else {
+                                // Simple prompt (search, mkdir, etc.) --
+                                // no cursor concept, append.
+                                p.buffer.push_str(&clean);
                             }
                         } else if self.pane_tabs.is_some() {
                             // Switch focus to the pane — the user clearly

@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.21.3] - 2026-04-27
+
+### Fixed
+- **Pasting into `!` / `;` / `:` prompts now splices at the cursor**
+  instead of appending to the end of the line. The bracketed-paste
+  handler used to `push_str` to the prompt buffer regardless of
+  where the cursor was; now, when the prompt has a vi line editor
+  attached, it calls a new `LineEditor::insert_str(&str)` that
+  inserts each char at `cursor` and advances. The canonical
+  `Prompt.buffer` is then synced from the editor's text. Simple
+  prompts (search, mkdir, file/dir name) still append since they
+  have no cursor concept. Lets you `!` `git ` ⏎-paste-back-from-`!?`
+  history-Esc-`b` (move back a word)-paste-mid-cursor without
+  having to retype.
+
 ## [1.21.2] - 2026-04-26
 
 ### Fixed

@@ -1,6 +1,6 @@
 ### SMALL ###
-- while editing for a command ! if you paste while insert mode it only appends
-  it doesn't paste at where the cursor is positioned
+- if an update happens in a subdirectory, the git update doesn't seem to
+  trigger in the display until you go into a subdirectory
 - while I am drafting a command for a new pane it would be nice to still be
   able to switch to another pane to check on something
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
@@ -47,6 +47,15 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.21.3) Bracketed-paste into the `!` / `;` / `:` prompt now
+  splices at the cursor instead of appending to the end. The paste
+  handler had `p.buffer.push_str(&clean)` regardless of cursor; now,
+  when the prompt has an editor (shell prompts), it calls a new
+  `LineEditor::insert_str` that inserts each char at the cursor and
+  advances. Simple prompts (search, mkdir, etc.) keep the append
+  behavior since they have no cursor concept. Three new unit tests
+  cover splice-at-cursor in Insert mode, end-of-line paste, and
+  start-of-line paste.
 - (fixed, v1.21.2) `!cmd` capture pager (and task viewer) now collapse
   bare `\r` progress-bar updates to the last frame, so `git pull` /
   `npm install` / `cargo build` no longer paint dozens of partial

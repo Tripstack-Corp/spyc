@@ -85,6 +85,19 @@ impl LineEditor {
         self.buf.is_empty()
     }
 
+    /// Splice a string into the buffer at the current cursor position,
+    /// advancing the cursor past the inserted text. Used by the paste
+    /// handler so an OS clipboard paste (bracketed paste / OSC 52
+    /// equivalent) lands where the cursor is, not at the end of the
+    /// line. Mode-agnostic; callers use it whether the user is in
+    /// Insert or Normal mode.
+    pub fn insert_str(&mut self, s: &str) {
+        for c in s.chars() {
+            self.buf.insert(self.cursor, c);
+            self.cursor += 1;
+        }
+    }
+
     /// Feed a key. Returns what the prompt loop should do next.
     pub fn feed(&mut self, key: KeyEvent) -> EditResult {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -425,6 +438,52 @@ mod tests {
         assert_eq!(e.feed(k(KeyCode::Char('s'))), EditResult::Continue);
         assert_eq!(e.text(), "ls");
         assert_eq!(e.feed(k(KeyCode::Enter)), EditResult::Submit);
+    }
+
+    #[test]
+    fn insert_str_splices_at_cursor_in_insert_mode() {
+        // The reported bug: in Insert mode with the cursor mid-line,
+        // a paste should land at the cursor, not at the end.
+        // Build "ls -l", move cursor back two with Left (to between
+        // 's' and ' '), then paste "ar" -- should be "lsar -l".
+        let mut e = LineEditor::new();
+        for c in "ls -l".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        // Cursor is at 5 (end). Walk left until just after 's'.
+        e.feed(k(KeyCode::Left));
+        e.feed(k(KeyCode::Left));
+        e.feed(k(KeyCode::Left));
+        // cursor is now at 2 (just before ' ').
+        let cursor_before = e.cursor;
+        assert_eq!(cursor_before, 2);
+        e.insert_str("ar");
+        assert_eq!(e.text(), "lsar -l");
+        assert_eq!(e.cursor, cursor_before + 2);
+    }
+
+    #[test]
+    fn insert_str_at_end_appends() {
+        let mut e = LineEditor::new();
+        for c in "ls".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        // Cursor is at end after typing in Insert mode.
+        e.insert_str(" -lah");
+        assert_eq!(e.text(), "ls -lah");
+        assert_eq!(e.cursor, 7);
+    }
+
+    #[test]
+    fn insert_str_at_start_prepends() {
+        let mut e = LineEditor::new();
+        for c in "lah".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.cursor = 0;
+        e.insert_str("ls -");
+        assert_eq!(e.text(), "ls -lah");
+        assert_eq!(e.cursor, 4);
     }
 
     #[test]
