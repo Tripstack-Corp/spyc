@@ -13,6 +13,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.20.1] - 2026-04-26
+
+### Fixed
+- **`:fg` no longer flashes "unknown command: fg".**
+  `AppState::dispatch_command` whitelists which colon-commands fall
+  through to App's terminal-touching arms (where the v1.20.0 `:fg`
+  implementation lives); `fg` wasn't on the list, so the command was
+  rejected inside AppState before App ever saw it. Added `fg` and
+  `fg <N>` to the passthrough list. `^Z` to background was unaffected.
+
 ## [1.20.0] - 2026-04-26
 
 ### Added
