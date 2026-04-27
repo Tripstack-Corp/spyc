@@ -243,9 +243,27 @@ terminal inside a terminal." In priority order:
   substituted in -- e.g., `map "<space>cr" claude-template review`
   where `review` is defined in config. Turns spyc into a
   keyboard-driven Claude launcher for repeated workflows.
-- **Status bar agent segment.** When the pane is running Claude, show
-  a small indicator: session identity, maybe token usage if the CLI
-  surface exposes it. Useful, not essential.
+- **Session cost telemetry (replaces the older "status bar agent
+  segment" entry).** Read the active Claude session's JSONL at
+  `~/.claude/projects/<slug>/<session>.jsonl` (the same file
+  `find_claude_session` already locates for resume), sum input /
+  output / cache tokens, multiply by a small built-in pricing table
+  keyed on model name. Surface in two places:
+  1. `I` info overlay -- a `session: $0.42 (37k in / 12k out)` line
+     so the user can see their spend without leaving spyc.
+     Optionally a tiny top-bar segment when the pane is running
+     Claude, behind a config flag (off by default; the bar is
+     already busy).
+  2. New MCP tool `get_session_cost` -- lets Claude self-report
+     ("you've cost $0.42 in this conversation"). This is the
+     *spyc-shaped* angle: only spyc can see Claude's own JSONL via
+     MCP, so the tool is novel-positioned rather than duplicative
+     of standalone cost trackers.
+  Scope: pricing table is hardcoded constants for the Claude 4.x
+  family, updated when new models ship. Multi-provider / currency
+  conversion / historical dashboards / one-shot success classifiers
+  stay out of scope -- standalone tools handle those better and
+  spyc has no business being one of them.
 - **Autocommands** per the old roadmap, but scoped to the agent
   workflow -- `autocmd "*.test.ts" "claude-template test-review"`
   etc. Defer until the template feature lands and the shape is
@@ -375,7 +393,7 @@ same commit.
   Distribution track complete. External announcement: TripStack
   engineering blog post, optional Show HN. Target: mid-to-late May
   2026.
-- **v2.x onward** -- Remaining thesis items (status bar agent segment,
+- **v2.x onward** -- Remaining thesis items (session cost telemetry,
   autocommands), feature work from Additional Ideas section,
   community-driven contributions.
 
