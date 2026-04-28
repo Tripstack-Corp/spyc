@@ -130,13 +130,25 @@ spyc.
 - **/ search** within pager content, with **n / N** navigation
 - **:N** jump to line N
 - **l** toggle line numbers (on by default)
-- **w** toggle whitespace markers (·, ↲)
+- **w** toggle whitespace markers (·, ↲, $)
+- **W** toggle line wrap (default on for content; off for picker UIs)
+- **m** toggle Markdown rendered ↔ source view (`.md`/`.markdown` only;
+  flashes "not a markdown file" otherwise)
 - **f** toggle full-width mode vs. centered overlay
 - **v** open pager content in `$EDITOR`
 - **s** save pager content to a file
-- **y** yank pager content to the system clipboard
+- **y** yank pager content to the system clipboard (always operates
+  on the *source* — yanking a rendered Markdown view gives you back
+  the markdown text, not the styled rendering)
 - **x** toggle hex-dump view for binary files
-- Line wrapping for long lines
+- **Markdown viewer** — `.md`/`.markdown` files open in rendered
+  mode by default: headings styled, lists with bullets, fenced
+  code blocks syntect-highlighted by language, blockquotes with a
+  left rule, links shown with the destination URL, inline
+  bold/italic/strikethrough preserved. Press `m` to toggle to the
+  raw source view (with full syntect highlighting of the
+  markdown source itself); press `m` again to flip back. Yank
+  and save always emit the source.
 - Page-up/down, half-page, and vi-style scrolling
 
 ## Shell integration

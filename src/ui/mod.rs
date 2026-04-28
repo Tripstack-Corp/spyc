@@ -15,6 +15,7 @@ pub mod help;
 )]
 pub mod line_edit;
 pub mod list_view;
+pub mod markdown;
 pub mod pager;
 pub mod prompt;
 pub mod status;

@@ -5799,6 +5799,9 @@ impl App {
             KeyCode::Char('l') => view.toggle_line_numbers(),
             KeyCode::Char('w') => view.toggle_whitespace(),
             KeyCode::Char('W') => view.toggle_wrap(),
+            KeyCode::Char('m') if !view.toggle_markdown() => {
+                view.flash = Some("not a markdown file".into());
+            }
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
                 Ok(()) => view.flash = Some("yanked to clipboard".into()),
@@ -6192,14 +6195,29 @@ impl App {
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
                             let content = expand_tabs(&content);
-                            let mut view = if let Some(styled) =
+                            let is_md = crate::ui::markdown::is_markdown_path(&path);
+                            // Source-side lines: syntect-highlighted if
+                            // available, else plain text per source line.
+                            let source_lines: Vec<ratatui::text::Line<'static>> =
                                 crate::ui::syntax::highlight_to_lines(&name, &content)
-                            {
-                                PagerView::new_styled(name, styled)
+                                    .unwrap_or_else(|| {
+                                        content
+                                            .lines()
+                                            .map(|l| ratatui::text::Line::from(l.to_string()))
+                                            .collect()
+                                    });
+                            let mut view = if is_md {
+                                // Pre-compute both views; default to
+                                // rendered. `m` toggles. Yank/save always
+                                // hit the source via `source_text()`.
+                                let rendered =
+                                    crate::ui::markdown::render(&content, &self.theme);
+                                let mut v = PagerView::new_styled(name, rendered);
+                                v.alt_lines = Some(source_lines);
+                                v.markdown_rendered = true;
+                                v
                             } else {
-                                let lines: Vec<String> =
-                                    content.lines().map(String::from).collect();
-                                PagerView::new_plain(name, lines)
+                                PagerView::new_styled(name, source_lines)
                             };
                             view.source_path = Some(path.clone());
                             self.pager = Some(view);

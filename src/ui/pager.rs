@@ -97,6 +97,14 @@ pub struct PagerView {
     /// UIs (find finder, task viewer) where each source line maps to
     /// a single selectable row.
     pub wrap: bool,
+    /// Alternate-view buffer used by the Markdown viewer. When
+    /// `Some`, `m` toggles `lines` ↔ `alt_lines` (rendered ↔
+    /// source). `markdown_rendered` tracks which side is active so
+    /// `yank` / `save` always work on the source.
+    pub alt_lines: Option<Vec<Line<'static>>>,
+    /// True when `lines` currently holds the rendered Markdown view
+    /// and `alt_lines` holds the source. Flipped by `toggle_markdown`.
+    pub markdown_rendered: bool,
     /// Lower bound for the line-number gutter width. Streaming views
     /// use this to lock the gutter at the expected final size so it
     /// doesn't widen mid-scan as `ilog10(lines.len())` grows -- which
@@ -135,6 +143,8 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             wrap: true,
+            alt_lines: None,
+            markdown_rendered: false,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -161,6 +171,8 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             wrap: true,
+            alt_lines: None,
+            markdown_rendered: false,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -191,38 +203,48 @@ impl PagerView {
             picker_edit_cursor: None,
             streaming: false,
             wrap: true,
+            alt_lines: None,
+            markdown_rendered: false,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
         }
     }
 
-    /// All lines as plain text (ANSI stripped), joined with newlines.
-    fn plain_text(&self) -> String {
-        self.lines
+    /// Plain text of the *source* view. For Markdown buffers this
+    /// is always the raw markdown, never the rendered output --
+    /// yanking a README to the clipboard or editing it should give
+    /// you back the file contents, not the styled rendering. POLA.
+    fn source_text(&self) -> String {
+        let lines = if self.markdown_rendered {
+            self.alt_lines.as_deref().unwrap_or(&self.lines)
+        } else {
+            &self.lines
+        };
+        lines
             .iter()
             .map(line_plain_text)
             .collect::<Vec<_>>()
             .join("\n")
     }
 
-    /// Save the plain-text content to a timestamped file in the current
+    /// Save the source content to a timestamped file in the current
     /// directory. Returns the path on success.
     pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = now.trim_end_matches("_UTC");
         let filename = format!("spyc_output_{stamp}.txt");
         let path = std::env::current_dir()?.join(&filename);
-        std::fs::write(&path, self.plain_text() + "\n")?;
+        std::fs::write(&path, self.source_text() + "\n")?;
         Ok(path)
     }
 
-    /// Write the plain-text content to a temp file for editing.
+    /// Write the source content to a temp file for editing.
     pub fn write_to_temp(&self) -> std::io::Result<std::path::PathBuf> {
         let dir = std::env::temp_dir();
         let filename = format!("spyc_pager_{}.txt", std::process::id());
         let path = dir.join(filename);
-        std::fs::write(&path, self.plain_text() + "\n")?;
+        std::fs::write(&path, self.source_text() + "\n")?;
         Ok(path)
     }
 
@@ -252,10 +274,13 @@ impl PagerView {
     }
 
     /// Yank the full pager content to the system clipboard via pbcopy.
+    /// For Markdown buffers, yanks the *source* regardless of view
+    /// mode -- you almost certainly want the markdown source, not a
+    /// styled rendering of it.
     pub fn yank_to_clipboard(&self) -> std::io::Result<()> {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let text = self.plain_text();
+        let text = self.source_text();
         let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
         if let Some(stdin) = child.stdin.as_mut() {
             stdin.write_all(text.as_bytes())?;
@@ -274,6 +299,22 @@ impl PagerView {
 
     pub const fn toggle_wrap(&mut self) {
         self.wrap = !self.wrap;
+    }
+
+    /// Toggle Markdown rendered ↔ source view. No-op (returns false)
+    /// if this view doesn't have an alternate buffer (i.e. wasn't
+    /// opened on a `.md`/`.markdown` file). Resets scroll to the top
+    /// because line counts differ between the two views and
+    /// preserving an absolute index would land somewhere arbitrary.
+    pub fn toggle_markdown(&mut self) -> bool {
+        let Some(alt) = self.alt_lines.take() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.lines, alt);
+        self.alt_lines = Some(current);
+        self.markdown_rendered = !self.markdown_rendered;
+        self.scroll = 0;
+        true
     }
 
     pub fn line_count(&self) -> u16 {
@@ -1076,6 +1117,7 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
                 ("l", "toggle line numbers"),
                 ("w", "toggle whitespace markers (·, ↲, $)"),
                 ("W", "toggle line wrap (default on for content pagers)"),
+                ("m", "toggle markdown render ↔ source (.md files)"),
                 ("f", "toggle full-width / centered"),
             ],
         ),

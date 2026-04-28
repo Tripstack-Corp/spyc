@@ -13,6 +13,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.26.0] - 2026-04-28
+
+### Added
+- **Markdown viewer with source ↔ rendered toggle.** `.md` /
+  `.markdown` files now open in *rendered* mode by default --
+  headings styled, lists with bullets, fenced code blocks
+  syntect-highlighted by language, blockquotes with a left rule,
+  links rendered with the destination URL appended, inline
+  bold/italic/strikethrough preserved. Press `m` in the pager to
+  toggle to the syntect-highlighted source view, `m` again to
+  flip back. Non-Markdown files flash "not a markdown file" on
+  `m`. Both views are pre-computed at file-open so the toggle is
+  instant.
+  - Yank (`y`) and save (`s`) always operate on the *source*
+    regardless of view mode -- POLA: yanking a README should give
+    you back the markdown text, not the styled rendering.
+  - Search / `n` / `N` match the *active* rendering: what you see
+    is what you find. Toggle to source first if you need to grep
+    for raw markdown syntax.
+  - Scroll resets to top on toggle (rendered/source line counts
+    differ; preserving an absolute index would land somewhere
+    arbitrary).
+  - Tables, images, and embedded HTML are out of scope by design;
+    tables fall through unstyled, images render as `[image: url]`
+    placeholders, raw HTML renders as dim text.
+  - Built on `pulldown-cmark` + a small `src/ui/markdown.rs`
+    renderer (~370 LOC). 7 unit tests cover heading prefix,
+    paragraph flow, bullet list, blockquote rule, fenced code
+    block fences, link rendering, and extension detection.
+
 ## [1.25.0] - 2026-04-28
 
 ### Added
