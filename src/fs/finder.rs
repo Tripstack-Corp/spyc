@@ -41,41 +41,133 @@ const STREAM_BATCH: usize = 256;
 /// to run in a background thread so the picker stays interactive
 /// while a large monorepo is being enumerated.
 ///
+/// Multi-repo handling: if `root` is itself a git repo, the walk
+/// runs in two passes. Pass 1 is a standard gitignore-aware walk
+/// from `root`. Pass 2 looks for *nested* git repos under `root`
+/// that pass 1 skipped because the outer repo's `.gitignore`
+/// excluded them (the common "sibling clones living inside a
+/// parent dir" layout, e.g. `tripstack_platform/.gitignore`
+/// excluding `book-org/` even though `book-org/` is a separate
+/// checkout the user wants to find files in). Each found subrepo
+/// is then walked with its own gitignore context. Without pass 2,
+/// `F` in such a parent dir misses everything outside the outer
+/// repo's tracked tree.
+///
 /// Cancellation: when the receiver is dropped (e.g. user closes
 /// the picker), `tx.send` fails and we exit cleanly without
 /// finishing the walk -- no lingering threads.
-///
-/// Returns when: the walk completes, the cap is hit, or the
-/// receiver disconnects. The sender drops on return; the receiver
-/// sees `TryRecvError::Disconnected` and knows the walk is done.
 pub fn walk_streaming(root: &Path, tx: std::sync::mpsc::Sender<Vec<PathBuf>>) {
-    let walker = ignore::WalkBuilder::new(root)
+    let mut count = 0usize;
+
+    // Pass 1: standard walk from the requested root.
+    if !walk_one(root, root, &tx, &mut count) {
+        return;
+    }
+
+    // Pass 2: only meaningful when root is itself a git repo --
+    // find sibling-clone-style nested .git directories that pass 1's
+    // gitignore would have masked, and walk each as its own root.
+    if root.join(".git").is_dir() {
+        for extra in find_nested_git_repos(root) {
+            if !walk_one(&extra, root, &tx, &mut count) {
+                return;
+            }
+        }
+    }
+}
+
+/// Single-repo walk loop, factored out so `walk_streaming` can run
+/// it on the original root and on each nested-repo root. Reports
+/// paths *relative to* `display_root` so the picker UI shows
+/// consistent prefixes regardless of which pass produced them.
+/// Returns false on receiver disconnect or cap-hit so the caller
+/// knows to bail.
+fn walk_one(
+    walk_root: &Path,
+    display_root: &Path,
+    tx: &std::sync::mpsc::Sender<Vec<PathBuf>>,
+    count: &mut usize,
+) -> bool {
+    let walker = ignore::WalkBuilder::new(walk_root)
         .standard_filters(true) // gitignore + hidden + .git/
         .max_filesize(None)
+        .parents(false) // don't pull in gitignores from above walk_root
         .build();
     let mut batch: Vec<PathBuf> = Vec::with_capacity(STREAM_BATCH);
-    let mut count = 0usize;
     for entry in walker {
         let Ok(entry) = entry else { continue };
         if entry.file_type().is_some_and(|t| t.is_file()) {
             let path = entry.path();
-            let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
+            let rel = path
+                .strip_prefix(display_root)
+                .unwrap_or(path)
+                .to_path_buf();
             batch.push(rel);
-            count += 1;
+            *count += 1;
             if batch.len() >= STREAM_BATCH {
                 if tx.send(std::mem::take(&mut batch)).is_err() {
-                    return; // receiver dropped -- picker closed
+                    return false;
                 }
                 batch = Vec::with_capacity(STREAM_BATCH);
             }
-            if count >= MAX_CANDIDATES {
-                break;
+            if *count >= MAX_CANDIDATES {
+                if !batch.is_empty() {
+                    let _ = tx.send(batch);
+                }
+                return false;
             }
         }
     }
-    if !batch.is_empty() {
-        let _ = tx.send(batch);
+    if !batch.is_empty() && tx.send(batch).is_err() {
+        return false;
     }
+    true
+}
+
+/// Scan `root`'s subtree (without gitignore filtering) for
+/// directories that contain a `.git/`. Returns the parent paths.
+/// Stops descending once a `.git/` is found (anything below it
+/// belongs to that repo, which the caller will walk with proper
+/// gitignore context). Skips `root` itself (already walked in
+/// pass 1) plus a small set of well-known noise dirs to avoid
+/// pointless descent into build/dependency trees.
+fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
+    const SKIP: &[&str] = &[
+        "node_modules",
+        "target",
+        "build",
+        "dist",
+        "_build",
+        ".next",
+        ".cache",
+        "__pycache__",
+        "venv",
+        ".venv",
+    ];
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        // Don't re-add the original root -- pass 1 already covered it.
+        if dir != root && dir.join(".git").exists() {
+            found.push(dir);
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') || SKIP.contains(&name_str.as_ref()) {
+                continue;
+            }
+            stack.push(entry.path());
+        }
+    }
+    found
 }
 
 /// Synchronous wrapper around `walk_streaming` -- spawns a thread,
@@ -235,6 +327,44 @@ mod tests {
         // Channel closed once walk completed -- thread dropped tx.
         assert!(batch_count >= 2, "expected ≥2 batches, got {batch_count}");
         assert_eq!(total, STREAM_BATCH + 5);
+    }
+
+    #[test]
+    fn walk_descends_into_sibling_clone_under_gitignored_dir() {
+        // Real-world repro: a parent repo whose .gitignore excludes
+        // a sibling-clone subdir (the dir contains its own .git).
+        // Pass 1 alone would skip everything under `sibling/` because
+        // the outer .gitignore says so; pass 2 should pick it up by
+        // detecting the nested .git boundary.
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        // Outer repo at root.
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "sibling/\n").unwrap();
+        File::create(root.join("outer_kept.txt")).unwrap();
+        // Sibling clone -- its own git repo, not part of outer's tracked tree.
+        std::fs::create_dir_all(root.join("sibling/.git")).unwrap();
+        File::create(root.join("sibling/inner_kept.txt")).unwrap();
+        // Sibling has its own gitignore; should still be honored
+        // within its own tree.
+        std::fs::write(root.join("sibling/.gitignore"), "inner_skip.txt\n").unwrap();
+        File::create(root.join("sibling/inner_skip.txt")).unwrap();
+
+        let paths: Vec<String> = walk(root)
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        assert!(paths.iter().any(|s| s == "outer_kept.txt"));
+        // The sibling repo's tracked file shows up via pass 2.
+        assert!(
+            paths.iter().any(|s| s == "sibling/inner_kept.txt"),
+            "sibling clone's tracked file missed; got {paths:?}"
+        );
+        // The sibling's *own* gitignore still kicks in within its tree.
+        assert!(
+            !paths.iter().any(|s| s == "sibling/inner_skip.txt"),
+            "sibling's own gitignore was not honored; got {paths:?}"
+        );
     }
 
     #[test]

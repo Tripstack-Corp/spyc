@@ -13,6 +13,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.22.2] - 2026-04-28
+
+### Fixed
+- **`F` finder descends into sibling-clone subdirs that the parent
+  repo's `.gitignore` excludes.** Real-world repro:
+  `~/src/tripstack_platform` is a git repo whose `.gitignore` has
+  entries like `book-org/`, `content-acquisition/`, etc. -- not
+  because the user doesn't want to see those files, but because
+  those subdirs are *separate clones* (each with its own `.git`)
+  living inside the parent dir. Pass 1 of the walker (gitignore-
+  aware from the parent) correctly skipped them, but the user
+  expects `F` to find files anywhere checked out under the
+  workspace. Now the walker runs a second pass: when the start
+  root is itself a git repo, it scans for nested `.git/`
+  directories that pass 1 missed and walks each as its own
+  ignore root (with `parents(false)` so the outer repo's
+  gitignore doesn't bleed in). Each subrepo's own gitignore is
+  still honored within its tree.
+
 ## [1.22.1] - 2026-04-28
 
 ### Changed
