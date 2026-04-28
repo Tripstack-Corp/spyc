@@ -301,6 +301,37 @@ terminal inside a terminal." In priority order:
   connecting process UID matches the server. Defense-in-depth --
   low priority since socket file permissions already enforce
   user-only access.
+- **Structured event stream (subscriber socket).** Inspired by
+  Yazi's `--local-events` / `--remote-events` flags. Today MCP
+  consumers poll the context snapshot file (`.spyc-context-<pid>.json`),
+  which is fine for "what is the user looking at right now?" but
+  forces clients to diff snapshots if they want to react to
+  *changes*. Add a subscribe verb to the existing PID-scoped Unix
+  socket: a subscriber connects, registers an interest set
+  (`cd`, `cursor`, `pick`, `filter`, `task_state`, `quit`, etc.),
+  and receives a JSON-line stream of structured events as they
+  happen. Same socket, same auth model -- just a new RPC method.
+  - Plays directly into the bridge thesis: opens spyc's state to
+    *non-Claude* tools (a tmux status segment showing the active
+    spyc's PROJECT_HOME, a Neovim plugin that follows the spyc
+    cursor's parent directory, a desktop notifier on long-task
+    completion) without any of them needing the MCP stdio
+    handshake.
+  - Generic primitive, but the consumer ecosystem we care about
+    is still keyboard/agent-flavored -- not a generic
+    "automation bus." We don't add the message-publishing side
+    (Yazi's `ya pub`); that's a different feature (autocommand
+    targets) and adds a wider attack surface.
+  - Shape: `subscribe(events: ["cd", "pick"])` returns a stream;
+    each event is `{ts, type, payload}`. Unsubscribe by closing
+    the socket. Backpressure: drop events past a small per-
+    subscriber buffer (events are advisory; replay isn't
+    expected).
+  - Implementation hook: every place that currently bumps
+    `last_context_json` or flips a `needs_draw` reason is
+    already a good event boundary. Centralize emission behind a
+    single `emit_event(EventKind)` so we don't have to hunt
+    call-sites later.
 
 ## Distribution
 
@@ -491,6 +522,37 @@ one of the tracks above when picked up.
   parser; worth it only if the status bar gains more segments.
 - **Per-file tags/metadata** -- key-value pairs attached to files,
   usable in filters and autocommands.
+- **Bulk rename via `$EDITOR`** (Yazi-inspired). `:rename` (or `R`
+  on the file list) opens the current pick-set in `$EDITOR` as a
+  newline-delimited list of paths; on save, the buffer is parsed
+  as a rename plan (line N of the original maps to line N of the
+  edit) and applied as a sequence of `mv` calls. Same model as
+  `vidir` / `massren`. Edge cases: blank line = delete (with
+  confirm), reordering ignored (rename-by-position only), conflicts
+  (target exists, source missing) abort the whole batch with a
+  diff-style error pager. No persistent UI surface -- just an
+  editor round-trip -- so it doesn't bloat the keymap. Pairs
+  naturally with our existing pick model (`t`/`T`).
+- **Cwd export on quit** (Yazi-inspired). Yazi's `q` writes the
+  cursor's cwd to a path the parent shell wrapper sources, so the
+  shell follows. Add a `--cwd-file <path>` flag (or
+  `$SPYC_CWD_FILE` env var); on quit, write the file-list cwd to
+  it. Document a tiny zsh/bash function in INSTALL.md that wraps
+  `spyc` and `cd`s the parent shell on exit. ~30 lines of code +
+  doc snippet. Nice UX win for users who use spyc as their primary
+  navigator -- `q` becomes "go here in my shell" instead of "back
+  to where I started." `Q` keeps the no-export semantics so users
+  who *don't* want this can opt out per-quit.
+- **Visual-mode range-pick** (`v`) (Yazi-inspired). Today picks
+  are toggle-per-row (`t`) or by glob (`T`). Add a vi-flavored
+  visual mode: `v` starts a range from the cursor, motion keys
+  extend it (`j`/`k`/`G`/`gg`/`5j` etc.), `Space` or Enter
+  commits the highlighted range as picks (additive), Esc cancels.
+  Builds on the existing `Mode::VisualSelect` shape that vim
+  users already know. Different axis from `T` (glob-filtered)
+  and `^T` (all/none) -- this is "select these N adjacent rows"
+  which is the natural shape for "pick the four files I just
+  scrolled past."
 
 ## Done (recent)
 
