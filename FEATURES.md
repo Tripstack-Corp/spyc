@@ -394,6 +394,22 @@ Claude can query and control the workspace through these tools:
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
 
+**Search tools (gitignore-aware, PROJECT_HOME-scoped):**
+- **`search_paths(query, [limit])`** -- fuzzy filename search
+  (same `ignore` walker + nucleo ranking as the `F` picker).
+  Returns repo-relative paths, fzf-style ranked.
+- **`search_content(pattern, [limit])`** -- regex content search
+  via the embedded ripgrep matcher (same as `:grep`). Returns
+  `{path, line, col, text}` objects.
+- **`search_picks(pattern, [limit])`** -- *spyc-shaped*: content
+  search restricted to the user's currently-picked files. Picks
+  are TUI multi-select state Claude can't see otherwise, so this
+  is the only way to grep the user's intended subset.
+- **`search_inventory(pattern, [limit])`** -- *spyc-shaped*:
+  content search over the persistent inventory cache (yanked
+  files surviving across sessions). Lets Claude grep accumulated
+  "interesting files" without re-establishing context.
+
 Write actions execute on the main thread via a command channel.
 Flash messages (`[mcp] navigated to src/`) inform the user when
 Claude changes the workspace. The `gf`/`gF` keys complete the loop:

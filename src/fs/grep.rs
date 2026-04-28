@@ -322,6 +322,103 @@ fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Synchronous search across `root`. Same gitignore-aware walk +
+/// binary-skipping searcher as `search_streaming`, but collects all
+/// matches into a vec (capped at `limit`) and returns them. Used by
+/// the MCP `search_content` tool which has a single-shot
+/// request/response shape.
+pub fn search_to_vec(root: &Path, pattern: &str, limit: usize) -> Result<Vec<GrepMatch>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let r = root.to_path_buf();
+    let p = pattern.to_string();
+    let handle = std::thread::spawn(move || search_streaming(&r, &p, tx));
+    let mut out = Vec::new();
+    while let Ok(batch) = rx.recv() {
+        for m in batch {
+            if out.len() >= limit {
+                break;
+            }
+            out.push(m);
+        }
+        if out.len() >= limit {
+            break;
+        }
+    }
+    // Surface a regex compile error from the worker; success/non-
+    // regex errors are silent (per-file IO failures already are).
+    if let Ok(Err(e)) = handle.join() {
+        return Err(e);
+    }
+    Ok(out)
+}
+
+/// Synchronous search across an explicit list of files (no walker,
+/// no gitignore -- the caller already chose the set). Used by the
+/// MCP `search_picks` and `search_inventory` tools which run grep
+/// over a known finite set of paths instead of a tree.
+pub fn search_files(
+    files: &[PathBuf],
+    pattern: &str,
+    display_root: Option<&Path>,
+    limit: usize,
+) -> Result<Vec<GrepMatch>, String> {
+    let matcher = RegexMatcherBuilder::new()
+        .case_smart(true)
+        .build(pattern)
+        .map_err(|e| format!("invalid regex: {e}"))?;
+    let mut searcher = SearcherBuilder::new()
+        .binary_detection(BinaryDetection::quit(0))
+        .line_number(true)
+        .build();
+    let mut out = Vec::new();
+    for path in files {
+        if out.len() >= limit {
+            break;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        let rel = display_root
+            .and_then(|root| path.strip_prefix(root).ok())
+            .unwrap_or(path)
+            .to_path_buf();
+        // Drain matches via a one-shot channel to reuse BatchSink's
+        // formatting (column lookup, sanitize_line). Bounded buffer
+        // keeps memory predictable per-file.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut count = 0usize;
+        let mut batch: Vec<GrepMatch> = Vec::new();
+        let mut sink = BatchSink {
+            path: &rel,
+            matcher: &matcher,
+            batch: &mut batch,
+            tx: &tx,
+            count: &mut count,
+            cap_hit: false,
+            disconnected: false,
+        };
+        let _ = searcher.search_path(&matcher, path, &mut sink);
+        // Pull anything the sink shipped via the channel, then the
+        // tail still in `batch`.
+        drop(tx);
+        while let Ok(b) = rx.recv() {
+            for m in b {
+                if out.len() >= limit {
+                    break;
+                }
+                out.push(m);
+            }
+        }
+        for m in batch {
+            if out.len() >= limit {
+                break;
+            }
+            out.push(m);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 fn search(root: &Path, pattern: &str) -> Vec<GrepMatch> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -495,6 +592,44 @@ mod tests {
         let trimmed = sanitize_line(&long);
         assert_eq!(trimmed.chars().count(), super::MAX_LINE_DISPLAY + 1);
         assert!(trimmed.ends_with('…'));
+    }
+
+    #[test]
+    fn search_to_vec_caps_results() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let mut f = File::create(root.join("a.txt")).unwrap();
+        for _ in 0..50 {
+            writeln!(f, "needle").unwrap();
+        }
+        let hits = search_to_vec(root, "needle", 10).unwrap();
+        assert_eq!(hits.len(), 10);
+    }
+
+    #[test]
+    fn search_files_only_explicit_set() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        File::create(root.join("a.txt"))
+            .unwrap()
+            .write_all(b"NEEDLE here\n")
+            .unwrap();
+        File::create(root.join("b.txt"))
+            .unwrap()
+            .write_all(b"NEEDLE there\n")
+            .unwrap();
+        // Restrict to a.txt; b.txt should not appear.
+        let only = vec![root.join("a.txt")];
+        let hits = search_files(&only, "NEEDLE", Some(root), 100).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, PathBuf::from("a.txt"));
+    }
+
+    #[test]
+    fn search_files_invalid_regex_errors() {
+        let result = search_files(&[], "[unterminated", None, 10);
+        assert!(result.is_err());
     }
 
     #[test]

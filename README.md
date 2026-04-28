@@ -101,6 +101,12 @@ Claude can call `get_spyc_context` at any time to see exactly what
 you're looking at. Use `gf`/`gF` to jump from Claude's output back to
 the file list. The context is bidirectional and always current.
 
+Search MCP tools (`search_paths`, `search_content`, `search_picks`,
+`search_inventory`) let Claude run gitignore-aware fuzzy filename
+and regex content searches over the project, the user's currently-
+picked files, or the persistent yanked-file cache — the last two
+are state Claude can't see through generic filesystem tools.
+
 Sessions are auto-saved on quit. `spyc -r` opens a session picker that
 restores all pane tabs and resumes Claude conversations via
 `--resume <sessionId>`.

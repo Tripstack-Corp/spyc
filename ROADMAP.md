@@ -247,19 +247,15 @@ terminal inside a terminal." In priority order:
      walker. Results stream into a pager as `path:line:col: text`
      so `gf`/`gF` jump for free. Capped at 5000 matches; refine to
      narrow.
-  3. **M3 -- MCP exposure.** Two basic tools: `search_paths` and
-     `search_content`, both gitignore-aware and PROJECT_HOME-
-     scoped. Plus two *spyc-shaped* tools that don't have a
-     Claude-CLI equivalent:
-     - `search_picks(pattern)` -- search only within the user's
-       currently-picked files. Picks are spyc state Claude can't
-       see directly otherwise.
-     - `search_inventory(pattern)` -- search the persistent
-       inventory cache. Lets Claude grep the user's accumulated
-       "interesting files" across sessions.
-     These are what justify the MCP-thesis here -- generic Glob
-     and Grep are commodity, but searching *the user's selected
-     subset* is uniquely possible because spyc owns that state.
+  3. ~~**M3 -- MCP exposure.**~~ Shipped v1.24.0. Four tools:
+     `search_paths` (fuzzy filename), `search_content` (ripgrep-
+     matcher content search), plus the two *spyc-shaped* tools
+     that justify the MCP-thesis -- `search_picks(pattern)` (only
+     within the user's currently-picked files; picks are spyc
+     state Claude can't see otherwise) and
+     `search_inventory(pattern)` (across the persistent inventory
+     cache, so Claude can grep accumulated interesting files
+     without re-explaining context).
   No persistent index (no tantivy, no ctags). Maintenance burden
   isn't worth it -- ripgrep on a 100K-file repo is sub-second
   cold and instant from page cache on repeat. Let dedicated tools
@@ -500,6 +496,12 @@ one of the tracks above when picked up.
 
 Items shipped in the current development cycle, newest first.
 
+- **v1.24.0** -- Project-wide-search MCP exposure (M3, completing
+  the search track). Four tools: `search_paths` (fuzzy filename),
+  `search_content` (ripgrep-matcher content search), plus the
+  spyc-shaped `search_picks` and `search_inventory` -- search
+  scoped to the user's TUI multi-select state and persistent
+  cache, neither of which Claude can see otherwise.
 - **v1.23.0** -- `:grep <pattern>` project-wide content search (M2 of
   the project-wide-search track). Embedded ripgrep matcher
   (`grep-regex` + `grep-searcher`, no subprocess), gitignore-aware,

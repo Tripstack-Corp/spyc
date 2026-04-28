@@ -170,6 +170,24 @@ fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Synchronous wrapper: walk + rank in one call. Used by the MCP
+/// `search_paths` tool which has a single-shot request/response
+/// shape (no streaming UI). Returns the top `limit` paths, scored
+/// against `query` (empty query = natural walk order, truncated).
+pub fn find_paths(root: &Path, query: &str, limit: usize) -> Vec<PathBuf> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let walk_root = root.to_path_buf();
+    std::thread::spawn(move || walk_streaming(&walk_root, tx));
+    let mut all = Vec::new();
+    while let Ok(batch) = rx.recv() {
+        all.extend(batch);
+    }
+    rank(&all, query, limit)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect()
+}
+
 /// Synchronous wrapper around `walk_streaming` -- spawns a thread,
 /// drains the channel, returns the full list. Test-only; the
 /// production picker uses `walk_streaming` directly so it can

@@ -13,6 +13,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.24.0] - 2026-04-28
+
+### Added
+- **Project-wide search MCP exposure (M3 of project-wide search).**
+  Four new tools, all gitignore-aware where applicable, all
+  PROJECT_HOME-scoped (cwd fallback if no project root):
+  - `search_paths(query, [limit])` — fuzzy filename search via the
+    same `ignore` walker + `nucleo-matcher` ranking the `F` picker
+    uses. Returns a JSON array of repo-relative paths, fzf-style
+    ranked. Default limit 100, max 1000.
+  - `search_content(pattern, [limit])` — content search via the
+    same embedded ripgrep matcher `:grep` uses (smart-case, binary
+    files skipped). Returns a JSON array of `{path, line, col,
+    text}`. Default limit 200, max 5000.
+  - `search_picks(pattern, [limit])` — content search restricted
+    to the user's currently-picked files. **Uniquely spyc-shaped**:
+    picks are TUI multi-select state Claude can't see otherwise,
+    so this is the only way to grep the user's intended subset.
+  - `search_inventory(pattern, [limit])` — content search across
+    the persistent inventory cache (yanked-into-cache files that
+    survive sessions). Lets Claude grep accumulated "interesting
+    files" without leaving the conversation.
+- 3 new MCP roundtrip tests (search_paths, search_content,
+  search_picks). 3 new fs::grep tests (search_to_vec cap,
+  search_files explicit-set scoping, invalid-regex error).
+
 ## [1.23.3] - 2026-04-28
 
 ### Fixed

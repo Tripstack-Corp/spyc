@@ -101,6 +101,14 @@ You are expected to be running inside spyc's split pane. If the
   directly rather than giving instructions for the user to do manually.
 - **To read a file the user is viewing:** use `get_file_content`
   with relative paths (resolved against spyc's cwd).
+- **For project-wide search:** prefer `search_paths` (fuzzy
+  filenames) and `search_content` (gitignore-aware regex over file
+  contents) over `Bash rg/grep`. Both are PROJECT_HOME-scoped and
+  return structured JSON. Two more are uniquely spyc-shaped:
+  `search_picks` searches only inside the user's currently-picked
+  files (a TUI multi-select you can't see otherwise), and
+  `search_inventory` searches the user's persistent yanked-cache
+  across sessions.
 
 If the spyc MCP tools are NOT available, remind the user:
 "I don't see the spyc MCP tools — are we running inside spyc?

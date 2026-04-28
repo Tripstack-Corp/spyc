@@ -784,6 +784,82 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         },
                         "required": ["path"]
                     }
+                },
+                {
+                    "name": "search_paths",
+                    "description": "Project-wide fuzzy filename search. Walks PROJECT_HOME (or cwd if no project root) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Fuzzy-match query. Empty string returns natural walk order."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum results to return. Default 100, max 1000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "search_content",
+                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks PROJECT_HOME (or cwd). Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case: lowercase pattern matches case-insensitively, mixed-case is sensitive."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches to return. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                },
+                {
+                    "name": "search_picks",
+                    "description": "Search content within ONLY the user's currently-picked files (multi-select state). Picks are spyc UI state Claude can't see directly, so this is the only way to grep the user's intended subset. Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case applied."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                },
+                {
+                    "name": "search_inventory",
+                    "description": "Search content within the user's persistent inventory cache (yanked-into-cache files that survive across sessions). Like search_picks but spans sessions, so it's the way to grep accumulated 'interesting files'. Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case applied."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
                 }
             ]
         }),
@@ -834,6 +910,55 @@ fn handle_tools_call(
             }
             match read_file_content(&canonical) {
                 Ok(content) => send_tool_result(w, id, &content),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_paths" => {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let limit = args["limit"].as_u64().map_or(100, |n| n.min(1000) as usize);
+            let root = search_root(ctx_path);
+            let paths = crate::fs::finder::find_paths(&root, &query, limit);
+            let arr: Vec<Value> = paths
+                .iter()
+                .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                .collect();
+            send_tool_result(w, id, &Value::Array(arr).to_string())
+        }
+        "search_content" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let root = search_root(ctx_path);
+            match crate::fs::grep::search_to_vec(&root, pattern, limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_picks" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let (files, root) = read_picks_from_context(ctx_path);
+            match crate::fs::grep::search_files(&files, pattern, root.as_deref(), limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_inventory" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let files = read_inventory_from_context(ctx_path);
+            // Inventory paths are absolute (cache files); display
+            // root is None so we report absolute paths to Claude.
+            match crate::fs::grep::search_files(&files, pattern, None, limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
@@ -907,6 +1032,100 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
 }
 
 /// Read the cwd from the context file (for resolving relative paths).
+/// Pick the search root: prefer `project_home` from the context
+/// file (the spyc-blessed project root), fall back to `cwd`.
+/// Used by `search_paths` and `search_content` so the MCP tools
+/// scope themselves the same way the in-TUI `F` and `:grep`
+/// commands do.
+fn search_root(ctx_path: &Path) -> PathBuf {
+    if let Ok(text) = std::fs::read_to_string(ctx_path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            if let Some(home) = v["project_home"].as_str() {
+                if !home.is_empty() {
+                    return PathBuf::from(home);
+                }
+            }
+            if let Some(cwd) = v["cwd"].as_str() {
+                return PathBuf::from(cwd);
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+}
+
+/// Read picks from the context file as absolute paths (resolved
+/// against `cwd`). Returns the picks plus the cwd to use as the
+/// display-relative root for match formatting. Picks list may be
+/// empty (no picks selected); that's a valid state -- search_picks
+/// just returns no matches.
+fn read_picks_from_context(ctx_path: &Path) -> (Vec<PathBuf>, Option<PathBuf>) {
+    let Ok(text) = std::fs::read_to_string(ctx_path) else {
+        return (Vec::new(), None);
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return (Vec::new(), None);
+    };
+    let cwd = v["cwd"].as_str().map(PathBuf::from);
+    let picks = v["picks"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p.as_str())
+                .map(|s| {
+                    let p = Path::new(s);
+                    if p.is_absolute() {
+                        p.to_path_buf()
+                    } else if let Some(c) = &cwd {
+                        c.join(p)
+                    } else {
+                        p.to_path_buf()
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (picks, cwd)
+}
+
+/// Read inventory paths from the context file. Inventory entries
+/// are stored as absolute paths in the persistent state, so no
+/// resolution against cwd is needed.
+fn read_inventory_from_context(ctx_path: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(ctx_path) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    v["inventory"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p.as_str())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Render a slice of grep matches as a JSON array of objects with
+/// `{path, line, col, text}` shape. Used by all three content-search
+/// tools so the response shape is uniform.
+fn grep_matches_to_json(hits: &[crate::fs::grep::GrepMatch]) -> Value {
+    let arr: Vec<Value> = hits
+        .iter()
+        .map(|m| {
+            json!({
+                "path": m.path.to_string_lossy(),
+                "line": m.line,
+                "col": m.col,
+                "text": m.text,
+            })
+        })
+        .collect();
+    Value::Array(arr)
+}
+
 fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
     if let Ok(text) = std::fs::read_to_string(ctx_path) {
         if let Ok(v) = serde_json::from_str::<Value>(&text) {
@@ -1105,13 +1324,17 @@ mod tests {
         .unwrap();
         let resp = parse_response(&output);
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 10);
         assert_eq!(tools[0]["name"], "get_spyc_context");
         assert_eq!(tools[1]["name"], "navigate_to");
         assert_eq!(tools[2]["name"], "set_filter");
         assert_eq!(tools[3]["name"], "pick_files");
         assert_eq!(tools[4]["name"], "clear_picks");
         assert_eq!(tools[5]["name"], "get_file_content");
+        assert_eq!(tools[6]["name"], "search_paths");
+        assert_eq!(tools[7]["name"], "search_content");
+        assert_eq!(tools[8]["name"], "search_picks");
+        assert_eq!(tools[9]["name"], "search_inventory");
     }
 
     #[test]
@@ -1175,6 +1398,134 @@ mod tests {
         )
         .unwrap();
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn search_paths_tool_walks_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("alpha.rs"), "").unwrap();
+        std::fs::write(root.join("beta.rs"), "").unwrap();
+        std::fs::write(root.join("gamma.txt"), "").unwrap();
+        let ctx = context::SpycContext {
+            cwd: root.to_path_buf(),
+            cursor_file: None,
+            picks: vec![],
+            inventory: vec![],
+            filter: None,
+            git_branch: None,
+            project_home: Some(root.to_path_buf()),
+            session_name: String::new(),
+        };
+        let ctx_path = context::context_path(tmp.path());
+        context::write_context_file(&ctx_path, &ctx).unwrap();
+
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":7,"method":"tools/call",
+                "params":{"name":"search_paths","arguments":{"query":"alpha"}}})
+            .to_string(),
+            &ctx_path,
+            None,
+        )
+        .unwrap();
+        let resp = parse_response(&output);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let arr: Value = serde_json::from_str(text).unwrap();
+        let paths: Vec<&str> = arr
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(paths.contains(&"alpha.rs"));
+        assert!(!paths.contains(&"gamma.txt"));
+    }
+
+    #[test]
+    fn search_content_tool_returns_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("a.txt"), "hello world\n").unwrap();
+        let ctx = context::SpycContext {
+            cwd: root.to_path_buf(),
+            cursor_file: None,
+            picks: vec![],
+            inventory: vec![],
+            filter: None,
+            git_branch: None,
+            project_home: Some(root.to_path_buf()),
+            session_name: String::new(),
+        };
+        let ctx_path = context::context_path(tmp.path());
+        context::write_context_file(&ctx_path, &ctx).unwrap();
+
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":8,"method":"tools/call",
+                "params":{"name":"search_content","arguments":{"pattern":"hello"}}})
+            .to_string(),
+            &ctx_path,
+            None,
+        )
+        .unwrap();
+        let resp = parse_response(&output);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let arr: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 1);
+        assert_eq!(arr[0]["path"], "a.txt");
+        assert_eq!(arr[0]["line"], 1);
+    }
+
+    #[test]
+    fn search_picks_tool_only_picked_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("picked.txt"), "TARGET in picked\n").unwrap();
+        std::fs::write(root.join("unpicked.txt"), "TARGET in unpicked\n").unwrap();
+        let ctx = context::SpycContext {
+            cwd: root.to_path_buf(),
+            cursor_file: None,
+            // Picks stored as relative paths in spyc's UI; resolved
+            // against cwd by the tool.
+            picks: vec![PathBuf::from("picked.txt")],
+            inventory: vec![],
+            filter: None,
+            git_branch: None,
+            project_home: Some(root.to_path_buf()),
+            session_name: String::new(),
+        };
+        let ctx_path = context::context_path(tmp.path());
+        context::write_context_file(&ctx_path, &ctx).unwrap();
+
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":9,"method":"tools/call",
+                "params":{"name":"search_picks","arguments":{"pattern":"TARGET"}}})
+            .to_string(),
+            &ctx_path,
+            None,
+        )
+        .unwrap();
+        let resp = parse_response(&output);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let arr: Value = serde_json::from_str(text).unwrap();
+        let paths: Vec<&str> = arr
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v["path"].as_str())
+            .collect();
+        assert!(paths.contains(&"picked.txt"));
+        assert!(
+            !paths.iter().any(|p| p.contains("unpicked")),
+            "unpicked file leaked into results: {paths:?}"
+        );
     }
 
     #[test]
