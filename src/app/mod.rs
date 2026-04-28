@@ -3723,6 +3723,10 @@ impl App {
         let mut view = pager::PagerView::new_plain(title, lines);
         view.show_line_numbers = false;
         view.no_history = true;
+        // Picker rows must map 1:1 to source lines so the cursor +
+        // selection math stays correct -- wrap would split a long
+        // path across multiple visual rows and break that.
+        view.wrap = false;
         view.picker_cursor = if shown == 0 {
             None
         } else {
@@ -5794,6 +5798,7 @@ impl App {
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
             KeyCode::Char('l') => view.toggle_line_numbers(),
             KeyCode::Char('w') => view.toggle_whitespace(),
+            KeyCode::Char('W') => view.toggle_wrap(),
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
                 Ok(()) => view.flash = Some("yanked to clipboard".into()),

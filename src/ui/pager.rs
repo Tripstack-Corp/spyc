@@ -90,6 +90,13 @@ pub struct PagerView {
     pub picker_edit_cursor: Option<(usize, crate::ui::line_edit::Mode)>,
     /// When true, suppress [EOF] and tilde markers (content is still arriving).
     pub streaming: bool,
+    /// When true, long lines wrap at the right edge instead of being
+    /// truncated. Continuation rows get a gutter-width indent (no
+    /// line number, no whitespace marker) so the wrap doesn't break
+    /// alignment. Default true for content pagers; false for picker
+    /// UIs (find finder, task viewer) where each source line maps to
+    /// a single selectable row.
+    pub wrap: bool,
     /// Lower bound for the line-number gutter width. Streaming views
     /// use this to lock the gutter at the expected final size so it
     /// doesn't widen mid-scan as `ilog10(lines.len())` grows -- which
@@ -127,6 +134,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            wrap: true,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -152,6 +160,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            wrap: true,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -181,6 +190,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            wrap: true,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -260,6 +270,10 @@ impl PagerView {
 
     pub const fn toggle_whitespace(&mut self) {
         self.show_whitespace = !self.show_whitespace;
+    }
+
+    pub const fn toggle_wrap(&mut self) {
+        self.wrap = !self.wrap;
     }
 
     pub fn line_count(&self) -> u16 {
@@ -599,7 +613,6 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     let viewport_h = content_area.height as usize;
     let start = view.scroll as usize;
     let content_end = view.lines.len();
-    let slice_end = (start + viewport_h).min(content_end);
 
     let total_lines = view.lines.len();
     // Streaming views can grow during render; clamp to the caller's
@@ -614,89 +627,188 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
 
-    let mut display_lines: Vec<Line<'static>> = view.lines[start..slice_end]
-        .iter()
-        .enumerate()
-        .map(|(i, line)| {
-            let abs_idx = start + i;
-            let mut styled = styled_line_for_render(line, view, abs_idx, theme);
-            // Highlight the picker cursor row.
-            if view.picker_cursor == Some(abs_idx) {
-                if let Some((col, vi_mode)) = view.picker_edit_cursor {
-                    // History editor: show editing cursor on this line.
-                    let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-                    let row_style = Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg);
-                    let before: String = plain.chars().take(col).collect();
-                    let cursor_ch: String = plain
-                        .chars()
-                        .nth(col)
-                        .map_or_else(|| " ".into(), |c| c.to_string());
-                    let after: String = plain.chars().skip(col + 1).collect();
-                    let cursor_style = if vi_mode == crate::ui::line_edit::Mode::Normal {
-                        row_style.add_modifier(Modifier::REVERSED)
-                    } else {
-                        row_style.add_modifier(Modifier::UNDERLINED)
-                    };
-                    styled = Line::from(vec![
-                        Span::styled(before, row_style),
-                        Span::styled(cursor_ch, cursor_style),
-                        Span::styled(after, row_style),
-                    ]);
-                } else {
-                    styled = Line::from(
-                        styled
-                            .spans
-                            .into_iter()
-                            .map(|s| {
-                                Span::styled(
-                                    s.content,
-                                    s.style
-                                        .bg(theme.cursor_bg)
-                                        .fg(theme.cursor_fg)
-                                        .add_modifier(Modifier::BOLD),
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+    // Width available for content (after the line-number gutter).
+    // Used by wrap to decide where to break visual rows. We render
+    // body + gutter into the same Paragraph so the visual budget
+    // matches the actual area ratatui will draw into.
+    let body_w = (content_area.width as usize).saturating_sub(gutter_w);
+
+    let mut display_lines: Vec<Line<'static>> = Vec::with_capacity(viewport_h);
+    let mut src_idx = start;
+    while src_idx < content_end && display_lines.len() < viewport_h {
+        let line = &view.lines[src_idx];
+        let abs_idx = src_idx;
+        // Apply per-source-line styling: match highlight, picker
+        // cursor highlight, optional whitespace markers. The `$`
+        // end-of-line marker naturally ends up on the last wrapped
+        // piece because we apply markers *before* wrap.
+        let styled = apply_row_styling(line, view, abs_idx, theme);
+        let styled = if view.show_whitespace {
+            apply_whitespace_markers(&styled, theme)
+        } else {
+            styled
+        };
+        // Split into 1+ visual rows. wrap=false ⇒ exactly one piece;
+        // wrap=true with body_w available width gives a Vec of
+        // visually-bounded chunks, preserving styling per-span.
+        let pieces = if view.wrap && body_w > 0 {
+            wrap_line(&styled, body_w)
+        } else {
+            vec![styled]
+        };
+        for (piece_idx, piece) in pieces.into_iter().enumerate() {
+            if display_lines.len() >= viewport_h {
+                break;
             }
-            let styled = if view.show_whitespace {
-                apply_whitespace_markers(&styled, theme)
-            } else {
-                styled
-            };
             if gutter_w > 0 {
-                let num = format!("{:>width$} ", abs_idx + 1, width = gutter_w - 1);
-                let mut spans = vec![Span::styled(num, ln_style)];
-                spans.extend(styled.spans);
-                Line::from(spans)
+                let gutter_text = if piece_idx == 0 {
+                    format!("{:>width$} ", abs_idx + 1, width = gutter_w - 1)
+                } else {
+                    // Continuation row: blank gutter so wrap pieces
+                    // visually align with the source line's indent.
+                    " ".repeat(gutter_w)
+                };
+                let mut spans = vec![Span::styled(gutter_text, ln_style)];
+                spans.extend(piece.spans);
+                display_lines.push(Line::from(spans));
             } else {
-                styled
+                display_lines.push(piece);
             }
-        })
-        .collect();
+        }
+        src_idx += 1;
+    }
+    let reached_end = src_idx >= content_end;
 
     let eof_style = Style::default()
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
-    if slice_end >= content_end && display_lines.len() < viewport_h && !view.streaming {
+    if reached_end && display_lines.len() < viewport_h && !view.streaming {
         display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
         while display_lines.len() < viewport_h {
             display_lines.push(Line::from(Span::styled("~", eof_style)));
         }
     }
 
-    // No wrap: long Lines truncate at the right edge of the body. Wrap
-    // was previously on (Wrap { trim: false }) but it interacted poorly
-    // with the line-number gutter and the `$` whitespace marker, since
-    // ratatui hard-breaks long unbreakable "words" (paths, log lines)
-    // mid-character and continuation rows don't carry their own gutter.
-    // The result was visible misalignment ("Builde$.cs"-style mid-row
-    // line-end markers) on long paths in `git log` output. Behavior now
-    // matches the multi-column path and `less -S`. Yank / save / search
-    // still operate on `view.lines` so they get the untruncated source.
+    // Wrap is handled by `wrap_line` above; ratatui's Paragraph::wrap
+    // is *not* used because it hard-breaks unbreakable "words" mid-
+    // character and continuation rows wouldn't carry the gutter.
+    // Yank / save / search operate on `view.lines` so they always
+    // see the untruncated source regardless of wrap state.
     let paragraph = Paragraph::new(display_lines);
     frame.render_widget(paragraph, content_area);
+}
+
+/// Apply match-highlight + picker-cursor styling to a source line.
+/// Extracted from `render_single_column` so wrap can re-use it
+/// (styling decisions happen before the visual split).
+fn apply_row_styling(
+    line: &Line<'static>,
+    view: &PagerView,
+    abs_idx: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let mut styled = styled_line_for_render(line, view, abs_idx, theme);
+    if view.picker_cursor == Some(abs_idx) {
+        if let Some((col, vi_mode)) = view.picker_edit_cursor {
+            // History editor: show editing cursor on this line.
+            let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+            let row_style = Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg);
+            let before: String = plain.chars().take(col).collect();
+            let cursor_ch: String = plain
+                .chars()
+                .nth(col)
+                .map_or_else(|| " ".into(), |c| c.to_string());
+            let after: String = plain.chars().skip(col + 1).collect();
+            let cursor_style = if vi_mode == crate::ui::line_edit::Mode::Normal {
+                row_style.add_modifier(Modifier::REVERSED)
+            } else {
+                row_style.add_modifier(Modifier::UNDERLINED)
+            };
+            styled = Line::from(vec![
+                Span::styled(before, row_style),
+                Span::styled(cursor_ch, cursor_style),
+                Span::styled(after, row_style),
+            ]);
+        } else {
+            styled = Line::from(
+                styled
+                    .spans
+                    .into_iter()
+                    .map(|s| {
+                        Span::styled(
+                            s.content,
+                            s.style
+                                .bg(theme.cursor_bg)
+                                .fg(theme.cursor_fg)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+    styled
+}
+
+/// Split a styled line into 1+ visual rows, each at most `width`
+/// columns wide. Hard-break at width if no whitespace boundary is
+/// nearby (paths, long single tokens). Preserves per-span styling
+/// across the break by splitting the span at the chosen byte
+/// offset. Width is in unicode display columns, so wide CJK
+/// characters and emoji count as 2 — same units ratatui uses for
+/// layout.
+fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![line.clone()];
+    }
+    let mut pieces: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+    let mut current_w = 0usize;
+    for span in &line.spans {
+        let mut rest: &str = span.content.as_ref();
+        while !rest.is_empty() {
+            let remaining = width.saturating_sub(current_w);
+            if remaining == 0 {
+                pieces.push(Vec::new());
+                current_w = 0;
+                continue;
+            }
+            let mut consumed_bytes = 0usize;
+            let mut visual = 0usize;
+            for (idx, ch) in rest.char_indices() {
+                let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if visual + w > remaining {
+                    break;
+                }
+                consumed_bytes = idx + ch.len_utf8();
+                visual += w;
+            }
+            // Force at least one char even if it's wider than the
+            // remaining budget (tiny pager boxes shouldn't infinite
+            // loop on a 2-col emoji in a 1-col viewport).
+            if consumed_bytes == 0 {
+                if let Some(first) = rest.chars().next() {
+                    consumed_bytes = first.len_utf8();
+                    visual = unicode_width::UnicodeWidthChar::width(first).unwrap_or(1);
+                }
+            }
+            let chunk = rest[..consumed_bytes].to_string();
+            rest = &rest[consumed_bytes..];
+            if !chunk.is_empty() {
+                pieces.last_mut().unwrap().push(Span::styled(chunk, span.style));
+                current_w += visual;
+            }
+            if !rest.is_empty() {
+                pieces.push(Vec::new());
+                current_w = 0;
+            }
+        }
+    }
+    // Drop trailing empty piece (from a span that exactly hit width
+    // and started a new row that never got content).
+    if pieces.last().is_some_and(Vec::is_empty) && pieces.len() > 1 {
+        pieces.pop();
+    }
+    pieces.into_iter().map(Line::from).collect()
 }
 
 /// Partition lines into `ncols` chunks at section boundaries (blank lines),
@@ -963,6 +1075,7 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
             &[
                 ("l", "toggle line numbers"),
                 ("w", "toggle whitespace markers (·, ↲, $)"),
+                ("W", "toggle line wrap (default on for content pagers)"),
                 ("f", "toggle full-width / centered"),
             ],
         ),
@@ -1032,5 +1145,74 @@ fn fit_height_rect(area: Rect, view: &PagerView) -> Rect {
         y: centered.y,
         width: centered.width,
         height,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn wrap_short_line_returns_one_piece() {
+        let line = Line::from("hello");
+        let pieces = wrap_line(&line, 80);
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(plain_text(&pieces[0]), "hello");
+    }
+
+    #[test]
+    fn wrap_long_line_hard_breaks() {
+        let line = Line::from("aaaaabbbbbcccccddddd");
+        let pieces = wrap_line(&line, 5);
+        assert_eq!(pieces.len(), 4);
+        assert_eq!(plain_text(&pieces[0]), "aaaaa");
+        assert_eq!(plain_text(&pieces[1]), "bbbbb");
+        assert_eq!(plain_text(&pieces[2]), "ccccc");
+        assert_eq!(plain_text(&pieces[3]), "ddddd");
+    }
+
+    #[test]
+    fn wrap_preserves_styled_spans_across_break() {
+        let red = Style::default().fg(ratatui::style::Color::Red);
+        let blue = Style::default().fg(ratatui::style::Color::Blue);
+        let line = Line::from(vec![
+            Span::styled("aaaaa", red),
+            Span::styled("BBBBB", blue),
+        ]);
+        let pieces = wrap_line(&line, 4);
+        // 10 chars at width 4 ⇒ 3 visual rows (4+4+2). Spans split
+        // across the break preserve their style on each side.
+        assert_eq!(pieces.len(), 3);
+        assert_eq!(plain_text(&pieces[0]), "aaaa");
+        assert_eq!(pieces[0].spans[0].style, red);
+        assert_eq!(plain_text(&pieces[1]), "aBBB");
+        assert_eq!(pieces[1].spans[0].style, red);
+        assert_eq!(pieces[1].spans[1].style, blue);
+        assert_eq!(plain_text(&pieces[2]), "BB");
+        assert_eq!(pieces[2].spans[0].style, blue);
+    }
+
+    #[test]
+    fn wrap_handles_wide_chars() {
+        // A single CJK char is 2 cols wide; in a 3-col viewport
+        // we fit one per row.
+        let line = Line::from("漢字漢");
+        let pieces = wrap_line(&line, 3);
+        assert_eq!(pieces.len(), 3);
+        assert_eq!(plain_text(&pieces[0]), "漢");
+        assert_eq!(plain_text(&pieces[1]), "字");
+        assert_eq!(plain_text(&pieces[2]), "漢");
+    }
+
+    #[test]
+    fn wrap_zero_width_returns_clone() {
+        let line = Line::from("anything");
+        let pieces = wrap_line(&line, 0);
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(plain_text(&pieces[0]), "anything");
     }
 }

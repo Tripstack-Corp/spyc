@@ -1,4 +1,9 @@
 ### SMALL ###
+- we should lazy load very large files and indicate that for the user; using
+  the pager on some large csv files quickly shot memory usage very high;
+  shouldn't we be using memmap magic for efficiently loading a large file into
+  ram anyways? what are the rust'y ways to handle this? or provide a way to
+  just run head or tail on a file
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -56,6 +61,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.25.0) Pager line wrap is back -- this time done by
+  spyc instead of ratatui's `Paragraph::wrap`. Pre-computed
+  visual-width chunking with per-span style preservation, so
+  long unbreakable tokens hard-break cleanly without the
+  v1.21.6 "Builde$.cs" misalignment. Continuation rows get a
+  blank gutter (no line number, no `$` whitespace marker), so
+  the wrapped pieces visually align with the source line's
+  indent. Default ON for content pagers (file viewers, `:grep`,
+  `!cmd` capture); explicitly OFF for picker UIs (`F` finder)
+  where each source line must map 1:1 to a selectable row.
+  Toggle: `W` in the pager.
 - (fixed, v1.21.7) Git status markers on parent-directory rows update
   when a file changes in a subtree below. The listing watch was
   `RecursiveMode::NonRecursive` (no events for subdir changes) and

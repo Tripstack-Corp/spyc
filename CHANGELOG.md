@@ -13,6 +13,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.25.0] - 2026-04-28
+
+### Added
+- **Pager line wrap is back, done properly this time.** v1.21.6
+  removed `Paragraph::wrap` because ratatui's wrap hard-breaks
+  unbreakable tokens (paths, log lines) mid-character and the
+  line-number gutter didn't carry across continuation rows --
+  visible misalignment like `Builde$.cs` on long paths. New impl
+  pre-computes visual-width chunks ourselves with per-span style
+  preservation: long lines wrap cleanly at viewport width, wide
+  CJK characters and emoji count as 2 cols (same as ratatui's
+  layout), continuation rows get a blank gutter so wrapped pieces
+  visually align with the source line's indent, and the `$`
+  end-of-line whitespace marker stays on the actual end of the
+  source line (last wrapped piece). Default ON for content
+  pagers (file viewers, `:grep`, `!cmd` capture, task viewer);
+  explicitly OFF for the `F` finder picker where each source line
+  must map 1:1 to a selectable row. Toggle: `W` (capital) in the
+  pager. 5 unit tests cover hard-break, span splitting, wide
+  chars, and zero-width edge case.
+
 ## [1.24.2] - 2026-04-28
 
 ### Changed
