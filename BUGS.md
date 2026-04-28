@@ -1,4 +1,10 @@
 ### SMALL ###
+- cwd should update when we quit based on where spyc is navigated to (may
+  already be mentioned in roadmap?)
+- change in git state while viewing a subdirectory did not automatically get
+  updated; need to try and reproduce
+- something funky is happening with our MCP support - we need to ensure that
+  multiple running spyc's don't interfere with eachother
 - when resuming a long running task we should be sure that the most recent
   output is visible
 - a pane that has ended should not be so easy to dismiss with ESC; it should
