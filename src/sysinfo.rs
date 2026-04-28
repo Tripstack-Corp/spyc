@@ -6,6 +6,22 @@ pub fn format_now() -> String {
     dt.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
+/// Seconds since the Unix epoch. Centralized so callers don't each
+/// re-roll `SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, ..)`.
+/// Uses `jiff::Timestamp` for monotonicity guarantees and a clean API.
+pub fn epoch_secs() -> u64 {
+    jiff::Timestamp::now().as_second().max(0) as u64
+}
+
+/// Nanoseconds since the Unix epoch. Same shape as `epoch_secs` but
+/// for hot-path id generators that want sub-second resolution.
+pub fn epoch_nanos() -> u128 {
+    let ts = jiff::Timestamp::now();
+    let secs = ts.as_second().max(0) as u128;
+    let subsec = ts.subsec_nanosecond().max(0) as u128;
+    secs * 1_000_000_000 + subsec
+}
+
 /// Git status for a directory: branch name + dirty flag.
 /// Returns e.g. `"main*"` (dirty) or `"main"` (clean), or `None` if
 /// the directory isn't in a git repo.

@@ -54,22 +54,7 @@ fn state_base() -> Option<PathBuf> {
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-fn make_id() -> String {
-    // Simple UUID-like: timestamp + random suffix.
-    use std::fmt::Write;
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut s = String::new();
-    let _ = write!(s, "{ts:x}");
-    s
+    crate::sysinfo::epoch_secs()
 }
 
 impl Inventory {
@@ -112,7 +97,8 @@ impl Inventory {
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        let id = make_id();
+        // UUIDv7 — time-ordered, no collision risk on rapid yanks.
+        let id = uuid::Uuid::now_v7().simple().to_string();
         let item = CachedItem {
             id: id.clone(),
             orig_path: path.to_path_buf(),

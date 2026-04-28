@@ -22,10 +22,7 @@ static LOG: Mutex<LogState> = Mutex::new(LogState {
 });
 
 fn make_path() -> String {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let ts = crate::sysinfo::epoch_secs();
     format!("/tmp/spyc-debug-{ts}.log")
 }
 

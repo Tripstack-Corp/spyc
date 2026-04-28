@@ -321,11 +321,7 @@ pub fn is_uuid(token: &str) -> bool {
 
 /// Human-readable relative time: "just now", "5 minutes ago", "2 days ago".
 pub fn format_relative_time(epoch_secs: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let diff = now.saturating_sub(epoch_secs);
+    let diff = crate::sysinfo::epoch_secs().saturating_sub(epoch_secs);
     if diff < 10 {
         "just now".to_string()
     } else if diff < 60 {
@@ -351,10 +347,7 @@ mod tests {
     use tempfile::tempdir;
 
     fn now_secs() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+        crate::sysinfo::epoch_secs()
     }
 
     #[test]

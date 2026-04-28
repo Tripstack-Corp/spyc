@@ -406,47 +406,14 @@ fn display_name(path: &Path, md: &fs::Metadata) -> String {
 
 #[cfg(unix)]
 fn lookup_user_name(uid: u32) -> Option<String> {
-    let mut buf = vec![0i8; 1024];
-    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut result: *mut libc::passwd = std::ptr::null_mut();
-    let r = unsafe {
-        libc::getpwuid_r(
-            uid,
-            &raw mut pwd,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            &raw mut result,
-        )
-    };
-    if r != 0 || result.is_null() {
-        return None;
-    }
-    let cstr = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
-    cstr.to_str().ok().map(String::from)
+    uzers::get_user_by_uid(uid).map(|u| u.name().to_string_lossy().into_owned())
 }
 
 #[cfg(unix)]
 fn lookup_group_name(gid: u32) -> Option<String> {
-    let mut buf = vec![0i8; 1024];
-    let mut grp: libc::group = unsafe { std::mem::zeroed() };
-    let mut result: *mut libc::group = std::ptr::null_mut();
-    let r = unsafe {
-        libc::getgrgid_r(
-            gid,
-            &raw mut grp,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            &raw mut result,
-        )
-    };
-    if r != 0 || result.is_null() {
-        return None;
-    }
-    let cstr = unsafe { std::ffi::CStr::from_ptr(grp.gr_name) };
-    cstr.to_str().ok().map(String::from)
+    uzers::get_group_by_gid(gid).map(|g| g.name().to_string_lossy().into_owned())
 }
 
-#[cfg(unix)]
 fn format_local_time(t: std::time::SystemTime) -> String {
     let secs = match t.duration_since(std::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
@@ -455,31 +422,13 @@ fn format_local_time(t: std::time::SystemTime) -> String {
     format_local_time_from_unix(secs, 0)
 }
 
-#[cfg(not(unix))]
-fn format_local_time(t: std::time::SystemTime) -> String {
-    match t.duration_since(std::time::UNIX_EPOCH) {
-        Ok(d) => format!("unix:{}", d.as_secs()),
-        Err(_) => "—".to_string(),
-    }
-}
-
-#[cfg(unix)]
 fn format_local_time_from_unix(secs: i64, _nsec: i64) -> String {
-    let t = secs as libc::time_t;
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let r = unsafe { libc::localtime_r(&raw const t, &raw mut tm) };
-    if r.is_null() {
+    let Ok(ts) = jiff::Timestamp::from_second(secs) else {
         return "—".to_string();
-    }
-    format!(
-        "{year:04}-{mon:02}-{day:02} {hour:02}:{min:02}:{sec:02}",
-        year = tm.tm_year + 1900,
-        mon = tm.tm_mon + 1,
-        day = tm.tm_mday,
-        hour = tm.tm_hour,
-        min = tm.tm_min,
-        sec = tm.tm_sec,
-    )
+    };
+    ts.to_zoned(jiff::tz::TimeZone::system())
+        .strftime("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 #[cfg(unix)]

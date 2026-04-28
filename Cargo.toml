@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.24.1"
+version = "1.24.2"
 edition = "2024"
 description = "A vi-keyboard-driven file commander that pairs with Claude Code, inspired by SideFX's spy"
 license = "BSD-3-Clause"
@@ -35,6 +35,9 @@ grep-searcher = "0.1"
 grep-regex = "0.1"
 grep-matcher = "0.1"
 jiff = "0.2"
+uuid = { version = "1", features = ["v7"] }
+uzers = "0.12"
+strip-ansi-escapes = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

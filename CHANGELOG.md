@@ -13,6 +13,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.24.2] - 2026-04-28
+
+### Changed
+- **Custom-code reduction sweep.** Continuing the v1.24.1 jiff
+  swap, replaced four more hand-rolled implementations with
+  established crates after a code survey:
+  - **`fs/ops.rs` — uid/gid/localtime via `uzers` + `jiff`**.
+    Deleted ~70 lines of `unsafe` `getpwuid_r` / `getgrgid_r` /
+    `localtime_r` libc FFI plus a duplicated date-formatter.
+    `format_local_time_from_unix` now uses
+    `jiff::Timestamp::from_second(..).to_zoned(system).strftime`.
+  - **`state/inventory.rs` — `make_id` via `uuid::Uuid::now_v7`**.
+    The previous "simple UUID-like" hex-of-nanos generator could
+    collide on rapid yanks; UUIDv7 is time-ordered with random
+    suffix, no collision risk.
+  - **`app/mod.rs` — ANSI stripping via `strip-ansi-escapes`**.
+    Replaced ~40 lines of hand-rolled CSI/OSC parsing with the
+    BurntSushi-adjacent crate. Kept the spyc-specific
+    `strip_crlf` 3-pass normalizer (taking the *last* CR-frame
+    on a line is a deliberate UX choice).
+  - **`sysinfo::epoch_secs` / `epoch_nanos`**. Six files were
+    each spelling out
+    `SystemTime::now().duration_since(UNIX_EPOCH)...` -- now they
+    call shared helpers backed by `jiff::Timestamp::now()`.
+
+  Net: -~110 LOC, two new tiny deps (`uzers`, `strip-ansi-escapes`,
+  `uuid`), one less `unsafe` block, one less custom date algorithm.
+  All 456 tests pass serially.
+
 ## [1.24.1] - 2026-04-28
 
 ### Changed

@@ -132,9 +132,7 @@ fn state_dir() -> Option<PathBuf> {
 }
 
 fn epoch_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    crate::sysinfo::epoch_secs()
 }
 
 #[cfg(test)]

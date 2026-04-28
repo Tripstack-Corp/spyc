@@ -83,10 +83,9 @@ fn seed() -> u64 {
     // Nanoseconds since the epoch — good enough entropy for a picker
     // label. XOR in the PID to decorrelate siblings spawned in the
     // same nanosecond.
-    let ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::from(d.subsec_nanos()) ^ (d.as_secs() << 16));
-    ns ^ u64::from(std::process::id())
+    let ns = crate::sysinfo::epoch_nanos();
+    let mixed = (ns as u64) ^ ((ns >> 64) as u64);
+    mixed ^ u64::from(std::process::id())
 }
 
 #[cfg(test)]

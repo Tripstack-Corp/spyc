@@ -4856,11 +4856,10 @@ impl App {
 
     fn save_session(&mut self) {
         use crate::state::sessions::{SavedTab, Session};
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let epoch_secs = now.as_secs();
-        let id = now.as_millis() as u64;
+        let epoch_secs = crate::sysinfo::epoch_secs();
+        // Session id is a millisecond timestamp -- unique within a
+        // single spyc instance and human-glanceable in the picker.
+        let id = (crate::sysinfo::epoch_nanos() / 1_000_000) as u64;
 
         let tabs: Vec<SavedTab> = self
             .pane_tabs
@@ -6623,45 +6622,17 @@ fn common_prefix(strings: &[String]) -> String {
     first[..byte_len].to_string()
 }
 
-/// Strip ANSI escape sequences (CSI, OSC, bracketed paste markers, etc.)
-/// from a string, returning only printable content.
+/// Strip ANSI escape sequences from a string and drop remaining
+/// non-printable control bytes, leaving only displayable text. Used
+/// to sanitize captured pane-prompt buffers before yanking.
 fn strip_ansi_escapes(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            // Skip ESC + whatever follows (CSI sequence, OSC, etc.).
-            if let Some(&next) = chars.peek() {
-                if next == '[' {
-                    chars.next(); // consume '['
-                    // Consume until a letter or ~ terminates the sequence.
-                    while let Some(&c) = chars.peek() {
-                        chars.next();
-                        if c.is_ascii_alphabetic() || c == '~' {
-                            break;
-                        }
-                    }
-                } else if next == ']' {
-                    // OSC: skip until ST (ESC \ or BEL).
-                    chars.next();
-                    while let Some(c) = chars.next() {
-                        if c == '\x07' {
-                            break;
-                        }
-                        if c == '\x1b' && chars.peek() == Some(&'\\') {
-                            chars.next();
-                            break;
-                        }
-                    }
-                } else {
-                    chars.next(); // consume the char after ESC
-                }
-            }
-        } else if ch >= ' ' || ch == '\n' || ch == '\t' {
-            out.push(ch);
-        }
-    }
-    out.trim().to_string()
+    let stripped = strip_ansi_escapes::strip_str(s);
+    stripped
+        .chars()
+        .filter(|&c| c >= ' ' || c == '\n' || c == '\t')
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Render an "added" diff for every untracked file under `paths`.
