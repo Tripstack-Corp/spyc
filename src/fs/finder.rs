@@ -31,33 +31,65 @@ use nucleo_matcher::{Config, Matcher, Utf32Str, pattern::Pattern};
 /// truncated list than freeze the UI.
 pub const MAX_CANDIDATES: usize = 100_000;
 
+/// Batch size for the streaming walker. Tuned for "rare enough that
+/// channel overhead is negligible, frequent enough that the picker
+/// updates feel live on a 100K-file repo."
+const STREAM_BATCH: usize = 256;
+
 /// Walk `root` honoring gitignore + standard hidden-file rules,
-/// returning repo-relative paths for every regular file. Symlinks
-/// are followed only at the root (gitignore convention). Hidden
-/// files are excluded -- the user's `a` mask toggle is for the
-/// listing, not the finder; the finder is for "find any project
-/// file by fragment of name."
-pub fn walk(root: &Path) -> Vec<PathBuf> {
+/// streaming repo-relative paths through `tx` in batches. Designed
+/// to run in a background thread so the picker stays interactive
+/// while a large monorepo is being enumerated.
+///
+/// Cancellation: when the receiver is dropped (e.g. user closes
+/// the picker), `tx.send` fails and we exit cleanly without
+/// finishing the walk -- no lingering threads.
+///
+/// Returns when: the walk completes, the cap is hit, or the
+/// receiver disconnects. The sender drops on return; the receiver
+/// sees `TryRecvError::Disconnected` and knows the walk is done.
+pub fn walk_streaming(root: &Path, tx: std::sync::mpsc::Sender<Vec<PathBuf>>) {
     let walker = ignore::WalkBuilder::new(root)
         .standard_filters(true) // gitignore + hidden + .git/
         .max_filesize(None)
         .build();
-    let mut out = Vec::new();
+    let mut batch: Vec<PathBuf> = Vec::with_capacity(STREAM_BATCH);
+    let mut count = 0usize;
     for entry in walker {
         let Ok(entry) = entry else { continue };
-        // Skip directories themselves; `ignore` yields both dirs
-        // and files when descending. We only want files.
         if entry.file_type().is_some_and(|t| t.is_file()) {
             let path = entry.path();
-            // Strip the root prefix for compact display. If for
-            // some reason stripping fails (shouldn't, but
-            // belt-and-suspenders), fall back to the raw path.
             let rel = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-            out.push(rel);
-            if out.len() >= MAX_CANDIDATES {
+            batch.push(rel);
+            count += 1;
+            if batch.len() >= STREAM_BATCH {
+                if tx.send(std::mem::take(&mut batch)).is_err() {
+                    return; // receiver dropped -- picker closed
+                }
+                batch = Vec::with_capacity(STREAM_BATCH);
+            }
+            if count >= MAX_CANDIDATES {
                 break;
             }
         }
+    }
+    if !batch.is_empty() {
+        let _ = tx.send(batch);
+    }
+}
+
+/// Synchronous wrapper around `walk_streaming` -- spawns a thread,
+/// drains the channel, returns the full list. Test-only; the
+/// production picker uses `walk_streaming` directly so it can
+/// progressively render results as the walk runs.
+#[cfg(test)]
+fn walk(root: &Path) -> Vec<PathBuf> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let walk_root = root.to_path_buf();
+    std::thread::spawn(move || walk_streaming(&walk_root, tx));
+    let mut out = Vec::new();
+    while let Ok(batch) = rx.recv() {
+        out.extend(batch);
     }
     out
 }
@@ -182,5 +214,52 @@ mod tests {
         let result = rank(&candidates, "foo", 10);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, PathBuf::from("foo.rs"));
+    }
+
+    #[test]
+    fn walk_streaming_emits_at_least_one_batch_and_disconnects() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        // Create enough files to ensure at least one batch ships.
+        for i in 0..STREAM_BATCH + 5 {
+            File::create(root.join(format!("f{i:04}"))).unwrap();
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || walk_streaming(&root, tx));
+        let mut total = 0;
+        let mut batch_count = 0;
+        while let Ok(batch) = rx.recv() {
+            total += batch.len();
+            batch_count += 1;
+        }
+        // Channel closed once walk completed -- thread dropped tx.
+        assert!(batch_count >= 2, "expected ≥2 batches, got {batch_count}");
+        assert_eq!(total, STREAM_BATCH + 5);
+    }
+
+    #[test]
+    fn walk_streaming_stops_when_receiver_drops() {
+        // Cancellation contract: dropping the receiver makes the
+        // walker thread exit on its next `tx.send` attempt without
+        // finishing the walk. We can't directly observe the thread
+        // exiting, but we can verify it doesn't hang: spawn it,
+        // drop the receiver immediately, join with a timeout via
+        // a side channel.
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        for i in 0..STREAM_BATCH * 4 {
+            File::create(root.join(format!("f{i:04}"))).unwrap();
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            walk_streaming(&root, tx);
+            let _ = done_tx.send(());
+        });
+        drop(rx); // immediate cancel
+        // Walker should exit promptly. Allow generous slack since
+        // ignore's threadpool startup adds latency.
+        let result = done_rx.recv_timeout(std::time::Duration::from_secs(5));
+        assert!(result.is_ok(), "walker did not exit after rx drop");
     }
 }

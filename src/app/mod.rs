@@ -289,11 +289,14 @@ pub enum PromptKind {
     },
 }
 
-/// State for the `F` filename finder. Walked once on open; the
-/// candidate list is re-ranked per keystroke against the current
-/// query. Selection is an index into the filtered slice.
+/// State for the `F` filename finder. The walk runs in a worker
+/// thread streaming batches of paths through `walk_rx`; the picker
+/// is interactive immediately and the candidate list grows live as
+/// the walker progresses. Re-rank runs on every keystroke and on
+/// every fresh batch arrival (cheap: ~1us per candidate).
 struct FindPicker {
-    /// Repo-relative paths from the walk; never modified after open.
+    /// Repo-relative paths accumulated from the walk so far.
+    /// Append-only during the walk; never modified by the user.
     candidates: Vec<PathBuf>,
     /// Absolute root the walk started from. Used to construct the
     /// final absolute path on Enter.
@@ -301,7 +304,7 @@ struct FindPicker {
     /// User's current input.
     query: String,
     /// Current ranked subset (paths only; scores discarded after
-    /// sort). Re-built on every keystroke.
+    /// sort). Re-built on keystroke or new-batch arrival.
     filtered: Vec<PathBuf>,
     /// Index into `filtered`. 0 when query just changed; arrows
     /// move it within `[0, filtered.len())`.
@@ -309,6 +312,13 @@ struct FindPicker {
     /// Cap on rendered results so a 100K-file repo doesn't blow up
     /// the pager Line vec on first paint.
     limit: usize,
+    /// Receiver for streaming candidate batches from the walker
+    /// thread. Set to `None` once the walk completes (channel
+    /// disconnects when the worker drops its sender).
+    walk_rx: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
+    /// True once the walker thread has finished. Drives the title
+    /// suffix ("scanning..." vs final count).
+    walk_complete: bool,
 }
 
 impl FindPicker {
@@ -320,6 +330,33 @@ impl FindPicker {
             .map(|(p, _score)| p)
             .collect();
         self.selected = 0;
+    }
+
+    /// Drain any batches that have arrived since the last tick.
+    /// Returns true when new candidates were appended OR when the
+    /// walk completed (caller should re-render either way: title
+    /// changes from "scanning..." to a final count).
+    fn drain_walk(&mut self) -> bool {
+        let Some(rx) = self.walk_rx.as_ref() else {
+            return false;
+        };
+        let mut got_any = false;
+        loop {
+            match rx.try_recv() {
+                Ok(batch) => {
+                    self.candidates.extend(batch);
+                    got_any = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.walk_rx = None;
+                    self.walk_complete = true;
+                    got_any = true;
+                    break;
+                }
+            }
+        }
+        got_any
     }
 }
 
@@ -1107,6 +1144,20 @@ impl App {
                         needs_draw = true;
                         draw_reason = 3;
                     }
+                }
+            }
+
+            // F-finder: drain any candidate batches the walker
+            // worker has pushed since the last tick. Re-rank +
+            // re-render only when something changed (or the walk
+            // completed -- title flips from "scanning..." to a
+            // final count).
+            if let Some(picker) = self.find_picker.as_mut() {
+                if picker.drain_walk() {
+                    picker.refilter();
+                    self.render_find_picker();
+                    needs_draw = true;
+                    draw_reason = 3;
                 }
             }
 
@@ -3418,23 +3469,31 @@ impl App {
 
     /// V — open $EDITOR on the cursor file in the top overlay (replaces
     /// the file list) while the bottom pane stays visible and running.
-    /// Open the F-finder: walk PROJECT_HOME (or listing dir as
-    /// fallback), build a fuzzy-picker pager, hook input to the
-    /// `find_picker` interceptor in the main key loop.
+    /// Open the F-finder. Spawns the walker on a worker thread so
+    /// the picker is interactive immediately (typing filters the
+    /// already-arrived candidates while the walker keeps streaming
+    /// in the background). Closing the picker drops the receiver,
+    /// which makes the walker exit on its next `tx.send`.
     fn open_find_picker(&mut self) {
         let root = self
             .state
             .project_home
             .clone()
             .unwrap_or_else(|| self.state.listing.dir.clone());
-        let candidates = crate::fs::finder::walk(&root);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let walk_root = root.clone();
+        std::thread::spawn(move || {
+            crate::fs::finder::walk_streaming(&walk_root, tx);
+        });
         let mut picker = FindPicker {
-            candidates,
+            candidates: Vec::new(),
             root,
             query: String::new(),
             filtered: Vec::new(),
             selected: 0,
             limit: 200,
+            walk_rx: Some(rx),
+            walk_complete: false,
         };
         picker.refilter();
         self.find_picker = Some(picker);
@@ -3443,8 +3502,9 @@ impl App {
     }
 
     /// Rebuild the pager view from current `find_picker` state.
-    /// Called on open and after each keystroke that mutates the
-    /// query or selection.
+    /// Called on open, after each keystroke that mutates the query
+    /// or selection, and after each tick where the streaming walk
+    /// produced new candidates (title shows progress).
     fn render_find_picker(&mut self) {
         let Some(picker) = self.find_picker.as_ref() else {
             return;
@@ -3452,7 +3512,15 @@ impl App {
         let total = picker.candidates.len();
         let shown = picker.filtered.len();
         let pos = if shown == 0 { 0 } else { picker.selected + 1 };
-        let title = format!("find — \"{}\" — {pos}/{shown} of {total}", picker.query);
+        let scan_suffix = if picker.walk_complete {
+            String::new()
+        } else {
+            " — scanning…".to_string()
+        };
+        let title = format!(
+            "find — \"{}\" — {pos}/{shown} of {total}{scan_suffix}",
+            picker.query
+        );
         let lines: Vec<String> = picker
             .filtered
             .iter()
@@ -3466,6 +3534,9 @@ impl App {
         } else {
             Some(picker.selected)
         };
+        // While the walker is still streaming, suppress [EOF] /
+        // tilde markers since the candidate list is still growing.
+        view.streaming = !picker.walk_complete;
         self.pager = Some(view);
     }
 

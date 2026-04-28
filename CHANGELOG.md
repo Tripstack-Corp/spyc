@@ -13,6 +13,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.22.1] - 2026-04-28
+
+### Changed
+- **`F` finder walks on a worker thread.** v1.22.0 walked
+  synchronously on F-press, blocking the picker open for ~100-200ms
+  on large monorepos. The walker now runs on a background thread
+  and streams candidate batches (256 paths each) into the picker
+  via an `mpsc::channel`. The picker is interactive immediately
+  (the user can start typing before the walk finishes), and the
+  candidate count + ranked results live-update as batches arrive.
+  Title shows "scanning…" while the walk is in progress; flips to
+  the final count when done. Closing the picker drops the receiver,
+  which makes the walker exit cleanly on its next `tx.send`.
+
 ## [1.22.0] - 2026-04-28
 
 ### Added
