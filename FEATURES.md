@@ -31,6 +31,12 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
   suggestions from visit history)
+- **F** project-wide fuzzy filename finder. Walks `PROJECT_HOME` (or
+  the current dir as fallback) honoring `.gitignore`, ranks
+  candidates against typed input via nucleo-matcher (basename hits
+  outrank parent-dir hits, fzf-style). Up/Down move selection,
+  Enter chdirs to the matched file's parent and places the cursor
+  on it; Esc cancels. No persistent index — walks lazily on open.
 - Multi-column layout that adapts to terminal width
 - Color-coded entries: directories, executables, symlinks, files
 - **Git status colors** — modified files show amber, untracked/added

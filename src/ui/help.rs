@@ -43,6 +43,10 @@ const SECTIONS: &[Section] = &[
             ("u  -", "climb to parent"),
             ("H  ~  Home", "go to home directory"),
             ("J", "jump to a path (~, $VAR expanded)"),
+            (
+                "F",
+                "find file (project-wide fuzzy: gitignore-aware walk, type to filter)",
+            ),
         ],
     },
     Section {

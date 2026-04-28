@@ -289,6 +289,40 @@ pub enum PromptKind {
     },
 }
 
+/// State for the `F` filename finder. Walked once on open; the
+/// candidate list is re-ranked per keystroke against the current
+/// query. Selection is an index into the filtered slice.
+struct FindPicker {
+    /// Repo-relative paths from the walk; never modified after open.
+    candidates: Vec<PathBuf>,
+    /// Absolute root the walk started from. Used to construct the
+    /// final absolute path on Enter.
+    root: PathBuf,
+    /// User's current input.
+    query: String,
+    /// Current ranked subset (paths only; scores discarded after
+    /// sort). Re-built on every keystroke.
+    filtered: Vec<PathBuf>,
+    /// Index into `filtered`. 0 when query just changed; arrows
+    /// move it within `[0, filtered.len())`.
+    selected: usize,
+    /// Cap on rendered results so a 100K-file repo doesn't blow up
+    /// the pager Line vec on first paint.
+    limit: usize,
+}
+
+impl FindPicker {
+    /// Re-rank `candidates` against the current `query`, store in
+    /// `filtered`, reset `selected` to 0.
+    fn refilter(&mut self) {
+        self.filtered = crate::fs::finder::rank(&self.candidates, &self.query, self.limit)
+            .into_iter()
+            .map(|(p, _score)| p)
+            .collect();
+        self.selected = 0;
+    }
+}
+
 /// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
 /// Works like a browser back/forward stack.
 struct PagerHistory {
@@ -380,6 +414,11 @@ pub struct App {
     pending_capture: Option<PendingCapture>,
     background_tasks: BackgroundTasks,
     pending_history_pick: Option<LineEditor>,
+    /// Active F-finder state (filename fuzzy picker). When `Some`,
+    /// the pager renders the picker UI and key input is intercepted
+    /// before the normal pager handler -- the user types to filter,
+    /// arrows move selection, Enter chdirs + cursors on the file.
+    find_picker: Option<FindPicker>,
     history_pending_g: bool,
     /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
     /// jump to file reference.
@@ -588,6 +627,7 @@ impl App {
             pending_capture: None,
             background_tasks: BackgroundTasks::new(),
             pending_history_pick: None,
+            find_picker: None,
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
@@ -2240,6 +2280,14 @@ impl App {
         // Any keypress clears a lingering flash message.
         self.state.flash = None;
 
+        // F-finder is modal: while open, swallow all keys for picker
+        // navigation (type-to-filter, Up/Down, Enter, Esc). Runs
+        // before the capture / pager / file-list dispatch so the
+        // picker can't be accidentally double-routed.
+        if self.handle_find_picker_key(key) {
+            return Ok(PostAction::None);
+        }
+
         // While a `!` capture is running, forward typed keys to the
         // child via the master PTY writer so the user can answer
         // prompts (sudo password, ssh password, etc.). Ctrl+\ kills
@@ -3370,6 +3418,141 @@ impl App {
 
     /// V — open $EDITOR on the cursor file in the top overlay (replaces
     /// the file list) while the bottom pane stays visible and running.
+    /// Open the F-finder: walk PROJECT_HOME (or listing dir as
+    /// fallback), build a fuzzy-picker pager, hook input to the
+    /// `find_picker` interceptor in the main key loop.
+    fn open_find_picker(&mut self) {
+        let root = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.listing.dir.clone());
+        let candidates = crate::fs::finder::walk(&root);
+        let mut picker = FindPicker {
+            candidates,
+            root,
+            query: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            limit: 200,
+        };
+        picker.refilter();
+        self.find_picker = Some(picker);
+        self.render_find_picker();
+        self.needs_full_repaint = true;
+    }
+
+    /// Rebuild the pager view from current `find_picker` state.
+    /// Called on open and after each keystroke that mutates the
+    /// query or selection.
+    fn render_find_picker(&mut self) {
+        let Some(picker) = self.find_picker.as_ref() else {
+            return;
+        };
+        let total = picker.candidates.len();
+        let shown = picker.filtered.len();
+        let pos = if shown == 0 { 0 } else { picker.selected + 1 };
+        let title = format!("find — \"{}\" — {pos}/{shown} of {total}", picker.query);
+        let lines: Vec<String> = picker
+            .filtered
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let mut view = pager::PagerView::new_plain(title, lines);
+        view.show_line_numbers = false;
+        view.no_history = true;
+        view.picker_cursor = if shown == 0 {
+            None
+        } else {
+            Some(picker.selected)
+        };
+        self.pager = Some(view);
+    }
+
+    /// Intercept keys when the F-finder is open. Returns true when
+    /// the key was consumed by the picker (so the caller skips
+    /// normal pager / file-list dispatch). Esc closes; Enter chdirs
+    /// to the matched file's parent and places the cursor on it;
+    /// Up/Down move selection; printable chars + Backspace edit
+    /// the query and re-rank.
+    fn handle_find_picker_key(&mut self, key: KeyEvent) -> bool {
+        if self.find_picker.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.find_picker = None;
+                self.pager = None;
+                self.needs_full_repaint = true;
+                true
+            }
+            KeyCode::Enter => {
+                let target = self.find_picker.as_ref().and_then(|p| {
+                    p.filtered
+                        .get(p.selected)
+                        .cloned()
+                        .map(|rel| (p.root.clone(), rel))
+                });
+                self.find_picker = None;
+                self.pager = None;
+                self.needs_full_repaint = true;
+                if let Some((root, rel)) = target {
+                    let abs = root.join(&rel);
+                    if let Some(parent) = abs.parent() {
+                        if let Err(e) = self.state.chdir(parent) {
+                            self.state.flash_error(format!("chdir: {e}"));
+                        } else if let Some(idx) = self.state.rows.iter().position(|r| r.path == abs)
+                        {
+                            self.state.cursor.index = idx;
+                            self.state.cursor.clamp(self.state.rows.len());
+                        }
+                    }
+                }
+                true
+            }
+            KeyCode::Up => {
+                if let Some(picker) = self.find_picker.as_mut() {
+                    if picker.selected > 0 {
+                        picker.selected -= 1;
+                        self.render_find_picker();
+                    }
+                }
+                true
+            }
+            KeyCode::Down => {
+                if let Some(picker) = self.find_picker.as_mut() {
+                    if picker.selected + 1 < picker.filtered.len() {
+                        picker.selected += 1;
+                        self.render_find_picker();
+                    }
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                if let Some(picker) = self.find_picker.as_mut() {
+                    if !picker.query.is_empty() {
+                        picker.query.pop();
+                        picker.refilter();
+                        self.render_find_picker();
+                    }
+                }
+                true
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if let Some(picker) = self.find_picker.as_mut() {
+                    picker.query.push(c);
+                    picker.refilter();
+                    self.render_find_picker();
+                }
+                true
+            }
+            _ => true, // Swallow other keys while picker is open.
+        }
+    }
+
     fn edit_in_pane(&mut self) {
         let Some(row) = self.state.rows.get(self.state.cursor.index) else {
             return;
@@ -5514,6 +5697,8 @@ impl App {
                     self.state.flash_info("no buffers in history");
                 }
             }
+
+            Action::FindFile => self.open_find_picker(),
 
             Action::ReloadConfig => self.reload_config(),
 

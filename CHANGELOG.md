@@ -13,6 +13,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.22.0] - 2026-04-28
+
+### Added
+- **`F` project-wide fuzzy filename finder.** First milestone of
+  the project-wide-search ROADMAP entry. New key in the file list
+  walks `PROJECT_HOME` (or the listing dir as fallback) honoring
+  `.gitignore` via the `ignore` crate, ranks candidates against
+  typed input with `nucleo-matcher` (basename hits outrank
+  parent-dir hits, fzf-style). Up/Down move selection, Enter
+  chdirs to the matched file's parent and places the cursor on
+  it; Esc cancels. Walk runs lazily on open (no persistent
+  index); 100K-file cap so a monorepo doesn't load the whole
+  kernel into RAM. Subsequent milestones (`:grep` content search,
+  MCP `search_paths` / `search_content` / `search_picks` /
+  `search_inventory` tools) remain on the ROADMAP.
+
 ## [1.21.7] - 2026-04-27
 
 ### Fixed

@@ -398,6 +398,12 @@ impl Resolver {
                 ResolverOutcome::Action(Action::JumpPrompt)
             }
 
+            // Find file (project-wide fuzzy filename picker).
+            KeyCode::Char('F') => {
+                self.reset();
+                ResolverOutcome::Action(Action::FindFile)
+            }
+
             // File operations.
             KeyCode::Char('c') => {
                 self.reset();

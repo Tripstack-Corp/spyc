@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.21.7"
+version = "1.22.0"
 edition = "2024"
 description = "A vi-keyboard-driven file commander that pairs with Claude Code, inspired by SideFX's spy"
 license = "BSD-3-Clause"
@@ -29,6 +29,8 @@ pretty-hex = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 unicode-width = "0.2"
 libc = "0.2"
+ignore = "0.4"
+nucleo-matcher = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

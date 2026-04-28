@@ -148,6 +148,12 @@ pub enum Action {
     /// when no pager is currently open.
     ReopenLastBuffer,
 
+    /// `F` from the file list -- open the project-wide filename
+    /// finder. Walks PROJECT_HOME (or the listing dir) honoring
+    /// gitignore, fuzzy-matches against typed input, Enter chdirs
+    /// to the matched file's parent and places the cursor on it.
+    FindFile,
+
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
     Noop,
@@ -246,6 +252,7 @@ impl Action {
             Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
             Self::ReopenLastBuffer => "reopen the most-recent closed pager buffer",
+            Self::FindFile => "find file (project-wide fuzzy)",
             Self::Noop => "no-op",
         }
     }

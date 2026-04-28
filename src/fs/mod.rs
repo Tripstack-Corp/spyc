@@ -1,6 +1,7 @@
 //! Filesystem model and operations.
 
 pub mod entry;
+pub mod finder;
 pub mod listing;
 pub mod ops;
 
