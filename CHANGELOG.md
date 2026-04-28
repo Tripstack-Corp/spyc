@@ -13,6 +13,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.24.1] - 2026-04-28
+
+### Changed
+- **Date formatting moved to `jiff`.** Replaced the hand-rolled
+  Howard Hinnant `civil_from_days` algorithm in `sysinfo.rs` with
+  `jiff::Timestamp::now().to_zoned(UTC).strftime(...)`. Same
+  output (`YYYY-MM-DD HH:MM:SS UTC`), one less algorithm we have
+  to maintain. `jiff` joins the existing BurntSushi crates we
+  already depend on (`grep-regex`, `grep-searcher`, `ignore`).
+
 ## [1.24.0] - 2026-04-28
 
 ### Added

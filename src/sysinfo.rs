@@ -1,39 +1,9 @@
 //! Process & environment info — what `D`, `V`, `I` show.
-//!
-//! We deliberately don't pull in a date-formatting crate; the 20-line
-//! Hinnant algorithm below formats UTC timestamps correctly for any
-//! Gregorian date we care about.
-
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Current UTC date/time as `YYYY-MM-DD HH:MM:SS UTC`.
 pub fn format_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let days = (secs / 86_400) as i64;
-    let (y, m, d) = civil_from_days(days);
-    let hour = (secs / 3600) % 24;
-    let minute = (secs / 60) % 60;
-    let second = secs % 60;
-    format!("{y:04}-{m:02}-{d:02} {hour:02}:{minute:02}:{second:02} UTC")
-}
-
-/// Howard Hinnant's `civil_from_days`: converts days-since-1970-01-01
-/// (Unix epoch) to (year, month, day). Handles years 0000–9999 and
-/// beyond; we don't care about edge cases.
-const fn civil_from_days(z: i64) -> (i32, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64; // [0, 146_096]
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if m <= 2 { y + 1 } else { y };
-    (year as i32, m as u32, d as u32)
+    let dt = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC);
+    dt.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 
 /// Git status for a directory: branch name + dirty flag.
@@ -332,22 +302,6 @@ pub fn format_rss() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn epoch_is_1970() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-    }
-
-    #[test]
-    fn y2k_is_30th_anniversary() {
-        // 2000-01-01 is day 10957 since 1970-01-01.
-        assert_eq!(civil_from_days(10957), (2000, 1, 1));
-    }
-
-    #[test]
-    fn pre_epoch() {
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
-    }
 
     #[test]
     fn format_now_has_correct_shape() {
