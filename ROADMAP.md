@@ -407,6 +407,38 @@ transition.
 Lower-priority items retained from the prior roadmap. Will graduate to
 one of the tracks above when picked up.
 
+- **Markdown viewer with source/rendered toggle.** Open `*.md` /
+  `*.markdown` in a *rendered* pager view by default (headings
+  styled, lists with bullet glyphs, code blocks highlighted,
+  blockquotes with a left rule, inline `**bold**`/`*italic*` styled
+  -- via `tui-markdown` or `pulldown-cmark` + a small custom
+  renderer). `m` in the pager toggles between rendered and source
+  modes; non-`.md` files no-op the toggle with a "not a markdown
+  file" flash.
+  - **Pre-compute both** at file-open time: `lines_source` (current
+    syntect-highlighted source) and `lines_rendered` (the styled
+    output). The pager picks one based on `markdown_mode: bool`.
+    Markdown source files are tiny (<100KB typical), so 2× memory
+    isn't a concern.
+  - **Default**: rendered for `.md`/`.markdown`, source for
+    everything else.
+  - **Search / `n` / `N`**: match the *active* rendering -- what you
+    see is what you find. Toggle to source first if you need to
+    grep for raw markdown syntax.
+  - **`ya` (yank-all) and `s` (save)**: always operate on the
+    *source*, regardless of view mode. POLA -- if you yank a
+    README to the clipboard, you almost certainly want the
+    markdown source, not a stripped-and-styled rendering.
+  - **Scroll position**: preserve the line index across toggle
+    (rendered/source line counts differ, so position drifts mildly).
+    User can re-orient with `gg`/`G`. Two-anchor preservation
+    (byte-offset matching) is a nice-to-have, not v1.
+  - **Out of scope for v1**: tables (look mediocre in TUIs no
+    matter what; fall back to source), images (alt-text only),
+    embedded HTML.
+  - Tradeoff: another dependency in `Cargo.toml`. Acceptable for
+    the feature value -- READMEs and design docs are the most
+    common file type a spyc user opens for *reading* (vs editing).
 - **Drag and drop** -- files from the desktop into spyc via OSC 52 or
   path paste.
 - **Page scroll overlap** in the pager -- keep 2-3 lines of previous

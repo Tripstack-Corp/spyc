@@ -1,6 +1,9 @@
 ### SMALL ###
-- while I am drafting a command for a new pane it would be nice to still be
-  able to switch to another pane to check on something
+- when resuming a long running task we should be sure that the most recent
+  output is visible
+- a pane that has ended should not be so easy to dismiss with ESC; it should
+  require ^a-x so that the user purposefully says they are done with it e.g. I
+  may still way to try and restart it
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
@@ -14,7 +17,13 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
-- maybe we need a better markdown viewer builtin?
+- / should support a more global search - perhaps even with a index of the
+  current working project? there must be a cask with something great which
+  would be a good fit for spyc? it could be exposed to the MCP for Claude to
+  leverage with a skill and speed it up for grepping; this could also contain
+  more indexing functions?
+- while I am drafting a command for a new pane it would be nice to still be
+  able to switch to another pane to check on something
 - would like to be able to reorder tabs
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
