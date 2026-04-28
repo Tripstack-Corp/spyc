@@ -11,7 +11,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)
 - `!?` history editor — popup with vi-editable lines, `/search`, `G`/`gg`, `:N` jump, `Ctrl+D` delete
-- `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:fg`, `:task`, `:bprev`, `:bnext`, `:q`)
+- `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:fg`, `:task`, `:grep`, `:bprev`, `:bnext`, `:q`)
+- Project-wide search — `F` opens a fuzzy filename finder (gitignore-aware walker on a worker thread, multi-repo descent into sibling-clone subrepos); `:grep <pattern>` is a project-wide content search via the embedded ripgrep matcher (`grep-regex` + `grep-searcher`, no subprocess), streams `path:line:col: text` into a pager so `gf`/`gF` jump for free.
 - Background tasks — `^Z` while a `!` capture pager is open sends the running task to the background; reader thread keeps draining output into a per-task buffer (head-truncated at 1 MB). `:fg` (or `:fg N`) resumes; `gB` / `:task N` / `[t`/`]t` open a peek "task viewer" without taking ownership. Tasks render as `[N+]`/`[N●]`/`[N✓]`/`[N✗]` in the pane divider (right-aligned, distinct color from pane tabs). On close of a viewed-and-exited task, the rendered view is promoted into buffer history.
 - Pager buffer history — closed pager views go onto a back/forward stack (max 10). `:bprev`/`:bnext` walk it from the prompt; `[b`/`]b` chord walks it from inside an open pager; `gp` reopens the most-recent closed buffer from the file list. The help overlay is excluded from the stack.
 - `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=` clears)
@@ -37,7 +38,7 @@ per-module navigation index.
 - **`src/keymap/`** — Resolver, user keymap DSL parser, default bindings.
 - **`src/pane/`** — Pty-hosted subprocess. `mod.rs` is the `Pane` struct (spawn, I/O, scroll mode), `input.rs` encodes crossterm keys to ANSI, `widget.rs` renders `vt100::Screen` to ratatui.
 - **`src/ui/`** — Widgets: list view, status bar, pager, prompt, line editor, help, theme.
-- **`src/fs/`** — Directory listing, entry types, file operations.
+- **`src/fs/`** — Directory listing, entry types, file operations. `finder.rs` backs the `F` filename picker (gitignore-aware streaming walker, nucleo fuzzy match); `grep.rs` backs `:grep` (embedded ripgrep matcher streaming `path:line:col: text` matches).
 - **`src/mcp.rs`** — MCP server: PID-scoped Unix socket listener, stdio proxy for Claude Code, `.mcp.json` management, enterprise policy checking, instance takeover.
 - **`src/mcp_cmd.rs`** — Command channel types bridging MCP threads to the main event loop.
 - **`src/context.rs`** — Context snapshot (cwd, cursor, picks, filter, git branch, project_home, session_name) written to disk for MCP consumers.

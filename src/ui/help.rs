@@ -193,7 +193,7 @@ const SECTIONS: &[Section] = &[
             ("$", "drop into $SHELL in current dir"),
             (
                 ":",
-                "command line (:cd, :sort, :marks, :limit, :set, :!, :;, :q)",
+                "command line (:cd, :sort, :grep, :limit, :set, :!, :;, :q)",
             ),
         ],
     },
@@ -230,6 +230,11 @@ const SECTIONS: &[Section] = &[
             ("/", "incremental search (prefix, or glob if * ? [)"),
             ("n", "repeat search forward"),
             ("N", "repeat search backward"),
+            ("F", "project-wide fuzzy filename finder (gitignore-aware)"),
+            (
+                ":grep <pat>",
+                "project-wide content search (embedded ripgrep, gf jumps)",
+            ),
         ],
     },
     Section {

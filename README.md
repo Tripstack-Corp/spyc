@@ -117,9 +117,11 @@ restores all pane tabs and resumes Claude conversations via
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
 | `V` | Open `$EDITOR` in top pane (Claude pane stays visible) |
 | `u` / `-` | Climb to parent |
-| `/` | Search (incremental, glob-aware) |
+| `/` | Search current listing (incremental, glob-aware) |
 | `H` / `~` | Jump to home |
 | `J` | Jump to any path |
+| `F` | Project-wide fuzzy filename finder (gitignore-aware) |
+| `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
 
 ### Picks & inventory
 
@@ -174,7 +176,7 @@ support. Press `?` inside the pager for its own help overlay.
 | `!?` | History editor (vi-editable, searchable) |
 | `;` | Foreground command (top, vim, etc.) |
 | `$` | Drop into `$SHELL` |
-| `:` | Command line (`:cd`, `:sort`, `:limit`, `:fg`, `:task`, `:q`) |
+| `:` | Command line (`:cd`, `:sort`, `:limit`, `:grep`, `:fg`, `:task`, `:q`) |
 
 `%` in any command expands to the current selection.
 

@@ -239,24 +239,14 @@ terminal inside a terminal." In priority order:
   filename search across the project, and content search across
   files. Both worth filling; both have a spyc-shaped MCP angle that
   generic Claude tools (Glob/Grep via Bash) don't.
-  1. **M1 -- `F` filename finder.** New key in the file list
-     opens a fuzzy-picker overlay walking PROJECT_HOME (or current
-     dir if no PROJECT_HOME). Stack: the `ignore` crate (gitignore-
-     aware walker, the same primitive ripgrep uses) +
-     `nucleo` (the fuzzy matcher Helix uses). Walk on demand, no
-     persistent index -- millisecond-fast on typical repos. Type
-     to live-narrow, Enter chdirs + cursors on the file. `J`
-     stays for the "I know roughly what dir" case; `F` is for
-     "find anything by fragment of name."
-  2. **M2 -- `:grep <pattern>` content search.** Embedded
-     ripgrep matcher (`grep-searcher` + `grep-regex` -- the
-     BurntSushi crates ripgrep itself uses, not a subprocess to
-     `rg`). No external prereq, predictable behavior. Power
-     users with custom `~/.ripgreprc` can still `! rg foo` for
-     full ripgrep flag surface. Results land in a pager as
-     `path:line:col: matched text`, one match per line; `gf` /
-     `gF` already jump from those (free integration with the
-     existing pane-path-reference code path).
+  1. ~~**M1 -- `F` filename finder.**~~ Shipped v1.22.0 (worker-
+     thread streaming in v1.22.1, multi-repo descent in v1.22.2).
+  2. ~~**M2 -- `:grep <pattern>` content search.**~~ Shipped
+     v1.23.0. Embedded ripgrep matcher (`grep-searcher` +
+     `grep-regex`), gitignore-aware, smart-case, multi-repo
+     walker. Results stream into a pager as `path:line:col: text`
+     so `gf`/`gF` jump for free. Capped at 5000 matches; refine to
+     narrow.
   3. **M3 -- MCP exposure.** Two basic tools: `search_paths` and
      `search_content`, both gitignore-aware and PROJECT_HOME-
      scoped. Plus two *spyc-shaped* tools that don't have a
@@ -510,6 +500,18 @@ one of the tracks above when picked up.
 
 Items shipped in the current development cycle, newest first.
 
+- **v1.23.0** -- `:grep <pattern>` project-wide content search (M2 of
+  the project-wide-search track). Embedded ripgrep matcher
+  (`grep-regex` + `grep-searcher`, no subprocess), gitignore-aware,
+  smart-case, multi-repo walker that descends into sibling-clone
+  subrepos the outer `.gitignore` excluded (same shape as the
+  v1.22.2 finder fix). Matches stream into a pager as
+  `path:line:col: text` so `gf`/`gF` jump from a hit for free.
+  Capped at 5000 matches per session.
+- **v1.22.x** -- `F` project-wide fuzzy filename finder (M1 of the
+  project-wide-search track). Streams candidates from a worker
+  thread on a 100K-cap; nucleo-matcher for fzf-style ranking;
+  multi-repo descent into sibling-clone subrepos.
 - **v1.11.0** -- `PROJECT_HOME`, named sessions, editable start dir,
   top-bar redesign.
   - `PROJECT_HOME` is a sticky per-session project root, auto-set at

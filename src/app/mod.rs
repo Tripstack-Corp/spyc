@@ -360,6 +360,35 @@ impl FindPicker {
     }
 }
 
+/// State for an active `:grep` session. The worker thread runs the
+/// content searcher and pushes batches of matches through `rx`; the
+/// main tick loop drains them and appends to the pager view whose
+/// `grep_id` matches `id`. When the matching pager is closed or
+/// replaced (`bprev`/`bnext`/Esc/etc.), the session is dropped and
+/// the worker exits on its next send.
+struct GrepSession {
+    /// Unique session id; pasted onto the pager view's `grep_id` so
+    /// stale workers can't bleed into a fresh search.
+    id: u32,
+    /// Receiver for streaming match batches from the worker.
+    rx: std::sync::mpsc::Receiver<Vec<crate::fs::grep::GrepMatch>>,
+    /// Total matches forwarded so far. Drives the title's progress
+    /// suffix and the cap-hit warning.
+    count: usize,
+    /// True once the worker disconnected (walk complete or cap hit).
+    /// The pager flips `streaming` off and the title shows the final
+    /// count instead of "scanning…".
+    complete: bool,
+    /// Cap-hit flag — set when `count` reaches `MAX_MATCHES` so the
+    /// final title can warn the user that results were truncated.
+    capped: bool,
+    /// Pattern echoed in the title.
+    pattern: String,
+    /// Display root (project home or listing dir) for context in the
+    /// title.
+    root: PathBuf,
+}
+
 /// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
 /// Works like a browser back/forward stack.
 struct PagerHistory {
@@ -456,6 +485,17 @@ pub struct App {
     /// before the normal pager handler -- the user types to filter,
     /// arrows move selection, Enter chdirs + cursors on the file.
     find_picker: Option<FindPicker>,
+    /// Active `:grep` session. Holds the receiver for the worker
+    /// thread streaming matches; the tick loop drains pending matches
+    /// onto the matching pager view (identified by `grep_id`). When
+    /// the user closes or replaces that pager, the session is dropped
+    /// and the worker exits on its next send.
+    grep_session: Option<GrepSession>,
+    /// Monotonic id for grep sessions, so a freshly-opened `:grep`
+    /// pager can never accidentally consume matches from a stale
+    /// session (e.g. user runs `:grep foo`, closes it, runs `:grep
+    /// bar` while the foo worker is still draining its tail).
+    next_grep_id: u32,
     history_pending_g: bool,
     /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
     /// jump to file reference.
@@ -665,6 +705,8 @@ impl App {
             background_tasks: BackgroundTasks::new(),
             pending_history_pick: None,
             find_picker: None,
+            grep_session: None,
+            next_grep_id: 0,
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
@@ -1159,6 +1201,15 @@ impl App {
                     needs_draw = true;
                     draw_reason = 3;
                 }
+            }
+
+            // :grep session: drain match batches into the active
+            // grep pager. Same shape as the F-finder drain but the
+            // results land directly in the pager body instead of
+            // being re-ranked.
+            if self.drain_grep_session() {
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // Pre-drain pane output so we know if anything arrived.
@@ -3227,6 +3278,24 @@ impl App {
             return PostAction::None;
         }
 
+        // :grep <pattern> — project-wide content search. Walks
+        // PROJECT_HOME (or the current listing dir if unset),
+        // gitignore-aware, results stream into a pager as
+        // `path:line:col: text` so gf/gF jumps to the file.
+        if input == "grep" {
+            self.state.flash_error("grep: pattern required");
+            return PostAction::None;
+        }
+        if let Some(pattern) = input.strip_prefix("grep ") {
+            let pattern = pattern.trim();
+            if pattern.is_empty() {
+                self.state.flash_error("grep: pattern required");
+            } else {
+                self.open_grep_pager(pattern);
+            }
+            return PostAction::None;
+        }
+
         // :task [N] — open the task viewer (peek mode). No arg picks
         // the most-recent task; numeric arg targets a specific id.
         if input == "task" {
@@ -3474,6 +3543,131 @@ impl App {
     /// already-arrived candidates while the walker keeps streaming
     /// in the background). Closing the picker drops the receiver,
     /// which makes the walker exit on its next `tx.send`.
+    /// Spawn a `:grep` worker, install its session, and open a pager
+    /// pre-populated with the title and an empty body. Subsequent
+    /// ticks drain the rx and append rendered match lines until the
+    /// worker disconnects or the pager is replaced.
+    fn open_grep_pager(&mut self, pattern: &str) {
+        let root = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.listing.dir.clone());
+        // Validate the pattern up-front so we can flash an error
+        // inline rather than open an empty pager that silently
+        // produces zero results. The worker re-compiles the same
+        // regex, but parse cost is trivial.
+        if let Err(e) = grep_regex::RegexMatcherBuilder::new()
+            .case_smart(true)
+            .build(pattern)
+        {
+            self.state.flash_error(format!("grep: {e}"));
+            return;
+        }
+        let id = self.next_grep_id;
+        self.next_grep_id = self.next_grep_id.wrapping_add(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let walk_root = root.clone();
+        let pat = pattern.to_string();
+        let pat_for_thread = pat.clone();
+        std::thread::spawn(move || {
+            let _ = crate::fs::grep::search_streaming(&walk_root, &pat_for_thread, tx);
+        });
+        let title = format!("grep — \"{pat}\" — scanning…");
+        let mut view = pager::PagerView::new_plain(title, Vec::<String>::new());
+        view.streaming = true;
+        // Lock the gutter to the cap so it doesn't widen as results
+        // stream in (otherwise visible text shifts right each time
+        // the count crosses a power of 10: 9→10, 99→100, etc.).
+        view.line_count_hint = Some(crate::fs::grep::MAX_MATCHES);
+        view.grep_id = Some(id);
+        view.saveable = true;
+        // Push any previously-open pager onto the back stack so the
+        // user can `:bprev` to it.
+        if let Some(prev) = self.pager.take() {
+            self.pager_history.push(prev);
+        }
+        self.pager = Some(view);
+        self.grep_session = Some(GrepSession {
+            id,
+            rx,
+            count: 0,
+            complete: false,
+            capped: false,
+            pattern: pat,
+            root,
+        });
+        self.needs_full_repaint = true;
+    }
+
+    /// Drain any pending grep matches into the active pager. Called
+    /// from the tick loop. Returns true when something changed
+    /// (matches appended or worker completed) so the caller can
+    /// request a redraw.
+    fn drain_grep_session(&mut self) -> bool {
+        let Some(session) = self.grep_session.as_mut() else {
+            return false;
+        };
+        // Drop the session if the matching pager is gone. The user
+        // closed/replaced it; the worker keeps running but will exit
+        // on its next send when our rx is dropped.
+        let pager_matches = self
+            .pager
+            .as_ref()
+            .is_some_and(|p| p.grep_id == Some(session.id));
+        if !pager_matches {
+            self.grep_session = None;
+            return false;
+        }
+        let mut got_any = false;
+        loop {
+            match session.rx.try_recv() {
+                Ok(batch) => {
+                    if let Some(view) = self.pager.as_mut() {
+                        for m in &batch {
+                            view.lines.push(ratatui::text::Line::from(m.render()));
+                        }
+                    }
+                    session.count += batch.len();
+                    if session.count >= crate::fs::grep::MAX_MATCHES {
+                        session.capped = true;
+                    }
+                    got_any = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    session.complete = true;
+                    got_any = true;
+                    break;
+                }
+            }
+        }
+        if got_any {
+            // Refresh title with current count + status.
+            let suffix = if session.complete {
+                if session.capped {
+                    format!(" — {} matches (cap; refine pattern)", session.count)
+                } else {
+                    format!(" — {} matches", session.count)
+                }
+            } else {
+                format!(" — {} matches — scanning…", session.count)
+            };
+            let root_label = crate::paths::display_tilde(&session.root);
+            let new_title = format!("grep — \"{}\" — {root_label}{suffix}", session.pattern);
+            if let Some(view) = self.pager.as_mut() {
+                view.title = new_title;
+                if session.complete {
+                    view.streaming = false;
+                }
+            }
+            if session.complete {
+                self.grep_session = None;
+            }
+        }
+        got_any
+    }
+
     fn open_find_picker(&mut self) {
         let root = self
             .state

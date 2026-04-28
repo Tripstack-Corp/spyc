@@ -68,6 +68,12 @@ pub struct PagerView {
     /// among task viewers; the main loop refreshes the contents from
     /// the task buffer while the task is running.
     pub task_id: Option<u32>,
+    /// When set, this pager view is a streaming `:grep` result. The
+    /// main tick loop drains pending matches into `lines` while the
+    /// id matches the active grep session; when the pager is replaced
+    /// or its id is cleared, the worker is dropped and the view
+    /// freezes at whatever was collected.
+    pub grep_id: Option<u32>,
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,
@@ -84,6 +90,13 @@ pub struct PagerView {
     pub picker_edit_cursor: Option<(usize, crate::ui::line_edit::Mode)>,
     /// When true, suppress [EOF] and tilde markers (content is still arriving).
     pub streaming: bool,
+    /// Lower bound for the line-number gutter width. Streaming views
+    /// use this to lock the gutter at the expected final size so it
+    /// doesn't widen mid-scan as `ilog10(lines.len())` grows -- which
+    /// would otherwise shift visible content right by one column each
+    /// time the result count crossed a power of 10. `None` means
+    /// "size the gutter to current line count" (the default).
+    pub line_count_hint: Option<usize>,
     /// When set, show `:` + digits at the bottom of the pager (inline jump prompt).
     pub jump_buf: Option<String>,
     /// Temporary message shown in the title bar (e.g. "yanked to clipboard").
@@ -108,11 +121,13 @@ impl PagerView {
             fit_to_content: false,
             no_history: false,
             task_id: None,
+            grep_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            line_count_hint: None,
             jump_buf: None,
             flash: None,
         }
@@ -131,11 +146,13 @@ impl PagerView {
             fit_to_content: false,
             no_history: false,
             task_id: None,
+            grep_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            line_count_hint: None,
             jump_buf: None,
             flash: None,
         }
@@ -158,11 +175,13 @@ impl PagerView {
             fit_to_content: false,
             no_history: false,
             task_id: None,
+            grep_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            line_count_hint: None,
             jump_buf: None,
             flash: None,
         }
@@ -583,8 +602,11 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     let slice_end = (start + viewport_h).min(content_end);
 
     let total_lines = view.lines.len();
+    // Streaming views can grow during render; clamp to the caller's
+    // expected upper bound so the gutter doesn't widen mid-scan.
+    let gutter_basis = total_lines.max(view.line_count_hint.unwrap_or(0));
     let gutter_w = if view.show_line_numbers {
-        total_lines.max(1).ilog10() as usize + 2
+        gutter_basis.max(1).ilog10() as usize + 2
     } else {
         0
     };

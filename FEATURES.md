@@ -190,6 +190,13 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 - **`:!!`** — repeat last captured command
 - **`:;<cmd>`** — foreground shell command (same as `;`)
 - **`:fg`** / **`:fg N`** — resume a backgrounded task (see Background tasks)
+- **`:grep <pattern>`** — project-wide content search via embedded
+  ripgrep matcher (`grep-regex` + `grep-searcher`). Walks
+  `PROJECT_HOME` (or current dir) honoring `.gitignore`, smart-case
+  by default. Results stream into a pager as `path:line:col: text`,
+  so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
+  matches; refine the pattern if you hit it. Power users: `! rg foo`
+  still works for ripgrep's full flag surface.
 - **`:q`** — quit
 
 The `:` prompt shares history with other shell prompts, so Up/Down

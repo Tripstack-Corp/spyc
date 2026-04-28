@@ -13,6 +13,79 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.23.3] - 2026-04-28
+
+### Fixed
+- **`:grep` no longer scrambles tab-separated content.** Real-world
+  repro: searching `tarzan` in tripstack_platform turned hits in
+  `postcodes.txt` (a TSV file) into garbled overlapping text --
+  `Tarzana    California` rendered as `rzCliforn aorniarnCA`. Cause:
+  ratatui counts `\t` as zero-width via `unicode-width`, but
+  terminals expand it to ~8 columns, so ratatui's position
+  tracking drifts from the terminal's actual cursor and content
+  visibly overlaps. Fixed in `sanitize_line`: tabs now expand to
+  the next 4-column boundary (chosen over 8 to keep result lines
+  compact, since most paths are already deep).
+
+## [1.23.2] - 2026-04-28
+
+### Fixed
+- **`:grep` pager gutter no longer jitters mid-scan.** The line-
+  number gutter width is computed each frame from
+  `ilog10(view.lines.len())`, so as results streamed in the gutter
+  widened from 1→2→3→4 chars at every power-of-10 boundary -- and
+  every existing visible row shifted right by one column at each
+  step. Visible content also realigned weirdly when the user
+  toggled `l` mid-stream. Fixed by adding `line_count_hint` to
+  PagerView; streaming views (currently `:grep`) seed it with the
+  result-count cap so the gutter is sized for the worst case from
+  the start. Also: `:grep` now defaults to **line numbers on**
+  (was off) -- the row index is the most useful column for
+  navigating result lists.
+
+## [1.23.1] - 2026-04-28
+
+### Fixed
+- **`:grep` no longer corrupts the terminal on binary files.**
+  Real-world repro: running `:grep test` in a workspace with
+  tracked `.docx`, `.dll`, `.jar`, `.pdf` files dumped raw bytes
+  (NULs, ESCs, backspaces) into the pager, scrambling colors and
+  cursor positioning. Two fixes:
+  - Searcher now uses `BinaryDetection::quit(0)` -- ripgrep's
+    default. The first NUL byte in a file aborts the search of
+    that file, so binary blobs are skipped.
+  - Matched-line text is sanitized before display: control bytes
+    (everything < 0x20 except tab, plus DEL) are replaced with
+    `·`, CR/LF trimmed, and lines wider than 400 chars truncated
+    with `…`. Catches sourcemap blobs, base64-inlined assets, and
+    text files that happen to contain ANSI escapes.
+- Also added `:grep` to the AppState command passthrough list so
+  the prompt parser routes it to the terminal-touching arm; without
+  it, `:grep test` flashed "unknown command".
+
+### Added
+- 2 new tests: binary-file skip behavior and `sanitize_line` length
+  cap + control-byte filter.
+
+## [1.23.0] - 2026-04-28
+
+### Added
+- **`:grep <pattern>` — project-wide content search (M2 of project-
+  wide search).** Embedded ripgrep matcher (`grep-regex` +
+  `grep-searcher`, the BurntSushi crates ripgrep itself uses), no
+  subprocess. Walks `PROJECT_HOME` (or the listing dir as fallback)
+  honoring `.gitignore`, smart-case by default. Matches stream into
+  a pager as `path:line:col: text` -- the same shape `gf`/`gF`
+  already understand from pane output, so jumping from a hit into
+  the file is free. Same multi-repo-aware walker as the `F` finder:
+  pass 2 picks up sibling-clone subrepos the outer `.gitignore`
+  excluded. Capped at 5000 matches; refine the pattern if you hit
+  it. Pattern errors flash inline before opening an empty pager.
+  Power users with custom `~/.ripgreprc` or fancy flag combinations
+  can still drop down to `! rg foo` for ripgrep's full surface.
+- 8 unit tests cover smart case, gitignore honored, sibling-clone
+  descent, invalid-regex error, and receiver-drop cancellation.
+
 ## [1.22.2] - 2026-04-28
 
 ### Fixed
