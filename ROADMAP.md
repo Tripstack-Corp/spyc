@@ -233,6 +233,47 @@ terminal inside a terminal." In priority order:
   Lower-level primitive that "Prompt templates" (below) sits on top
   of. Implementation reuses `pane.send_bytes()` plus a sink dispatch
   table.
+- **Project-wide search (`F` finder, `:grep`, MCP exposure).** Today
+  `/` matches filenames in the current listing only and content
+  search means shelling out to `! rg foo`. Two distinct gaps:
+  filename search across the project, and content search across
+  files. Both worth filling; both have a spyc-shaped MCP angle that
+  generic Claude tools (Glob/Grep via Bash) don't.
+  1. **M1 -- `F` filename finder.** New key in the file list
+     opens a fuzzy-picker overlay walking PROJECT_HOME (or current
+     dir if no PROJECT_HOME). Stack: the `ignore` crate (gitignore-
+     aware walker, the same primitive ripgrep uses) +
+     `nucleo` (the fuzzy matcher Helix uses). Walk on demand, no
+     persistent index -- millisecond-fast on typical repos. Type
+     to live-narrow, Enter chdirs + cursors on the file. `J`
+     stays for the "I know roughly what dir" case; `F` is for
+     "find anything by fragment of name."
+  2. **M2 -- `:grep <pattern>` content search.** Embedded
+     ripgrep matcher (`grep-searcher` + `grep-regex` -- the
+     BurntSushi crates ripgrep itself uses, not a subprocess to
+     `rg`). No external prereq, predictable behavior. Power
+     users with custom `~/.ripgreprc` can still `! rg foo` for
+     full ripgrep flag surface. Results land in a pager as
+     `path:line:col: matched text`, one match per line; `gf` /
+     `gF` already jump from those (free integration with the
+     existing pane-path-reference code path).
+  3. **M3 -- MCP exposure.** Two basic tools: `search_paths` and
+     `search_content`, both gitignore-aware and PROJECT_HOME-
+     scoped. Plus two *spyc-shaped* tools that don't have a
+     Claude-CLI equivalent:
+     - `search_picks(pattern)` -- search only within the user's
+       currently-picked files. Picks are spyc state Claude can't
+       see directly otherwise.
+     - `search_inventory(pattern)` -- search the persistent
+       inventory cache. Lets Claude grep the user's accumulated
+       "interesting files" across sessions.
+     These are what justify the MCP-thesis here -- generic Glob
+     and Grep are commodity, but searching *the user's selected
+     subset* is uniquely possible because spyc owns that state.
+  No persistent index (no tantivy, no ctags). Maintenance burden
+  isn't worth it -- ripgrep on a 100K-file repo is sub-second
+  cold and instant from page cache on repeat. Let dedicated tools
+  be dedicated; spyc is the keyboard surface and the MCP bridge.
 - **Session forking** (already in old roadmap as `^a f`). Duplicate a
   pane tab with scrollback replayed, so a Claude conversation can
   branch without losing the prior line of inquiry. High-value for

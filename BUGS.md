@@ -17,11 +17,6 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
-- / should support a more global search - perhaps even with a index of the
-  current working project? there must be a cask with something great which
-  would be a good fit for spyc? it could be exposed to the MCP for Claude to
-  leverage with a skill and speed it up for grepping; this could also contain
-  more indexing functions?
 - while I am drafting a command for a new pane it would be nice to still be
   able to switch to another pane to check on something
 - would like to be able to reorder tabs
