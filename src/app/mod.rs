@@ -3004,6 +3004,32 @@ impl App {
             }
         }
 
+        // Double-Esc opens the history popup. First Esc puts the
+        // line editor in Normal mode (existing vi behavior); second
+        // Esc (when already in Normal) opens the popup. Same shape
+        // as J's Esc-on-empty popup, but for !/;/: it's the more
+        // intuitive double-Esc path because users hit a single Esc
+        // dozens of times per session for vi mode toggling.
+        //
+        // KNOWN LIMITATION: the popup currently always shows shell
+        // history regardless of which vi prompt opened it. For `!`
+        // and `;` that's correct; for `:` (command line) it's the
+        // wrong bucket -- the user's : commands won't appear there.
+        // Tracked in ROADMAP for proper kind-routing.
+        if matches!(key.code, KeyCode::Esc) {
+            let in_normal_mode = matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if p.editor.as_ref().is_some_and(
+                    |e| e.mode == crate::ui::line_edit::Mode::Normal
+                )
+            );
+            if in_normal_mode {
+                self.state.mode = Mode::Normal;
+                self.show_history_popup();
+                return PostAction::None;
+            }
+        }
+
         // Feed key to the editor.
         let result = {
             let Mode::Prompting(prompt) = &mut self.state.mode else {

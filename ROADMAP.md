@@ -474,6 +474,17 @@ one of the tracks above when picked up.
   differ between views; preserving an absolute index would land
   somewhere arbitrary). Tables, images, and embedded HTML stay
   out of scope as planned.
+- **History popup kind routing.** v1.31.0 wired double-Esc in
+  vi prompts to open `show_history_popup`, but that helper is
+  hardcoded to `state.history` (shell bucket). For `:` (command
+  line, which has its own `command_history` since v1.28.0), the
+  popup currently shows the wrong bucket. Need to parameterize
+  `show_history_popup` with a kind, route the popup's submit
+  back to the right history (and the right dispatch:
+  `dispatch_command` for `:`, `dispatch_prompt` with
+  `ShellCmdCaptured` for `!`/`;`). Same generalization unlocks
+  per-bucket `^D` deletes, sync_editor, etc. Estimated ~150
+  LOC of careful refactor inside the !? popup machinery.
 - **Drag and drop** -- files from the desktop into spyc via OSC 52 or
   path paste.
 - **Page scroll overlap** in the pager -- keep 2-3 lines of previous

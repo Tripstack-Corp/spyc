@@ -13,6 +13,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.31.0] - 2026-04-28
+
+### Added
+- **Double-Esc opens the history popup in vi prompts** (`!`,
+  `;`, `:`). First Esc puts the line editor in vi Normal mode
+  (existing behavior); second Esc (when already in Normal)
+  opens the `!?` popup. j/k inside the popup browse, Enter
+  submits, ^D deletes, q/Esc closes. Mirrors J's Esc-on-empty
+  popup, generalized to any vi prompt.
+
+### Known limitation
+- The popup currently shows shell history regardless of which
+  vi prompt opened it. For `!`/`;` that's correct; for `:`
+  (command line, which has its own `command_history` since
+  v1.28.0) the popup will show the wrong bucket -- mostly
+  empty for users who don't also use `!`. Fixing requires
+  parameterizing the popup helper to take a kind and routing
+  the popup's submit back to the matching dispatch
+  (`dispatch_command` for `:`, etc.). Tracked in ROADMAP.
+
 ## [1.30.0] - 2026-04-28
 
 ### Added
