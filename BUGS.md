@@ -61,6 +61,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.26.3) `!cmd` captures used to advertise
+  `TERM=xterm-256color`, which lied about our actual capabilities
+  -- the capture pager only renders ANSI SGR + CR/LF, no cursor
+  positioning or alt-screen. So `!less foo`, `!vim foo`, `!htop`
+  would happily switch into TUI mode and either freeze waiting
+  for keystrokes or write unrenderable cursor games into the
+  pager. Now we advertise `TERM=dumb` which makes those programs
+  fall back to plain dump-to-stdout (or print a friendly "this
+  terminal lacks features" error and exit). FORCE_COLOR /
+  CLICOLOR_FORCE / COLORTERM kept so tools that respect those
+  still produce colored output despite the dumb terminfo signal.
 - (fixed, v1.25.0) Pager line wrap is back -- this time done by
   spyc instead of ratatui's `Paragraph::wrap`. Pre-computed
   visual-width chunking with per-span style preservation, so

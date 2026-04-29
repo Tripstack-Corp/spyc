@@ -6479,7 +6479,26 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
     let mut builder = CommandBuilder::new("sh");
     builder.args(["-c", cmd]);
     builder.cwd(cwd);
-    builder.env("TERM", "xterm-256color");
+    // We're not actually a vt100 terminal -- the capture pager only
+    // renders ANSI SGR (colors) and treats CR/LF intelligently;
+    // cursor positioning, alt-screen, mouse codes, etc. all get
+    // stripped or rendered as garbage. Advertising
+    // `xterm-256color` would lie about that, and tools like `less`,
+    // `vim`, `htop` would happily switch into alt-screen TUI mode
+    // and freeze the capture (or render unrenderable cursor games
+    // into the pager body). `TERM=dumb` is the canonical "nothing
+    // fancy" signal: TUI programs refuse to run as a TUI (they
+    // dump to stdout or print a friendly error and exit), which is
+    // exactly the behavior we want for `!` captures. Users who
+    // genuinely want a TUI program should use `;cmd` (foreground
+    // pane) instead.
+    //
+    // FORCE_COLOR / CLICOLOR_FORCE / COLORTERM are kept so tools
+    // that respect those override TERM=dumb's "no color" implication
+    // -- cargo, eza, bat, ripgrep all keep their color output. Tools
+    // that key off TERM alone (older `git`, default `ls`) will
+    // produce plain output, which is acceptable.
+    builder.env("TERM", "dumb");
     builder.env("CLICOLOR_FORCE", "1");
     builder.env("FORCE_COLOR", "1");
     builder.env("COLORTERM", "truecolor");

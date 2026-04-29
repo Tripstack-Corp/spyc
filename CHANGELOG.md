@@ -13,6 +13,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.26.3] - 2026-04-28
+
+### Fixed
+- **`!cmd` captures now advertise `TERM=dumb` instead of
+  `xterm-256color`.** The capture pager only renders ANSI SGR
+  colors and CR/LF intelligently; cursor positioning, alt-screen,
+  and mouse codes get stripped or render as garbage. Lying about
+  vt100 capability meant `!less foo`, `!vim foo`, `!htop` etc.
+  would switch into alt-screen TUI mode and either freeze the
+  capture or write unrenderable cursor games into the pager.
+  `TERM=dumb` is the canonical "nothing fancy" signal:
+  TUI programs refuse to run as TUIs (they dump to stdout or
+  print a friendly error and exit cleanly), which is exactly
+  what we want for capture mode. `;cmd` (foreground in the top
+  pane) remains the path for genuine TUI programs.
+  `FORCE_COLOR`, `CLICOLOR_FORCE`, and `COLORTERM=truecolor` are
+  kept so tools that respect those (cargo, eza, bat, ripgrep)
+  keep producing colored output despite `TERM=dumb`.
+
 ## [1.26.2] - 2026-04-28
 
 ### Added
