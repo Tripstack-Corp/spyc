@@ -13,6 +13,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.34.1] - 2026-04-28
+
+### Fixed
+- **`/` "no matches" flash now renders inside the pager**, not on
+  the spyc file-list status bar underneath. The pager search
+  routed its empty-result feedback through `state.flash_error`
+  which lives on the file-list pane; the message would appear
+  *behind* the pager overlay where the user wasn't looking. Now
+  it's set on `view.flash` so the pager's own title-bar flash
+  (teal-on-amber, per v1.27.4) carries it.
+
 ## [1.34.0] - 2026-04-28
 
 ### Changed

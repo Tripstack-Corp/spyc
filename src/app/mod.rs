@@ -5487,7 +5487,10 @@ impl App {
                 KeyCode::Enter => {
                     let committed = view.commit_search(viewport);
                     if !committed {
-                        self.state.flash_error("no matches");
+                        // Flash inside the pager itself, not on the
+                        // file-list status bar -- the user is looking
+                        // at the pager, the message belongs there.
+                        view.flash = Some("no matches".into());
                     } else if let Some(ref mut editor) = self.pending_history_pick {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
