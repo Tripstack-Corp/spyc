@@ -59,6 +59,15 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.35.1) `w` / `b` / `e` / `dw` / `cw` / `^W` now
+  treat punctuation as a word boundary, matching vim's default
+  `iskeyword`. So `dw` on `foo-bar` from position 0 now deletes
+  only `foo`, not the whole `foo-bar`. The line editor's word
+  motions previously split only on whitespace, treating `foo-bar`
+  as a single word -- annoying when editing paths, kebab-case
+  identifiers, flag values, etc. Implemented via a `CharClass`
+  helper (Word / Punct / Space) that's checked at each step;
+  word motion stops at any class transition.
 - (fixed, v1.35.0) Markdown tables now render with proper
   ASCII-aligned borders. Previously fall-through-unstyled --
   cells got jammed together as inline text. Now: enable

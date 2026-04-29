@@ -13,6 +13,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.35.1] - 2026-04-28
+
+### Fixed
+- **`w` / `b` / `e` / `dw` / `cw` / `^W` now respect punctuation
+  boundaries**, matching vim's default `iskeyword`. Previously
+  the line editor's word motions split only on whitespace, so
+  `foo-bar` was treated as a single word and `dw` from position 0
+  deleted the whole thing. Now `dw` on `foo-bar` deletes only
+  `foo` -- the same behavior any vim user expects when editing
+  paths, kebab-case identifiers, flag values, URLs, etc.
+  Implemented via a `CharClass` helper (`Word` / `Punct` /
+  `Space`); word motion stops at any class transition. 4 new
+  unit tests cover `w`, `dw`, `cw`, `^W` against `foo-bar`.
+
 ## [1.35.0] - 2026-04-28
 
 ### Added

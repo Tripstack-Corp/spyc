@@ -341,11 +341,18 @@ impl LineEditor {
         }
     }
 
-    /// End of current word (exclusive) — for `cw`.
+    /// End of current word (exclusive) — for `cw`. Word boundary
+    /// is a class transition: alphanumeric/underscore vs.
+    /// punctuation vs. whitespace. So `foo-bar` cw at 0 only
+    /// changes `foo` (stops at `-`), matching vim's default `iskeyword`.
     fn word_end_exclusive(&self) -> usize {
         let n = self.buf.len();
+        if self.cursor >= n {
+            return n;
+        }
         let mut i = self.cursor;
-        while i < n && !self.buf[i].is_whitespace() {
+        let cls = char_class(self.buf[i]);
+        while i < n && char_class(self.buf[i]) == cls {
             i += 1;
         }
         i
@@ -355,19 +362,23 @@ impl LineEditor {
     fn next_word_start_delete(&self) -> usize {
         let mut i = self.word_end_exclusive();
         let n = self.buf.len();
-        while i < n && self.buf[i].is_whitespace() {
+        while i < n && char_class(self.buf[i]) == CharClass::Space {
             i += 1;
         }
         i
     }
 
     fn delete_word_back(&mut self) {
-        // Delete trailing whitespace, then the word.
-        while self.cursor > 0 && self.buf[self.cursor - 1].is_whitespace() {
+        // Delete trailing whitespace, then the previous-class chunk.
+        while self.cursor > 0 && char_class(self.buf[self.cursor - 1]) == CharClass::Space {
             self.cursor -= 1;
             self.buf.remove(self.cursor);
         }
-        while self.cursor > 0 && !self.buf[self.cursor - 1].is_whitespace() {
+        if self.cursor == 0 {
+            return;
+        }
+        let cls = char_class(self.buf[self.cursor - 1]);
+        while self.cursor > 0 && char_class(self.buf[self.cursor - 1]) == cls {
             self.cursor -= 1;
             self.buf.remove(self.cursor);
         }
@@ -375,14 +386,26 @@ impl LineEditor {
 
     fn next_word_start(&self) -> usize {
         let n = self.buf.len();
-        let mut i = self.cursor;
-        // Skip current word.
-        while i < n && !self.buf[i].is_whitespace() {
-            i += 1;
+        if self.cursor >= n {
+            return n.saturating_sub(1);
         }
-        // Skip whitespace.
-        while i < n && self.buf[i].is_whitespace() {
-            i += 1;
+        let mut i = self.cursor;
+        let cls = char_class(self.buf[i]);
+        if cls == CharClass::Space {
+            // Just skip whitespace; we land at the start of the
+            // next word/punct chunk.
+            while i < n && char_class(self.buf[i]) == CharClass::Space {
+                i += 1;
+            }
+        } else {
+            // Skip the rest of the current word/punct chunk.
+            while i < n && char_class(self.buf[i]) == cls {
+                i += 1;
+            }
+            // Skip any whitespace separating us from the next chunk.
+            while i < n && char_class(self.buf[i]) == CharClass::Space {
+                i += 1;
+            }
         }
         i.min(n.saturating_sub(1))
     }
@@ -393,12 +416,13 @@ impl LineEditor {
             return 0;
         }
         i -= 1;
-        // Skip whitespace.
-        while i > 0 && self.buf[i].is_whitespace() {
+        // Skip preceding whitespace.
+        while i > 0 && char_class(self.buf[i]) == CharClass::Space {
             i -= 1;
         }
-        // Skip word.
-        while i > 0 && !self.buf[i - 1].is_whitespace() {
+        // Skip back over the current word/punct chunk.
+        let cls = char_class(self.buf[i]);
+        while i > 0 && char_class(self.buf[i - 1]) == cls {
             i -= 1;
         }
         i
@@ -410,16 +434,48 @@ impl LineEditor {
         if i >= n {
             return n.saturating_sub(1);
         }
-        i += 1;
-        // Skip whitespace.
-        while i < n && self.buf[i].is_whitespace() {
+        // If we're at the last char of a word/punct chunk (or on
+        // whitespace), advance past it before searching for the
+        // next end. This matches vim's `e` semantic of "next end
+        // forward" rather than "end of current."
+        let cur = char_class(self.buf[i]);
+        let at_end_of_chunk = cur == CharClass::Space
+            || i + 1 >= n
+            || char_class(self.buf[i + 1]) != cur;
+        if at_end_of_chunk {
+            i += 1;
+            while i < n && char_class(self.buf[i]) == CharClass::Space {
+                i += 1;
+            }
+        }
+        if i >= n {
+            return n.saturating_sub(1);
+        }
+        let cls = char_class(self.buf[i]);
+        while i + 1 < n && char_class(self.buf[i + 1]) == cls {
             i += 1;
         }
-        // Skip to end of word.
-        while i < n && !self.buf[i].is_whitespace() {
-            i += 1;
-        }
-        if i > 0 { i - 1 } else { 0 }
+        i
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum CharClass {
+    /// Word-character: alphanumeric or `_`. Vim's default `iskeyword`.
+    Word,
+    /// Whitespace (Unicode `is_whitespace`).
+    Space,
+    /// Everything else: punctuation, symbols.
+    Punct,
+}
+
+fn char_class(c: char) -> CharClass {
+    if c.is_whitespace() {
+        CharClass::Space
+    } else if c.is_alphanumeric() || c == '_' {
+        CharClass::Word
+    } else {
+        CharClass::Punct
     }
 }
 
@@ -590,5 +646,67 @@ mod tests {
         assert_eq!(e.cursor, 12);
         e.feed(k(KeyCode::Char('b'))); // → 'w' of "world"
         assert_eq!(e.cursor, 6);
+    }
+
+    #[test]
+    fn w_treats_punctuation_as_word_boundary() {
+        // vim's default `iskeyword`: word chars are alnum + `_`,
+        // everything else (`-`, `/`, `.`, etc.) is its own word
+        // class. So `foo-bar` has three "words": `foo`, `-`, `bar`.
+        let mut e = LineEditor::new();
+        for c in "foo-bar".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.feed(k(KeyCode::Esc));
+        e.feed(k(KeyCode::Char('0'))); // cursor at 0 ('f')
+        e.feed(k(KeyCode::Char('w')));
+        assert_eq!(e.cursor, 3, "w from 'foo' should land on '-'");
+        e.feed(k(KeyCode::Char('w')));
+        assert_eq!(e.cursor, 4, "w from '-' should land on 'b' of bar");
+    }
+
+    #[test]
+    fn dw_stops_at_punctuation() {
+        // The headline bug: `dw` on `foo-bar` from position 0
+        // should delete only `foo`, not the whole `foo-bar`.
+        let mut e = LineEditor::new();
+        for c in "foo-bar".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.feed(k(KeyCode::Esc));
+        e.feed(k(KeyCode::Char('0')));
+        // dw chord: 'd' enters pending op, 'w' is the motion.
+        e.feed(k(KeyCode::Char('d')));
+        e.feed(k(KeyCode::Char('w')));
+        assert_eq!(e.text(), "-bar");
+    }
+
+    #[test]
+    fn cw_stops_at_punctuation_and_enters_insert() {
+        let mut e = LineEditor::new();
+        for c in "foo-bar".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.feed(k(KeyCode::Esc));
+        e.feed(k(KeyCode::Char('0')));
+        e.feed(k(KeyCode::Char('c')));
+        e.feed(k(KeyCode::Char('w')));
+        assert_eq!(e.text(), "-bar");
+        assert_eq!(e.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn ctrl_w_back_delete_stops_at_punctuation() {
+        // Ctrl+W in Insert mode (delete word back) should also
+        // respect punctuation boundaries: in `foo-bar` with cursor
+        // at end, ^W deletes `bar` only, leaving `foo-`.
+        let mut e = LineEditor::new();
+        for c in "foo-bar".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        // cursor at 7 (past end of "bar")
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        e.feed(ctrl_w);
+        assert_eq!(e.text(), "foo-");
     }
 }
