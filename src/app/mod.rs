@@ -2936,17 +2936,21 @@ impl App {
             }
         }
 
-        // Double-Esc opens the history popup. First Esc puts the
-        // line editor in Normal mode (existing vi behavior); second
-        // Esc (when already in Normal) opens the popup of the kind
-        // that matches the active prompt:
+        // `<Space>` in Normal mode opens the history popup. The full
+        // sequence is `Esc Space`: first Esc enters Normal mode (the
+        // standard vi-line-editor behavior); Space then asks for the
+        // bigger pager view. Reads more naturally than double-Esc
+        // and doesn't fight Esc's "back out of something" muscle
+        // memory.
+        //
+        // Dispatched by prompt kind:
         //   PromptKind::Jump → show_jump_history_popup (j/k cd)
         //   anything else    → show_history_popup (shell !? popup)
         //
         // KNOWN LIMITATION: for `:` (command line) the !? popup
         // shows shell history, not command_history. Tracked in
         // ROADMAP for proper kind-routing.
-        if matches!(key.code, KeyCode::Esc) {
+        if matches!(key.code, KeyCode::Char(' ')) {
             let in_normal_mode = matches!(
                 &self.state.mode,
                 Mode::Prompting(p) if p.editor.as_ref().is_some_and(

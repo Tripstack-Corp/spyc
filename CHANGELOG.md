@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.34.0] - 2026-04-28
+
+### Changed
+- **History popup is now opened by `Esc Space`** (vi prompts) and
+  `Esc <Space>` for `J` (also a vi prompt as of v1.33.0), not
+  the v1.31.0/v1.32.0 double-Esc. The user found double-Esc
+  fights Esc's "back out of something" muscle memory; Space in
+  Normal mode reads more naturally as "expand into the bigger
+  view." Space is unused in our line editor's Normal mode, so
+  no binding conflict.
+- Sequence on every prompt with history: type → Esc (enters
+  Normal) → Space (opens kind-specific popup). Single Esc no
+  longer escalates -- it just toggles Insert↔Normal as standard
+  vi.
+
 ## [1.33.0] - 2026-04-28
 
 ### Changed
