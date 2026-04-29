@@ -224,6 +224,14 @@ pub struct Prompt {
     /// When set, this prompt uses the vi line editor with history.
     #[allow(dead_code)]
     pub editor: Option<crate::ui::line_edit::LineEditor>,
+    /// "Browse mode" for simple prompts that lack a vi line editor
+    /// (currently just `J`). First Esc flips this on -- j/k then
+    /// walk history inline, replacing the buffer; second Esc opens
+    /// the full popup. Mirrors the vi-prompt behavior where first
+    /// Esc enters Normal mode (and j/k there does the same thing).
+    /// Typing any non-nav key flips it back off so the user can
+    /// keep editing.
+    pub browse_mode: bool,
 }
 
 impl Prompt {
@@ -234,6 +242,7 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: None,
+            browse_mode: false,
         }
     }
 
@@ -244,6 +253,7 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: Some(LineEditor::new()),
+            browse_mode: false,
         }
     }
 }
@@ -2647,35 +2657,78 @@ impl App {
 
         // --- Simple prompts (search, jump, pattern-pick, etc.) ---
 
-        // Esc on an empty `J` prompt opens the jump-history popup
-        // (j/k browse, Enter cd, q/Esc close). The user has nothing
-        // to throw away on an empty buffer, so cancel→popup is purely
-        // additive UX. A non-empty Esc still cancels normally below.
-        // Must come before the generic Esc-cancel arm; J is a simple
-        // prompt without a line editor, so handle_vi_prompt_key never
-        // sees its keys.
+        // Esc on a `J` prompt: double-tap pattern matching the vi
+        // prompts shipped in v1.31.0.
+        //   First Esc  ⇒ enter browse mode (j/k walks history inline)
+        //   Second Esc ⇒ open full jump-history popup
+        // Cancellation is via Backspace-on-empty or ^C below.
         if matches!(key.code, KeyCode::Esc) {
             if let Mode::Prompting(Prompt {
                 kind: PromptKind::Jump,
-                ref buffer,
+                ref mut browse_mode,
                 ..
             }) = self.state.mode
             {
-                if buffer.is_empty() {
+                if *browse_mode {
+                    // Already browsing → escalate to popup.
                     self.state.mode = Mode::Normal;
                     self.show_jump_history_popup();
-                    return PostAction::None;
+                } else {
+                    // First Esc → enter browse mode. Buffer
+                    // unchanged; j/k from here on walks history.
+                    *browse_mode = true;
                 }
+                return PostAction::None;
             }
         }
 
-        // ^C cancels too (vi muscle memory; same as Esc).
+        // j/k while in J browse mode walks history (mirrors vi
+        // Normal-mode j/k). Up/Down still works in any mode.
+        let in_jump_browse = matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump) && p.browse_mode
+        );
+        if in_jump_browse {
+            let walks = matches!(
+                key.code,
+                KeyCode::Char('j' | 'k') | KeyCode::Up | KeyCode::Down
+            );
+            if walks {
+                let prev_dir = matches!(key.code, KeyCode::Char('k') | KeyCode::Up);
+                let current = match &self.state.mode {
+                    Mode::Prompting(p) => p.buffer.clone(),
+                    Mode::Normal => String::new(),
+                };
+                let replacement = if prev_dir {
+                    self.state.jump_history.prev(&current).map(String::from)
+                } else {
+                    let nxt = self.state.jump_history.next().map(String::from);
+                    nxt.or_else(|| Some(self.state.jump_history.stashed().to_string()))
+                };
+                if let Some(text) = replacement {
+                    if let Mode::Prompting(p) = &mut self.state.mode {
+                        p.buffer = text;
+                    }
+                }
+                return PostAction::None;
+            }
+            // Any non-nav key dropped the user out of browse mode --
+            // they're typing again, so resume normal text edit
+            // semantics (and let the keystroke fall through).
+            if let Mode::Prompting(p) = &mut self.state.mode {
+                p.browse_mode = false;
+            }
+        }
+
+        // ^C cancels too (vi muscle memory; same as Esc on vi
+        // prompts). For J specifically, ^C bypasses browse mode and
+        // unconditionally cancels.
         let ctrl_c = matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL);
-        // Esc cancels; Backspace on an empty buffer cancels too.
+        // Backspace on an empty buffer cancels too.
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
             && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
-        if matches!(key.code, KeyCode::Esc) || backspace_on_empty || ctrl_c {
+        if backspace_on_empty || ctrl_c {
             // Reset jump_history nav so the next J prompt starts
             // fresh at the most-recent entry instead of mid-walk.
             if matches!(
@@ -2684,6 +2737,13 @@ impl App {
             ) {
                 self.state.jump_history.reset_nav();
             }
+            self.cancel_prompt();
+            return PostAction::None;
+        }
+        // For non-J simple prompts, keep the legacy Esc-cancels
+        // behavior. (J was special-cased above; falling through here
+        // means kind != Jump and we're not in browse mode.)
+        if matches!(key.code, KeyCode::Esc) {
             self.cancel_prompt();
             return PostAction::None;
         }

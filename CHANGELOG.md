@@ -13,6 +13,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.32.0] - 2026-04-28
+
+### Added
+- **`J` now matches the vi-prompt double-Esc pattern.** First Esc
+  on a `J` prompt enters "browse mode" (no popup yet); j/k
+  walks history inline like vi Normal-mode j/k. Second Esc
+  (already in browse mode) opens the full jump-history popup.
+  Typing any non-nav character drops out of browse mode and
+  resumes normal text editing. Backspace-on-empty and `^C`
+  unconditionally cancel.
+  - Reverses v1.29.0/v1.29.2's behavior where Esc on an empty J
+    buffer opened the popup directly. Now Esc always enters
+    browse mode first; the popup is the second tap. Consistent
+    with the `!`/`;`/`:` model shipped in v1.31.0.
+  - `browse_mode: bool` field added to the `Prompt` struct so
+    simple prompts can carry the same kind of mode-state vi
+    line editors track internally.
+
 ## [1.31.0] - 2026-04-28
 
 ### Added
