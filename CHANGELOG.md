@@ -13,6 +13,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.26.2] - 2026-04-28
+
+### Added
+- **`Y` (capital) yanks the *visible* pager content** to the
+  clipboard. Lowercase `y` still yanks the source (the POLA
+  default). Most useful with the Markdown viewer in rendered
+  mode: `Y` gives you back the styled-but-plain rendering
+  (headings with `#`, bullets, blockquote rules, 80-col wrap)
+  that you can paste into chat or a doc, without having to
+  toggle to source first. In all other contexts (regular files,
+  capture pagers, `:grep` results) `y` and `Y` are identical
+  because the visible text *is* the source. Flash text
+  distinguishes the two ("yanked source" vs "yanked visible")
+  so you know which one fired.
+
+## [1.26.1] - 2026-04-28
+
+### Changed
+- **Markdown content wraps at 80 cols (par-style).** The renderer
+  now word-wraps paragraphs and list items at 80 visual columns
+  inside `src/ui/markdown.rs` itself (not via the pager-level wrap),
+  preserving per-span styles across break points and dropping
+  trailing whitespace. List-item continuation rows get a hanging
+  indent that matches the bullet width, so wrapped text aligns
+  under the item content rather than under outer-level bullets.
+  Code blocks pass through unwrapped (their formatting matters).
+  Blockquote content wraps inside the rule prefix (78 col content
+  + 2 col `┃ `). The pager pane stays full-width as before; only
+  the content body is bounded.
+- **Line-number gutter and inline `code` are no longer washed out.**
+  Both used `status_suffix + DIM` which left them barely legible
+  against dark backgrounds. Line numbers drop the DIM modifier
+  (`status_suffix` alone is plenty subtle); inline code switches to
+  `theme.take` (teal) — semantically reads as "code" and contrasts
+  cleanly with body text.
+
+### Added
+- 4 new markdown tests: long-paragraph wrap, list-item continuation
+  indent, word-wrap range breaks, hard-break fallback.
+
 ## [1.26.0] - 2026-04-28
 
 ### Added

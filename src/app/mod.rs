@@ -5804,7 +5804,11 @@ impl App {
             }
             KeyCode::Char('f') => view.toggle_full_width(),
             KeyCode::Char('y') => match view.yank_to_clipboard() {
-                Ok(()) => view.flash = Some("yanked to clipboard".into()),
+                Ok(()) => view.flash = Some("yanked source to clipboard".into()),
+                Err(e) => view.flash = Some(format!("yank failed: {e}")),
+            },
+            KeyCode::Char('Y') => match view.yank_visible_to_clipboard() {
+                Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
                 Err(e) => view.flash = Some(format!("yank failed: {e}")),
             },
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {

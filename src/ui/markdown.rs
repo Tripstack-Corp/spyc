@@ -21,6 +21,14 @@ use ratatui::text::{Line, Span};
 
 use crate::ui::theme::Theme;
 
+/// Target visual width for wrapped Markdown content, before any
+/// blockquote rule or list-item indent is added. 80 columns is the
+/// standard prose-readability target -- READMEs and design docs
+/// land in that range and stay scannable. The pager pane itself
+/// stays full-width so the user can still see other surrounding UI;
+/// just the content body is bounded.
+const CONTENT_WIDTH: usize = 80;
+
 /// Render a Markdown source string into styled lines suitable for
 /// the pager's `lines` field.
 pub fn render(source: &str, theme: &Theme) -> Vec<Line<'static>> {
@@ -82,21 +90,60 @@ impl<'t> Renderer<'t> {
     }
 
     fn flush_line(&mut self) {
-        let prefix = if self.in_blockquote {
+        let bq_prefix = if self.in_blockquote {
             Some(Span::styled(
                 "\u{2503} ".to_string(), // ┃
-                Style::default()
-                    .fg(self.theme.status_suffix)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(self.theme.status_suffix),
             ))
         } else {
             None
         };
-        let mut spans = std::mem::take(&mut self.current);
-        if let Some(p) = prefix {
-            spans.insert(0, p);
+        let bq_w = if self.in_blockquote { 2 } else { 0 };
+        let cont_indent = self.continuation_indent();
+        let cont_w = cont_indent.chars().count();
+        // Subtract the blockquote rule and any list-item continuation
+        // indent so the body still hits the 80-col target.
+        let wrap_w = CONTENT_WIDTH.saturating_sub(bq_w + cont_w).max(20);
+
+        let spans = std::mem::take(&mut self.current);
+        if spans.is_empty() {
+            // Caller must use push_blank() for spacing; flush_line is
+            // a no-op when there's nothing to push so we don't emit
+            // stray blockquote-only rows.
+            return;
         }
-        self.lines.push(Line::from(spans));
+        let plain: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        let ranges = word_wrap_ranges(&plain, wrap_w);
+        for (piece_idx, (start, end)) in ranges.into_iter().enumerate() {
+            let chunk_spans = slice_spans(&spans, start, end);
+            let mut row: Vec<Span<'static>> = Vec::new();
+            if let Some(p) = bq_prefix.as_ref() {
+                row.push(p.clone());
+            }
+            // First piece keeps the original leading content (bullet,
+            // text); continuation rows get a blank indent so wrapped
+            // text aligns under the source line's content.
+            if piece_idx > 0 && cont_w > 0 {
+                row.push(Span::raw(cont_indent.clone()));
+            }
+            row.extend(chunk_spans);
+            self.lines.push(Line::from(row));
+        }
+    }
+
+    /// Indent for continuation rows when wrapping inside a list
+    /// item. Top-level list ⇒ 2 spaces (under the `• `); nested
+    /// items ⇒ deeper indent so wrapped text aligns under the
+    /// item's content, not under outer-level bullets.
+    fn continuation_indent(&self) -> String {
+        if self.list_indent == 0 {
+            String::new()
+        } else {
+            // Each list level adds 2 cols of indent; the bullet itself
+            // takes 2 ("• "). Continuation should align under the text
+            // start = (list_indent - 1) * 2 + 2 = list_indent * 2.
+            " ".repeat(self.list_indent * 2)
+        }
     }
 
     fn push_blank(&mut self) {
@@ -149,9 +196,12 @@ impl<'t> Renderer<'t> {
             Event::End(tag) => self.end_tag(tag),
             Event::Text(t) => self.push_text(&t, Style::default()),
             Event::Code(t) => {
-                let style = Style::default()
-                    .fg(self.theme.status_suffix)
-                    .add_modifier(Modifier::DIM);
+                // Inline `code`: teal-on-default reads as "code" the
+                // way most monospace UIs render it. Previously
+                // status_suffix + DIM, which was so dark on a black
+                // pager background that the backticks blurred into
+                // body text.
+                let style = Style::default().fg(self.theme.take);
                 self.current.push(Span::styled(format!("`{t}`"), style));
             }
             Event::SoftBreak => {
@@ -386,6 +436,118 @@ const fn heading_depth(level: HeadingLevel) -> usize {
     }
 }
 
+/// Compute byte-range break points for word-wrapping `text` at
+/// `width` visual columns. Prefers breaks at whitespace; falls back
+/// to a hard break when no whitespace exists in the budget. The
+/// whitespace at break points is *consumed* — the next range starts
+/// after it — so wrapped lines don't begin with a stray space.
+fn word_wrap_ranges(text: &str, width: usize) -> Vec<(usize, usize)> {
+    if text.is_empty() {
+        return vec![(0, 0)];
+    }
+    let width = width.max(1);
+    let mut ranges = Vec::new();
+    let mut line_start = 0usize;
+    let mut last_space_end: Option<usize> = None;
+    let mut col = 0usize;
+    for (idx, ch) in text.char_indices() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        // Track byte position immediately after the last whitespace,
+        // so we can break right after a word ends without leading
+        // space on the next row.
+        if ch == ' ' {
+            last_space_end = Some(idx + ch.len_utf8());
+            col += cw;
+            continue;
+        }
+        if col + cw > width && idx > line_start {
+            // Need a break. Prefer the last whitespace if we saw one
+            // since the line started; else hard-break before this
+            // char.
+            let break_pos = last_space_end
+                .filter(|&p| p > line_start && p <= idx)
+                .unwrap_or(idx);
+            // End of the previous range trims trailing whitespace.
+            let trimmed_end = trim_trailing_space_end(text, break_pos);
+            ranges.push((line_start, trimmed_end));
+            line_start = break_pos;
+            last_space_end = None;
+            // Recompute col for content already past break_pos up to idx.
+            col = text[break_pos..idx]
+                .chars()
+                .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum::<usize>()
+                + cw;
+        } else {
+            col += cw;
+        }
+    }
+    let final_end = trim_trailing_space_end(text, text.len());
+    if line_start < final_end {
+        ranges.push((line_start, final_end));
+    } else if ranges.is_empty() {
+        // Whitespace-only or empty after trimming — preserve a single
+        // empty range so callers can still emit a (possibly prefix-
+        // only) row if they want.
+        ranges.push((line_start, text.len()));
+    }
+    ranges
+}
+
+/// Walk back from `end` past trailing ASCII spaces. Used so wrap
+/// boundaries don't carry visible trailing whitespace into yanked
+/// text or the rendered display.
+fn trim_trailing_space_end(text: &str, end: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut e = end;
+    while e > 0 && bytes[e - 1] == b' ' {
+        e -= 1;
+    }
+    e
+}
+
+/// Slice a sequence of styled spans by a byte range over the
+/// concatenated plain text. Spans that fall outside the range are
+/// dropped; spans that straddle the boundary are split at the byte
+/// offset, preserving their style on the kept portion. Used to
+/// reconstruct each wrapped row's spans from the original
+/// paragraph's spans.
+fn slice_spans(spans: &[Span<'static>], start: usize, end: usize) -> Vec<Span<'static>> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    for span in spans {
+        let span_start = cursor;
+        let span_end = cursor + span.content.len();
+        cursor = span_end;
+        if span_end <= start {
+            continue;
+        }
+        if span_start >= end {
+            break;
+        }
+        let lo = start.saturating_sub(span_start);
+        let hi = (end - span_start).min(span.content.len());
+        // Only keep slices that lie on UTF-8 char boundaries; if the
+        // wrap point happens to land mid-char (rare given we walk
+        // char_indices in word_wrap_ranges), back up to the nearest
+        // boundary by extending the chunk one byte at a time.
+        let lo = floor_char_boundary(&span.content, lo);
+        let hi = floor_char_boundary(&span.content, hi);
+        if hi > lo {
+            let chunk = span.content[lo..hi].to_string();
+            out.push(Span::styled(chunk, span.style));
+        }
+    }
+    out
+}
+
+fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 /// True if `path` looks like a Markdown file we should render. The
 /// pager checks this when opening a file: if true, both the source
 /// and rendered views are pre-computed and `m` toggles between them.
@@ -455,6 +617,58 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("docs") && l.contains("https://example.com"))
         );
+    }
+
+    #[test]
+    fn long_paragraph_wraps_at_content_width() {
+        // Build a paragraph whose source is one line of >100 chars;
+        // pulldown joins it as one logical paragraph, the renderer
+        // should wrap at CONTENT_WIDTH (80) at word boundaries.
+        let src = format!("{} word.\n", "lorem ".repeat(20));
+        let lines = render_plain(&src);
+        // Every non-empty body line should be <= CONTENT_WIDTH.
+        for l in &lines {
+            assert!(
+                l.chars().count() <= super::CONTENT_WIDTH,
+                "line {l:?} exceeded CONTENT_WIDTH"
+            );
+        }
+        // And the paragraph should produce more than one line of
+        // content (proves wrap actually happened).
+        let body_lines = lines.iter().filter(|l| !l.is_empty()).count();
+        assert!(body_lines >= 2, "expected wrap to produce multiple lines, got {lines:?}");
+    }
+
+    #[test]
+    fn wrapped_list_item_indents_continuation() {
+        // List item whose content overflows 80 cols should wrap with
+        // 2-space hanging indent so the continuation aligns under
+        // the bullet's text.
+        let src = format!("- {}\n", "alpha ".repeat(20));
+        let lines = render_plain(&src);
+        let body: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
+        assert!(body.len() >= 2, "expected wrap on long list item");
+        // First line starts with "• ".
+        assert!(body[0].starts_with("\u{2022} "), "first line: {:?}", body[0]);
+        // Continuation starts with two spaces (matches bullet width).
+        assert!(body[1].starts_with("  "), "continuation: {:?}", body[1]);
+    }
+
+    #[test]
+    fn word_wrap_ranges_breaks_at_spaces() {
+        let s = "hello world foo bar baz";
+        let ranges = super::word_wrap_ranges(s, 11);
+        let pieces: Vec<&str> = ranges.iter().map(|&(a, b)| &s[a..b]).collect();
+        assert_eq!(pieces, vec!["hello world", "foo bar baz"]);
+    }
+
+    #[test]
+    fn word_wrap_ranges_hard_breaks_when_no_space() {
+        // No spaces ⇒ hard break at width.
+        let s = "abcdefghijklmnopqrstuvwxyz";
+        let ranges = super::word_wrap_ranges(s, 10);
+        let pieces: Vec<&str> = ranges.iter().map(|&(a, b)| &s[a..b]).collect();
+        assert_eq!(pieces, vec!["abcdefghij", "klmnopqrst", "uvwxyz"]);
     }
 
     #[test]

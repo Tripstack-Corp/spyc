@@ -273,25 +273,50 @@ impl PagerView {
         self.full_width = !self.full_width;
     }
 
-    /// Yank the full pager content to the system clipboard via pbcopy.
-    /// For Markdown buffers, yanks the *source* regardless of view
-    /// mode -- you almost certainly want the markdown source, not a
-    /// styled rendering of it.
+    /// Yank the *source* content to the system clipboard. For
+    /// Markdown views this is always the underlying markdown text,
+    /// even when the pager is showing the rendered view -- POLA for
+    /// "I want to paste this README into a chat."
     pub fn yank_to_clipboard(&self) -> std::io::Result<()> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let text = self.source_text();
-        let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(text.as_bytes())?;
-        }
-        child.wait()?;
-        Ok(())
+        pbcopy(&self.source_text())
+    }
+
+    /// Yank the *visible* content to the system clipboard. For
+    /// Markdown views in rendered mode this gives back the styled-
+    /// but-plain-text rendering (headings with `#`, bullets, etc.,
+    /// wrapped at 80 cols); in source mode it's identical to
+    /// `yank_to_clipboard`. Useful when the rendered version is
+    /// what you want to paste.
+    pub fn yank_visible_to_clipboard(&self) -> std::io::Result<()> {
+        let text = self
+            .lines
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        pbcopy(&text)
     }
 
     pub const fn toggle_line_numbers(&mut self) {
         self.show_line_numbers = !self.show_line_numbers;
     }
+
+}
+
+/// Pipe `text` to `pbcopy`. Shared by both yank-source and
+/// yank-visible so they only differ in *which* text they hand off.
+fn pbcopy(text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    child.wait()?;
+    Ok(())
+}
+
+impl PagerView {
 
     pub const fn toggle_whitespace(&mut self) {
         self.show_whitespace = !self.show_whitespace;
@@ -664,9 +689,11 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     } else {
         0
     };
-    let ln_style = Style::default()
-        .fg(theme.status_suffix)
-        .add_modifier(Modifier::DIM);
+    // Line-number gutter: muted but readable. Previously DIM-on-top
+    // of status_suffix which left it almost invisible against dark
+    // backgrounds; dropped the DIM modifier so the digits actually
+    // register.
+    let ln_style = Style::default().fg(theme.status_suffix);
 
     // Width available for content (after the line-number gutter).
     // Used by wrap to decide where to break visual rows. We render
@@ -1125,7 +1152,8 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
             "Actions",
             &[
                 ("v", "open in $EDITOR"),
-                ("y", "yank to clipboard"),
+                ("y", "yank source to clipboard"),
+                ("Y", "yank visible to clipboard (rendered markdown / current view)"),
                 ("s", "save to file (command output only)"),
             ],
         ),
