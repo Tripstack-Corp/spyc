@@ -23,11 +23,14 @@ use anyhow::Result;
 use clap::Parser;
 use crossterm::{
     cursor::MoveTo,
-    event::{DisableBracketedPaste, EnableBracketedPaste},
+    event::{
+        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{
         Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
+        enable_raw_mode, supports_keyboard_enhancement,
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -297,6 +300,22 @@ fn setup_terminal() -> Result<Tui> {
         EnableAlternateScroll,
         HideMousePointer
     )?;
+    // Kitty keyboard protocol: ask the terminal to send unambiguous
+    // modifier info on every key. The big practical win is
+    // Option+Enter on macOS -- without this, terminals like Ghostty,
+    // Kitty, WezTerm, foot, and modern iTerm2 either fold it into
+    // Alt+Enter or send it as ESC+Enter ambiguously. With
+    // DISAMBIGUATE_ESCAPE_CODES, we get an unambiguous Alt+Enter
+    // KeyEvent every time, and `pane::input::encode_key` folds it
+    // to a `\n` newline (multi-line input in Claude). Best-effort:
+    // terminals that don't support the protocol (Terminal.app, older
+    // Alacritty) simply don't reply to the request -- no harm done.
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     // Save the current window title so we can restore it on quit.
     // Best-effort: terminals that don't implement xterm CSI 22;0t just
     // ignore it.
@@ -308,6 +327,12 @@ fn setup_terminal() -> Result<Tui> {
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
+    // Pop the kitty keyboard enhancement flag (best-effort -- if
+    // we never pushed it because the terminal didn't support it,
+    // the pop is a no-op). Terminals that *do* support it leave
+    // the flag set if we don't pop, which would affect any other
+    // TUI started in the same shell session.
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,

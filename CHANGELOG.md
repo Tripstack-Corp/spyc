@@ -13,6 +13,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.29.0] - 2026-04-28
+
+### Added
+- **`Esc` on an empty `J` prompt opens a jump-history popup.**
+  Scrollable list of every jumped-to path, newest first. `j`/`k`
+  navigate, `Enter` chdirs to the cursored path (and pushes it
+  to the top of MRU so the next browse surfaces it), `^D` deletes
+  the entry from history, `q`/`Esc` closes. Esc on a *non-empty*
+  J buffer still cancels normally -- only the empty-buffer case
+  switches to the popup, since there's nothing to throw away.
+- **Option+Enter sends a newline to the pane on terminals that
+  support the kitty keyboard protocol.** `setup_terminal` now
+  pushes `KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES`
+  before entering the TUI; modern terminals (Ghostty, Kitty,
+  WezTerm, foot, recent Alacritty, iTerm2 with the experimental
+  flag) report `Option+Enter` as an unambiguous `Alt+Enter`
+  KeyEvent. Old Terminal.app silently ignores the request -- on
+  that one, users still need "Use Option as Meta key" in their
+  profile preferences. Also broadened `pane::input::encode_key`:
+  *any* modified Enter (Alt, Ctrl, Shift, Super/Meta/Hyper) now
+  folds to `\n` so weird per-terminal modifier reports all
+  produce the multi-line newline Claude expects.
+
+### Fixed
+- **`^C` in a `:` / `J` / `!` / `;` prompt cancels** instead of
+  flashing the "use Q to quit" hint. v1.27.1's hint was the right
+  thing in normal mode but wrong in prompts where vi muscle
+  memory wants `^C` ≡ `Esc`. The hint now skips Prompting mode;
+  `handle_vi_prompt_key` intercepts `^C` and routes to
+  `cancel_prompt`. Capture mode still forwards `^C` to the child
+  as 0x03 (sudo / ssh prompts unaffected).
+
 ## [1.28.0] - 2026-04-28
 
 ### Added

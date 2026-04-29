@@ -480,6 +480,12 @@ pub struct App {
     pending_capture: Option<PendingCapture>,
     background_tasks: BackgroundTasks,
     pending_history_pick: Option<LineEditor>,
+    /// Snapshot of jump-history entries (newest first) for the popup
+    /// opened by `Esc` on an empty `J` prompt. While `Some`, an
+    /// `Enter` on the active pager chdirs to the entry at the
+    /// cursor; `^D` deletes the entry from history and the snapshot.
+    /// `None` when no jump-history popup is active.
+    pending_jump_history: Option<Vec<String>>,
     /// Active F-finder state (filename fuzzy picker). When `Some`,
     /// the pager renders the picker UI and key input is intercepted
     /// before the normal pager handler -- the user types to filter,
@@ -706,6 +712,7 @@ impl App {
             pending_capture: None,
             background_tasks: BackgroundTasks::new(),
             pending_history_pick: None,
+            pending_jump_history: None,
             find_picker: None,
             grep_session: None,
             next_grep_id: 0,
@@ -2392,17 +2399,23 @@ impl App {
             return Ok(PostAction::None);
         }
 
-        // ^C is intentionally a no-op at the spyc level (we don't
-        // quit on Ctrl+C, that footgun's too easy with one stray
-        // chord). Flash a hint so the user isn't left wondering
-        // whether the key got captured -- common after coming back
-        // from a `p` → `$PAGER` takeover where they tried to ^C
-        // out of less and might have sent a second one in confusion.
-        // Capture mode handles its own ^C below (forwards to child
-        // as 0x03), so we filter that case out.
+        // ^C is intentionally a no-op at the spyc-normal level (we
+        // don't quit on Ctrl+C, that footgun's too easy with one
+        // stray chord). Flash a hint so the user isn't left
+        // wondering whether the key got captured -- common after
+        // coming back from a `p` → `$PAGER` takeover where they
+        // tried to ^C out of less and might have sent a second one
+        // in confusion.
+        //
+        // Exclusions:
+        //  - Capture mode forwards ^C to the child as 0x03 below.
+        //  - Prompting mode treats ^C as cancel (vi muscle memory:
+        //    `^C` in `:` should drop you back to normal mode, same
+        //    as Esc) -- handled in `handle_vi_prompt_key`.
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.pending_capture.is_none()
+            && !matches!(self.state.mode, Mode::Prompting(_))
         {
             self.state
                 .flash_info("^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes");
@@ -2887,6 +2900,17 @@ impl App {
         // Non-Tab clears double-Tab state.
         self.tab_state = None;
 
+        // ^C in any prompt cancels and returns to normal mode --
+        // vi muscle memory. Distinct from Esc only in keystroke,
+        // identical in effect.
+        if matches!(key.code, KeyCode::Char('c'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.history_for_prompt().reset_nav();
+            self.cancel_prompt();
+            return PostAction::None;
+        }
+
         // `!?` — when the buffer is empty and the user types '?',
         // immediately open the history editor (no Enter needed).
         if key.code == KeyCode::Char('?') {
@@ -2899,6 +2923,25 @@ impl App {
                 if buffer.is_empty() {
                     self.state.mode = Mode::Normal;
                     self.show_history_popup();
+                    return PostAction::None;
+                }
+            }
+        }
+
+        // Esc on an empty `J` prompt opens the jump-history popup
+        // (j/k browse, Enter cd, q/Esc close). The user has nothing
+        // to throw away on an empty buffer, so cancel→popup is purely
+        // additive UX. A non-empty Esc still cancels normally.
+        if matches!(key.code, KeyCode::Esc) {
+            if let Mode::Prompting(Prompt {
+                kind: PromptKind::Jump,
+                ref buffer,
+                ..
+            }) = self.state.mode
+            {
+                if buffer.is_empty() {
+                    self.state.mode = Mode::Normal;
+                    self.show_jump_history_popup();
                     return PostAction::None;
                 }
             }
@@ -5084,6 +5127,39 @@ impl App {
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
     }
 
+    /// Open a popup listing every entry in `jump_history`, newest at
+    /// the top. j/k navigate, Enter chdirs to the cursored path,
+    /// ^D deletes the entry from history, q/Esc closes. Triggered by
+    /// hitting Esc on an empty `J` prompt -- since there's nothing to
+    /// throw away, the cancel turns into "show me my jumps."
+    fn show_jump_history_popup(&mut self) {
+        let entries = self.state.jump_history.entries();
+        if entries.is_empty() {
+            self.state.flash_info("jump history is empty");
+            return;
+        }
+        // Snapshot newest-first paths into pending_jump_history so
+        // index ↔ entry mapping stays stable even if the live history
+        // is mutated (e.g. by another running spyc).
+        let snapshot: Vec<String> = entries.iter().rev().cloned().collect();
+        let lines: Vec<String> = snapshot
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("  {:>3}  {}", i + 1, p))
+            .collect();
+        let mut view = pager::PagerView::new_plain(
+            "jump history — j/k move, Enter cd, ^D delete, q close",
+            lines,
+        );
+        view.picker_cursor = Some(0);
+        view.no_history = true;
+        view.show_line_numbers = false;
+        view.wrap = false;
+        self.pending_jump_history = Some(snapshot);
+        self.pager = Some(view);
+        self.needs_full_repaint = true;
+    }
+
     fn show_history_popup(&mut self) {
         let entries = self.state.history.entries();
         if entries.is_empty() {
@@ -5512,6 +5588,67 @@ impl App {
             return PostAction::None;
         }
 
+        // Jump-history popup: Enter on cursor chdirs, ^D deletes
+        // the entry, q/Esc/'q' closes. j/k picker_move is handled
+        // by the generic block lower down.
+        if self.pending_jump_history.is_some() {
+            match key.code {
+                KeyCode::Enter => {
+                    let cursor = view.picker_cursor.unwrap_or(0);
+                    let snapshot = self.pending_jump_history.take().unwrap();
+                    self.pager = None;
+                    self.needs_full_repaint = true;
+                    if let Some(path_str) = snapshot.get(cursor) {
+                        let path = crate::paths::expand(path_str);
+                        match self.state.chdir(&path) {
+                            Ok(()) => {
+                                // Push to top of history so MRU stays
+                                // accurate even if user reaches via
+                                // popup instead of typing.
+                                self.state.jump_history.push(path_str);
+                            }
+                            Err(e) => self.state.flash_error(format!("cd: {e}")),
+                        }
+                    }
+                    return PostAction::None;
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let cursor = view.picker_cursor.unwrap_or(0);
+                    let snapshot = self.pending_jump_history.as_mut().unwrap();
+                    if let Some(path_str) = snapshot.get(cursor).cloned() {
+                        // Remove from real history (find by content,
+                        // since snapshot indices are reverse-ordered).
+                        let entries = self.state.jump_history.entries();
+                        if let Some(real_idx) = entries.iter().position(|e| e == &path_str) {
+                            self.state.jump_history.remove(real_idx);
+                        }
+                        snapshot.remove(cursor);
+                        if snapshot.is_empty() {
+                            self.pending_jump_history = None;
+                            self.pager = None;
+                            self.needs_full_repaint = true;
+                            self.state.flash_info("jump history empty");
+                            return PostAction::None;
+                        }
+                        // Rebuild the pager line list from the snapshot.
+                        let lines: Vec<ratatui::text::Line<'static>> = snapshot
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| {
+                                ratatui::text::Line::from(format!("  {:>3}  {}", i + 1, p))
+                            })
+                            .collect();
+                        view.lines = lines;
+                        if cursor >= view.lines.len() {
+                            view.picker_cursor = Some(view.lines.len() - 1);
+                        }
+                        return PostAction::None;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Worktree picker: 1-9 selects a worktree and chdirs.
         if let Some(ref worktrees) = self.state.pending_worktrees {
             if let KeyCode::Char(c @ '1'..='9') = key.code {
@@ -5834,6 +5971,7 @@ impl App {
                 self.state.pending_worktrees = None;
                 self.state.pending_sessions = None;
                 self.pending_history_pick = None;
+                self.pending_jump_history = None;
                 self.pager_jump_buf = None;
                 self.pager_pending_bracket = None;
                 self.needs_full_repaint = true;

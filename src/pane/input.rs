@@ -12,6 +12,10 @@ pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
     use KeyCode as K;
     let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
     let alt = ev.modifiers.contains(KeyModifiers::ALT);
+    let shift = ev.modifiers.contains(KeyModifiers::SHIFT);
+    let zoo = ev.modifiers.contains(KeyModifiers::SUPER)
+        || ev.modifiers.contains(KeyModifiers::META)
+        || ev.modifiers.contains(KeyModifiers::HYPER);
 
     let mut out = Vec::new();
 
@@ -43,10 +47,15 @@ pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
             }
         }
         K::Enter => {
-            if alt || ctrl {
-                // Alt+Enter or Ctrl+Enter → newline (Claude CLI multi-line).
-                // Ctrl+Enter is the fallback for terminals where Option
-                // doesn't produce an ALT modifier (iTerm2 with "Esc+" mode).
+            if alt || ctrl || shift || zoo {
+                // Any modified Enter ⇒ newline (Claude CLI multi-line input).
+                // Different terminals report Option+Enter differently --
+                // some as Alt+Enter, some as Ctrl+Enter, some as
+                // Shift+Enter, some only properly when the kitty
+                // keyboard protocol is enabled. Fold them all so the
+                // user's "I want a newline in my Claude prompt"
+                // muscle memory just works regardless of host
+                // terminal config.
                 out.push(b'\n');
             } else {
                 out.push(b'\r');
