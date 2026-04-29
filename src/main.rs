@@ -274,6 +274,16 @@ fn install_signal_handlers() {
         let h = signal_noop as *const () as libc::sighandler_t;
         libc::signal(libc::SIGINT, h);
         libc::signal(libc::SIGQUIT, h);
+        // SIGTTOU is raised on a process not in the FG process group
+        // when it calls `tcsetpgrp()`. We use `tcsetpgrp` to hand tty
+        // foreground to/from children for `p` / `v` / `;` takeovers
+        // -- the *restore* call after the child exits comes from a
+        // process that's no longer the FG group, so without ignoring
+        // SIGTTOU spyc would suspend itself. Ignored permanently:
+        // ignored signals inherit across exec, but no well-behaved
+        // child process running in the foreground triggers SIGTTOU
+        // anyway (it's a background-write signal).
+        libc::signal(libc::SIGTTOU, libc::SIG_IGN);
     }
 }
 

@@ -6676,6 +6676,15 @@ fn sh_c(cmd: &str, pause_after: bool) -> PostAction {
 /// Hand the tty to a child process, optionally pausing for a keypress
 /// afterwards so the user can read the command's output before we repaint
 /// over it.
+///
+/// Job-control aware: the child is placed in its own process group and
+/// becomes the foreground process group of the controlling tty for the
+/// duration of the run. This is what a normal shell does when launching
+/// a foreground command, and it's what makes Ctrl+C / Ctrl+\ delivery
+/// land *only* on the child instead of being broadcast to spyc + child.
+/// Without this, less running line-counts would react to ^C *and* spyc
+/// would see it (caught by our no-op handler, but the FG-group ambiguity
+/// caused other anomalies -- less appearing to miss the signal, etc.).
 fn run_child_in_foreground(
     terminal: &mut Tui,
     program: &str,
@@ -6685,9 +6694,44 @@ fn run_child_in_foreground(
     use std::io::Write;
     suspend_tui(terminal)?;
 
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    // process_group(0) ⇒ child becomes leader of a new process group
+    // (PGID == child PID). Equivalent to setpgid(0, 0) right before
+    // exec. The child no longer shares spyc's group, so a tty signal
+    // delivered to spyc's FG group can't accidentally hit it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    let mut child = cmd.spawn()?;
+
+    // Make the child's process group the foreground group of the
+    // controlling tty. Now ^C / ^\ from the kernel's tty driver go
+    // to the child only. SIGTTOU is ignored globally (see
+    // `install_signal_handlers`) so the restore call below doesn't
+    // suspend us.
+    #[cfg(unix)]
+    let saved_pgid: libc::pid_t = unsafe {
+        let our_pgid = libc::getpgrp();
+        let child_pid = child.id() as libc::pid_t;
+        libc::tcsetpgrp(libc::STDIN_FILENO, child_pid);
+        our_pgid
+    };
+
     // Ignoring status on purpose: non-zero exits (e.g. less with `q`, or a
     // grep that found nothing) are normal and should not crash spyc.
-    let _ = std::process::Command::new(program).args(args).status();
+    let _ = child.wait();
+
+    // Restore tty foreground to spyc's group. Without this, the next
+    // tty input would still be delivered to the child's (now-dead)
+    // group and the kernel would EIO subsequent reads.
+    #[cfg(unix)]
+    unsafe {
+        libc::tcsetpgrp(libc::STDIN_FILENO, saved_pgid);
+    }
 
     if pause_after {
         let mut stdout = std::io::stdout();

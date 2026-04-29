@@ -1,13 +1,17 @@
 ### SMALL ###
 - J should have a scrollable / editable history with the frecency magic
+- the pager view is kind of dumb with some outputs - it doesn't end up
+  scrolling with the stdout - it ends up using only half the screen but if you
+  go back to the top of the buffer and down again, it will then correctly use the
+  whole available window - this might be related to the bug directly below
+- when resuming a long running task we should be sure that the most recent
+  output is visible
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
   updated; need to try and reproduce
 - something funky is happening with our MCP support - we need to ensure that
   multiple running spyc's don't interfere with eachother
-- when resuming a long running task we should be sure that the most recent
-  output is visible
 - a pane that has ended should not be so easy to dismiss with ESC; it should
   require ^a-x so that the user purposefully says they are done with it e.g. I
   may still way to try and restart it
@@ -59,6 +63,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.27.3) `^C` in `p` → less now reaches less cleanly.
+  v1.27.2 stopped spyc dying on the signal but left spyc and the
+  child sharing a process group, so SIGINT went to both and the
+  signal-disposition / mask interactions between them caused
+  less to appear to miss the signal. Fix: proper Unix job
+  control -- child gets its own process group via
+  `process_group(0)`, becomes the foreground group of the tty
+  via `tcsetpgrp` for the duration of the run, parent restores
+  on wait completion (SIGTTOU ignored permanently so the restore
+  doesn't suspend spyc). Same pattern bash/zsh use; less / vim /
+  etc. now get clean signal delivery.
 - (fixed, v1.27.2) `^C` while in a `p`/`v`/`;` takeover used to
   kill both the child *and* spyc. Repro: `p` on a huge file → less
   → `G` to count lines → `^C` to abort count → spyc exits along

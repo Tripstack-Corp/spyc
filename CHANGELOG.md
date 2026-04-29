@@ -13,6 +13,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.27.3] - 2026-04-28
+
+### Fixed
+- **`^C` in `p` → less now interrupts less cleanly** (rather than
+  appearing to be ignored). v1.27.2 stopped spyc from dying on
+  Ctrl+C, but the no-op-handler approach left spyc and the child
+  sharing a process group, so signals went to both. less *did*
+  receive SIGINT but interactions between two processes seeing
+  the same FG-group signal led to "less seems to miss the
+  signal" symptoms (race-y disposition handling, signal mask
+  ambiguity, etc.). Fix: proper Unix job control around
+  `run_child_in_foreground`:
+  - Child spawned with `process_group(0)` ⇒ becomes leader of a
+    new process group (PGID == child PID).
+  - After spawn, `tcsetpgrp(stdin, child_pid)` makes the child's
+    group the foreground group of the controlling tty. Now `^C`
+    / `^\` from the kernel go to the child *only*.
+  - On wait completion, `tcsetpgrp(stdin, our_pgid)` restores
+    spyc as the FG group; SIGTTOU (raised on a non-FG-group
+    process calling tcsetpgrp) is now ignored permanently in
+    `install_signal_handlers` so the restore call doesn't
+    suspend spyc itself.
+  - Same shape that bash/zsh use to launch foreground commands.
+    Less, vim, and any other child now get clean signal
+    delivery and behave exactly as they would in a normal
+    terminal.
+
 ## [1.27.2] - 2026-04-28
 
 ### Fixed
