@@ -1,4 +1,5 @@
 ### SMALL ###
+- J should have a scrollable / editable history with the frecency magic
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -23,6 +24,8 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
+- include a SMALL model that can conversationally answer how to do stuff with
+  spyc
 - while I am drafting a command for a new pane it would be nice to still be
   able to switch to another pane to check on something
 - would like to be able to reorder tabs
@@ -56,6 +59,15 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.27.2) `^C` while in a `p`/`v`/`;` takeover used to
+  kill both the child *and* spyc. Repro: `p` on a huge file → less
+  → `G` to count lines → `^C` to abort count → spyc exits along
+  with less. Cause: spyc and child shared the foreground process
+  group; `^C` from tty driver hit both; spyc's default SIGINT
+  disposition = terminate. Fix: install no-op handlers for SIGINT
+  and SIGQUIT at startup. POSIX `execve` semantics reset custom
+  handlers to `SIG_DFL` in the child, so less/vim still receive
+  signals normally; spyc just ignores them.
 - (fixed, v1.27.0) Pager no longer OOMs on huge files. We were
   doing `read_to_string(path)` + syntect over the whole content,
   which on a multi-MB CSV/log built a Vec<Line> with millions of

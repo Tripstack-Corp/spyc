@@ -117,6 +117,11 @@ fn main() -> Result<()> {
     if let Some(p) = debug_log::init(cli.debug) {
         eprintln!("spyc: debug log → {p}");
     }
+    // Install signal handlers BEFORE the TUI starts so a stray
+    // ^C during a suspended-mode takeover (`p` → less, `v` →
+    // editor, `;` → top pane) doesn't bring spyc down with the
+    // child. See `install_signal_handlers` for the full reasoning.
+    install_signal_handlers();
     let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
     let mut app = App::new(cli.resume, mcp_takeover_allowed);
@@ -223,6 +228,52 @@ impl crossterm::Command for DisableAlternateScroll {
     #[cfg(windows)]
     fn execute_winapi(&self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// No-op handler for SIGINT / SIGQUIT. Replaces the default
+/// "terminate-the-process" disposition so spyc can survive a stray
+/// `^C` (or `^\`) that arrives while raw mode is off and the kernel
+/// is generating signals from tty input.
+// Intentionally empty -- we want SIGINT/SIGQUIT to be a no-op
+// for spyc, NOT inherited as SIG_IGN by children. Can't be const
+// since extern "C" fn pointers don't work with const-fn.
+#[allow(clippy::missing_const_for_fn)]
+extern "C" fn signal_noop(_: libc::c_int) {}
+
+/// Install no-op handlers for SIGINT and SIGQUIT so spyc never dies
+/// from a Ctrl+C / Ctrl+\ that wasn't intended for it.
+///
+/// **The bug this fixes:** spyc runs in raw mode, where the kernel's
+/// tty signal generation (`ISIG`) is disabled and `^C` arrives as a
+/// regular key event. But `p` → `$PAGER`, `v` → `$EDITOR`, and `;`
+/// foreground commands all call `suspend_tui` first, which restores
+/// canonical mode + `ISIG`. Now a `^C` from the tty driver is sent
+/// as `SIGINT` to the *foreground process group* of the controlling
+/// terminal — which is spyc's process group, since the child
+/// inherited it. Both spyc and the child receive the signal:
+///   - The child (less, vim) installs its own `SIGINT` handler at
+///     startup and treats it as "interrupt current operation" (less
+///     stops counting lines, vim cancels current input).
+///   - spyc, with the default disposition, *terminates*. The tty
+///     session leader exits, the kernel sends `SIGHUP` to remaining
+///     foreground processes, less + sh die too. From the user's
+///     perspective: "spyc died on ^C in less."
+///
+/// Fix: install a custom no-op handler for SIGINT (and SIGQUIT for
+/// the same reason). spyc receives the signal, ignores it. Per
+/// POSIX `execve(2)` semantics, custom handlers are reset to
+/// `SIG_DFL` in the child, so the child receives the signal with
+/// normal disposition and handles it correctly. (Pure `SIG_IGN`
+/// would inherit across exec, breaking the child's signal handling.)
+fn install_signal_handlers() {
+    unsafe {
+        // libc::signal returns the previous handler; we don't care
+        // about it. SIG_ERR ⇒ failure, but on a sane Unix this
+        // doesn't fail for a regular handler install.
+        let h = signal_noop as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGINT, h);
+        libc::signal(libc::SIGQUIT, h);
     }
 }
 

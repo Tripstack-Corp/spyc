@@ -13,6 +13,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.27.2] - 2026-04-28
+
+### Fixed
+- **`^C` in a `p`/`v`/`;` takeover no longer kills spyc.**
+  Real-world repro: `p` opens `less` on a huge file; `G` jumps to
+  end and triggers a long line-count; user hits `^C` to abort the
+  count → less *quits entirely* AND spyc exits. In a normal
+  terminal less would just stop counting and stay open.
+  - Root cause: spyc runs in raw mode (kernel `ISIG` disabled,
+    `^C` arrives as a key event). When suspending for the
+    `p`/`v`/`;` takeover, raw mode is restored to canonical, and
+    `^C` from the tty driver is delivered as `SIGINT` to the
+    *whole foreground process group* — which is spyc's process
+    group, since the child inherited it. Both processes get the
+    signal: less handles it gracefully (interrupt the count, stay
+    open), spyc dies on the default disposition. The tty session
+    leader exits → kernel `SIGHUP`s remaining processes → less +
+    sh die too. From the user: "spyc died on ^C in less."
+  - Fix: install no-op handlers for SIGINT and SIGQUIT in spyc at
+    startup. spyc receives the signal, ignores it. Per POSIX
+    `execve(2)`, custom handlers are reset to `SIG_DFL` in the
+    child, so less / vim / etc. receive the signal with normal
+    disposition and handle it themselves. (Pure `SIG_IGN` would
+    inherit across exec, breaking the child's signal handling --
+    that's why a custom no-op handler is the right shape.)
+
 ## [1.27.1] - 2026-04-28
 
 ### Fixed
