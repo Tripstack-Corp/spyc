@@ -661,6 +661,8 @@ impl App {
             quit_pending: None,
             history: History::load(),
             pane_history: History::load_file("pane_history"),
+            jump_history: History::load_file("jump_history"),
+            command_history: History::load_file("command_history"),
             flash: start_error.map(|text| FlashMessage {
                 text,
                 kind: FlashKind::Error,
@@ -2824,16 +2826,31 @@ impl App {
     }
 
     /// Return the appropriate history for the current prompt kind.
-    const fn history_for_prompt(&mut self) -> &mut History {
-        let is_pane = matches!(
-            self.state.mode,
-            Mode::Prompting(Prompt {
-                kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
-                ..
-            })
-        );
-        if is_pane {
+    /// Four buckets so they don't pollute each other:
+    ///   - `pane_history` for new-pane-tab cmd / cwd prompts
+    ///   - `jump_history` for the `J` jump-to-path prompt
+    ///   - `command_history` for `:` (vim-style command line)
+    ///   - `history` for shell-out prompts (`!`, `;`)
+    ///
+    /// Mixing `:` with `!` was the worst of these collisions: typing
+    /// `!make sync-all` then later hitting `:` + Up surfaces
+    /// `make sync-all` and submits it as a `:` command, which then
+    /// errors with "unknown command".
+    #[allow(clippy::missing_const_for_fn)]
+    fn history_for_prompt(&mut self) -> &mut History {
+        let kind = match &self.state.mode {
+            Mode::Prompting(p) => Some(&p.kind),
+            Mode::Normal => None,
+        };
+        if matches!(
+            kind,
+            Some(PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd)
+        ) {
             &mut self.state.pane_history
+        } else if matches!(kind, Some(PromptKind::Jump)) {
+            &mut self.state.jump_history
+        } else if matches!(kind, Some(PromptKind::Command)) {
+            &mut self.state.command_history
         } else {
             &mut self.state.history
         }
@@ -2908,13 +2925,34 @@ impl App {
                         ..
                     })
                 );
+                let is_jump_prompt = matches!(
+                    self.state.mode,
+                    Mode::Prompting(Prompt {
+                        kind: PromptKind::Jump,
+                        ..
+                    })
+                );
+                let is_command_prompt = matches!(
+                    self.state.mode,
+                    Mode::Prompting(Prompt {
+                        kind: PromptKind::Command,
+                        ..
+                    })
+                );
                 let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
                 else {
                     return PostAction::None;
                 };
                 // Push to the appropriate history before dispatching.
+                // Four buckets stay isolated -- shell, pane-tab, jump
+                // destinations, and `:` commands don't cross-pollute
+                // each other's Up/Down browse.
                 let hist = if is_pane_prompt {
                     &mut self.state.pane_history
+                } else if is_jump_prompt {
+                    &mut self.state.jump_history
+                } else if is_command_prompt {
+                    &mut self.state.command_history
                 } else {
                     &mut self.state.history
                 };

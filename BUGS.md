@@ -1,5 +1,4 @@
 ### SMALL ###
-- J should have a scrollable / editable history with the frecency magic
 - the pager view is kind of dumb with some outputs - it doesn't end up
   scrolling with the stdout - it ends up using only half the screen but if you
   go back to the top of the buffer and down again, it will then correctly use the
@@ -19,9 +18,6 @@
   top of a directory (the ~ in the status is not enough)
 - graveyard should include files that have been removed with R
 - we should be able to send control signals to running processes e.g. ^t
-- you can get into a weird history loop where commands are mixed with !shell
-  comamands and you'll just get "unknown command" - we should preserve a unified
-  history but it should preserve shell vs. spyc commands
 - cw didn't seem to be worked as expected in ! (? need to confirm - may have
   been using an old version); maybe we should put a build commit hash in the
   top right?
@@ -63,6 +59,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.28.0) `J` (jump-to-path) now has its own persistent
+  history bucket. Up / Down in the prompt walk previously-jumped
+  destinations independently of shell-command and pane-prompt
+  history. Tab + frecency completion still works as before.
+- (fixed, v1.28.0) `:` (vim-style command line) and `!` (shell
+  capture) no longer share a history. Repro: type
+  `!make sync-all` (a real shell command). Later type `:` and
+  press Up — the buffer surfaces `make sync-all`, you submit it
+  as a `:` command, spyc errors with "unknown command: make
+  sync-all". Now `:` has its own `command_history` file, isolated
+  from `!`/`;` shell history.
 - (fixed, v1.27.3) `^C` in `p` → less now reaches less cleanly.
   v1.27.2 stopped spyc dying on the signal but left spyc and the
   child sharing a process group, so SIGINT went to both and the

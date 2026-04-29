@@ -95,6 +95,16 @@ pub struct AppState {
     pub last_captured_cmd: Option<String>,
     pub history: History,
     pub pane_history: History,
+    /// Persistent history for `J` (jump-to-path) prompts. Up / Down
+    /// in the prompt cycle through previously-jumped destinations,
+    /// independent of the shell-command and pane-prompt histories
+    /// so they don't pollute each other.
+    pub jump_history: History,
+    /// Persistent history for `:` (vim-style command-line) prompts.
+    /// Kept separate from shell-command history so `:make sync-all`
+    /// (a typo for `!make sync-all`) doesn't surface back as a `:`
+    /// command on Up arrow and explode with "unknown command".
+    pub command_history: History,
     pub flash: Option<FlashMessage>,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
@@ -1328,6 +1338,8 @@ mod tests {
             last_captured_cmd: None,
             history: History::load_file("test_state_h"),
             pane_history: History::load_file("test_state_ph"),
+            jump_history: History::load_file("test_state_jh"),
+            command_history: History::load_file("test_state_ch"),
             flash: None,
             should_quit: false,
             quit_pending: None,

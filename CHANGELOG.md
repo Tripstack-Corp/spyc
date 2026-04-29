@@ -13,6 +13,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.28.0] - 2026-04-28
+
+### Added
+- **`J` (jump to path) gets its own persistent history.** Up /
+  Down in the J prompt now cycle through previously-jumped
+  destinations, persisted to
+  `$XDG_STATE_HOME/spyc/jump_history`. Tab-completion + frecency
+  hits still work as before; this is a parallel surface for
+  "take me back to that thing I jumped to yesterday."
+
+### Fixed
+- **`:` and `!` no longer share a history bucket.** Real-world
+  repro: type `!make sync-all` (a shell command), later type `:`
+  and press Up to recall something — the buffer surfaces
+  `make sync-all`, you submit it, spyc fires "unknown command:
+  make sync-all" because `:` is the vim-style command line, not
+  a shell. Now `:` has its own `command_history` file
+  (`$XDG_STATE_HOME/spyc/command_history`) and the four buckets
+  stay fully isolated: shell (`!`/`;`), pane-tab cmd/cwd, jump,
+  and command-line.
+
 ## [1.27.4] - 2026-04-28
 
 ### Changed
