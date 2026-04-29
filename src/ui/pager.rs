@@ -1181,10 +1181,19 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
         }
     }
 
-    let mut view = PagerView::new_styled("Pager help", lines);
+    let mut view = PagerView::new_styled(PAGER_HELP_TITLE, lines);
     view.show_line_numbers = false;
+    // Help is a transient overlay -- never push it to buffer history,
+    // and never word-wrap (its content is curated to fit).
+    view.no_history = true;
+    view.wrap = false;
     view
 }
+
+/// Sentinel title used to identify the pager-help overlay so the
+/// `Esc` handler can dismiss just the help and pop back to the
+/// underlying pager that was active when `?` was pressed.
+pub const PAGER_HELP_TITLE: &str = "Pager help";
 
 const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
     let w = area.width * percent_w / 100;

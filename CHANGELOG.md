@@ -13,6 +13,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.27.1] - 2026-04-28
+
+### Fixed
+- **Truncation now flashes the `p` hint immediately on open.**
+  v1.27.0 added a banner row at the *end* of the truncated content,
+  but if the file's the first 5000 lines and the user doesn't scroll
+  to the bottom, they'd never see the escape hatch. Now: a flash
+  message ("truncated at N lines · press p for full file in
+  $PAGER") appears in the title bar the moment a truncated view
+  opens, alongside the existing footer banner.
+- **Pager-help (`?`) `Esc` now dismisses just the help, not the
+  underlying pager.** Before: pressing `?` pushed the active pager
+  into history, opened help; pressing `Esc` then closed the help
+  *and* dropped you back to the file list, requiring `[b` or `gp`
+  to reopen what you were viewing. Now: `Esc` / `q` on the
+  help overlay pops the previous pager from history and restores
+  it as active. Help is also flagged `no_history = true` so it
+  can't accidentally land in the buffer-history stack.
+- **^C in spyc-normal mode flashes an explicit hint** instead of
+  silently doing nothing. Real-world repro: `p` opens `$PAGER`,
+  user hits ^C to abort a struggling `less`, comes back to spyc
+  thinking ^C may have been "captured." Now the flash makes the
+  contract explicit: `^C is not a quit binding — use Q (or :q) to
+  quit, Esc to cancel modes`. Capture mode still forwards ^C to
+  the running child (sudo/ssh prompts behave normally).
+
 ## [1.27.0] - 2026-04-28
 
 ### Added

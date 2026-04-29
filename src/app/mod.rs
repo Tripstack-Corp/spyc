@@ -2390,6 +2390,23 @@ impl App {
             return Ok(PostAction::None);
         }
 
+        // ^C is intentionally a no-op at the spyc level (we don't
+        // quit on Ctrl+C, that footgun's too easy with one stray
+        // chord). Flash a hint so the user isn't left wondering
+        // whether the key got captured -- common after coming back
+        // from a `p` → `$PAGER` takeover where they tried to ^C
+        // out of less and might have sent a second one in confusion.
+        // Capture mode handles its own ^C below (forwards to child
+        // as 0x03), so we filter that case out.
+        if matches!(key.code, KeyCode::Char('c'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.pending_capture.is_none()
+        {
+            self.state
+                .flash_info("^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes");
+            return Ok(PostAction::None);
+        }
+
         // While a `!` capture is running, forward typed keys to the
         // child via the master PTY writer so the user can answer
         // prompts (sudo password, ssh password, etc.). Ctrl+\ kills
@@ -5717,6 +5734,23 @@ impl App {
 
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
+                // Pager-help overlay: dismiss just the help, restore
+                // whatever pager was active when `?` was pressed
+                // (we pushed it to back-stack at open time). Without
+                // this, ESC would close help AND drop us back to the
+                // file list -- the user just wanted to glance at the
+                // keys, not lose their place.
+                if self
+                    .pager
+                    .as_ref()
+                    .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
+                {
+                    self.pager = self.pager_history.back.pop();
+                    self.pager_jump_buf = None;
+                    self.pager_pending_bracket = None;
+                    self.needs_full_repaint = true;
+                    return PostAction::None;
+                }
                 // Task viewer special close: if the viewed task has
                 // exited (and the user has seen it), promote -- snapshot
                 // its rendered view into buffer history and drop the
@@ -6295,6 +6329,15 @@ impl App {
                                             ),
                                             warn_style,
                                         ),
+                                    ));
+                                    // Also flash an immediate hint -- the
+                                    // banner is at the bottom and the user
+                                    // might not scroll there before
+                                    // wondering what happened to their
+                                    // file.
+                                    v.flash = Some(format!(
+                                        "truncated at {} lines · press p for full file in $PAGER",
+                                        crate::fs::ops::MAX_PAGER_LINES
                                     ));
                                 }
                                 v
