@@ -1086,7 +1086,8 @@ impl AppState {
         }
 
         // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd,
-        // :bprev, :bnext, :fg [N], :task [N], :grep <pattern>
+        // :bprev, :bnext, :fg [N], :task [N], :grep <pattern>,
+        // :pause [N], :resume [N]
         if input.starts_with('!')
             || input.starts_with(';')
             || input == "bprev"
@@ -1097,6 +1098,10 @@ impl AppState {
             || input.starts_with("task ")
             || input == "grep"
             || input.starts_with("grep ")
+            || input == "pause"
+            || input.starts_with("pause ")
+            || input == "resume"
+            || input.starts_with("resume ")
         {
             return CommandResult::NotHandled;
         }

@@ -1,4 +1,10 @@
 ### SMALL ###
+- the interactive picker tool - gum - handles our ! view very poorly - we
+  should investigate why and see if we can patch
+- fg does not show the recent output - it puts the current STDOUT at the very
+  top so it ends up looking like there has been no output
+- notice of ^c while in the task viewer goes to the spyc pane instead of at the
+  top of the task pager view
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -19,7 +25,7 @@
 
 ### BIGGER ###
 - include a SMALL model that can conversationally answer how to do stuff with
-  spyc
+  spyc; maybe there's a good crate to sidecar with this functionality?
 - while I am drafting a command for a new pane it would be nice to still be
   able to switch to another pane to check on something
 - would like to be able to reorder tabs
@@ -53,6 +59,15 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.37.0) Backgrounded tasks can be paused and resumed.
+  `:pause [N]` sends SIGSTOP to the task's process group (whole
+  subprocess tree halts together: make → cc → ld); `:resume [N]`
+  sends SIGCONT. Inside the task viewer (`gB` / `:task N`),
+  `S` and `C` are shorthand. Paused tasks render as `[N⏸]` in
+  the divider; `:fg` on a paused task auto-resumes before
+  re-attaching. Useful for the canonical "switching networks"
+  scenario plus any general "pause this for a sec" need (CPU
+  relief, debugging another task, freeing a port).
 - (fixed, v1.35.2) Streaming `!cmd` capture pager auto-tail no
   longer leaves the pager half-empty. The tick-loop calls to
   `scroll_to_bottom(40)` and `page_lines(40)` were hard-coded

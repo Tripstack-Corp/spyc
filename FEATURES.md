@@ -202,6 +202,8 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 - **`:!!`** — repeat last captured command
 - **`:;<cmd>`** — foreground shell command (same as `;`)
 - **`:fg`** / **`:fg N`** — resume a backgrounded task (see Background tasks)
+- **`:pause`** / **`:pause N`** — pause a backgrounded task (`SIGSTOP`)
+- **`:resume`** / **`:resume N`** — resume a paused task (`SIGCONT`)
 - **`:grep <pattern>`** — project-wide content search via embedded
   ripgrep matcher (`grep-regex` + `grep-searcher`). Walks
   `PROJECT_HOME` (or current dir) honoring `.gitignore`, smart-case
@@ -239,6 +241,14 @@ to lock you out of spyc.
   buffer. On close, *exited* tasks are promoted: snapshot pushed to
   buffer history, task dropped from the bg list. Running tasks stay
   put -- you can come back via `gB` / `[t`.
+- **`:pause`** / **`:pause N`** sends `SIGSTOP` to the task's
+  process group, halting the whole subprocess tree (`make → cc →
+  ld` all stop together). **`:resume`** / **`:resume N`** sends
+  `SIGCONT`. Useful when switching networks, freeing CPU, or
+  pausing an over-eager build to focus on something else. Inside
+  the task viewer, **`S`** and **`C`** are the shorthand
+  equivalents. Paused tasks render as `[N⏸]` in the divider;
+  `:fg` on a paused task auto-resumes before re-attaching.
 - A task that completes while in the background fires a flash:
   `task #N: cmd — exit 0 (43s)`.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks

@@ -13,6 +13,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.37.0] - 2026-04-29
+
+### Added
+- **`:pause [N]` / `:resume [N]` for backgrounded tasks.** The
+  top BIGGER-pile request: pause/resume execution so you can
+  swap networks, free CPU, or just stop an over-eager build to
+  focus on something else. Implementation sends `SIGSTOP` /
+  `SIGCONT` to the task's *process group* (negative pid via
+  `libc::kill`), so subprocess trees (e.g. `make → cc → ld`)
+  all halt together rather than just the direct child. No-arg
+  forms target the most-recent task; numeric arg targets a
+  specific id. Same UX shape as `:fg [N]` / `:task [N]`.
+- **`S` / `C` keybindings inside the task viewer** (`gB` /
+  `:task N`) — Stop and Continue, the hand-on-keyboard
+  shorthand for `:pause` / `:resume`.
+- Divider glyph `[N⏸]` for paused tasks (mixed in with the
+  existing `[N+]` / `[N●]` / `[N✓]` / `[N✗]`).
+- `:fg` on a paused task **auto-resumes** before re-attaching
+  the streaming capture, so the user doesn't get a frozen
+  foreground pager.
+- `paused: bool` field added to `BackgroundTask`.
+
+### Fixed
+- Cleared the "pause and resume execution of backgrounded
+  tasks" entry from BUGS.md BIGGER pile (it's the feature this
+  release adds).
+
 ## [1.36.0] - 2026-04-28
 
 ### Changed

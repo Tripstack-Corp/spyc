@@ -212,9 +212,15 @@ const SECTIONS: &[Section] = &[
                 "[t  ]t",
                 "(in pager) cycle task viewer prev/next by id (chord)",
             ),
+            (":pause / :pause N", "pause a backgrounded task (SIGSTOP)"),
+            (":resume / :resume N", "resume a paused task (SIGCONT)"),
+            (
+                "S / C",
+                "(in task viewer) pause / continue the underlying task",
+            ),
             (
                 "  divider glyphs",
-                "[N+] new output, [N●] running, [N✓] exit 0, [N✗] error",
+                "[N+] new output, [N●] running, [N⏸] paused, [N✓] exit 0, [N✗] error",
             ),
             ("g p", "reopen the most-recently-closed pager buffer"),
             (":bprev / :bnext", "walk pager buffer history back/forward"),

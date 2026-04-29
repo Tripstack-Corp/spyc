@@ -95,6 +95,12 @@ struct BackgroundTask {
     /// status, this is what triggers the on-close promotion to buffer
     /// history -- viewing acts as the user's "I've seen this" ack.
     viewed_in_task_viewer: bool,
+    /// True while the task is paused (SIGSTOP delivered, no further
+    /// SIGCONT yet). Toggled by `:pause`/`:resume` (and `S`/`C` in
+    /// the task viewer). The reader thread keeps blocking on read
+    /// until the child resumes; status stays Running because the
+    /// child hasn't exited.
+    paused: bool,
 }
 
 /// Soft cap on per-task buffered output. When exceeded, drop bytes from
@@ -1928,12 +1934,19 @@ impl App {
         // Reserve room for at least 4 dashes + the tag.
         let bg_budget = width.saturating_sub(used + tag.len() + 4);
         for task in self.background_tasks.tasks.iter().rev() {
-            let (glyph, color) = match (&task.status, task.has_unread_output) {
-                (TaskStatus::Running, true) => ("+", bg_unread_color),
-                (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
-                (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
-                (TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_), _) => {
-                    ("\u{2717}", bg_err_color)
+            let (glyph, color) = if task.paused && matches!(task.status, TaskStatus::Running) {
+                // Pause glyph trumps the running/unread variants:
+                // user explicitly paused, that's the headline state.
+                ("\u{23f8}", bg_running_color) // ⏸
+            } else {
+                match (&task.status, task.has_unread_output) {
+                    (TaskStatus::Running, true) => ("+", bg_unread_color),
+                    (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
+                    (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
+                    (
+                        TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_),
+                        _,
+                    ) => ("\u{2717}", bg_err_color),
                 }
             };
             let text = format!(" [{}{glyph}]", task.id);
@@ -3445,6 +3458,37 @@ impl App {
             return PostAction::None;
         }
 
+        // :pause [N] — pause a backgrounded task via SIGSTOP to its
+        // process group. No arg = most-recent task; numeric = id.
+        if input == "pause" {
+            self.pause_task(None);
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("pause ") {
+            match arg.trim().parse::<u32>() {
+                Ok(id) => self.pause_task(Some(id)),
+                Err(_) => self
+                    .state
+                    .flash_error(format!("pause: expected task id (got {arg:?})")),
+            }
+            return PostAction::None;
+        }
+
+        // :resume [N] — resume a paused backgrounded task via SIGCONT.
+        if input == "resume" {
+            self.resume_task(None);
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("resume ") {
+            match arg.trim().parse::<u32>() {
+                Ok(id) => self.resume_task(Some(id)),
+                Err(_) => self
+                    .state
+                    .flash_error(format!("resume: expected task id (got {arg:?})")),
+            }
+            return PostAction::None;
+        }
+
         // :bprev / :bnext — pager buffer history
         if input == "bprev" {
             if let Some(current) = self.pager.take() {
@@ -4044,6 +4088,7 @@ impl App {
             finished_at: None,
             has_unread_output: false,
             viewed_in_task_viewer: false,
+            paused: false,
         };
         self.background_tasks.tasks.push(task);
         self.pager = None;
@@ -4056,6 +4101,80 @@ impl App {
     /// foreground. Still-running tasks resume as a streaming pager
     /// seeded with the buffer; already-exited tasks open as a static
     /// pager and are removed from the background list (one-shot view).
+    /// Pause a backgrounded task by sending SIGSTOP to its process
+    /// group. portable-pty children are session/group leaders by
+    /// default, so `kill(-pid, SIGSTOP)` halts the whole subprocess
+    /// tree (e.g. `make → cc → ld` all stop together) rather than
+    /// just the direct child.
+    ///
+    /// `target` of None pauses the most-recent task; numeric arg
+    /// targets a specific id. No-op (with flash) if the target is
+    /// not Running, doesn't exist, or is already paused.
+    fn pause_task(&mut self, target: Option<u32>) {
+        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+            self.state.flash_error("no background tasks");
+            return;
+        };
+        let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+            self.state.flash_error(format!("no task with id {id}"));
+            return;
+        };
+        if !matches!(task.status, TaskStatus::Running) {
+            self.state
+                .flash_error(format!("task #{id} is not running"));
+            return;
+        }
+        if task.paused {
+            self.state.flash_info(format!("task #{id} already paused"));
+            return;
+        }
+        let Some(pid) = task.child.process_id() else {
+            self.state
+                .flash_error(format!("task #{id}: no process id"));
+            return;
+        };
+        // Negative pid → process group. SIGSTOP is uncatchable, so the
+        // child can't refuse; reader thread keeps blocking on read
+        // until SIGCONT.
+        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGSTOP) };
+        if r == 0 {
+            task.paused = true;
+            self.state.flash_info(format!("task #{id} paused — :resume to continue"));
+        } else {
+            self.state
+                .flash_error(format!("task #{id}: SIGSTOP failed"));
+        }
+    }
+
+    /// Resume a paused task with SIGCONT to its process group.
+    fn resume_task(&mut self, target: Option<u32>) {
+        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+            self.state.flash_error("no background tasks");
+            return;
+        };
+        let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+            self.state.flash_error(format!("no task with id {id}"));
+            return;
+        };
+        if !task.paused {
+            self.state.flash_info(format!("task #{id} is not paused"));
+            return;
+        }
+        let Some(pid) = task.child.process_id() else {
+            self.state
+                .flash_error(format!("task #{id}: no process id"));
+            return;
+        };
+        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGCONT) };
+        if r == 0 {
+            task.paused = false;
+            self.state.flash_info(format!("task #{id} resumed"));
+        } else {
+            self.state
+                .flash_error(format!("task #{id}: SIGCONT failed"));
+        }
+    }
+
     fn foreground_task(&mut self, target: Option<u32>) {
         if self.pending_capture.is_some() {
             self.state
@@ -4070,6 +4189,18 @@ impl App {
             self.state.flash_error(format!("no task #{id}"));
             return;
         };
+
+        // If the task was paused, auto-resume on foreground — the
+        // user explicitly asked for it to be active again. Without
+        // this, `:fg` on a paused task would re-attach the streaming
+        // capture but the child would stay frozen.
+        if task.paused {
+            if let Some(pid) = task.child.process_id() {
+                unsafe {
+                    libc::kill(-(pid as libc::pid_t), libc::SIGCONT);
+                }
+            }
+        }
 
         match task.status {
             TaskStatus::Running => {
@@ -6075,6 +6206,19 @@ impl App {
                 Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
                 Err(e) => view.flash = Some(format!("yank failed: {e}")),
             },
+            KeyCode::Char('S') if view.task_id.is_some() => {
+                // Task viewer: S (Stop) pauses the underlying task
+                // via SIGSTOP to its process group. Mirrors the
+                // :pause command for hand-on-keyboard control.
+                let id = view.task_id.unwrap();
+                self.pause_task(Some(id));
+            }
+            KeyCode::Char('C') if view.task_id.is_some() => {
+                // Task viewer: C (Continue) resumes a paused task
+                // via SIGCONT. Mirrors the :resume command.
+                let id = view.task_id.unwrap();
+                self.resume_task(Some(id));
+            }
             KeyCode::Char('p') => {
                 // Hand the file off to $PAGER (default less) via full
                 // TTY takeover. Same suspend_tui / resume_tui dance as
