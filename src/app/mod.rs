@@ -2680,9 +2680,22 @@ impl App {
             return PostAction::None;
         }
         if matches!(key.code, KeyCode::Enter) {
+            let is_jump = matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump)
+            );
             let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
                 return PostAction::None;
             };
+            // Persist J submissions to jump_history so the Esc-popup
+            // (and Up/Down browse) actually has entries to surface.
+            // Simple prompts don't go through handle_vi_prompt_key,
+            // which is where the other history pushes live -- so we
+            // do it here for Jump specifically.
+            if is_jump && !p.buffer.trim().is_empty() {
+                self.state.jump_history.push(p.buffer.trim());
+                self.state.jump_history.reset_nav();
+            }
             return self.dispatch_prompt(p);
         }
 

@@ -13,6 +13,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.29.3] - 2026-04-28
+
+### Fixed
+- **`J` submissions actually push to `jump_history` now.** Same
+  bucket of bug as v1.29.2: v1.28.0's history-push lived in
+  `handle_vi_prompt_key`'s Submit arm, but `J` is a simple
+  prompt that submits via `handle_prompt_key`'s Enter branch
+  and never reached the editor flow. Result: every J jump
+  silently *didn't* persist, the popup forever flashed "jump
+  history is empty," Up/Down had nothing to recall. Push moved
+  into the simple-prompt Enter handler, gated on
+  `PromptKind::Jump`. New jumps now persist; the v1.29.0
+  popup is finally reachable with content.
+
 ## [1.29.2] - 2026-04-28
 
 ### Fixed
