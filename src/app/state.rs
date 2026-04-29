@@ -698,7 +698,11 @@ impl AppState {
 
             // -- Navigation prompts --
             Action::JumpPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump to: "));
+                // Vi line editor so the user can pull up a history
+                // entry (j/k in Normal, Up/Down anywhere) and tweak
+                // it before submitting -- e.g. recall ~/src/spyc
+                // and append `/src` before pressing Enter.
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::Jump, "jump to: "));
             }
 
             // -- File operation prompts --

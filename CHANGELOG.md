@@ -13,6 +13,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.33.0] - 2026-04-28
+
+### Changed
+- **`J` is now a vi-line-editor prompt** (was a "simple prompt"
+  with append-only buffer editing). User feedback: after pulling
+  up a history entry with j/k or Up/Down, you should be able to
+  *tweak* it before submitting -- e.g. recall `~/src/spyc` and
+  append `/src` before Enter. The simple prompt only supported
+  end-of-buffer typing + Backspace, so cursor positioning, word
+  motion, mid-buffer delete etc. were all unavailable.
+- Promoting J to vi-line-editor unifies its key handling with
+  `!` / `;` / `:`. All four prompts now share the same model:
+  - First Esc: Insert → Normal mode
+  - Normal-mode `j`/`k` (or Up/Down anywhere): walk history
+  - Second Esc (in Normal): open the kind-specific popup
+    (`show_jump_history_popup` for J, `show_history_popup` for
+    the others)
+  - Full vi line editing: h/l motion, w/b/e word motion, x/D/C
+    delete operators, A/I/0/$ position, etc.
+- `browse_mode` field removed from `Prompt` (was added in v1.32.0
+  to fake a vi-mode for the simple prompt; redundant now that J
+  has the real thing).
+- All four history-push routings already worked from v1.28.0;
+  removed the duplicate Submit-push for Jump from the
+  simple-prompt path that v1.29.3 added (handle_vi_prompt_key
+  picks it up via history_for_prompt).
+
 ## [1.32.0] - 2026-04-28
 
 ### Added
