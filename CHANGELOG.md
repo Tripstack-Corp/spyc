@@ -13,6 +13,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.35.0] - 2026-04-28
+
+### Added
+- **Markdown tables now render with proper borders.** v1.26.0
+  punted on tables ("tables fall through unstyled — out of scope
+  for v1"); the result was cell text getting mashed together as
+  inline text. Now: tables get a real renderer with box-drawing
+  borders (`┌┐└┘├┤┬┴┼─│`), bold headers, dim slate borders.
+  Column widths computed from natural cell content, capped at
+  24 chars per column, then proportionally trimmed so the whole
+  table stays inside the 80-col content budget. Cells longer
+  than their allotted width truncate with `…`. Inline emphasis
+  inside cells (`**bold**`, `*italic*`, `code`) is preserved
+  thanks to the same span-styling pipeline the rest of the
+  renderer uses. 2 new tests cover border rendering and
+  overlong-cell truncation.
+
 ## [1.34.1] - 2026-04-28
 
 ### Fixed

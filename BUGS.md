@@ -59,6 +59,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.35.0) Markdown tables now render with proper
+  ASCII-aligned borders. Previously fall-through-unstyled --
+  cells got jammed together as inline text. Now: enable
+  `Options::ENABLE_TABLES` in pulldown-cmark, collect cells
+  per-row, render with box-drawing borders (┌┐└┘├┤┬┴┼─│),
+  bold headers, dim slate borders. Per-column widths capped
+  at 24 chars and trimmed proportionally so the whole table
+  stays inside the 80-col content budget. Overlong cells
+  truncate with `…`.
+
 - (fixed, v1.28.0) `J` (jump-to-path) now has its own persistent
   history bucket. Up / Down in the prompt walk previously-jumped
   destinations independently of shell-command and pane-prompt

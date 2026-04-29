@@ -15,11 +15,18 @@
 //! and the language is recognized; unrecognized languages render
 //! plain in the code-block style.
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::ui::theme::Theme;
+
+/// Maximum visual width of a single table column. Caps a runaway
+/// "very long content in one cell" from blowing past CONTENT_WIDTH.
+/// Per-column widths are *also* capped to fit the overall table
+/// inside CONTENT_WIDTH; this is the upper bound regardless of
+/// column count.
+const TABLE_MAX_COL_WIDTH: usize = 24;
 
 /// Target visual width for wrapped Markdown content, before any
 /// blockquote rule or list-item indent is added. 80 columns is the
@@ -36,6 +43,7 @@ pub fn render(source: &str, theme: &Theme) -> Vec<Line<'static>> {
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(source, opts);
     let mut r = Renderer::new(theme);
     for event in parser {
@@ -61,6 +69,31 @@ struct Renderer<'t> {
     /// Last text span saw was a Start(Link); store the destination so
     /// we can append it dimly after the link's text.
     pending_link_url: Option<String>,
+    /// Active table state. While `Some`, cell-text events (`Text`,
+    /// `Code`, emphasis spans, etc.) are routed into the current
+    /// cell buffer instead of `current`. On `End(Table)` we render
+    /// the collected rows into `lines` as an ASCII-aligned table.
+    table: Option<TableBuilder>,
+}
+
+struct TableBuilder {
+    #[allow(dead_code)]
+    alignments: Vec<Alignment>,
+    /// Header cells (one row). Set on `End(TableHead)`.
+    head: Option<Vec<Vec<Span<'static>>>>,
+    /// Body rows.
+    body: Vec<Vec<Vec<Span<'static>>>>,
+    /// Currently in `TableHead`? If true, the row being built lands
+    /// in `head` on `End(TableHead)`; else it lands in `body` on
+    /// `End(TableRow)`.
+    in_head: bool,
+    /// Cells of the row currently under construction.
+    cur_row: Vec<Vec<Span<'static>>>,
+    /// Where outer `current` lived before we entered the active
+    /// cell. Restored on `End(TableCell)`. Always empty in practice
+    /// because tables only nest after a paragraph flush, but keeping
+    /// the stash makes the swap symmetric.
+    stashed_current: Vec<Span<'static>>,
 }
 
 struct CodeBlockState {
@@ -79,6 +112,7 @@ impl<'t> Renderer<'t> {
             in_blockquote: false,
             code_block: None,
             pending_link_url: None,
+            table: None,
         }
     }
 
@@ -330,8 +364,40 @@ impl<'t> Renderer<'t> {
                     Style::default().fg(self.theme.status_suffix),
                 ));
             }
-            // Tables fall through unstyled — rendering them as
-            // ASCII-aligned content is out of scope for v1.
+            Tag::Table(alignments) => {
+                if !self.current.is_empty() {
+                    self.flush_line();
+                }
+                self.table = Some(TableBuilder {
+                    alignments,
+                    head: None,
+                    body: Vec::new(),
+                    in_head: false,
+                    cur_row: Vec::new(),
+                    stashed_current: Vec::new(),
+                });
+            }
+            Tag::TableHead => {
+                if let Some(t) = self.table.as_mut() {
+                    t.in_head = true;
+                    t.cur_row.clear();
+                }
+            }
+            Tag::TableRow => {
+                if let Some(t) = self.table.as_mut() {
+                    t.cur_row.clear();
+                }
+            }
+            Tag::TableCell => {
+                // Swap the active span buffer to capture cell content.
+                // Inline emphasis / code / links etc. inside the cell
+                // push into `current` per usual; we'll harvest it on
+                // `End(TableCell)`.
+                if let Some(t) = self.table.as_mut() {
+                    t.stashed_current = std::mem::take(&mut self.current);
+                }
+            }
+            // Other tags fall through unstyled.
             _ => {}
         }
     }
@@ -383,8 +449,162 @@ impl<'t> Renderer<'t> {
                         .push(Span::styled(format!(" \u{2192} {url}"), dim));
                 }
             }
+            TagEnd::TableCell => {
+                if let Some(t) = self.table.as_mut() {
+                    let cell = std::mem::take(&mut self.current);
+                    self.current = std::mem::take(&mut t.stashed_current);
+                    t.cur_row.push(cell);
+                }
+            }
+            TagEnd::TableHead => {
+                if let Some(t) = self.table.as_mut() {
+                    let row = std::mem::take(&mut t.cur_row);
+                    t.head = Some(row);
+                    t.in_head = false;
+                }
+            }
+            TagEnd::TableRow => {
+                if let Some(t) = self.table.as_mut() {
+                    let row = std::mem::take(&mut t.cur_row);
+                    t.body.push(row);
+                }
+            }
+            TagEnd::Table => {
+                self.end_table();
+            }
             _ => {}
         }
+    }
+
+    /// Render the collected `TableBuilder` into `self.lines` as an
+    /// ASCII-aligned table with box-drawing borders. Column widths
+    /// are computed from natural cell widths, capped per-column at
+    /// `TABLE_MAX_COL_WIDTH` and trimmed proportionally so the
+    /// total fits inside `CONTENT_WIDTH`. Cells longer than the
+    /// allotted column width are truncated with `…`. Header cells
+    /// render bold; borders render in dim slate (theme.status_suffix).
+    fn end_table(&mut self) {
+        let Some(t) = self.table.take() else {
+            return;
+        };
+        let head = t.head.as_ref();
+        let n_cols = head.map_or(0, Vec::len).max(
+            t.body.iter().map(Vec::len).max().unwrap_or(0),
+        );
+        if n_cols == 0 {
+            return;
+        }
+
+        // Natural widths per column, then cap.
+        let mut widths = vec![0usize; n_cols];
+        let update_widths = |row: &[Vec<Span<'static>>], widths: &mut [usize]| {
+            for (i, cell) in row.iter().enumerate() {
+                if i < widths.len() {
+                    widths[i] = widths[i].max(spans_visual_width(cell));
+                }
+            }
+        };
+        if let Some(h) = head {
+            update_widths(h, &mut widths);
+        }
+        for row in &t.body {
+            update_widths(row, &mut widths);
+        }
+        // Per-column cap.
+        for w in &mut widths {
+            *w = (*w).clamp(3, TABLE_MAX_COL_WIDTH);
+        }
+        // Proportional trim if total > CONTENT_WIDTH. Each cell takes
+        // `width + 2` columns of frame (space-content-space) plus one
+        // border char between cells (`│`) plus the two outer borders.
+        // total = sum(w+2) + (n+1) = sum(w) + 3n + 1.
+        let total_with_frame = |widths: &[usize]| widths.iter().sum::<usize>() + 3 * n_cols + 1;
+        while total_with_frame(&widths) > CONTENT_WIDTH {
+            // Shrink the widest column by one. Stop if everything is
+            // already at the floor of 3.
+            let Some((idx, _)) = widths
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, w)| **w)
+            else {
+                break;
+            };
+            if widths[idx] <= 3 {
+                break;
+            }
+            widths[idx] -= 1;
+        }
+
+        let frame_style = Style::default().fg(self.theme.status_suffix);
+
+        // Top, mid, bottom border strings.
+        let mut top = String::from("\u{250c}"); // ┌
+        let mut mid = String::from("\u{251c}"); // ├
+        let mut bot = String::from("\u{2514}"); // └
+        for (i, w) in widths.iter().enumerate() {
+            for _ in 0..*w + 2 {
+                top.push('\u{2500}'); // ─
+                mid.push('\u{2500}');
+                bot.push('\u{2500}');
+            }
+            if i + 1 < widths.len() {
+                top.push('\u{252c}'); // ┬
+                mid.push('\u{253c}'); // ┼
+                bot.push('\u{2534}'); // ┴
+            }
+        }
+        top.push('\u{2510}'); // ┐
+        mid.push('\u{2524}'); // ┤
+        bot.push('\u{2518}'); // ┘
+
+        self.lines
+            .push(Line::from(Span::styled(top, frame_style)));
+        if let Some(h) = head {
+            self.lines
+                .push(self.render_table_row(h, &widths, true, frame_style));
+            self.lines
+                .push(Line::from(Span::styled(mid, frame_style)));
+        }
+        for row in &t.body {
+            self.lines
+                .push(self.render_table_row(row, &widths, false, frame_style));
+        }
+        self.lines
+            .push(Line::from(Span::styled(bot, frame_style)));
+        self.lines.push(Line::from(Vec::<Span<'static>>::new()));
+    }
+
+    fn render_table_row(
+        &self,
+        row: &[Vec<Span<'static>>],
+        widths: &[usize],
+        is_header: bool,
+        frame_style: Style,
+    ) -> Line<'static> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::styled("\u{2502} ".to_string(), frame_style)); // "│ "
+        for (i, w) in widths.iter().enumerate() {
+            let empty = Vec::new();
+            let cell_spans = row.get(i).unwrap_or(&empty);
+            let truncated = truncate_spans_to_width(cell_spans, *w);
+            let used = spans_visual_width(&truncated);
+            for s in truncated {
+                let mut style = s.style;
+                if is_header {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                spans.push(Span::styled(s.content, style));
+            }
+            if used < *w {
+                spans.push(Span::raw(" ".repeat(*w - used)));
+            }
+            if i + 1 < widths.len() {
+                spans.push(Span::styled(" \u{2502} ".to_string(), frame_style));
+            } else {
+                spans.push(Span::styled(" \u{2502}".to_string(), frame_style));
+            }
+        }
+        Line::from(spans)
     }
 
     fn end_code_block(&mut self) {
@@ -548,6 +768,59 @@ fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
     idx
 }
 
+/// Visual width (terminal columns) of a styled span sequence,
+/// computed via `unicode-width`. Used by the table renderer to
+/// size columns from natural cell content.
+fn spans_visual_width(spans: &[Span<'static>]) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    spans
+        .iter()
+        .map(|s| s.content.as_ref().width())
+        .sum()
+}
+
+/// Truncate a styled span sequence to fit within `max_w` visual
+/// columns, appending `…` as a marker if truncation occurred. The
+/// per-span style is preserved up to the truncation boundary;
+/// content past the cap is dropped.
+fn truncate_spans_to_width(spans: &[Span<'static>], max_w: usize) -> Vec<Span<'static>> {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len());
+    let mut used = 0usize;
+    for span in spans {
+        let span_w = span.content.as_ref().width();
+        if used + span_w <= max_w {
+            out.push(span.clone());
+            used += span_w;
+            continue;
+        }
+        // Truncate this span to the remaining budget, leaving room
+        // for the … marker.
+        let remaining = max_w.saturating_sub(used);
+        if remaining < 2 {
+            if remaining >= 1 {
+                out.push(Span::styled("\u{2026}".to_string(), span.style));
+            }
+            return out;
+        }
+        let target_w = remaining - 1;
+        let mut buf = String::new();
+        let mut buf_w = 0usize;
+        for ch in span.content.chars() {
+            let cw = ch.width().unwrap_or(0);
+            if buf_w + cw > target_w {
+                break;
+            }
+            buf.push(ch);
+            buf_w += cw;
+        }
+        buf.push('\u{2026}');
+        out.push(Span::styled(buf, span.style));
+        return out;
+    }
+    out
+}
+
 /// True if `path` looks like a Markdown file we should render. The
 /// pager checks this when opening a file: if true, both the source
 /// and rendered views are pre-computed and `m` toggles between them.
@@ -669,6 +942,46 @@ mod tests {
         let ranges = super::word_wrap_ranges(s, 10);
         let pieces: Vec<&str> = ranges.iter().map(|&(a, b)| &s[a..b]).collect();
         assert_eq!(pieces, vec!["abcdefghij", "klmnopqrst", "uvwxyz"]);
+    }
+
+    #[test]
+    fn renders_simple_table_with_borders() {
+        // Standard GFM table: header row + separator + data rows.
+        // Should render with box-drawing borders and the header
+        // text appearing somewhere inside the table.
+        let src = "| H1 | H2 |\n|----|----|\n| a  | b  |\n| c  | d  |\n";
+        let lines = render_plain(src);
+        // Top border with corner glyphs.
+        assert!(
+            lines.iter().any(|l| l.contains('\u{250c}') && l.contains('\u{2510}')),
+            "missing top border in {lines:?}"
+        );
+        // Bottom border.
+        assert!(
+            lines.iter().any(|l| l.contains('\u{2514}') && l.contains('\u{2518}')),
+            "missing bottom border in {lines:?}"
+        );
+        // Header separator with cross.
+        assert!(
+            lines.iter().any(|l| l.contains('\u{253c}')),
+            "missing header separator in {lines:?}"
+        );
+        // Header and data text appear.
+        assert!(lines.iter().any(|l| l.contains("H1") && l.contains("H2")));
+        assert!(lines.iter().any(|l| l.contains('a') && l.contains('b')));
+    }
+
+    #[test]
+    fn table_truncates_overlong_cells() {
+        // Cell longer than TABLE_MAX_COL_WIDTH should be truncated
+        // with `…` to keep the table within content width.
+        let long = "x".repeat(super::TABLE_MAX_COL_WIDTH + 20);
+        let src = format!("| Header |\n|--------|\n| {long} |\n");
+        let lines = render_plain(&src);
+        assert!(
+            lines.iter().any(|l| l.contains('\u{2026}')),
+            "expected … truncation marker in {lines:?}"
+        );
     }
 
     #[test]
