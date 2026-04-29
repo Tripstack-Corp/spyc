@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.27.4] - 2026-04-28
+
+### Changed
+- **Pager flash messages now render in teal-on-default** instead
+  of inheriting the amber title color. Real-world miss: the
+  `truncated at 5000 lines · press p for full file in $PAGER`
+  notice on a capped file rendered in the same amber as the
+  filename, looking like part of the title; users (me) didn't
+  read it as a separate help notice. Now the title stays amber,
+  the flash segment renders in teal + BOLD with a thin space
+  buffer on each side -- visually clear that "this part is a
+  notice, not part of the filename." Same treatment applies to
+  every flash (yank confirmations, save confirmations, "no
+  source file" warnings, etc.).
+
 ## [1.27.3] - 2026-04-28
 
 ### Fixed

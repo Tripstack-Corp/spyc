@@ -603,10 +603,27 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     frame.render_widget(Clear, inner_area);
 
     let pos = view.position_indicator(inner_area.height.saturating_sub(2));
-    let title = if let Some(ref msg) = view.flash {
-        format!("  {} — {}  ", view.title, msg)
+    let title_style = Style::default()
+        .fg(theme.prompt_prefix)
+        .add_modifier(Modifier::BOLD);
+    // Flash is teal + BOLD against the amber title so help notices
+    // (e.g. "truncated at 5000 lines · press p for full file in
+    // $PAGER") stand out clearly as a separate piece of info, not as
+    // an extension of the filename.
+    let flash_style = Style::default()
+        .fg(theme.take)
+        .add_modifier(Modifier::BOLD);
+    let title_line: Line<'static> = if let Some(ref msg) = view.flash {
+        Line::from(vec![
+            Span::styled(format!("  {}  ", view.title), title_style),
+            Span::styled(format!(" {msg} "), flash_style),
+            Span::styled("  ", title_style),
+        ])
     } else {
-        format!("  {}   ({} lines)  ", view.title, view.lines.len())
+        Line::from(Span::styled(
+            format!("  {}   ({} lines)  ", view.title, view.lines.len()),
+            title_style,
+        ))
     };
     let title_right = format!("  {pos}  ");
     let block = if view.full_width {
@@ -615,12 +632,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     } else {
         Block::default()
             .borders(Borders::ALL)
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD),
-            ))
+            .title(title_line)
             .title_bottom(
                 Line::from(Span::styled(
                     title_right,
