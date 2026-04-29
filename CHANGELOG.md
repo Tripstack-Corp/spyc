@@ -13,6 +13,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.30.0] - 2026-04-28
+
+### Added
+- **`Up` / `Down` in the `J` prompt cycle through jump history
+  inline** (replaces the buffer with the prev/next entry, just
+  like `:` and `!` already do). v1.28.0's changelog claimed this
+  worked but the wiring was wrong twice over: history-push lived
+  in the vi-prompt branch (which `J` doesn't use), and Up/Down
+  was never registered in the simple-prompt branch at all. Now
+  the simple-prompt path has its own Up/Down handler that walks
+  `jump_history.prev` / `next`, with `reset_nav` on cancel /
+  submit so the next `J` opens fresh at the most-recent entry.
+
+### Fixed
+- **`j` / `k` work in the jump-history popup.** v1.29.0's popup
+  set `picker_cursor` but never wired the j/k → picker_move
+  arms; the pager dispatch doesn't have a generic picker-nav
+  fallback, each popup type has to wire its own. Added them to
+  the `pending_jump_history` block so j/k navigate as expected
+  (matches the session picker's pattern).
+
 ## [1.29.3] - 2026-04-28
 
 ### Fixed

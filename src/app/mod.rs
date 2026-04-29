@@ -2676,6 +2676,14 @@ impl App {
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
             && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
         if matches!(key.code, KeyCode::Esc) || backspace_on_empty || ctrl_c {
+            // Reset jump_history nav so the next J prompt starts
+            // fresh at the most-recent entry instead of mid-walk.
+            if matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump)
+            ) {
+                self.state.jump_history.reset_nav();
+            }
             self.cancel_prompt();
             return PostAction::None;
         }
@@ -2697,6 +2705,36 @@ impl App {
                 self.state.jump_history.reset_nav();
             }
             return self.dispatch_prompt(p);
+        }
+
+        // Up / Down: walk through history inline (replace buffer with
+        // prev / next entry). Mirrors the vi-prompt behavior so `J`
+        // gets the same Up/Down muscle memory as `:` / `!`. Only
+        // applies to Jump for now since other simple prompts don't
+        // have associated history buckets.
+        if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            let is_jump = matches!(
+                &self.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump)
+            );
+            if is_jump {
+                let current = match &self.state.mode {
+                    Mode::Prompting(p) => p.buffer.clone(),
+                    Mode::Normal => String::new(),
+                };
+                let replacement = if matches!(key.code, KeyCode::Up) {
+                    self.state.jump_history.prev(&current).map(String::from)
+                } else {
+                    let nxt = self.state.jump_history.next().map(String::from);
+                    nxt.or_else(|| Some(self.state.jump_history.stashed().to_string()))
+                };
+                if let Some(text) = replacement {
+                    if let Mode::Prompting(p) = &mut self.state.mode {
+                        p.buffer = text;
+                    }
+                }
+                return PostAction::None;
+            }
         }
 
         // Tab completion.
@@ -5607,11 +5645,21 @@ impl App {
             return PostAction::None;
         }
 
-        // Jump-history popup: Enter on cursor chdirs, ^D deletes
-        // the entry, q/Esc/'q' closes. j/k picker_move is handled
-        // by the generic block lower down.
+        // Jump-history popup: j/k navigate, Enter chdirs, x deletes,
+        // q/Esc closes. Per-popup j/k handling because the pager
+        // dispatch doesn't have a generic picker-move arm; each
+        // popup type wires its own (matches how the session picker
+        // and history editor do it).
         if self.pending_jump_history.is_some() {
             match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    view.picker_move(1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    view.picker_move(-1, viewport);
+                    return PostAction::None;
+                }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
                     let snapshot = self.pending_jump_history.take().unwrap();
