@@ -2647,10 +2647,35 @@ impl App {
 
         // --- Simple prompts (search, jump, pattern-pick, etc.) ---
 
+        // Esc on an empty `J` prompt opens the jump-history popup
+        // (j/k browse, Enter cd, q/Esc close). The user has nothing
+        // to throw away on an empty buffer, so cancel→popup is purely
+        // additive UX. A non-empty Esc still cancels normally below.
+        // Must come before the generic Esc-cancel arm; J is a simple
+        // prompt without a line editor, so handle_vi_prompt_key never
+        // sees its keys.
+        if matches!(key.code, KeyCode::Esc) {
+            if let Mode::Prompting(Prompt {
+                kind: PromptKind::Jump,
+                ref buffer,
+                ..
+            }) = self.state.mode
+            {
+                if buffer.is_empty() {
+                    self.state.mode = Mode::Normal;
+                    self.show_jump_history_popup();
+                    return PostAction::None;
+                }
+            }
+        }
+
+        // ^C cancels too (vi muscle memory; same as Esc).
+        let ctrl_c = matches!(key.code, KeyCode::Char('c'))
+            && key.modifiers.contains(KeyModifiers::CONTROL);
         // Esc cancels; Backspace on an empty buffer cancels too.
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
             && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
-        if matches!(key.code, KeyCode::Esc) || backspace_on_empty {
+        if matches!(key.code, KeyCode::Esc) || backspace_on_empty || ctrl_c {
             self.cancel_prompt();
             return PostAction::None;
         }
@@ -2923,25 +2948,6 @@ impl App {
                 if buffer.is_empty() {
                     self.state.mode = Mode::Normal;
                     self.show_history_popup();
-                    return PostAction::None;
-                }
-            }
-        }
-
-        // Esc on an empty `J` prompt opens the jump-history popup
-        // (j/k browse, Enter cd, q/Esc close). The user has nothing
-        // to throw away on an empty buffer, so cancel→popup is purely
-        // additive UX. A non-empty Esc still cancels normally.
-        if matches!(key.code, KeyCode::Esc) {
-            if let Mode::Prompting(Prompt {
-                kind: PromptKind::Jump,
-                ref buffer,
-                ..
-            }) = self.state.mode
-            {
-                if buffer.is_empty() {
-                    self.state.mode = Mode::Normal;
-                    self.show_jump_history_popup();
                     return PostAction::None;
                 }
             }

@@ -13,6 +13,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.29.2] - 2026-04-28
+
+### Fixed
+- **`Esc` on empty `J` prompt actually opens the jump-history
+  popup now.** v1.29.0 put the check in `handle_vi_prompt_key`,
+  but `J` is a "simple prompt" (no line editor) and dispatches
+  through `handle_prompt_key`'s simple-prompt branch — never
+  reaching the vi-editor path where my check lived. Moved the
+  check into the simple-prompt branch ahead of the generic
+  Esc-cancel arm.
+- **`^C` in `J` (and other simple prompts) cancels** — same
+  fix shape as v1.29.0's `^C` handling, but at the
+  `handle_prompt_key` simple-branch level so it actually
+  reaches J / search / pattern-pick etc.
+
 ## [1.29.1] - 2026-04-28
 
 ### Changed
