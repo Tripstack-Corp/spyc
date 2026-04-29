@@ -13,6 +13,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.27.0] - 2026-04-28
+
+### Added
+- **`p` (in pager) — open in `$PAGER` (full-screen takeover).**
+  Mirrors `v` / `$EDITOR`: resolves `$PAGER` (default `less`),
+  suspends the TUI, runs the external pager on the current
+  file, resumes spyc on quit. The right tool for full traversal
+  of huge files, interactive `less`-style search, or piping
+  through marks. Buffer pagers without a source path (`!cmd`
+  output, `:grep` results) flash "no source file (try `s` to
+  save first)" instead.
+
+### Fixed
+- **Pager no longer OOMs on huge files.** Previous behavior was
+  `read_to_string(path)` + syntect over the whole content, which
+  built a `Vec<Line<'static>>` with millions of styled spans on
+  multi-MB CSVs/logs -- pager state ballooned to ~50× file size
+  in worst cases. Now: files above 5 MB load only the first 5000
+  lines (plain text, syntect skipped — that's the dominant memory
+  amplifier). Title gets a `⚠ truncated · X MB` suffix; a banner
+  row at the end of the truncated content points at the new `p`
+  binding for full-file viewing. Markdown rendered-mode also
+  skips for truncated files since rendering half a doc looks
+  weird (broken refs, half-closed code fences).
+- 3 new `read_truncated` tests cover under-cap, over-cap, and
+  exact-cap-boundary cases.
+
 ## [1.26.3] - 2026-04-28
 
 ### Fixed

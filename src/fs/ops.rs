@@ -18,8 +18,54 @@
 
 use std::fs;
 use std::io;
+use std::io::BufRead as _;
 use std::io::Read as _;
 use std::path::Path;
+
+/// Soft cap above which the in-app pager loads only the first
+/// `MAX_PAGER_LINES` lines of a file instead of the whole content.
+/// Files past this cap will also skip syntect highlighting (it's
+/// the dominant memory amplifier — every token allocates a styled
+/// span). The user can press `p` in the pager to hand the file
+/// off to `$PAGER` (less, by default) which mmap's huge files
+/// efficiently.
+pub const MAX_PAGER_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Hard cap on the line count we load when a file is past
+/// `MAX_PAGER_BYTES`. 5000 is enough to glance at a header / spot-
+/// check / find a pattern; full traversal of huge files belongs
+/// in `$PAGER`.
+pub const MAX_PAGER_LINES: usize = 5000;
+
+/// Read at most the first `MAX_PAGER_LINES` lines of `path`.
+/// Returns `(content, total_lines_read, truncated)`. `truncated`
+/// is true if we hit the line cap before EOF; callers use it to
+/// decide whether to skip syntect and emit a banner row.
+pub fn read_truncated(
+    path: &Path,
+    max_lines: usize,
+) -> io::Result<(String, usize, bool)> {
+    let f = fs::File::open(path)?;
+    let mut reader = io::BufReader::new(f);
+    let mut buf = String::new();
+    let mut lines_read = 0usize;
+    let mut line = String::new();
+    while lines_read < max_lines {
+        line.clear();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            return Ok((buf, lines_read, false));
+        }
+        buf.push_str(&line);
+        lines_read += 1;
+    }
+    // We hit the cap. Try to read one more byte to know whether
+    // there's actually more content (truncated == true) or the
+    // file ended exactly at the cap.
+    let mut probe = [0u8; 1];
+    let truncated = matches!(reader.read(&mut probe), Ok(n) if n > 0);
+    Ok((buf, lines_read, truncated))
+}
 
 /// Value of the POSIX `EXDEV` errno ("cross-device link"). Same on Linux
 /// and macOS; hardcoded so we can detect cross-filesystem renames without
@@ -663,6 +709,50 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn read_truncated_returns_full_content_when_under_cap() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("small.txt");
+        File::create(&path)
+            .unwrap()
+            .write_all(b"line1\nline2\nline3\n")
+            .unwrap();
+        let (content, lines, truncated) = read_truncated(&path, 100).unwrap();
+        assert_eq!(content, "line1\nline2\nline3\n");
+        assert_eq!(lines, 3);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn read_truncated_caps_at_max_lines_and_flags_remainder() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("big.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..50 {
+            writeln!(f, "line {i}").unwrap();
+        }
+        let (content, lines, truncated) = read_truncated(&path, 10).unwrap();
+        assert_eq!(lines, 10);
+        assert!(truncated, "expected truncated flag for 50-line file capped at 10");
+        assert_eq!(content.lines().count(), 10);
+        assert!(content.starts_with("line 0\n"));
+        assert!(content.ends_with("line 9\n"));
+    }
+
+    #[test]
+    fn read_truncated_handles_exactly_max_lines() {
+        // File ends exactly at the cap — should NOT be flagged truncated.
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("exact.txt");
+        let mut f = File::create(&path).unwrap();
+        for i in 0..5 {
+            writeln!(f, "{i}").unwrap();
+        }
+        let (_, lines, truncated) = read_truncated(&path, 5).unwrap();
+        assert_eq!(lines, 5);
+        assert!(!truncated, "file ending at the cap should not be flagged");
+    }
 
     #[test]
     fn copy_tree_file() {

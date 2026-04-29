@@ -1,9 +1,4 @@
 ### SMALL ###
-- we should lazy load very large files and indicate that for the user; using
-  the pager on some large csv files quickly shot memory usage very high;
-  shouldn't we be using memmap magic for efficiently loading a large file into
-  ram anyways? what are the rust'y ways to handle this? or provide a way to
-  just run head or tail on a file
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -61,6 +56,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.27.0) Pager no longer OOMs on huge files. We were
+  doing `read_to_string(path)` + syntect over the whole content,
+  which on a multi-MB CSV/log built a Vec<Line> with millions of
+  styled spans -- pager state ballooned to ~50× the file size.
+  Now: files above 5 MB load just the first 5000 lines (plain
+  text, no syntect amplification) with a banner row pointing at
+  the escape hatch. New `p` binding in the pager: opens the file
+  in `$PAGER` (default `less`) via full TTY takeover -- mirrors
+  `v` / $EDITOR. Right tool for full traversal of huge files,
+  saves us from reimplementing less inside spyc.
 - (fixed, v1.26.3) `!cmd` captures used to advertise
   `TERM=xterm-256color`, which lied about our actual capabilities
   -- the capture pager only renders ANSI SGR + CR/LF, no cursor

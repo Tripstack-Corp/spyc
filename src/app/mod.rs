@@ -5811,6 +5811,23 @@ impl App {
                 Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
                 Err(e) => view.flash = Some(format!("yank failed: {e}")),
             },
+            KeyCode::Char('p') => {
+                // Hand the file off to $PAGER (default less) via full
+                // TTY takeover. Same suspend_tui / resume_tui dance as
+                // `v` for $EDITOR. Right tool for huge files past our
+                // in-app cap, or for users who want less's specific
+                // search / mark / pipe-out features.
+                let Some(ref src) = view.source_path else {
+                    view.flash = Some("no source file (try `s` to save first)".into());
+                    return PostAction::None;
+                };
+                let argv = shell::resolve_pager();
+                let pager_cmd = argv.join(" ");
+                let path_quoted = shell::shell_quote(&src.display().to_string());
+                self.pager = None;
+                self.needs_full_repaint = true;
+                return sh_c(&format!("{pager_cmd} {path_quoted}"), false);
+            }
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {
                 Ok(path) => view.flash = Some(format!("saved: {}", path.display())),
                 Err(e) => view.flash = Some(format!("save failed: {e}")),
@@ -6196,24 +6213,54 @@ impl App {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .into_owned();
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => {
+                    let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
+                    // Big files used to OOM us: read_to_string + syntect
+                    // every token = file size × ~50 in pager state. Now
+                    // we cap at MAX_PAGER_BYTES; past that, load just
+                    // MAX_PAGER_LINES of plain text and tell the user how
+                    // to hand off to $PAGER for the full thing.
+                    let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
+                        crate::fs::ops::read_truncated(
+                            &path,
+                            crate::fs::ops::MAX_PAGER_LINES,
+                        )
+                    } else {
+                        std::fs::read_to_string(&path).map(|c| {
+                            let n = c.lines().count();
+                            (c, n, false)
+                        })
+                    };
+                    match load_result {
+                        Ok((content, _line_count, truncated)) => {
                             let content = expand_tabs(&content);
                             let is_md = crate::ui::markdown::is_markdown_path(&path);
                             // Source-side lines: syntect-highlighted if
-                            // available, else plain text per source line.
-                            let source_lines: Vec<ratatui::text::Line<'static>> =
+                            // available AND we loaded the whole file
+                            // (highlighting a partial file would still
+                            // mostly work but blows memory and the savings
+                            // is the whole point of truncation).
+                            let source_lines: Vec<ratatui::text::Line<'static>> = if truncated {
+                                content
+                                    .lines()
+                                    .map(|l| ratatui::text::Line::from(l.to_string()))
+                                    .collect()
+                            } else {
                                 crate::ui::syntax::highlight_to_lines(&name, &content)
                                     .unwrap_or_else(|| {
                                         content
                                             .lines()
                                             .map(|l| ratatui::text::Line::from(l.to_string()))
                                             .collect()
-                                    });
-                            let mut view = if is_md {
+                                    })
+                            };
+                            let mut view = if is_md && !truncated {
                                 // Pre-compute both views; default to
                                 // rendered. `m` toggles. Yank/save always
                                 // hit the source via `source_text()`.
+                                // Skipped for truncated files since the
+                                // markdown rendering of half a doc looks
+                                // weird (broken refs, half-closed code
+                                // fences).
                                 let rendered =
                                     crate::ui::markdown::render(&content, &self.theme);
                                 let mut v = PagerView::new_styled(name, rendered);
@@ -6221,7 +6268,36 @@ impl App {
                                 v.markdown_rendered = true;
                                 v
                             } else {
-                                PagerView::new_styled(name, source_lines)
+                                let display_name = if truncated {
+                                    format!(
+                                        "{name} \u{26a0} truncated · {} MB",
+                                        file_size / (1024 * 1024)
+                                    )
+                                } else {
+                                    name
+                                };
+                                let mut v =
+                                    PagerView::new_styled(display_name, source_lines);
+                                if truncated {
+                                    // Append a banner row pointing at the
+                                    // escape hatch so the user knows the
+                                    // cap fired and what to do.
+                                    let warn_style = ratatui::style::Style::default()
+                                        .fg(self.theme.pick)
+                                        .add_modifier(ratatui::style::Modifier::BOLD);
+                                    v.lines.push(ratatui::text::Line::from(""));
+                                    v.lines.push(ratatui::text::Line::from(
+                                        ratatui::text::Span::styled(
+                                            format!(
+                                                "[truncated at {} lines · {} MB total · press p to open in $PAGER]",
+                                                crate::fs::ops::MAX_PAGER_LINES,
+                                                file_size / (1024 * 1024)
+                                            ),
+                                            warn_style,
+                                        ),
+                                    ));
+                                }
+                                v
                             };
                             view.source_path = Some(path.clone());
                             self.pager = Some(view);

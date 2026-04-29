@@ -23,6 +23,19 @@ pub fn resolve_editor() -> Vec<String> {
     split_command(&raw)
 }
 
+/// $PAGER, fall back to `less`. Used by spyc's `p` binding to hand
+/// the file off to a real pager (full TTY takeover via suspend_tui),
+/// which is the right tool for huge files / interactive search /
+/// line-folding-on-demand. Spyc's in-app pager remains the default
+/// for normal viewing; `p` is the escape hatch.
+pub fn resolve_pager() -> Vec<String> {
+    let raw = std::env::var("PAGER")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "less".to_string());
+    split_command(&raw)
+}
+
 /// Split an `$EDITOR`-style value into `[program, arg, arg, ...]` on
 /// whitespace. This is what git does. People who need shell features set
 /// `EDITOR` to a wrapper script.

@@ -1154,6 +1154,7 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
                 ("v", "open in $EDITOR"),
                 ("y", "yank source to clipboard"),
                 ("Y", "yank visible to clipboard (rendered markdown / current view)"),
+                ("p", "open in $PAGER (less, full-screen takeover — for huge files)"),
                 ("s", "save to file (command output only)"),
             ],
         ),
