@@ -13,6 +13,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.36.0] - 2026-04-28
+
+### Changed
+- **Markdown table cells now wrap to multiple visual rows**
+  instead of truncating with `…`. v1.35.0 capped each column at
+  ≤24 chars and `…`-truncated overlong content; the result was
+  unreadable on tables like the README key-binding tables where
+  the `Action` column has full sentences. Now: each cell is
+  wrapped at its column width via the same `word_wrap_ranges`
+  routine the paragraph renderer uses (par-style word boundaries
+  with hard-break fallback for unbreakable tokens). The visual
+  height of a row is the max wrap-rows across cells; cells that
+  wrap to fewer rows are padded with blank lines so the column
+  borders stay aligned. Per-span styling (`**bold**`, `*italic*`,
+  `code`) preserved across wrap boundaries via `slice_spans`.
+  `truncate_spans_to_width` is gone -- nothing called it after
+  the cell renderer switched to wrap.
+
 ## [1.35.2] - 2026-04-28
 
 ### Fixed

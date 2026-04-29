@@ -560,51 +560,74 @@ impl<'t> Renderer<'t> {
         self.lines
             .push(Line::from(Span::styled(top, frame_style)));
         if let Some(h) = head {
-            self.lines
-                .push(self.render_table_row(h, &widths, true, frame_style));
+            self.render_table_row(h, &widths, true, frame_style);
             self.lines
                 .push(Line::from(Span::styled(mid, frame_style)));
         }
         for row in &t.body {
-            self.lines
-                .push(self.render_table_row(row, &widths, false, frame_style));
+            self.render_table_row(row, &widths, false, frame_style);
         }
         self.lines
             .push(Line::from(Span::styled(bot, frame_style)));
         self.lines.push(Line::from(Vec::<Span<'static>>::new()));
     }
 
+    /// Render one logical row of cells, wrapping each cell's content
+    /// at its column width via the same `word_wrap_ranges` routine
+    /// the paragraph renderer uses (par-style word wrap with
+    /// hard-break fallback). The visual height of the row is the
+    /// max wrap-rows across cells; cells that wrap to fewer rows
+    /// are padded with blank cells for those visual rows.
     fn render_table_row(
-        &self,
+        &mut self,
         row: &[Vec<Span<'static>>],
         widths: &[usize],
         is_header: bool,
         frame_style: Style,
-    ) -> Line<'static> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled("\u{2502} ".to_string(), frame_style)); // "│ "
-        for (i, w) in widths.iter().enumerate() {
-            let empty = Vec::new();
-            let cell_spans = row.get(i).unwrap_or(&empty);
-            let truncated = truncate_spans_to_width(cell_spans, *w);
-            let used = spans_visual_width(&truncated);
-            for s in truncated {
-                let mut style = s.style;
-                if is_header {
-                    style = style.add_modifier(Modifier::BOLD);
+    ) {
+        // Wrap each cell into a Vec<Vec<Span>> (one inner Vec per
+        // visual row of the cell). Empty cells get a single empty
+        // visual row so the row-height math doesn't degenerate.
+        let wrapped: Vec<Vec<Vec<Span<'static>>>> = widths
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| {
+                let cell = row.get(i).cloned().unwrap_or_default();
+                let mut rows = wrap_spans_to_width(&cell, w);
+                if rows.is_empty() {
+                    rows.push(Vec::new());
                 }
-                spans.push(Span::styled(s.content, style));
+                rows
+            })
+            .collect();
+
+        let row_h = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let empty_row: Vec<Span<'static>> = Vec::new();
+
+        for vr in 0..row_h {
+            let mut line_spans: Vec<Span<'static>> = Vec::new();
+            line_spans.push(Span::styled("\u{2502} ".to_string(), frame_style));
+            for (i, w) in widths.iter().enumerate() {
+                let cell_row = wrapped[i].get(vr).unwrap_or(&empty_row);
+                let used = spans_visual_width(cell_row);
+                for s in cell_row {
+                    let mut style = s.style;
+                    if is_header {
+                        style = style.add_modifier(Modifier::BOLD);
+                    }
+                    line_spans.push(Span::styled(s.content.clone(), style));
+                }
+                if used < *w {
+                    line_spans.push(Span::raw(" ".repeat(*w - used)));
+                }
+                if i + 1 < widths.len() {
+                    line_spans.push(Span::styled(" \u{2502} ".to_string(), frame_style));
+                } else {
+                    line_spans.push(Span::styled(" \u{2502}".to_string(), frame_style));
+                }
             }
-            if used < *w {
-                spans.push(Span::raw(" ".repeat(*w - used)));
-            }
-            if i + 1 < widths.len() {
-                spans.push(Span::styled(" \u{2502} ".to_string(), frame_style));
-            } else {
-                spans.push(Span::styled(" \u{2502}".to_string(), frame_style));
-            }
+            self.lines.push(Line::from(line_spans));
         }
-        Line::from(spans)
     }
 
     fn end_code_block(&mut self) {
@@ -779,47 +802,27 @@ fn spans_visual_width(spans: &[Span<'static>]) -> usize {
         .sum()
 }
 
-/// Truncate a styled span sequence to fit within `max_w` visual
-/// columns, appending `…` as a marker if truncation occurred. The
-/// per-span style is preserved up to the truncation boundary;
-/// content past the cap is dropped.
-fn truncate_spans_to_width(spans: &[Span<'static>], max_w: usize) -> Vec<Span<'static>> {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len());
-    let mut used = 0usize;
-    for span in spans {
-        let span_w = span.content.as_ref().width();
-        if used + span_w <= max_w {
-            out.push(span.clone());
-            used += span_w;
-            continue;
-        }
-        // Truncate this span to the remaining budget, leaving room
-        // for the … marker.
-        let remaining = max_w.saturating_sub(used);
-        if remaining < 2 {
-            if remaining >= 1 {
-                out.push(Span::styled("\u{2026}".to_string(), span.style));
-            }
-            return out;
-        }
-        let target_w = remaining - 1;
-        let mut buf = String::new();
-        let mut buf_w = 0usize;
-        for ch in span.content.chars() {
-            let cw = ch.width().unwrap_or(0);
-            if buf_w + cw > target_w {
-                break;
-            }
-            buf.push(ch);
-            buf_w += cw;
-        }
-        buf.push('\u{2026}');
-        out.push(Span::styled(buf, span.style));
-        return out;
+/// Wrap a styled span sequence into one or more visual rows, each
+/// at most `max_w` visual columns wide. Uses the same
+/// `word_wrap_ranges` routine as paragraph wrap (par-style word
+/// boundaries with hard-break fallback for unbreakable tokens).
+/// Per-span styling is preserved across wrap boundaries via
+/// `slice_spans`. Used by the table renderer so cells can flow to
+/// multiple visual rows instead of truncating with `…`.
+fn wrap_spans_to_width(spans: &[Span<'static>], max_w: usize) -> Vec<Vec<Span<'static>>> {
+    if spans.is_empty() || max_w == 0 {
+        return vec![spans.to_vec()];
     }
-    out
+    let plain: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    if plain.is_empty() {
+        return vec![Vec::new()];
+    }
+    word_wrap_ranges(&plain, max_w)
+        .into_iter()
+        .map(|(s, e)| slice_spans(spans, s, e))
+        .collect()
 }
+
 
 /// True if `path` looks like a Markdown file we should render. The
 /// pager checks this when opening a file: if true, both the source
@@ -972,15 +975,30 @@ mod tests {
     }
 
     #[test]
-    fn table_truncates_overlong_cells() {
-        // Cell longer than TABLE_MAX_COL_WIDTH should be truncated
-        // with `…` to keep the table within content width.
-        let long = "x".repeat(super::TABLE_MAX_COL_WIDTH + 20);
-        let src = format!("| Header |\n|--------|\n| {long} |\n");
+    fn table_wraps_overlong_cells_to_multiple_visual_rows() {
+        // A cell long enough that wrapping at column width produces
+        // multiple visual rows. We should see the same column-border
+        // glyph (`│`) on more than one line below the header
+        // separator -- proving the cell spans multiple visual rows
+        // rather than being truncated with `…`.
+        let long = "alpha bravo ".repeat(20);
+        let src = format!("| H |\n|---|\n| {long} |\n");
         let lines = render_plain(&src);
+        // No truncation marker should appear (we wrap, not truncate).
         assert!(
-            lines.iter().any(|l| l.contains('\u{2026}')),
-            "expected … truncation marker in {lines:?}"
+            !lines.iter().any(|l| l.contains('\u{2026}')),
+            "expected NO ellipsis (wrap, don't truncate); got {lines:?}"
+        );
+        // At least 3 rows of body content (the long string at narrow
+        // width must wrap to multiple visual rows). Each body row
+        // has a leading `│ `.
+        let body_rows = lines
+            .iter()
+            .filter(|l| l.starts_with("\u{2502} "))
+            .count();
+        assert!(
+            body_rows >= 3,
+            "expected ≥3 body rows from wrap, got {body_rows} in {lines:?}"
         );
     }
 
