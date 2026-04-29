@@ -5148,7 +5148,7 @@ impl App {
             .map(|(i, p)| format!("  {:>3}  {}", i + 1, p))
             .collect();
         let mut view = pager::PagerView::new_plain(
-            "jump history — j/k move, Enter cd, ^D delete, q close",
+            "jump history — j/k move, Enter cd, x delete, q close",
             lines,
         );
         view.picker_cursor = Some(0);
@@ -5612,7 +5612,13 @@ impl App {
                     }
                     return PostAction::None;
                 }
-                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // `x` deletes the entry at the cursor. Matches
+                    // the inventory view's `x` for "remove this
+                    // item." The `!?` shell-history popup uses ^D
+                    // because it has a vi line-editor where `x` is
+                    // taken; the jump popup has no editor so `x` is
+                    // unambiguously "delete entry."
                     let cursor = view.picker_cursor.unwrap_or(0);
                     let snapshot = self.pending_jump_history.as_mut().unwrap();
                     if let Some(path_str) = snapshot.get(cursor).cloned() {

@@ -13,6 +13,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.29.1] - 2026-04-28
+
+### Changed
+- **Jump-history popup uses `x` to delete** instead of `^D`,
+  matching the inventory view's `x` for "remove this item."
+  Consistency with the rest of the spyc surface. The `!?` shell-
+  history popup keeps `^D` because it has a vi line-editor
+  active, where `x` is already taken by the editor; the jump
+  popup has no editor so `x` is unambiguously "delete entry."
+
 ## [1.29.0] - 2026-04-28
 
 ### Added
