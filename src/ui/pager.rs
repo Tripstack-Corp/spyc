@@ -117,6 +117,13 @@ pub struct PagerView {
     /// Temporary message shown in the title bar (e.g. "yanked to clipboard").
     /// Cleared on the next keypress.
     pub flash: Option<String>,
+    /// Last viewport height the renderer drew this view into (in
+    /// rows). Cached on `&Cell` so callers using `&PagerView` (e.g.
+    /// the streaming-capture tick loop) can auto-scroll-to-bottom
+    /// using a real number instead of a hard-coded estimate. 0 until
+    /// the first render. Updated from `render_single_column` /
+    /// `render_multi_column` each frame.
+    pub last_viewport_h: std::cell::Cell<u16>,
 }
 
 impl PagerView {
@@ -148,6 +155,7 @@ impl PagerView {
             line_count_hint: None,
             jump_buf: None,
             flash: None,
+            last_viewport_h: std::cell::Cell::new(0),
         }
     }
 
@@ -176,6 +184,7 @@ impl PagerView {
             line_count_hint: None,
             jump_buf: None,
             flash: None,
+            last_viewport_h: std::cell::Cell::new(0),
         }
     }
 
@@ -208,6 +217,7 @@ impl PagerView {
             line_count_hint: None,
             jump_buf: None,
             flash: None,
+            last_viewport_h: std::cell::Cell::new(0),
         }
     }
 
@@ -389,6 +399,18 @@ impl PagerView {
 
     pub fn scroll_to_bottom(&mut self, viewport_height: u16) {
         self.scroll = self.scroll_max(viewport_height);
+    }
+
+    /// Scroll-to-bottom using the viewport height the most recent
+    /// render observed (cached in `last_viewport_h`). For
+    /// streaming-capture auto-tail: the tick loop appends new
+    /// output and wants to keep showing the latest, but it doesn't
+    /// have direct access to terminal geometry. Falls back to a
+    /// 40-row guess when nothing's been rendered yet (first frame).
+    pub fn scroll_to_bottom_auto(&mut self) {
+        let h = self.last_viewport_h.get();
+        let h = if h == 0 { 40 } else { h };
+        self.scroll_to_bottom(h);
     }
 
     /// Position indicator: "Top", "Bot", "All", or "NN%".
@@ -670,6 +692,14 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     } else {
         (body_area, None)
     };
+
+    // Cache the viewport height the renderer is using *now* so the
+    // tick-loop streaming-capture path can call scroll_to_bottom_auto
+    // with a real number (instead of the v1.20-era hardcoded 40 that
+    // caused the auto-tail to under-shoot on tall terminals --
+    // showing only the top half of the pager filled with content
+    // and the rest with `~` until the user manually scrolled).
+    view.last_viewport_h.set(content_area.height);
 
     if ncols > 1 {
         render_multi_column(frame, content_area, view, theme, ncols);

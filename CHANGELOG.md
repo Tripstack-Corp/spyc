@@ -13,6 +13,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+## [1.35.2] - 2026-04-28
+
+### Fixed
+- **Streaming `!cmd` capture pager auto-tail uses real viewport
+  height** instead of a hardcoded 40 rows. Repro: run a long
+  capture (`!cargo build` or similar) on a tall terminal; the
+  pager would render ~63 rows tall but the auto-tail would only
+  scroll enough to show the last 40 lines -- the bottom of the
+  pager filled with `~` markers while content sat in the upper
+  half. The "go to top + bottom" workaround that fixed it
+  manually was just `G` reading the actual viewport height.
+  Same bug affected `:fg` resume of backgrounded tasks. Fix:
+  cache the rendered viewport height on `PagerView.last_viewport_h`
+  (a `Cell<u16>`) during render; tick-loop auto-tail reads it
+  via the new `scroll_to_bottom_auto()`. Falls back to 40 on
+  the very first frame before any render has run -- harmless
+  since the next frame replaces it.
+
 ## [1.35.1] - 2026-04-28
 
 ### Fixed

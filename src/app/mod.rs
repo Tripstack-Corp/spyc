@@ -1077,15 +1077,25 @@ impl App {
                     use ansi_to_tui::IntoText;
                     let normalized = strip_crlf(&capture.buffer);
                     let text = normalized.as_slice().into_text().unwrap_or_default();
+                    // "At bottom" detection uses the actual rendered
+                    // viewport height -- before this we hardcoded 40,
+                    // which under-shoots on tall terminals and made
+                    // the streaming-capture auto-tail leave the top
+                    // half of the pager showing content with `~`
+                    // markers filling the rest until the user
+                    // manually scrolled. last_viewport_h is set by
+                    // the renderer on every frame.
                     let at_bottom = self.pager.as_ref().is_some_and(|v| {
+                        let h = v.last_viewport_h.get();
+                        let h = if h == 0 { 40 } else { h };
                         let total = v.line_count();
-                        let page = v.page_lines(40); // approximate
+                        let page = v.page_lines(h);
                         v.scroll >= total.saturating_sub(page)
                     });
                     if let Some(view) = self.pager.as_mut() {
                         view.lines = text.lines;
                         if at_bottom {
-                            view.scroll_to_bottom(40);
+                            view.scroll_to_bottom_auto();
                         }
                     }
                 }
@@ -1105,7 +1115,7 @@ impl App {
                         view.lines = text.lines;
                         view.saveable = true;
                         view.streaming = false;
-                        view.scroll_to_bottom(40);
+                        view.scroll_to_bottom_auto();
                     }
                     self.pending_capture = None;
                 }
@@ -4107,7 +4117,7 @@ impl App {
                 let mut view = PagerView::new_plain(title, Vec::new());
                 view.lines = text.lines;
                 view.saveable = true;
-                view.scroll_to_bottom(40);
+                view.scroll_to_bottom_auto();
                 self.pager = Some(view);
             }
         }
@@ -4151,7 +4161,7 @@ impl App {
         // Suppress [EOF]/tilde markers while the underlying task is
         // still running -- the buffer is live, not finalized.
         view.streaming = matches!(task.status, TaskStatus::Running);
-        view.scroll_to_bottom(40);
+        view.scroll_to_bottom_auto();
         view
     }
 

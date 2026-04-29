@@ -1,10 +1,4 @@
 ### SMALL ###
-- the pager view is kind of dumb with some outputs - it doesn't end up
-  scrolling with the stdout - it ends up using only half the screen but if you
-  go back to the top of the buffer and down again, it will then correctly use the
-  whole available window - this might be related to the bug directly below
-- when resuming a long running task we should be sure that the most recent
-  output is visible
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -59,6 +53,19 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.35.2) Streaming `!cmd` capture pager auto-tail no
+  longer leaves the pager half-empty. The tick-loop calls to
+  `scroll_to_bottom(40)` and `page_lines(40)` were hard-coded
+  estimates from the v1.20-era code, written before the pager
+  understood its own viewport size. On tall iTerm windows the
+  pager would render at ~63 rows but auto-tail only enough to
+  show the last 40 -- the bottom of the pager box would fill
+  with `~` markers while content sat in the upper half. Same
+  bug also affected resumed tasks via `:fg`. Fix: cache the
+  rendered viewport height on `PagerView.last_viewport_h`
+  during render; tick-loop auto-tail uses
+  `scroll_to_bottom_auto()` which reads it. Falls back to 40
+  on the first frame before any render has run.
 - (fixed, v1.35.1) `w` / `b` / `e` / `dw` / `cw` / `^W` now
   treat punctuation as a word boundary, matching vim's default
   `iskeyword`. So `dw` on `foo-bar` from position 0 now deletes
