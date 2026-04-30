@@ -90,12 +90,13 @@ impl Pane {
             pixel_height: 0,
         })?;
 
-        // Most shells look at $SHELL or argv[0] to decide if they're a
-        // login shell. For the spike we just exec whatever command the
-        // caller asked for, passed through sh -c so values like
-        // "claude --print" work without us parsing shell syntax.
-        let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", command]);
+        // Use the user's $SHELL with -i (where supported) so aliases,
+        // rc-file PATH entries, and shell functions all work the way
+        // they do in a regular terminal tab. Falls back to sh -c on
+        // POSIX-only shells. See `shell::user_shell_invocation`.
+        let (shell, shell_args) = crate::shell::user_shell_invocation(command);
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.args(shell_args.iter().map(String::as_str));
         // Use the caller-specified working directory.
         cmd.cwd(cwd);
         // Ensure the child sees correct terminal type and dimensions.

@@ -5,6 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+(Nothing pending; see [1.37.2] for the most recent release.)
+
+## [1.37.2] - 2026-04-30
+
+### Fixed
+- **Shell aliases and rc-file PATH entries now work in `:!cmd`,
+  `;cmd`, and pane prompts.** Previously, spyc spawned `sh -c <cmd>`
+  regardless of the user's `$SHELL`, and even setting `$SHELL` would
+  not have helped: aliases / functions live in interactive rc files
+  (`.zshrc`, `.bashrc`) which non-interactive shells don't load.
+  A user running `:!gemma` (where `gemma` is an alias for a local
+  `llama.cpp` invocation) got `sh: gemma: command not found`. Now
+  `spawn_capture` and `Pane::spawn` resolve `$SHELL` and pass `-i`
+  to shells that source rc files in interactive mode (`zsh`, `bash`,
+  `fish`, `ksh`, `mksh`); POSIX `sh` / `dash` get plain `-c` since
+  they don't read rc files in `-i` mode anyway. Helper lives at
+  `shell::user_shell_invocation`. FEATURES.md updated to describe
+  the new behavior. Tradeoff: heavy `.zshrc` / `.bashrc` setups
+  (oh-my-zsh banners, p10k init) may now print init noise into
+  capture pagers; well-behaved rc files gate that behind
+  `[[ -t 1 ]]` / `[[ $- == *i* ]]` and stay quiet.
+
 ### Changed
 - **`make install` now defaults to `~/.local/bin` (no sudo).** The
   Makefile's `PREFIX` defaults to `$HOME/.local`. To install

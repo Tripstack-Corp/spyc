@@ -6978,8 +6978,12 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
         pixel_height: 0,
     })?;
 
-    let mut builder = CommandBuilder::new("sh");
-    builder.args(["-c", cmd]);
+    // Use the user's $SHELL with -i so aliases and rc-file PATH
+    // entries from .zshrc / .bashrc are honored — `:!gemma` should
+    // resolve a user alias the same way it does in their terminal.
+    let (shell, shell_args) = crate::shell::user_shell_invocation(cmd);
+    let mut builder = CommandBuilder::new(&shell);
+    builder.args(shell_args.iter().map(String::as_str));
     builder.cwd(cwd);
     // We're not actually a vt100 terminal -- the capture pager only
     // renders ANSI SGR (colors) and treats CR/LF intelligently;

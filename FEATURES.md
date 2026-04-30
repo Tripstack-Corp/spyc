@@ -173,6 +173,12 @@ Three modes of running commands, each for a different use case:
   stays untouched.
 - **$** shell — drop into `$SHELL` in the current directory.
 
+All three modes invoke `$SHELL -i -c <cmd>` (interactive flag where
+the shell supports it: zsh, bash, fish, ksh) so aliases, functions,
+and rc-file PATH entries from `.zshrc` / `.bashrc` work the same way
+they do in a regular terminal tab. POSIX `sh` / `dash` get plain
+`-c` since they don't read rc files in interactive mode anyway.
+
 The shell prompt uses a vi-mode line editor with persistent history
 (shared across sessions), so you get `h/l/w/b/0/$` motion, `x/D/C`
 editing, operator+motion (`dw`, `cw`, `db`, `d$`, `dd`, `cc`, etc.),
