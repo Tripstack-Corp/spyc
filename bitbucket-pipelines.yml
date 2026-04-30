@@ -29,11 +29,13 @@ definitions:
           - cargo
           - target
         script:
-          # The slim image lacks dev tooling. We need `make`, rustfmt,
-          # clippy, and cargo-deny. cargo-deny covers what cargo-audit
-          # used to (advisory DB) plus licenses, sources, and bans —
-          # ignores live in deny.toml with documented reasons.
-          - apt-get update && apt-get install -y --no-install-recommends make
+          # The slim image lacks dev tooling. We need `make` (canonical
+          # gate), `git` (cargo-deny clones the RustSec advisory DB),
+          # rustfmt + clippy components, and cargo-deny itself.
+          # cargo-deny covers what cargo-audit used to (advisories)
+          # plus licenses, sources, and bans — ignores live in
+          # deny.toml with documented reasons.
+          - apt-get update && apt-get install -y --no-install-recommends make git
           - rustup component add rustfmt clippy
           - cargo install cargo-deny --locked
           # `make check` = fmt-check + clippy + tests + deny. Tests
