@@ -28,8 +28,10 @@ definitions:
           - cargo
           - target
         script:
-          # The slim image lacks rustfmt/clippy components and cargo-audit;
-          # installs hit the cargo cache on subsequent runs.
+          # The slim image is a debian-slim minus dev tooling. We need
+          # `make` (for the canonical `make check` target), rustfmt
+          # and clippy components, and cargo-audit.
+          - apt-get update && apt-get install -y --no-install-recommends make
           - rustup component add rustfmt clippy
           - cargo install cargo-audit --locked
           # `make check` runs fmt-check + clippy + tests. Tests are
