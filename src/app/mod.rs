@@ -999,6 +999,10 @@ impl App {
 
         let mut last_context_write = std::time::Instant::now();
         let mut last_refresh = std::time::Instant::now();
+        // 1Hz safety net: re-poll git state even if FSEvents missed
+        // the `.git/index.lock` → `.git/index` rename. See
+        // `AppState::refresh_git_state`.
+        let mut last_git_poll = std::time::Instant::now();
         // Trailing debounce: fire refresh once events have stopped
         // arriving for `REFRESH_QUIET`. Bursty git operations
         // (`git add && git commit && git push`) emit several
@@ -1344,6 +1348,20 @@ impl App {
                     last_event_at = None;
                     self.state.refresh_listing();
                     last_refresh = now;
+                    needs_draw = true;
+                    draw_reason = 3;
+                }
+            }
+            // 1Hz safety net for git state — converges within a second
+            // when FSEvents misses an event (commits replace `.git/index`
+            // via atomic rename, which is the inode-replacement edge
+            // case where FSEvents can drop notifications). Diff-aware:
+            // only repaints when git_info or git_files actually
+            // differ, so idle dps stays at 0.
+            const GIT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+            if self.state.git_info.is_some() && last_git_poll.elapsed() >= GIT_POLL_INTERVAL {
+                last_git_poll = std::time::Instant::now();
+                if self.state.refresh_git_state() {
                     needs_draw = true;
                     draw_reason = 3;
                 }

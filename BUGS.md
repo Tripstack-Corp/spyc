@@ -24,6 +24,8 @@
 - there should be a short cut to help jump to files affected by git status
 
 ### BIGGER ###
+- yank last response possible? [only if claude code terminal? is there an "api"
+  in CC for it to better maintain over time?
 - include a SMALL model that can conversationally answer how to do stuff with
   spyc; maybe there's a good crate to sidecar with this functionality?
 - while I am drafting a command for a new pane it would be nice to still be
@@ -59,6 +61,19 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.37.1) Stale git markers (`+` / `~` / `?`) after a
+  commit + push self-heal within ~1s instead of sticking until the
+  user changes directories. Root cause: macOS FSEvents on `.git/`
+  occasionally misses the `.git/index.lock` → `.git/index` atomic
+  rename (inode replacement is the watcher's known soft spot), so
+  the post-commit refresh never fired. The watcher is still the
+  primary path; added a 1Hz safety-net poll in the run loop that
+  re-runs `git_status` + `git_file_statuses` and diffs against the
+  live state when we're in a repo. Diff-aware: only bumps
+  `list_generation` and requests a repaint when something actually
+  differed, so idle dps stays at 0. Implemented as
+  `AppState::refresh_git_state(&mut self) -> bool` (state.rs)
+  driven by a `last_git_poll` ticker in `App::run` (app/mod.rs).
 - (fixed, v1.37.0) Backgrounded tasks can be paused and resumed.
   `:pause [N]` sends SIGSTOP to the task's process group (whole
   subprocess tree halts together: make → cc → ld); `:resume [N]`

@@ -474,6 +474,25 @@ impl AppState {
         }
     }
 
+    /// Re-poll just git state (`git_info` + `git_files`) and update
+    /// only if it changed. Returns `true` iff anything was different.
+    /// 1Hz safety net for FSEvents missing the `.git/index.lock` →
+    /// `.git/index` rename on commit (inode replacement is the macOS
+    /// FSEvents soft spot). The diff guard preserves the 0-dps-idle
+    /// target: when nothing changed, we don't bump `list_generation`
+    /// or request a repaint.
+    pub fn refresh_git_state(&mut self) -> bool {
+        let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
+        let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+        if new_git_info == self.git_info && new_git_files == self.git_files {
+            return false;
+        }
+        self.git_info = new_git_info;
+        self.git_files = new_git_files;
+        self.rebuild_rows();
+        true
+    }
+
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
         let canonical = std::fs::canonicalize(path)?;
         let new_listing = Listing::read(&canonical)?;
