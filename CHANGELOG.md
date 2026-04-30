@@ -73,6 +73,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   documents the intentional gap so a future signing rollout has a
   ready landing spot.
 
+## [1.37.3] - 2026-04-30
+
+### Fixed
+- **Stray reverse-video cell when running TUI apps in the lower pane.**
+  spyc's pane renderer was unconditionally painting a reverse-video
+  block at `vt100`'s cursor position, even when the child had hidden
+  the cursor with DEC `?25l`. Apps like lazygit, less, and vim hide
+  the cursor and draw their own selection highlight, so the overlay
+  showed up as a stray "glitch" cell sitting on top of the child's
+  UI -- typically wherever the child had last left its (now-hidden)
+  cursor. Now suppressed when `screen.hide_cursor()` is true.
+  Reported via lazygit dog-fooding in the lower pane
+  (`src/pane/widget.rs`).
+
 ## [1.37.1] - 2026-04-30
 
 ### Fixed

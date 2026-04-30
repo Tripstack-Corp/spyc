@@ -36,10 +36,9 @@ impl Widget for PaneWidget<'_> {
             }
         }
 
-        // Overlay a cursor block at the pty cursor position.
-        //  - Focused: bright reverse-video block.
-        //  - Unfocused: static dim reverse-video block.
-        {
+        // Overlay a cursor block at the pty cursor position (skip when the
+        // child has hidden the cursor; TUI apps draw their own highlight).
+        if !self.screen.hide_cursor() {
             let (cy, cx) = self.screen.cursor_position();
             if cy < draw_rows && cx < draw_cols {
                 let x = area.x + cx;
