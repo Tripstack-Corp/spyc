@@ -31,6 +31,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   fmt / clippy / test failures surface locally instead of ~10 min
   later in CI. Bypass with `git commit --no-verify` if you must.
 
+## [1.37.1] - 2026-04-30
+
+### Fixed
+- **Stale `+` (or any) git marker after commit/push now self-heals
+  within ~1s.** The `notify`-driven FSEvents watch on `.git/` would
+  occasionally miss the `.git/index.lock` → `.git/index` atomic
+  rename that happens on every commit -- macOS FSEvents has a known
+  soft spot for inode replacement, so the listing dir's `+` / `~` /
+  `?` markers (and the top-bar branch/dirty string) could stay
+  stale until the user changed directories. Added a 1Hz safety-net
+  poll: when `git_info` is set (we're in a repo), the run loop
+  re-runs `git_status` and `git_file_statuses` once per second and
+  diffs the results against the live state. Diff-aware -- only
+  bumps `list_generation` and requests a repaint when something
+  actually changed, so idle dps stays at 0. Watcher path is
+  unchanged; this is a backstop, not a replacement.
+
 ## [1.37.0] - 2026-04-29
 
 ### Added
