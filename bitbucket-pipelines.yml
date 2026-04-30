@@ -1,8 +1,9 @@
-# spyc CI — runs formatting, clippy, tests, audit, and coverage on every push.
+# spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage.
 #
-# We build against the pinned rust-toolchain.toml so that a new stable Rust
-# release cannot silently tighten lints. Target is linux x86_64 with musl
-# for our statically-linked artifact.
+# We build against the pinned rust-toolchain.toml so a new stable Rust
+# release cannot silently tighten lints. All cargo invocations use
+# --locked (directly or via the Makefile) so a Cargo.lock drift in CI
+# fails loudly instead of silently pulling fresh transitive deps.
 
 image: rust:1.85-slim
 
@@ -23,26 +24,24 @@ definitions:
 
   steps:
     - step: &quality
-        name: Quality gate (make check + audit)
+        name: Quality gate (make check)
         caches:
           - cargo
           - target
         script:
-          # The slim image is a debian-slim minus dev tooling. We need
-          # `make` (for the canonical `make check` target), rustfmt
-          # and clippy components, and cargo-audit.
-          - apt-get update && apt-get install -y --no-install-recommends make
+          # The slim image lacks dev tooling. We need `make` (canonical
+          # gate), `git` (cargo-deny clones the RustSec advisory DB),
+          # rustfmt + clippy components, and cargo-deny itself.
+          # cargo-deny covers what cargo-audit used to (advisories)
+          # plus licenses, sources, and bans — ignores live in
+          # deny.toml with documented reasons.
+          - apt-get update && apt-get install -y --no-install-recommends make git
           - rustup component add rustfmt clippy
-          - cargo install cargo-audit --locked
-          # `make check` runs fmt-check + clippy + tests. Tests are
-          # forced single-threaded inside the Makefile because two
-          # state-module tests mutate XDG_STATE_HOME and race when
-          # parallel. CI calls the Makefile so local and CI agree
-          # exactly on the gate.
+          - cargo install cargo-deny --locked
+          # `make check` = fmt-check + clippy + tests + deny. Tests
+          # forced single-threaded by the Makefile (XDG_STATE_HOME race).
+          # CI calls the Makefile so local and CI agree on the gate.
           - make check
-          # RUSTSEC-2026-0009: time 0.3.45 DoS — fix needs Rust 1.88, our MSRV is 1.85.
-          # Not exploitable: transitive via syntect→plist, no user time parsing.
-          - cargo audit --ignore RUSTSEC-2026-0009
 
     - step: &coverage
         name: Coverage (ratcheting floor)
@@ -52,7 +51,7 @@ definitions:
         script:
           - rustup component add llvm-tools-preview
           - cargo install cargo-llvm-cov --locked
-          - cargo llvm-cov --all-targets --fail-under-lines 35
+          - cargo llvm-cov --locked --all-targets --fail-under-lines 35
 
 pipelines:
   default:

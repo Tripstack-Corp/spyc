@@ -31,6 +31,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   fmt / clippy / test failures surface locally instead of ~10 min
   later in CI. Bypass with `git commit --no-verify` if you must.
 
+### Security
+- **`SECURITY.md`** — honest posture doc covering threat model,
+  supply-chain controls, build/install trust chain, and known
+  caveats. Avoids signing/SBOM theater for an internal tool with
+  no published binary distribution channel.
+- **`cargo deny check`** replaces `cargo audit` in CI. Same advisory
+  coverage, plus license allow-listing (only the SPDX identifiers
+  present in the actual dep graph), source allow-listing
+  (crates.io only — no `git = ...` deps), and bans (yanked /
+  multiple-major-versions). Configuration in `deny.toml`; ignored
+  advisories list a documented reason each.
+- **`--locked` on every `cargo` invocation** in the Makefile and
+  pipelines (test, lint, all release builds, coverage). Prevents a
+  CI-time `Cargo.lock` drift from silently pulling fresh transitive
+  deps; failures are loud.
+- **`make dist-sign`** scaffolding for GPG-signed checksum files.
+  Not used today (we don't ship prebuilt binaries); SECURITY.md
+  documents the intentional gap so a future signing rollout has a
+  ready landing spot.
+
 ## [1.37.1] - 2026-04-30
 
 ### Fixed
