@@ -18,7 +18,7 @@ VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/
 DIST_DIR := dist
 
 # Rust flags shared across release builds.
-RELEASE_FLAGS := --release
+RELEASE_FLAGS := --locked --release
 
 # ---------- Development -----------------------------------------------------
 
@@ -33,17 +33,19 @@ run: ## Debug run
 # ---------- Quality gate -----------------------------------------------------
 
 .PHONY: check
-check: fmt-check lint test ## Full quality gate (CI)
+check: fmt-check lint test deny ## Full quality gate (CI)
 
+# `--locked` on test/lint/build forbids implicit Cargo.lock changes —
+# CI and dev builds use the committed lockfile or fail loudly.
 .PHONY: test
 test: ## Run all tests
 	# Single-threaded: two state-module tests (inventory, sessions) mutate
 	# the global XDG_STATE_HOME env var. Parallel execution races them.
-	cargo test --all-targets -- --test-threads=1
+	cargo test --locked --all-targets -- --test-threads=1
 
 .PHONY: lint
 lint: ## Clippy with pedantic + nursery
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --locked --all-targets -- -D warnings
 
 .PHONY: fmt
 fmt: ## Format code
@@ -52,6 +54,14 @@ fmt: ## Format code
 .PHONY: fmt-check
 fmt-check: ## Check formatting without modifying
 	cargo fmt --all -- --check
+
+.PHONY: deny
+deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
+	@command -v cargo-deny >/dev/null 2>&1 || { \
+		echo "cargo-deny not found — install with: cargo install cargo-deny --locked"; \
+		exit 1; \
+	}
+	cargo deny --all-features check
 
 # ---------- Release builds ---------------------------------------------------
 
@@ -124,6 +134,18 @@ dist: release-macos-universal release-linux-x86 release-linux-arm ## Build all p
 dist-checksums: dist ## Generate SHA-256 checksums
 	cd $(DIST_DIR) && shasum -a 256 $(BINARY)-* > checksums-sha256.txt
 	@cat $(DIST_DIR)/checksums-sha256.txt
+
+# Detached GPG signature on the checksums file. Verifying users run:
+#   gpg --verify checksums-sha256.txt.asc checksums-sha256.txt
+# then `shasum -a 256 -c checksums-sha256.txt`. The maintainer's key
+# fingerprint is published in SECURITY.md.
+GPG_KEY ?=
+.PHONY: dist-sign
+dist-sign: dist-checksums ## GPG-sign the checksums file (set GPG_KEY=<id> to choose a key)
+	@command -v gpg >/dev/null 2>&1 || { echo "gpg not found"; exit 1; }
+	cd $(DIST_DIR) && rm -f checksums-sha256.txt.asc && \
+		gpg --detach-sign --armor $(if $(GPG_KEY),--local-user $(GPG_KEY),) checksums-sha256.txt
+	@echo "✓ signature written to $(DIST_DIR)/checksums-sha256.txt.asc"
 
 # ---------- Install ----------------------------------------------------------
 
