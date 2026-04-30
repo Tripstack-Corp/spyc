@@ -292,8 +292,7 @@ impl<'t> Renderer<'t> {
                 let style = Style::default()
                     .fg(self.theme.status_user)
                     .add_modifier(Modifier::BOLD);
-                self.current
-                    .push(Span::styled(format!("{prefix} "), style));
+                self.current.push(Span::styled(format!("{prefix} "), style));
                 // Subsequent text in the heading inherits BOLD via style_mods.
                 self.style_mods |= Modifier::BOLD;
             }
@@ -488,9 +487,9 @@ impl<'t> Renderer<'t> {
             return;
         };
         let head = t.head.as_ref();
-        let n_cols = head.map_or(0, Vec::len).max(
-            t.body.iter().map(Vec::len).max().unwrap_or(0),
-        );
+        let n_cols = head
+            .map_or(0, Vec::len)
+            .max(t.body.iter().map(Vec::len).max().unwrap_or(0));
         if n_cols == 0 {
             return;
         }
@@ -522,11 +521,7 @@ impl<'t> Renderer<'t> {
         while total_with_frame(&widths) > CONTENT_WIDTH {
             // Shrink the widest column by one. Stop if everything is
             // already at the floor of 3.
-            let Some((idx, _)) = widths
-                .iter()
-                .enumerate()
-                .max_by_key(|(_, w)| **w)
-            else {
+            let Some((idx, _)) = widths.iter().enumerate().max_by_key(|(_, w)| **w) else {
                 break;
             };
             if widths[idx] <= 3 {
@@ -557,18 +552,15 @@ impl<'t> Renderer<'t> {
         mid.push('\u{2524}'); // ┤
         bot.push('\u{2518}'); // ┘
 
-        self.lines
-            .push(Line::from(Span::styled(top, frame_style)));
+        self.lines.push(Line::from(Span::styled(top, frame_style)));
         if let Some(h) = head {
             self.render_table_row(h, &widths, true, frame_style);
-            self.lines
-                .push(Line::from(Span::styled(mid, frame_style)));
+            self.lines.push(Line::from(Span::styled(mid, frame_style)));
         }
         for row in &t.body {
             self.render_table_row(row, &widths, false, frame_style);
         }
-        self.lines
-            .push(Line::from(Span::styled(bot, frame_style)));
+        self.lines.push(Line::from(Span::styled(bot, frame_style)));
         self.lines.push(Line::from(Vec::<Span<'static>>::new()));
     }
 
@@ -796,10 +788,7 @@ fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
 /// size columns from natural cell content.
 fn spans_visual_width(spans: &[Span<'static>]) -> usize {
     use unicode_width::UnicodeWidthStr;
-    spans
-        .iter()
-        .map(|s| s.content.as_ref().width())
-        .sum()
+    spans.iter().map(|s| s.content.as_ref().width()).sum()
 }
 
 /// Wrap a styled span sequence into one or more visual rows, each
@@ -822,7 +811,6 @@ fn wrap_spans_to_width(spans: &[Span<'static>], max_w: usize) -> Vec<Vec<Span<'s
         .map(|(s, e)| slice_spans(spans, s, e))
         .collect()
 }
-
 
 /// True if `path` looks like a Markdown file we should render. The
 /// pager checks this when opening a file: if true, both the source
@@ -874,7 +862,11 @@ mod tests {
     #[test]
     fn renders_blockquote_with_left_rule() {
         let lines = render_plain("> quoted\n");
-        assert!(lines.iter().any(|l| l.starts_with("\u{2503} ") && l.contains("quoted")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("\u{2503} ") && l.contains("quoted"))
+        );
     }
 
     #[test]
@@ -912,7 +904,10 @@ mod tests {
         // And the paragraph should produce more than one line of
         // content (proves wrap actually happened).
         let body_lines = lines.iter().filter(|l| !l.is_empty()).count();
-        assert!(body_lines >= 2, "expected wrap to produce multiple lines, got {lines:?}");
+        assert!(
+            body_lines >= 2,
+            "expected wrap to produce multiple lines, got {lines:?}"
+        );
     }
 
     #[test]
@@ -925,7 +920,11 @@ mod tests {
         let body: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
         assert!(body.len() >= 2, "expected wrap on long list item");
         // First line starts with "• ".
-        assert!(body[0].starts_with("\u{2022} "), "first line: {:?}", body[0]);
+        assert!(
+            body[0].starts_with("\u{2022} "),
+            "first line: {:?}",
+            body[0]
+        );
         // Continuation starts with two spaces (matches bullet width).
         assert!(body[1].starts_with("  "), "continuation: {:?}", body[1]);
     }
@@ -956,12 +955,16 @@ mod tests {
         let lines = render_plain(src);
         // Top border with corner glyphs.
         assert!(
-            lines.iter().any(|l| l.contains('\u{250c}') && l.contains('\u{2510}')),
+            lines
+                .iter()
+                .any(|l| l.contains('\u{250c}') && l.contains('\u{2510}')),
             "missing top border in {lines:?}"
         );
         // Bottom border.
         assert!(
-            lines.iter().any(|l| l.contains('\u{2514}') && l.contains('\u{2518}')),
+            lines
+                .iter()
+                .any(|l| l.contains('\u{2514}') && l.contains('\u{2518}')),
             "missing bottom border in {lines:?}"
         );
         // Header separator with cross.
@@ -992,10 +995,7 @@ mod tests {
         // At least 3 rows of body content (the long string at narrow
         // width must wrap to multiple visual rows). Each body row
         // has a leading `│ `.
-        let body_rows = lines
-            .iter()
-            .filter(|l| l.starts_with("\u{2502} "))
-            .count();
+        let body_rows = lines.iter().filter(|l| l.starts_with("\u{2502} ")).count();
         assert!(
             body_rows >= 3,
             "expected ≥3 body rows from wrap, got {body_rows} in {lines:?}"

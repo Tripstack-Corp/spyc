@@ -1,0 +1,10 @@
+#!/bin/sh
+# spyc pre-commit hook — installed via `make install-hooks`.
+#
+# Runs the same gate as CI (fmt-check + clippy + tests) so failures
+# surface in seconds locally instead of ~10 min later in Bitbucket.
+#
+# Skip occasionally with `git commit --no-verify` (don't make a habit).
+
+set -e
+exec make check

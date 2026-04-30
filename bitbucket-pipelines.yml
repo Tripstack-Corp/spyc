@@ -14,18 +14,30 @@ definitions:
           - Cargo.lock
           - rust-toolchain.toml
       path: $CARGO_HOME
+    target:
+      key:
+        files:
+          - Cargo.lock
+          - rust-toolchain.toml
+      path: target
 
   steps:
     - step: &quality
-        name: Quality gate (fmt, clippy, test, audit)
+        name: Quality gate (make check + audit)
         caches:
           - cargo
+          - target
         script:
+          # The slim image lacks rustfmt/clippy components and cargo-audit;
+          # installs hit the cargo cache on subsequent runs.
           - rustup component add rustfmt clippy
           - cargo install cargo-audit --locked
-          - cargo fmt --all -- --check
-          - cargo clippy --all-targets -- -D warnings
-          - cargo test --all-targets
+          # `make check` runs fmt-check + clippy + tests. Tests are
+          # forced single-threaded inside the Makefile because two
+          # state-module tests mutate XDG_STATE_HOME and race when
+          # parallel. CI calls the Makefile so local and CI agree
+          # exactly on the gate.
+          - make check
           # RUSTSEC-2026-0009: time 0.3.45 DoS — fix needs Rust 1.88, our MSRV is 1.85.
           # Not exploitable: transitive via syntect→plist, no user time parsing.
           - cargo audit --ignore RUSTSEC-2026-0009
@@ -34,6 +46,7 @@ definitions:
         name: Coverage (ratcheting floor)
         caches:
           - cargo
+          - target
         script:
           - rustup component add llvm-tools-preview
           - cargo install cargo-llvm-cov --locked

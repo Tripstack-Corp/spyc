@@ -439,9 +439,8 @@ impl LineEditor {
         // next end. This matches vim's `e` semantic of "next end
         // forward" rather than "end of current."
         let cur = char_class(self.buf[i]);
-        let at_end_of_chunk = cur == CharClass::Space
-            || i + 1 >= n
-            || char_class(self.buf[i + 1]) != cur;
+        let at_end_of_chunk =
+            cur == CharClass::Space || i + 1 >= n || char_class(self.buf[i + 1]) != cur;
         if at_end_of_chunk {
             i += 1;
             while i < n && char_class(self.buf[i]) == CharClass::Space {
