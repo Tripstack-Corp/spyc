@@ -541,6 +541,32 @@ one of the tracks above when picked up.
   and `^T` (all/none) -- this is "select these N adjacent rows"
   which is the natural shape for "pick the four files I just
   scrolled past."
+- **Generalized pager picker** (lazygit-inspired). Adapt
+  lazygit's `Menu` popup pattern into spyc's existing
+  `pager.picker_cursor` machinery so any list-of-options surface
+  (project chooser, `W l` worktree picker, branch checkout) is
+  a pager mode rather than a fifth overlay. Stays inside
+  DESIGN.md's "render *into* the pager" rule. Highest-leverage
+  of the lazygit borrows because the scoped-help item below
+  builds on it. Full analysis at
+  `notes/lazygit-ux-catalogue.md` §4.
+- **Context-sensitive prompt-row hint** (lazygit-inspired).
+  Paint the most-relevant keys for the active overlay or mode
+  into the prompt row using the DIM modifier — only when keys
+  differ from list-mode (pager `?/n/s/:N`, finder, `!?`
+  history editor, picker). DESIGN.md is explicit that a third
+  status row is forbidden, so the prompt row is the only legal
+  transient surface for this. Directly addresses the "I know it
+  exists but forgot the key" failure mode without a help-overlay
+  context switch. Full analysis at
+  `notes/lazygit-ux-catalogue.md` §2.
+- **Scoped `?` help** (lazygit-inspired). Restructure the
+  existing `src/ui/help.rs` dump to lead with the active
+  surface's keys, then a collapsed "global / other surfaces"
+  tail. Content reorganization, not a new feature; cost is
+  near-zero once the generalized pager picker lands and `?`
+  can render its scoped section as a picker. Full analysis at
+  `notes/lazygit-ux-catalogue.md` §5.
 
 ## Done (recent)
 
