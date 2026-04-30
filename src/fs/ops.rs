@@ -41,10 +41,7 @@ pub const MAX_PAGER_LINES: usize = 5000;
 /// Returns `(content, total_lines_read, truncated)`. `truncated`
 /// is true if we hit the line cap before EOF; callers use it to
 /// decide whether to skip syntect and emit a banner row.
-pub fn read_truncated(
-    path: &Path,
-    max_lines: usize,
-) -> io::Result<(String, usize, bool)> {
+pub fn read_truncated(path: &Path, max_lines: usize) -> io::Result<(String, usize, bool)> {
     let f = fs::File::open(path)?;
     let mut reader = io::BufReader::new(f);
     let mut buf = String::new();
@@ -734,7 +731,10 @@ mod tests {
         }
         let (content, lines, truncated) = read_truncated(&path, 10).unwrap();
         assert_eq!(lines, 10);
-        assert!(truncated, "expected truncated flag for 50-line file capped at 10");
+        assert!(
+            truncated,
+            "expected truncated flag for 50-line file capped at 10"
+        );
         assert_eq!(content.lines().count(), 10);
         assert!(content.starts_with("line 0\n"));
         assert!(content.ends_with("line 9\n"));

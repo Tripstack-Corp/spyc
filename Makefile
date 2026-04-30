@@ -147,6 +147,14 @@ endif
 uninstall: ## Remove from $(PREFIX)/bin
 	rm -f $(PREFIX)/bin/$(BINARY)
 
+# ---------- Git hooks --------------------------------------------------------
+
+.PHONY: install-hooks
+install-hooks: ## Install pre-commit hook (runs `make check` before each commit)
+	@install -m 755 scripts/git-hooks/pre-commit .git/hooks/pre-commit
+	@echo "✓ installed .git/hooks/pre-commit — runs 'make check' on each commit"
+	@echo "  bypass with 'git commit --no-verify' (don't make a habit)"
+
 # --- Remote deploy ---
 
 FIKA_HOST := drek@10.130.1.36

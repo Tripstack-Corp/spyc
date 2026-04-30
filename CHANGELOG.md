@@ -13,6 +13,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   README, INSTALL.md, and CLAUDE.md updated to reflect the new
   recommended flow.
 
+### CI / Tooling
+- **`bitbucket-pipelines.yml` now calls `make check`** instead of
+  inlining its own cargo commands. The Makefile's `test` target
+  runs with `--test-threads=1` to serialize XDG_STATE_HOME-mutating
+  state-module tests; CI was inlining `cargo test --all-targets`
+  without that flag and hitting the race, leaving CI red on `main`.
+  Calling `make check` keeps CI and local on the same exact gate.
+- **Pipeline `target/` cache** added alongside the existing cargo
+  cache, both keyed on `Cargo.lock` + `rust-toolchain.toml`.
+  Should drop pipeline compile time materially on cache hits.
+- **Code-tree `cargo fmt --all` sweep** to clear pre-existing
+  formatting drift in `pager.rs`, `markdown.rs`, `fs/ops.rs`,
+  `line_edit.rs`, and `app/mod.rs`. No behavior changes.
+- **Pre-commit hook** in `scripts/git-hooks/pre-commit`. Install
+  with `make install-hooks` — runs `make check` on every commit so
+  fmt / clippy / test failures surface locally instead of ~10 min
+  later in CI. Bypass with `git commit --no-verify` if you must.
+
 ## [1.37.0] - 2026-04-29
 
 ### Added

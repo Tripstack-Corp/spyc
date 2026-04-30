@@ -1943,10 +1943,9 @@ impl App {
                     (TaskStatus::Running, true) => ("+", bg_unread_color),
                     (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
                     (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
-                    (
-                        TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_),
-                        _,
-                    ) => ("\u{2717}", bg_err_color),
+                    (TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_), _) => {
+                        ("\u{2717}", bg_err_color)
+                    }
                 }
             };
             let text = format!(" [{}{glyph}]", task.id);
@@ -2440,8 +2439,9 @@ impl App {
             && self.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
         {
-            self.state
-                .flash_info("^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes");
+            self.state.flash_info(
+                "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",
+            );
             return Ok(PostAction::None);
         }
 
@@ -2671,8 +2671,8 @@ impl App {
         // --- Simple prompts (search, jump, pattern-pick, etc.) ---
 
         // ^C cancels too (vi muscle memory; same as Esc).
-        let ctrl_c = matches!(key.code, KeyCode::Char('c'))
-            && key.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl_c =
+            matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL);
         // Esc cancels; Backspace on an empty buffer cancels too.
         let backspace_on_empty = matches!(key.code, KeyCode::Backspace)
             && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
@@ -2934,9 +2934,7 @@ impl App {
         // ^C in any prompt cancels and returns to normal mode --
         // vi muscle memory. Distinct from Esc only in keystroke,
         // identical in effect.
-        if matches!(key.code, KeyCode::Char('c'))
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-        {
+        if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.history_for_prompt().reset_nav();
             self.cancel_prompt();
             return PostAction::None;
@@ -4120,8 +4118,7 @@ impl App {
             return;
         };
         if !matches!(task.status, TaskStatus::Running) {
-            self.state
-                .flash_error(format!("task #{id} is not running"));
+            self.state.flash_error(format!("task #{id} is not running"));
             return;
         }
         if task.paused {
@@ -4129,8 +4126,7 @@ impl App {
             return;
         }
         let Some(pid) = task.child.process_id() else {
-            self.state
-                .flash_error(format!("task #{id}: no process id"));
+            self.state.flash_error(format!("task #{id}: no process id"));
             return;
         };
         // Negative pid → process group. SIGSTOP is uncatchable, so the
@@ -4139,7 +4135,8 @@ impl App {
         let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGSTOP) };
         if r == 0 {
             task.paused = true;
-            self.state.flash_info(format!("task #{id} paused — :resume to continue"));
+            self.state
+                .flash_info(format!("task #{id} paused — :resume to continue"));
         } else {
             self.state
                 .flash_error(format!("task #{id}: SIGSTOP failed"));
@@ -4161,8 +4158,7 @@ impl App {
             return;
         }
         let Some(pid) = task.child.process_id() else {
-            self.state
-                .flash_error(format!("task #{id}: no process id"));
+            self.state.flash_error(format!("task #{id}: no process id"));
             return;
         };
         let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGCONT) };
@@ -6628,10 +6624,7 @@ impl App {
                     // MAX_PAGER_LINES of plain text and tell the user how
                     // to hand off to $PAGER for the full thing.
                     let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
-                        crate::fs::ops::read_truncated(
-                            &path,
-                            crate::fs::ops::MAX_PAGER_LINES,
-                        )
+                        crate::fs::ops::read_truncated(&path, crate::fs::ops::MAX_PAGER_LINES)
                     } else {
                         std::fs::read_to_string(&path).map(|c| {
                             let n = c.lines().count();
@@ -6669,8 +6662,7 @@ impl App {
                                 // markdown rendering of half a doc looks
                                 // weird (broken refs, half-closed code
                                 // fences).
-                                let rendered =
-                                    crate::ui::markdown::render(&content, &self.theme);
+                                let rendered = crate::ui::markdown::render(&content, &self.theme);
                                 let mut v = PagerView::new_styled(name, rendered);
                                 v.alt_lines = Some(source_lines);
                                 v.markdown_rendered = true;
@@ -6684,8 +6676,7 @@ impl App {
                                 } else {
                                     name
                                 };
-                                let mut v =
-                                    PagerView::new_styled(display_name, source_lines);
+                                let mut v = PagerView::new_styled(display_name, source_lines);
                                 if truncated {
                                     // Append a banner row pointing at the
                                     // escape hatch so the user knows the

@@ -310,7 +310,6 @@ impl PagerView {
     pub const fn toggle_line_numbers(&mut self) {
         self.show_line_numbers = !self.show_line_numbers;
     }
-
 }
 
 /// Pipe `text` to `pbcopy`. Shared by both yank-source and
@@ -327,7 +326,6 @@ fn pbcopy(text: &str) -> std::io::Result<()> {
 }
 
 impl PagerView {
-
     pub const fn toggle_whitespace(&mut self) {
         self.show_whitespace = !self.show_whitespace;
     }
@@ -632,9 +630,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // (e.g. "truncated at 5000 lines · press p for full file in
     // $PAGER") stand out clearly as a separate piece of info, not as
     // an extension of the filename.
-    let flash_style = Style::default()
-        .fg(theme.take)
-        .add_modifier(Modifier::BOLD);
+    let flash_style = Style::default().fg(theme.take).add_modifier(Modifier::BOLD);
     let title_line: Line<'static> = if let Some(ref msg) = view.flash {
         Line::from(vec![
             Span::styled(format!("  {}  ", view.title), title_style),
@@ -904,7 +900,10 @@ fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
             let chunk = rest[..consumed_bytes].to_string();
             rest = &rest[consumed_bytes..];
             if !chunk.is_empty() {
-                pieces.last_mut().unwrap().push(Span::styled(chunk, span.style));
+                pieces
+                    .last_mut()
+                    .unwrap()
+                    .push(Span::styled(chunk, span.style));
                 current_w += visual;
             }
             if !rest.is_empty() {
@@ -1195,8 +1194,14 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
             &[
                 ("v", "open in $EDITOR"),
                 ("y", "yank source to clipboard"),
-                ("Y", "yank visible to clipboard (rendered markdown / current view)"),
-                ("p", "open in $PAGER (less, full-screen takeover — for huge files)"),
+                (
+                    "Y",
+                    "yank visible to clipboard (rendered markdown / current view)",
+                ),
+                (
+                    "p",
+                    "open in $PAGER (less, full-screen takeover — for huge files)",
+                ),
                 ("s", "save to file (command output only)"),
             ],
         ),
