@@ -43,6 +43,40 @@ fn split_command(raw: &str) -> Vec<String> {
     raw.split_whitespace().map(ToString::to_string).collect()
 }
 
+/// Resolve the user's preferred interactive shell for running
+/// commands that need alias / function / rc-file PATH resolution.
+/// Returns `(shell_path, [args...])` ready to feed to a process
+/// spawner.
+///
+/// `:!cmd` (capture) and `;cmd` (foreground pane) both go through
+/// this. Without `-i`, aliases defined in `.zshrc` / `.bashrc`
+/// aren't loaded — `$- == ""` and the shell skips interactive
+/// startup. With `-i`, rc files fire and the user's aliases /
+/// functions / rc-set PATH all work, matching what they see in a
+/// regular terminal tab.
+///
+/// POSIX `sh` and `dash` don't read rc files in `-i` mode anyway
+/// (and dash warns about it), so we only set `-i` for shells that
+/// actually source a startup file interactively.
+pub fn user_shell_invocation(cmd: &str) -> (String, Vec<String>) {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string());
+    let basename = Path::new(&shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("sh");
+    let interactive = matches!(basename, "zsh" | "bash" | "fish" | "ksh" | "ksh93" | "mksh");
+    let mut args = Vec::with_capacity(3);
+    if interactive {
+        args.push("-i".to_string());
+    }
+    args.push("-c".to_string());
+    args.push(cmd.to_string());
+    (shell, args)
+}
+
 /// Heuristic text/binary detection: look for a NUL byte in the first 8 KiB.
 /// Matches what `grep` and `file` effectively do.
 pub fn looks_like_text(path: &Path) -> bool {
@@ -54,4 +88,84 @@ pub fn looks_like_text(path: &Path) -> bool {
         return false;
     };
     !buf[..read].contains(&0u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: scope-set $SHELL for a single call. Tests in this
+    /// module mutate the process-global env var; gate them with the
+    /// XDG_STATE_HOME serialization comment in inventory.rs --
+    /// running in parallel here is fine because the helper restores
+    /// in the same call.
+    fn with_shell<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
+        let prev = std::env::var_os("SHELL");
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var("SHELL", v),
+                None => std::env::remove_var("SHELL"),
+            }
+        }
+        let r = f();
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("SHELL", p),
+                None => std::env::remove_var("SHELL"),
+            }
+        }
+        r
+    }
+
+    #[test]
+    fn user_shell_zsh_gets_interactive_flag() {
+        with_shell(Some("/bin/zsh"), || {
+            let (sh, args) = user_shell_invocation("echo hi");
+            assert_eq!(sh, "/bin/zsh");
+            assert_eq!(args, vec!["-i", "-c", "echo hi"]);
+        });
+    }
+
+    #[test]
+    fn user_shell_bash_gets_interactive_flag() {
+        with_shell(Some("/usr/local/bin/bash"), || {
+            let (sh, args) = user_shell_invocation("ls");
+            assert_eq!(sh, "/usr/local/bin/bash");
+            assert_eq!(args, vec!["-i", "-c", "ls"]);
+        });
+    }
+
+    #[test]
+    fn user_shell_posix_sh_skips_interactive() {
+        with_shell(Some("/bin/sh"), || {
+            let (sh, args) = user_shell_invocation("ls");
+            assert_eq!(sh, "/bin/sh");
+            assert_eq!(args, vec!["-c", "ls"]);
+        });
+    }
+
+    #[test]
+    fn user_shell_dash_skips_interactive() {
+        with_shell(Some("/bin/dash"), || {
+            let (_, args) = user_shell_invocation("ls");
+            assert_eq!(args, vec!["-c", "ls"]);
+        });
+    }
+
+    #[test]
+    fn user_shell_unset_falls_back_to_sh() {
+        with_shell(None, || {
+            let (sh, args) = user_shell_invocation("ls");
+            assert_eq!(sh, "/bin/sh");
+            assert_eq!(args, vec!["-c", "ls"]);
+        });
+    }
+
+    #[test]
+    fn user_shell_empty_falls_back_to_sh() {
+        with_shell(Some(""), || {
+            let (sh, _) = user_shell_invocation("ls");
+            assert_eq!(sh, "/bin/sh");
+        });
+    }
 }
