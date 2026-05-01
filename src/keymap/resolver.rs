@@ -171,6 +171,7 @@ impl Resolver {
                 KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
                 KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+                KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
                 KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
                 // Send / pipe content to pane.
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
@@ -959,10 +960,20 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_w_z_zooms_pane() {
+        let mut r = Resolver::new();
+        feed(&mut r, ctrl('w'));
+        assert_eq!(
+            feed(&mut r, key('z')),
+            ResolverOutcome::Action(Action::TogglePaneZoom)
+        );
+    }
+
+    #[test]
     fn ctrl_w_unknown_is_ignored() {
         let mut r = Resolver::new();
         feed(&mut r, ctrl('w'));
-        assert_eq!(feed(&mut r, key('z')), ResolverOutcome::Ignored);
+        assert_eq!(feed(&mut r, key('q')), ResolverOutcome::Ignored);
     }
 
     // ── W (worktree) prefix ───────────────────────────────────────

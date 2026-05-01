@@ -117,6 +117,14 @@ pub struct AppState {
     pub frecency: Frecency,
     pub pane_focused: bool,
     pub pane_height_pct: u16,
+    /// Tmux-style "zoom": when true, the bottom pane fills the middle
+    /// region (list collapses to 0 rows). The user's preferred
+    /// `pane_height_pct` is preserved untouched so un-zoom restores
+    /// exactly the prior split.
+    pub pane_zoomed: bool,
+    /// Focus state captured at zoom-on, restored at zoom-off. `None`
+    /// when not zoomed.
+    pub pane_focus_before_zoom: Option<bool>,
     pub rows: Vec<RowData>,
     pub last_grid: Grid,
     /// Monotonic counter bumped whenever the display row list changes.
@@ -1380,6 +1388,8 @@ mod tests {
             frecency: Frecency::default(),
             pane_focused: false,
             pane_height_pct: 30,
+            pane_zoomed: false,
+            pane_focus_before_zoom: None,
             rows: Vec::new(),
             last_grid: Grid {
                 cols: 1,
