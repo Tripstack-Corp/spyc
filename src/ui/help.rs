@@ -168,6 +168,7 @@ const SECTIONS: &[Section] = &[
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
             ("^a +  ^a -", "grow / shrink the pane"),
+            ("^a z", "zoom pane (fullscreen toggle)"),
             ("^a v", "scroll pane history"),
             ("^a s", "send selection paths to pane stdin"),
             ("^a P", "pipe file contents of selection to pane"),

@@ -104,6 +104,7 @@ pub enum Action {
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
     PaneGrow,           // ^W + — bottom pane takes more height
     PaneShrink,         // ^W - — bottom pane takes less height
+    TogglePaneZoom,     // ^W z — zoom (fullscreen) the pane / restore split
     PaneScrollEnter,    // ^W v — enter scroll mode (browse scrollback)
     PaneScrollSave,     // s (while in scroll mode) — save scrollback to file
     PaneNewTab,         // ^W n — open a new pane tab (prompt for command + cwd)
@@ -214,6 +215,7 @@ impl Action {
             Self::PaneSendSelection => "send selection to pane",
             Self::PaneGrow => "grow pane",
             Self::PaneShrink => "shrink pane",
+            Self::TogglePaneZoom => "zoom pane (toggle fullscreen)",
             Self::PaneScrollEnter => "scroll pane history",
             Self::PaneScrollSave => "save pane scrollback",
             Self::PaneNewTab => "new pane tab",

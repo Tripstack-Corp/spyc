@@ -663,6 +663,8 @@ impl App {
             pane_focused: false,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
+            pane_zoomed: false,
+            pane_focus_before_zoom: None,
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,
@@ -1498,11 +1500,12 @@ impl App {
                         // so the child shells re-render their prompts at the
                         // correct width.
                         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+                        let pane_pct = self.effective_pane_pct();
                         if let Some(tabs) = self.pane_tabs.as_mut() {
                             let layout = Self::compute_layout(
                                 area,
                                 true,
-                                self.state.pane_height_pct,
+                                pane_pct,
                                 self.state.config.layout.status_position,
                             );
                             if let Some(pane_rect) = layout.pane {
@@ -1512,10 +1515,7 @@ impl App {
                             }
                         }
                         if let Some(overlay) = self.top_overlay.as_mut() {
-                            let (r, c) = Self::top_overlay_size(
-                                self.state.pane_height_pct,
-                                self.pane_tabs.is_some(),
-                            );
+                            let (r, c) = Self::top_overlay_size(pane_pct, self.pane_tabs.is_some());
                             let _ = overlay.resize(r, c);
                         }
                         // Help content is baked at open time for the current
@@ -1948,9 +1948,15 @@ impl App {
         let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
         let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
         let mut bg_width = 0usize;
-        let tag = if is_scrolling { " [SCROLL]" } else { "" };
-        // Reserve room for at least 4 dashes + the tag.
-        let bg_budget = width.saturating_sub(used + tag.len() + 4);
+        let zoom_tag = if self.state.pane_zoomed {
+            " [ZOOM]"
+        } else {
+            ""
+        };
+        let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
+        let tag_len = zoom_tag.len() + scroll_tag.len();
+        // Reserve room for at least 4 dashes + the tag(s).
+        let bg_budget = width.saturating_sub(used + tag_len + 4);
         for task in self.background_tasks.tasks.iter().rev() {
             let (glyph, color) = if task.paused && matches!(task.status, TaskStatus::Running) {
                 // Pause glyph trumps the running/unread variants:
@@ -1974,8 +1980,8 @@ impl App {
             bg_pieces_rev.push((text, color));
         }
 
-        // Dash fill between pane-tab area and bg group / scroll tag.
-        let fill = width.saturating_sub(used + tag.len() + bg_width);
+        // Dash fill between pane-tab area and bg group / mode tag(s).
+        let fill = width.saturating_sub(used + tag_len + bg_width);
         if fill > 0 {
             spans.push(Span::styled("─".repeat(fill), rule_style));
             used += fill;
@@ -1991,14 +1997,23 @@ impl App {
             ));
         }
 
+        if self.state.pane_zoomed {
+            spans.push(Span::styled(
+                zoom_tag,
+                Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            used += zoom_tag.len();
+        }
         if is_scrolling {
             spans.push(Span::styled(
-                tag,
+                scroll_tag,
                 Style::default()
                     .fg(self.theme.pick)
                     .add_modifier(Modifier::BOLD),
             ));
-            used += tag.len();
+            used += scroll_tag.len();
         }
         // If anything's left (shouldn't be), pad.
         let _ = used;
@@ -2019,7 +2034,7 @@ impl App {
         let layout = Self::compute_layout(
             frame_area,
             self.pane_tabs.is_some(),
-            self.state.pane_height_pct,
+            self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
 
@@ -2870,7 +2885,7 @@ impl App {
         }
 
         let (rows, cols) = Self::pane_spawn_size(
-            self.state.pane_height_pct,
+            self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
         match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &[]) {
@@ -3413,7 +3428,7 @@ impl App {
             }
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let (rows, cols) =
-                Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+                Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
             let cwd = self.state.listing.dir.clone();
             match Pane::spawn(&expanded, rows, cols, &cwd) {
                 Ok(p) => {
@@ -3586,7 +3601,7 @@ impl App {
             PromptKind::ShellCmd => {
                 let expanded = shell::expand_percent(&prompt.buffer, &self.state.selection_paths());
                 let (rows, cols) =
-                    Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+                    Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
                 let cwd = self.state.listing.dir.clone();
                 match Pane::spawn(&expanded, rows, cols, &cwd) {
                     Ok(p) => {
@@ -3689,6 +3704,8 @@ impl App {
         if self.pane_tabs.is_some() {
             self.pane_tabs = None;
             self.state.pane_focused = false;
+            self.state.pane_zoomed = false;
+            self.state.pane_focus_before_zoom = None;
             self.needs_full_repaint = true;
             self.state.flash_info("pane closed");
             return;
@@ -3710,7 +3727,7 @@ impl App {
 
     fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
         let (rows, cols) = Self::pane_spawn_size(
-            self.state.pane_height_pct,
+            self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
         match Pane::spawn_with_env(cmd, rows, cols, cwd, &[]) {
@@ -4035,7 +4052,7 @@ impl App {
             shell::shell_quote(&path.display().to_string()),
         );
         let (rows, cols) =
-            Self::top_overlay_size(self.state.pane_height_pct, self.pane_tabs.is_some());
+            Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
         match Pane::spawn(&cmd, rows, cols, &cwd) {
             Ok(p) => {
@@ -4924,9 +4941,66 @@ impl App {
         if self.pane_tabs.is_none() {
             return;
         }
+        if self.state.pane_zoomed {
+            self.state.flash_info("pane is zoomed (^a z to exit)");
+            return;
+        }
         let current = i32::from(self.state.pane_height_pct);
         let new = (current + delta_pct).clamp(10, 90);
         self.state.pane_height_pct = new as u16;
+    }
+
+    /// The pane percentage to use for layout/sizing computations.
+    /// Returns 100 when zoomed (list collapses to 0 rows) so that the
+    /// stored `pane_height_pct` — the user's preferred split — stays
+    /// untouched and is restored on un-zoom.
+    const fn effective_pane_pct(&self) -> u16 {
+        if self.state.pane_zoomed {
+            100
+        } else {
+            self.state.pane_height_pct
+        }
+    }
+
+    /// ^a z / ^w z — toggle "zoom" on the bottom pane. When zoomed,
+    /// the file list collapses to 0 rows and the pane fills the
+    /// middle region (status + prompt rows still render). Focus is
+    /// forced into the pane on zoom-on; the prior focus is restored
+    /// on zoom-off. No-op (with a flash) when the pane is closed.
+    fn toggle_pane_zoom(&mut self) {
+        if self.pane_tabs.is_none() {
+            self.state.flash_info("no pane open");
+            return;
+        }
+        if self.state.pane_zoomed {
+            self.state.pane_zoomed = false;
+            if let Some(prev) = self.state.pane_focus_before_zoom.take() {
+                self.state.pane_focused = prev;
+            }
+            self.state.flash_info("zoom: off");
+        } else {
+            self.state.pane_focus_before_zoom = Some(self.state.pane_focused);
+            self.state.pane_zoomed = true;
+            self.state.pane_focused = true;
+            self.state.flash_info("zoom: on (^a z to exit)");
+        }
+        // Resize all pty children to the new pane rect so their
+        // child shells re-render at the right dimensions; otherwise
+        // Claude's UI is the wrong size until the next terminal resize.
+        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+        let layout = Self::compute_layout(
+            area,
+            true,
+            self.effective_pane_pct(),
+            self.state.config.layout.status_position,
+        );
+        if let (Some(pane_rect), Some(tabs)) = (layout.pane, self.pane_tabs.as_mut()) {
+            for entry in tabs.tabs_mut() {
+                let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
+            }
+        }
+        self.needs_full_repaint = true;
     }
 
     // ---- Git diff (M12) ----------------------------------------------------
@@ -6424,6 +6498,7 @@ impl App {
             | Action::PaneSendSelection
             | Action::PaneGrow
             | Action::PaneShrink
+            | Action::TogglePaneZoom
             | Action::PaneScrollEnter
             | Action::PaneScrollSave
             | Action::PaneNewTab
@@ -6456,6 +6531,7 @@ impl App {
             Action::PaneSendSelection => self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
             Action::PaneShrink => self.resize_pane(-5),
+            Action::TogglePaneZoom => self.toggle_pane_zoom(),
             Action::PaneScrollEnter => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.active_mut().enter_scroll_mode();

@@ -1,4 +1,13 @@
 ### SMALL ###
+- = should be able to show "files being worked on" which could be files
+  included in git status or setup like the harpoon tool in neovim
+  https://github.com/theprimeagen/harpoon
+- we should steal some ideas from https://wezterm.org/ e.g. simple visual
+  picker for urls / id's from the terminal view
+- it's very confusing still to remember you're in scroll mode in the bottom
+  half - we need a stronger top line/bottom line marker for this
+- while focused on the command in the lower pane we should send ^c to the lower
+  pane running process
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
 - fg does not show the recent output - it puts the current STDOUT at the very
@@ -22,6 +31,16 @@
   been using an old version); maybe we should put a build commit hash in the
   top right?
 - there should be a short cut to help jump to files affected by git status
+- `brew upgrade` parallel-download progress doesn't redraw in place inside
+  the lower pane — each tick stacks 4 fresh lines (gradle / claude-code /
+  python@3.14 / python@3.13) into scrollback instead of overwriting. Looks
+  like brew's concurrent-downloads UI uses cursor-up to redraw N progress
+  lines, and that's failing. Top suspect: lines printed at the last pty row
+  scroll into scrollback before `\e[NA` runs, so the redraw lands below
+  rather than over the originals (a tall iTerm window has the headroom to
+  hide this; the short lower pane doesn't). Capture with
+  `SPYC_PTY_DEBUG=1` set at launch and inspect `/tmp/spyc_pty_debug.bin`
+  for `\e[NA` sequences to confirm vs. brew choosing line-mode.
 
 ### BIGGER ###
 - yank last response possible? [only if claude code terminal? is there an "api"

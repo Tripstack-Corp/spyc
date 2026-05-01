@@ -5,7 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-(Nothing pending; see [1.37.2] for the most recent release.)
+### Added
+- **Pane zoom (fullscreen toggle).** `^a z` (and `^w z`) zooms the
+  bottom pane: the file list collapses to 0 rows and the pane fills
+  the middle region between status and prompt. Tmux-style — the
+  status bar and prompt row stay visible, focus is forced into the
+  pane on zoom-on and the prior focus is restored on un-zoom. The
+  user's preferred `pane_height_pct` is preserved untouched so the
+  prior split returns exactly on un-zoom. A `[ZOOM]` tag renders in
+  the divider while active. `^a +` / `^a -` are no-ops while
+  zoomed (with a status flash). Closing the pane (`^a \`) clears
+  the zoom flag. Requested by a daily user.
 
 ## [1.37.2] - 2026-04-30
 

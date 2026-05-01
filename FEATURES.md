@@ -97,6 +97,10 @@ spyc's workflow: browse files above, talk to Claude below.
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
 - **^a + / ^a -** grow or shrink the pane
+- **^a z** zoom the pane (toggle fullscreen) — list collapses to 0
+  rows so the pane fills the middle region; the prior split is
+  restored on un-zoom. Status + prompt rows stay visible (tmux-style).
+  A `[ZOOM]` tag appears in the divider while active.
 - **^a v** enter scroll mode — browse up to 10K lines of scrollback
   without interrupting the child process; **s** saves to a file
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
