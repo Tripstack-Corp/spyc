@@ -124,6 +124,13 @@ pub struct PagerView {
     /// the first render. Updated from `render_single_column` /
     /// `render_multi_column` each frame.
     pub last_viewport_h: std::cell::Cell<u16>,
+    /// Last content width the renderer used for line wrapping
+    /// (terminal width minus line-number gutter, etc.). 0 until
+    /// the first render. Used by `scroll_max` to size the bottom
+    /// of the document in *visual* rows when wrap is on, so long
+    /// lines that wrap to multiple rows don't cause the trailing
+    /// logical lines to fall off the viewport at "Bot".
+    pub last_body_w: std::cell::Cell<u16>,
 }
 
 impl PagerView {
@@ -156,6 +163,7 @@ impl PagerView {
             jump_buf: None,
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
+            last_body_w: std::cell::Cell::new(0),
         }
     }
 
@@ -185,6 +193,7 @@ impl PagerView {
             jump_buf: None,
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
+            last_body_w: std::cell::Cell::new(0),
         }
     }
 
@@ -218,6 +227,7 @@ impl PagerView {
             jump_buf: None,
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
+            last_body_w: std::cell::Cell::new(0),
         }
     }
 
@@ -362,19 +372,53 @@ impl PagerView {
     /// Maximum useful `scroll` value for the current layout. In multi-col
     /// the static partition means each column has its own chunk; the
     /// visible range is capped by the longest chunk minus viewport_h.
-    /// In single-col it's simply `lines - viewport_h`.
-    fn scroll_max(&self, viewport_height: u16) -> u16 {
+    /// In single-col, the obvious answer is `lines - viewport_h`, but
+    /// that's wrong when `wrap` is on and lines exceed `body_w` —
+    /// each wrapped line consumes multiple visual rows, and stopping
+    /// at logical-line distance `viewport_h` from the end leaves the
+    /// trailing lines invisible (the renderer fills the viewport with
+    /// the wrapped portions of earlier lines and runs out of space
+    /// before reaching them). When wrap is on and we have a cached
+    /// `body_w` from the most recent render, we walk lines from the
+    /// end summing visual rows; max_scroll = the highest logical line
+    /// index whose inclusion still fits the viewport.
+    pub fn scroll_max(&self, viewport_height: u16) -> u16 {
         let ncols = self.columns.max(1) as usize;
-        let longest = if ncols <= 1 {
-            self.lines.len()
-        } else {
-            partition_lines_static(&self.lines, ncols)
+        if ncols > 1 {
+            // Multi-col: keep the prior partition-based bound. Wrap
+            // is irrelevant here because multi-col is only used for
+            // pickers (find finder, task viewer) where wrap is off.
+            let longest = partition_lines_static(&self.lines, ncols)
                 .into_iter()
                 .map(|(s, e)| e - s)
                 .max()
-                .unwrap_or(0)
-        };
-        u16::try_from(longest.saturating_sub(viewport_height.into())).unwrap_or(u16::MAX)
+                .unwrap_or(0);
+            return u16::try_from(longest.saturating_sub(viewport_height.into()))
+                .unwrap_or(u16::MAX);
+        }
+        let logical_max = u16::try_from(self.lines.len().saturating_sub(viewport_height.into()))
+            .unwrap_or(u16::MAX);
+        let body_w = self.last_body_w.get() as usize;
+        if !self.wrap || body_w == 0 || viewport_height == 0 {
+            return logical_max;
+        }
+        // Walk from the end backwards, accumulating visual rows.
+        // The first logical line index `i` whose visual-row sum
+        // (including itself) reaches `viewport_height` is the
+        // greatest scroll value that still keeps the last line
+        // visible: starting from `i`, the renderer fills exactly
+        // viewport_h rows ending at the document's last line.
+        let vh = u32::from(viewport_height);
+        let mut acc = 0u32;
+        for (i, line) in self.lines.iter().enumerate().rev() {
+            let rows = u32::try_from(visual_rows(line, body_w)).unwrap_or(u32::MAX);
+            acc = acc.saturating_add(rows);
+            if acc >= vh {
+                return u16::try_from(i).unwrap_or(u16::MAX);
+            }
+        }
+        // Whole document fits in the viewport — no scrolling needed.
+        0
     }
 
     fn clamp_scroll(&mut self, viewport_height: u16) {
@@ -738,6 +782,12 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
     // body + gutter into the same Paragraph so the visual budget
     // matches the actual area ratatui will draw into.
     let body_w = (content_area.width as usize).saturating_sub(gutter_w);
+    // Cache for `scroll_max` so the wrap-aware bound stays
+    // accurate across keystrokes. 0 stays as "unknown" (e.g.
+    // multi-col) so the wrap-aware path correctly falls back to
+    // the logical-line bound there.
+    view.last_body_w
+        .set(u16::try_from(body_w).unwrap_or(u16::MAX));
 
     let mut display_lines: Vec<Line<'static>> = Vec::with_capacity(viewport_h);
     let mut src_idx = start;
@@ -863,6 +913,31 @@ fn apply_row_styling(
 /// offset. Width is in unicode display columns, so wide CJK
 /// characters and emoji count as 2 — same units ratatui uses for
 /// layout.
+/// Count the number of visual rows `line` will occupy when wrapped
+/// at `width`. Mirrors `wrap_line`'s greedy hard-break policy
+/// (cells are filled left-to-right, breaks happen at the first
+/// char that would overflow), but doesn't allocate — used by
+/// `scroll_max` on every keystroke.
+///
+/// Empty lines render as one visual row (a blank line); this
+/// matches the renderer's behavior so the math is symmetric.
+/// `width == 0` yields one row to match `wrap_line`'s short-circuit.
+fn visual_rows(line: &Line<'_>, width: usize) -> usize {
+    if width == 0 {
+        return 1;
+    }
+    let total: usize = line
+        .spans
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum();
+    if total == 0 {
+        return 1;
+    }
+    total.div_ceil(width)
+}
+
 fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![line.clone()];
@@ -1281,6 +1356,51 @@ mod tests {
 
     fn plain_text(line: &Line<'_>) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// Regression test for the wrap-vs-bottom bug: a file with
+    /// long lines that wrap to multiple visual rows would lose the
+    /// trailing logical lines when scrolled to "Bot". Reported on
+    /// `docs/spyc-logo.svg` (154 logical lines, several wrap to 2
+    /// rows each, viewport ~40 rows). The user saw "Bot" but lines
+    /// 151-154 never appeared.
+    ///
+    /// Cause: `scroll_max` computed the cap from logical line
+    /// count, ignoring that wrapped lines consume extra visual
+    /// rows. Fix: when wrap is on and `body_w` is known, walk the
+    /// lines from the end summing visual rows; the highest scroll
+    /// value that still includes the last line in the viewport is
+    /// the true max.
+    #[test]
+    fn scroll_max_accounts_for_wrapped_visual_rows() {
+        // 5 logical lines; each one is 60 chars wide. With body_w=20
+        // each line takes 3 visual rows. Viewport is 6 visual rows
+        // (= 2 logical lines fully unwrapped). Without the fix,
+        // scroll_max = 5 - 6 = 0 (saturating; "All"); with the fix
+        // we should be able to scroll through ~3 logical lines so
+        // line 5's content lands in the last visible row.
+        let view = PagerView::new_plain("test", vec!["x".repeat(60); 5]);
+        view.last_body_w.set(20);
+        assert!(
+            view.scroll_max(6) >= 3,
+            "scroll_max({}) too small — content past visual viewport \
+             will be unreachable",
+            view.scroll_max(6),
+        );
+    }
+
+    #[test]
+    fn scroll_max_logical_when_no_wrap_or_no_body_w() {
+        let mut view = PagerView::new_plain("test", vec!["x".repeat(60); 10]);
+        // wrap off → logical-line behavior
+        view.wrap = false;
+        assert_eq!(view.scroll_max(4), 6); // 10 - 4
+        // wrap on but body_w = 0 (e.g. before first render) →
+        // fall back to logical-line behavior so we don't return a
+        // bogus value when the wrap-aware path can't compute.
+        view.wrap = true;
+        view.last_body_w.set(0);
+        assert_eq!(view.scroll_max(4), 6);
     }
 
     #[test]
