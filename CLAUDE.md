@@ -15,7 +15,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - Project-wide search — `F` opens a fuzzy filename finder (gitignore-aware walker on a worker thread, multi-repo descent into sibling-clone subrepos); `:grep <pattern>` is a project-wide content search via the embedded ripgrep matcher (`grep-regex` + `grep-searcher`, no subprocess), streams `path:line:col: text` into a pager so `gf`/`gF` jump for free.
 - Background tasks — `^Z` while a `!` capture pager is open sends the running task to the background; reader thread keeps draining output into a per-task buffer (head-truncated at 1 MB). `:fg` (or `:fg N`) resumes; `gB` / `:task N` / `[t`/`]t` open a peek "task viewer" without taking ownership. Tasks render as `[N+]`/`[N●]`/`[N✓]`/`[N✗]` in the pane divider (right-aligned, distinct color from pane tabs). On close of a viewed-and-exited task, the rendered view is promoted into buffer history.
 - Pager buffer history — closed pager views go onto a back/forward stack (max 10). `:bprev`/`:bnext` walk it from the prompt; `[b`/`]b` chord walks it from inside an open pager; `gp` reopens the most-recent closed buffer from the file list. The help overlay is excluded from the stack.
-- `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=git`/`=g` for files in `git status`, `=` clears)
+- `=` limit filter — temporary glob filtering (`=*.rs`, `=!` for picks, `=git`/`=g` for files in `git status`, `=h` for harpoon, `=` clears)
+- Harpoon — small per-project pinned list of file/dir pointers (max 9 slots) for muscle-memory navigation. `H` is now a chord prefix: `Ha` append, `Hx` remove, `H1`..`H9` jump (chdir + cursor), `Hh` open menu (j/k, K/J reorder, dd delete). `=h` filters the listing to harpoon entries (with ancestor dirs). Persisted at `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml` per `PROJECT_HOME`. `H` was previously an alias for `Home`; that role is now `~` / Home key only.
 - Picks (per-directory multi-select) and inventory (file cache with graveyard)
 - Session save/restore — auto-saved on quit with a spice-themed name (e.g. `SAFFRON_CUMIN`), `spyc -r` resumes tabs and Claude conversations
 - `PROJECT_HOME` — sticky per-session project root. Auto-set when launch dir has `.git`. `gh` jumps, `gP` sets, `:project` manages. New pane tabs default their cwd to `PROJECT_HOME`. Exposed via MCP context.
@@ -42,7 +43,7 @@ per-module navigation index.
 - **`src/mcp.rs`** — MCP server: PID-scoped Unix socket listener, stdio proxy for Claude Code, `.mcp.json` management, enterprise policy checking, instance takeover.
 - **`src/mcp_cmd.rs`** — Command channel types bridging MCP threads to the main event loop.
 - **`src/context.rs`** — Context snapshot (cwd, cursor, picks, filter, git branch, project_home, session_name) written to disk for MCP consumers.
-- **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks, sessions, session_names (spice-pair generator).
+- **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks, sessions, session_names (spice-pair generator), harpoon (per-project pinned file list).
 - **`src/config/`** — Config loading and DSL parser.
 - **`src/shell/`** — Shell expansion and command execution.
 - **`src/paths.rs`** — XDG-compliant path resolution for state, config, and cache directories.

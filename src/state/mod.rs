@@ -2,6 +2,7 @@
 
 pub mod cursor;
 pub mod frecency;
+pub mod harpoon;
 pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
@@ -14,6 +15,7 @@ pub mod sessions;
 
 pub use cursor::Cursor;
 pub use frecency::Frecency;
+pub use harpoon::Harpoon;
 pub use history::History;
 pub use ignore::IgnoreMasks;
 pub use inventory::Inventory;

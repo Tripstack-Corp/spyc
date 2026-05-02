@@ -208,6 +208,7 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`
+- **`:limit h`** / **`:limit harpoon`** — show only harpoon entries
 - **`:limit`** — clear filter
 - **`:!<cmd>`** — captured shell command (same as `!`)
 - **`:!!`** — repeat last captured command
@@ -283,6 +284,40 @@ Vi-style named bookmarks for fast navigation:
 - **''** jump back to the previous directory (like `cd -`)
 - **\`** jump to the start directory (editable via `gS` or `:startdir`)
 
+## Harpoon — pinned working set
+
+Inspired by ThePrimeagen's neovim plugin: a small, hand-curated,
+**per-project** ordered list of file (or directory) pointers for
+muscle-memory navigation. Up to 9 slots. Persisted on disk per
+`PROJECT_HOME`, auto-saved on every mutation.
+
+- **Ha** harpoon the cursor file/dir (append; idempotent; capped at 9)
+- **Hx** un-harpoon the cursor file/dir
+- **H1**..**H9** jump to slot N — chdirs to the slot's parent and
+  places the cursor on the file (or chdirs into the directory).
+  Spyc lets *you* pick the verb afterwards (Enter, V, ^a s); the
+  jump itself is just navigation.
+- **Hh** open the harpoon menu — modal overlay where you can:
+  - **j/k** move cursor / **g**/**G** first/last
+  - **K/J** swap slot up/down (reorder)
+  - **dd** delete the slot under the cursor (vim-style: first `d`
+    arms, second `d` confirms; any other key cancels)
+  - **1**..**9**/**Enter** jump and close
+  - **q/Esc** close
+- **=h** (or `:limit h`) limits the file list to harpoon entries.
+  Ancestor directories are included automatically — if
+  `src/foo/bar/hello.c` is harpooned and you're viewing `src/`,
+  `foo/` shows up so you can drill in.
+
+Persistence: `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`
+(one file per project, keyed by an absolute-path hash so two
+projects with the same basename can't collide). Outside a
+`PROJECT_HOME`, the H-prefix bindings flash a hint and bail.
+
+Note: `H` was previously an alias for "jump to `$HOME`"; it's now
+the harpoon chord prefix. The `~` key and the Home key still jump
+to `$HOME`, and `gh` jumps to `PROJECT_HOME`.
+
 ## Project home & session name
 
 Each spyc run has a **`PROJECT_HOME`** (a sticky project root) and a
@@ -321,9 +356,10 @@ shows only files appearing in `git status` — modified, staged,
 untracked, deleted, renamed, conflicted — plus parent directories
 that contain such files (so you can navigate into changed subtrees).
 The filter stays live as the 1Hz git poll updates `git_files`.
-`=` with an empty pattern clears the filter. The active filter is
-shown in the status bar. Cleared automatically when changing
-directories.
+`=h` shows only the project's harpoon entries plus their ancestor
+directories (see "Harpoon" below). `=` with an empty pattern clears
+the filter. The active filter is shown in the status bar. Cleared
+automatically when changing directories.
 
 ## Powerline status bar
 

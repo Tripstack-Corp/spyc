@@ -6,6 +6,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Harpoon — per-project pinned working set.** Inspired by
+  ThePrimeagen's neovim plugin: a small (max 9), hand-curated,
+  ordered list of file or directory pointers for muscle-memory
+  navigation. `Ha` appends the cursor file/dir, `Hx` removes,
+  `H1`..`H9` jumps to slot N (chdirs to the parent and places the
+  cursor on the file; chdirs *into* the slot if it's a directory).
+  `Hh` opens a modal menu where `K`/`J` reorder, `dd` deletes
+  (vim-style two-key arming), `Enter`/`1`-`9` jumps. `=h` (or
+  `:limit h`) filters the listing to harpoon entries plus all
+  their ancestor directories — so `foo/` shows up when viewing
+  `src/` and `src/foo/bar/hello.c` is harpooned, letting you drill
+  in. Persisted at `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`
+  per `PROJECT_HOME`; auto-saved on every mutation. Two PROJECT_HOMEs
+  with the same basename can't collide (filename is keyed by an
+  absolute-path hash).
+
+### Changed
+- **`H` is no longer an alias for "jump to `$HOME`".** It's now the
+  harpoon chord prefix. The `~` key and the Home key still jump
+  to `$HOME`; `gh` still jumps to `PROJECT_HOME`. This frees the
+  natural `H1`..`H9` muscle-memory bindings without three-keystroke
+  chord overhead.
+
+### Added
 - **`=git` / `=g` limit filter.** Shows only entries appearing in
   `git status` (modified, staged, untracked, deleted, renamed,
   conflicted) plus parent directories that contain such files

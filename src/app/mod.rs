@@ -16,7 +16,7 @@ use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneTabs, PaneWidget, TabEntry, TabInfo};
 use crate::shell;
-use crate::state::{Cursor, History, IgnoreMasks, Inventory, Marks, Picks};
+use crate::state::{Cursor, Harpoon, History, IgnoreMasks, Inventory, Marks, Picks};
 use crate::ui::line_edit::LineEditor;
 use crate::ui::{
     help,
@@ -395,6 +395,21 @@ struct GrepSession {
     root: PathBuf,
 }
 
+/// State for the harpoon menu overlay (`Hh` / `gh`). Shows the
+/// project's harpoon slots and lets the user reorder, delete, or
+/// jump while the overlay is open. Keys are intercepted before
+/// normal dispatch when `Some`.
+struct HarpoonMenu {
+    /// Cursor row inside the menu (0-based, indexes the *active*
+    /// non-empty slots). Clamped to `slots.len() - 1` after each
+    /// mutation so deletes never leave it dangling.
+    cursor: usize,
+    /// vim-style `dd` arming: `d` arms, second `d` deletes; any
+    /// other key clears it. Avoids accidental deletion from a
+    /// single-key slip.
+    delete_armed: bool,
+}
+
 /// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
 /// Works like a browser back/forward stack.
 struct PagerHistory {
@@ -480,6 +495,16 @@ pub struct App {
     pager_was_open: bool,
     pager_jump_buf: Option<String>,
     pane_tabs: Option<PaneTabs>,
+    /// Active harpoon list — small per-project pinned set of file
+    /// pointers. `None` when `PROJECT_HOME` is unset; loaded from
+    /// disk at startup and on chdir into a new `PROJECT_HOME`,
+    /// auto-saved on every mutation. See `state::harpoon` for the
+    /// model and persistence layout.
+    harpoon: Option<Harpoon>,
+    /// Active harpoon menu overlay (interactive: reorder, delete,
+    /// jump). `None` when closed; intercepts keys before normal
+    /// dispatch when open.
+    harpoon_menu: Option<HarpoonMenu>,
     top_overlay: Option<Pane>,
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
@@ -627,6 +652,12 @@ impl App {
         let project_home = cwd.join(".git").exists().then(|| cwd.clone());
         let session_name = Some(crate::state::session_names::generate());
 
+        // Load the harpoon list for the active project (if any). When
+        // `PROJECT_HOME` is unset, harpoon stays `None` and all H-prefix
+        // bindings flash a hint. Loaded once at startup; reloaded on
+        // chdir into a different `PROJECT_HOME`.
+        let harpoon = project_home.as_ref().map(|p| Harpoon::load(p));
+
         // Run health check before loading state — cleans up orphaned
         // files so Inventory::load() et al. see a consistent directory.
         let health_warnings = if let Some(sd) = crate::state::health::state_dir() {
@@ -665,6 +696,10 @@ impl App {
             pane_height_pct: 70,
             pane_zoomed: false,
             pane_focus_before_zoom: None,
+            harpoon_filter_set: harpoon
+                .as_ref()
+                .map(|h| h.ancestor_set().clone())
+                .unwrap_or_default(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,
@@ -714,6 +749,8 @@ impl App {
             pager_was_open: false,
             pager_jump_buf: None,
             pane_tabs: None,
+            harpoon,
+            harpoon_menu: None,
             top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
@@ -2021,6 +2058,122 @@ impl App {
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
+    /// Render the harpoon menu overlay. Centered modal box listing
+    /// the active project's slots, with the menu cursor on a
+    /// highlighted row. Footer shows the bindings.
+    fn render_harpoon_menu(&self, frame: &mut Frame) {
+        use ratatui::{
+            layout::Rect,
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+        let Some(menu) = self.harpoon_menu.as_ref() else {
+            return;
+        };
+        let Some(h) = self.harpoon.as_ref() else {
+            return;
+        };
+
+        let area = frame.area();
+        // Box dims: width clamped, height = 2 chrome + N slots + 2 footer.
+        let width = area.width.clamp(40, 72);
+        let body_h = (h.slots.len().max(1)) as u16;
+        let height = (2 + body_h + 2).min(area.height); // borders + body + footer
+        let x = area.x + (area.width.saturating_sub(width)) / 2;
+        let y = area.y + (area.height.saturating_sub(height)) / 2;
+        let rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        frame.render_widget(Clear, rect);
+
+        let title = format!(
+            " harpoon — {} ",
+            h.project.file_name().map_or_else(
+                || h.project.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        );
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(self.theme.prompt_prefix));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let footer_h = 1u16;
+        let body_rect = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: inner.height.saturating_sub(footer_h),
+        };
+        let footer_rect = Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(footer_h),
+            width: inner.width,
+            height: footer_h,
+        };
+
+        // Body lines.
+        let mut body_lines: Vec<Line> = Vec::with_capacity(h.slots.len().max(1));
+        if h.slots.is_empty() {
+            body_lines.push(Line::from(Span::styled(
+                "  (empty — Ha to harpoon the cursor file/dir)",
+                Style::default().fg(self.theme.status_suffix),
+            )));
+        } else {
+            let cursor_style = Style::default()
+                .fg(Color::Black)
+                .bg(self.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            let normal_style = Style::default().fg(self.theme.status_path);
+            let key_style = Style::default()
+                .fg(self.theme.pick)
+                .add_modifier(Modifier::BOLD);
+            for (i, path) in h.slots.iter().enumerate() {
+                let on_cursor = i == menu.cursor;
+                let armed = on_cursor && menu.delete_armed;
+                let prefix = if armed { " ⚠ " } else { "   " };
+                // Display path relative to project_home when possible
+                // (shorter, more readable); otherwise use the absolute.
+                let shown = path
+                    .strip_prefix(&h.project)
+                    .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
+                let line = Line::from(vec![
+                    Span::styled(prefix, normal_style),
+                    Span::styled(format!("{}  ", i + 1), key_style),
+                    Span::styled(
+                        shown,
+                        if on_cursor {
+                            cursor_style
+                        } else {
+                            normal_style
+                        },
+                    ),
+                ]);
+                body_lines.push(line);
+            }
+        }
+        frame.render_widget(Paragraph::new(body_lines), body_rect);
+
+        let footer_style = Style::default()
+            .fg(self.theme.status_suffix)
+            .add_modifier(Modifier::DIM);
+        let footer_text = if menu.delete_armed {
+            "   d again = delete · any other key cancels"
+        } else {
+            "   j/k move · 1-9/Enter jump · K/J reorder · dd delete · q/Esc close"
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(footer_text, footer_style)),
+            footer_rect,
+        );
+    }
+
     fn render(&mut self, frame: &mut Frame) {
         let frame_area = frame.area();
 
@@ -2321,6 +2474,12 @@ impl App {
             pager::render(frame, frame.area(), view, &self.theme);
         }
 
+        // Harpoon menu overlay — modal, drawn on top of everything
+        // except the activity monitor.
+        if self.harpoon_menu.is_some() {
+            self.render_harpoon_menu(frame);
+        }
+
         // Activity monitor overlay (top-right corner).
         if self.show_activity {
             use ratatui::widgets::Paragraph as ActivityP;
@@ -2535,6 +2694,11 @@ impl App {
         if let Some(overlay) = self.top_overlay.as_mut() {
             let _ = overlay.send_key(key);
             return Ok(PostAction::None);
+        }
+
+        // Harpoon menu eats all keys until dismissed (Esc/q).
+        if self.harpoon_menu.is_some() {
+            return Ok(self.handle_harpoon_menu_key(key));
         }
 
         // Pager eats all keys until dismissed.
@@ -5003,6 +5167,264 @@ impl App {
         self.needs_full_repaint = true;
     }
 
+    // ---- Harpoon -----------------------------------------------------------
+
+    /// Path under the cursor (file or directory) that the harpoon
+    /// `Ha`/`Hx` actions operate on. Returns the absolute path of
+    /// the focused row, or `None` if the listing is empty.
+    fn harpoon_cursor_path(&self) -> Option<PathBuf> {
+        self.state
+            .rows
+            .get(self.state.cursor.index)
+            .map(|r| r.path.clone())
+    }
+
+    /// `Ha` — append the cursor file/dir to the project's harpoon
+    /// list. Idempotent (already-harpooned paths flash and bail);
+    /// hard-capped at `MAX_SLOTS`. Saves the list immediately so a
+    /// crash before the next mutation doesn't lose the entry.
+    fn harpoon_append(&mut self) {
+        if self.harpoon.is_none() {
+            self.state
+                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+            return;
+        }
+        let Some(path) = self.harpoon_cursor_path() else {
+            self.state.flash_error("harpoon: nothing under cursor");
+            return;
+        };
+        let label = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let h = self.harpoon.as_mut().unwrap();
+        match h.append(path) {
+            crate::state::harpoon::AppendResult::Added(slot) => {
+                if let Err(e) = h.save() {
+                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    return;
+                }
+                self.sync_harpoon_filter_set();
+                if matches!(self.state.temp_filter.as_deref(), Some("h")) {
+                    self.state.rebuild_rows();
+                }
+                self.state.flash_info(format!("harpoon[{slot}] {label}"));
+            }
+            crate::state::harpoon::AppendResult::AlreadyPresent => {
+                self.state
+                    .flash_info(format!("harpoon: already in list — {label}"));
+            }
+            crate::state::harpoon::AppendResult::Full => {
+                self.state.flash_error(format!(
+                    "harpoon full ({} slots) — Hx to remove first",
+                    crate::state::harpoon::MAX_SLOTS
+                ));
+            }
+        }
+    }
+
+    /// `Hx` — remove the cursor file from the harpoon list (any
+    /// slot). No-op + flash if it isn't harpooned.
+    fn harpoon_remove(&mut self) {
+        if self.harpoon.is_none() {
+            self.state
+                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+            return;
+        }
+        let Some(path) = self.harpoon_cursor_path() else {
+            self.state.flash_error("harpoon: nothing under cursor");
+            return;
+        };
+        let label = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let h = self.harpoon.as_mut().unwrap();
+        match h.remove(&path) {
+            Some(slot) => {
+                if let Err(e) = h.save() {
+                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    return;
+                }
+                self.sync_harpoon_filter_set();
+                if matches!(self.state.temp_filter.as_deref(), Some("h")) {
+                    self.state.rebuild_rows();
+                }
+                self.state
+                    .flash_info(format!("harpoon: removed [{slot}] {label}"));
+            }
+            None => self
+                .state
+                .flash_info(format!("harpoon: not in list — {label}")),
+        }
+    }
+
+    /// `H<digit>` — jump to slot N. Cursor-land semantics: chdir to
+    /// the file's parent and place the cursor on it (or chdir into
+    /// the directory if the slot is a directory). The user picks
+    /// the verb (Enter, V, ^a s) afterwards. Missing-on-disk → flash
+    /// and bail; we don't auto-prune (the user might be mid-rebase).
+    fn harpoon_jump(&mut self, slot: u8) {
+        let Some(h) = self.harpoon.as_ref() else {
+            self.state
+                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+            return;
+        };
+        let Some(target) = h.get(slot).map(Path::to_path_buf) else {
+            self.state.flash_info(format!("harpoon: slot {slot} empty"));
+            return;
+        };
+        if !target.exists() {
+            self.state.flash_error(format!(
+                "harpoon: gone — {}",
+                target.file_name().map_or_else(
+                    || target.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
+            ));
+            return;
+        }
+        let (chdir_to, focus) = if target.is_dir() {
+            (target, None)
+        } else if let Some(parent) = target.parent() {
+            (parent.to_path_buf(), Some(target.clone()))
+        } else {
+            self.state.flash_error("harpoon: slot has no parent dir");
+            return;
+        };
+        if let Err(e) = self.state.chdir(&chdir_to) {
+            self.state.flash_error(format!("harpoon chdir: {e}"));
+            return;
+        }
+        if let Some(p) = focus {
+            self.state.focus_on_path(&p);
+        }
+        self.state.rebuild_rows();
+        self.state.flash_info(format!("harpoon[{slot}]"));
+    }
+
+    /// `Hh` / `gh` — open the harpoon menu overlay. The menu
+    /// intercepts subsequent keys until closed (Esc/q). No-op when
+    /// the list is unset (no PROJECT_HOME).
+    fn harpoon_open_menu(&mut self) {
+        if self.harpoon.is_none() {
+            self.state
+                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+            return;
+        }
+        self.harpoon_menu = Some(HarpoonMenu {
+            cursor: 0,
+            delete_armed: false,
+        });
+        self.needs_full_repaint = true;
+    }
+
+    /// Key handler for the harpoon menu overlay. Owns all input
+    /// while the menu is open. Bindings:
+    ///   `j`/`k` (and arrows) — move cursor in the menu
+    ///   `g`/`G` — jump to first/last slot
+    ///   `1`..`9` — jump directly to slot N (and close)
+    ///   `Enter` — jump to slot under cursor (and close)
+    ///   `K`/`J` — swap slot up / down (reorder)
+    ///   `dd` — delete slot under cursor (vim convention; first `d`
+    ///          arms, second `d` confirms; any other key disarms)
+    ///   `Esc`/`q` — close menu
+    fn handle_harpoon_menu_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
+        use crossterm::event::KeyCode;
+        let Some(menu) = self.harpoon_menu.as_mut() else {
+            return PostAction::None;
+        };
+        let Some(h) = self.harpoon.as_mut() else {
+            self.harpoon_menu = None;
+            self.needs_full_repaint = true;
+            return PostAction::None;
+        };
+        let len = h.slots.len();
+
+        // `dd` arming. The pending-d flag lives on App so it survives
+        // across this call (which can't borrow `menu` mutably across
+        // re-entry). Using a local approach: piggyback on `cursor`'s
+        // high bit would be hacky — keep it simple and use a separate
+        // bool field on `HarpoonMenu`.
+        let pending_delete = menu.delete_armed;
+        if pending_delete {
+            menu.delete_armed = false;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.harpoon_menu = None;
+                self.needs_full_repaint = true;
+            }
+            KeyCode::Char('j') | KeyCode::Down if len > 0 => {
+                menu.cursor = (menu.cursor + 1).min(len - 1);
+            }
+            KeyCode::Char('k') | KeyCode::Up if len > 0 => {
+                menu.cursor = menu.cursor.saturating_sub(1);
+            }
+            KeyCode::Char('g') if len > 0 => {
+                menu.cursor = 0;
+            }
+            KeyCode::Char('G') if len > 0 => {
+                menu.cursor = len - 1;
+            }
+            KeyCode::Char(c @ '1'..='9') => {
+                let slot = c as u8 - b'0';
+                self.harpoon_menu = None;
+                self.needs_full_repaint = true;
+                self.harpoon_jump(slot);
+            }
+            KeyCode::Enter if len > 0 => {
+                let slot = (menu.cursor + 1) as u8;
+                self.harpoon_menu = None;
+                self.needs_full_repaint = true;
+                self.harpoon_jump(slot);
+            }
+            KeyCode::Char('K') if menu.cursor > 0 && len > 1 => {
+                h.swap(menu.cursor, menu.cursor - 1);
+                menu.cursor -= 1;
+                if let Err(e) = h.save() {
+                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                }
+                self.sync_harpoon_filter_set();
+            }
+            KeyCode::Char('J') if menu.cursor + 1 < len => {
+                h.swap(menu.cursor, menu.cursor + 1);
+                menu.cursor += 1;
+                if let Err(e) = h.save() {
+                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                }
+                self.sync_harpoon_filter_set();
+            }
+            KeyCode::Char('d') => {
+                if pending_delete && menu.cursor < len {
+                    let removed_idx = menu.cursor;
+                    h.remove_at(removed_idx);
+                    if let Err(e) = h.save() {
+                        self.state.flash_error(format!("harpoon save failed: {e}"));
+                    }
+                    self.sync_harpoon_filter_set();
+                    if matches!(self.state.temp_filter.as_deref(), Some("h")) {
+                        self.state.rebuild_rows();
+                    }
+                    // Re-fetch menu since filter sync invalidates `menu` borrow
+                    if let Some(m) = self.harpoon_menu.as_mut() {
+                        let new_len = self.harpoon.as_ref().map_or(0, |hh| hh.slots.len());
+                        if new_len == 0 {
+                            m.cursor = 0;
+                        } else {
+                            m.cursor = removed_idx.min(new_len - 1);
+                        }
+                    }
+                } else if let Some(m) = self.harpoon_menu.as_mut() {
+                    m.delete_armed = true;
+                }
+            }
+            _ => {}
+        }
+        PostAction::None
+    }
+
     // ---- Git diff (M12) ----------------------------------------------------
 
     /// g d / g D — run `git diff` on selection and show in pager.
@@ -6384,7 +6806,55 @@ impl App {
 
     // --- Action handlers --------------------------------------------------
 
+    /// Wrapper around the action dispatcher that reconciles
+    /// project-scoped state (currently just the harpoon list) after
+    /// each action. Cheap: a no-op when `state.project_home` matches
+    /// the loaded harpoon's project field.
     fn apply(&mut self, action: &Action) -> Result<PostAction> {
+        let result = self.apply_inner(action);
+        self.reconcile_harpoon();
+        result
+    }
+
+    /// Save the current harpoon (if any) and load a fresh one when
+    /// `state.project_home` has shifted. Also flips `harpoon` on/off
+    /// when `PROJECT_HOME` is set/unset.
+    fn reconcile_harpoon(&mut self) {
+        let want = self.state.project_home.as_deref();
+        let have = self.harpoon.as_ref().map(|h| h.project.as_path());
+        if want == have {
+            return;
+        }
+        // Save the outgoing list before we drop it.
+        if let Some(h) = self.harpoon.as_ref() {
+            if let Err(e) = h.save() {
+                spyc_debug!("harpoon save on PROJECT_HOME swap failed: {e}");
+            }
+        }
+        self.harpoon = want.map(Harpoon::load);
+        // Close the menu if it's open — its cursor referenced the old
+        // list and would point at stale rows.
+        self.harpoon_menu = None;
+        self.sync_harpoon_filter_set();
+        // If `=h` was active, the now-stale set may render an empty
+        // list silently; rebuild rows so the user sees the new state.
+        if matches!(self.state.temp_filter.as_deref(), Some("h")) {
+            self.state.rebuild_rows();
+        }
+    }
+
+    /// Refresh `state.harpoon_filter_set` from the active harpoon.
+    /// Call after any list mutation (append/remove/swap/delete) so
+    /// `=h` reflects the new state on the next `rebuild_rows`.
+    fn sync_harpoon_filter_set(&mut self) {
+        self.state.harpoon_filter_set = self
+            .harpoon
+            .as_ref()
+            .map(|h| h.ancestor_set().clone())
+            .unwrap_or_default();
+    }
+
+    fn apply_inner(&mut self, action: &Action) -> Result<PostAction> {
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
@@ -6508,6 +6978,10 @@ impl App {
             | Action::PanePrevTab
             | Action::PaneRenameTab
             | Action::PaneRestartTab
+            | Action::HarpoonJump(_)
+            | Action::HarpoonAppend
+            | Action::HarpoonRemove
+            | Action::HarpoonOpenMenu
             | Action::PanePipeContent
             | Action::PanePipeInventory
                 if matches!(
@@ -6585,6 +7059,11 @@ impl App {
 
             Action::PanePipeContent => self.pipe_content_to_pane(false),
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
+
+            Action::HarpoonJump(n) => self.harpoon_jump(*n),
+            Action::HarpoonAppend => self.harpoon_append(),
+            Action::HarpoonRemove => self.harpoon_remove(),
+            Action::HarpoonOpenMenu => self.harpoon_open_menu(),
 
             Action::WorktreeList => self.worktree_list(),
 

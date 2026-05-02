@@ -110,6 +110,11 @@ pub struct AppState {
     pub quit_pending: Option<std::time::Instant>,
     pub git_info: Option<String>,
     pub git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
+    /// Snapshot of the active harpoon ancestor-set (slot paths plus
+    /// every parent directory of every slot). App refreshes this
+    /// whenever the harpoon list mutates so `apply_temp_filter`
+    /// remains pure-domain. Empty when no `PROJECT_HOME` is active.
+    pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
@@ -441,6 +446,13 @@ impl AppState {
         if pattern == "!" {
             rows.into_iter()
                 .filter(|r| self.picks.contains(&r.path))
+                .collect()
+        } else if pattern == "h" {
+            // Harpoon filter — keep entries whose absolute path is
+            // in the project's harpoon set (slot paths plus all
+            // their ancestor directories). Empty set → empty list.
+            rows.into_iter()
+                .filter(|r| self.harpoon_filter_set.contains(&r.path))
                 .collect()
         } else if pattern == "git" {
             // Show only entries that appear in `git status` with a
@@ -1227,6 +1239,15 @@ impl AppState {
                 } else if pattern == "!" {
                     self.temp_filter = Some("!".to_string());
                     self.flash_info("limit: picks only");
+                } else if pattern == "h" || pattern == "harpoon" {
+                    if self.harpoon_filter_set.is_empty() {
+                        self.flash_error(
+                            "harpoon empty (or PROJECT_HOME unset) — nothing to filter",
+                        );
+                        return PromptResult::Handled;
+                    }
+                    self.temp_filter = Some("h".to_string());
+                    self.flash_info("limit: harpoon");
                 } else if pattern == "git" || pattern == "g" {
                     if self.git_files.is_empty() {
                         self.flash_error("not in a git repo (or no changes)");
@@ -1403,6 +1424,7 @@ mod tests {
             quit_pending: None,
             git_info: None,
             git_files: std::collections::HashMap::new(),
+            harpoon_filter_set: std::collections::HashSet::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,
