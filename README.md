@@ -218,7 +218,7 @@ back to it later.
 | `` ` `` | Jump to start dir (set with `gS` or `:startdir`) |
 | `a` | Toggle dotfile filter |
 | `o` | Toggle build artifact filter |
-| `=` | Temporary glob filter (`=*.rs`, `=!` for picks) |
+| `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git status) |
 
 ### Project home & session
 

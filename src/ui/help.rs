@@ -84,7 +84,10 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("a", "toggle mask 1 (dotfiles by default)"),
             ("o", "toggle mask 2 (build artifacts by default)"),
-            ("=", "limit — filter by glob (! = picks only, empty clears)"),
+            (
+                "=",
+                "limit — glob filter (! = picks, git/g = git changes, empty clears)",
+            ),
         ],
     },
     Section {
