@@ -5,6 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pager: trailing logical lines were unreachable when long lines
+  wrapped.** A file with N logical lines (some long enough to wrap
+  to multiple visual rows) showed "Bot" before all content was
+  visible — `scroll_max` capped the scroll using logical-line count,
+  so wrapped portions of earlier lines consumed the visual budget
+  and pushed the last few lines off-screen. Reported on
+  `docs/spyc-logo.svg` (154 lines, several path elements wrap; lines
+  151-154 never appeared at "Bot"). Fix: `scroll_max` now walks
+  lines from the end summing visual rows when wrap is on, using a
+  `last_body_w` cache the renderer updates each frame. Wrap-off
+  pagers and multi-column pickers keep the original logical-line
+  bound. Two regression tests in `pager::tests`.
+
 ### Added
 - **Quick Select — labeled overlay picker (`^a u`).** Borrowed from
   WezTerm's mode of the same name. Press `^a u` to scan the visible
