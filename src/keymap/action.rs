@@ -117,6 +117,12 @@ pub enum Action {
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
+    // Harpoon — small per-project pinned list of file pointers.
+    HarpoonJump(u8), // H 1..9 — chdir to slot N's parent + cursor on it
+    HarpoonAppend,   // H a — append cursor file/dir to harpoon list
+    HarpoonRemove,   // H x — remove cursor file from harpoon list
+    HarpoonOpenMenu, // H h / g h — open the harpoon menu (reorder, delete, jump)
+
     // Git worktree (M11).
     WorktreeList,   // W l — list worktrees, pick to chdir
     WorktreeNew,    // W n — prompt for branch, create worktree
@@ -227,6 +233,10 @@ impl Action {
             Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
+            Self::HarpoonJump(_) => "jump to harpoon slot N",
+            Self::HarpoonAppend => "harpoon — append cursor file",
+            Self::HarpoonRemove => "harpoon — remove cursor file",
+            Self::HarpoonOpenMenu => "harpoon — open menu",
             Self::WorktreeList => "list git worktrees",
             Self::WorktreeNew => "new git worktree",
             Self::WorktreeDelete => "delete git worktree",

@@ -41,7 +41,7 @@ const SECTIONS: &[Section] = &[
             ),
             ("V", "open $EDITOR in top pane (Claude pane stays visible)"),
             ("u  -", "climb to parent"),
-            ("H  ~  Home", "go to home directory"),
+            ("~  Home", "go to home directory ($HOME)"),
             ("J", "jump to a path (~, $VAR expanded)"),
             (
                 "F",
@@ -86,7 +86,7 @@ const SECTIONS: &[Section] = &[
             ("o", "toggle mask 2 (build artifacts by default)"),
             (
                 "=",
-                "limit — glob filter (! = picks, git/g = git changes, empty clears)",
+                "limit — glob (! picks, git/g git changes, h harpoon, empty clears)",
             ),
         ],
     },
@@ -110,6 +110,16 @@ const SECTIONS: &[Section] = &[
             ("'{a-z}", "jump to mark (chdir + focus)"),
             ("''", "jump back to previous directory (cd -)"),
             ("`", "jump to starting dir (set with gS or :startdir)"),
+        ],
+    },
+    Section {
+        title: "Harpoon (per-project pinned files, max 9)",
+        rows: &[
+            ("Ha", "append cursor file/dir to harpoon"),
+            ("Hx", "remove cursor file/dir from harpoon"),
+            ("H1..H9", "jump to harpoon slot N (chdir + focus)"),
+            ("Hh", "open harpoon menu (j/k, K/J reorder, dd delete)"),
+            ("=h", "limit listing to harpoon (incl. ancestor dirs)"),
         ],
     },
     Section {

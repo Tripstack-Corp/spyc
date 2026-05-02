@@ -28,6 +28,9 @@ enum PendingSeq {
     Worktree,
     /// Seen `y`, waiting for: `y` = take (inventory yank), `p` = yank pane.
     Yank,
+    /// Seen uppercase `H`, waiting for a harpoon sub-command:
+    /// `1`..`9` = jump to slot, `a` = append, `x` = remove, `h` = open menu.
+    Harpoon,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -79,6 +82,7 @@ impl Resolver {
             PendingSeq::W => "^a-",
             PendingSeq::Worktree => "W-",
             PendingSeq::Yank => "y-",
+            PendingSeq::Harpoon => "H-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -195,6 +199,21 @@ impl Resolver {
             return out;
         }
 
+        // Mid-sequence: `H` (harpoon) prefix waiting for a sub-command.
+        if self.pending == PendingSeq::Harpoon {
+            let out = match ev.code {
+                KeyCode::Char(c @ '1'..='9') => {
+                    ResolverOutcome::Action(Action::HarpoonJump(c as u8 - b'0'))
+                }
+                KeyCode::Char('a' | 'A') => ResolverOutcome::Action(Action::HarpoonAppend),
+                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::HarpoonRemove),
+                KeyCode::Char('h') => ResolverOutcome::Action(Action::HarpoonOpenMenu),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
         // Mid-sequence: `y` prefix waiting for a yank sub-command.
         if self.pending == PendingSeq::Yank {
             let out = match ev.code {
@@ -304,7 +323,11 @@ impl Resolver {
                 self.reset();
                 ResolverOutcome::Action(Action::Climb)
             }
-            KeyCode::Char('H' | '~') | KeyCode::Home => {
+            // `~` and the Home key both still jump to `$HOME`. `H` was
+            // formerly an alias here but is now the harpoon chord prefix
+            // (`H1`..`H9`, `Ha`, `Hx`, `Hh`); muscle-memory falls back
+            // to `gh` (PROJECT_HOME) for the common case anyway.
+            KeyCode::Char('~') | KeyCode::Home => {
                 self.reset();
                 ResolverOutcome::Action(Action::Home)
             }
@@ -487,6 +510,12 @@ impl Resolver {
             // Git worktree prefix.
             KeyCode::Char('W') => {
                 self.pending = PendingSeq::Worktree;
+                ResolverOutcome::Pending
+            }
+
+            // Harpoon prefix (`H1`..`H9`, `Ha`, `Hx`, `Hh`).
+            KeyCode::Char('H') => {
+                self.pending = PendingSeq::Harpoon;
                 ResolverOutcome::Pending
             }
 
@@ -1202,13 +1231,43 @@ mod tests {
             feed(&mut r, key('-')),
             ResolverOutcome::Action(Action::Climb)
         );
+        // `H` is the harpoon chord prefix (was `Home` alias; freed
+        // for `H1`..`H9`, `Ha`, `Hx`, `Hh`). `~` and the Home key
+        // remain the bindings for jumping to `$HOME`.
+        assert_eq!(feed(&mut r, key('H')), ResolverOutcome::Pending);
+        // `Hh` opens the harpoon menu (recovers from the pending state).
         assert_eq!(
-            feed(&mut r, key('H')),
-            ResolverOutcome::Action(Action::Home)
+            feed(&mut r, key('h')),
+            ResolverOutcome::Action(Action::HarpoonOpenMenu)
         );
         assert_eq!(
             feed(&mut r, key('~')),
             ResolverOutcome::Action(Action::Home)
+        );
+    }
+
+    #[test]
+    fn harpoon_chord_jumps_to_slot() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('H'));
+        assert_eq!(
+            feed(&mut r, key('3')),
+            ResolverOutcome::Action(Action::HarpoonJump(3))
+        );
+    }
+
+    #[test]
+    fn harpoon_chord_append_remove() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('H'));
+        assert_eq!(
+            feed(&mut r, key('a')),
+            ResolverOutcome::Action(Action::HarpoonAppend)
+        );
+        feed(&mut r, key('H'));
+        assert_eq!(
+            feed(&mut r, key('x')),
+            ResolverOutcome::Action(Action::HarpoonRemove)
         );
     }
 

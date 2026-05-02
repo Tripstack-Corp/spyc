@@ -218,7 +218,20 @@ back to it later.
 | `` ` `` | Jump to start dir (set with `gS` or `:startdir`) |
 | `a` | Toggle dotfile filter |
 | `o` | Toggle build artifact filter |
-| `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git status) |
+| `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git, `=h` harpoon) |
+
+### Harpoon (per-project pinned files)
+
+A small ordered list (max 9 slots) of files / dirs you're cycling
+between. Persists per `PROJECT_HOME`.
+
+| Key | Action |
+|-----|--------|
+| `Ha` | Append cursor file/dir to harpoon |
+| `Hx` | Remove cursor file/dir from harpoon |
+| `H1`..`H9` | Jump to slot N (chdir + place cursor) |
+| `Hh` | Open harpoon menu (j/k, K/J reorder, dd delete) |
+| `=h` | Limit listing to harpoon entries (incl. ancestor dirs) |
 
 ### Project home & session
 
