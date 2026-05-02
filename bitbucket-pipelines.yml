@@ -54,9 +54,15 @@ definitions:
           - cargo llvm-cov --locked --all-targets --fail-under-lines 35
 
 pipelines:
-  default:
-    - step: *quality
-
+  # No `default:` block. With both `default` and `pull-requests`
+  # active, every push to a feature branch with an open PR fired
+  # *two* identical pipelines in parallel — one matched by the
+  # catch-all `default`, one by `pull-requests`. Dropping `default`
+  # leaves a clean three-state model:
+  #   - branch push, no PR    → no CI (open the PR for feedback)
+  #   - branch push, PR open  → `pull-requests` runs once
+  #   - merge to main         → `branches.main` runs (parallel
+  #                              quality + coverage gate)
   branches:
     main:
       - parallel:
