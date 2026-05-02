@@ -1,7 +1,12 @@
 ### SMALL ###
-- = should be able to show "files being worked on" which could be files
-  included in git status or setup like the harpoon tool in neovim
-  https://github.com/theprimeagen/harpoon
+- harpoon-style "currently working on" pinned set — small ordered
+  per-project file list with quick numeric jumps, persistent across
+  sessions; not just a filter mode. Distinct from picks (per-dir,
+  ephemeral), marks (single-file pointer per letter), inventory
+  (yank stash). Needs a real design pass — design space overlaps
+  existing concepts. https://github.com/theprimeagen/harpoon
+  (`=git` / `=g` filter shipped separately for the simple "files in
+  git status" case.)
 - we should steal some ideas from https://wezterm.org/ e.g. simple visual
   picker for urls / id's from the terminal view
 - it's very confusing still to remember you're in scroll mode in the bottom

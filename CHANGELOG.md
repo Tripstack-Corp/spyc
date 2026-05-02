@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`=git` / `=g` limit filter.** Shows only entries appearing in
+  `git status` (modified, staged, untracked, deleted, renamed,
+  conflicted) plus parent directories that contain such files
+  (so changed subtrees stay navigable). The filter stays live as
+  the 1Hz git poll updates `git_files`. `=` clears it like any
+  other filter. Outside a git repo (or with no changes), applying
+  `=git` flashes "not in a git repo (or no changes)" instead of
+  silently showing an empty list. Requested via BUGS.md; the
+  harpoon-style pinned-set part of that request is split out for
+  a deeper design pass.
 - **Pane zoom (fullscreen toggle).** `^a z` (and `^w z`) zooms the
   bottom pane: the file list collapses to 0 rows and the pane fills
   the middle region between status and prompt. Tmux-style — the

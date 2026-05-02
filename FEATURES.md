@@ -207,6 +207,7 @@ separate from shell commands — so Up/Down shows `claude`, `zsh`,
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
+- **`:limit git`** / **`:limit g`** — show only files in `git status`
 - **`:limit`** — clear filter
 - **`:!<cmd>`** — captured shell command (same as `!`)
 - **`:!!`** — repeat last captured command
@@ -315,9 +316,14 @@ Masks are configurable in `.spycrc.toml` — you can define custom glob
 patterns for each group.
 
 **Temporary filter** (`=`): type a glob pattern to temporarily hide
-non-matching files. `=!` shows only picked files. `=` with an empty
-pattern clears the filter. The active filter is shown in the status bar.
-Cleared automatically when changing directories.
+non-matching files. `=!` shows only picked files. `=git` (or `=g`)
+shows only files appearing in `git status` — modified, staged,
+untracked, deleted, renamed, conflicted — plus parent directories
+that contain such files (so you can navigate into changed subtrees).
+The filter stays live as the 1Hz git poll updates `git_files`.
+`=` with an empty pattern clears the filter. The active filter is
+shown in the status bar. Cleared automatically when changing
+directories.
 
 ## Powerline status bar
 

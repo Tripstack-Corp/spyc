@@ -434,12 +434,27 @@ impl AppState {
     }
 
     pub fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
+        use crate::ui::list_view::GitFileStatus;
         let Some(ref pattern) = self.temp_filter else {
             return rows;
         };
         if pattern == "!" {
             rows.into_iter()
                 .filter(|r| self.picks.contains(&r.path))
+                .collect()
+        } else if pattern == "git" {
+            // Show only entries that appear in `git status` with a
+            // non-Clean state. `git_files` keys files by basename and
+            // also marks parent directories that contain changes
+            // (basename + trailing `/`), so directories show up too —
+            // useful for navigating into a subtree with edits.
+            rows.into_iter()
+                .filter(|r| {
+                    !matches!(
+                        self.git_files.get(&r.display).copied().unwrap_or_default(),
+                        GitFileStatus::Clean
+                    )
+                })
                 .collect()
         } else {
             let matcher = Matcher::build(pattern);
@@ -1212,6 +1227,13 @@ impl AppState {
                 } else if pattern == "!" {
                     self.temp_filter = Some("!".to_string());
                     self.flash_info("limit: picks only");
+                } else if pattern == "git" || pattern == "g" {
+                    if self.git_files.is_empty() {
+                        self.flash_error("not in a git repo (or no changes)");
+                        return PromptResult::Handled;
+                    }
+                    self.temp_filter = Some("git".to_string());
+                    self.flash_info("limit: git changes");
                 } else {
                     self.temp_filter = Some(pattern.to_string());
                     self.flash_info(format!("limit: {pattern}"));
