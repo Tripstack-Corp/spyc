@@ -1,4 +1,22 @@
 ### SMALL ###
+- pane widget always paints a reverse-video cursor block at
+  `screen.cursor_position()` even when the child has set `DEC ?25l`
+  (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`;
+  `src/pane/widget.rs:43-54` just doesn't read it. Most likely
+  cause of the rendering glitch reported when running lazygit in
+  the lower pane (lazygit hides the cursor and draws its own
+  selection highlight, so the stray block shows up as a cell
+  inverted in the wrong place). Fix is a single guard on
+  `screen.hide_cursor()` before the reverse-video paint.
+- pane spawn env should advertise `COLORTERM=truecolor`. We
+  already set `TERM=xterm-256color`
+  (`src/pane/mod.rs:102` in pre-quickselect numbering), but
+  modern apps that runtime-negotiate truecolor (lazygit/tcell,
+  bat, fzf) check `$COLORTERM` first and silently downgrade to
+  256-color when it's missing. Symptom: diff palettes look
+  "close but slightly off" inside the pane vs. a bare terminal
+  tab. One-line addition next to the existing `TERM` env line.
+- graveyard should include files that have been removed with R
 - it's very confusing still to remember you're in scroll mode in the bottom
   half - we need a stronger top line/bottom line marker for this
 - while focused on the command in the lower pane we should send ^c to the lower
@@ -20,7 +38,6 @@
   may still way to try and restart it
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
-- graveyard should include files that have been removed with R
 - we should be able to send control signals to running processes e.g. ^t
 - cw didn't seem to be worked as expected in ! (? need to confirm - may have
   been using an old version); maybe we should put a build commit hash in the
@@ -38,6 +55,20 @@
   for `\e[NA` sequences to confirm vs. brew choosing line-mode.
 
 ### BIGGER ###
+- pane forwards no mouse events to the child. spyc never calls
+  `EnableMouseCapture` on the host terminal
+  (`src/main.rs::setup_terminal`), and `src/pane/input.rs` has no
+  encoder for `Event::Mouse(_)`. `vt100` *tracks* the mouse
+  protocols when the child enables them (1000/1002/1003/1006), but
+  no events ever reach the pty. Apps that default to
+  `MouseEvents: true` (lazygit, htop, broot in mouse mode) look
+  half-broken — clicks on panel headers / commit list / footer
+  keybindings, scroll-wheel on diffs, all silently no-op. Two-layer
+  fix: enable mouse capture on the host terminal *and* add the
+  `Event::Mouse` arm in `pane::input::encode_key` to encode SGR
+  mouse reports the child expects. Worth designing carefully
+  because spyc itself doesn't want mouse events outside the pane —
+  the right shape is "forward to pane only when pane is focused."
 - yank last response possible? [only if claude code terminal? is there an "api"
   in CC for it to better maintain over time?
 - include a SMALL model that can conversationally answer how to do stuff with
@@ -52,6 +83,21 @@
 - ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
+- vt100 0.15 doesn't parse `\x1b[?2026h…\x1b[?2026l` (synchronized
+  output / "mode 2026"). Apps that wrap every redraw in 2026
+  (lazygit/tcell, recent neovim) get partial-frame tearing during
+  fast scrolls — the renderer reads a half-finished frame and
+  paints it. spyc already *emits* mode 2026 itself (perf refactor,
+  see FIXED entries), so the protocol is well-supported on the
+  host side; only the pane's vt100 parser is behind. Either
+  upgrade the `vt100` crate (the unmaintained 0.15 → a
+  community-fork or alacritty's `vte` parser) or live with the
+  tearing. Big dep change; defer until someone notices.
+- vt100 0.15 doesn't parse OSC 8 (terminal hyperlinks). lazygit's
+  footer ("Donate" / "Ask Question") and any modern tool that
+  emits `\x1b]8;;url\x07label\x1b]8;;\x07` will show stray bytes
+  or a label without the link. Same dep-upgrade story as mode 2026
+  above; same defer rationale.
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles

@@ -548,8 +548,7 @@ one of the tracks above when picked up.
   a pager mode rather than a fifth overlay. Stays inside
   DESIGN.md's "render *into* the pager" rule. Highest-leverage
   of the lazygit borrows because the scoped-help item below
-  builds on it. Full analysis at
-  `notes/lazygit-ux-catalogue.md` §4.
+  builds on it.
 - **Context-sensitive prompt-row hint** (lazygit-inspired).
   Paint the most-relevant keys for the active overlay or mode
   into the prompt row using the DIM modifier — only when keys
@@ -558,15 +557,13 @@ one of the tracks above when picked up.
   status row is forbidden, so the prompt row is the only legal
   transient surface for this. Directly addresses the "I know it
   exists but forgot the key" failure mode without a help-overlay
-  context switch. Full analysis at
-  `notes/lazygit-ux-catalogue.md` §2.
+  context switch.
 - **Scoped `?` help** (lazygit-inspired). Restructure the
   existing `src/ui/help.rs` dump to lead with the active
   surface's keys, then a collapsed "global / other surfaces"
   tail. Content reorganization, not a new feature; cost is
   near-zero once the generalized pager picker lands and `?`
-  can render its scoped section as a picker. Full analysis at
-  `notes/lazygit-ux-catalogue.md` §5.
+  can render its scoped section as a picker.
 
 ## Done (recent)
 
