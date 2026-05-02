@@ -181,6 +181,7 @@ impl Resolver {
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
                 KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
+                KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

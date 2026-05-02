@@ -505,6 +505,10 @@ pub struct App {
     /// jump). `None` when closed; intercepts keys before normal
     /// dispatch when open.
     harpoon_menu: Option<HarpoonMenu>,
+    /// Active Quick Select picker (`^a u`). `None` when closed;
+    /// intercepts keys before normal dispatch while open. See
+    /// `pane::quick_select` for the model.
+    quick_select: Option<crate::pane::quick_select::QuickSelect>,
     top_overlay: Option<Pane>,
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
@@ -751,6 +755,7 @@ impl App {
             pane_tabs: None,
             harpoon,
             harpoon_menu: None,
+            quick_select: None,
             top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
@@ -2407,6 +2412,12 @@ impl App {
                 rect,
             );
             tabs.active_mut().output_dirty = false;
+            // Quick Select labels paint *over* the pane widget so
+            // the user keeps the live output as context. Render
+            // here, after the pane, before the divider.
+            if self.quick_select.is_some() {
+                self.render_quick_select_overlay(frame, rect);
+            }
         }
 
         if let Some(divider_rect) = layout.divider {
@@ -2694,6 +2705,13 @@ impl App {
         if let Some(overlay) = self.top_overlay.as_mut() {
             let _ = overlay.send_key(key);
             return Ok(PostAction::None);
+        }
+
+        // Quick Select picker eats all keys until dismissed.
+        // Earlier than the harpoon menu so it'll never collide
+        // with chord state.
+        if self.quick_select.is_some() {
+            return Ok(self.handle_quick_select_key(key));
         }
 
         // Harpoon menu eats all keys until dismissed (Esc/q).
@@ -5425,6 +5443,309 @@ impl App {
         PostAction::None
     }
 
+    // ---- Quick Select ------------------------------------------------------
+
+    /// `^a u` — enter Quick Select. Snapshot the visible pane,
+    /// scan for matches across the built-in + user patterns,
+    /// assign labels, and install the picker as a key-intercepting
+    /// overlay. Bails with a flash if there's nothing pickable.
+    fn open_quick_select(&mut self) {
+        use crate::pane::quick_select::{QuickSelect, assign_labels, build_patterns, scan};
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            self.state.flash_error("quick select: pane is closed");
+            return;
+        };
+        // Always scan the *visible* viewport — labels must land on
+        // text the user can see. Scroll mode falls out of this for
+        // free since `visible_lines()` honors the user's current
+        // scroll position.
+        let lines = tabs.active().visible_lines();
+        let patterns = build_patterns(&self.state.config.scan_patterns);
+        let mut matches = scan(&lines, &patterns);
+        if matches.is_empty() {
+            self.state.flash_info("quick select: no matches in view");
+            return;
+        }
+        let all_two_letter = assign_labels(&mut matches);
+        self.quick_select = Some(QuickSelect {
+            matches,
+            pending_first: None,
+            all_two_letter,
+            open_intent: false,
+        });
+        self.needs_full_repaint = true;
+    }
+
+    /// Key handler for the Quick Select overlay. Owns input until
+    /// the picker exits. Bindings:
+    ///   `q` / `Esc`            — exit, no action
+    ///   one-letter labels      — commit immediately
+    ///   uppercase one-letter   — commit with "open" intent
+    ///   two-letter labels      — first key narrows, second commits;
+    ///                            uppercase anywhere = open intent
+    ///   any other key          — clears any narrowing buffer (so a
+    ///                            stray keystroke doesn't strand the
+    ///                            user; they can still type a label)
+    fn handle_quick_select_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
+        use crossterm::event::KeyCode;
+        let Some(qs) = self.quick_select.as_mut() else {
+            return PostAction::None;
+        };
+
+        let close = |this: &mut Self| {
+            this.quick_select = None;
+            this.needs_full_repaint = true;
+        };
+
+        let c = match key.code {
+            KeyCode::Esc => {
+                close(self);
+                return PostAction::None;
+            }
+            KeyCode::Char(c) => c,
+            _ => return PostAction::None,
+        };
+
+        // `q`/`Q` always exits — labels never use it (alphabet check
+        // covered in unit test) so this is unambiguous.
+        if c.eq_ignore_ascii_case(&'q') && qs.pending_first.is_none() {
+            close(self);
+            return PostAction::None;
+        }
+
+        let is_upper = c.is_ascii_uppercase();
+        let lower = c.to_ascii_lowercase();
+
+        if qs.all_two_letter {
+            match qs.pending_first {
+                None => {
+                    // First keystroke: must be the prefix of some label.
+                    let any_match = qs.matches.iter().any(|m| m.label.starts_with(lower));
+                    if !any_match {
+                        return PostAction::None; // no narrowing possible — ignore
+                    }
+                    qs.pending_first = Some(lower);
+                    if is_upper {
+                        qs.open_intent = true;
+                    }
+                }
+                Some(first) => {
+                    let combined = format!("{first}{lower}");
+                    let open = qs.open_intent || is_upper;
+                    let m = qs.matches.iter().find(|m| m.label == combined).cloned();
+                    close(self);
+                    if let Some(m) = m {
+                        self.dispatch_quick_select(&m, open);
+                    }
+                }
+            }
+        } else {
+            // 1-letter labels. Uppercase commits with open intent.
+            let m = qs
+                .matches
+                .iter()
+                .find(|m| m.label == lower.to_string())
+                .cloned();
+            close(self);
+            if let Some(m) = m {
+                self.dispatch_quick_select(&m, is_upper);
+            }
+        }
+        PostAction::None
+    }
+
+    /// Route a picked match to the right action, given user
+    /// intent. See action matrix in `FEATURES.md` ("Quick Select").
+    fn dispatch_quick_select(&mut self, m: &crate::pane::quick_select::Match, open_intent: bool) {
+        use crate::pane::quick_select::MatchKind;
+        let kind_label = m.kind.label().to_string();
+        let text = m.text.clone();
+        if !open_intent {
+            self.yank_quick_select(&text, &kind_label);
+            return;
+        }
+        match &m.kind {
+            MatchKind::Url => self.open_url_or_flash(&text),
+            MatchKind::Path => self.jump_to_pane_path(&text),
+            MatchKind::GitSha => self.open_git_show_pager(&text),
+            MatchKind::Custom { url_template, .. } if url_template.is_some() => {
+                let url = url_template.as_ref().unwrap().replace("{}", &text);
+                self.open_url_or_flash(&url);
+            }
+            // IPv4 and template-less Custom: fall back to yank with a
+            // hint that explains why nothing else happened.
+            MatchKind::Ipv4 | MatchKind::Custom { .. } => {
+                self.yank_quick_select(&text, &kind_label);
+                self.state
+                    .flash_info(format!("yanked {kind_label} (no open handler)"));
+            }
+        }
+    }
+
+    fn yank_quick_select(&mut self, text: &str, kind_label: &str) {
+        match Self::copy_to_clipboard(text) {
+            Ok(()) => {
+                let preview: String = text.chars().take(60).collect();
+                let ellipsis = if text.len() > 60 { "…" } else { "" };
+                self.state
+                    .flash_info(format!("yanked {kind_label}: {preview}{ellipsis}"));
+            }
+            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+        }
+    }
+
+    /// Hand `target` to the system handler via the `open` crate
+    /// (cross-platform: macOS `open`, Linux `xdg-open`, Windows
+    /// `start`). The crate spawns the launcher as a detached child
+    /// and returns immediately, so the system handler never blocks
+    /// our event loop.
+    fn open_url_or_flash(&mut self, url: &str) {
+        match open::that_detached(url) {
+            Ok(()) => {
+                let preview: String = url.chars().take(80).collect();
+                let ellipsis = if url.len() > 80 { "…" } else { "" };
+                self.state
+                    .flash_info(format!("opening: {preview}{ellipsis}"));
+            }
+            Err(e) => self.state.flash_error(format!("open: {e}")),
+        }
+    }
+
+    /// Navigate spyc to a path matched in the pane (uppercase intent
+    /// for a Path match). Mirrors `goto_file_from_pane`'s post-resolve
+    /// flow but starts from a pre-extracted path string rather than
+    /// running pathref again.
+    fn jump_to_pane_path(&mut self, raw: &str) {
+        let path = std::path::PathBuf::from(raw);
+        let resolved = if path.is_absolute() {
+            path
+        } else {
+            // Resolve against the active pane tab's cwd first, falling
+            // back to spyc's listing dir — same precedence `gf` uses.
+            let tab_cwd = self.pane_tabs.as_ref().map(|t| t.active_info().cwd.clone());
+            let candidate = tab_cwd.as_ref().map(|c| c.join(&path));
+            match candidate {
+                Some(p) if p.exists() => p,
+                _ => self.state.listing.dir.join(&path),
+            }
+        };
+        if !resolved.exists() {
+            self.state
+                .flash_error(format!("path not found: {}", resolved.display()));
+            return;
+        }
+        let (chdir_to, focus) = if resolved.is_dir() {
+            (resolved, None)
+        } else if let Some(parent) = resolved.parent() {
+            (parent.to_path_buf(), Some(resolved.clone()))
+        } else {
+            self.state.flash_error("path has no parent dir");
+            return;
+        };
+        if let Err(e) = self.state.chdir(&chdir_to) {
+            self.state.flash_error(format!("chdir: {e}"));
+            return;
+        }
+        if let Some(p) = focus {
+            self.state.focus_on_path(&p);
+        }
+        self.state.pane_focused = false;
+        self.state.rebuild_rows();
+        self.needs_full_repaint = true;
+    }
+
+    /// `git show <sha>` into the pager. Uppercase action for a
+    /// matched git SHA — the value of the picker for a
+    /// commit-discussion workflow.
+    fn open_git_show_pager(&mut self, sha: &str) {
+        match std::process::Command::new("git")
+            .args(["show", "--color=always", sha])
+            .current_dir(&self.state.listing.dir)
+            .output()
+        {
+            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
+                let title = format!("git show {sha}");
+                self.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let msg = stderr.lines().next().unwrap_or("no output").trim();
+                self.state.flash_error(format!("git show: {msg}"));
+            }
+            Err(e) => self.state.flash_error(format!("git show: {e}")),
+        }
+    }
+
+    /// Render label overlay on top of the pane. Drawn after the
+    /// pane widget so labels paint over the live vt100 grid; small
+    /// inverted-color cells next to each match's start position.
+    fn render_quick_select_overlay(&self, frame: &mut Frame, pane_rect: ratatui::layout::Rect) {
+        use ratatui::{
+            style::{Color, Modifier, Style},
+            widgets::Paragraph,
+        };
+        let Some(qs) = self.quick_select.as_ref() else {
+            return;
+        };
+        let label_style = Style::default()
+            .fg(Color::Black)
+            .bg(self.theme.pick)
+            .add_modifier(Modifier::BOLD);
+        let pending_style = Style::default()
+            .fg(Color::Black)
+            .bg(self.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        for m in &qs.matches {
+            // Skip labels that would render outside the pane rect.
+            // (Matches whose row exceeded the pane height are
+            // possible if the snapshot happened to be longer than
+            // the visible region — defensive.)
+            if m.row >= pane_rect.height as usize || m.col >= pane_rect.width as usize {
+                continue;
+            }
+            // 2-letter narrowing: dim labels whose first letter
+            // doesn't match the buffered keystroke; highlight
+            // those that do (the user sees their narrowing land).
+            let style = if let Some(first) = qs.pending_first {
+                if m.label.starts_with(first) {
+                    pending_style
+                } else {
+                    Style::default().fg(self.theme.status_suffix)
+                }
+            } else {
+                label_style
+            };
+            let text = if let Some(first) = qs.pending_first {
+                if m.label.starts_with(first) {
+                    // Show only the *second* letter, since the
+                    // first is already committed.
+                    m.label.chars().nth(1).map(|c| c.to_string())
+                } else {
+                    None
+                }
+            } else {
+                Some(m.label.clone())
+            };
+            let Some(text) = text else { continue };
+            let label_rect = ratatui::layout::Rect {
+                x: pane_rect.x + m.col as u16,
+                y: pane_rect.y + m.row as u16,
+                width: text.len() as u16,
+                height: 1,
+            };
+            // Clamp to pane rect.
+            if label_rect.x + label_rect.width > pane_rect.x + pane_rect.width
+                || label_rect.y >= pane_rect.y + pane_rect.height
+            {
+                continue;
+            }
+            frame.render_widget(
+                Paragraph::new(ratatui::text::Span::styled(text, style)),
+                label_rect,
+            );
+        }
+    }
+
     // ---- Git diff (M12) ----------------------------------------------------
 
     /// g d / g D — run `git diff` on selection and show in pager.
@@ -5522,9 +5843,12 @@ impl App {
             self.state.flash_error("no pane open");
             return;
         };
-        // Scan the last 200 lines of output (not just the visible
-        // viewport) so paths in large diffs are still found.
-        let lines = tabs.active_mut().recent_lines(200);
+        // Scan what the user is looking at. While scrolling, that's
+        // exactly the visible viewport (so a path scrolled into view
+        // is the one we find — not a different region). When live,
+        // widen to the last 200 lines so paths in large diffs that
+        // just rolled past the bottom are still findable.
+        let lines = tabs.active_mut().pickable_text(200);
         // Also try resolving against the spyc cwd (project root), not just
         // the pane tab's cwd — Claude often prints paths relative to the
         // project root regardless of the shell's cwd.
@@ -7060,6 +7384,7 @@ impl App {
             Action::PanePipeContent => self.pipe_content_to_pane(false),
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
 
+            Action::QuickSelectOpen => self.open_quick_select(),
             Action::HarpoonJump(n) => self.harpoon_jump(*n),
             Action::HarpoonAppend => self.harpoon_append(),
             Action::HarpoonRemove => self.harpoon_remove(),

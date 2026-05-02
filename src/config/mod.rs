@@ -37,6 +37,11 @@ pub struct Config {
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
 
+    /// User-defined Quick Select patterns appended to the built-in
+    /// set (URL, path, SHA, IPv4). Bad regexes are dropped at load
+    /// time with a warning rather than failing the whole config.
+    pub scan_patterns: Vec<crate::pane::quick_select::CustomPattern>,
+
     /// File paths we actually loaded from (for the watcher to track).
     pub sources: Vec<PathBuf>,
 }
@@ -118,6 +123,28 @@ struct FileConfig {
     layout: FileLayout,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
+    #[serde(default)]
+    scan: ScanConfig,
+}
+
+/// On-disk shape of `[scan]`. Holds Quick Select pattern
+/// definitions; bad regexes are reported and dropped at load
+/// rather than failing the whole config.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScanConfig {
+    #[serde(default)]
+    patterns: Vec<ScanPatternFile>,
+}
+
+/// On-disk shape of one `[[scan.patterns]]` entry.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScanPatternFile {
+    name: String,
+    regex: String,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 impl Config {
@@ -179,6 +206,28 @@ impl Config {
 
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
+
+        // Scan patterns: append. A bad regex is logged and skipped
+        // rather than failing the whole config — one user-typed
+        // typo shouldn't lock them out of starting spyc.
+        for p in file.scan.patterns {
+            match regex::Regex::new(&p.regex) {
+                Ok(re) => self
+                    .scan_patterns
+                    .push(crate::pane::quick_select::CustomPattern {
+                        name: p.name,
+                        regex: re,
+                        url_template: p.url,
+                    }),
+                Err(e) => {
+                    crate::spyc_debug!(
+                        "{}: scan pattern {:?}: bad regex — {e}",
+                        source.display(),
+                        p.name
+                    );
+                }
+            }
+        }
 
         // Keymap: parse each line, append.
         for (i, line) in file.keymap.iter().enumerate() {

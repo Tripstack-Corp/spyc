@@ -183,6 +183,7 @@ const SECTIONS: &[Section] = &[
             ("^a +  ^a -", "grow / shrink the pane"),
             ("^a z", "zoom pane (fullscreen toggle)"),
             ("^a v", "scroll pane history"),
+            ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             ("^a s", "send selection paths to pane stdin"),
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),

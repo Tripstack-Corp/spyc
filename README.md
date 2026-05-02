@@ -163,6 +163,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
 | `^a z` | Zoom pane (fullscreen toggle) |
+| `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Scroll mode (10K line scrollback) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `gf` | Jump to file path in pane output |

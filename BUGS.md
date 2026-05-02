@@ -1,6 +1,4 @@
 ### SMALL ###
-- we should steal some ideas from https://wezterm.org/ e.g. simple visual
-  picker for urls / id's from the terminal view
 - it's very confusing still to remember you're in scroll mode in the bottom
   half - we need a stronger top line/bottom line marker for this
 - while focused on the command in the lower pane we should send ^c to the lower

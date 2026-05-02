@@ -10,6 +10,7 @@
 
 pub mod input;
 pub mod pathref;
+pub mod quick_select;
 pub mod tabs;
 mod widget;
 
@@ -254,11 +255,30 @@ impl Pane {
     }
 
     /// Return visible screen content as individual lines (plain text,
-    /// no ANSI escapes).
-    #[allow(dead_code)]
+    /// no ANSI escapes). When the pane is in scroll mode, this is
+    /// exactly the viewport the user is looking at — *not* the live
+    /// tail. Use `pickable_text` for picker/scanner code that should
+    /// follow the user's eye.
     pub fn visible_lines(&self) -> Vec<String> {
         let screen = self.parser.screen();
         screen.contents().lines().map(String::from).collect()
+    }
+
+    /// Text that interactive pickers (`gf`/`gF`, `^a u`) should scan:
+    /// what the user is currently looking at. While scrolling, that
+    /// is the exact visible viewport at the user's scroll position;
+    /// while live, we widen to the last `recent_n` lines so
+    /// paths/URLs that just rolled past the bottom are still
+    /// findable. Without this distinction, scanning from a fixed
+    /// slice means a user who scrolled up to find a URL would have
+    /// it ignored — the picker would read a different region than
+    /// their eyes.
+    pub fn pickable_text(&mut self, recent_n: usize) -> Vec<String> {
+        if self.is_scrolling() {
+            self.visible_lines()
+        } else {
+            self.recent_lines(recent_n)
+        }
     }
 
     /// Return the most recent `max_lines` of output (scrollback + visible
