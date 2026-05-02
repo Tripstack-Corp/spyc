@@ -6,6 +6,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Quick Select — labeled overlay picker (`^a u`).** Borrowed from
+  WezTerm's mode of the same name. Press `^a u` to scan the visible
+  pane for URLs, file paths, git SHAs, IPv4 addresses, and any
+  user-defined regex patterns; each match is overlaid with a 1- or
+  2-letter label. Lowercase label → yank to clipboard. **Uppercase
+  label → "open" intent**, dispatched per match kind:
+  - URLs → system handler (`open` / `xdg-open`)
+  - Paths → cursor-jump in spyc
+  - Git SHAs → `git show <sha>` in the in-app pager
+  - Custom patterns with a `url = "https://.../{}"` template →
+    fill `{}` with the match, then `open`/`xdg-open`
+  - Other kinds → fall back to yank with a flash hint
+
+  Scroll mode "just works": the picker scans exactly the user's
+  visible viewport, so scrolling up to a Claude reply and pressing
+  `^a u` labels the URLs in *that* reply.
+
+  Custom patterns in `.spycrc.toml`:
+  ```toml
+  [[scan.patterns]]
+  name = "jira"
+  regex = '[A-Z]+-\\d+'
+  url = "https://tripstack.atlassian.net/browse/{}"
+  ```
+  Bad regexes are dropped at config load with a debug-log note;
+  one typo never blocks startup.
+
+### Fixed
+- **`gf` / `gF` now honor scroll mode.** Previously
+  `goto_file_from_pane` temporarily forced scrollback to its
+  deepest position, so a path the user had scrolled up to was
+  ignored — the scanner read a different region of history. Now
+  routes through a new `Pane::pickable_text()` helper: when
+  scrolling, scans exactly the visible viewport; when live, the
+  prior 200-line behavior is preserved so paths in large diffs
+  that just scrolled past the bottom are still findable.
+
+### Added
 - **Harpoon — per-project pinned working set.** Inspired by
   ThePrimeagen's neovim plugin: a small (max 9), hand-curated,
   ordered list of file or directory pointers for muscle-memory

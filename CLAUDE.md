@@ -7,7 +7,8 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
 - Embedded pty pane (horizontal split) with tabs for running subprocesses — primarily used to host `claude` CLI for dog-fooding. The divider line shows the active tab's *live* cwd (polled via `/proc/<pid>/cwd` on Linux, `lsof` on macOS, ~1Hz cache); when it drifts from the spawn cwd it gets a `↪` marker. `^a z` zooms the pane (tmux-style fullscreen toggle): list collapses to 0 rows, divider shows `[ZOOM]`, focus is forced into the pane and restored on un-zoom; `pane_height_pct` is preserved so the prior split returns on un-zoom.
 - MCP server on a PID-scoped Unix socket — Claude Code discovers spyc via `.mcp.json`, queries context (cwd, cursor, picks, filter, git branch), and can mutate the TUI (navigate, filter, pick). Multiple instances coexist; takeover is prompted (`PID N already owns MCP here. Take over? [Y/n]`) so a second spyc doesn't silently steal MCP from the first. Enterprise policies respected: `deniedMcpServers`/`allowedMcpServers` in `managed-settings.json` gate the entry; if a Jamf-deployed `managed-mcp.json` already defines a server named `spyc`, the per-project `.mcp.json` write is suppressed (org config wins on the name; we'd just collide) and any prior local `spyc` entry is removed.
-- `gf`/`gF` — jump from Claude's output to the referenced file (or file:line)
+- `gf`/`gF` — jump from Claude's output to the referenced file (or file:line). Honors scroll mode: when scrolling, scans exactly the visible viewport (not a fixed slice).
+- `^a u` — Quick Select picker (wezterm-style): scan visible pane for URLs / paths / git SHAs / IPv4 / custom-regex matches, overlay 1- or 2-letter labels, lowercase = yank to clipboard, uppercase = open (URLs → `open`/`xdg-open`, paths → cursor-jump, SHAs → `git show` in pager). Custom patterns in `.spycrc.toml` `[[scan.patterns]]` with optional `url = "https://.../{}"` template.
 - In-app pager with search, ANSI rendering, hex-dump, line numbers, `:N` jump, save
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)
 - `!?` history editor — popup with vi-editable lines, `/search`, `G`/`gg`, `:N` jump, `Ctrl+D` delete
@@ -37,7 +38,7 @@ per-module navigation index.
 - **`src/app/state.rs`** — `AppState`: domain state (cursor, picks, listing, mode) separated from terminal state.
 - **`src/keymap/action.rs`** — `Action` enum: the full vocabulary of user-observable behaviors. Every keybinding maps to an `Action`.
 - **`src/keymap/`** — Resolver, user keymap DSL parser, default bindings.
-- **`src/pane/`** — Pty-hosted subprocess. `mod.rs` is the `Pane` struct (spawn, I/O, scroll mode), `input.rs` encodes crossterm keys to ANSI, `widget.rs` renders `vt100::Screen` to ratatui.
+- **`src/pane/`** — Pty-hosted subprocess. `mod.rs` is the `Pane` struct (spawn, I/O, scroll mode), `input.rs` encodes crossterm keys to ANSI, `widget.rs` renders `vt100::Screen` to ratatui, `quick_select.rs` is the `^a u` picker (regex scan + label assignment over visible pane text), `pathref.rs` is `gf`/`gF`'s path extractor.
 - **`src/ui/`** — Widgets: list view, status bar, pager, prompt, line editor, help, theme.
 - **`src/fs/`** — Directory listing, entry types, file operations. `finder.rs` backs the `F` filename picker (gitignore-aware streaming walker, nucleo fuzzy match); `grep.rs` backs `:grep` (embedded ripgrep matcher streaming `path:line:col: text` matches).
 - **`src/mcp.rs`** — MCP server: PID-scoped Unix socket listener, stdio proxy for Claude Code, `.mcp.json` management, enterprise policy checking, instance takeover.
@@ -45,7 +46,7 @@ per-module navigation index.
 - **`src/context.rs`** — Context snapshot (cwd, cursor, picks, filter, git branch, project_home, session_name) written to disk for MCP consumers.
 - **`src/state/`** — Cursor, marks, picks, inventory, history, ignore masks, sessions, session_names (spice-pair generator), harpoon (per-project pinned file list).
 - **`src/config/`** — Config loading and DSL parser.
-- **`src/shell/`** — Shell expansion and command execution.
+- **`src/shell/`** — Shell expansion and command execution. Cross-platform "open URL with system handler" goes through the `open` crate (`open::that_detached`), used by Quick Select's "open" intent.
 - **`src/paths.rs`** — XDG-compliant path resolution for state, config, and cache directories.
 - **`src/sysinfo.rs`** — System info (RSS, PID) for the `I` info overlay.
 - **`src/proc_cwd.rs`** — Cross-platform "cwd of pid N" lookup (Linux `/proc/<pid>/cwd`, macOS `lsof -Fn`). Used to surface the live pane subprocess cwd in the divider.

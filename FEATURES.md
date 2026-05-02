@@ -275,6 +275,44 @@ buffer in one keystroke. The help overlay is excluded from the
 stack. Walking off the end keeps the current pager open with a
 flash instead of silently closing. Scroll positions are preserved.
 
+## Quick Select — labeled overlay picker
+
+Borrowed from [WezTerm's Quick Select][wezterm-qs]. Press **`^a u`**
+to scan the visible pane for matches (URLs, file paths, git SHAs,
+IPv4 addresses, plus any custom regexes from `.spycrc.toml`); each
+match is overlaid with a 1- or 2-letter label.
+
+[wezterm-qs]: https://wezterm.org/quickselect.html
+
+- **Lowercase label** — yank the match to the clipboard, exit.
+- **Uppercase label** — "open" intent:
+  - **URL** → hand to the system handler (`open` on macOS,
+    `xdg-open` on Linux)
+  - **Path** → cursor-jump in spyc (chdir to parent + place cursor)
+  - **Git SHA** → `git show <sha>` in the in-app pager
+  - **Custom pattern** with a `url = "..."` template → fill `{}`
+    with the match, then `open`/`xdg-open`
+  - Other kinds (IPv4, custom without template) → fall back to
+    yank with a flash hint
+- **`q` / `Esc`** — exit without action
+
+Scroll mode just works: scroll up to a Claude reply, hit `^a u`,
+the URLs in *that* reply get labels (the picker scans exactly the
+visible viewport at the user's scroll position).
+
+Custom patterns in `.spycrc.toml`:
+
+```toml
+[[scan.patterns]]
+name = "jira"
+regex = '[A-Z]+-\\d+'
+url = "https://tripstack.atlassian.net/browse/{}"   # optional
+```
+
+Without `url`, uppercase falls back to yank+hint. Bad regexes are
+dropped at config load and noted in the debug log; a typo never
+prevents spyc from starting.
+
 ## Marks
 
 Vi-style named bookmarks for fast navigation:
