@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`:undo` and `:graveyard` returned "unknown command".** State's
+  command dispatcher routes a fixed list of names to App's
+  terminal-touching arms; `undo` and `graveyard` weren't on it,
+  so they hit the unknown-command fallthrough before App's
+  handler could see them. Added both to the punt list.
+
 ### Added
 - **Graveyard — soft-delete recovery for `R` and undo support.**
   Files removed with `R` (and items expelled from inventory) now

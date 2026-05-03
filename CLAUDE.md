@@ -58,6 +58,7 @@ per-module navigation index.
 ## Conventions
 
 - **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler in `app.rs`.
+- **`:command` dispatch has TWO sites**: `AppState::dispatch_command` (pure-domain) and `App::dispatch_command` (terminal-touching). State runs first; if state returns `CommandResult::Handled` the command is done, if `NotHandled` App takes over. State has an "unknown command:" fallthrough at the end, so any new command handled in `App` MUST be added to state's punt list (the `if input == "..." || ...` block before the fallthrough — search for `"bprev"` to find it). Symptom of forgetting: typing the command flashes "unknown command: X" even though the App handler is in place. Bitten on `:undo` (v1.41.1) and on `:limit`/`:`-history split historically.
 - **Milestone spikes**: Development proceeds in numbered milestones (M4, M6, M8, M9, M10...).
 - **Repaint strategy**: Event-driven dirty-frame rendering. `needs_draw` flag with reason codes (pane=1, event=2, other=3). `needs_full_repaint` for teardown transitions (pager close, overlay close). DEC 2026 synchronized output wraps every frame. `build_rows()` and grid stabilization are cached via `list_generation` counter. Target: 0 dps at idle.
 - **Pane I/O**: Keys go through `input::encode_key()`. Raw bytes use `pane.send_bytes()`. Bracketed paste wraps text in `\x1b[200~`...`\x1b[201~` before forwarding. Pane prefix is `^a` (screen-style), `^w` works as alias.
