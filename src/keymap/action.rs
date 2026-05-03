@@ -117,6 +117,9 @@ pub enum Action {
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
+    // Graveyard.
+    OpenGraveyardView, // g y — open the graveyard viewer
+
     // Quick Select — wezterm-style labeled overlay over pane output.
     QuickSelectOpen, // ^a u — scan visible pane, label matches, pick to yank/open
 
@@ -236,6 +239,7 @@ impl Action {
             Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
+            Self::OpenGraveyardView => "open graveyard viewer (recover deleted)",
             Self::QuickSelectOpen => "quick select — pick URL/path/SHA/IP from pane",
             Self::HarpoonJump(_) => "jump to harpoon slot N",
             Self::HarpoonAppend => "harpoon — append cursor file",

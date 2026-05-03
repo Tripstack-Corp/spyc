@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.40.1"
+version = "1.41.0"
 edition = "2024"
 description = "A vi-keyboard-driven file commander that pairs with Claude Code, inspired by SideFX's spy"
 license = "BSD-3-Clause"
@@ -41,9 +41,15 @@ uuid = { version = "1", features = ["v7"] }
 uzers = "0.12"
 strip-ansi-escapes = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
+tar = "0.4"
+zstd = "0.13"
+trash = "5"
+# tempfile is a runtime dep (not just dev-deps) because the
+# graveyard's cascade-to-trash and legacy-migration paths stage
+# files into a TempDir before handing them to the system trash.
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 insta = "1"
 
 [profile.release]

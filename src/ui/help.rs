@@ -80,6 +80,18 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Graveyard (soft-delete recovery, R-undo)",
+        rows: &[
+            ("g y", "open graveyard view"),
+            (":undo", "restore most-recent removal to original path"),
+            (":graveyard", "open graveyard view (typed)"),
+            ("p", "(in view) restore cursor entry to cwd"),
+            ("P", "(in view) restore cursor entry to original path"),
+            ("dd  x", "(in view) purge cursor entry to system trash"),
+            ("Z", "(in view) purge ALL entries to system trash (confirm)"),
+        ],
+    },
+    Section {
         title: "Ignore masks & filtering",
         rows: &[
             ("a", "toggle mask 1 (dotfiles by default)"),

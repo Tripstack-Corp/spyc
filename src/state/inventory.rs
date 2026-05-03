@@ -41,10 +41,6 @@ fn inventory_dir() -> Option<PathBuf> {
     state_base().map(|b| b.join("inventory"))
 }
 
-fn graveyard_dir() -> Option<PathBuf> {
-    state_base().map(|b| b.join("graveyard"))
-}
-
 fn state_base() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
         Some(PathBuf::from(xdg).join("spyc"))
@@ -207,30 +203,43 @@ impl Inventory {
         item
     }
 
-    /// Move an item from inventory to graveyard.
+    /// Move an item from inventory to graveyard. Reads the
+    /// inventory `.dat` blob, archives it through the graveyard's
+    /// uniform tar.zst pipeline so the schema stays consistent
+    /// with `R`-driven entries (single restore code path), and
+    /// then removes the inventory pair on success.
+    ///
+    /// Failures here are logged via the debug log (no return value
+    /// — the inventory mutation has already happened, and the
+    /// callers don't have a place to surface a flash). The .dat
+    /// file is left in place if archiving fails so manual recovery
+    /// is still possible.
     fn move_to_graveyard(&mut self, id: &str) {
-        if self.items.remove(id).is_none() {
+        let Some(item) = self.items.remove(id) else {
             return;
-        }
+        };
         let Some(inv_dir) = inventory_dir() else {
             return;
         };
-        let Some(gy_dir) = graveyard_dir() else {
-            return;
-        };
-        let _ = std::fs::create_dir_all(&gy_dir);
-        for ext in &["json", "dat"] {
-            let src = inv_dir.join(format!("{id}.{ext}"));
-            let dst = gy_dir.join(format!("{id}.{ext}"));
-            let _ = std::fs::rename(&src, &dst);
-        }
-    }
-
-    /// Clear the graveyard (free disk space).
-    #[allow(dead_code)]
-    pub fn empty_graveyard() {
-        if let Some(dir) = graveyard_dir() {
-            let _ = std::fs::remove_dir_all(&dir);
+        let dat = inv_dir.join(format!("{id}.dat"));
+        let json = inv_dir.join(format!("{id}.json"));
+        let res = crate::state::graveyard::Graveyard::write_entry_as(
+            &dat,
+            &item.filename,
+            item.orig_path.clone(),
+        );
+        match res {
+            Ok(_entry) => {
+                // Archive succeeded; drop the inventory pair.
+                let _ = std::fs::remove_file(&dat);
+                let _ = std::fs::remove_file(&json);
+            }
+            Err(e) => {
+                crate::spyc_debug!(
+                    "inventory→graveyard archive failed for {id} ({}): {e}",
+                    item.filename
+                );
+            }
         }
     }
 

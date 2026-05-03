@@ -2,6 +2,7 @@
 
 pub mod cursor;
 pub mod frecency;
+pub mod graveyard;
 pub mod harpoon;
 pub mod health;
 #[allow(dead_code, clippy::question_mark)]
