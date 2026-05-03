@@ -75,7 +75,11 @@ become `%` in shell expansion.
 
 - **c** copy selection to a destination
 - **M** move selection to a destination
-- **R** remove selection (with confirmation)
+- **R** remove selection (with confirmation). The prompt counts
+  files inside any selected directory and surfaces the total
+  ("remove DIR (recursive, N files) + M file(s)?") so the blast
+  radius is visible before you press `y`. Removed items go to the
+  **graveyard** (see below) — recover with `gy` or `:undo`.
 - **+** create a new directory
 - **L** long listing -- aligned table with inode, mode, octal,
   links, owner, group, size, bytes, blocks, mtime/atime/ctime/birth,
@@ -312,6 +316,34 @@ url = "https://tripstack.atlassian.net/browse/{}"   # optional
 Without `url`, uppercase falls back to yank+hint. Bad regexes are
 dropped at config load and noted in the debug log; a typo never
 prevents spyc from starting.
+
+## Graveyard — soft-delete recovery
+
+Files removed with **R** (and items expelled from inventory) go to
+a **graveyard** at `$XDG_STATE_HOME/spyc/graveyard/`. Each entry is
+a `<uuid>.json` (metadata) + `<uuid>.tar.zst` (compressed payload)
+pair. tar's `HeaderMode::Complete` captures mode bits (executable
+flag, etc.), mtime, and best-effort UID/GID; restore preserves all
+of them. xattrs / ACLs / macOS resource forks are NOT preserved
+(out of scope for v1).
+
+- **`gy`** — open the graveyard view (newest entries first)
+- **`:undo`** — restore the most-recent entry to its original path
+- Inside the graveyard view:
+  - **`p`** — restore the cursor entry to the current dir (cwd)
+  - **`P`** — restore to its original path (refuses to clobber an
+    existing file; flash error and you can fall back to `p`)
+  - **`dd`** / **`x`** — purge cursor entry to the system trash
+    (out of spyc, into Finder / Files / etc.)
+  - **`Z`** — purge ALL entries to the system trash (single-key
+    confirm)
+  - **`Esc`** / **`gy`** — close
+
+When the graveyard exceeds 500 MB at startup, the **oldest entries
+cascade to the system trash** (FIFO) until the total falls below
+the cap. A flash tells you how many were moved. Net flow:
+`R` → graveyard (compressed, undo-able from spyc) → system trash
+(uncompressed, browsable from the OS).
 
 ## Marks
 

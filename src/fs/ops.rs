@@ -80,13 +80,6 @@ pub fn remove_tree(path: &Path) -> io::Result<()> {
     }
 }
 
-pub fn remove_all(paths: &[&Path]) -> io::Result<()> {
-    for p in paths {
-        remove_tree(p)?;
-    }
-    Ok(())
-}
-
 /// Recursively copy `src` to `dst`. Symlinks are re-created as symlinks
 /// pointing at the same target; they are **not** followed.
 pub fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {

@@ -143,6 +143,7 @@ impl Resolver {
                 KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
+                KeyCode::Char('y') => ResolverOutcome::Action(Action::OpenGraveyardView),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

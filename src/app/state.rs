@@ -115,6 +115,12 @@ pub struct AppState {
     /// whenever the harpoon list mutates so `apply_temp_filter`
     /// remains pure-domain. Empty when no `PROJECT_HOME` is active.
     pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
+    /// Snapshot of the graveyard, refreshed when `View::Graveyard`
+    /// is opened or after any entry-mutating action. Newest-first
+    /// (matches `Graveyard::load`). Empty when not in graveyard
+    /// view; the rebuild_rows path keys off `view` so we don't pay
+    /// the disk read except when the user is looking at it.
+    pub graveyard: Vec<crate::state::graveyard::Entry>,
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
@@ -395,9 +401,26 @@ impl AppState {
 
     pub fn toggle_inventory_view(&mut self) {
         self.view = match self.view {
-            View::Dir => View::Inventory,
+            View::Dir | View::Graveyard => View::Inventory,
             View::Inventory => View::Dir,
         };
+        // Leaving graveyard view drops the snapshot so a stale set
+        // of entries can't bleed into a later open.
+        self.graveyard.clear();
+        self.cursor = Cursor::new();
+        self.rebuild_rows();
+    }
+
+    /// Open the graveyard view: load a fresh snapshot from disk
+    /// and switch the visible list. Toggle on second call.
+    pub fn open_graveyard_view(&mut self) {
+        if matches!(self.view, View::Graveyard) {
+            self.graveyard.clear();
+            self.view = View::Dir;
+        } else {
+            self.graveyard = crate::state::graveyard::Graveyard::load().entries;
+            self.view = View::Graveyard;
+        }
         self.cursor = Cursor::new();
         self.rebuild_rows();
     }
@@ -432,6 +455,38 @@ impl AppState {
                         item.orig_path.parent().unwrap_or(Path::new("/")).display()
                     ),
                     kind: crate::fs::EntryKind::File,
+                })
+                .collect(),
+            View::Graveyard => self
+                .graveyard
+                .iter()
+                .map(|e| {
+                    let glyph = match e.kind {
+                        crate::state::graveyard::EntryKind::File => "[f]",
+                        crate::state::graveyard::EntryKind::Dir => "[d]",
+                        crate::state::graveyard::EntryKind::Symlink => "[l]",
+                    };
+                    let parent = e
+                        .orig_path
+                        .parent()
+                        .map_or_else(|| "/".to_string(), |p| p.display().to_string());
+                    let count_tag = if matches!(e.kind, crate::state::graveyard::EntryKind::Dir)
+                        && e.file_count > 0
+                    {
+                        format!(" ({} files)", e.file_count)
+                    } else {
+                        String::new()
+                    };
+                    let age = format_age(e.timestamp);
+                    let kind = match e.kind {
+                        crate::state::graveyard::EntryKind::Dir => crate::fs::EntryKind::Dir,
+                        _ => crate::fs::EntryKind::File,
+                    };
+                    RowData {
+                        path: e.orig_path.clone(),
+                        display: format!("{glyph} {}{count_tag} ({age})  ← {parent}", e.filename),
+                        kind,
+                    }
                 })
                 .collect(),
         };
@@ -777,13 +832,41 @@ impl AppState {
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::NewFile, "new file: "));
             }
             Action::RemovePrompt => {
-                let count = self.selection_paths().len();
-                if count > 0 {
-                    self.mode = Mode::Prompting(Prompt::simple(
-                        PromptKind::RemoveConfirm,
-                        format!("remove {count} file(s)? (y/N): "),
-                    ));
+                let paths = self.selection_paths();
+                if paths.is_empty() {
+                    return ApplyResult::Handled;
                 }
+                // Pre-walk to count files inside any selected dirs so
+                // the user sees the actual blast radius of `R`. Cheap
+                // (interactive flow, sub-second on any sane subtree)
+                // and load-bearing for safety: today's prompt just
+                // says "N file(s)?" which a user can reflexively `y`
+                // their way through, even if N includes a directory
+                // tree that would recursively delete thousands.
+                let mut file_count = 0u64;
+                let mut dir_count = 0u64;
+                let mut dir_files = 0u64;
+                for p in &paths {
+                    match std::fs::symlink_metadata(p) {
+                        Ok(md) if md.is_dir() => {
+                            dir_count += 1;
+                            dir_files += count_files_in_dir(p);
+                        }
+                        _ => file_count += 1,
+                    }
+                }
+                let prompt = if dir_count == 0 {
+                    format!("remove {file_count} file(s)? (y/N): ")
+                } else if file_count == 0 && dir_count == 1 {
+                    format!("remove DIR (recursive, {dir_files} file(s))? (y/N): ")
+                } else if file_count == 0 {
+                    format!("remove {dir_count} dir(s) (recursive, {dir_files} file(s))? (y/N): ")
+                } else {
+                    format!(
+                        "remove {file_count} file(s) + {dir_count} dir(s) (recursive, {dir_files} file(s))? (y/N): "
+                    )
+                };
+                self.mode = Mode::Prompting(Prompt::simple(PromptKind::RemoveConfirm, prompt));
             }
 
             // -- Long listing (pager) --
@@ -1310,9 +1393,9 @@ impl AppState {
                 self.mode = Mode::Prompting(p);
                 PromptResult::Handled
             }
-            PromptKind::RemoveConfirm | PromptKind::ClaudeCrashRecover { .. } => {
-                PromptResult::Handled
-            }
+            PromptKind::RemoveConfirm
+            | PromptKind::ClaudeCrashRecover { .. }
+            | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.
             PromptKind::NewFile
             | PromptKind::ShellCmd
@@ -1386,6 +1469,58 @@ impl AppState {
     }
 }
 
+/// Compact relative-age string for the graveyard view ("3m ago",
+/// "2h ago", "yesterday", "2026-04-15"). Coarsened deliberately —
+/// the user only needs to know "very recent" vs "older than today"
+/// to find what they just deleted.
+fn format_age(epoch: u64) -> String {
+    let now = crate::sysinfo::epoch_secs();
+    let dt = now.saturating_sub(epoch);
+    if dt < 60 {
+        "just now".to_string()
+    } else if dt < 60 * 60 {
+        format!("{}m ago", dt / 60)
+    } else if dt < 24 * 60 * 60 {
+        format!("{}h ago", dt / 3600)
+    } else if dt < 2 * 24 * 60 * 60 {
+        "yesterday".to_string()
+    } else if dt < 7 * 24 * 60 * 60 {
+        format!("{}d ago", dt / (24 * 60 * 60))
+    } else {
+        // Older than a week → date stamp. Use jiff (already a dep)
+        // to format Y-m-d in local TZ.
+        match jiff::Timestamp::from_second(epoch as i64) {
+            Ok(ts) => ts
+                .to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%Y-%m-%d")
+                .to_string(),
+            Err(_) => "long ago".to_string(),
+        }
+    }
+}
+
+/// Recursively count regular-file entries inside `dir`. Used by the
+/// `R` confirm prompt to surface the actual blast radius before the
+/// user types `y`. Symlinks count as a single entry (not followed)
+/// to match what `remove_tree` will actually unlink.
+fn count_files_in_dir(dir: &Path) -> u64 {
+    let mut n = 0u64;
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return n;
+    };
+    for ent in rd.flatten() {
+        let Ok(md) = std::fs::symlink_metadata(ent.path()) else {
+            continue;
+        };
+        if md.file_type().is_symlink() || md.is_file() {
+            n += 1;
+        } else if md.is_dir() {
+            n += count_files_in_dir(&ent.path());
+        }
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1425,6 +1560,7 @@ mod tests {
             git_info: None,
             git_files: std::collections::HashMap::new(),
             harpoon_filter_set: std::collections::HashSet::new(),
+            graveyard: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,

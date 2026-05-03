@@ -1,4 +1,5 @@
 ### SMALL ###
+- how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
   (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`;
@@ -16,7 +17,6 @@
   256-color when it's missing. Symptom: diff palettes look
   "close but slightly off" inside the pane vs. a bare terminal
   tab. One-line addition next to the existing `TERM` env line.
-- graveyard should include files that have been removed with R
 - it's very confusing still to remember you're in scroll mode in the bottom
   half - we need a stronger top line/bottom line marker for this
 - while focused on the command in the lower pane we should send ^c to the lower

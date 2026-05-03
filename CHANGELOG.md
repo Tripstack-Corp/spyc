@@ -5,6 +5,48 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Graveyard — soft-delete recovery for `R` and undo support.**
+  Files removed with `R` (and items expelled from inventory) now
+  go to a per-user **graveyard** at `$XDG_STATE_HOME/spyc/graveyard/`
+  instead of being hard-deleted. Each entry is a `<uuid>.json` +
+  `<uuid>.tar.zst` pair — single regular files and directory trees
+  use the same shape. zstd compression keeps the payload small;
+  tar's `HeaderMode::Complete` preserves mode bits (executable,
+  group-write), mtime, and best-effort UID/GID; `set_overwrite(false)`
+  on restore refuses to clobber existing files. xattrs / ACLs /
+  macOS resource forks are NOT preserved (out of scope for v1).
+
+  Recover via:
+  - **`gy`** — open the graveyard view (newest first)
+  - **`:undo`** — restore most-recent entry to its original path
+    (one-shot escape hatch)
+  - Inside the view: **`p`** restore-to-cwd, **`P`**
+    restore-to-original, **`dd`**/**`x`** purge entry to system
+    trash, **`Z`** purge ALL (single-key confirm),
+    **`Esc`**/**`gy`** close.
+
+  When the graveyard exceeds 500 MB at startup, the **oldest
+  entries cascade to the system trash** (FIFO) until under the
+  cap, with a flash reporting the count. Net pipeline:
+  `R` → graveyard (compressed, undo-able from spyc) → system
+  trash (uncompressed, browsable from the OS) when the cap is
+  hit. New deps: `tar`, `zstd`, `trash`.
+
+### Changed
+- **`R` confirm prompt now surfaces directory blast radius.**
+  Previously: "remove N file(s)?". Now pre-walks any selected
+  directory to count files inside and shows
+  "remove DIR (recursive, N file(s)) + M file(s)? (y/N)" so a
+  reflexive `y` doesn't accidentally drop a build tree. Cost is
+  microseconds on any sane subtree.
+- **Inventory's `move_to_graveyard` now uses the new tar.zst
+  schema** so the graveyard is uniform — one read/write code
+  path. Pre-v1.41.0 paired `<uuid>.json` + `<uuid>.dat` graveyard
+  entries are silently ignored by the new reader (the graveyard
+  is a transient soft-delete cache; major version bumps may lose
+  recovery state).
+
 ### Fixed
 - **Pager: trailing logical lines were unreachable when long lines
   wrapped.** A file with N logical lines (some long enough to wrap

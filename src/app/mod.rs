@@ -185,6 +185,11 @@ pub mod state;
 pub enum View {
     Dir,
     Inventory,
+    /// Graveyard view: list of soft-deleted entries (most recent
+    /// first). Bindings inside: `p` restore-to-cwd, `P`
+    /// restore-to-original, `dd`/`x` purge entry to system trash,
+    /// `Z` purge all (with confirm), `Esc`/`gy` close.
+    Graveyard,
 }
 
 /// Input mode: normal key bindings or a one-line text prompt.
@@ -270,6 +275,11 @@ pub enum PromptKind {
     /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
     /// anything else is treated as a cancel.
     RemoveConfirm,
+    /// Confirm purge-all from the graveyard view (cascade
+    /// everything to system trash). Same single-key shape as
+    /// RemoveConfirm; routed separately because the verb and
+    /// destination are different.
+    GraveyardPurgeAllConfirm,
     SetEnv,
     /// `!` — capture command output with ANSI colors, show in in-app pager.
     ShellCmdCaptured,
@@ -509,6 +519,12 @@ pub struct App {
     /// intercepts keys before normal dispatch while open. See
     /// `pane::quick_select` for the model.
     quick_select: Option<crate::pane::quick_select::QuickSelect>,
+    /// `dd` arming for the graveyard view: first `d` arms, second
+    /// `d` deletes (cascades to system trash). Any other key
+    /// disarms. False whenever the graveyard view is closed.
+    graveyard_pending_d: bool,
+    /// `gg` arming for the graveyard view (jump to top).
+    graveyard_pending_g: bool,
     top_overlay: Option<Pane>,
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
@@ -704,6 +720,7 @@ impl App {
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
                 .unwrap_or_default(),
+            graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,
@@ -756,6 +773,8 @@ impl App {
             harpoon,
             harpoon_menu: None,
             quick_select: None,
+            graveyard_pending_d: false,
+            graveyard_pending_g: false,
             top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
@@ -806,6 +825,22 @@ impl App {
         if !health_warnings.is_empty() {
             app.state.flash_error(health_warnings.join("; "));
         }
+        // Graveyard cascade: if total exceeds the cap, push the
+        // oldest entries to the system trash (FIFO) until under
+        // the cap. Best-effort and silent on failure (the user
+        // would see a flash from any visible-error path; failures
+        // here are uncommon disk/permissions issues that don't
+        // need to interrupt startup).
+        let cap = crate::state::graveyard::GRAVEYARD_CAP_BYTES;
+        if crate::state::graveyard::Graveyard::load().total_bytes() > cap {
+            let (trashed, _errors) = crate::state::graveyard::Graveyard::cascade_until_under(cap);
+            if trashed > 0 {
+                app.state.flash_info(format!(
+                    "graveyard: {trashed} item(s) moved to system trash (cap reached)"
+                ));
+            }
+        }
+
         if resume {
             app.show_session_picker();
         }
@@ -2584,6 +2619,13 @@ impl App {
                     }
                 ),
             ),
+            View::Graveyard => (
+                "<GRAVEYARD>".to_string(),
+                format!(
+                    "[{} item(s)]  (p: put cwd, P: restore orig, dd/x: trash, Z: trash all, ESC: return)",
+                    self.state.graveyard.len()
+                ),
+            ),
         }
     }
 
@@ -2810,6 +2852,13 @@ impl App {
                 _ => {}
             }
         }
+        // Graveyard view: special key handling. Same shape as
+        // inventory; verbs are restore/purge instead of put/tag.
+        // `dd` (vim-style two-key delete) is implemented via the
+        // pager's `d` already being free here — second `d` confirms.
+        if self.state.view == View::Graveyard {
+            return Ok(self.handle_graveyard_view_key(key));
+        }
         match self.state.resolver.feed(key, &self.state.user_keymap) {
             ResolverOutcome::Action(action) => return self.apply(&action),
             ResolverOutcome::User(bound) => return self.apply_user(&bound),
@@ -2867,6 +2916,12 @@ impl App {
             Mode::Prompting(p) if matches!(p.kind, PromptKind::RemoveConfirm)
         ) {
             return self.handle_remove_confirm_key(key);
+        }
+        if matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::GraveyardPurgeAllConfirm)
+        ) {
+            return self.handle_graveyard_purge_all_confirm(key);
         }
         if matches!(
             &self.state.mode,
@@ -3013,13 +3068,112 @@ impl App {
         if paths.is_empty() {
             return PostAction::None;
         }
-        let count = paths.len();
-        self.run_and_flash(
-            fs::ops::remove_all(&paths),
-            format!("removed {count} item(s)"),
-        );
+        // Route through the graveyard: archive each path into
+        // `<uuid>.tar.zst` first, then unlink the source. If the
+        // archive step fails for any path we skip the unlink for
+        // *that* path and surface a clear error — the user keeps
+        // the file. Per-path failures don't stop the rest of the
+        // batch; we report the count at the end.
+        let mut archived = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+        for p in &paths {
+            match crate::state::graveyard::Graveyard::write_entry(p) {
+                Ok(_entry) => match fs::ops::remove_tree(p) {
+                    Ok(()) => archived += 1,
+                    Err(e) => {
+                        failures.push(format!("{}: archived but unlink failed: {e}", p.display()));
+                    }
+                },
+                Err(e) => {
+                    // Archive failed — fall back to a hard delete
+                    // would surprise the user (they expect undo);
+                    // instead, leave the file alone and report.
+                    failures.push(format!(
+                        "{}: graveyard archive failed: {e} — file NOT removed",
+                        p.display()
+                    ));
+                }
+            }
+        }
+        if failures.is_empty() {
+            self.state
+                .flash_info(format!("removed {archived} item(s) (recoverable: gy)"));
+        } else {
+            // First failure goes in the flash; remainder in debug log.
+            self.state.flash_error(failures[0].clone());
+            for msg in &failures[1..] {
+                spyc_debug!("R: {msg}");
+            }
+        }
         self.state.picks.clear();
         self.state.refresh_listing();
+        PostAction::None
+    }
+
+    /// `:undo` — restore the most-recent graveyard entry to its
+    /// original path. Best-effort recovery for the very common
+    /// "I just deleted the wrong thing" case. If the original
+    /// path is occupied (rare; user recreated it), tar's
+    /// `set_overwrite(false)` errors and we surface that — the
+    /// user can open `gy` and pick `p` to restore-to-cwd instead.
+    fn undo_last_remove(&mut self) {
+        let g = crate::state::graveyard::Graveyard::load();
+        let Some(latest) = g.entries.into_iter().next() else {
+            self.state.flash_info("undo: graveyard is empty");
+            return;
+        };
+        let dest = latest.orig_path.parent().map_or_else(
+            || std::path::PathBuf::from("/"),
+            std::path::Path::to_path_buf,
+        );
+        match crate::state::graveyard::Graveyard::restore(&latest, &dest) {
+            Ok(()) => {
+                crate::state::graveyard::Graveyard::delete_entry(&latest);
+                self.state.flash_info(format!(
+                    "undo: restored {} → {}",
+                    latest.filename,
+                    dest.display()
+                ));
+                if matches!(self.state.view, View::Graveyard) {
+                    self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
+                    self.state.cursor.clamp(self.state.graveyard.len());
+                    self.state.rebuild_rows();
+                }
+                self.state.refresh_listing();
+            }
+            Err(e) => self
+                .state
+                .flash_error(format!("undo: {e} — try `gy` then `p` to restore to cwd")),
+        }
+    }
+
+    /// Single-key confirmation for "purge ALL graveyard entries to
+    /// system trash". Bound on `Z` from the graveyard view; routes
+    /// to a separate prompt kind so the wording stays accurate.
+    fn handle_graveyard_purge_all_confirm(&mut self, key: KeyEvent) -> PostAction {
+        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
+        self.state.mode = Mode::Normal;
+        if !confirmed {
+            return PostAction::None;
+        }
+        let mut trashed = 0usize;
+        let mut errors = 0usize;
+        for entry in self.state.graveyard.clone() {
+            match crate::state::graveyard::Graveyard::cascade_entry_to_trash(&entry) {
+                Ok(()) => trashed += 1,
+                Err(_) => errors += 1,
+            }
+        }
+        if errors > 0 {
+            self.state
+                .flash_error(format!("graveyard: trashed {trashed}, {errors} failed"));
+        } else {
+            self.state
+                .flash_info(format!("graveyard: trashed {trashed} item(s)"));
+        }
+        self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
+        self.state.cursor.clamp(self.state.graveyard.len());
+        self.state.rebuild_rows();
         PostAction::None
     }
 
@@ -3618,6 +3772,20 @@ impl App {
                 }
                 Err(e) => self.state.flash_error(format!("spawn: {e}")),
             }
+            return PostAction::None;
+        }
+
+        // :undo — restore the most-recent graveyard entry to its
+        // original path. The "did I mean to do that?" escape hatch
+        // for `R`. No-arg only; if the user wants to pick a
+        // specific entry they open the graveyard view (`gy`).
+        if input == "undo" {
+            self.undo_last_remove();
+            return PostAction::None;
+        }
+        // :graveyard — open the graveyard viewer (typed alias for `gy`).
+        if input == "graveyard" {
+            self.state.open_graveyard_view();
             return PostAction::None;
         }
 
@@ -4865,6 +5033,146 @@ impl App {
             self.state.flash_error(e);
         }
         PostAction::None
+    }
+
+    /// Key dispatcher for `View::Graveyard`. Bindings:
+    ///   `j`/`k`/arrows       — move cursor
+    ///   `g`/`G`              — first / last
+    ///   `p`                  — restore the cursor entry to cwd
+    ///   `P`                  — restore to original path (refuses
+    ///                          to clobber existing files)
+    ///   `dd` (vim-style) /   — purge cursor entry to system trash
+    ///   `x`
+    ///   `Z`                  — purge ALL entries to system trash
+    ///                          (single-key confirm: `y` to commit)
+    ///   `Esc`                — close the view, return to dir
+    ///
+    /// `dd` arming uses a per-instance bool; first `d` arms, any
+    /// other key (including a second non-`d`) clears it.
+    fn handle_graveyard_view_key(&mut self, key: KeyEvent) -> PostAction {
+        // Confirm-purge-all is a transient inline confirm. We
+        // signal it via a one-shot Mode::Prompting; routed there
+        // directly rather than reusing RemoveConfirm because the
+        // semantics are distinct (we're cascading to system trash,
+        // not unlinking).
+        match key.code {
+            KeyCode::Esc => {
+                self.state.open_graveyard_view(); // toggle off
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.state.cursor_move_vertical(1, self.state.rows.len());
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.state.cursor_move_vertical(-1, self.state.rows.len());
+            }
+            KeyCode::Char('g') => {
+                self.graveyard_pending_d = false;
+                if self.graveyard_pending_g {
+                    self.state.cursor.index = 0;
+                    self.graveyard_pending_g = false;
+                } else {
+                    self.graveyard_pending_g = true;
+                }
+            }
+            KeyCode::Char('G') => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                if !self.state.rows.is_empty() {
+                    self.state.cursor.index = self.state.rows.len() - 1;
+                }
+            }
+            KeyCode::Char('p') => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                self.graveyard_restore(false);
+            }
+            KeyCode::Char('P') => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                self.graveyard_restore(true);
+            }
+            KeyCode::Char('x') => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                self.graveyard_purge_cursor_entry();
+            }
+            KeyCode::Char('d') => {
+                self.graveyard_pending_g = false;
+                if self.graveyard_pending_d {
+                    self.graveyard_pending_d = false;
+                    self.graveyard_purge_cursor_entry();
+                } else {
+                    self.graveyard_pending_d = true;
+                }
+            }
+            KeyCode::Char('Z') => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                self.state.mode = Mode::Prompting(Prompt::simple(
+                    PromptKind::GraveyardPurgeAllConfirm,
+                    "purge ALL graveyard entries to system trash? (y/N): ",
+                ));
+            }
+            _ => {
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+            }
+        }
+        PostAction::None
+    }
+
+    /// Restore the cursor entry from the graveyard. `to_original`
+    /// = true means the original path (use `Graveyard::restore`
+    /// with the orig dir as dest); false = current cwd.
+    fn graveyard_restore(&mut self, to_original: bool) {
+        let Some(entry) = self.state.graveyard.get(self.state.cursor.index).cloned() else {
+            self.state.flash_error("graveyard: no entry under cursor");
+            return;
+        };
+        let dest = if to_original {
+            entry.orig_path.parent().map_or_else(
+                || std::path::PathBuf::from("/"),
+                std::path::Path::to_path_buf,
+            )
+        } else {
+            self.state.listing.dir.clone()
+        };
+        match crate::state::graveyard::Graveyard::restore(&entry, &dest) {
+            Ok(()) => {
+                // Restoration succeeded — drop the entry from the
+                // graveyard so the user doesn't think it's still there.
+                crate::state::graveyard::Graveyard::delete_entry(&entry);
+                let where_ = if to_original { "original" } else { "cwd" };
+                self.state
+                    .flash_info(format!("restored {} ({where_})", entry.filename));
+                self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
+                self.state.cursor.clamp(self.state.graveyard.len());
+                self.state.refresh_listing(); // dest may be cwd
+                self.state.rebuild_rows();
+            }
+            Err(e) => {
+                self.state
+                    .flash_error(format!("restore failed: {e} (target may already exist)"));
+            }
+        }
+    }
+
+    /// Purge the cursor entry to system trash. Used by `dd` and `x`.
+    fn graveyard_purge_cursor_entry(&mut self) {
+        let Some(entry) = self.state.graveyard.get(self.state.cursor.index).cloned() else {
+            self.state.flash_error("graveyard: no entry under cursor");
+            return;
+        };
+        match crate::state::graveyard::Graveyard::cascade_entry_to_trash(&entry) {
+            Ok(()) => {
+                self.state
+                    .flash_info(format!("→ system trash: {}", entry.filename));
+                self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
+                self.state.cursor.clamp(self.state.graveyard.len());
+                self.state.rebuild_rows();
+            }
+            Err(e) => self.state.flash_error(format!("purge failed: {e}")),
+        }
     }
 
     fn start_new_tab_prompt(&mut self) {
@@ -7385,6 +7693,7 @@ impl App {
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
 
             Action::QuickSelectOpen => self.open_quick_select(),
+            Action::OpenGraveyardView => self.state.open_graveyard_view(),
             Action::HarpoonJump(n) => self.harpoon_jump(*n),
             Action::HarpoonAppend => self.harpoon_append(),
             Action::HarpoonRemove => self.harpoon_remove(),

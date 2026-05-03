@@ -145,6 +145,23 @@ file cache that survives across sessions.
 | `p` | Put inventory files into cwd |
 | `i` | Toggle inventory view |
 
+### Graveyard (R-undo + soft-delete recovery)
+
+Files removed with **`R`** (and items expelled from inventory) go
+to a per-user **graveyard** as compressed `tar.zst` blobs (mode
+bits + mtime preserved). Recover with `gy` or `:undo`. When the
+graveyard exceeds 500 MB the oldest entries cascade to the system
+trash so OS-native recovery still works.
+
+| Key | Action |
+|-----|--------|
+| `gy` | Open graveyard view (newest first) |
+| `:undo` | Restore most-recent removal to its original path |
+| `p` (in view) | Restore cursor entry to cwd |
+| `P` (in view) | Restore cursor entry to original path |
+| `dd` / `x` (in view) | Purge cursor entry to system trash |
+| `Z` (in view) | Purge ALL entries to system trash (confirm) |
+
 ### Split pane
 
 The pane is a real pty -- it runs `claude` by default, but any command
