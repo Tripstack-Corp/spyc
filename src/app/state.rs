@@ -1239,6 +1239,8 @@ impl AppState {
             || input.starts_with("pause ")
             || input == "resume"
             || input.starts_with("resume ")
+            || input == "undo"
+            || input == "graveyard"
         {
             return CommandResult::NotHandled;
         }

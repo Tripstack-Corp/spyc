@@ -56,3 +56,5 @@ Cargo.lock.bak
 .spyc-context-*.json
 
 .mcp.json
+
+.claude
