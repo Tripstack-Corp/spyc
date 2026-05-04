@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`:fg` opened the pager scrolled to the top with the live tail
+  off-screen.** Resuming a backgrounded `cargo build` (or any
+  chatty task) showed an empty pager, or — once the next chunk
+  landed — content scrolled to row 0 with the latest output
+  invisible, so it looked like nothing was running. Root cause:
+  `foreground_task`'s Running branch built the `PagerView` with
+  `lines: Vec::new()` and only the streaming-tick repopulated it
+  on the next chunk. Now seeded the same way `:task N`'s peek
+  viewer is — render `task.buffer` into the pager and call
+  `scroll_to_bottom_auto()` before handing the buffer to
+  `pending_capture`.
 - **`^C` swallowed when pane is focused.** The "^C is not a quit
   binding" footgun-guard fired before the pane-forward path, so
   pressing `^C` while focused on a child process (zsh, a long-running

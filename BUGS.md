@@ -23,8 +23,6 @@
   half - we need a stronger top line/bottom line marker for this
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
-- fg does not show the recent output - it puts the current STDOUT at the very
-  top so it ends up looking like there has been no output
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -119,6 +117,20 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.3) `:fg` now opens the pager already populated with
+  the task's buffered output and scrolled to the bottom. Symptom:
+  resuming a backgrounded `cargo build` (or any chatty task)
+  showed an empty pager — or, once the next chunk arrived, content
+  scrolled to row 0 with the live tail off-screen — making it look
+  like nothing was running. Root cause: `foreground_task`'s Running
+  branch built the `PagerView` with `lines: Vec::new()` and handed
+  the existing buffer straight over to `pending_capture`; the
+  streaming-tick only rebuilds pager content when a NEW chunk
+  arrives, so the pre-existing buffer was invisible until then,
+  and even after that the at-bottom check was racing the line-count
+  growth. Now seeded the same way `:task N` (peek viewer) seeds —
+  render the buffer and `scroll_to_bottom_auto()` before re-attaching
+  the streaming capture.
 - (fixed, v1.41.2) Per-file git markers (`~`/`+`/`-`/`?`) no longer
   spuriously dirty a clean root-level file when a sibling-named
   file in a subdirectory is modified. Symptom: working in
