@@ -17,6 +17,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   viewer is — render `task.buffer` into the pager and call
   `scroll_to_bottom_auto()` before handing the buffer to
   `pending_capture`.
+- **Flaky test suite under parallel execution.** Several state-module
+  tests (graveyard / harpoon / inventory / marks / sessions) and the
+  shell-module tests mutate process-global env vars
+  (`XDG_STATE_HOME`, `SHELL`) and raced when run in parallel,
+  surfacing as random `NotFound` errors deep inside graveyard
+  restores or wrong-shell-path assertions. `make check` was
+  papered over with `--test-threads=1`; the CI Coverage step ran
+  parallel and was failing intermittently. Added a single shared
+  `crate::state::env_test_lock()` mutex; each affected test holds
+  it for its full body. 15 consecutive parallel runs now pass.
 - **`^C` swallowed when pane is focused.** The "^C is not a quit
   binding" footgun-guard fired before the pane-forward path, so
   pressing `^C` while focused on a child process (zsh, a long-running

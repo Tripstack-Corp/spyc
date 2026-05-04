@@ -1899,6 +1899,7 @@ mod tests {
 
     #[test]
     fn take_cursor_item_to_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
@@ -1911,6 +1912,7 @@ mod tests {
 
     #[test]
     fn take_picks_to_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
@@ -1924,6 +1926,7 @@ mod tests {
 
     #[test]
     fn drop_removes_from_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
@@ -2302,6 +2305,7 @@ mod tests {
 
     #[test]
     fn apply_take_adds_to_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
@@ -2314,6 +2318,7 @@ mod tests {
 
     #[test]
     fn apply_drop_removes_from_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
@@ -2336,6 +2341,7 @@ mod tests {
 
     #[test]
     fn apply_empty_inventory() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());
