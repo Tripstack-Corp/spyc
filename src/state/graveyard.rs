@@ -389,6 +389,7 @@ mod tests {
 
     #[test]
     fn write_and_restore_single_file_roundtrips_with_perms() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let work = tempdir().unwrap();
         let src = work.path().join("hello.sh");
@@ -427,6 +428,7 @@ mod tests {
 
     #[test]
     fn write_and_restore_directory_tree() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let work = tempdir().unwrap();
         let root = work.path().join("proj");
@@ -453,6 +455,7 @@ mod tests {
 
     #[test]
     fn restore_refuses_to_overwrite() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let work = tempdir().unwrap();
         let src = work.path().join("important.txt");
@@ -475,6 +478,7 @@ mod tests {
 
     #[test]
     fn load_returns_newest_first() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let work = tempdir().unwrap();
         let a = work.path().join("a.txt");
@@ -507,6 +511,7 @@ mod tests {
 
     #[test]
     fn delete_entry_removes_pair() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let work = tempdir().unwrap();
         let src = work.path().join("x.txt");
@@ -524,6 +529,7 @@ mod tests {
 
     #[test]
     fn orphan_tarball_without_json_is_ignored() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let dir = graveyard_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();

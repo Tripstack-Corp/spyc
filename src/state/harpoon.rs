@@ -317,6 +317,7 @@ mod tests {
 
     #[test]
     fn roundtrip_persistence() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let project = PathBuf::from("/tmp/myproj");
         let mut h = Harpoon::load(&project);
@@ -333,6 +334,7 @@ mod tests {
 
     #[test]
     fn load_missing_file_yields_empty() {
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let h = Harpoon::load(Path::new("/tmp/never-saved"));
         assert!(h.slots.is_empty());
@@ -350,6 +352,7 @@ mod tests {
     fn project_mismatch_yields_empty() {
         // Pre-write a file claiming a different project; load should
         // discard it rather than serve someone else's slots.
+        let _lock = crate::state::env_test_lock();
         let _xdg = fresh_xdg();
         let real = PathBuf::from("/tmp/realproj");
         let mut wrong = Harpoon::load(&real);

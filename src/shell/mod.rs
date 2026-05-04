@@ -95,11 +95,13 @@ mod tests {
     use super::*;
 
     /// Helper: scope-set $SHELL for a single call. Tests in this
-    /// module mutate the process-global env var; gate them with the
-    /// XDG_STATE_HOME serialization comment in inventory.rs --
-    /// running in parallel here is fine because the helper restores
-    /// in the same call.
+    /// module mutate the process-global env var. The shared
+    /// `crate::state::env_test_lock()` mutex serializes us against
+    /// each other AND against the state-module tests that mutate
+    /// other env vars (XDG_STATE_HOME), so the whole test suite can
+    /// run with the default parallel runner without env-var races.
     fn with_shell<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
+        let _lock = crate::state::env_test_lock();
         let prev = std::env::var_os("SHELL");
         unsafe {
             match value {

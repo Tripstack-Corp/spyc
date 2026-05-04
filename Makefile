@@ -39,9 +39,7 @@ check: fmt-check lint test deny ## Full quality gate (CI)
 # CI and dev builds use the committed lockfile or fail loudly.
 .PHONY: test
 test: ## Run all tests
-	# Single-threaded: two state-module tests (inventory, sessions) mutate
-	# the global XDG_STATE_HOME env var. Parallel execution races them.
-	cargo test --locked --all-targets -- --test-threads=1
+	cargo test --locked --all-targets
 
 .PHONY: lint
 lint: ## Clippy with pedantic + nursery

@@ -487,12 +487,13 @@ mod tests {
     }
 
     // Note: save/load/prune tests use the shared XDG_STATE_HOME env var.
-    // Run them serially to avoid interference between parallel tests.
-    // We use `#[serial_test::serial]` conceptually but since that's not a
-    // dep, we combine them into a single test.
+    // The lock from `crate::state::env_test_lock()` serializes us
+    // against the other state-module tests that mutate the same env
+    // var (graveyard / harpoon / inventory / marks).
 
     #[test]
     fn save_load_prune_and_dedup() {
+        let _lock = crate::state::env_test_lock();
         let tmp = tempdir().unwrap();
         unsafe {
             std::env::set_var("XDG_STATE_HOME", tmp.path());

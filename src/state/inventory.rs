@@ -358,9 +358,12 @@ mod tests {
 
     // All tests are combined into one to avoid env var races
     // (XDG_STATE_HOME is process-global). Same pattern as
-    // sessions::tests::save_load_prune_and_dedup.
+    // sessions::tests::save_load_prune_and_dedup. The shared lock
+    // also serializes us against graveyard / harpoon / marks / sessions
+    // tests that touch the same env var.
     #[test]
     fn cached_inventory_operations() {
+        let _lock = crate::state::env_test_lock();
         let (tmp, mut inv) = setup_inv();
 
         // --- yank and contains ---

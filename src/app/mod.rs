@@ -4590,14 +4590,24 @@ impl App {
 
         match task.status {
             TaskStatus::Running => {
-                // Re-attach as a streaming capture. Title rebuilt next
-                // tick by the streaming code path.
+                // Re-attach as a streaming capture. Seed the pager with
+                // the buffered output BEFORE handing the buffer over to
+                // `pending_capture`, otherwise the user sees an empty
+                // pager (or, once new chunks arrive, content scrolled
+                // to row 0 with the live tail off-screen) until the
+                // streaming-tick rebuilds. Mirrors what
+                // `build_task_viewer_for` does for `:task N`.
+                use ansi_to_tui::IntoText;
+                let normalized = strip_crlf(&task.buffer);
+                let text = normalized.as_slice().into_text().unwrap_or_default();
                 let secs = task.started.elapsed().as_secs();
                 let mut view = PagerView::new_plain(
                     format!("\u{23f3} {} — running... ({secs}s)", task.title),
                     Vec::new(),
                 );
+                view.lines = text.lines;
                 view.streaming = true;
+                view.scroll_to_bottom_auto();
                 self.pager = Some(view);
                 self.pending_capture = Some(PendingCapture {
                     child: task.child,
