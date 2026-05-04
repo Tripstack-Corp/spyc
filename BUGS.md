@@ -1,4 +1,6 @@
 ### SMALL ###
+- notice of ^c while in the task viewer goes to the spyc pane instead of at the
+  top of the task pager view
 - how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
@@ -19,14 +21,10 @@
   tab. One-line addition next to the existing `TERM` env line.
 - it's very confusing still to remember you're in scroll mode in the bottom
   half - we need a stronger top line/bottom line marker for this
-- while focused on the command in the lower pane we should send ^c to the lower
-  pane running process
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
 - fg does not show the recent output - it puts the current STDOUT at the very
   top so it ends up looking like there has been no output
-- notice of ^c while in the task viewer goes to the spyc pane instead of at the
-  top of the task pager view
 - cwd should update when we quit based on where spyc is navigated to (may
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
@@ -121,6 +119,25 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.2) Per-file git markers (`~`/`+`/`-`/`?`) no longer
+  spuriously dirty a clean root-level file when a sibling-named
+  file in a subdirectory is modified. Symptom: working in
+  `tripstack_platform`, the root `CLAUDE.md` rendered with `~` even
+  with no local edits, because `content-acquisition/CLAUDE.md` was
+  modified and `git_file_statuses` collapsed every status entry to
+  its basename — so the deep file's status leaked onto the root
+  row. The map now only stores a basename entry for files actually
+  in the listing directory; deeper entries only mark the parent
+  directory. Added a parser-level test (`parse_porcelain_statuses`)
+  so the regression is caught without spawning git.
+- (fixed, v1.41.2) `^C` now reaches the lower-pane subprocess when
+  the pane is focused. The "^C is not a quit binding" hint-flash
+  was firing before the pane-forward dispatch, so `^C` to interrupt
+  zsh / a running command got swallowed and the user saw a flash
+  instead of a SIGINT. The guard now skips when the pane has focus;
+  the spyc-normal footgun protection still fires when the file list
+  has focus. Other control codes (`^T`, `^D`, etc.) were already
+  forwarded — only `^C` carried the extra guard.
 - (fixed, v1.37.1) Stale git markers (`+` / `~` / `?`) after a
   commit + push self-heal within ~1s instead of sticking until the
   user changes directories. Root cause: macOS FSEvents on `.git/`

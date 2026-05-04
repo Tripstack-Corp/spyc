@@ -2679,10 +2679,15 @@ impl App {
         //  - Prompting mode treats ^C as cancel (vi muscle memory:
         //    `^C` in `:` should drop you back to normal mode, same
         //    as Esc) -- handled in `handle_vi_prompt_key`.
+        //  - Pane focused: ^C must reach the child (zsh, etc.) so the
+        //    user can interrupt a running command. Forwarding happens
+        //    at the pane-focused dispatch below.
+        let pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused;
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
+            && !pane_has_focus
         {
             self.state.flash_info(
                 "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",

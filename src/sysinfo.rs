@@ -62,8 +62,7 @@ pub fn git_status(dir: &std::path::Path) -> Option<String> {
 pub fn git_file_statuses(
     dir: &std::path::Path,
 ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
-    use crate::ui::list_view::GitFileStatus;
-    let mut map = std::collections::HashMap::new();
+    let map = std::collections::HashMap::new();
     let output = std::process::Command::new("git")
         .args(["status", "--porcelain", "-unormal"])
         .current_dir(dir)
@@ -94,7 +93,20 @@ pub fn git_file_statuses(
         .unwrap_or_default();
 
     let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
+    parse_porcelain_statuses(&text, &prefix)
+}
+
+/// Pure-parser half of [`git_file_statuses`]: turns raw `git status
+/// --porcelain` output (plus the dir-relative prefix) into the
+/// basename-keyed map the list view consumes. Split out so we can unit
+/// test the path-mapping rules without spawning `git`.
+fn parse_porcelain_statuses(
+    porcelain: &str,
+    prefix: &str,
+) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
+    use crate::ui::list_view::GitFileStatus;
+    let mut map = std::collections::HashMap::new();
+    for line in porcelain.lines() {
         if line.len() < 4 {
             continue;
         }
@@ -108,11 +120,11 @@ pub fn git_file_statuses(
             raw_path
         } else {
             let pfx = if prefix.ends_with('/') {
-                prefix.as_str()
+                prefix.to_string()
             } else {
-                &format!("{prefix}/")
+                format!("{prefix}/")
             };
-            match raw_path.strip_prefix(pfx) {
+            match raw_path.strip_prefix(&pfx) {
                 Some(rest) => rest,
                 None => continue, // not under this directory
             }
@@ -123,6 +135,7 @@ pub fn git_file_statuses(
             .unwrap_or_default();
         // Top component relative to THIS directory.
         let top_component = filename.split('/').next().unwrap_or(filename).to_string();
+        let in_this_dir = top_component == filename;
         let status = match xy {
             "??" => GitFileStatus::Untracked,
             "!!" => continue, // ignored
@@ -132,11 +145,15 @@ pub fn git_file_statuses(
             s if s.starts_with('D') || s.ends_with('D') => GitFileStatus::Deleted,
             _ => GitFileStatus::Modified,
         };
-        if !name.is_empty() {
+        // Only file rows in THIS directory get a basename entry.
+        // Otherwise a deep entry like `content-acquisition/CLAUDE.md`
+        // would write `CLAUDE.md → Modified` and dirty the unrelated
+        // root-level `CLAUDE.md` row.
+        if in_this_dir && !name.is_empty() {
             map.entry(name).or_insert(status);
         }
-        // Mark parent directories as modified too.
-        if top_component != filename && !top_component.is_empty() {
+        // Mark parent directory as modified for entries in subtrees.
+        if !in_this_dir && !top_component.is_empty() {
             map.entry(format!("{top_component}/"))
                 .or_insert(GitFileStatus::Modified);
         }
@@ -318,6 +335,7 @@ pub fn format_rss() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::list_view::GitFileStatus;
 
     #[test]
     fn format_now_has_correct_shape() {
@@ -330,5 +348,56 @@ mod tests {
         assert_eq!(&s[13..14], ":");
         assert_eq!(&s[16..17], ":");
         assert!(s.ends_with(" UTC"));
+    }
+
+    #[test]
+    fn deep_modification_does_not_dirty_same_basename_at_root() {
+        // Regression: a root listing of `git status` showing
+        // `content-acquisition/CLAUDE.md` modified must NOT mark a
+        // separate root-level `CLAUDE.md` as modified.
+        let porcelain = " M content-acquisition/CLAUDE.md\n";
+        let map = parse_porcelain_statuses(porcelain, "");
+        // The deep file's basename is NOT a root entry.
+        assert!(!map.contains_key("CLAUDE.md"));
+        // The parent dir IS marked modified.
+        assert_eq!(
+            map.get("content-acquisition/"),
+            Some(&GitFileStatus::Modified)
+        );
+    }
+
+    #[test]
+    fn root_modification_marks_basename() {
+        let map = parse_porcelain_statuses(" M CLAUDE.md\n", "");
+        assert_eq!(map.get("CLAUDE.md"), Some(&GitFileStatus::Modified));
+    }
+
+    #[test]
+    fn root_and_deep_same_basename_uses_root_status() {
+        // Both a root file and a sibling-named deep file are dirty.
+        // The root entry must reflect the root file's actual status,
+        // not the deep file's.
+        let porcelain = "?? new.md\n M sub/new.md\n";
+        let map = parse_porcelain_statuses(porcelain, "");
+        assert_eq!(map.get("new.md"), Some(&GitFileStatus::Untracked));
+        assert_eq!(map.get("sub/"), Some(&GitFileStatus::Modified));
+    }
+
+    #[test]
+    fn prefix_strips_listing_dir() {
+        // Listing `sub/` under a repo root: only entries under `sub/`
+        // contribute, and they're keyed relative to the listing dir.
+        let porcelain = " M sub/foo.txt\n M other/bar.txt\n";
+        let map = parse_porcelain_statuses(porcelain, "sub");
+        assert_eq!(map.get("foo.txt"), Some(&GitFileStatus::Modified));
+        assert!(!map.contains_key("bar.txt"));
+    }
+
+    #[test]
+    fn rename_takes_new_name() {
+        let porcelain = "R  old.md -> new.md\n";
+        let map = parse_porcelain_statuses(porcelain, "");
+        assert_eq!(map.get("new.md"), Some(&GitFileStatus::Renamed));
+        assert!(!map.contains_key("old.md"));
     }
 }
