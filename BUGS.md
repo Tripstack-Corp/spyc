@@ -117,6 +117,18 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.4) `/<query>` followed by `n n n` in the help pager no
+  longer pins the view at the bottom of the file. Symptom: in the
+  multi-column help overlay, searching for "show" and pressing `n` a
+  few times left every column scrolled to the end of its chunk with
+  no match visible. Cause: `scroll_to_match` fed the global line
+  index straight into `self.scroll`, but in multi-col rendering
+  `scroll` is interpreted per-column (each column applies the same
+  offset within its own chunk). A match in column 2 produced a
+  scroll value larger than `scroll_max` and got clamped to the
+  bottom. Now translates the match's global line index to a
+  chunk-local offset for multi-col views; single-col is unchanged.
+  Regression test pins the rule.
 - (fixed, v1.41.3) `:fg` now opens the pager already populated with
   the task's buffered output and scrolled to the bottom. Symptom:
   resuming a backgrounded `cargo build` (or any chatty task)

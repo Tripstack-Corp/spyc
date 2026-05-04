@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`/...` then `n n n` in the help pager left the view stuck at the
+  bottom.** The help overlay renders in two columns when the terminal
+  is wide enough; in multi-column mode `scroll` is interpreted
+  per-column (each column applies the same offset within its own
+  chunk), but `scroll_to_match` was treating it as a global line
+  offset. A match in column 2 produced a `scroll` value larger than
+  `scroll_max` (= longest-chunk - viewport_h), got clamped to the
+  bottom, and pinned every column at the end of its chunk — hiding
+  the actual match. Now translates the match's global line index to
+  a chunk-local offset before assigning to `self.scroll`. Single-
+  column pagers behave unchanged. Pinned by a regression test.
 - **`:fg` opened the pager scrolled to the top with the live tail
   off-screen.** Resuming a backgrounded `cargo build` (or any
   chatty task) showed an empty pager, or — once the next chunk
