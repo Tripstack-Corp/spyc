@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`^C` swallowed when pane is focused.** The "^C is not a quit
+  binding" footgun-guard fired before the pane-forward path, so
+  pressing `^C` while focused on a child process (zsh, a long-running
+  command, etc.) flashed the hint instead of delivering `0x03` to the
+  child. The guard now skips when the pane has focus, so `^C` reaches
+  the running process as it does in any normal terminal. Other control
+  codes (`^T`, `^D`, …) were already forwarded; only the `^C` case
+  carried the extra guard.
+- **Git markers leaked across same-name files.** A clean root-level
+  file rendered with a `~` (modified) marker when a sibling-named
+  file in a subdirectory was actually the dirty one (e.g. root
+  `CLAUDE.md` clean, `content-acquisition/CLAUDE.md` modified →
+  both rows showed `~`). `git_file_statuses` collapsed every
+  porcelain entry to its basename and indexed the map by that
+  basename, so the deep file's status overwrote the root row.
+  The basename now only goes into the map for files actually in
+  the listing directory; deeper entries still mark the parent
+  directory. The parsing logic is now split out as
+  `parse_porcelain_statuses` with unit tests pinning the rule.
 - **`:undo` and `:graveyard` returned "unknown command".** State's
   command dispatcher routes a fixed list of names to App's
   terminal-touching arms; `undo` and `graveyard` weren't on it,
