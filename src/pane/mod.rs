@@ -256,6 +256,70 @@ impl Pane {
         self.child.process_id()
     }
 
+    /// Orderly shutdown of the child and its descendants. Sends
+    /// `SIGTERM` to the child's process group (negative PID — reaches
+    /// every grandchild, which is the actual user-reported scenario:
+    /// `npm run dev` → node → esbuild → workers all need to die when
+    /// the tab closes), waits up to `grace` for voluntary exit, then
+    /// `SIGKILL`s the group if it's still alive. Reaps the child so
+    /// no zombies are left behind.
+    ///
+    /// portable-pty calls `setsid` for spawned children on Unix, so
+    /// the child's PID is also its process-group leader — sending to
+    /// `-pid` reaches the whole tree. Already-exited children
+    /// short-circuit (the reader thread set `closed`).
+    pub fn shutdown(&mut self, grace: std::time::Duration) {
+        if self.closed {
+            // Reader thread already saw EOF; just harvest exit_status
+            // if we haven't yet. Non-blocking.
+            if self.exit_status.is_none() {
+                if let Ok(Some(status)) = self.child.try_wait() {
+                    self.exit_status = Some(status);
+                }
+            }
+            return;
+        }
+        let Some(pid) = self.child.process_id() else {
+            // No PID (already reaped, or platform didn't surface one).
+            // Best-effort: ask portable-pty to kill the immediate child
+            // and move on.
+            let _ = self.child.kill();
+            self.closed = true;
+            return;
+        };
+
+        #[cfg(unix)]
+        unsafe {
+            // SIGTERM to the process group. Most well-behaved children
+            // shut down cleanly within a few hundred ms.
+            libc::kill(-(pid as libc::pid_t), libc::SIGTERM);
+        }
+        // Poll for voluntary exit. Cap iterations at `grace`.
+        let deadline = std::time::Instant::now() + grace;
+        while std::time::Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
+                    self.exit_status = Some(status);
+                    self.closed = true;
+                    return;
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Err(_) => break,
+            }
+        }
+        // Grace expired — escalate to SIGKILL on the process group, then
+        // reap. SIGKILL is uncatchable so a final blocking wait() is
+        // safe (it won't hang).
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+        }
+        if let Ok(status) = self.child.wait() {
+            self.exit_status = Some(status);
+        }
+        self.closed = true;
+    }
+
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
     #[allow(dead_code)] // wired into the S-key handler in the next step
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
@@ -417,6 +481,32 @@ impl Pane {
 
     fn apply_scroll(&mut self) {
         self.parser.set_scrollback(self.scroll_offset);
+    }
+}
+
+/// Best-effort safety net: any code path that drops a `Pane` without
+/// going through `shutdown` (panic unwind, `?`-propagated error in
+/// the main loop, etc.) still gets the child tree torn down. We
+/// can't sleep here without making Drop slow, so this skips the
+/// SIGTERM grace period and goes straight to SIGKILL on the process
+/// group. The orderly close-tab and quit paths call `shutdown`
+/// explicitly first, so this rarely fires for a "well-behaved" exit.
+impl Drop for Pane {
+    fn drop(&mut self) {
+        if self.closed {
+            return;
+        }
+        if let Some(pid) = self.child.process_id() {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+            }
+        } else {
+            let _ = self.child.kill();
+        }
+        // Non-blocking reap; the kernel will clean up if it's already
+        // gone or about to be.
+        let _ = self.child.try_wait();
     }
 }
 

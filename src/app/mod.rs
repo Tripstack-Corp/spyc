@@ -1710,6 +1710,19 @@ impl App {
         }
         // Clean up the context file on exit.
         crate::context::remove_context_file(&self.context_path);
+        // Tear down every pane child tree before App is dropped.
+        // The per-Pane Drop is a SIGKILL safety net; going through
+        // `shutdown` here first sends SIGTERM with a 250ms grace, so
+        // well-behaved children (`vite`, `npm run dev`, anything that
+        // catches SIGTERM) get a chance to flush state before we
+        // escalate. Without this, quitting spyc with a frontend dev
+        // server in a pane would leave the whole node/esbuild/worker
+        // tree orphaned and still bound to its port.
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            for entry in tabs.tabs_mut() {
+                entry.pane.shutdown(Duration::from_millis(250));
+            }
+        }
         Ok(())
     }
 

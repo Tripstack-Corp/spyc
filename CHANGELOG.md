@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pane child trees now exit cleanly on tab close and spyc quit.**
+  `^a x` / `^a K` (close tab) and `Q` / `:q` / `^D` (quit spyc) used
+  to drop the pane without signalling its child, leaving processes
+  orphaned — most painfully `npm run dev` / `vite` / etc., where the
+  whole `node` → `esbuild` → workers tree kept running and stayed
+  bound to its dev-server port. New `Pane::shutdown(grace)` sends
+  SIGTERM to the child's process group (negative PID — reaches the
+  whole subprocess tree), waits up to 250 ms for voluntary exit,
+  then escalates to SIGKILL and reaps. Wired into both
+  `tabs.remove_at` (close-tab path) and the end of `App::run` (quit
+  path). A backstop `Drop for Pane` SIGKILLs the process group on
+  any path that bypasses the orderly shutdown (panic unwind,
+  `?`-propagated error), so children never leak.
+
 ### Added
 - **Codex MCP discovery via `.codex/config.toml`.** spyc now writes
   the codex equivalent of its `.mcp.json` to
