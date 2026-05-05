@@ -65,6 +65,8 @@
   for `\e[NA` sequences to confirm vs. brew choosing line-mode.
 
 ### BIGGER ###
+- codex doesn't support vi bindings ... maybe we could control it and inject vi
+  bindings into it's rataui pane
 - pane forwards no mouse events to the child. spyc never calls
   `EnableMouseCapture` on the host terminal
   (`src/main.rs::setup_terminal`), and `src/pane/input.rs` has no

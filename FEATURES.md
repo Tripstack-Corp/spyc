@@ -106,7 +106,11 @@ spyc's workflow: browse files above, talk to Claude below.
   restored on un-zoom. Status + prompt rows stay visible (tmux-style).
   A `[ZOOM]` tag appears in the divider while active.
 - **^a v** enter scroll mode — browse up to 10K lines of scrollback
-  without interrupting the child process; **s** saves to a file
+  without interrupting the child process; **s** saves to a file.
+  When the child has switched to the alternate screen (full-screen
+  TUIs like codex, vim, htop, lazygit), the flash hints that
+  scroll-back is unavailable and points you at the app's own
+  history viewer.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
@@ -123,7 +127,11 @@ Multiple tabs, each running an independent pty:
 - **^a n / ^a ]** next tab
 - **^a r** rename the active tab
 - Activity indicator (**+**) on background tabs that have new output
-- Set `SPYC_PANE_CMD` to change the default pane command from `claude`
+- **Default command** for `^a c` resolves in this order:
+  `$SPYC_PANE_CMD` env var → `[pane] default_command` in
+  `.spycrc.toml` → built-in `"claude"` fallback. Switch your daily
+  driver to codex (or anything else) by adding
+  `[pane]\ndefault_command = "codex"` to your config.
 
 ## In-app pager
 

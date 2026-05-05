@@ -6,6 +6,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`[pane] default_command` config key.** `^a c` (new pane tab)
+  pre-fills its prompt with this command instead of the hardcoded
+  `"claude"`. Precedence: `$SPYC_PANE_CMD` env var > config >
+  `"claude"` fallback. The env var still wins so users can
+  experiment per-shell without editing config; the new key just
+  fixes the default for users who've switched to codex (or anything
+  else) as their daily driver.
+- **`gd` now matches what the `~` marker says.** `gd` was running
+  bare `git diff` (working-tree-vs-index) and flashing
+  "no unstaged changes" on rows the listing had marked dirty with
+  `~`, because once you `git add` a file the diff lives in the
+  index and unstaged is empty. `~` flags anything different from
+  HEAD, so `gd` is now `git diff HEAD` — covers staged + unstaged
+  + still folds in untracked-as-new — and the empty-flash now says
+  "no uncommitted changes". `gD` (`--cached`) is unchanged for the
+  "what would commit" view.
+- **Alt-screen scroll-mode hint.** `^a v` against a full-screen TUI
+  (codex, claude post-startup, vim, htop, lazygit) now flashes
+  `scroll: on — alt-screen app, no scrollback (use the app's own
+  history)` instead of the generic `(j/k nav, s save, Esc exit)`
+  message. Alt-screen apps don't write to main-screen scrollback,
+  so there's nothing for `^a v` to surface — the hint redirects the
+  user to the app's built-in history viewer rather than letting them
+  think scroll-back is broken. Detection via vt100's
+  `Screen::alternate_screen()`. Single-screen apps (bash, plain
+  shells) keep the old flash.
 - **Codex session save/restore parity with claude.** `spyc -r` now
   resurrects codex panes with their conversation intact, the same
   way it has long done for claude. On quit, spyc sniffs the codex

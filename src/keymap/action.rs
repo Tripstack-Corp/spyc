@@ -135,7 +135,7 @@ pub enum Action {
     WorktreeDelete, // W d — confirm, remove current worktree
 
     // Git diff (M12).
-    GitDiff,       // g d — unstaged diff for cursor file / selection (includes new/untracked)
+    GitDiff,       // g d — diff-vs-HEAD for cursor file / selection (staged + unstaged + new)
     GitDiffCached, // g D — staged (cached) diff
     GitBlame,      // g b — git blame on cursor file
 
@@ -248,7 +248,7 @@ impl Action {
             Self::WorktreeList => "list git worktrees",
             Self::WorktreeNew => "new git worktree",
             Self::WorktreeDelete => "delete git worktree",
-            Self::GitDiff => "git diff (unstaged + new)",
+            Self::GitDiff => "git diff HEAD (staged + unstaged + new)",
             Self::GitDiffCached => "git diff --cached (staged)",
             Self::GitBlame => "git blame (cursor file)",
             Self::GotoFile => "jump to path in pane output",
