@@ -586,9 +586,27 @@ impl PagerView {
 
     /// Scroll the viewport so `line_idx` is roughly a third of the way
     /// down — gives context above and more content below.
+    ///
+    /// In multi-column mode `scroll` is interpreted per-column (each
+    /// column applies the same offset within its own chunk), so a
+    /// match in column 2+ has to be translated to a chunk-local
+    /// offset before being assigned to `self.scroll` — otherwise the
+    /// global line index gets clamped to `scroll_max` (= longest
+    /// chunk minus viewport_h) and every column pins to the bottom
+    /// of its chunk, hiding the match. Symptom: `/show` then `n n n`
+    /// in the help pager left the view stuck at the bottom.
     fn scroll_to_match(&mut self, line_idx: usize, viewport_height: u16) {
         let third = i64::from(viewport_height) / 3;
-        let target = line_idx as i64 - third;
+        let ncols = self.columns.max(1) as usize;
+        let local_idx = if ncols > 1 {
+            partition_lines_static(&self.lines, ncols)
+                .into_iter()
+                .find(|(s, e)| (*s..*e).contains(&line_idx))
+                .map_or(line_idx, |(s, _)| line_idx - s)
+        } else {
+            line_idx
+        };
+        let target = local_idx as i64 - third;
         let scroll = target.max(0);
         self.scroll = u16::try_from(scroll).unwrap_or(u16::MAX);
         self.clamp_scroll(viewport_height);
@@ -1386,6 +1404,68 @@ mod tests {
             "scroll_max({}) too small — content past visual viewport \
              will be unreachable",
             view.scroll_max(6),
+        );
+    }
+
+    /// Regression test for the "stuck at bottom" search bug in the
+    /// help pager (which is multi-column). With `ncols >= 2`, `scroll`
+    /// is interpreted per-column (each column applies the same offset
+    /// within its own chunk). `scroll_to_match` used to feed the
+    /// global line index straight into `self.scroll`, so a match in
+    /// column 2+ overshot `scroll_max` (= longest-chunk - vh) and got
+    /// clamped to the bottom — hiding the match. Symptom users hit:
+    /// `/show` in the help overlay then `n n n n` left the view stuck
+    /// at the bottom.
+    #[test]
+    fn scroll_to_match_translates_to_chunk_local_offset_in_multi_col() {
+        // 200 lines, no blank lines so partition_lines_static cuts at
+        // exactly idx 100 (blank-line search finds nothing in the
+        // window and falls back to the ideal cut). Matches every 50:
+        // {0, 50, 100, 150}. col1 chunk = [0, 100), col2 = [100, 200).
+        let lines: Vec<String> = (0..200)
+            .map(|i| {
+                if i % 50 == 0 {
+                    format!("line {i} show")
+                } else {
+                    format!("line {i}")
+                }
+            })
+            .collect();
+        let mut view = PagerView::new_plain("help", lines);
+        view.columns = 2;
+        let viewport = 24u16;
+
+        view.begin_search();
+        for c in "show".chars() {
+            view.search_push_char(c);
+        }
+        assert!(view.commit_search(viewport));
+
+        // After commit: cursor=0 (line 0), scroll=0.
+        assert_eq!(view.scroll, 0);
+
+        // n → line 50 in col1 chunk. Chunk-local idx = 50, scroll = 50 - 8 = 42.
+        view.search_next(viewport);
+        assert_eq!(
+            view.scroll, 42,
+            "n into mid-col1 should land near the match"
+        );
+
+        // n → line 100 (start of col2 chunk). Chunk-local idx = 0, scroll = 0.
+        // Pre-fix: target = 100 - 8 = 92, clamped to scroll_max = 100 - 24 = 76 → bottom.
+        view.search_next(viewport);
+        assert_eq!(
+            view.scroll, 0,
+            "n onto first col2 match should reset scroll to the top of col2's chunk, \
+             not pin to scroll_max"
+        );
+
+        // n → line 150 in col2 chunk. Chunk-local idx = 50, scroll = 42.
+        // Pre-fix: target = 142, clamped to 76 → "stuck at bottom".
+        view.search_next(viewport);
+        assert_eq!(
+            view.scroll, 42,
+            "n onto mid-col2 match should land mid-chunk, not pin to scroll_max"
         );
     }
 
