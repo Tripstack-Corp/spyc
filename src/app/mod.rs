@@ -878,6 +878,28 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!(".mcp.json: {e}")),
         }
+
+        // Codex equivalent: write `.codex/config.toml` so the codex CLI
+        // discovers spyc's MCP server the same way claude does. Both
+        // agents share the same socket; the writer just registers a
+        // stdio entry that re-execs `spyc --mcp` to proxy. Failures
+        // here flash but don't gate startup — codex isn't required.
+        // Enterprise-flavored statuses are claude-specific; codex
+        // shouldn't return them, but if it ever does we treat them as
+        // a no-op.
+        match crate::mcp::ensure_codex_config_toml(&self.state.listing.dir, takeover_allowed) {
+            Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
+                self.state
+                    .flash_info(format!("codex MCP: took over from PID {old_pid}"));
+            }
+            Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
+                self.state.flash_info(format!(
+                    "codex MCP: kept PID {old_pid} as owner (codex here will talk to it)"
+                ));
+            }
+            Ok(_) => {}
+            Err(e) => self.state.flash_error(format!(".codex/config.toml: {e}")),
+        }
     }
 
     /// Build a context snapshot from the current state for MCP consumers.

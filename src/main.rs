@@ -156,7 +156,13 @@ fn prompt_mcp_takeover_if_needed() -> bool {
     let Ok(cwd) = std::env::current_dir() else {
         return true;
     };
-    let Some(old_pid) = mcp::detect_existing_spyc(&cwd) else {
+    // Either claude's `.mcp.json` or codex's `.codex/config.toml`
+    // can hold a stale-by-PID spyc entry; check both so the takeover
+    // prompt fires regardless of which agent the prior instance had
+    // configured.
+    let Some(old_pid) =
+        mcp::detect_existing_spyc(&cwd).or_else(|| mcp::detect_existing_spyc_codex(&cwd))
+    else {
         return true;
     };
     if !io::stdin().is_terminal() {

@@ -149,14 +149,21 @@ terminal inside a terminal." In priority order:
 
 ### Done
 
+- **Codex MCP discovery via `.codex/config.toml`** (v1.41.8).
+  `ensure_codex_config_toml` mirrors `ensure_mcp_json` for codex's
+  TOML config. Splice is shape-safe (malformed file → clean
+  rewrite). Takeover detection now covers both `.mcp.json` and
+  `.codex/config.toml` so a stale codex-only entry triggers the
+  same prompt. Closes the codex parity series (PR-C).
+- **Alt-screen scroll-mode hint + `[pane] default_command` config
+  + `gd`-vs-HEAD** (v1.41.7). PR-B of the codex parity series. UX
+  fixes for the "running an agent in the pane" workflow.
 - **Codex session save/restore parity with claude** (v1.41.6).
   `spyc -r` resurrects codex panes with conversation intact. UUID
   sniffed from codex's exit banner; restore spawns
   `codex resume <UUID>` directly (CLI flag works for codex, unlike
   claude). `AgentKind` enum + `agent_session_id` field added; older
-  saves migrate via serde aliases. PR-A of a 3-PR codex parity pass
-  (PR-B: alt-screen scroll-mode hint; PR-C: codex `config.toml` MCP
-  writer).
+  saves migrate via serde aliases. PR-A of the codex parity series.
 - **Writable MCP actions** (v1.8.0). Five new tools: `navigate_to`,
   `set_filter`, `pick_files`, `clear_picks`, `get_file_content`.
   Command channel (mpsc) from HTTP server threads to event loop with
