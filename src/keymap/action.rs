@@ -34,6 +34,7 @@ pub enum Action {
     YankPrompt,          // yp — yank visible pane output to clipboard
     YankLastPrompt,      // yP — yank last typed pane prompt to clipboard
     YankScrollback,      // ya — yank full pane scrollback to clipboard
+    YankPaths,           // yf — yank cursor file's absolute path (or all picks, newline-separated)
 
     // Ignore masks & filtering.
     ToggleMask(u8), // a -> 1, o -> 2
@@ -200,6 +201,7 @@ impl Action {
             Self::YankPrompt => "yank visible pane output to clipboard",
             Self::YankLastPrompt => "yank last typed prompt to clipboard",
             Self::YankScrollback => "yank full pane scrollback to clipboard",
+            Self::YankPaths => "yank cursor file path (or picks) to clipboard",
             Self::ToggleMask(_) => "toggle ignore mask",
             Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
             Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",

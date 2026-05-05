@@ -61,6 +61,10 @@ const SECTIONS: &[Section] = &[
         title: "Inventory & yank",
         rows: &[
             ("y y", "yank file(s) into inventory cache"),
+            (
+                "y f",
+                "yank cursor file's absolute path (or picks) to clipboard",
+            ),
             ("y p", "yank visible pane output to clipboard"),
             ("y P", "yank last typed prompt to clipboard"),
             ("y a", "yank full pane scrollback to clipboard"),
@@ -200,7 +204,10 @@ const SECTIONS: &[Section] = &[
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),
             ("Ctrl+J", "newline in pane (multi-line input)"),
-            ("SPYC_PANE_CMD", "env var for pane command (default claude)"),
+            (
+                "  default cmd",
+                "$SPYC_PANE_CMD env > [pane] default_command in .spycrc.toml > \"claude\"",
+            ),
         ],
     },
     Section {
@@ -211,6 +218,11 @@ const SECTIONS: &[Section] = &[
                 "capture output → pager (PTY-backed; sudo/ssh prompts work)",
             ),
             ("!!", "repeat last captured command"),
+            (
+                "  %",
+                "= cursor file (or all picks/inventory if any), shell-quoted",
+            ),
+            ("  %%", "literal percent sign"),
             (
                 "  while running",
                 "keys → child, ^C interrupt, ^\\ kill, ^Z background",

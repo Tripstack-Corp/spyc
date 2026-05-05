@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`yf` — yank cursor file path (or all picks) to clipboard.** New
+  binding in the `y`-prefix family. Yields absolute paths so the
+  receiving shell resolves them correctly regardless of where the
+  user pastes them. With picks active, joins them newline-separated
+  for one-per-line consumption (`xargs`, `git restore $(pbpaste)`,
+  etc.). Came from a real-world ask — "easy way to copy a file path
+  for a one-off `git restore`" — that previously had to route
+  through `!git restore %`.
+
+### Changed
+- **`?` help text discoverability.** Added the long-missing `%`
+  substitution under the `!` row (`%` = cursor file or all picks,
+  shell-quoted; `%%` = literal percent), so a new user looking at
+  the help can find the substitution mechanism without having to
+  read source or remember the spy heritage. Updated the pane
+  default-command row to reflect the v1.41.7 precedence chain
+  (`$SPYC_PANE_CMD` env > `[pane] default_command` config >
+  `"claude"` fallback) — the prior text only mentioned the env var.
+
 ### Fixed
 - **Pane child trees now exit cleanly on tab close and spyc quit.**
   `^a x` / `^a K` (close tab) and `Q` / `:q` / `^D` (quit spyc) used
