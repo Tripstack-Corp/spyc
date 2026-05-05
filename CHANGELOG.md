@@ -5,7 +5,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`CLAUDE.md` → `AGENTS.md`.** Renamed the project instructions
+  file to the cross-tool standard. Recent Claude Code reads both
+  names so behavior is unchanged. All references in repo docs
+  (`ARCHITECTURE.md`, `CONTRIBUTING.md`, `DESIGN.md`, `ROADMAP.md`,
+  `LAUNCH_PREP.md`, `BUGS.md`, `CHANGELOG.md`) and source comments
+  updated.
+
 ### Fixed
+- **`.mcp.json` with an unexpected shape panics startup.**
+  `ensure_mcp_json` parsed the file, then unwrapped
+  `.as_object_mut()` on both the top-level value and the
+  `mcpServers` key. A file that was valid JSON but had the wrong
+  shape (top-level array, top-level string, `mcpServers: []`) would
+  panic instead of being safely overwritten. Now shape-checks each
+  layer; falls back to a clean rewrite when splice isn't safe.
+- **Pane `SPYC_CONTEXT` pointed at a path App never writes.**
+  App writes one canonical `<start_dir>/.spyc-context-<pid>.json`,
+  but `Pane::spawn` was recomputing the path from the pane's `cwd`
+  via `context_path(cwd)`. When a pane spawned outside `start_dir`
+  (e.g. in `PROJECT_HOME` or a subdir), Claude Code's direct-mode
+  MCP fallback read a path nobody writes. `Pane::spawn` /
+  `spawn_with_env` now require an explicit `context_path` parameter
+  threaded through from `App`; all five call sites updated.
+- **`TMUX` env race in `term_title` tests.** The two
+  `wrap_*_tmux` tests both mutated process-global `TMUX` and could
+  race under parallel execution (same flake family as the
+  state-module tests). Both now hold `crate::state::env_test_lock()`.
 - **`/...` then `n n n` in the help pager left the view stuck at the
   bottom.** The help overlay renders in two columns when the terminal
   is wide enough; in multi-column mode `scroll` is interpreted
@@ -49,7 +76,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 - **Git markers leaked across same-name files.** A clean root-level
   file rendered with a `~` (modified) marker when a sibling-named
   file in a subdirectory was actually the dirty one (e.g. root
-  `CLAUDE.md` clean, `content-acquisition/CLAUDE.md` modified →
+  `AGENTS.md` clean, `content-acquisition/AGENTS.md` modified →
   both rows showed `~`). `git_file_statuses` collapsed every
   porcelain entry to its basename and indexed the map by that
   basename, so the deep file's status overwrote the root row.
@@ -228,7 +255,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Makefile's `PREFIX` defaults to `$HOME/.local`. To install
   system-wide, override: `sudo make install PREFIX=/usr/local`. The
   install target prints a hint if `~/.local/bin` is not on `$PATH`.
-  README, INSTALL.md, and CLAUDE.md updated to reflect the new
+  README, INSTALL.md, and AGENTS.md updated to reflect the new
   recommended flow.
 
 ### CI / Tooling
@@ -1567,11 +1594,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   somewhere — the path gets a `↪` prefix and is rendered in the
   active-tab color so it's easy to spot. The previous tilde-collapse
   for `$HOME` is preserved via `paths::display_tilde`.
-- **CLAUDE.md note on shell-continuity loops.** Claude Code doesn't
+- **AGENTS.md note on shell-continuity loops.** Claude Code doesn't
   have shell continuity between Bash tool calls — `cd /foo` in one
   call doesn't persist to the next, which is a real source of
   Claude getting stuck on `make`/`cargo`/test loops. Added an
-  explicit instruction in `CLAUDE.md` covering compound `cd && cmd`,
+  explicit instruction in `AGENTS.md` covering compound `cd && cmd`,
   absolute paths, and the "run `pwd && ls` first when stuck" habit.
   The live-cwd indicator helps the *user* spot drift; this note
   helps Claude avoid the trap in the first place.

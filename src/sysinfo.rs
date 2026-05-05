@@ -146,9 +146,9 @@ fn parse_porcelain_statuses(
             _ => GitFileStatus::Modified,
         };
         // Only file rows in THIS directory get a basename entry.
-        // Otherwise a deep entry like `content-acquisition/CLAUDE.md`
-        // would write `CLAUDE.md → Modified` and dirty the unrelated
-        // root-level `CLAUDE.md` row.
+        // Otherwise a deep entry like `content-acquisition/AGENTS.md`
+        // would write `AGENTS.md → Modified` and dirty the unrelated
+        // root-level `AGENTS.md` row.
         if in_this_dir && !name.is_empty() {
             map.entry(name).or_insert(status);
         }
@@ -353,12 +353,12 @@ mod tests {
     #[test]
     fn deep_modification_does_not_dirty_same_basename_at_root() {
         // Regression: a root listing of `git status` showing
-        // `content-acquisition/CLAUDE.md` modified must NOT mark a
-        // separate root-level `CLAUDE.md` as modified.
-        let porcelain = " M content-acquisition/CLAUDE.md\n";
+        // `content-acquisition/AGENTS.md` modified must NOT mark a
+        // separate root-level `AGENTS.md` as modified.
+        let porcelain = " M content-acquisition/AGENTS.md\n";
         let map = parse_porcelain_statuses(porcelain, "");
         // The deep file's basename is NOT a root entry.
-        assert!(!map.contains_key("CLAUDE.md"));
+        assert!(!map.contains_key("AGENTS.md"));
         // The parent dir IS marked modified.
         assert_eq!(
             map.get("content-acquisition/"),
@@ -368,8 +368,8 @@ mod tests {
 
     #[test]
     fn root_modification_marks_basename() {
-        let map = parse_porcelain_statuses(" M CLAUDE.md\n", "");
-        assert_eq!(map.get("CLAUDE.md"), Some(&GitFileStatus::Modified));
+        let map = parse_porcelain_statuses(" M AGENTS.md\n", "");
+        assert_eq!(map.get("AGENTS.md"), Some(&GitFileStatus::Modified));
     }
 
     #[test]

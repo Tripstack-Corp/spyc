@@ -71,9 +71,21 @@ enum PaneEvent {
 
 impl Pane {
     /// Spawn `command` in a fresh pty of `rows × cols`, with `cwd` as
-    /// the working directory.
-    pub fn spawn(command: &str, rows: u16, cols: u16, cwd: &Path) -> anyhow::Result<Self> {
-        Self::spawn_with_env(command, rows, cols, cwd, &[])
+    /// the working directory. `context_path` points at *App's* live
+    /// context file (the one the main loop writes to) so the child's
+    /// `SPYC_CONTEXT` always resolves to a real file regardless of
+    /// where the pane itself spawns — App writes one canonical
+    /// `<start_dir>/.spyc-context-<pid>.json`, but a pane can spawn
+    /// in any subdir, and recomputing from `cwd` would point at a
+    /// path nobody writes.
+    pub fn spawn(
+        command: &str,
+        rows: u16,
+        cols: u16,
+        cwd: &Path,
+        context_path: &Path,
+    ) -> anyhow::Result<Self> {
+        Self::spawn_with_env(command, rows, cols, cwd, context_path, &[])
     }
 
     pub fn spawn_with_env(
@@ -81,6 +93,7 @@ impl Pane {
         rows: u16,
         cols: u16,
         cwd: &Path,
+        context_path: &Path,
         extra_env: &[(&str, &str)],
     ) -> anyhow::Result<Self> {
         let pty_system = native_pty_system();
@@ -108,7 +121,7 @@ impl Pane {
         // find this spyc instance's context file.
         cmd.env(
             crate::context::CONTEXT_ENV_VAR,
-            crate::context::context_path(cwd).to_string_lossy().as_ref(),
+            context_path.to_string_lossy().as_ref(),
         );
         for (k, v) in extra_env {
             cmd.env(k, v);

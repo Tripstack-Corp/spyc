@@ -545,22 +545,31 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
         }
     });
 
-    let content = if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(mut parsed) = serde_json::from_str::<Value>(&text) {
-            parsed
-                .as_object_mut()
-                .unwrap()
-                .entry("mcpServers")
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .unwrap()
-                .insert("spyc".to_string(), spyc_entry);
-            serde_json::to_string_pretty(&parsed).unwrap()
-        } else {
-            serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } })).unwrap()
-        }
-    } else {
-        serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } })).unwrap()
+    // Default content when there's no existing file or we can't safely
+    // splice into it (parse error, top-level not an object, mcpServers
+    // present but not an object). In all those cases we overwrite with
+    // a clean shape rather than panicking on `.as_object_mut().unwrap()`.
+    let fresh =
+        || serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } })).unwrap();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(mut parsed) => {
+                let top = parsed.as_object_mut();
+                let servers = top.and_then(|t| {
+                    let entry = t.entry("mcpServers").or_insert_with(|| json!({}));
+                    entry.as_object_mut()
+                });
+                match servers {
+                    Some(map) => {
+                        map.insert("spyc".to_string(), spyc_entry);
+                        serde_json::to_string_pretty(&parsed).unwrap()
+                    }
+                    None => fresh(),
+                }
+            }
+            Err(_) => fresh(),
+        },
+        Err(_) => fresh(),
     };
 
     std::fs::write(&path, content + "\n")?;

@@ -2,7 +2,7 @@
 
 This document captures the **stable architectural decisions** behind
 spyc: the choices that should not drift without deliberate revisit.
-For a per-module file index, see `CLAUDE.md`. For forward plans, see
+For a per-module file index, see `AGENTS.md`. For forward plans, see
 `ROADMAP.md`.
 
 ## Concurrency model: sync-only, `std::thread` + `mpsc`
@@ -159,7 +159,7 @@ Architecture decisions land in:
 
 - **This file** — stable principles. Edit when a *decision* changes,
   not on every feature.
-- **`CLAUDE.md`** — slim, always loaded into Claude's context.
+- **`AGENTS.md`** — slim, always loaded into Claude's context.
   Module index, conventions, "what spyc does" summary, MCP usage
   hints. Don't grow it past what's worth paying context tokens for.
 - **`ROADMAP.md`** — forward plan; move shipped items to Done.
