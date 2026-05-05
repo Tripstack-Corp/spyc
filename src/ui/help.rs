@@ -178,6 +178,8 @@ const SECTIONS: &[Section] = &[
             ("g d", "git diff HEAD (staged + unstaged + new)"),
             ("g D", "git diff --cached (staged changes only)"),
             ("g b", "git blame (cursor file)"),
+            ("] g", "cursor to next git-changed entry (wraps)"),
+            ("[ g", "cursor to prev git-changed entry (wraps)"),
             ("W l", "list worktrees (1-9 to switch)"),
             ("W n", "new worktree (prompt for branch)"),
             ("W d", "delete current worktree (confirm)"),
