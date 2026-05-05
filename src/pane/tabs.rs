@@ -244,10 +244,22 @@ impl PaneTabs {
     /// the container is now empty (caller should tear down the pane area).
     /// Active index follows the removed tab when the active tab itself is
     /// removed; otherwise it shifts to keep pointing at the same tab.
+    ///
+    /// Tears down the removed tab's child tree before dropping it —
+    /// SIGTERM the process group, 250ms grace, then SIGKILL. Without
+    /// this an `^a x` on a tab running `npm run dev` (or anything
+    /// with subprocesses) would orphan the whole tree because
+    /// `portable_pty::Child`'s default Drop is a no-op. The Pane's
+    /// own `Drop` is a hard SIGKILL safety net, but going through
+    /// `shutdown` here gives well-behaved children a chance to
+    /// flush their own state first.
     pub fn remove_at(&mut self, idx: usize) -> bool {
         if idx >= self.tabs.len() {
             return !self.tabs.is_empty();
         }
+        self.tabs[idx]
+            .pane
+            .shutdown(std::time::Duration::from_millis(250));
         self.tabs.remove(idx);
         if self.tabs.is_empty() {
             return false;

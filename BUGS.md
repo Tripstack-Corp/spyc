@@ -133,6 +133,15 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.9) Pane child trees now exit cleanly on `^a x` / `^a K`
+  and on spyc quit. Pre-fix, closing a tab running `npm run dev`
+  (or anything with subprocesses) orphaned the whole `node` →
+  `esbuild` → workers tree because `portable_pty::Child`'s default
+  Drop is a no-op. New `Pane::shutdown(grace)` SIGTERMs the child's
+  process group (negative PID — reaches the whole tree), waits up
+  to 250 ms, then SIGKILLs. Wired into both the close-tab path and
+  the end of `App::run`. `Drop for Pane` is a SIGKILL safety net
+  for panic / error-propagation paths so children never leak.
 - (fixed, v1.41.4) `/<query>` followed by `n n n` in the help pager no
   longer pins the view at the bottom of the file. Symptom: in the
   multi-column help overlay, searching for "show" and pressing `n` a
