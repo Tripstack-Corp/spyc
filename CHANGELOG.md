@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Codex MCP discovery via `.codex/config.toml`.** spyc now writes
+  the codex equivalent of its `.mcp.json` to
+  `<project>/.codex/config.toml` on startup, registering itself as
+  a stdio MCP server in the `[mcp_servers.spyc]` section. The
+  registration re-execs `spyc --mcp` and shares the same socket as
+  the claude side, so a single server backs both agents. Same
+  takeover semantics as claude — startup detection now checks both
+  `.mcp.json` and `.codex/config.toml`, so a stale codex-only entry
+  also triggers the takeover prompt. TOML splice is shape-safe (a
+  malformed or invalid `.codex/config.toml` falls back to a clean
+  rewrite rather than panicking).
 - **`[pane] default_command` config key.** `^a c` (new pane tab)
   pre-fills its prompt with this command instead of the hardcoded
   `"claude"`. Precedence: `$SPYC_PANE_CMD` env var > config >

@@ -585,6 +585,166 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
     }
 }
 
+/// Codex's equivalent of `ensure_mcp_json`. Writes a stdio MCP entry
+/// for spyc into `<dir>/.codex/config.toml` so the codex CLI discovers
+/// us automatically, the same way claude does via `.mcp.json`. Codex
+/// reads both `~/.codex/config.toml` (user-scope) and
+/// `<cwd>/.codex/config.toml` (project-scope); we only ever write the
+/// project file to mirror claude's project-scoped behavior and avoid
+/// touching the user's main config.
+///
+/// Codex's TOML schema is `[mcp_servers.<name>]` with `command`,
+/// `args`, and `env` keys for stdio servers (parallel to
+/// claude's `.mcp.json` shape):
+///
+/// ```toml
+/// [mcp_servers.spyc]
+/// command = "spyc"
+/// args = ["--mcp"]
+///
+/// [mcp_servers.spyc.env]
+/// SPYC_MCP_SOCK = "/Users/x/.local/state/spyc/mcp-12345.sock"
+/// ```
+///
+/// Takeover semantics match `ensure_mcp_json`: an existing live spyc
+/// socket in another PID gets a `spyc/disconnected` notification and
+/// we replace the entry. Enterprise policies are claude-specific and
+/// don't apply here.
+pub fn ensure_codex_config_toml(
+    dir: &Path,
+    takeover_allowed: bool,
+) -> Result<McpConfigStatus, io::Error> {
+    let our_sock = socket_path();
+    let our_pid = std::process::id();
+    let path = dir.join(".codex").join("config.toml");
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+
+    // Takeover detection: existing entry pointing at a different
+    // live socket means another spyc instance owns this directory.
+    let mut took_over: Option<u32> = None;
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
+            if let Some(old_sock_str) = parsed
+                .get("mcp_servers")
+                .and_then(|m| m.get("spyc"))
+                .and_then(|s| s.get("env"))
+                .and_then(|e| e.get("SPYC_MCP_SOCK"))
+                .and_then(toml::Value::as_str)
+            {
+                let old_sock = PathBuf::from(old_sock_str);
+                if old_sock != our_sock && UnixStream::connect(&old_sock).is_ok() {
+                    let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+                    if !takeover_allowed {
+                        mcp_log(&format!(
+                            "codex: skipped takeover from PID {old_pid} ({})",
+                            old_sock.display()
+                        ));
+                        return Ok(McpConfigStatus::SkippedTakeover { old_pid });
+                    }
+                    notify_disconnect(&old_sock, our_pid);
+                    took_over = Some(old_pid);
+                    mcp_log(&format!(
+                        "codex: taking over from PID {old_pid} ({})",
+                        old_sock.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    // Build a fresh `[mcp_servers.spyc]` table — used both as the
+    // splice target and as the whole-file fallback when the existing
+    // file is malformed or has the wrong shape (top-level not a
+    // table, mcp_servers not a table, etc.).
+    let build_entry = || {
+        let mut env_table = toml::Table::new();
+        env_table.insert(
+            "SPYC_MCP_SOCK".into(),
+            toml::Value::String(our_sock.to_string_lossy().into_owned()),
+        );
+        let mut entry = toml::Table::new();
+        entry.insert(
+            "command".into(),
+            toml::Value::String(exe.to_string_lossy().into_owned()),
+        );
+        entry.insert(
+            "args".into(),
+            toml::Value::Array(vec![toml::Value::String("--mcp".into())]),
+        );
+        entry.insert("env".into(), toml::Value::Table(env_table));
+        entry
+    };
+    let fresh = || {
+        let mut servers = toml::Table::new();
+        servers.insert("spyc".into(), toml::Value::Table(build_entry()));
+        let mut root = toml::Table::new();
+        root.insert("mcp_servers".into(), toml::Value::Table(servers));
+        toml::to_string_pretty(&toml::Value::Table(root)).unwrap_or_default()
+    };
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(text) => match toml::from_str::<toml::Value>(&text) {
+            Ok(mut parsed) => {
+                let top = parsed.as_table_mut();
+                let servers_ok = top.and_then(|t| {
+                    let entry = t
+                        .entry("mcp_servers")
+                        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                    entry.as_table_mut()
+                });
+                match servers_ok {
+                    Some(map) => {
+                        map.insert("spyc".to_string(), toml::Value::Table(build_entry()));
+                        toml::to_string_pretty(&parsed).unwrap_or_else(|_| fresh())
+                    }
+                    None => fresh(),
+                }
+            }
+            Err(_) => fresh(),
+        },
+        Err(_) => fresh(),
+    };
+
+    // Create the `.codex/` parent directory if missing.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, content)?;
+    mcp_log(&format!(
+        "wrote .codex/config.toml (sock={}, exe={})",
+        our_sock.display(),
+        exe.display()
+    ));
+
+    match took_over {
+        Some(old_pid) => Ok(McpConfigStatus::TookOver { old_pid }),
+        None => Ok(McpConfigStatus::Configured),
+    }
+}
+
+/// Detect a live spyc instance currently owning codex MCP for `dir`
+/// without modifying `.codex/config.toml`. Mirrors
+/// `detect_existing_spyc` for the codex side; used by startup so a
+/// single takeover prompt covers both claude and codex.
+pub fn detect_existing_spyc_codex(dir: &Path) -> Option<u32> {
+    let our_sock = socket_path();
+    let path = dir.join(".codex").join("config.toml");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let parsed: toml::Value = toml::from_str(&text).ok()?;
+    let old_sock_str = parsed
+        .get("mcp_servers")?
+        .get("spyc")?
+        .get("env")?
+        .get("SPYC_MCP_SOCK")?
+        .as_str()?;
+    let old_sock = PathBuf::from(old_sock_str);
+    if old_sock == our_sock {
+        return None;
+    }
+    UnixStream::connect(&old_sock).ok()?;
+    pid_from_sock_path(old_sock_str)
+}
+
 /// Remove just the "spyc" entry from `<dir>/.mcp.json` if present,
 /// preserving any other servers the user (or another tool) may have
 /// added. If after removal `mcpServers` is empty *and* no other
@@ -1717,5 +1877,91 @@ mod tests {
                 .unwrap()
                 .contains("outside the working directory")
         );
+    }
+
+    // ---- ensure_codex_config_toml ------------------------------------
+
+    #[test]
+    fn codex_config_writes_fresh_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+        assert!(matches!(status, McpConfigStatus::Configured));
+        let written = std::fs::read_to_string(tmp.path().join(".codex").join("config.toml"))
+            .expect("config.toml created");
+        let parsed: toml::Value = toml::from_str(&written).unwrap();
+        // Schema check: mcp_servers.spyc.{command,args,env.SPYC_MCP_SOCK}
+        let spyc = &parsed["mcp_servers"]["spyc"];
+        assert!(spyc["command"].as_str().unwrap_or("").contains("spyc"));
+        assert_eq!(spyc["args"][0].as_str(), Some("--mcp"));
+        assert!(
+            spyc["env"]["SPYC_MCP_SOCK"]
+                .as_str()
+                .unwrap_or("")
+                .contains("mcp-")
+        );
+    }
+
+    #[test]
+    fn codex_config_preserves_other_servers() {
+        // A pre-existing entry from another tool must survive the splice.
+        let tmp = tempfile::tempdir().unwrap();
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let path = codex_dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[mcp_servers.other]
+command = "/usr/local/bin/other-mcp"
+args = ["--stdio"]
+
+[mcp_servers.other.env]
+KEY = "val"
+"#,
+        )
+        .unwrap();
+        ensure_codex_config_toml(tmp.path(), true).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        let parsed: toml::Value = toml::from_str(&written).unwrap();
+        // Both servers present.
+        assert!(parsed["mcp_servers"].get("other").is_some());
+        assert!(parsed["mcp_servers"].get("spyc").is_some());
+        assert_eq!(
+            parsed["mcp_servers"]["other"]["command"].as_str(),
+            Some("/usr/local/bin/other-mcp")
+        );
+    }
+
+    #[test]
+    fn codex_config_fresh_rewrite_on_malformed_input() {
+        // Top-level array (not a table) must not panic — mirror the
+        // mcp.json shape-check fix from v1.41.5.
+        let tmp = tempfile::tempdir().unwrap();
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let path = codex_dir.join("config.toml");
+        std::fs::write(&path, "not_a_section = 1\nrandom = \"junk\"\n").unwrap();
+        // Don't crash; either splice into the (now-empty) file or rewrite.
+        let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+        assert!(matches!(status, McpConfigStatus::Configured));
+        let written = std::fs::read_to_string(&path).unwrap();
+        let parsed: toml::Value = toml::from_str(&written).unwrap();
+        assert!(parsed["mcp_servers"]["spyc"].is_table());
+    }
+
+    #[test]
+    fn codex_config_rewrites_completely_invalid_toml() {
+        // Non-TOML content (e.g. corrupted file) falls back to a fresh
+        // rewrite rather than failing.
+        let tmp = tempfile::tempdir().unwrap();
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let path = codex_dir.join("config.toml");
+        std::fs::write(&path, "}}}}{{{ this is not toml").unwrap();
+        let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+        assert!(matches!(status, McpConfigStatus::Configured));
+        let written = std::fs::read_to_string(&path).unwrap();
+        let parsed: toml::Value = toml::from_str(&written).unwrap();
+        assert!(parsed["mcp_servers"]["spyc"].is_table());
     }
 }

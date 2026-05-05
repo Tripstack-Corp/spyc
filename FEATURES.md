@@ -525,20 +525,32 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   (pane killed before exit), codex falls back to `codex resume
   --last`, which uses codex's native cwd-filtered picker.
 
-## MCP server (Claude integration)
+## MCP server (Claude + Codex integration)
 
 spyc runs a background MCP server on a PID-scoped Unix domain socket
-(`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes
-`.mcp.json` with a stdio transport entry so Claude Code discovers
-spyc automatically — no `--mcp-config` flag needed. Multiple spyc
-instances coexist safely; when a new instance opens in a directory
-already owned by a live spyc, it prompts on stderr before taking over
-(`PID N already owns MCP here. Take over? [Y/n]`, default Y). On
-takeover it sends a `spyc/disconnected` notification to the old
-instance and rewrites `.mcp.json`; on decline (`n`), the old instance
-keeps ownership and the new spyc starts without MCP. Non-tty stdin
-(scripts/CI) auto-takes-over. Enterprise managed-settings.json
-policies (`deniedMcpServers`/`allowedMcpServers`) are respected.
+(`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes two
+config files so each agent discovers spyc automatically — no
+`--mcp-config` flag needed:
+
+- **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
+- **`.codex/config.toml`** for the codex CLI (TOML,
+  `[mcp_servers.spyc]` shape).
+
+Both registrations re-exec `spyc --mcp` as a stdio proxy that
+forwards to the same socket, so a single server backs both agents.
+Both files carry `SPYC_MCP_SOCK` in the env block.
+
+Multiple spyc instances coexist safely; when a new instance opens
+in a directory already owned by a live spyc, it prompts on stderr
+before taking over (`PID N already owns MCP here. Take over?
+[Y/n]`, default Y). The detection checks both `.mcp.json` and
+`.codex/config.toml`. On takeover it sends a `spyc/disconnected`
+notification to the old instance and rewrites both files; on
+decline (`n`), the old instance keeps ownership and the new spyc
+starts without MCP. Non-tty stdin (scripts/CI) auto-takes-over.
+Enterprise `managed-settings.json` policies
+(`deniedMcpServers`/`allowedMcpServers`) are respected for the
+claude side; codex has no equivalent enterprise hook.
 
 Claude can query and control the workspace through these tools:
 
