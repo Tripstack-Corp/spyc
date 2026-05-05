@@ -16,6 +16,7 @@ use crate::fs::{self, Entry, EntryKind, Listing};
 use crate::keymap::{Action, BoundAction, Resolver, ResolverOutcome, UserKeymap};
 use crate::pane::{Pane, PaneTabs, PaneWidget, TabEntry, TabInfo};
 use crate::shell;
+use crate::state::sessions::AgentKind;
 use crate::state::{Cursor, Harpoon, History, IgnoreMasks, Inventory, Marks, Picks};
 use crate::ui::line_edit::LineEditor;
 use crate::ui::{
@@ -4423,6 +4424,25 @@ impl App {
         first == "claude" || first.ends_with("/claude")
     }
 
+    /// Does this command look like it's launching Codex CLI? Matches
+    /// bare `codex`, `codex resume ...`, `codex exec ...`, etc., plus
+    /// the path-qualified form (`/usr/local/bin/codex`).
+    fn is_codex_command(cmd: &str) -> bool {
+        let first = cmd.split_whitespace().next().unwrap_or("");
+        first == "codex" || first.ends_with("/codex")
+    }
+
+    /// Classify a command for session-resume purposes.
+    fn detect_agent_kind(cmd: &str) -> AgentKind {
+        if Self::is_claude_command(cmd) {
+            AgentKind::Claude
+        } else if Self::is_codex_command(cmd) {
+            AgentKind::Codex
+        } else {
+            AgentKind::Other
+        }
+    }
+
     /// Spawn a captured shell command and install the streaming pager
     /// view + `pending_capture` so the loop can drain output. Used by
     /// the `!` prompt, `:!`, `:!!`, and the `!?` history re-execute —
@@ -4874,6 +4894,37 @@ fn command_without_resume(cmd: &str) -> String {
     }
 }
 
+/// Strip codex's `resume [...args]` subcommand and any of its flags
+/// from a command line, leaving the bare `codex` invocation. Used at
+/// session-save time so a saved tab restores cleanly even if the
+/// user had explicitly typed `codex resume <UUID>`. Mirrors
+/// `command_without_resume` for claude. The id we'll resume to is
+/// stored separately in `agent_session_id`.
+fn command_without_codex_resume(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
+    let mut hit_resume = false;
+    for p in parts {
+        if !hit_resume && p == "resume" {
+            // Drop "resume" and everything after it — typically a UUID
+            // and/or `--last`/`--all`/`--include-non-interactive` flags
+            // that only make sense with `resume`.
+            hit_resume = true;
+            continue;
+        }
+        if hit_resume {
+            continue;
+        }
+        out.push(p);
+    }
+    let stripped = out.join(" ");
+    if stripped.is_empty() {
+        "codex".to_string()
+    } else {
+        stripped
+    }
+}
+
 impl App {
     /// Resolve the `claude --resume <token>` target to use on session save.
     ///
@@ -4902,7 +4953,7 @@ impl App {
 
         let resolved: (Option<String>, Option<String>) = (|| {
             let banner_lines = pane.recent_lines(200);
-            if let Some(tok) = s::extract_resume_token(&banner_lines) {
+            if let Some(tok) = s::extract_claude_resume_token(&banner_lines) {
                 if s::is_uuid(&tok) {
                     if s::claude_jsonl_exists(cwd, &tok) {
                         let name = s::find_claude_session_name_public(&tok);
@@ -6293,26 +6344,35 @@ impl App {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
-                        let is_claude = Self::is_claude_command(&t.info.command);
-                        let (claude_session_id, claude_session_name) = if is_claude {
-                            Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
-                        } else {
-                            (None, None)
+                        let kind = Self::detect_agent_kind(&t.info.command);
+                        let (agent_session_id, agent_session_name) = match kind {
+                            AgentKind::Claude => {
+                                Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
+                            }
+                            AgentKind::Codex => {
+                                let lines = t.pane.recent_lines(200);
+                                let id = crate::state::sessions::extract_codex_resume_token(&lines);
+                                // Codex doesn't expose a display name; UUID
+                                // is what `codex resume <UUID>` consumes.
+                                (id, None)
+                            }
+                            AgentKind::Other => (None, None),
                         };
-                        // The sid lives in claude_session_id; baking
-                        // --resume into `command` would survive past a
-                        // resolver miss and pollute the next restore.
-                        let saved_command = if is_claude {
-                            command_without_resume(&t.info.command)
-                        } else {
-                            t.info.command.clone()
+                        // The sid lives in agent_session_id; baking
+                        // --resume / `resume` into `command` would survive
+                        // past a resolver miss and pollute the next restore.
+                        let saved_command = match kind {
+                            AgentKind::Claude => command_without_resume(&t.info.command),
+                            AgentKind::Codex => command_without_codex_resume(&t.info.command),
+                            AgentKind::Other => t.info.command.clone(),
                         };
                         SavedTab {
                             command: saved_command,
                             label: t.info.label.clone(),
                             cwd: t.info.cwd.clone(),
-                            claude_session_id,
-                            claude_session_name,
+                            agent_kind: kind,
+                            agent_session_id,
+                            agent_session_name,
                         }
                     })
                     .collect()
@@ -6339,8 +6399,14 @@ impl App {
         let claude_names: Vec<String> = session
             .tabs
             .iter()
-            .filter_map(|t| t.claude_session_name.clone())
+            .filter(|t| t.effective_kind() == AgentKind::Claude)
+            .filter_map(|t| t.agent_session_name.clone())
             .collect();
+        let codex_count = session
+            .tabs
+            .iter()
+            .filter(|t| t.effective_kind() == AgentKind::Codex && t.agent_session_id.is_some())
+            .count();
         let mut parts = vec![format!("session saved — {cwd_display}")];
         if tab_count > 0 {
             parts.push(format!(
@@ -6350,6 +6416,12 @@ impl App {
         }
         if !claude_names.is_empty() {
             parts.push(format!("claude: {}", claude_names.join(", ")));
+        }
+        if codex_count > 0 {
+            parts.push(format!(
+                "codex: {codex_count} session{}",
+                if codex_count == 1 { "" } else { "s" }
+            ));
         }
         parts.push("restore with spyc -r".to_string());
         self.exit_summary = Some(parts.join(" · "));
@@ -6369,17 +6441,24 @@ impl App {
                 let age = sessions::format_relative_time(s.epoch_secs);
                 let tab_count = s.tabs.len();
                 let names: Vec<&str> = s.tabs.iter().map(|t| t.label.as_str()).collect();
-                // Show Claude session info for tabs that have it.
-                let claude_info: Vec<String> = s
+                // Show agent session info (claude/codex) for tabs that have it.
+                // Picker tooltips group by kind so a session with mixed
+                // claude+codex panes is legible at a glance.
+                let agent_info: Vec<String> = s
                     .tabs
                     .iter()
                     .filter_map(|t| {
-                        let sid = t.claude_session_id.as_deref()?;
+                        let sid = t.agent_session_id.as_deref()?;
                         let short_id = &sid[..sid.len().min(8)];
-                        match &t.claude_session_name {
-                            Some(name) => Some(format!("{name} ({short_id})")),
-                            None => Some(short_id.to_string()),
-                        }
+                        let label = match t.effective_kind() {
+                            AgentKind::Claude => match &t.agent_session_name {
+                                Some(name) => format!("claude:{name} ({short_id})"),
+                                None => format!("claude:{short_id}"),
+                            },
+                            AgentKind::Codex => format!("codex:{short_id}"),
+                            AgentKind::Other => return None,
+                        };
+                        Some(label)
                     })
                     .collect();
                 let tab_info = if tab_count == 0 {
@@ -6387,10 +6466,10 @@ impl App {
                 } else {
                     format!("  [{}]", names.join(", "))
                 };
-                let claude_suffix = if claude_info.is_empty() {
+                let agent_suffix = if agent_info.is_empty() {
                     String::new()
                 } else {
-                    format!("  claude: {}", claude_info.join(", "))
+                    format!("  {}", agent_info.join(", "))
                 };
                 let name_col = if s.name.is_empty() {
                     "(unnamed)"
@@ -6404,7 +6483,7 @@ impl App {
                     age,
                     s.cwd.display(),
                     tab_info,
-                    claude_suffix
+                    agent_suffix
                 )
             })
             .collect();
@@ -6544,25 +6623,42 @@ impl App {
                 } else {
                     &session.cwd
                 };
-                // Always spawn a fresh `claude` (no `--resume`) — the
-                // CLI flag trips a regression that crashes at mount
-                // when initialMessages is non-empty. Instead we type
-                // `/resume <sid>` once claude has settled; that goes
-                // through a different code path that works.
-                let cmd = if Self::is_claude_command(&tab.command) {
-                    command_without_resume(&tab.command)
-                } else {
-                    tab.command.clone()
+                let kind = tab.effective_kind();
+                // Codex restores by spawning `codex resume <UUID>`
+                // directly — the CLI flag works, no `/resume` stdin
+                // dance needed. Claude has a regression on the CLI
+                // flag (crashes at mount with non-empty initialMessages),
+                // so we always spawn fresh and type `/resume <sid>`
+                // once it has settled.
+                let (cmd, codex_resume_id) = match (kind, tab.agent_session_id.as_deref()) {
+                    (AgentKind::Claude, _) => (command_without_resume(&tab.command), None),
+                    (AgentKind::Codex, Some(sid)) => {
+                        let base = command_without_codex_resume(&tab.command);
+                        (format!("{base} resume {sid}"), Some(sid.to_string()))
+                    }
+                    (AgentKind::Codex, None) => {
+                        // No saved id — fall back to codex's own
+                        // most-recent picker for this cwd.
+                        let base = command_without_codex_resume(&tab.command);
+                        (format!("{base} resume --last"), None)
+                    }
+                    (AgentKind::Other, _) => (tab.command.clone(), None),
                 };
                 self.open_pane_tab_in(&cmd, cwd);
-                if let Some(ref sid) = tab.claude_session_id {
-                    if let Some(tabs) = self.pane_tabs.as_mut() {
-                        if let Some(entry) = tabs.tabs_mut().last_mut() {
-                            entry.info.pending_resume_send =
-                                Some((sid.clone(), std::time::Instant::now()));
+                if kind == AgentKind::Claude {
+                    if let Some(ref sid) = tab.agent_session_id {
+                        if let Some(tabs) = self.pane_tabs.as_mut() {
+                            if let Some(entry) = tabs.tabs_mut().last_mut() {
+                                entry.info.pending_resume_send =
+                                    Some((sid.clone(), std::time::Instant::now()));
+                            }
                         }
                     }
                 }
+                // Codex resume target is baked into `cmd` itself; no
+                // pending-stdin send needed. The local binding here
+                // mainly documents intent; suppress the unused-var lint.
+                let _ = codex_resume_id;
             }
             // Restore active tab.
             if let Some(tabs) = self.pane_tabs.as_mut() {

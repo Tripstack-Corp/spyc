@@ -149,6 +149,14 @@ terminal inside a terminal." In priority order:
 
 ### Done
 
+- **Codex session save/restore parity with claude** (v1.41.6).
+  `spyc -r` resurrects codex panes with conversation intact. UUID
+  sniffed from codex's exit banner; restore spawns
+  `codex resume <UUID>` directly (CLI flag works for codex, unlike
+  claude). `AgentKind` enum + `agent_session_id` field added; older
+  saves migrate via serde aliases. PR-A of a 3-PR codex parity pass
+  (PR-B: alt-screen scroll-mode hint; PR-C: codex `config.toml` MCP
+  writer).
 - **Writable MCP actions** (v1.8.0). Five new tools: `navigate_to`,
   `set_filter`, `pick_files`, `clear_picks`, `get_file_content`.
   Command channel (mpsc) from HTTP server threads to event loop with

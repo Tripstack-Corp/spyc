@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Codex session save/restore parity with claude.** `spyc -r` now
+  resurrects codex panes with their conversation intact, the same
+  way it has long done for claude. On quit, spyc sniffs the codex
+  exit banner (`To continue this session, run codex resume <UUID>`)
+  out of pane scrollback and stashes the UUID in the saved tab. On
+  restore, codex tabs spawn directly as `codex resume <UUID>` —
+  cleaner than claude's path because the CLI flag works for codex
+  (no `/resume`-over-stdin dance). When no UUID was captured (e.g.
+  the user killed the pane before exit), restore falls back to
+  `codex resume --last`, which uses codex's own cwd-filtered
+  most-recent picker.
+
+  Plumbing: introduced `AgentKind` (Claude/Codex/Other) and renamed
+  `SavedTab.claude_session_id`/`name` → `agent_session_id`/`name`.
+  Older saves load via serde aliases and `effective_kind()` infers
+  Claude when the legacy fields were set, so existing `spyc -r`
+  flows continue working without migration. Session-picker tooltips
+  now group by agent kind (`claude:foo (12345678), codex:abcdef12`).
+
 ### Changed
 - **`CLAUDE.md` → `AGENTS.md`.** Renamed the project instructions
   file to the cross-tool standard. Recent Claude Code reads both
