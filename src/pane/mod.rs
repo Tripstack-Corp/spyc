@@ -267,6 +267,17 @@ impl Pane {
         self.parser.screen()
     }
 
+    /// True when the child has switched to the xterm alternate screen
+    /// (`\e[?1049h` or `\e[?47h`). Full-screen TUIs (codex, claude
+    /// post-startup, vim, htop, lazygit) live there. Content drawn in
+    /// alt-screen never enters main-screen scrollback, so spyc's
+    /// `^a v` scroll-back has nothing to show in that mode — callers
+    /// can flash a hint pointing the user at the app's own history
+    /// viewer instead.
+    pub fn is_alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
+    }
+
     /// Return visible screen content as individual lines (plain text,
     /// no ANSI escapes). When the pane is in scroll mode, this is
     /// exactly the viewport the user is looking at — *not* the live

@@ -5242,7 +5242,13 @@ impl App {
     }
 
     fn start_new_tab_prompt(&mut self) {
-        let default_cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+        // Precedence: $SPYC_PANE_CMD > [pane] default_command in
+        // .spycrc.toml > "claude" fallback. Env var wins so a user
+        // can override on the fly per shell without editing config.
+        let default_cmd = std::env::var("SPYC_PANE_CMD")
+            .ok()
+            .or_else(|| self.state.config.pane.default_command.clone())
+            .unwrap_or_else(|| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
         p.buffer.clone_from(&default_cmd);
         if let Some(ed) = p.editor.as_mut() {
@@ -6138,9 +6144,19 @@ impl App {
         let cwd = &self.state.listing.dir;
         let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
 
+        // `gd` shows diff-vs-HEAD (staged + unstaged) so it matches the
+        // `~` marker semantics — `~` flags anything different from HEAD,
+        // and a user pressing `gd` to see "what's the change" expects
+        // the same scope. Pre-1.41.7 ran bare `git diff` which only
+        // showed unstaged work, so `git add` followed by `gd` produced
+        // a confusing "no unstaged changes" flash on a row that was
+        // visibly marked dirty. `gD` (`--cached`) keeps the
+        // staged-only "what would commit" view.
         let mut args: Vec<&str> = vec!["diff", "--color=always"];
         if cached {
             args.push("--cached");
+        } else {
+            args.push("HEAD");
         }
         args.push("--");
         for s in &path_strings {
@@ -6164,14 +6180,14 @@ impl App {
         }
 
         if combined.is_empty() {
-            let label = if cached { "staged" } else { "unstaged" };
+            let label = if cached { "staged" } else { "uncommitted" };
             self.state.flash_info(format!("no {label} changes"));
             return;
         }
         let label = if cached {
             "git diff --cached"
         } else {
-            "git diff (+ new)"
+            "git diff HEAD (+ new)"
         };
         self.pager = Some(pager::PagerView::new_ansi(label, &combined));
     }
@@ -7751,10 +7767,25 @@ impl App {
             Action::TogglePaneZoom => self.toggle_pane_zoom(),
             Action::PaneScrollEnter => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
-                    tabs.active_mut().enter_scroll_mode();
+                    let active = tabs.active_mut();
+                    let on_alt_screen = active.is_alternate_screen();
+                    active.enter_scroll_mode();
                     self.state.pane_focused = true;
-                    self.state
-                        .flash_info("scroll: on (j/k nav, s save, Esc exit)");
+                    // Full-screen TUIs (codex, vim, htop, lazygit, etc.)
+                    // paint into the alternate screen, which never lands
+                    // in main-screen scrollback. `^a v` still works
+                    // (j/k nav over the current viewport, s saves it),
+                    // but there's nothing to scroll *back* to — point
+                    // users at the app's own history viewer instead of
+                    // letting them think scrollback is broken.
+                    if on_alt_screen {
+                        self.state.flash_info(
+                            "scroll: on — alt-screen app, no scrollback (use the app's own history)",
+                        );
+                    } else {
+                        self.state
+                            .flash_info("scroll: on (j/k nav, s save, Esc exit)");
+                    }
                 }
             }
             Action::PaneScrollSave => {

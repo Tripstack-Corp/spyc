@@ -33,6 +33,9 @@ pub struct Config {
     /// Layout overrides (status bar position, etc.).
     pub layout: LayoutConfig,
 
+    /// Pane / pty defaults.
+    pub pane: PaneConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -75,6 +78,25 @@ pub struct LayoutConfig {
 struct FileLayout {
     #[serde(default)]
     status_position: Option<StatusPosition>,
+}
+
+/// Pane / pty defaults. Currently just the default command for `^a c`.
+#[derive(Debug, Clone, Default)]
+pub struct PaneConfig {
+    /// Default command pre-filled into the `^a c` (new tab) prompt.
+    /// Falls back to `"claude"` when both this and `$SPYC_PANE_CMD`
+    /// are unset, preserving long-standing behavior. The env var
+    /// still wins so users can override per-shell on the fly.
+    pub default_command: Option<String>,
+}
+
+/// On-disk shape of `[pane]`. `Option` for the same "didn't set"
+/// distinguishability as `[layout]`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilePane {
+    #[serde(default)]
+    default_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -121,6 +143,8 @@ struct FileConfig {
     colors: ColorOverrides,
     #[serde(default)]
     layout: FileLayout,
+    #[serde(default)]
+    pane: FilePane,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -204,6 +228,11 @@ impl Config {
             self.layout.status_position = pos;
         }
 
+        // Pane: per-field merge for the same reason.
+        if let Some(cmd) = file.pane.default_command {
+            self.pane.default_command = Some(cmd);
+        }
+
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
 
@@ -267,6 +296,39 @@ mod tests {
         assert!(file.colors.dir.is_none());
         assert!(file.ignore_masks.is_empty());
         assert!(file.layout.status_position.is_none());
+        assert!(file.pane.default_command.is_none());
+    }
+
+    #[test]
+    fn parses_pane_default_command() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pane]\ndefault_command = \"codex\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pane.default_command.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn project_without_pane_does_not_clobber_user_pane() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[pane]\ndefault_command = \"codex\"\n").unwrap();
+        // Project file has no [pane] — must not reset to default.
+        std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(cfg.pane.default_command.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn project_pane_overrides_user_pane() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[pane]\ndefault_command = \"codex\"\n").unwrap();
+        std::fs::write(&project, "[pane]\ndefault_command = \"bash --login\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(cfg.pane.default_command.as_deref(), Some("bash --login"));
     }
 
     #[test]

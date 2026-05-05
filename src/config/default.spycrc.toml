@@ -17,6 +17,13 @@
 [layout]
 # status_position = "top"
 
+# ── pane ──────────────────────────────────────────────────────────────
+# Default command pre-filled into the `^a c` (new pane tab) prompt.
+# Falls back to "claude" if unset. The $SPYC_PANE_CMD env var still
+# overrides this value, so per-shell experimentation keeps working.
+[pane]
+# default_command = "claude"
+
 # ── colors ────────────────────────────────────────────────────────────
 # Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you
 # don't set falls back to the built-in palette.
