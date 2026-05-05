@@ -509,6 +509,13 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   Enter to restore, n for a new session, 1-9 for direct selection.
 - Sessions are de-duplicated by cwd + tab commands (most recent kept).
 - Capped at 20 most recent sessions.
+- **Agent session resume** — for tabs running `claude` or `codex`,
+  spyc captures the session UUID so the conversation resumes on
+  restore. Claude tabs spawn a fresh `claude` and type `/resume <id>`
+  once it's settled (the CLI flag has a regression). Codex tabs
+  spawn `codex resume <UUID>` directly. When no UUID was captured
+  (pane killed before exit), codex falls back to `codex resume
+  --last`, which uses codex's native cwd-filtered picker.
 
 ## MCP server (Claude integration)
 

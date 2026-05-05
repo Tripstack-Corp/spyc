@@ -10,18 +10,61 @@ use serde::{Deserialize, Serialize};
 
 const MAX_SESSIONS: usize = 20;
 
+/// Which interactive coding agent (if any) the tab is hosting.
+/// Drives session-save and resume-on-restore behavior — claude uses
+/// a UUID-or-name token plus `/resume` over stdin (CLI flag is
+/// regression-prone), codex uses `codex resume <UUID>` directly.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentKind {
+    Claude,
+    Codex,
+    /// Anything else (`bash`, `vim`, `make`, …). No session resume.
+    #[default]
+    Other,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedTab {
     pub command: String,
     pub label: String,
     pub cwd: PathBuf,
-    /// Claude Code session ID (UUID), if this tab was running Claude.
-    /// Used to resume the conversation on session restore.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_session_id: Option<String>,
-    /// Claude Code session display name (from `claude --name`), if set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_session_name: Option<String>,
+    /// Which agent this tab is hosting. Older saves (pre-1.41.6)
+    /// don't carry this; `effective_kind()` infers Claude when an
+    /// `agent_session_id` is present (the only resume case before
+    /// codex support).
+    #[serde(default)]
+    pub agent_kind: AgentKind,
+    /// Resume token. UUID for codex; UUID-or-thread-name for claude.
+    /// Renamed from `claude_session_id` in v1.41.6 — the deserialize
+    /// alias keeps older saves loadable.
+    #[serde(
+        default,
+        alias = "claude_session_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub agent_session_id: Option<String>,
+    /// Display name (claude custom-title only — codex doesn't ship
+    /// one). Renamed from `claude_session_name`; deserialize alias
+    /// kept for older saves.
+    #[serde(
+        default,
+        alias = "claude_session_name",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub agent_session_name: Option<String>,
+}
+
+impl SavedTab {
+    /// Agent kind, inferring Claude for older saves that didn't
+    /// carry the field but recorded a session id (only Claude was
+    /// supported then).
+    pub const fn effective_kind(&self) -> AgentKind {
+        match self.agent_kind {
+            AgentKind::Other if self.agent_session_id.is_some() => AgentKind::Claude,
+            k => k,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,12 +326,34 @@ fn find_claude_session_name(session_id: &str) -> Option<String> {
 /// prints on quit: `Resume this session with:` / `claude --resume <token>`.
 /// Returns the token (a UUID or a session name). Searches in reverse so the
 /// most recent banner wins.
-pub fn extract_resume_token(lines: &[String]) -> Option<String> {
+pub fn extract_claude_resume_token(lines: &[String]) -> Option<String> {
     for line in lines.iter().rev() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("claude --resume ") {
             let tok = rest.split_whitespace().next()?.trim();
             if !tok.is_empty() {
+                return Some(tok.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Scan pane scrollback for the exit banner codex prints on a clean exit:
+/// `To continue this session, run codex resume <UUID>`. Returns just the
+/// UUID — codex doesn't have thread-name resume tokens. Searches in
+/// reverse so the most recent banner wins.
+pub fn extract_codex_resume_token(lines: &[String]) -> Option<String> {
+    for line in lines.iter().rev() {
+        let trimmed = line.trim();
+        // Look for `codex resume <token>` anywhere on the line so we
+        // tolerate the leading "To continue this session, run " prefix
+        // and any trailing color-reset bytes the TUI may have left on
+        // the same render line.
+        if let Some(idx) = trimmed.find("codex resume ") {
+            let rest = &trimmed[idx + "codex resume ".len()..];
+            let tok = rest.split_whitespace().next()?.trim();
+            if is_uuid(tok) {
                 return Some(tok.to_string());
             }
         }
@@ -392,7 +457,7 @@ mod tests {
         .iter()
         .map(ToString::to_string)
         .collect();
-        let tok = extract_resume_token(&lines).unwrap();
+        let tok = extract_claude_resume_token(&lines).unwrap();
         assert_eq!(tok, "2afd7b70-f1e0-44a3-95c6-d9e538d231db");
         assert!(is_uuid(&tok));
     }
@@ -400,7 +465,7 @@ mod tests {
     #[test]
     fn extracts_named_resume_token() {
         let lines: Vec<String> = ["claude --resume saffron-cumin".to_string()].to_vec();
-        let tok = extract_resume_token(&lines).unwrap();
+        let tok = extract_claude_resume_token(&lines).unwrap();
         assert_eq!(tok, "saffron-cumin");
         assert!(!is_uuid(&tok));
     }
@@ -415,14 +480,89 @@ mod tests {
         .iter()
         .map(ToString::to_string)
         .collect();
-        let tok = extract_resume_token(&lines).unwrap();
+        let tok = extract_claude_resume_token(&lines).unwrap();
         assert_eq!(tok, "22222222-2222-2222-2222-222222222222");
     }
 
     #[test]
     fn returns_none_when_no_banner() {
         let lines: Vec<String> = vec!["random scrollback".to_string(), "no banner".to_string()];
-        assert!(extract_resume_token(&lines).is_none());
+        assert!(extract_claude_resume_token(&lines).is_none());
+    }
+
+    #[test]
+    fn extracts_codex_uuid_with_prefix_phrase() {
+        let lines: Vec<String> = [
+            "some output",
+            "To continue this session, run codex resume 2afd7b70-f1e0-44a3-95c6-d9e538d231db",
+            "",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_codex_resume_token(&lines).unwrap();
+        assert_eq!(tok, "2afd7b70-f1e0-44a3-95c6-d9e538d231db");
+    }
+
+    #[test]
+    fn codex_extractor_requires_uuid() {
+        // Codex never uses thread-name tokens — guard against picking
+        // up a non-UUID that happened to follow `codex resume`.
+        let lines: Vec<String> = vec!["codex resume saffron-cumin".to_string()];
+        assert!(extract_codex_resume_token(&lines).is_none());
+    }
+
+    #[test]
+    fn codex_picks_last_banner() {
+        let lines: Vec<String> = [
+            "To continue this session, run codex resume 11111111-1111-1111-1111-111111111111",
+            "…later…",
+            "To continue this session, run codex resume 22222222-2222-2222-2222-222222222222",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_codex_resume_token(&lines).unwrap();
+        assert_eq!(tok, "22222222-2222-2222-2222-222222222222");
+    }
+
+    #[test]
+    fn effective_kind_infers_claude_for_legacy_saves() {
+        // Older saves had no `agent_kind` field but did populate
+        // `claude_session_id` (deserialized via the alias to
+        // `agent_session_id`). The effective kind must report Claude
+        // for those rows so resume-on-restore picks the right path.
+        let json = serde_json::json!({
+            "command": "claude",
+            "label": "claude",
+            "cwd": "/tmp",
+            "claude_session_id": "11111111-1111-1111-1111-111111111111",
+            "claude_session_name": "old-session",
+        });
+        let tab: SavedTab = serde_json::from_value(json).unwrap();
+        assert_eq!(tab.agent_kind, AgentKind::Other);
+        assert_eq!(tab.effective_kind(), AgentKind::Claude);
+        assert_eq!(
+            tab.agent_session_id.as_deref(),
+            Some("11111111-1111-1111-1111-111111111111")
+        );
+        assert_eq!(tab.agent_session_name.as_deref(), Some("old-session"));
+    }
+
+    #[test]
+    fn effective_kind_passes_through_explicit_value() {
+        let mut tab = SavedTab {
+            command: "codex".into(),
+            label: "codex".into(),
+            cwd: "/tmp".into(),
+            agent_kind: AgentKind::Codex,
+            agent_session_id: Some("uuid".into()),
+            agent_session_name: None,
+        };
+        assert_eq!(tab.effective_kind(), AgentKind::Codex);
+        tab.agent_kind = AgentKind::Other;
+        tab.agent_session_id = None;
+        assert_eq!(tab.effective_kind(), AgentKind::Other);
     }
 
     #[test]
@@ -509,8 +649,9 @@ mod tests {
                 command: "bash".to_string(),
                 label: "shell".to_string(),
                 cwd: PathBuf::from("/tmp/test"),
-                claude_session_id: None,
-                claude_session_name: None,
+                agent_kind: crate::state::sessions::AgentKind::Other,
+                agent_session_id: None,
+                agent_session_name: None,
             }],
             active_tab: 0,
             pane_height_pct: 30,
@@ -542,8 +683,9 @@ mod tests {
                     command: format!("cmd{i}"),
                     label: format!("tab{i}"),
                     cwd: PathBuf::from(format!("/tmp/dir{i}")),
-                    claude_session_id: None,
-                    claude_session_name: None,
+                    agent_kind: crate::state::sessions::AgentKind::Other,
+                    agent_session_id: None,
+                    agent_session_name: None,
                 }],
                 active_tab: 0,
                 pane_height_pct: 30,
@@ -570,8 +712,9 @@ mod tests {
                     command: "bash".to_string(),
                     label: "shell".to_string(),
                     cwd: PathBuf::from("/same/dir"),
-                    claude_session_id: None,
-                    claude_session_name: None,
+                    agent_kind: crate::state::sessions::AgentKind::Other,
+                    agent_session_id: None,
+                    agent_session_name: None,
                 }],
                 active_tab: 0,
                 pane_height_pct: 30,
