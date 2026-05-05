@@ -5090,6 +5090,41 @@ impl App {
         Ok(())
     }
 
+    /// yf — yank the cursor file's absolute path to the system
+    /// clipboard. When picks are active, yanks all of them
+    /// newline-separated. Always absolute paths so the receiving
+    /// shell resolves them correctly regardless of where the user
+    /// pastes them. The user's recurring real-world ask was a clean
+    /// way to grab a path for one-off shell commands like `git
+    /// restore <path>` without opening a pane.
+    fn yank_paths_to_clipboard(&mut self) -> PostAction {
+        let paths = self.state.selection_paths();
+        if paths.is_empty() {
+            self.state.flash_error("no path to yank");
+            return PostAction::None;
+        }
+        let text: String = paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match Self::copy_to_clipboard(&text) {
+            Ok(()) => {
+                if paths.len() == 1 {
+                    let preview: String = text.chars().take(80).collect();
+                    let ellipsis = if text.len() > 80 { "…" } else { "" };
+                    self.state
+                        .flash_info(format!("yanked path: {preview}{ellipsis}"));
+                } else {
+                    self.state
+                        .flash_info(format!("yanked {} paths", paths.len()));
+                }
+            }
+            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+        }
+        PostAction::None
+    }
+
     /// yP — yank the last prompt the user typed into the pane.
     fn yank_last_prompt_to_clipboard(&mut self) -> PostAction {
         let Some(text) = self.last_pane_prompt.as_ref() else {
@@ -7676,6 +7711,11 @@ impl App {
         // ya — yank full pane scrollback to system clipboard.
         if *action == Action::YankScrollback {
             return Ok(self.yank_scrollback_to_clipboard());
+        }
+        // yf — yank cursor file's absolute path (or all picks,
+        // newline-separated) to system clipboard.
+        if *action == Action::YankPaths {
+            return Ok(self.yank_paths_to_clipboard());
         }
 
         // Try pure-domain dispatch first.

@@ -55,6 +55,9 @@ Two levels of selection for flexible file management.
 **Inventory** is a file cache — yanked files are copied to a local cache
 (`~/.local/state/spyc/inventory/`), persisted across sessions:
 - **yy** yank file(s) into inventory cache (regular files only)
+- **yf** yank the cursor file's absolute path (or all picks,
+  newline-separated) to the system clipboard — for one-off shell
+  use without a pane (`git restore $(pbpaste)` etc.)
 - **yp** yank visible pane output to the system clipboard
 - **yP** yank the last prompt you typed into the pane to the clipboard
 - **Y** remove cursor file from inventory
