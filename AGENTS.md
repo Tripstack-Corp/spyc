@@ -65,7 +65,7 @@ per-module navigation index.
 - **Keep docs in sync**: When committing changes that affect user-visible behavior, keybindings, or project status, update **all** of the following that are affected:
   - `README.md` — positioning, install instructions, keybinding tables
   - `FEATURES.md` — complete feature reference
-  - `CLAUDE.md` — module index, conventions, "what it does" summary
+  - `AGENTS.md` — module index, conventions, "what it does" summary
   - `ARCHITECTURE.md` — only when an *architectural decision* changes (concurrency model, MVU shape, persistence, etc.); not for routine features
   - `DESIGN.md` — only when the *UI design language* changes (a new surface type, a new naming convention, palette change); not for routine features
   - `ROADMAP.md` — move shipped items to Done, update track status

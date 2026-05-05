@@ -7,7 +7,7 @@ recognizable, consistent shape rather than as one-off widgets.
 
 For *engine* decisions (concurrency, persistence, MCP), see
 [`ARCHITECTURE.md`](ARCHITECTURE.md). For per-module navigation,
-see [`CLAUDE.md`](CLAUDE.md).
+see [`AGENTS.md`](AGENTS.md).
 
 ## Theme: tokyo-night with a pepper
 

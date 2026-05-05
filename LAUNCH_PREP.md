@@ -85,7 +85,7 @@ enough signal to feel "this is real, maintained, and works for me."
 - [ ] Re-read the headline — make sure it sells the Claude angle
       in one sentence.
 - [ ] Confirm the keybinding tables match the current keymap
-      (we keep these in sync per CLAUDE.md, but spot-check before
+      (we keep these in sync per AGENTS.md, but spot-check before
       launch).
 
 ### 5. `.github/` scaffolding

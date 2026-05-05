@@ -1,4 +1,18 @@
 ### SMALL ###
+- MCP socket discovery can attach to the wrong spyc instance. When
+  `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's
+  pane, env didn't propagate, or the local `.mcp.json` was suppressed
+  by enterprise managed-mcp), `discover_live_socket` in
+  `src/mcp.rs:153` returns the first connectable
+  `~/.local/state/spyc/mcp-*.sock` it finds — could be any other
+  spyc on the host, including another user's. Conflicts with the
+  multi-instance isolation model. Design fixes worth weighing:
+  (a) require explicit `$SPYC_MCP_SOCK`, no discovery fallback;
+  (b) gate discovery on a per-project marker (e.g. only accept
+  sockets whose context file's project_root matches the caller's
+  cwd); (c) include user/uid in the socket path. Option (b) feels
+  most spyc-shaped — keeps the "just works" ergonomics while
+  ruling out cross-instance attachment.
 - notice of ^c while in the task viewer goes to the spyc pane instead of at the
   top of the task pager view
 - how do we keep up with updates to crates we depend on?
@@ -146,8 +160,8 @@
 - (fixed, v1.41.2) Per-file git markers (`~`/`+`/`-`/`?`) no longer
   spuriously dirty a clean root-level file when a sibling-named
   file in a subdirectory is modified. Symptom: working in
-  `tripstack_platform`, the root `CLAUDE.md` rendered with `~` even
-  with no local edits, because `content-acquisition/CLAUDE.md` was
+  `tripstack_platform`, the root `AGENTS.md` rendered with `~` even
+  with no local edits, because `content-acquisition/AGENTS.md` was
   modified and `git_file_statuses` collapsed every status entry to
   its basename — so the deep file's status leaked onto the root
   row. The map now only stores a basename entry for files actually
@@ -452,7 +466,7 @@
   a wandering bash tab is obvious. Caveat: Claude's process cwd
   never moves (each Bash call is a fresh subprocess), so this is
   a read on real cwd drift, not on Claude's internal confusion —
-  for that, see the new shell-continuity note in CLAUDE.md.
+  for that, see the new shell-continuity note in AGENTS.md.
 - (fixed) `g d` now includes untracked / new files. Previously,
   cursor on a `?`-flagged file gave empty diff output. spyc now
   also runs `git ls-files --others --exclude-standard` and

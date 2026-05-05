@@ -396,7 +396,7 @@ forgetting about.
   workflow without forcing them to internalise a keymap reference
   first -- complements the docs site rather than replacing it.
   Maintenance: tutor content tracks bindings, so add it to the
-  "Keep docs in sync" checklist in CLAUDE.md when keybindings move.
+  "Keep docs in sync" checklist in AGENTS.md when keybindings move.
 - **Repo hygiene.** `SECURITY.md` (how to report vulnerabilities),
   `CODE_OF_CONDUCT.md` (one of the standard ones, link only),
   PR template, issue templates for bug reports and feature
@@ -439,7 +439,7 @@ same commit.
 
 - **v1.8** (current) -- Writable MCP actions (navigate_to, set_filter,
   pick_files, clear_picks, get_file_content). Command channel
-  architecture. CLAUDE.md updated to instruct Claude to use tools
+  architecture. AGENTS.md updated to instruct Claude to use tools
   proactively.
 - **v1.7** -- Performance refactor (idle CPU ~2.5%), ^a pane prefix,
   yank commands (yy/yp/yP), activity monitor, pager improvements,
@@ -617,7 +617,7 @@ Items shipped in the current development cycle, newest first.
 - **v1.8.0** -- Writable MCP actions. Five new tools: navigate_to,
   set_filter, pick_files, clear_picks, get_file_content. Command
   channel from MCP server threads to event loop with one-shot reply
-  channels. CLAUDE.md updated to instruct Claude to use tools
+  channels. AGENTS.md updated to instruct Claude to use tools
   proactively. Debounce fix for git status refresh.
 - **v1.7.0** -- Performance refactor, ^a pane prefix, yank commands,
   activity monitor, pager improvements, exit summary, startup health

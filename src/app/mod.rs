@@ -3229,7 +3229,7 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &[]) {
+        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &self.context_path, &[]) {
             Ok(p) => {
                 let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
                 if let Some(tabs) = self.pane_tabs.as_mut() {
@@ -3771,7 +3771,7 @@ impl App {
             let (rows, cols) =
                 Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
             let cwd = self.state.listing.dir.clone();
-            match Pane::spawn(&expanded, rows, cols, &cwd) {
+            match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
                 Ok(p) => {
                     self.top_overlay = Some(p);
                 }
@@ -3958,7 +3958,7 @@ impl App {
                 let (rows, cols) =
                     Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
                 let cwd = self.state.listing.dir.clone();
-                match Pane::spawn(&expanded, rows, cols, &cwd) {
+                match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
                     }
@@ -4085,7 +4085,7 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        match Pane::spawn_with_env(cmd, rows, cols, cwd, &[]) {
+        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.context_path, &[]) {
             Ok(p) => {
                 self.state.pane_focused = true;
                 self.state
@@ -4409,7 +4409,7 @@ impl App {
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
-        match Pane::spawn(&cmd, rows, cols, &cwd) {
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
             Ok(p) => {
                 self.top_overlay = Some(p);
             }

@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn wrap_is_identity_outside_tmux() {
-        // SAFETY: tests run sequentially against this env var; we restore.
+        // TMUX is process-global; the shared env_test_lock serializes us
+        // against the sibling `wrap_doubles_esc_inside_tmux` test (which
+        // sets TMUX) so we don't race and read each other's value mid-call.
+        let _lock = crate::state::env_test_lock();
         let prev = std::env::var_os("TMUX");
         unsafe {
             std::env::remove_var("TMUX");
@@ -119,6 +122,7 @@ mod tests {
 
     #[test]
     fn wrap_doubles_esc_inside_tmux() {
+        let _lock = crate::state::env_test_lock();
         let prev = std::env::var_os("TMUX");
         unsafe {
             std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0");
