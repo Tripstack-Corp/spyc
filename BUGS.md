@@ -1,4 +1,8 @@
 ### SMALL ###
+- hitting ^c with the task pager up also sent ^c to the lower pane - causing
+  the task in the lower pane to erroneously cancel
+- notice of ^c while in the task viewer goes to the spyc pane instead of at the
+  top of the task pager view
 - MCP socket discovery can attach to the wrong spyc instance. When
   `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's
   pane, env didn't propagate, or the local `.mcp.json` was suppressed
@@ -13,8 +17,6 @@
   cwd); (c) include user/uid in the socket path. Option (b) feels
   most spyc-shaped — keeps the "just works" ergonomics while
   ruling out cross-instance attachment.
-- notice of ^c while in the task viewer goes to the spyc pane instead of at the
-  top of the task pager view
 - how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
@@ -52,7 +54,6 @@
 - cw didn't seem to be worked as expected in ! (? need to confirm - may have
   been using an old version); maybe we should put a build commit hash in the
   top right?
-- there should be a short cut to help jump to files affected by git status
 - `brew upgrade` parallel-download progress doesn't redraw in place inside
   the lower pane — each tick stacks 4 fresh lines (gradle / claude-code /
   python@3.14 / python@3.13) into scrollback instead of overwriting. Looks
@@ -133,6 +134,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.11) `]g` / `[g` jumps the cursor to the next /
+  previous git-changed entry in the listing (file or directory
+  carrying any of the `~`/`+`/`?`/`-`/`>` markers). Wraps. From a
+  user request: "maybe you could make a jump hotkey in the
+  filetree to go to the next dir/file that has a diff."
 - (fixed, v1.41.9) Pane child trees now exit cleanly on `^a x` / `^a K`
   and on spyc quit. Pre-fix, closing a tab running `npm run dev`
   (or anything with subprocesses) orphaned the whole `node` →

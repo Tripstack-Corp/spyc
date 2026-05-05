@@ -42,6 +42,10 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **Git status colors** — modified files show amber, untracked/added
   show green, deleted show dim, renamed show lavender, conflicted
   show bold red. Directories containing changes are tinted too.
+- **`]g` / `[g`** jump the cursor to the next / previous file or dir
+  with a non-clean git status. Wraps end-to-end so the chord is
+  hold-to-cycle. Flashes "no git changes in this directory" when
+  there's nothing to land on.
 
 ## Picks and inventory
 

@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`]g` / `[g` — cursor to next / previous git-changed entry.**
+  Vim-style "next hunk" muscle memory for the file list. Walks the
+  current directory's listing in either direction looking for the
+  next file or dir whose git status is anything other than clean
+  (`~` modified / `+` added / `?` untracked / `-` deleted /
+  `>` renamed). Wraps around end-of-list so the chord can be held
+  without thinking about direction. Flashes "no git changes in
+  this directory" when there's nothing to jump to. Implementation
+  is pure-domain (lives on `AppState`); 5 new unit tests pin the
+  forward, backward, wrap, advance-off-current, and empty-listing
+  cases. Reuses the same `git_files` map the listing markers
+  consume, so detection is consistent with what the user sees.
 - **`yf` — yank cursor file path (or all picks) to clipboard.** New
   binding in the `y`-prefix family. Yields absolute paths so the
   receiving shell resolves them correctly regardless of where the

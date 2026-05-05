@@ -31,6 +31,10 @@ enum PendingSeq {
     /// Seen uppercase `H`, waiting for a harpoon sub-command:
     /// `1`..`9` = jump to slot, `a` = append, `x` = remove, `h` = open menu.
     Harpoon,
+    /// Seen `]`, waiting for a "next" sub-command (`g` = next git change).
+    NextBracket,
+    /// Seen `[`, waiting for a "prev" sub-command (`g` = prev git change).
+    PrevBracket,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -83,6 +87,8 @@ impl Resolver {
             PendingSeq::Worktree => "W-",
             PendingSeq::Yank => "y-",
             PendingSeq::Harpoon => "H-",
+            PendingSeq::NextBracket => "]-",
+            PendingSeq::PrevBracket => "[-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -216,6 +222,25 @@ impl Resolver {
             return out;
         }
 
+        // Mid-sequence: `[` or `]` waiting for a "next/prev <thing>"
+        // sub-command. Currently just `g` for git changes.
+        if matches!(
+            self.pending,
+            PendingSeq::PrevBracket | PendingSeq::NextBracket
+        ) {
+            let is_next = self.pending == PendingSeq::NextBracket;
+            let out = match ev.code {
+                KeyCode::Char('g') => ResolverOutcome::Action(if is_next {
+                    Action::JumpNextGitChange
+                } else {
+                    Action::JumpPrevGitChange
+                }),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
         // Mid-sequence: `y` prefix waiting for a yank sub-command.
         if self.pending == PendingSeq::Yank {
             let out = match ev.code {
@@ -315,6 +340,18 @@ impl Resolver {
             KeyCode::Char('G') => {
                 self.reset();
                 ResolverOutcome::Action(Action::GotoLast)
+            }
+
+            // [g / ]g — jump cursor to prev/next git-changed entry.
+            // Bracket pairs are reserved for "next/prev <thing>" jumps,
+            // mirroring the [t/]t and [b/]b chords in the pager.
+            KeyCode::Char('[') => {
+                self.pending = PendingSeq::PrevBracket;
+                ResolverOutcome::Pending
+            }
+            KeyCode::Char(']') => {
+                self.pending = PendingSeq::NextBracket;
+                ResolverOutcome::Pending
             }
 
             // Navigation.

@@ -140,6 +140,11 @@ pub enum Action {
     GitDiffCached, // g D — staged (cached) diff
     GitBlame,      // g b — git blame on cursor file
 
+    // Cursor jumps to next / previous git-changed entry in the current
+    // listing. Vim-style "next/prev hunk" muscle memory.
+    JumpNextGitChange, // ] g — cursor to next file/dir with non-clean git status (wraps)
+    JumpPrevGitChange, // [ g — cursor to prev file/dir with non-clean git status (wraps)
+
     // Path references (M13).
     GotoFile,     // g f — jump file list to path reference in pane output
     GotoFileLine, // g F — jump + open pager at line
@@ -202,6 +207,8 @@ impl Action {
             Self::YankLastPrompt => "yank last typed prompt to clipboard",
             Self::YankScrollback => "yank full pane scrollback to clipboard",
             Self::YankPaths => "yank cursor file path (or picks) to clipboard",
+            Self::JumpNextGitChange => "jump to next git-changed entry",
+            Self::JumpPrevGitChange => "jump to prev git-changed entry",
             Self::ToggleMask(_) => "toggle ignore mask",
             Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
             Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",

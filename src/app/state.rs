@@ -200,6 +200,46 @@ impl AppState {
         self.cursor.index = col_end - 1;
     }
 
+    /// Move the cursor to the next (or previous) row whose git status
+    /// is non-clean — i.e., a row carrying a `~`/`+`/`?`/`-` marker
+    /// in the listing. Wraps around the end of the list (so a user
+    /// can keep pressing `]g` without worrying about direction).
+    /// Returns `false` when no row in the listing has a git change,
+    /// so the caller can flash an empty-search message.
+    pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
+        use crate::ui::list_view::GitFileStatus;
+        let len = self.rows.len();
+        if len == 0 || self.git_files.is_empty() {
+            return false;
+        }
+        let cur = self.cursor.index.min(len.saturating_sub(1));
+        let is_changed = |idx: usize| -> bool {
+            self.rows.get(idx).is_some_and(|r| {
+                self.git_files
+                    .get(&r.display)
+                    .copied()
+                    .unwrap_or(GitFileStatus::Clean)
+                    != GitFileStatus::Clean
+            })
+        };
+        // Walk every other index, in the requested direction, with wrap.
+        // `n` = 1..len means we never re-test the cursor's own row, so a
+        // press from a dirty row advances to the *next* dirty one rather
+        // than staying put.
+        for n in 1..=len {
+            let idx = if forward {
+                (cur + n) % len
+            } else {
+                (cur + len - (n % len)) % len
+            };
+            if is_changed(idx) {
+                self.cursor.index = idx;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Move the cursor by `delta` columns.
     /// h/l — move across columns on the same row. Wraps at row
     /// boundaries. Returns false (flash) if only one column on this row.
@@ -671,6 +711,21 @@ impl AppState {
             Action::PageDown => self.cursor_move_global(per_page as isize, len),
             Action::GotoFirst => self.goto_col_top(),
             Action::GotoLast => self.goto_col_bottom(len),
+
+            // ]g / [g — cursor to next/prev git-changed entry. Wraps
+            // when there's no match in the desired direction so the
+            // user can keep pressing the chord without thinking about
+            // direction. No-op flash when the listing has no changes.
+            Action::JumpNextGitChange => {
+                if !self.jump_to_git_change(true) {
+                    self.flash_info("no git changes in this directory");
+                }
+            }
+            Action::JumpPrevGitChange => {
+                if !self.jump_to_git_change(false) {
+                    self.flash_info("no git changes in this directory");
+                }
+            }
 
             // -- Navigation --
             Action::Climb => self.climb(),
@@ -2301,6 +2356,57 @@ mod tests {
         assert_eq!(s.picks.len(), 3);
         s.apply(&Action::PickToggleAll);
         assert!(s.picks.is_empty());
+    }
+
+    fn dirty_state(names: &[&str], dirty: &[&str]) -> AppState {
+        use crate::ui::list_view::GitFileStatus;
+        let mut s = state_with_rows(names);
+        for d in dirty {
+            s.git_files
+                .insert((*d).to_string(), GitFileStatus::Modified);
+        }
+        s
+    }
+
+    #[test]
+    fn jump_next_git_change_skips_clean_rows() {
+        let mut s = dirty_state(&["a", "b", "c", "d"], &["c"]);
+        s.cursor.index = 0;
+        assert!(s.jump_to_git_change(true));
+        assert_eq!(s.cursor.index, 2); // landed on `c`
+    }
+
+    #[test]
+    fn jump_next_git_change_wraps_around() {
+        let mut s = dirty_state(&["a", "b", "c", "d"], &["a"]);
+        s.cursor.index = 2; // past the only dirty row
+        assert!(s.jump_to_git_change(true));
+        assert_eq!(s.cursor.index, 0); // wrapped back to `a`
+    }
+
+    #[test]
+    fn jump_prev_git_change_wraps_around() {
+        let mut s = dirty_state(&["a", "b", "c", "d"], &["d"]);
+        s.cursor.index = 1; // before the only dirty row in reverse
+        assert!(s.jump_to_git_change(false));
+        assert_eq!(s.cursor.index, 3); // wrapped to `d`
+    }
+
+    #[test]
+    fn jump_advances_off_the_current_dirty_row() {
+        // From a dirty row, pressing `]g` should land on the *next*
+        // dirty row, not stay put.
+        let mut s = dirty_state(&["a", "b", "c", "d"], &["a", "c"]);
+        s.cursor.index = 0;
+        assert!(s.jump_to_git_change(true));
+        assert_eq!(s.cursor.index, 2);
+    }
+
+    #[test]
+    fn jump_returns_false_when_no_changes() {
+        let mut s = state_with_rows(&["a", "b", "c"]);
+        assert!(!s.jump_to_git_change(true));
+        assert!(!s.jump_to_git_change(false));
     }
 
     #[test]
