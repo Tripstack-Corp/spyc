@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded vt100 0.15 → 0.16, ratatui 0.29 → 0.30, ansi-to-tui
+  7 → 8.** The vt100 bump is the proper fix for the
+  `screen.rs:934.unwrap()` panic that previously crashed spyc when
+  closing nvim from inside zsh (caught defensively in v1.41.17;
+  now resolved upstream). The transitive `unicode-width` pin
+  forced the ratatui major bump along with it; ansi-to-tui needed
+  to follow to a ratatui-0.30-compatible release. Net code change
+  was small: vt100 0.16 moved `set_size` and `set_scrollback` from
+  `Parser` to `Screen` (call sites adjusted via `screen_mut()`),
+  and `Cell::contents` now returns `&str` directly instead of
+  needing a borrow. The `catch_unwind` safety net from v1.41.17
+  stays — any third-party parser can hit edge cases on rare
+  escape sequences, and the cost is zero on the happy path.
+
 ### Fixed
 - **vt100 parser panics no longer take spyc down.** A user reported
   nvim crashing the whole spyc process when closing it inside a zsh

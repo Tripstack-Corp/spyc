@@ -103,30 +103,6 @@
 - ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
-- upgrade vt100 0.15 → 0.16. We're pinned at 0.15.2; upstream is at
-  0.16.2 (active, not unmaintained — earlier notes saying "the
-  unmaintained 0.15" were inaccurate, corrected here). The
-  motivating cases are the panic in `screen.rs:934` (caught
-  defensively in v1.41.17 but the real fix is upstream), mode 2026
-  (synchronized output) which 0.15 doesn't parse — see entry below
-  — and OSC 8 (hyperlinks) — also below. Should evaluate API churn
-  vs. the wins in one go; alternative is `vt100-ctt 0.17.1`
-  (community fork) or alacritty's `vte` parser. Defer until
-  someone has a clear afternoon — touches every place that holds
-  a `vt100::Screen` reference.
-- vt100 0.15 doesn't parse `\x1b[?2026h…\x1b[?2026l` (synchronized
-  output / "mode 2026"). Apps that wrap every redraw in 2026
-  (lazygit/tcell, recent neovim) get partial-frame tearing during
-  fast scrolls — the renderer reads a half-finished frame and
-  paints it. spyc already *emits* mode 2026 itself (perf refactor,
-  see FIXED entries), so the protocol is well-supported on the
-  host side; only the pane's vt100 parser is behind. Resolved by
-  the vt100 upgrade above.
-- vt100 0.15 doesn't parse OSC 8 (terminal hyperlinks). lazygit's
-  footer ("Donate" / "Ask Question") and any modern tool that
-  emits `\x1b]8;;url\x07label\x1b]8;;\x07` will show stray bytes
-  or a label without the link. Same upgrade-path resolution as
-  above.
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles
@@ -150,6 +126,12 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.18) Upgraded vt100 0.15 → 0.16, ratatui 0.29 →
+  0.30, ansi-to-tui 7 → 8. The vt100 bump is the proper fix for
+  the `screen.rs:934.unwrap()` panic; the catch_unwind safety net
+  from v1.41.17 stays as belt-and-suspenders. Also retires the two
+  MAYBE entries about mode 2026 (synchronized output) and OSC 8
+  (terminal hyperlinks) — both should now parse correctly.
 - (defensive, v1.41.17) vt100 0.15 parser panic
   (`screen.rs:934.unwrap()`) no longer crashes the entire spyc
   process. Reported triggered by exiting nvim from inside a zsh
