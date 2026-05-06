@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`D` now opens the cursor file in `$PAGER` as a top overlay**
+  (was: flash the date/time). Mirror of `V` for $EDITOR and a
+  natural use of the focus-sharing overlay landed in v1.41.21.
+  Workflow this enables: `D` on `docs/architecture.md`, `^a-j`
+  into claude, work, `^a-k` to scroll the doc — without quitting
+  less. The old date utility is still reachable via the typed
+  command `:date`. `D` flashes an error on directories ("D: cannot
+  page a directory") and when `$PAGER` is unset. Updated `?` help
+  and FEATURES.md.
+
 ### Fixed
 - **`;cmd` overlay no longer traps focus when a bottom pane is open.**
   Used to be: a `;`-style interactive command (`;less docs/foo.md`,

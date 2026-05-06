@@ -1,5 +1,4 @@
 ### SMALL ###
-- D in spyc pane should open in $PAGER in the top pane
 - / should match within names - it seems to assume ^ e.g. env won't match .env
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
@@ -123,6 +122,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.22) `D` now opens the cursor file in `$PAGER`
+  as a top overlay (was: flash date/time). Mirror of `V` for
+  `$EDITOR` and a natural use of the focus-sharing overlay
+  landed in v1.41.21 — `D` on a doc, `^a-j` to claude, `^a-k`
+  back to scroll. Date utility still available via `:date`.
 - (fixed, v1.41.21) `;cmd` overlay (`;less`, `;vim`, etc.) no
   longer traps focus when a bottom pane is open. Spyc meta keys
   (`^a`, `^w`, `^\`, F10) now fall through while the overlay is

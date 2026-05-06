@@ -39,7 +39,8 @@ const SECTIONS: &[Section] = &[
                 "e  v",
                 "enter dir / editor ($EDITOR) on file (suspends TUI)",
             ),
-            ("V", "open $EDITOR in top pane (Claude pane stays visible)"),
+            ("V", "open $EDITOR in top pane (bottom pane stays visible)"),
+            ("D", "open $PAGER  in top pane (bottom pane stays visible)"),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
             ("J", "jump to a path (~, $VAR expanded)"),
@@ -157,7 +158,7 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Info",
         rows: &[
-            ("D", "show date/time (UTC)"),
+            (":date", "show date/time (UTC)"),
             ("g V", "show spyc version (also :version)"),
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),

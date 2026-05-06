@@ -80,11 +80,12 @@ pub enum Action {
     // Identity.
     ShowUserHost, // gU — flash user@host in the status line
 
-    // Edit in pane.
-    EditInPane, // V — open $EDITOR in pane tab (file list stays visible)
+    // Edit / display in top pane.
+    EditInPane,    // V — open $EDITOR in top overlay (bottom pane stays visible)
+    DisplayInPane, // D — open $PAGER in top overlay (bottom pane stays visible)
 
     // Info commands.
-    Date,           // D — show date/time
+    Date,           // :date — show date/time
     Version,        // gV / :version — show spyc version
     ShowMemory,     // I — session info pager (version, pid, rss, counts)
     ColorToggle,    // C — toggle color theme on/off
@@ -192,7 +193,8 @@ impl Action {
             Self::GotoLast => "bottom of column",
             Self::EnterOrDisplay => "enter dir / pager on text file",
             Self::EnterOrEdit => "enter dir / editor on file (suspends TUI)",
-            Self::EditInPane => "open editor in top pane (Claude pane stays visible)",
+            Self::EditInPane => "open editor in top pane (bottom pane stays visible)",
+            Self::DisplayInPane => "open $PAGER in top pane (bottom pane stays visible)",
             Self::Climb => "climb to parent",
             Self::Home => "home directory",
             Self::TogglePick => "toggle pick",

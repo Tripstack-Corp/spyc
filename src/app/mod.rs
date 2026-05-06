@@ -3926,6 +3926,14 @@ impl App {
             self.undo_last_remove();
             return PostAction::None;
         }
+        // :date — flash current date/time. Used to be bound to `D` but
+        // `D` now opens the cursor file in $PAGER (the common
+        // request); the date utility lives on as a typed command for
+        // the rare hand-on-keyboard moment you actually want it.
+        if input == "date" {
+            let _ = self.apply(&Action::Date);
+            return PostAction::None;
+        }
         // :graveyard — open the graveyard viewer (typed alias for `gy`).
         if input == "graveyard" {
             self.state.open_graveyard_view();
@@ -4538,6 +4546,41 @@ impl App {
         let argv = shell::resolve_editor();
         if argv.is_empty() {
             self.state.flash_error("no $VISUAL or $EDITOR set");
+            return;
+        }
+        let cmd = format!(
+            "{} {}",
+            argv.join(" "),
+            shell::shell_quote(&path.display().to_string()),
+        );
+        let (rows, cols) =
+            Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+        let cwd = self.state.listing.dir.clone();
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+            Ok(p) => {
+                self.top_overlay = Some(p);
+                self.state.pane_focused = false;
+            }
+            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+        }
+    }
+
+    /// `D` — open the cursor file in `$PAGER` as a top-overlay pty so
+    /// the bottom pane (claude / zsh / etc.) stays visible alongside.
+    /// Mirror of `edit_in_pane` for the read path. Common workflow:
+    /// `D` on a doc, `^a-j` into claude, work, `^a-k` to scroll.
+    fn display_in_pane(&mut self) {
+        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+            return;
+        };
+        let path = row.path.clone();
+        if row.kind == EntryKind::Dir {
+            self.state.flash_error("D: cannot page a directory");
+            return;
+        }
+        let argv = shell::resolve_pager();
+        if argv.is_empty() {
+            self.state.flash_error("no $PAGER set");
             return;
         }
         let cmd = format!(
@@ -7950,6 +7993,10 @@ impl App {
             }
             Action::EditInPane => {
                 self.edit_in_pane();
+                return Ok(PostAction::None);
+            }
+            Action::DisplayInPane => {
+                self.display_in_pane();
                 return Ok(PostAction::None);
             }
 

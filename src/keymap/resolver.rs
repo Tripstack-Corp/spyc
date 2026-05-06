@@ -536,10 +536,10 @@ impl Resolver {
                 ResolverOutcome::Action(Action::Help)
             }
 
-            // Info commands.
+            // Display / edit in top pane.
             KeyCode::Char('D') => {
                 self.reset();
-                ResolverOutcome::Action(Action::Date)
+                ResolverOutcome::Action(Action::DisplayInPane)
             }
             KeyCode::Char('V') => {
                 self.reset();
