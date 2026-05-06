@@ -164,6 +164,18 @@ impl Widget for ListView<'_> {
         let end = (start + per_page).min(self.rows.len());
         let slice = &self.rows[start..end];
 
+        // When the list isn't the input target (pane focused), fade
+        // the non-cursor rows so the user can tell where focus lives
+        // at a glance. The cursor row already gets its own dimmed
+        // treatment via `cursor_bg_dim` below; this dims everything
+        // else. SGR 2 (Modifier::DIM) is rendered as ~50% lightness
+        // by every supported terminal.
+        let dim = if self.focused {
+            Modifier::empty()
+        } else {
+            Modifier::DIM
+        };
+
         for (i, row) in slice.iter().enumerate() {
             let col_idx = i / rows_per_col;
             let row_idx = i % rows_per_col;
@@ -207,7 +219,7 @@ impl Widget for ListView<'_> {
                         .add_modifier(bold),
                 )
             } else {
-                (marker_style, name_style)
+                (marker_style.add_modifier(dim), name_style.add_modifier(dim))
             };
 
             buf.set_string(x, y, format!("{marker} "), marker_style);

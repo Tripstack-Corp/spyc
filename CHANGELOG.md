@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Unfocused side dims so focus is obvious at a glance.** When the
+  pane has focus, the file list above renders with `Modifier::DIM`
+  on every non-cursor row; when the list has focus, the pty pane
+  below renders with DIM on every cell. The cursor row's existing
+  `cursor_bg_dim` treatment stacks on top so the highlighted row
+  stays distinguishable in either state. SGR 2 lands as ~50%
+  lightness on every supported terminal — no theme work or layout
+  shift, just a clean visual cue for "input goes here vs. there."
+
 ### Fixed
 - **Input dispatch hardening for fast typing.** Two defensive guards
   on the user-reported "switching panes input doesn't work when done
