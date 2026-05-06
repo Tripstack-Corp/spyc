@@ -7510,6 +7510,81 @@ impl App {
             }
         }
 
+        // Visual line mode: extend / yank / cancel. Intercept first so
+        // motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move the
+        // selection cursor instead of the scroll position, and `y`
+        // yanks the inclusive range. Esc / V cancel without yanking.
+        if view.is_visual() {
+            let half_page = i32::from(viewport) / 2;
+            let page = i32::from(viewport);
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('V') => {
+                    view.cancel_visual();
+                    return PostAction::None;
+                }
+                KeyCode::Char('y' | 'Y') => {
+                    match view.yank_visual_to_clipboard() {
+                        Ok(n) => {
+                            view.flash = Some(format!(
+                                "yanked {n} line{} to clipboard",
+                                if n == 1 { "" } else { "s" }
+                            ));
+                        }
+                        Err(e) => view.flash = Some(format!("yank failed: {e}")),
+                    }
+                    return PostAction::None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    view.visual_move(1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    view.visual_move(-1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.visual_move(half_page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.visual_move(-half_page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.visual_move(page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.visual_move(-page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::PageDown | KeyCode::Char(' ') => {
+                    view.visual_move(page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::PageUp | KeyCode::Char('b') => {
+                    view.visual_move(-page as isize, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    view.visual_jump_to(0, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    let last = view.lines.len().saturating_sub(1);
+                    view.visual_jump_to(last, viewport);
+                    return PostAction::None;
+                }
+                _ => {
+                    // Unknown key while in visual mode — ignore so a
+                    // stray `/` or `:` doesn't silently trigger a
+                    // search/jump that the visual selection wasn't
+                    // expecting. User must Esc out first.
+                    return PostAction::None;
+                }
+            }
+        }
+
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 // Pager-help overlay: dismiss just the help, restore
@@ -7624,6 +7699,13 @@ impl App {
                 Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
                 Err(e) => view.flash = Some(format!("yank failed: {e}")),
             },
+            KeyCode::Char('V') => {
+                // Enter visual line mode -- anchor at the top visible
+                // line, then j/k/G/etc. extend the selection and `y`
+                // yanks the inclusive range. The interceptor above
+                // takes over all subsequent keys until Esc / V exit.
+                view.enter_visual();
+            }
             KeyCode::Char('S') if view.task_id.is_some() => {
                 // Task viewer: S (Stop) pauses the underlying task
                 // via SIGSTOP to its process group. Mirrors the

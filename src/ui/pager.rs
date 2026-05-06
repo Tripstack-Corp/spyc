@@ -31,6 +31,27 @@ enum Search {
     },
 }
 
+/// vi-style visual line selection inside the pager. Active when
+/// `PagerView::visual` is `Some(_)`; `V` toggles, `j`/`k`/`G`/etc.
+/// move `cursor`, `y` yanks the inclusive range `[min..=max]` and
+/// exits.
+#[derive(Debug, Clone, Copy)]
+pub struct VisualSelection {
+    pub anchor: usize,
+    pub cursor: usize,
+}
+
+impl VisualSelection {
+    /// Inclusive `(low, high)` line indices.
+    pub const fn range(&self) -> (usize, usize) {
+        if self.anchor <= self.cursor {
+            (self.anchor, self.cursor)
+        } else {
+            (self.cursor, self.anchor)
+        }
+    }
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct PagerView {
     pub title: String,
@@ -131,6 +152,12 @@ pub struct PagerView {
     /// lines that wrap to multiple rows don't cause the trailing
     /// logical lines to fall off the viewport at "Bot".
     pub last_body_w: std::cell::Cell<u16>,
+    /// vi-style visual line selection. `None` outside the mode;
+    /// `Some({ anchor, cursor })` while the user is selecting a
+    /// range with `V` + `j`/`k`/`G`/etc. `y` yanks the inclusive
+    /// range `[min..=max]` and exits. Mutually exclusive with the
+    /// search/jump prompts (entering them cancels visual mode).
+    pub visual: Option<VisualSelection>,
 }
 
 impl PagerView {
@@ -164,6 +191,7 @@ impl PagerView {
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
+            visual: None,
         }
     }
 
@@ -194,6 +222,7 @@ impl PagerView {
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
+            visual: None,
         }
     }
 
@@ -228,6 +257,7 @@ impl PagerView {
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
+            visual: None,
         }
     }
 
@@ -319,6 +349,101 @@ impl PagerView {
 
     pub const fn toggle_line_numbers(&mut self) {
         self.show_line_numbers = !self.show_line_numbers;
+    }
+
+    // ---- Visual line mode ------------------------------------------------
+
+    /// True while the user is selecting a line range with `V`.
+    pub const fn is_visual(&self) -> bool {
+        self.visual.is_some()
+    }
+
+    /// Enter visual line mode, anchoring the selection at the top
+    /// visible line. `j`/`k`/`G`/etc. then move the cursor end (with
+    /// auto-scroll) and `y` yanks the inclusive range. No-op on an
+    /// empty buffer (nothing to select).
+    pub fn enter_visual(&mut self) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let max = self.lines.len() - 1;
+        let start = (self.scroll as usize).min(max);
+        self.visual = Some(VisualSelection {
+            anchor: start,
+            cursor: start,
+        });
+    }
+
+    pub const fn cancel_visual(&mut self) {
+        self.visual = None;
+    }
+
+    /// Move the visual-mode cursor by `delta` lines (clamped to the
+    /// buffer), and auto-scroll the viewport so the cursor stays
+    /// visible. No-op when not in visual mode.
+    pub fn visual_move(&mut self, delta: isize, viewport_height: u16) {
+        let Some(sel) = self.visual.as_mut() else {
+            return;
+        };
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let new = (sel.cursor as isize + delta).clamp(0, n as isize - 1) as usize;
+        sel.cursor = new;
+        self.scroll_to_keep_visible(new, viewport_height);
+    }
+
+    /// Jump the visual-mode cursor to a specific line, scrolling as
+    /// needed. Used by `g`/`G`/`:N` while a selection is active.
+    pub fn visual_jump_to(&mut self, line: usize, viewport_height: u16) {
+        let Some(sel) = self.visual.as_mut() else {
+            return;
+        };
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let target = line.min(n - 1);
+        sel.cursor = target;
+        self.scroll_to_keep_visible(target, viewport_height);
+    }
+
+    /// Adjust `scroll` so `line` is in the viewport. Visual cursor
+    /// helper, factored out so both `visual_move` and `visual_jump_to`
+    /// share the same edge logic.
+    const fn scroll_to_keep_visible(&mut self, line: usize, viewport_height: u16) {
+        let top = self.scroll as usize;
+        let vh = viewport_height as usize;
+        if vh == 0 {
+            return;
+        }
+        let bot = top + vh;
+        if line < top {
+            self.scroll = line as u16;
+        } else if line >= bot {
+            self.scroll = (line + 1).saturating_sub(vh) as u16;
+        }
+    }
+
+    /// Yank the visual-mode selection (inclusive line range) to the
+    /// clipboard and exit visual mode. Returns the number of yanked
+    /// lines. Errors propagate from the clipboard pipe.
+    pub fn yank_visual_to_clipboard(&mut self) -> std::io::Result<usize> {
+        let Some(sel) = self.visual else {
+            return Ok(0);
+        };
+        let (lo, hi) = sel.range();
+        let hi = hi.min(self.lines.len().saturating_sub(1));
+        let text = self.lines[lo..=hi]
+            .iter()
+            .map(line_plain_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        pbcopy(&text)?;
+        let count = hi - lo + 1;
+        self.visual = None;
+        Ok(count)
     }
 }
 
@@ -628,6 +753,16 @@ impl PagerView {
 
     /// Current search status for the footer line (e.g. `/foo 3/17`).
     fn status_text(&self) -> Option<String> {
+        if let Some(sel) = self.visual {
+            let (lo, hi) = sel.range();
+            let count = hi - lo + 1;
+            return Some(format!(
+                "-- VISUAL --  L{}-L{}  ({count} line{})",
+                lo + 1,
+                hi + 1,
+                if count == 1 { "" } else { "s" },
+            ));
+        }
         if let Some(ref buf) = self.jump_buf {
             return Some(format!(":{buf}_"));
         }
@@ -882,6 +1017,30 @@ fn apply_row_styling(
     theme: &Theme,
 ) -> Line<'static> {
     let mut styled = styled_line_for_render(line, view, abs_idx, theme);
+    // Visual-line selection: paint a muted background across the
+    // inclusive range so the user can see what `y` will yank. The
+    // cursor end gets the brighter cursor_bg (so it reads like vi's
+    // visual cursor); other selected rows use cursor_bg_dim. Applied
+    // before the picker-cursor branch so visual mode wins when both
+    // would coincide (visual mode shouldn't be active inside picker
+    // overlays anyway, but be defensive).
+    if let Some(sel) = view.visual {
+        let (lo, hi) = sel.range();
+        if (lo..=hi).contains(&abs_idx) {
+            let bg = if abs_idx == sel.cursor {
+                theme.cursor_bg
+            } else {
+                theme.cursor_bg_dim
+            };
+            styled = Line::from(
+                styled
+                    .spans
+                    .into_iter()
+                    .map(|s| Span::styled(s.content, s.style.bg(bg)))
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
     if view.picker_cursor == Some(abs_idx) {
         if let Some((col, vi_mode)) = view.picker_edit_cursor {
             // History editor: show editing cursor on this line.
@@ -1291,6 +1450,7 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
                     "Y",
                     "yank visible to clipboard (rendered markdown / current view)",
                 ),
+                ("V", "enter visual line mode (j/k extend, y yanks range)"),
                 (
                     "p",
                     "open in $PAGER (less, full-screen takeover — for huge files)",
@@ -1541,5 +1701,128 @@ mod tests {
         let pieces = wrap_line(&line, 0);
         assert_eq!(pieces.len(), 1);
         assert_eq!(plain_text(&pieces[0]), "anything");
+    }
+
+    // ── Visual line mode ─────────────────────────────────────────────────
+
+    fn sample_view() -> PagerView {
+        PagerView::new_plain("v", (0..20).map(|i| format!("line {i}")).collect())
+    }
+
+    #[test]
+    fn enter_visual_anchors_at_top_visible_line() {
+        let mut view = sample_view();
+        view.scroll = 5;
+        view.enter_visual();
+        let sel = view.visual.expect("should be in visual mode");
+        assert_eq!(sel.anchor, 5);
+        assert_eq!(sel.cursor, 5);
+        assert!(view.is_visual());
+    }
+
+    #[test]
+    fn enter_visual_on_empty_buffer_is_noop() {
+        let mut view = PagerView::new_plain("v", Vec::<String>::new());
+        view.enter_visual();
+        assert!(view.visual.is_none());
+    }
+
+    #[test]
+    fn visual_move_extends_cursor_and_clamps() {
+        let mut view = sample_view();
+        view.enter_visual();
+        view.visual_move(3, 10);
+        assert_eq!(view.visual.unwrap().cursor, 3);
+        // Clamp at the bottom — buffer has 20 lines (idx 0..=19).
+        view.visual_move(100, 10);
+        assert_eq!(view.visual.unwrap().cursor, 19);
+        // And at the top.
+        view.visual_move(-100, 10);
+        assert_eq!(view.visual.unwrap().cursor, 0);
+        // Anchor is unchanged through movement.
+        assert_eq!(view.visual.unwrap().anchor, 0);
+    }
+
+    #[test]
+    fn visual_range_is_inclusive_and_order_independent() {
+        let sel = VisualSelection {
+            anchor: 5,
+            cursor: 10,
+        };
+        assert_eq!(sel.range(), (5, 10));
+        let sel = VisualSelection {
+            anchor: 10,
+            cursor: 5,
+        };
+        // Cursor moved up past the anchor — range still goes low → high.
+        assert_eq!(sel.range(), (5, 10));
+    }
+
+    #[test]
+    fn visual_move_auto_scrolls_when_cursor_leaves_viewport() {
+        let mut view = sample_view();
+        view.scroll = 0;
+        view.enter_visual();
+        // Viewport = 5 rows. Move cursor past the bottom edge — scroll
+        // should advance so the cursor stays visible.
+        view.visual_move(7, 5);
+        assert_eq!(view.visual.unwrap().cursor, 7);
+        // cursor=7, vh=5 → scroll = 7 + 1 - 5 = 3
+        assert_eq!(view.scroll, 3);
+        // Move back up past the top — scroll should retreat.
+        view.visual_move(-7, 5);
+        assert_eq!(view.visual.unwrap().cursor, 0);
+        assert_eq!(view.scroll, 0);
+    }
+
+    #[test]
+    fn visual_jump_to_clamps_and_scrolls() {
+        let mut view = sample_view();
+        view.enter_visual();
+        view.visual_jump_to(15, 5);
+        assert_eq!(view.visual.unwrap().cursor, 15);
+        assert_eq!(view.scroll, 11);
+        // Beyond the end is clamped.
+        view.visual_jump_to(999, 5);
+        assert_eq!(view.visual.unwrap().cursor, 19);
+    }
+
+    #[test]
+    fn cancel_visual_clears_state() {
+        let mut view = sample_view();
+        view.enter_visual();
+        assert!(view.is_visual());
+        view.cancel_visual();
+        assert!(!view.is_visual());
+    }
+
+    #[test]
+    fn visual_move_outside_visual_mode_is_noop() {
+        let mut view = sample_view();
+        view.scroll = 4;
+        view.visual_move(5, 10);
+        // No selection started, no scroll change.
+        assert!(view.visual.is_none());
+        assert_eq!(view.scroll, 4);
+    }
+
+    #[test]
+    fn visual_status_text_reports_range_and_count() {
+        let mut view = sample_view();
+        view.enter_visual();
+        view.visual_move(4, 10);
+        let s = view.status_text().expect("status while visual");
+        assert!(s.contains("VISUAL"), "expected VISUAL marker, got: {s}");
+        assert!(s.contains("L1-L5"), "expected L1-L5, got: {s}");
+        assert!(s.contains("5 lines"), "expected count, got: {s}");
+    }
+
+    #[test]
+    fn visual_status_pluralizes_correctly_for_single_line() {
+        let mut view = sample_view();
+        view.enter_visual();
+        // anchor == cursor → single-line range.
+        let s = view.status_text().expect("status while visual");
+        assert!(s.contains("(1 line)"), "expected singular, got: {s}");
     }
 }

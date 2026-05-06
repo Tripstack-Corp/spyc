@@ -1,6 +1,4 @@
 ### SMALL ###
-- view mode in the lower pane should show line numbers and be able to yank
-  based on line number range
 - using editor in top pane prevents switching to bottom pane
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
@@ -126,6 +124,21 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.20) Pager visual line mode for range yank. `V`
+  enters vi-style visual mode, `j`/`k`/`G`/etc. extend the
+  selection (auto-scrolling), the muted indigo highlight and
+  `-- VISUAL -- L{lo}-L{hi} (N lines)` footer show the range,
+  `y`/`Y` yanks the inclusive range to the clipboard and exits,
+  `Esc`/`V` cancels. Line numbers were already on by default
+  (`l` toggles, present since the older "pager: `l` toggles
+  line numbers" change), so the only missing half of the bug
+  was range yank — which this lands.
+- (fixed, v1.41.19) Built-in chord prefixes (`^a`, `[`, `]`, `H`,
+  `W`, `m`, `'`, `y`) now beat user keybindings on the second key
+  of the chord. Previously `^a-n` / `^a-p` (and `]g`, `H1`, `yp`,
+  etc.) would flash the pending indicator and disappear when the
+  user had `n`/`p`/etc. user-bound. The `g` chord stays
+  user-overridable since bare `g` is also a vi motion fragment.
 - (fixed, v1.41.18) Upgraded vt100 0.15 → 0.16, ratatui 0.29 →
   0.30, ansi-to-tui 7 → 8. The vt100 bump is the proper fix for
   the `screen.rs:934.unwrap()` panic; the catch_unwind safety net

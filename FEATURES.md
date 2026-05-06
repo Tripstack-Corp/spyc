@@ -168,6 +168,12 @@ spyc.
 - **y** yank pager content to the system clipboard (always operates
   on the *source* — yanking a rendered Markdown view gives you back
   the markdown text, not the styled rendering)
+- **V** enter vi-style **visual line mode** to yank a line range:
+  the anchor sets at the top visible line, `j` / `k` / `^d` / `^u`
+  / `^f` / `^b` / `g` / `G` / `Home` / `End` extend the selection
+  (auto-scrolling), the status footer shows `L{lo}-L{hi}` and the
+  line count, `y` yanks the inclusive range to the clipboard and
+  exits, `Esc` / `V` cancel
 - **x** toggle hex-dump view for binary files
 - **Markdown viewer** — `.md`/`.markdown` files open in rendered
   mode by default: headings styled, lists with bullets, fenced
