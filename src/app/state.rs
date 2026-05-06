@@ -627,6 +627,17 @@ impl AppState {
             self.prev_dir = Some(self.listing.dir.clone());
         }
         let _ = std::env::set_current_dir(&canonical);
+        // If the directory had more than `MAX_ENTRIES`, the read
+        // stopped early. Surface that to the user with a flash so a
+        // partial listing isn't mistaken for the whole picture — the
+        // alternative was the pre-fix behavior of hanging the event
+        // loop for many seconds on a 1M-entry tmp dir.
+        if new_listing.truncated {
+            self.flash_info(format!(
+                "listing capped at {} entries — directory has more",
+                crate::fs::listing::MAX_ENTRIES
+            ));
+        }
         self.listing = new_listing;
         self.listing.sort(self.sort_order);
         self.git_info = crate::sysinfo::git_status(&canonical);

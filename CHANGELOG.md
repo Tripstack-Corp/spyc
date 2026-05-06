@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Huge directories no longer hang spyc.** A user reported entering
+  a stale `/tmp/...` directory and having to kill the terminal to
+  recover — every entry costs a `stat()` call plus a sort
+  comparison, so a 1M-entry directory could spend minutes blocking
+  the event loop. `Listing::read` now caps at 50,000 entries (new
+  `MAX_ENTRIES` const) and flashes
+  `listing capped at 50000 entries — directory has more` on chdir
+  when the cap was hit. The cap is generous enough that real-world
+  navigation directories (build trees, monorepos, even chubby
+  `node_modules`) read in full; only pathological directories
+  (message queues, log spools, runaway tmp) trip it. Also extracted
+  `read_capped(dir, cap)` for unit testing without burning real
+  time on 50k file stats.
+
 ### Changed
 - **Two-character git markers distinguish staged from unstaged.**
   The left gutter now shows the full porcelain XY pair (column 0 =
