@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.41.16"
+version = "1.41.17"
 edition = "2024"
 description = "A vi-keyboard-driven file commander that pairs with Claude Code, inspired by SideFX's spy"
 license = "BSD-3-Clause"
@@ -57,7 +57,17 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+# `unwind` instead of `abort` so `std::panic::catch_unwind` actually
+# catches panics — used in `pane::Pane::process_bytes_safe` to recover
+# from vt100 0.15's known unwrap-on-edge-case panic (hits
+# `Option::unwrap` deep in screen.rs for some valid escape sequences,
+# e.g. nvim's exit-from-alt-screen after specific scroll state). With
+# `abort` a single panicking byte stream took down the entire spyc
+# process, dropping every other pane along with it. Slightly larger
+# binary + minor codegen change is a fine trade for not crashing the
+# user's session. Worth keeping as a safety net even after a vt100
+# upgrade.
+panic = "unwind"
 
 [profile.release-static]
 inherits = "release"
