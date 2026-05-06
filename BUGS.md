@@ -1,8 +1,19 @@
 ### SMALL ###
+- darken screen on unfocused pane to better distinguish focus
+- staged vs unstaged changes not well distinguished
+- user reported: timeout on viewing large directory (went into a messy tmp
+  directory by accident and had to kill the terminal)
+- user reported: block cursor in insert mode on nvim even when that is not my
+  cursor (ntd: we should remove any cursor overrides?)
+- view mode in the lower pane should show line numbers and be able to yank
+  based on line number range
+- using editor in top pane prevents switching to bottom pane
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - notice of ^c while in the task viewer goes to the spyc pane instead of at the
   top of the task pager view
+- D in spyc pane should open in $PAGER in the top pane
+- / should match within names - it seems to assume ^ e.g. env won't match .env
 - MCP socket discovery can attach to the wrong spyc instance. When
   `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's
   pane, env didn't propagate, or the local `.mcp.json` was suppressed
@@ -66,6 +77,8 @@
   for `\e[NA` sequences to confirm vs. brew choosing line-mode.
 
 ### BIGGER ###
+- task runner should be equivalent to a lower pane and be able to push down
+  into lower pane ^w-_ or into the background ^w-z
 - codex doesn't support vi bindings ... maybe we could control it and inject vi
   bindings into it's rataui pane
 - pane forwards no mouse events to the child. spyc never calls
@@ -134,6 +147,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (defensive, v1.41.12) "switching panes input doesn't work when done
+  too quickly" — couldn't reproduce, but two plausible failure modes
+  were addressed: (1) post-chord bounce: a focus-switch chord
+  (`^a-j`/`^a-k`) now suppresses a same-key Press/Repeat within 60 ms
+  so a fast chord doesn't leak a stray byte into the just-focused
+  pane; (2) stranded paste: `Event::Paste` outside Prompting / with
+  no pane open now flashes "paste ignored" instead of silently
+  dropping. Also added `--key-trace`/`SPYC_KEY_TRACE` for diagnosing
+  the next report — writes every event + dispatch decision to
+  `/tmp/spyc-key-trace-<ts>.log` with elapsed-since-start timestamps.
 - (fixed, v1.41.11) `]g` / `[g` jumps the cursor to the next /
   previous git-changed entry in the listing (file or directory
   carrying any of the `~`/`+`/`?`/`-`/`>` markers). Wraps. From a

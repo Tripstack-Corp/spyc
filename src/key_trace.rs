@@ -1,0 +1,64 @@
+//! Opt-in per-key dispatch trace.
+//!
+//! Enabled by `--key-trace` CLI flag or `SPYC_KEY_TRACE=1` env var.
+//! Trace lines go to `/tmp/spyc-key-trace-<TIMESTAMP>.log`, separate from
+//! the general debug log so a key-trace session doesn't get drowned in
+//! pane drain / repaint noise.
+//!
+//! The intent is diagnostic-only: when a user reports an input bug
+//! ("typed ^a-j too fast and the focus didn't switch"), they can flip
+//! the flag, reproduce, and ship the log. Each line is a single key
+//! event annotated with the elapsed time since spyc start, the
+//! key+modifiers, and where the dispatch sent it.
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::Mutex;
+
+struct TraceState {
+    file: std::fs::File,
+    start: std::time::Instant,
+}
+
+static TRACE: Mutex<Option<TraceState>> = Mutex::new(None);
+
+/// Call once at startup. Returns the trace-log path when active.
+pub fn init(flag: bool) -> Option<String> {
+    let enabled = flag
+        || std::env::var("SPYC_KEY_TRACE").is_ok_and(|v| !v.is_empty() && v != "0" && v != "false");
+    if !enabled {
+        return None;
+    }
+    let ts = crate::sysinfo::epoch_secs();
+    let path = format!("/tmp/spyc-key-trace-{ts}.log");
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+    {
+        let mut slot = TRACE.lock().unwrap();
+        *slot = Some(TraceState {
+            file,
+            start: std::time::Instant::now(),
+        });
+    }
+    Some(path)
+}
+
+/// Returns true when the trace is armed. Callers can guard expensive
+/// formatting behind this.
+pub fn is_enabled() -> bool {
+    let slot = TRACE.lock().unwrap();
+    slot.is_some()
+}
+
+/// Log one trace line, prefixed with elapsed-since-start in milliseconds.
+/// No-op when the trace isn't armed.
+pub fn log(msg: &str) {
+    let mut slot = TRACE.lock().unwrap();
+    if let Some(state) = slot.as_mut() {
+        let elapsed_ms = state.start.elapsed().as_millis();
+        let _ = writeln!(state.file, "[{elapsed_ms:>8}ms] {msg}");
+    }
+}

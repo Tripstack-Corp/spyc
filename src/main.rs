@@ -5,6 +5,7 @@ mod config;
 mod context;
 mod debug_log;
 mod fs;
+mod key_trace;
 mod keymap;
 mod mcp;
 mod mcp_cmd;
@@ -48,6 +49,13 @@ struct Cli {
     /// Write debug log to /tmp/spyc-debug-<ts>.log
     #[arg(short, long)]
     debug: bool,
+
+    /// Trace every key event + dispatch decision to
+    /// /tmp/spyc-key-trace-<ts>.log. Useful for diagnosing
+    /// "input doesn't work when done too quickly" reports.
+    /// Equivalent to setting SPYC_KEY_TRACE=1.
+    #[arg(long)]
+    key_trace: bool,
 
     /// Run as MCP server (stdio JSON-RPC)
     #[arg(long)]
@@ -119,6 +127,9 @@ fn main() -> Result<()> {
 
     if let Some(p) = debug_log::init(cli.debug) {
         eprintln!("spyc: debug log → {p}");
+    }
+    if let Some(p) = key_trace::init(cli.key_trace) {
+        eprintln!("spyc: key trace → {p}");
     }
     // Install signal handlers BEFORE the TUI starts so a stray
     // ^C during a suspended-mode takeover (`p` → less, `v` →

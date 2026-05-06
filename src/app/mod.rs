@@ -572,6 +572,14 @@ pub struct App {
     pub exit_summary: Option<String>,
     /// Accumulates characters the user types while the pane is focused.
     pane_prompt_buf: String,
+    /// When a focus-switch chord (^a-j / ^a-k) just completed, this
+    /// captures (when, the key that completed it). The next dispatch
+    /// drops any Press/Repeat of the same key within ~60 ms — without
+    /// this guard, fast typing of `^a-j-...` produced a stray `j` byte
+    /// to the now-focused pane child (the `j` Press completes the
+    /// chord, but a brief OS-level Repeat or a too-quick second Press
+    /// arrives just after, with the new focus already in effect).
+    focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
     /// The last complete prompt the user sent to the pane (Enter commits).
     last_pane_prompt: Option<String>,
     /// Activity monitor: draws/sec, bytes/sec overlay.
@@ -796,6 +804,7 @@ impl App {
             mcp_running,
             exit_summary: None,
             pane_prompt_buf: String::new(),
+            focus_chord_completed: None,
             last_pane_prompt: None,
             show_activity: false,
             activity_draws: 0,
@@ -1561,6 +1570,14 @@ impl App {
                         }
                     }
                     Event::Paste(text) => {
+                        if crate::key_trace::is_enabled() {
+                            crate::key_trace::log(&format!(
+                                "RX paste len={} pane_focused={} mode={:?}",
+                                text.len(),
+                                self.state.pane_focused,
+                                std::mem::discriminant(&self.state.mode),
+                            ));
+                        }
                         if let Mode::Prompting(ref mut p) = self.state.mode {
                             // Paste into the active prompt buffer.
                             // Strip newlines (prompts are single-line).
@@ -1593,6 +1610,17 @@ impl App {
                             buf.extend_from_slice(text.as_bytes());
                             buf.extend_from_slice(b"\x1b[201~");
                             pane.send_bytes(&buf)?;
+                        } else {
+                            // No prompt and no pane — there's nowhere
+                            // sensible to send the paste. Some terminals
+                            // wrap rapid-fire keystrokes in bracketed
+                            // paste sequences, so silently dropping
+                            // could swallow real input. Flash a hint so
+                            // the user knows it happened.
+                            let n = text.chars().count();
+                            self.state.flash_info(format!(
+                                "paste ignored ({n} chars) — open `:` or `^\\` to paste"
+                            ));
                         }
                     }
                     Event::Resize(cols, rows) => {
@@ -2691,6 +2719,45 @@ impl App {
     // --- Input handling ---------------------------------------------------
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
+        // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
+        // Captures the input as it arrives so a user reproducing an
+        // "input doesn't work" issue can ship a log. We re-trace the
+        // dispatch decision wherever a key gets routed.
+        if crate::key_trace::is_enabled() {
+            crate::key_trace::log(&format!(
+                "RX kind={:?} code={:?} mods={:?} pane_focused={} pending={:?}",
+                key.kind,
+                key.code,
+                key.modifiers,
+                self.state.pane_focused,
+                self.state.resolver.pending_display(),
+            ));
+        }
+
+        // Swallow a Press/Repeat of the chord-completing key when it
+        // arrives within ~60 ms of a focus-switch chord. Without this
+        // guard, fast-typing `^a-j` (or holding the chord-completing
+        // key even briefly) produces a stray byte to the now-focused
+        // pane child — the j Press completes the chord, but a Repeat
+        // or too-quick second Press follows with the new focus already
+        // active, so it gets forwarded to the pane as raw input.
+        // 60 ms covers system-key-repeat (~30-50 ms) and kitty-keyboard
+        // Repeat events without affecting deliberate double-taps.
+        if let Some((at, code)) = self.focus_chord_completed {
+            let within_window = at.elapsed() < Duration::from_millis(60);
+            if within_window
+                && key.code == code
+                && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                && key.modifiers.is_empty()
+            {
+                crate::key_trace::log("  swallowed (post-chord bounce)");
+                return Ok(PostAction::None);
+            }
+            if !within_window {
+                self.focus_chord_completed = None;
+            }
+        }
+
         // Any keypress clears a lingering flash message.
         self.state.flash = None;
 
@@ -2900,8 +2967,20 @@ impl App {
         if self.state.view == View::Graveyard {
             return Ok(self.handle_graveyard_view_key(key));
         }
-        match self.state.resolver.feed(key, &self.state.user_keymap) {
-            ResolverOutcome::Action(action) => return self.apply(&action),
+        let outcome = self.state.resolver.feed(key, &self.state.user_keymap);
+        if crate::key_trace::is_enabled() {
+            crate::key_trace::log(&format!("  resolver -> {outcome:?}"));
+        }
+        match outcome {
+            ResolverOutcome::Action(action) => {
+                // Stamp focus-switch chord completions so the next
+                // ~60 ms suppresses a same-key Repeat or bouncy second
+                // Press from leaking into the now-focused pane.
+                if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
+                    self.focus_chord_completed = Some((std::time::Instant::now(), key.code));
+                }
+                return self.apply(&action);
+            }
             ResolverOutcome::User(bound) => return self.apply_user(&bound),
             ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
         }
