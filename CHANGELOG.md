@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`;cmd` overlay no longer traps focus when a bottom pane is open.**
+  Used to be: a `;`-style interactive command (`;less docs/foo.md`,
+  `;vim`, `;htop`) was an unconditional key takeover — every key
+  went to the overlay subprocess until it exited. With a bottom
+  pane already running claude / zsh, that meant the user had to
+  quit `less` just to glance at the lower pane. Now spyc meta keys
+  (`^a`, `^w`, `^\`, F10) fall through to the chord resolver while
+  the overlay is up, so `^a-j` / `^a-k` flip focus between the
+  overlay and the bottom pane and `^a-c` / `^a-n` etc. still manage
+  bottom-pane tabs. The overlay rendering tracks the focus state —
+  unfocused overlays dim like any other unfocused pane — and the
+  focus-switch flash says `focus: overlay` when the overlay holds
+  the slot. New overlays steal focus on spawn so `;less` lands you
+  in the pager directly. The user-visible workflow this enables:
+  `;less docs/architecture.md`, `^a-j` into claude, do work, `^a-k`
+  back to scroll the doc, repeat.
+
 ### Added
 - **Pager visual line mode for range yank.** `V` in any pager view
   enters vi-style visual line mode: the anchor is set at the top

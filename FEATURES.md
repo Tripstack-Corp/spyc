@@ -202,9 +202,13 @@ Three modes of running commands, each for a different use case:
   Press `i` to vi-edit the highlighted command in-place.
   `Enter` executes the (possibly edited) command, `Ctrl+D` deletes
   an entry, `Esc`/`q` closes.
-- **;** foreground — run an interactive command (top, vim, htop) in a
-  top-overlay pty that replaces the file listing while the bottom pane
-  stays untouched.
+- **;** foreground — run an interactive command (top, vim, htop, less)
+  in a top-overlay pty that replaces the file listing while the bottom
+  pane stays visible. **`^a-j` / `^a-k` flip focus between the overlay
+  and the bottom pane** so you can `;less docs/architecture.md`, pop
+  down to claude, do work, and pop back up to scroll the doc — all
+  without quitting the subprocess. The unfocused side dims; the focus
+  flash says `focus: overlay` or `focus: <tab label>`.
 - **$** shell — drop into `$SHELL` in the current directory.
 
 All three modes invoke `$SHELL -i -c <cmd>` (interactive flag where
