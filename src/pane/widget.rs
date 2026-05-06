@@ -40,7 +40,7 @@ impl Widget for PaneWidget<'_> {
                     continue;
                 };
                 let contents = cell.contents();
-                let ch: &str = if contents.is_empty() { " " } else { &contents };
+                let ch: &str = if contents.is_empty() { " " } else { contents };
                 let style = cell_style(cell).add_modifier(dim);
                 let x = area.x + col;
                 let y = area.y + row;

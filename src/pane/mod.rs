@@ -273,7 +273,7 @@ impl Pane {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        self.parser.set_size(rows, cols);
+        self.parser.screen_mut().set_size(rows, cols);
         Ok(())
     }
 
@@ -411,7 +411,7 @@ impl Pane {
     pub fn recent_lines(&mut self, max_lines: usize) -> Vec<String> {
         let prev = self.scroll_offset;
         let max_sb = self.max_scrollback();
-        self.parser.set_scrollback(max_sb);
+        self.parser.screen_mut().set_scrollback(max_sb);
         let all: Vec<String> = self
             .parser
             .screen()
@@ -419,7 +419,7 @@ impl Pane {
             .lines()
             .map(String::from)
             .collect();
-        self.parser.set_scrollback(prev);
+        self.parser.screen_mut().set_scrollback(prev);
         // Return only the last `max_lines` lines.
         if all.len() > max_lines {
             all[all.len() - max_lines..].to_vec()
@@ -483,10 +483,10 @@ impl Pane {
         // Temporarily set scrollback to max so contents() captures everything.
         let prev = self.scroll_offset;
         let max = self.max_scrollback();
-        self.parser.set_scrollback(max);
+        self.parser.screen_mut().set_scrollback(max);
         let text = self.parser.screen().contents();
         // Restore previous view.
-        self.parser.set_scrollback(prev);
+        self.parser.screen_mut().set_scrollback(prev);
 
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = now.trim_end_matches("_UTC");
@@ -516,7 +516,7 @@ impl Pane {
     }
 
     fn apply_scroll(&mut self) {
-        self.parser.set_scrollback(self.scroll_offset);
+        self.parser.screen_mut().set_scrollback(self.scroll_offset);
     }
 }
 
