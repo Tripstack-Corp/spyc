@@ -1,5 +1,4 @@
 ### SMALL ###
-- staged vs unstaged changes not well distinguished
 - user reported: timeout on viewing large directory (went into a messy tmp
   directory by accident and had to kill the terminal)
 - user reported: block cursor in insert mode on nvim even when that is not my
@@ -146,6 +145,12 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.14) Staged vs unstaged changes now visually distinct
+  via a two-character marker mirroring `git status -s` (col 0 =
+  staged side, col 1 = unstaged side). `M ` ready-to-commit,
+  ` M` working-tree-only, `MM` partially staged + further edits.
+  Each char colored independently. `GitFileStatus` upgraded from a
+  flat enum to a struct carrying both halves + an untracked flag.
 - (fixed, v1.41.13) Unfocused side now visibly dims so the user can
   tell at a glance which half is the input target. Per-cell
   `Modifier::DIM` on the unfocused widget (file list when pane is

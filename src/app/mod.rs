@@ -2704,7 +2704,7 @@ impl App {
                     .git_files
                     .get(&rd.display)
                     .copied()
-                    .unwrap_or(GitFileStatus::Clean);
+                    .unwrap_or_else(GitFileStatus::clean);
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,

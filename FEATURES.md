@@ -39,9 +39,14 @@ Everything is keyboard-driven with vi motions as the foundation.
   on it; Esc cancels. No persistent index — walks lazily on open.
 - Multi-column layout that adapts to terminal width
 - Color-coded entries: directories, executables, symlinks, files
-- **Git status colors** — modified files show amber, untracked/added
-  show green, deleted show dim, renamed show lavender, conflicted
-  show bold red. Directories containing changes are tinted too.
+- **Git status markers** — two-character left-gutter pair mirroring
+  `git status -s`: column 0 = staged side, column 1 = unstaged side.
+  `M ` ready-to-commit, ` M` working-tree-only, `MM` partially
+  staged + further edits, ` ?` untracked, `R~` staged rename +
+  unstaged tweaks, `!!` conflicted. Each char colored independently
+  (modified=amber, added/untracked=green, deleted=red, renamed=
+  lavender, conflicted=bold red). Directories containing changes
+  are tinted too.
 - **`]g` / `[g`** jump the cursor to the next / previous file or dir
   with a non-clean git status. Wraps end-to-end so the chord is
   hold-to-cycle. Flashes "no git changes in this directory" when
