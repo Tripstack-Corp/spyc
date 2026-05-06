@@ -26,7 +26,10 @@ Everything is keyboard-driven with vi motions as the foundation.
 
 - **d / Enter** descend into a directory, or view a text file in the pager
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
-- **V** open `$EDITOR` in the top pane — Claude pane below stays visible
+- **V** open `$EDITOR` in the top pane — bottom pane stays visible
+- **D** open `$PAGER` (e.g. `less`) in the top pane — bottom pane stays
+  visible. Workflow: `D` on a doc, `^a-j` into the bottom pane to do
+  work, `^a-k` back to scroll the doc
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
@@ -619,7 +622,7 @@ jump from Claude's output back to the file list.
 
 ## Info and diagnostics
 
-- **D** show date and time (UTC)
+- **:date** show date and time (UTC)
 - **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
 - **A** activity monitor: live draws/sec, cells/sec, draw reason
