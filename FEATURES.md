@@ -474,6 +474,10 @@ Falls back to a plain text layout in mono mode.
 When switching between the file list and the pane, focus is
 unambiguous:
 
+- **The whole unfocused side dims** — pane content (when the list
+  has focus) or non-cursor list rows (when the pane has focus)
+  render with SGR 2 / `Modifier::DIM`, so the focus target is
+  obvious at a glance
 - **File list cursor** dims to a muted color when the pane has focus
 - **Pane cursor** shows as a bright reverse-video block when focused,
   dim block when unfocused

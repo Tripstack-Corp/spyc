@@ -22,6 +22,18 @@ impl Widget for PaneWidget<'_> {
         let draw_rows = area.height.min(screen_rows);
         let draw_cols = area.width.min(screen_cols);
 
+        // When the pane isn't the input target, fade the whole content
+        // so the user can tell at a glance which side has focus. SGR 2
+        // (Modifier::DIM) is the cheap way: every modern terminal we
+        // support renders it as ~50% lightness on the affected cells.
+        // Combined with the dimmed cursor block below, the unfocused
+        // pane looks visibly muted vs. the focused list above.
+        let dim = if self.focused {
+            Modifier::empty()
+        } else {
+            Modifier::DIM
+        };
+
         for row in 0..draw_rows {
             for col in 0..draw_cols {
                 let Some(cell) = self.screen.cell(row, col) else {
@@ -29,7 +41,7 @@ impl Widget for PaneWidget<'_> {
                 };
                 let contents = cell.contents();
                 let ch: &str = if contents.is_empty() { " " } else { &contents };
-                let style = cell_style(cell);
+                let style = cell_style(cell).add_modifier(dim);
                 let x = area.x + col;
                 let y = area.y + row;
                 buf.set_string(x, y, ch, style);

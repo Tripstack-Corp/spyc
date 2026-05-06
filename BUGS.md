@@ -1,5 +1,4 @@
 ### SMALL ###
-- darken screen on unfocused pane to better distinguish focus
 - staged vs unstaged changes not well distinguished
 - user reported: timeout on viewing large directory (went into a messy tmp
   directory by accident and had to kill the terminal)
@@ -147,6 +146,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.13) Unfocused side now visibly dims so the user can
+  tell at a glance which half is the input target. Per-cell
+  `Modifier::DIM` on the unfocused widget (file list when pane is
+  focused; pane when list is focused). Cursor row's existing
+  dim-bg treatment stacks on top so it stays distinguishable.
 - (defensive, v1.41.12) "switching panes input doesn't work when done
   too quickly" — couldn't reproduce, but two plausible failure modes
   were addressed: (1) post-chord bounce: a focus-switch chord
