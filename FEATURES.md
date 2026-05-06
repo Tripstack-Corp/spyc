@@ -484,8 +484,13 @@ unambiguous:
   render with SGR 2 / `Modifier::DIM`, so the focus target is
   obvious at a glance
 - **File list cursor** dims to a muted color when the pane has focus
-- **Pane cursor** shows as a bright reverse-video block when focused,
-  dim block when unfocused
+- **Pane cursor** shows as a reverse-video block at the pty cursor
+  position when the pane is focused AND the child is on the main
+  screen (plain shell / REPL). Suppressed when the pane is
+  unfocused, when the child has switched to the alternate screen
+  (full-screen TUIs render their own cursor — nvim's beam, vim's
+  block, etc.), or when the child has explicitly hidden it
+  (`\e[?25l`)
 - The divider rule brightens when the pane is focused
 - The divider also shows the active tab's *live* cwd (polled from
   `/proc/<pid>/cwd` on Linux, `lsof` on macOS). If the subprocess

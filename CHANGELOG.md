@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Pane cursor block no longer clobbers nvim's own cursor.** Spyc
+  used to paint a reverse-block at the pty cursor position
+  unconditionally (modulo `?25l`-hidden), which fought with TUI
+  apps that draw their own cursor — most visibly nvim's beam in
+  insert mode, where users saw a block when the app was clearly
+  asking for a beam. The block is now skipped when (a) the pane
+  isn't focused (user's eye is on the file list anyway, the block
+  is just clutter), or (b) the child has switched to the alternate
+  screen (any full-screen TUI: nvim / vim / less / htop / lazygit
+  / claude in TUI mode renders its own cursor in its own shape).
+  Plain shells / REPLs on the main screen still get the block as
+  before — that visibility cue genuinely helps when no native
+  cursor is rendered.
 - **Huge directories no longer hang spyc.** A user reported entering
   a stale `/tmp/...` directory and having to kill the terminal to
   recover — every entry costs a `stat()` call plus a sort

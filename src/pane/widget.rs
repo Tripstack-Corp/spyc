@@ -48,18 +48,32 @@ impl Widget for PaneWidget<'_> {
             }
         }
 
-        // Overlay a cursor block at the pty cursor position (skip when the
-        // child has hidden the cursor; TUI apps draw their own highlight).
-        if !self.screen.hide_cursor() {
+        // Overlay a reverse-block cursor at the pty cursor position —
+        // but only when spyc has business doing so:
+        //
+        // 1. Pane is focused. Otherwise the user's eye isn't here and a
+        //    block in an unfocused pane is just visual clutter / a
+        //    pseudo-second-cursor that competes with the real input
+        //    target above (the file list).
+        // 2. Child hasn't switched to the alternate screen. Full-screen
+        //    TUIs (nvim, vim, less, htop, lazygit, claude in TUI mode)
+        //    paint their own cursor in their own shape — beam in nvim
+        //    insert mode, e.g. — and our hard-coded block clobbers it
+        //    with the wrong shape and color.
+        // 3. Child hasn't explicitly hidden the cursor (DEC ?25l).
+        //
+        // Net effect: a plain shell / REPL on the main screen still
+        // gets the visibility cue (where the next char will land);
+        // alt-screen TUIs and unfocused panes show their natural state.
+        let want_block_cursor =
+            self.focused && !self.screen.alternate_screen() && !self.screen.hide_cursor();
+        if want_block_cursor {
             let (cy, cx) = self.screen.cursor_position();
             if cy < draw_rows && cx < draw_cols {
                 let x = area.x + cx;
                 let y = area.y + cy;
                 if let Some(cell_ref) = buf.cell_mut((x, y)) {
-                    let mut s = cell_ref.style().add_modifier(Modifier::REVERSED);
-                    if !self.focused {
-                        s = s.add_modifier(Modifier::DIM);
-                    }
+                    let s = cell_ref.style().add_modifier(Modifier::REVERSED);
                     cell_ref.set_style(s);
                 }
             }

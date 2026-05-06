@@ -1,6 +1,4 @@
 ### SMALL ###
-- user reported: block cursor in insert mode on nvim even when that is not my
-  cursor (ntd: we should remove any cursor overrides?)
 - view mode in the lower pane should show line numbers and be able to yank
   based on line number range
 - using editor in top pane prevents switching to bottom pane
@@ -143,6 +141,12 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.16) Pane cursor block no longer clobbers nvim's
+  beam (or any TUI's own cursor). Block is only painted when the
+  pane is focused AND the child is on the main screen. nvim / vim
+  / less / htop / lazygit / claude in TUI mode now render their
+  own cursor unobstructed; shells / REPLs on main screen still
+  get the visibility block.
 - (fixed, v1.41.15) Huge directories no longer hang spyc on chdir.
   `Listing::read` caps at 50,000 entries; truncated reads flash a
   hint so the user knows the listing isn't the full picture. The
