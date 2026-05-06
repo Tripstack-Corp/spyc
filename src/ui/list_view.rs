@@ -20,17 +20,52 @@ use ratatui::{
 use crate::fs::EntryKind;
 use crate::ui::theme::Theme;
 
-/// Git status for a single file in the listing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GitFileStatus {
-    #[default]
-    Clean,
+/// One half of a git porcelain XY pair — either the index/staged side
+/// or the working-tree/unstaged side. `Untracked` is special: it
+/// applies to a file as a whole (porcelain `??`), not to either side
+/// in isolation, so it lives on `GitFileStatus` itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitChange {
     Modified,
     Added,
-    Untracked,
     Deleted,
     Renamed,
     Conflicted,
+}
+
+/// Git status for a single file in the listing. Models the full XY
+/// porcelain shape so the renderer can show "staged but also further
+/// modified", "staged-only", "unstaged-only", etc. as distinct states
+/// — previously collapsed to one marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GitFileStatus {
+    pub staged: Option<GitChange>,
+    pub unstaged: Option<GitChange>,
+    pub untracked: bool,
+}
+
+impl GitFileStatus {
+    pub const fn clean() -> Self {
+        Self {
+            staged: None,
+            unstaged: None,
+            untracked: false,
+        }
+    }
+
+    pub const fn is_clean(self) -> bool {
+        self.staged.is_none() && self.unstaged.is_none() && !self.untracked
+    }
+
+    /// Convenience for callers (tests, parent-dir aggregation) that
+    /// just want a generic "this row has changes" marker.
+    pub const fn unstaged(change: GitChange) -> Self {
+        Self {
+            staged: None,
+            unstaged: Some(change),
+            untracked: false,
+        }
+    }
 }
 
 pub struct Row {
@@ -186,21 +221,33 @@ impl Widget for ListView<'_> {
             let x = area.x + x_offsets[col_idx];
             let y = area.y + row_idx as u16;
 
-            let (marker, marker_style) = if row.picked {
-                ('*', self.theme.pick_style())
+            // Pick / take override the git pair entirely (single-char
+            // marker + space). Otherwise we render the staged + unstaged
+            // pair from `git_marker_pair`, with each char carrying its
+            // own style so green-staged-vs-amber-unstaged is legible at
+            // a glance.
+            let (chars_styles, single_marker) = if row.picked {
+                (
+                    [(' ', Style::default()); 2],
+                    Some(('*', self.theme.pick_style())),
+                )
             } else if row.taken {
-                ('+', self.theme.take_style())
+                (
+                    [(' ', Style::default()); 2],
+                    Some(('+', self.theme.take_style())),
+                )
             } else {
-                git_marker(row.git_status, self.theme)
+                (git_marker_pair(row.git_status, self.theme), None)
             };
 
             let name_style = row_style(row.kind, row.git_status, self.theme);
             let highlighted = (start + i) == self.cursor;
-            let (marker_style, name_style) = if highlighted {
-                // On the cursor row, force a bright white foreground so the
-                // text remains legible on the saturated cursor bar and you
-                // can see the selected row from across the room.
-                // When unfocused (pane has focus), dim the cursor bar.
+
+            // Cursor row — force the bright bar bg + fg over both
+            // marker cells and the filename. DIM doesn't apply to the
+            // cursor row; the existing `cursor_bg_dim` handles the
+            // unfocused case.
+            let (cursor_bg, cursor_bold) = if highlighted {
                 let bg = if self.focused {
                     self.theme.cursor_bg
                 } else {
@@ -211,28 +258,50 @@ impl Widget for ListView<'_> {
                 } else {
                     Modifier::empty()
                 };
-                (
-                    marker_style.bg(bg).add_modifier(bold),
-                    Style::default()
-                        .fg(self.theme.cursor_fg)
-                        .bg(bg)
-                        .add_modifier(bold),
-                )
+                (Some(bg), bold)
             } else {
-                (marker_style.add_modifier(dim), name_style.add_modifier(dim))
+                (None, Modifier::empty())
             };
 
-            buf.set_string(x, y, format!("{marker} "), marker_style);
+            let apply_row_style = |s: Style| -> Style {
+                if let Some(bg) = cursor_bg {
+                    s.bg(bg).add_modifier(cursor_bold)
+                } else {
+                    s.add_modifier(dim)
+                }
+            };
+
+            // Marker cells: two chars, two independent styles.
+            if let Some((marker, marker_style)) = single_marker {
+                // Pick / take: write the single char + a space.
+                let style = apply_row_style(marker_style);
+                buf.set_string(x, y, format!("{marker} "), style);
+            } else {
+                let [(c0, s0), (c1, s1)] = chars_styles;
+                let s0 = apply_row_style(s0);
+                let s1 = apply_row_style(s1);
+                buf.set_string(x, y, c0.to_string(), s0);
+                buf.set_string(x + 1, y, c1.to_string(), s1);
+            }
+
+            let final_name_style = if highlighted {
+                Style::default()
+                    .fg(self.theme.cursor_fg)
+                    .bg(cursor_bg.unwrap_or_default())
+                    .add_modifier(cursor_bold)
+            } else {
+                name_style.add_modifier(dim)
+            };
 
             let name_w = cell_w.saturating_sub(MARKER_W) as usize;
             let drawn = super::display_truncate(&row.display, name_w);
             let drawn_w = super::display_width(drawn) as u16;
-            buf.set_string(x + MARKER_W, y, drawn, name_style);
+            buf.set_string(x + MARKER_W, y, drawn, final_name_style);
 
             let used = MARKER_W + drawn_w;
             if used < cell_w {
                 let pad: String = " ".repeat((cell_w - used) as usize);
-                buf.set_string(x + used, y, &pad, name_style);
+                buf.set_string(x + used, y, &pad, final_name_style);
             }
         }
     }
@@ -248,23 +317,52 @@ fn row_style(kind: EntryKind, _git: GitFileStatus, theme: &Theme) -> Style {
     }
 }
 
-/// Colored marker character for git status, shown in the left gutter.
-/// Picks and inventory markers take priority (handled by the caller).
-fn git_marker(git: GitFileStatus, theme: &Theme) -> (char, Style) {
-    match git {
-        GitFileStatus::Clean => (' ', Style::default()),
-        GitFileStatus::Modified => ('~', Style::default().fg(theme.pick)), // amber
-        GitFileStatus::Added => ('+', Style::default().fg(theme.exec)),    // green
-        GitFileStatus::Untracked => ('?', Style::default().fg(theme.exec)), // green
-        GitFileStatus::Deleted => ('-', Style::default().fg(theme.cursor_bg)), // red
-        GitFileStatus::Renamed => ('>', Style::default().fg(theme.symlink)), // lavender
-        GitFileStatus::Conflicted => (
+/// Glyph + color for a single XY half. Returns the same per-change
+/// glyph for either side; the *position* in the marker column tells
+/// the user which half it is (column 0 = staged, column 1 = unstaged).
+/// Color encodes the kind (modified/added/etc.).
+fn change_glyph(change: GitChange, theme: &Theme) -> (char, Style) {
+    match change {
+        GitChange::Modified => ('~', Style::default().fg(theme.pick)),
+        GitChange::Added => ('+', Style::default().fg(theme.exec)),
+        GitChange::Deleted => ('-', Style::default().fg(theme.cursor_bg)),
+        GitChange::Renamed => ('>', Style::default().fg(theme.symlink)),
+        GitChange::Conflicted => (
             '!',
             Style::default()
                 .fg(theme.cursor_bg)
                 .add_modifier(Modifier::BOLD),
         ),
     }
+}
+
+/// Two-character marker for the left gutter: column 0 = staged side,
+/// column 1 = unstaged side. Mirrors `git status -s`. Untracked files
+/// have no staged side (porcelain `??`) and render as ` ?` so the `?`
+/// lines up with the unstaged column.
+///
+/// Each char carries its own style — staged and unstaged colors don't
+/// have to match, which is the whole point: at a glance the user can
+/// tell `M ` (ready to commit) from ` M` (still working) from `MM`
+/// (partially staged + further edits).
+fn git_marker_pair(git: GitFileStatus, theme: &Theme) -> [(char, Style); 2] {
+    if git.is_clean() {
+        return [(' ', Style::default()), (' ', Style::default())];
+    }
+    if git.untracked {
+        // Untracked: no staged side; the `?` in the unstaged column.
+        return [
+            (' ', Style::default()),
+            ('?', Style::default().fg(theme.exec)),
+        ];
+    }
+    let staged = git
+        .staged
+        .map_or((' ', Style::default()), |c| change_glyph(c, theme));
+    let unstaged = git
+        .unstaged
+        .map_or((' ', Style::default()), |c| change_glyph(c, theme));
+    [staged, unstaged]
 }
 
 #[cfg(test)]
@@ -277,7 +375,7 @@ mod tests {
             kind: EntryKind::File,
             picked: false,
             taken: false,
-            git_status: GitFileStatus::Clean,
+            git_status: GitFileStatus::clean(),
         }
     }
 

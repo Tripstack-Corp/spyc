@@ -104,7 +104,20 @@ fn parse_porcelain_statuses(
     porcelain: &str,
     prefix: &str,
 ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
-    use crate::ui::list_view::GitFileStatus;
+    use crate::ui::list_view::{GitChange, GitFileStatus};
+    /// Decode one porcelain XY half (X = index/staged, Y = working tree)
+    /// into a `GitChange`. ` ` (and `?`/`!`) yield None — those are
+    /// handled by the caller via the special-case markers.
+    const fn decode_half(c: char) -> Option<GitChange> {
+        match c {
+            'M' | 'T' => Some(GitChange::Modified),
+            'A' => Some(GitChange::Added),
+            'D' => Some(GitChange::Deleted),
+            'R' | 'C' => Some(GitChange::Renamed),
+            'U' => Some(GitChange::Conflicted),
+            _ => None,
+        }
+    }
     let mut map = std::collections::HashMap::new();
     for line in porcelain.lines() {
         if line.len() < 4 {
@@ -136,14 +149,33 @@ fn parse_porcelain_statuses(
         // Top component relative to THIS directory.
         let top_component = filename.split('/').next().unwrap_or(filename).to_string();
         let in_this_dir = top_component == filename;
-        let status = match xy {
-            "??" => GitFileStatus::Untracked,
-            "!!" => continue, // ignored
-            s if s.contains('U') || s == "DD" || s == "AA" => GitFileStatus::Conflicted,
-            s if s.starts_with('R') || s.ends_with('R') => GitFileStatus::Renamed,
-            s if s.starts_with('A') || s.ends_with('A') => GitFileStatus::Added,
-            s if s.starts_with('D') || s.ends_with('D') => GitFileStatus::Deleted,
-            _ => GitFileStatus::Modified,
+        // Build a structured status. Both halves are decoded
+        // independently; a porcelain like `MM` means staged-modified
+        // AND further-modified-unstaged. Conflicts (`UU`, `DD`, `AA`)
+        // collapse to Conflicted on both halves so the marker reads
+        // `!!` and stands out.
+        let status = if xy == "??" {
+            GitFileStatus {
+                untracked: true,
+                ..GitFileStatus::clean()
+            }
+        } else if xy == "!!" {
+            continue; // ignored
+        } else if xy.contains('U') || xy == "DD" || xy == "AA" {
+            GitFileStatus {
+                staged: Some(GitChange::Conflicted),
+                unstaged: Some(GitChange::Conflicted),
+                untracked: false,
+            }
+        } else {
+            let mut chars = xy.chars();
+            let x = chars.next().unwrap_or(' ');
+            let y = chars.next().unwrap_or(' ');
+            GitFileStatus {
+                staged: decode_half(x),
+                unstaged: decode_half(y),
+                untracked: false,
+            }
         };
         // Only file rows in THIS directory get a basename entry.
         // Otherwise a deep entry like `content-acquisition/AGENTS.md`
@@ -152,10 +184,12 @@ fn parse_porcelain_statuses(
         if in_this_dir && !name.is_empty() {
             map.entry(name).or_insert(status);
         }
-        // Mark parent directory as modified for entries in subtrees.
+        // Mark parent directory as dirty for entries in subtrees.
+        // Use the unstaged-Modified shape since directories don't
+        // have a meaningful per-half staging concept.
         if !in_this_dir && !top_component.is_empty() {
             map.entry(format!("{top_component}/"))
-                .or_insert(GitFileStatus::Modified);
+                .or_insert_with(|| GitFileStatus::unstaged(GitChange::Modified));
         }
     }
     map
@@ -335,7 +369,7 @@ pub fn format_rss() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::list_view::GitFileStatus;
+    use crate::ui::list_view::GitChange;
 
     #[test]
     fn format_now_has_correct_shape() {
@@ -359,17 +393,21 @@ mod tests {
         let map = parse_porcelain_statuses(porcelain, "");
         // The deep file's basename is NOT a root entry.
         assert!(!map.contains_key("AGENTS.md"));
-        // The parent dir IS marked modified.
-        assert_eq!(
-            map.get("content-acquisition/"),
-            Some(&GitFileStatus::Modified)
-        );
+        // The parent dir IS marked dirty (unstaged-Modified).
+        let dir_status = map.get("content-acquisition/").unwrap();
+        assert_eq!(dir_status.unstaged, Some(GitChange::Modified));
+        assert!(dir_status.staged.is_none());
+        assert!(!dir_status.untracked);
     }
 
     #[test]
     fn root_modification_marks_basename() {
+        // ` M` = unstaged-only modify.
         let map = parse_porcelain_statuses(" M AGENTS.md\n", "");
-        assert_eq!(map.get("AGENTS.md"), Some(&GitFileStatus::Modified));
+        let s = map.get("AGENTS.md").unwrap();
+        assert_eq!(s.unstaged, Some(GitChange::Modified));
+        assert!(s.staged.is_none());
+        assert!(!s.untracked);
     }
 
     #[test]
@@ -379,8 +417,10 @@ mod tests {
         // not the deep file's.
         let porcelain = "?? new.md\n M sub/new.md\n";
         let map = parse_porcelain_statuses(porcelain, "");
-        assert_eq!(map.get("new.md"), Some(&GitFileStatus::Untracked));
-        assert_eq!(map.get("sub/"), Some(&GitFileStatus::Modified));
+        let new_md = map.get("new.md").unwrap();
+        assert!(new_md.untracked);
+        assert!(new_md.staged.is_none() && new_md.unstaged.is_none());
+        assert_eq!(map.get("sub/").unwrap().unstaged, Some(GitChange::Modified));
     }
 
     #[test]
@@ -389,15 +429,47 @@ mod tests {
         // contribute, and they're keyed relative to the listing dir.
         let porcelain = " M sub/foo.txt\n M other/bar.txt\n";
         let map = parse_porcelain_statuses(porcelain, "sub");
-        assert_eq!(map.get("foo.txt"), Some(&GitFileStatus::Modified));
+        assert_eq!(
+            map.get("foo.txt").unwrap().unstaged,
+            Some(GitChange::Modified)
+        );
         assert!(!map.contains_key("bar.txt"));
     }
 
     #[test]
     fn rename_takes_new_name() {
+        // `R ` = staged rename, working tree clean.
         let porcelain = "R  old.md -> new.md\n";
         let map = parse_porcelain_statuses(porcelain, "");
-        assert_eq!(map.get("new.md"), Some(&GitFileStatus::Renamed));
+        let s = map.get("new.md").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Renamed));
+        assert!(s.unstaged.is_none());
         assert!(!map.contains_key("old.md"));
+    }
+
+    #[test]
+    fn staged_only_modify() {
+        let map = parse_porcelain_statuses("M  foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Modified));
+        assert!(s.unstaged.is_none());
+    }
+
+    #[test]
+    fn partially_staged_modify() {
+        // `MM` — staged modify + further unstaged edits. Both halves set.
+        let map = parse_porcelain_statuses("MM foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Modified));
+        assert_eq!(s.unstaged, Some(GitChange::Modified));
+    }
+
+    #[test]
+    fn conflict_marks_both_halves() {
+        // `UU` — both sides unmerged. We collapse to Conflicted on both.
+        let map = parse_porcelain_statuses("UU foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Conflicted));
+        assert_eq!(s.unstaged, Some(GitChange::Conflicted));
     }
 }

@@ -207,7 +207,6 @@ impl AppState {
     /// Returns `false` when no row in the listing has a git change,
     /// so the caller can flash an empty-search message.
     pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
-        use crate::ui::list_view::GitFileStatus;
         let len = self.rows.len();
         if len == 0 || self.git_files.is_empty() {
             return false;
@@ -218,8 +217,7 @@ impl AppState {
                 self.git_files
                     .get(&r.display)
                     .copied()
-                    .unwrap_or(GitFileStatus::Clean)
-                    != GitFileStatus::Clean
+                    .is_some_and(|s| !s.is_clean())
             })
         };
         // Walk every other index, in the requested direction, with wrap.
@@ -534,7 +532,6 @@ impl AppState {
     }
 
     pub fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        use crate::ui::list_view::GitFileStatus;
         let Some(ref pattern) = self.temp_filter else {
             return rows;
         };
@@ -557,10 +554,10 @@ impl AppState {
             // useful for navigating into a subtree with edits.
             rows.into_iter()
                 .filter(|r| {
-                    !matches!(
-                        self.git_files.get(&r.display).copied().unwrap_or_default(),
-                        GitFileStatus::Clean
-                    )
+                    self.git_files
+                        .get(&r.display)
+                        .copied()
+                        .is_some_and(|s| !s.is_clean())
                 })
                 .collect()
         } else {
@@ -2359,11 +2356,13 @@ mod tests {
     }
 
     fn dirty_state(names: &[&str], dirty: &[&str]) -> AppState {
-        use crate::ui::list_view::GitFileStatus;
+        use crate::ui::list_view::{GitChange, GitFileStatus};
         let mut s = state_with_rows(names);
         for d in dirty {
-            s.git_files
-                .insert((*d).to_string(), GitFileStatus::Modified);
+            s.git_files.insert(
+                (*d).to_string(),
+                GitFileStatus::unstaged(GitChange::Modified),
+            );
         }
         s
     }

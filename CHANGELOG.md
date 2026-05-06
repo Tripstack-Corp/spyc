@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Two-character git markers distinguish staged from unstaged.**
+  The left gutter now shows the full porcelain XY pair (column 0 =
+  staged side, column 1 = unstaged side), mirroring `git status -s`.
+  `M ` is staged-only, ` M` is unstaged-only, `MM` is partially
+  staged + further edits, `R~` is staged rename + further unstaged
+  edits, ` ?` is untracked. Each char carries its own color so the
+  staged/unstaged halves are independently legible at a glance.
+  Previously a single marker collapsed all three cases ("staged",
+  "unstaged", "both") to one glyph, making the staged-vs-unstaged
+  distinction invisible. Marker column was already 2 cells wide
+  (was `~` + space) — no layout shift. Internally `GitFileStatus`
+  is now a struct (`staged: Option<GitChange>`, `unstaged:`,
+  `untracked: bool`) instead of a flat enum; new `GitChange`
+  carries the per-side kind. 3 new parser tests cover the
+  staged-only / partially-staged / conflict shapes.
 - **Unfocused side dims so focus is obvious at a glance.** When the
   pane has focus, the file list above renders with `Modifier::DIM`
   on every non-cursor row; when the list has focus, the pty pane
