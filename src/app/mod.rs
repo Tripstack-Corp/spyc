@@ -2311,10 +2311,15 @@ impl App {
             if overlay.is_closed() && !self.overlay_awaiting_dismiss {
                 self.overlay_awaiting_dismiss = true;
             }
+            // Visual focus tracks `state.pane_focused`: false ⇒
+            // overlay focused (cursor block, full color); true ⇒
+            // bottom pane focused (overlay dims to half-lightness via
+            // PaneWidget's DIM modifier). User toggles with ^a-j/k.
+            let overlay_focused = !self.state.pane_focused;
             frame.render_widget(
                 PaneWidget {
                     screen: overlay.screen(),
-                    focused: true,
+                    focused: overlay_focused,
                 },
                 overlay_area,
             );
@@ -2354,7 +2359,7 @@ impl App {
                 frame.render_widget(
                     PaneWidget {
                         screen: tabs.active().screen(),
-                        focused: false,
+                        focused: self.state.pane_focused,
                     },
                     rect,
                 );
@@ -2849,12 +2854,26 @@ impl App {
             return Ok(PostAction::None);
         }
 
-        // Top overlay (interactive `;` command) owns all keys — it's a
-        // full takeover of the top area. The user exits by quitting the
-        // subprocess itself (q in top, :q in vim, etc.).
+        // Top overlay (interactive `;` command). Used to be an
+        // unconditional takeover ("the user exits by quitting the
+        // subprocess itself"), which was fine when only the overlay
+        // existed -- but if the user has a bottom pane too (e.g.
+        // claude open), they couldn't pop down to it without quitting
+        // the overlay first. So now spyc meta keys (^a, ^w, ^\, F10)
+        // and bottom-pane-focused keys fall through to the regular
+        // chord / pane-forwarding paths, letting the user `^a-j` into
+        // claude while keeping `;less docs/foo.md` visible above.
         if let Some(overlay) = self.top_overlay.as_mut() {
-            let _ = overlay.send_key(key);
-            return Ok(PostAction::None);
+            let has_bottom = self.pane_tabs.is_some();
+            let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
+            let bottom_owns = has_bottom && self.state.pane_focused;
+            if !is_meta && !bottom_owns {
+                let _ = overlay.send_key(key);
+                return Ok(PostAction::None);
+            }
+            // Fall through: meta key reaches the resolver below;
+            // bottom-pane-focused keys reach the pane-focused
+            // forwarding block further down.
         }
 
         // Quick Select picker eats all keys until dismissed.
@@ -3889,6 +3908,10 @@ impl App {
             match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
                 Ok(p) => {
                     self.top_overlay = Some(p);
+                    // Initial focus is on the new overlay so the user
+                    // can drive the subprocess directly. ^a-j hands
+                    // focus to the bottom pane (when one is open).
+                    self.state.pane_focused = false;
                 }
                 Err(e) => self.state.flash_error(format!("spawn: {e}")),
             }
@@ -4076,6 +4099,7 @@ impl App {
                 match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
+                        self.state.pane_focused = false;
                     }
                     Err(e) => self.state.flash_error(format!("spawn: {e}")),
                 }
@@ -4527,6 +4551,7 @@ impl App {
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
             Ok(p) => {
                 self.top_overlay = Some(p);
+                self.state.pane_focused = false;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
         }
@@ -5455,7 +5480,16 @@ impl App {
                 .map_or("pane", |t| t.active_info().label.as_str());
             self.state.flash_info(format!("focus: {label}"));
         } else {
-            self.state.flash_info("focus: spyc");
+            // When a `;cmd` overlay is showing the spyc-list slot, the
+            // "non-pane" side is the overlay subprocess, not the file
+            // list. Label accordingly so the user can read what just
+            // got focus instead of guessing.
+            let label = if self.top_overlay.is_some() {
+                "overlay"
+            } else {
+                "spyc"
+            };
+            self.state.flash_info(format!("focus: {label}"));
         }
     }
 

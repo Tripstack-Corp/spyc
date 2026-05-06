@@ -1,11 +1,10 @@
 ### SMALL ###
-- using editor in top pane prevents switching to bottom pane
+- D in spyc pane should open in $PAGER in the top pane
+- / should match within names - it seems to assume ^ e.g. env won't match .env
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - notice of ^c while in the task viewer goes to the spyc pane instead of at the
   top of the task pager view
-- D in spyc pane should open in $PAGER in the top pane
-- / should match within names - it seems to assume ^ e.g. env won't match .env
 - MCP socket discovery can attach to the wrong spyc instance. When
   `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's
   pane, env didn't propagate, or the local `.mcp.json` was suppressed
@@ -124,6 +123,14 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.21) `;cmd` overlay (`;less`, `;vim`, etc.) no
+  longer traps focus when a bottom pane is open. Spyc meta keys
+  (`^a`, `^w`, `^\`, F10) now fall through while the overlay is
+  up, so `^a-j` / `^a-k` flip focus between overlay and bottom
+  pane and `^a-c` / `^a-n` still manage bottom-pane tabs. Overlay
+  visually dims when unfocused; the focus flash says `focus:
+  overlay`. Enables `;less docs/foo.md` → `^a-j` to claude → work
+  → `^a-k` to scroll the doc.
 - (fixed, v1.41.20) Pager visual line mode for range yank. `V`
   enters vi-style visual mode, `j`/`k`/`G`/etc. extend the
   selection (auto-scrolling), the muted indigo highlight and
