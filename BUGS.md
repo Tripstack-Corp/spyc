@@ -1,6 +1,4 @@
 ### SMALL ###
-- user reported: timeout on viewing large directory (went into a messy tmp
-  directory by accident and had to kill the terminal)
 - user reported: block cursor in insert mode on nvim even when that is not my
   cursor (ntd: we should remove any cursor overrides?)
 - view mode in the lower pane should show line numbers and be able to yank
@@ -145,6 +143,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.15) Huge directories no longer hang spyc on chdir.
+  `Listing::read` caps at 50,000 entries; truncated reads flash a
+  hint so the user knows the listing isn't the full picture. The
+  pre-fix behavior on a 1M-entry tmp dir was a multi-minute event
+  loop block that required killing the terminal.
 - (fixed, v1.41.14) Staged vs unstaged changes now visually distinct
   via a two-character marker mirroring `git status -s` (col 0 =
   staged side, col 1 = unstaged side). `M ` ready-to-commit,

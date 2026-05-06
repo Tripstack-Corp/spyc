@@ -59,7 +59,22 @@ fn ext_of(name: &str) -> &str {
 pub struct Listing {
     pub dir: PathBuf,
     pub entries: Vec<Entry>,
+    /// True when the on-disk directory had more than `MAX_ENTRIES`
+    /// items and we stopped early. Caller surfaces this as a flash
+    /// so the user knows the listing isn't the full picture.
+    pub truncated: bool,
 }
+
+/// Hard cap on entries Listing::read will materialize. A user
+/// reported entering a tmp directory with so many entries that spyc
+/// hung and they had to kill the terminal — every entry costs a
+/// `stat()` syscall plus a sort comparison, so 1M entries can spend
+/// minutes blocking the event loop on a slow filesystem. Most real
+/// directories the user wants to navigate are well under this cap;
+/// when we hit it, `truncated` is set so the caller can surface a
+/// flash and the user can `R` / `:!find` / climb out instead of
+/// waiting for the read to finish.
+pub const MAX_ENTRIES: usize = 50_000;
 
 impl Listing {
     /// An empty listing for a given directory (used when the dir isn't readable).
@@ -67,21 +82,37 @@ impl Listing {
         Self {
             dir,
             entries: Vec::new(),
+            truncated: false,
         }
     }
 
     pub fn read<P: AsRef<Path>>(dir: P) -> Result<Self> {
+        Self::read_capped(dir, MAX_ENTRIES)
+    }
+
+    /// Same as [`read`] but with a caller-supplied cap. Public for
+    /// tests; production code goes through `read` (with `MAX_ENTRIES`).
+    pub fn read_capped<P: AsRef<Path>>(dir: P, cap: usize) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         let mut entries: Vec<Entry> = Vec::new();
+        let mut truncated = false;
         let rd = std::fs::read_dir(&dir)
             .with_context(|| format!("reading directory {}", dir.display()))?;
         for item in rd {
+            if entries.len() >= cap {
+                truncated = true;
+                break;
+            }
             let Ok(item) = item else { continue };
             if let Ok(e) = Entry::from_dir_entry(&item) {
                 entries.push(e);
             }
         }
-        let mut listing = Self { dir, entries };
+        let mut listing = Self {
+            dir,
+            entries,
+            truncated,
+        };
         listing.sort(SortMode::Name);
         Ok(listing)
     }
@@ -119,5 +150,42 @@ impl Listing {
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn read_capped_truncates_when_over_cap() {
+        let tmp = tempdir().unwrap();
+        // 8 files; cap at 5 so we hit the truncation branch without
+        // burning real test time on 50k stat() calls.
+        for i in 0..8 {
+            File::create(tmp.path().join(format!("f{i:02}"))).unwrap();
+        }
+        let listing = Listing::read_capped(tmp.path(), 5).unwrap();
+        assert_eq!(listing.entries.len(), 5);
+        assert!(listing.truncated);
+    }
+
+    #[test]
+    fn read_capped_does_not_truncate_under_cap() {
+        let tmp = tempdir().unwrap();
+        for i in 0..3 {
+            File::create(tmp.path().join(format!("f{i:02}"))).unwrap();
+        }
+        let listing = Listing::read_capped(tmp.path(), 100).unwrap();
+        assert_eq!(listing.entries.len(), 3);
+        assert!(!listing.truncated);
+    }
+
+    #[test]
+    fn empty_listing_is_not_truncated() {
+        let l = Listing::empty(std::path::PathBuf::from("/tmp"));
+        assert!(!l.truncated);
     }
 }
