@@ -103,21 +103,30 @@
 - ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
+- upgrade vt100 0.15 → 0.16. We're pinned at 0.15.2; upstream is at
+  0.16.2 (active, not unmaintained — earlier notes saying "the
+  unmaintained 0.15" were inaccurate, corrected here). The
+  motivating cases are the panic in `screen.rs:934` (caught
+  defensively in v1.41.17 but the real fix is upstream), mode 2026
+  (synchronized output) which 0.15 doesn't parse — see entry below
+  — and OSC 8 (hyperlinks) — also below. Should evaluate API churn
+  vs. the wins in one go; alternative is `vt100-ctt 0.17.1`
+  (community fork) or alacritty's `vte` parser. Defer until
+  someone has a clear afternoon — touches every place that holds
+  a `vt100::Screen` reference.
 - vt100 0.15 doesn't parse `\x1b[?2026h…\x1b[?2026l` (synchronized
   output / "mode 2026"). Apps that wrap every redraw in 2026
   (lazygit/tcell, recent neovim) get partial-frame tearing during
   fast scrolls — the renderer reads a half-finished frame and
   paints it. spyc already *emits* mode 2026 itself (perf refactor,
   see FIXED entries), so the protocol is well-supported on the
-  host side; only the pane's vt100 parser is behind. Either
-  upgrade the `vt100` crate (the unmaintained 0.15 → a
-  community-fork or alacritty's `vte` parser) or live with the
-  tearing. Big dep change; defer until someone notices.
+  host side; only the pane's vt100 parser is behind. Resolved by
+  the vt100 upgrade above.
 - vt100 0.15 doesn't parse OSC 8 (terminal hyperlinks). lazygit's
   footer ("Donate" / "Ask Question") and any modern tool that
   emits `\x1b]8;;url\x07label\x1b]8;;\x07` will show stray bytes
-  or a label without the link. Same dep-upgrade story as mode 2026
-  above; same defer rationale.
+  or a label without the link. Same upgrade-path resolution as
+  above.
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles
@@ -141,6 +150,16 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (defensive, v1.41.17) vt100 0.15 parser panic
+  (`screen.rs:934.unwrap()`) no longer crashes the entire spyc
+  process. Reported triggered by exiting nvim from inside a zsh
+  pane. `Pane::process_bytes_safe` wraps `parser.process` in
+  `catch_unwind`; on panic we replace the parser with a fresh one
+  at the same dimensions. Release profile switched from
+  `panic = "abort"` to `panic = "unwind"` so the catch actually
+  fires (was a no-op in release builds before). The proper fix is
+  a vt100 upgrade — upstream is at 0.16.2 and the panic may be
+  resolved there; tracked as a separate item.
 - (fixed, v1.41.16) Pane cursor block no longer clobbers nvim's
   beam (or any TUI's own cursor). Block is only painted when the
   pane is focused AND the child is on the main screen. nvim / vim

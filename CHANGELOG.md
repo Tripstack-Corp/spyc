@@ -6,6 +6,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **vt100 parser panics no longer take spyc down.** A user reported
+  nvim crashing the whole spyc process when closing it inside a zsh
+  pane: `panicked at vt100/src/screen.rs:934: Option::unwrap() on a
+  None value`. We're on vt100 0.15.2 (upstream is at 0.16.2 — an
+  upgrade may resolve this and is worth doing separately), and 0.15
+  has a known `unwrap()` deep in `screen.rs` for certain valid
+  escape sequences (this one fires while parsing the exit-from-
+  alt-screen byte stream after a specific scroll/cursor state). The
+  defensive fix is a `catch_unwind` around the parser hot path: on
+  panic we log via the debug log and replace the parser with a
+  fresh one at the same dimensions and 10k-line scrollback. The
+  user loses the in-pane screen state at the moment of recovery
+  (the next render from the child repaints anyway), but spyc and
+  every other pane stay alive. Even after a vt100 upgrade this
+  safety net is worth keeping — any third-party parser can hit
+  edge cases.
+
+  Also flipped the release profile from `panic = "abort"` to
+  `panic = "unwind"` — `catch_unwind` is a no-op under `abort`,
+  so the recovery code only worked in dev builds before. Slight
+  binary-size cost, fine trade for not crashing the user's session.
 - **Pane cursor block no longer clobbers nvim's own cursor.** Spyc
   used to paint a reverse-block at the pty cursor position
   unconditionally (modulo `?25l`-hidden), which fought with TUI

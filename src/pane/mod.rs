@@ -198,7 +198,7 @@ impl Pane {
             match event {
                 PaneEvent::Bytes(bytes) => {
                     had_bytes = true;
-                    self.parser.process(&bytes);
+                    self.process_bytes_safe(&bytes);
                 }
                 PaneEvent::Closed => {
                     self.closed = true;
@@ -221,6 +221,42 @@ impl Pane {
     /// True once the subprocess has exited (reader thread saw EOF).
     pub const fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    /// Feed bytes to the vt100 parser, recovering from any panic.
+    ///
+    /// We're pinned at vt100 0.15.2; upstream is at 0.16.2 (worth
+    /// trying as a separate upgrade — the bug may already be fixed
+    /// there). 0.15 has a known panic-on-`unwrap` path on some valid
+    /// escape sequences — e.g. nvim's exit-from-alt-screen byte
+    /// stream after a session in zsh has produced a particular
+    /// scroll/cursor state hits `vt100/screen.rs:934.unwrap()` on
+    /// `drawing_cell(pos)`. When that fires the entire spyc process
+    /// aborts, taking down all panes. Wrapping `parser.process` in
+    /// `catch_unwind` and replacing the parser with a fresh instance
+    /// keeps spyc alive — the user loses this pane's screen state
+    /// at the moment of recovery (which mirrors what happens when
+    /// the child redraws anyway). Useful safety net regardless of
+    /// vt100 version: any third-party parser can hit edge cases.
+    fn process_bytes_safe(&mut self, bytes: &[u8]) {
+        // Capture the grid size before the parse; even reading
+        // `parser.screen()` after a panic isn't safe, so we use the
+        // cached `last_size` we already maintain for resize coalescing.
+        let (rows, cols) = self.last_size;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.parser.process(bytes);
+        }));
+        if result.is_err() {
+            crate::spyc_debug!(
+                "vt100 parser panicked on {} bytes; replacing parser to recover",
+                bytes.len()
+            );
+            // Fresh parser at the same dimensions + scrollback. The
+            // child's next render will repopulate the grid; in the
+            // meantime the screen looks blank, which is preferable
+            // to spyc dying.
+            self.parser = vt100::Parser::new(rows, cols, 10_000);
+        }
     }
 
     /// Tell the pty about a new size. We also resize the emulator so the
