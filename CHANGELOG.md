@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Built-in chord prefixes now beat user keybindings on the second
+  key.** A user reported `^a-n` / `^a-p` flashing the pending
+  indicator and then doing nothing — they had `n` / `p` bound
+  elsewhere in `.spycrc`, and the resolver was consulting user
+  bindings *before* checking whether a chord was already in flight.
+  Same root cause for `]g` / `[g` (anyone with `g` user-bound),
+  `H1`..`H9`, `yp` / `yf` / etc., `ma`..`mz`, `'a`..`'z`, `Wl` /
+  `Wn` / `Wd`. The fix flips the precedence: when an explicit chord
+  prefix (`^a`, `[`, `]`, `H`, `W`, `m`, `'`, `y`) is pending, the
+  next key resolves the chord. The `g` chord keeps its previous
+  behavior — bare `g` is also a vi motion fragment users may want to
+  remap (`gd` / `gf` / etc. remain user-overridable). Top-level user
+  bindings are unaffected.
+
 ### Changed
 - **Upgraded vt100 0.15 → 0.16, ratatui 0.29 → 0.30, ansi-to-tui
   7 → 8.** The vt100 bump is the proper fix for the

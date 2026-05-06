@@ -96,11 +96,26 @@ impl Resolver {
     /// Feed a key through the resolver, first consulting the user keymap
     /// and falling through to the built-in default bindings.
     pub fn feed(&mut self, ev: KeyEvent, user: &UserKeymap) -> ResolverOutcome {
-        // User bindings always win. We still reset any pending multi-key
-        // state so `g` followed by a user-bound key doesn't trigger `gg`.
-        if let Some(action) = user.find(&ev) {
-            self.reset();
-            return ResolverOutcome::User(action.clone());
+        // User bindings win at the top level (and for the `g` chord —
+        // see below). For the explicit chord prefixes (`^a`, `[`, `]`,
+        // `H`, `W`, `m`, `'`, `y`), the pending state wins so the
+        // second key completes the chord. Without this, any user
+        // binding for a single letter (e.g. `n`, `p`, `g`, `1`) would
+        // silently break the corresponding chord (`^a-n`, `]g`, `H1`,
+        // `yp`, etc.) — the user reported `^a-n`/`^a-p` flashing the
+        // pending indicator and then disappearing because their `n`/`p`
+        // bindings preempted the chord resolution.
+        //
+        // `g` is the deliberate exception: bare `g` is also a vi motion
+        // fragment that users may want to remap (the
+        // `user_binding_resets_pending` test covers this), so chords
+        // built on `g` (`gd`, `gf`, …) remain user-overridable.
+        let chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G);
+        if !chord_locked {
+            if let Some(action) = user.find(&ev) {
+                self.reset();
+                return ResolverOutcome::User(action.clone());
+            }
         }
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -1489,6 +1504,114 @@ mod tests {
         }]);
         r.feed(key('g'), &user);
         assert!(!r.is_pending());
+    }
+
+    // Regression: when a built-in chord prefix is pending (^a, ], y, …),
+    // user bindings for the *second* key must NOT preempt the chord.
+    // Reported as `^a-n` / `^a-p` flashing the pending indicator and
+    // then doing nothing because the user had `n`/`p` bound elsewhere.
+
+    #[test]
+    fn user_binding_for_n_does_not_preempt_ctrl_a_n() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('n'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        // ^a primes pending=W; user binding for `n` must not win.
+        r.feed(ctrl('a'), &user);
+        let out = r.feed(key('n'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::PaneNextTab));
+        assert!(!r.is_pending());
+    }
+
+    #[test]
+    fn user_binding_for_p_does_not_preempt_ctrl_a_p() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('p'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(ctrl('a'), &user);
+        let out = r.feed(key('p'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::PanePrevTab));
+    }
+
+    #[test]
+    fn user_binding_for_g_does_not_preempt_bracket_g() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('g'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(key(']'), &user);
+        let out = r.feed(key('g'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::JumpNextGitChange));
+    }
+
+    #[test]
+    fn user_binding_for_y_second_key_does_not_preempt_yank_chord() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('p'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(key('y'), &user);
+        let out = r.feed(key('p'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::YankPrompt));
+    }
+
+    #[test]
+    fn user_binding_for_digit_does_not_preempt_harpoon_chord() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('1'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(key('H'), &user);
+        let out = r.feed(key('1'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::HarpoonJump(1)));
+    }
+
+    #[test]
+    fn user_binding_for_letter_does_not_preempt_mark_chord() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('a'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(key('m'), &user);
+        let out = r.feed(key('a'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::SetMark('a')));
+    }
+
+    #[test]
+    fn user_binding_for_letter_does_not_preempt_worktree_chord() {
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('l'),
+            action: BoundAction::UnixCmd("nope".to_string()),
+        }]);
+        r.feed(key('W'), &user);
+        let out = r.feed(key('l'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::WorktreeList));
+    }
+
+    #[test]
+    fn g_chord_remains_user_overridable() {
+        // Counter-test: `g` is the deliberate exception. A user binding
+        // for the second char of a g-chord still wins.
+        let mut r = Resolver::new();
+        let user = UserKeymap::from_bindings(vec![super::super::user::UserBinding {
+            chord: super::super::user::KeyChord::Char('d'),
+            action: BoundAction::UnixCmd("custom-d".to_string()),
+        }]);
+        r.feed(key('g'), &user);
+        let out = r.feed(key('d'), &user);
+        assert_eq!(
+            out,
+            ResolverOutcome::User(BoundAction::UnixCmd("custom-d".to_string()))
+        );
     }
 
     // ── special keys ──────────────────────────────────────────────
