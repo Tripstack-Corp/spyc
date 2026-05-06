@@ -5,7 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Input dispatch hardening for fast typing.** Two defensive guards
+  on the user-reported "switching panes input doesn't work when done
+  too quickly" symptom:
+  1. **Post-chord bounce-suppression** — a focus-switch chord
+     (`^a-j` / `^a-k`) now stamps the chord-completing key. The
+     next dispatch drops a same-key Press/Repeat within 60 ms,
+     so a fast `^a-j` no longer leaks a stray `j` byte into the
+     just-focused pane child (the `j` Press completes the chord,
+     but the OS-level Repeat or a too-quick second Press would
+     otherwise arrive with the new focus already active).
+  2. **Stranded paste flash** — `Event::Paste` outside Prompting
+     mode and without a pane open now flashes "paste ignored
+     (N chars) — open `:` or `^\` to paste" instead of silently
+     dropping. Some terminals wrap rapid keystrokes in bracketed
+     paste, which would previously vanish; the flash makes it
+     obvious. The Prompting and pane-open paths are unchanged.
+
 ### Added
+- **`--key-trace` / `SPYC_KEY_TRACE` diagnostic switch.** Writes
+  every key event + dispatch decision to
+  `/tmp/spyc-key-trace-<ts>.log` with elapsed-since-start
+  timestamps. Off by default; mirrors the `--debug` /
+  `SPYC_DEBUG` pattern. Useful for users hitting hard-to-reproduce
+  input bugs — flip it on, reproduce, ship the log.
 - **`]g` / `[g` — cursor to next / previous git-changed entry.**
   Vim-style "next hunk" muscle memory for the file list. Walks the
   current directory's listing in either direction looking for the
