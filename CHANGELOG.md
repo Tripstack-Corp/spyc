@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Pager visual line mode for range yank.** `V` in any pager view
+  enters vi-style visual line mode: the anchor is set at the top
+  visible line and `j` / `k` / `^d` / `^u` / `^f` / `^b` /
+  `PageDown` / `PageUp` / `Space` / `g` / `G` / `Home` / `End`
+  extend the cursor end (auto-scrolling when the cursor leaves the
+  viewport). The selection is highlighted with the muted indigo
+  cursor-bg-dim across the range and the active cursor row gets
+  the brighter cursor-bg, so it reads like vi's visual cursor. The
+  status footer shows `-- VISUAL --  L{lo}-L{hi}  ({n} lines)` so
+  the range is unambiguous before you commit. `y` / `Y` yanks the
+  inclusive range to the system clipboard via `pbcopy` and exits;
+  `Esc` or `V` cancels without yanking. While the mode is active
+  unrelated keys (`/`, `:`, `f`, `l`, `w`, etc.) are swallowed —
+  exit visual mode first to use them, so a stray `/` doesn't
+  silently reinterpret your selection mid-flight. Top-level `y`
+  (yank source) and `Y` (yank visible) are unchanged outside
+  visual mode. Also surfaced in the pager `?` help.
+
 ### Fixed
 - **Built-in chord prefixes now beat user keybindings on the second
   key.** A user reported `^a-n` / `^a-p` flashing the pending
