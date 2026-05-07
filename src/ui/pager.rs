@@ -191,6 +191,14 @@ pub struct PagerView {
     /// each `new_*` constructor); v1.5 phases swap callers over to
     /// `TopPane` (`D`) and `LowerPane` (`^a-v`).
     pub mount: Mount,
+    /// True when this pager is the v1.5 pane-scrollback view
+    /// (opened via `^a-v`). Drives a couple of pieces of behavior
+    /// that differ from the regular pager: Esc tells the underlying
+    /// pty pane to exit scroll mode (so the divider's `[SCROLL]`
+    /// indicator clears), and the view is never pushed to buffer
+    /// history (it's an ephemeral snapshot of pane state, not a
+    /// page-of-content the user wants to revisit).
+    pub pane_scroll: bool,
 }
 
 impl PagerView {
@@ -226,6 +234,7 @@ impl PagerView {
             last_body_w: std::cell::Cell::new(0),
             visual: None,
             mount: Mount::Overlay,
+            pane_scroll: false,
         }
     }
 
@@ -258,6 +267,7 @@ impl PagerView {
             last_body_w: std::cell::Cell::new(0),
             visual: None,
             mount: Mount::Overlay,
+            pane_scroll: false,
         }
     }
 
@@ -294,6 +304,7 @@ impl PagerView {
             last_body_w: std::cell::Cell::new(0),
             visual: None,
             mount: Mount::Overlay,
+            pane_scroll: false,
         }
     }
 
