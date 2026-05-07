@@ -367,20 +367,27 @@ mod tests {
     #[test]
     fn spawn_and_drain_echo() {
         let mut host = PtyHost::spawn(echo_spec()).expect("spawn echo");
-        // Give the child a moment to run + the reader thread a moment
-        // to pump bytes.
-        std::thread::sleep(Duration::from_millis(200));
         let mut collected: Vec<u8> = Vec::new();
-        // Loop until we observe close — echo is a one-shot command.
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        // Loop until we observe close. `echo` is a one-shot command,
+        // but under parallel-test load (cargo test default) the
+        // spawn → exec → write → exit chain can take a noticeable
+        // moment. 10s is generous; in practice we usually see the
+        // close in ~50 ms.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !host.closed && std::time::Instant::now() < deadline {
             host.drain(|bytes| collected.extend_from_slice(bytes));
             std::thread::sleep(Duration::from_millis(20));
         }
         // One more drain to harvest anything posted right before
-        // close.
+        // close (race: reader thread queues bytes and Closed in
+        // quick succession, drain only sees the bytes the first
+        // time around).
         host.drain(|bytes| collected.extend_from_slice(bytes));
-        assert!(host.closed, "echo should have exited");
+        assert!(
+            host.closed,
+            "echo should have exited within deadline; collected so far: {:?}",
+            String::from_utf8_lossy(&collected)
+        );
         let text = String::from_utf8_lossy(&collected);
         assert!(
             text.contains("hello"),
