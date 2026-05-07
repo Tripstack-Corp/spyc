@@ -56,3 +56,94 @@ Provenance:
 - `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF (v1.37.2 question forwarded).
 
 <!-- Entry-ID: 01KR0YSEMQ51PEM2NYZFMQH05S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:15:01.350561+00:00
+Role: scribe
+Type: Note
+Title: Investigation (PR #5): 399 lines of notes, a 7-line cursor-block fix, three ROADMAP additions, and v1.37.3 (not v1.37.2 as the commit subject reads)
+
+Spec: scribe
+
+tags: #history #arc-02
+
+PR #5 is the only PR in the 22-day window prefixed `investigate/`, and the diff shape matches: 444 insertions across 7 files, of which 399 lines are the two notes files in a freshly-created `notes/` directory. The cursor-block code change in `src/pane/widget.rs` is 7 lines. Commit subject reads "lazygit investigation + cursor-block fix (v1.37.2)" (commit 0691666, 2026-04-30).
+
+The investigation deliverable is the load-bearing half of this PR. The cursor-block fix is the smaller-and-narrower half. The version tag in the commit subject is wrong against the diff; the empirical resolution is the last paragraph below.
+
+**The two notes files: gap analysis + UX catalogue.**
+
+`notes/lazygit-gap-analysis.md` (111 lines, new) reads as a terminal-feature gap audit. Inputs named at the top: lazygit upstream at `lazygit-upstream/` (commit `69635f3`, "Update to tcell v3"); spyc pane at `src/pane/{mod,input,widget}.rs` against `vt100 = 0.15.2`; host setup at `src/main.rs::setup_terminal`. The body comprises an initialization-fingerprint section (14 numbered steps tracing tcell's startup escape-sequence emissions in order), a 16-row gap table (per-feature: lazygit-needs-it / spyc-handles-it / likely-symptom / evidence), and a "Top suspects" section with three numbered candidates for the user-reported "rendering / conflict issues":
+
+- **Top suspects §1: "Spurious cursor block from `widget.rs`."** The gap-analysis text reads verbatim: "spyc unconditionally reverse-videoes the cell at `screen.cursor_position()`, even when the child has set DEC ?25l (cursor hidden). vt100 already exposes `screen.hide_cursor()`, but `src/pane/widget.rs:43–55` never reads it. lazygit hides the cursor and draws its own selection highlight, so a stray reverse-video square sits on some panel — visually reads exactly as 'rendering glitch'." Suspect §1 is the one this PR's code-fix half addresses; arc 03 will narrate its generalization on PR #29.
+
+- **Top suspects §2: "No mouse, anywhere."** The gap-analysis text reads verbatim: "Mouse capture is not enabled on the host terminal (`src/main.rs::setup_terminal` has no `EnableMouseCapture`), and `src/pane/input.rs` has no encoder for `Event::Mouse`. lazygit defaults `MouseEvents: true` and binds click/scroll on every panel — to a daily user this manifests as 'clicks and scroll-wheel don't work in lazygit', easily called a 'conflict issue'." Suspect §2 is named in the gap table's "Mouse 1000/1002/1003/1006" row as "**NO** at *both* layers." No PR in the 22-day window executes against suspect §2; the `onboarding-product-charter` seed (entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH) names "mouse support beyond what already exists" in the explicit non-goals list at `ROADMAP.md:426-447`. The suspect therefore reads as a known-and-accepted gap rather than executable item; the harvest entry (next) will narrate how PR #12 lifts it into BUGS.md as a **BIGGER** item with a "designing carefully" framing.
+
+- **Top suspects §3: "Synchronized-output (mode 2026) tearing."** The gap-analysis text reads verbatim: "tcell wraps every redraw in `\x1b[?2026h … \x1b[?2026l`. vt100 0.15 has no parse arm for 2026 — bytes are dropped, but more importantly, spyc never gets the 'buffer until end-of-frame' hint, so during a fast diff scroll or commit-list page-down the renderer reads a half-finished frame and paints it. Looks like flicker / a sliver of stale text under the new content for one frame." Suspect §3 lives in the gap table's "Synchronized output (2026)" row, evidence cited as `grep '2026' vt100-0.15.2/src` → 0 hits. Whether arc 08's PR #31 (`chore/vt100-and-ratatui-upgrade`, vt100 0.15 → 0.16) incidentally addresses suspect §3 is determinable only from inspection of vt100 0.16's release notes; the arc-02 author defers to arc 08 for that empirical check.
+
+The gap-analysis closes with an honourable-mentions section (truecolor downgrade because pane env lacks `COLORTERM=truecolor`; OSC 8 hyperlinks unparsed; focus-event-driven dim/undim state stuck; DA1 / `\x1b[c` and `\x1b[>q` probes time out) and a "What we'd need to actually run to confirm" methodology note (run lazygit in the lower pane with `SPYC_PTY_DEBUG=1`; click a panel and verify nothing reaches the pty; compare bare-terminal vs in-pane diff palettes for truecolor downgrade).
+
+`notes/lazygit-ux-catalogue.md` (288 lines, new) reads as a borrow/adapt/skip pattern catalogue. Seven sections, each: lazygit's pattern, spyc's current state, recommendation (borrow / adapt / skip), effort sketch. The catalogue opens with a tension acknowledgement: "lazygit is **mouse-first with keyboard parity**... spyc's DESIGN.md is explicit that 'Keys are the API; mouse is a courtesy.'" The seven sections in order: §1 Numbered panels & direct-jump (skip), §2 Context-sensitive footer (adapt), §3 Command log + "Random tip" (skip the log, adapt the tip as a one-shot flash), §4 Popups / pickers (adapt — extend pager into generalized pick-from-list mode), §5 Sub-menu drill-down — scoped help (adapt), §6 Single-key action vocabulary on rows (skip), §7 Two-letter chord jumps (skip). The closing "Top 3 to consider first" section ranks §4 generalized pager picker, §2 context-sensitive prompt-row hint, §5 scoped `?` help.
+
+The three "adapt" recommendations from the catalogue's top-3 are the load-bearing items for the back-reference network:
+
+- **§2 "Context-sensitive footer."** Adaptation recommendation: "into the prompt row, not the status bar." DESIGN.md is cited explicitly: "Don't introduce a third status row." The shape: a `context_hints()` accessor on each overlay returning a `Vec<(key, label)>`; paint via `Style::DIM` when the prompt is otherwise idle. Arc 05's PR #20 (`feat/scroll-altscreen-hint`, ee07307) ships an alt-screen scroll-hint component aligned with §2 in pattern (DIM hint at a transient row when context shifts), though PR #20 narrows to alt-screen detection rather than the broader options-map idea.
+
+- **§4 "Generalized pager picker."** Adaptation recommendation: "extend the pager into a generalized pick-from-list mode" via a `PagerView::picker_items: Vec<(Label, Action)>` field with Enter-to-fire dispatch. The catalogue argues this stays inside DESIGN.md's "render *into* the pager" rule. Arc 06's PR #8 (`feat/harpoon`) and PR #10 (`feat/quickselect`) ship picker-shaped overlays; the diff shape suggests both ship as standalone overlays rather than as the `pager.picker_cursor` extension §4 recommends. The catalogue's intended pattern lives, parallel-but-different, alongside the executed work.
+
+- **§5 "Scoped `?` help."** Adaptation recommendation: "scope `?` to current overlay first, then `?` again for global." Effort estimate from the catalogue: "becomes nearly free once §4 lands." No PR in the 22-day window appears to execute §5; the recommendation reads as a deferral pending §4's machinery.
+
+**The cursor-block fix in `src/pane/widget.rs`.**
+
+The 7-line diff (`git diff 1f41b4b..3949983 -- src/pane/widget.rs`) replaces an unconditional reverse-video paint with a guarded one. Pre-fix, the comment block reads: "Overlay a cursor block at the pty cursor position. / - Focused: bright reverse-video block. / - Unfocused: static dim reverse-video block." and the body is an unconditional `{ ... }`. Post-fix, the comment becomes "Overlay a cursor block at the pty cursor position (skip when the / child has hidden the cursor; TUI apps draw their own highlight)." and the body becomes `if !self.screen.hide_cursor() { ... }`. The fix narrows to the explicit-hide-cursor case and leaves the focused/unfocused dim distinction in place for non-hiding children.
+
+Arc 03's PR #29 (`fix/skip-pane-cursor-block-when-uninvited`, bdb8d87, 2026-05-06) generalizes this guard to three conditions: focused, not-alternate-screen, not-hide-cursor. The PR #29 diff (`git diff bdb8d87^1..bdb8d87^2 -- src/pane/widget.rs`) introduces `let want_block_cursor = self.focused && !self.screen.alternate_screen() && !self.screen.hide_cursor();` as the gate and drops the focused/unfocused dim branch entirely (because unfocused panes never paint a block under PR #29's policy). PR #29's diff carries an extensive policy comment naming "nvim, vim, less, htop, lazygit, claude in TUI mode" as the alt-screen apps that PR #5's hide-cursor-only guard misses. The relationship reads as PR #5 covering the exact case the gap-analysis suspect §1 named (lazygit's hide-cursor path), and PR #29 generalizing to the broader class once experience under §1's fix surfaced the alt-screen-without-hide-cursor cases.
+
+**The three ROADMAP additions.**
+
+PR #5 adds 26 lines to `ROADMAP.md` at line 541 onward (per `git diff 1f41b4b..3949983 -- ROADMAP.md`). Three new entries under what reads as a feature-tracks listing; each carries a verbatim "(lazygit-inspired)" tag and a `notes/lazygit-ux-catalogue.md §N` cross-reference. The three entries:
+
+1. **"Generalized pager picker"** — verbatim: "Adapt lazygit's `Menu` popup pattern into spyc's existing `pager.picker_cursor` machinery so any list-of-options surface (project chooser, `W l` worktree picker, branch checkout) is a pager mode rather than a fifth overlay." Cross-references catalogue §4. Tagged "Highest-leverage of the lazygit borrows."
+
+2. **"Context-sensitive prompt-row hint"** — verbatim: "Paint the most-relevant keys for the active overlay or mode into the prompt row using the DIM modifier — only when keys differ from list-mode (pager `?/n/s/:N`, finder, `!?` history editor, picker). DESIGN.md is explicit that a third status row is forbidden, so the prompt row is the only legal transient surface for this." Cross-references catalogue §2.
+
+3. **"Scoped `?` help"** — verbatim: "Restructure the existing `src/ui/help.rs` dump to lead with the active surface's keys, then a collapsed 'global / other surfaces' tail. Content reorganization, not a new feature; cost is near-zero once the generalized pager picker lands and `?` can render its scoped section as a picker." Cross-references catalogue §5.
+
+The three entries land verbatim from the catalogue's top-3-to-consider-first ranking. The ROADMAP additions are the load-bearing artifact that turns the catalogue from a one-off audit into committed forward work; the harvest entry will narrate how PR #12 trims the `notes/...` cross-references (since it deletes the notes themselves) but preserves the three roadmap entries intact.
+
+**The v1.37.2-vs-v1.37.3 question, resolved empirically.**
+
+Arc 01's PR #4 entry (= 01KR0WBKNMQF231X2T8KTGD9KS, drift findings) flagged the question without prejudgement: PR #5's commit subject carries `(v1.37.2)` despite PR #4 having cut v1.37.2 immediately before, with `[Unreleased]` reading "(Nothing pending; …)" post-merge. Arc 01's closure entry (= 01KR0WD8428XFNTJV11MXX59NF) handed the resolution to arc 02. The verification:
+
+`git diff 1f41b4b..3949983 -- Cargo.toml` shows `version = "1.37.2"` becoming `version = "1.37.3"` (one-line change at `Cargo.toml:3`). `git diff 1f41b4b..3949983 -- CHANGELOG.md` shows 14 lines added; a new `## [1.37.3] - 2026-04-30` block lands above the existing `## [1.37.1]` block (and below the `## [1.37.2] - 2026-04-30` block PR #4 cut, which sits unmodified). The `[1.37.3]` block contains a single "Fixed" item describing the cursor-block work in detail, including verbatim "Reported via lazygit dog-fooding in the lower pane (`src/pane/widget.rs`)."
+
+**The diff cuts v1.37.3, not v1.37.2.** The `(v1.37.2)` tag in the commit subject is therefore wrong — commit-subject drift, not release-coalescing. The diff shape rules out the release-coalescing reading: PR #5 does not extend the `[1.37.2]` block, does not leave Cargo.toml at 1.37.2, and does not write an `[Unreleased]` parenthetical. The release the diff actually ships is v1.37.3, and the `[1.37.2]` block PR #4 cut sits unmodified above the new `[1.37.3]` block. Reading the commit subject's `(v1.37.2)` as a copy-paste from PR #4's own commit subject ("shell: aliases work in :!cmd / ;cmd via $SHELL -i (v1.37.2)") is consistent with the timing — PR #5 lands roughly two hours after PR #4's merge — and with the diff content. The drift is commit-subject-level only; CHANGELOG and Cargo.toml are internally consistent.
+
+**Drift findings flagged for the insight layer**:
+
+- The `(v1.37.2)` commit-subject tag is the genuine drift; the diff is correct. Captured here for the eventual insight layer's drift / commit-message-vs-diff catalogue. The arc-01 → arc-02 hand-off proved out: arc 01 flagged without prejudgement, arc 02 resolved against the diff.
+- The PR title prefix `investigate/` understates the diff content: a partial code fix lands alongside the investigation deliverable. Arc 01's segmentation entry (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) flagged this from the outside; here it is reconfirmed against the diff.
+- The cursor-block fix in `src/pane/widget.rs` is narrower than the gap-analysis suspect §1 framing implies. Suspect §1 names TUI apps that hide their cursor; PR #5's guard checks `screen.hide_cursor()` only. PR #29 broadens to alt-screen + unfocused. The fix-as-shipped is correct against §1's text but partial against the broader class — a one-PR-introduces-the-honest-case-then-a-later-PR-generalizes shape.
+- The three ROADMAP additions read as ranked recommendations imported verbatim from the catalogue's "Top 3 to consider first." A reader who only sees the ROADMAP and not the notes/ files cannot tell that the three entries are a top-3 ranking against four "skip" items; the harvest entry will narrate how PR #12 trims the `notes/...` cross-references entirely.
+- Onboarding-architecture seed (entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ) describes the current end-state of pane PTY ownership; gap-analysis suspect §1 maps directly to that surface. The seed describes the surface as it currently exists post-PR-#29; the suspect §1 narration here is the genesis state from PR #5's vantage.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — full PR.
+- 1f41b4b → 3949983 — parent and tip SHAs for the diff inspection used to resolve the v1.37.2 question.
+- `git diff 1f41b4b..3949983 -- Cargo.toml`: `version = "1.37.2"` → `version = "1.37.3"`.
+- `git diff 1f41b4b..3949983 -- CHANGELOG.md`: 14 lines added; new `## [1.37.3] - 2026-04-30` block with a single "Fixed" item; `[1.37.2]` block left unchanged above it.
+- `git diff 1f41b4b..3949983 -- src/pane/widget.rs`: 7-line change; `if !self.screen.hide_cursor()` guard added; comment updated.
+- `git diff 1f41b4b..3949983 -- ROADMAP.md`: 26 lines added at the feature-tracks tail; three entries (Generalized pager picker, Context-sensitive prompt-row hint, Scoped `?` help), each tagged "(lazygit-inspired)" with a `notes/lazygit-ux-catalogue.md §N` cross-reference.
+- `notes/lazygit-gap-analysis.md` content verified at `git show 0691666:notes/lazygit-gap-analysis.md`. "Top suspects" §1, §2, §3 quoted verbatim.
+- `notes/lazygit-ux-catalogue.md` content verified at `git show 0691666:notes/lazygit-ux-catalogue.md`. §2, §4, §5 quoted verbatim from the "adapt" recommendations.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — comparison reference for cursor-block generalization. `git diff bdb8d87^1..bdb8d87^2 -- src/pane/widget.rs`: 28-line diff; three-condition guard `focused && !alternate_screen() && !hide_cursor()`.
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05) — named as the §2 alignment partner; arc 05 will narrate.
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02), 9043547 (PR #10 feat/quickselect, 2026-05-02) — named as the §4 parallel-pattern partners; arc 06 will narrate.
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (mouse non-goal at `ROADMAP.md:426-447`).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (current-state pane PTY ownership and MCP transport surface; gap-analysis suspect §1 maps here).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract; downstream arcs will cite this entry).
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (v1.37.2 question source).
+- `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF (v1.37.2 question forwarded; resolution returned here).
+- `history-arc-02-lazygit-investigation-and-harvest` framing entry = 01KR0YSEMQ51PEM2NYZFMQH05S.
+
+<!-- Entry-ID: 01KR0YXXZRQR24CSNAK4Q7808T -->
