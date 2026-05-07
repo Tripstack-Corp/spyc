@@ -315,6 +315,21 @@ to lock you out of spyc.
   `:fg` on a paused task auto-resumes before re-attaching.
 - A task that completes while in the background fires a flash:
   `task #N: cmd — exit 0 (43s)`.
+- **`:task-to-pane`** / **`:task-to-pane N`** promotes a
+  backgrounded task to a new pane tab. The pty keeps running
+  through the transition; spyc resizes it to the bottom-pane
+  geometry, replays the captured buffer through a fresh vt100
+  parser so the tab opens with the same content the task viewer
+  was showing, and SIGCONT's the child if it was paused. Useful
+  when an `!` task you started turns out to need persistent
+  attention (a long-running `npm run dev`, a `cargo watch`, a
+  `tail -F`) — promote it next to claude instead of shuttling
+  through `:fg` / `^z`. Already-exited tasks aren't promoted
+  (a dead pty would just immediately tear down the tab); use
+  `:fg` for the static-output view in that case. The promoted
+  tab inherits the task's TERM (`dumb`, set when the `!` capture
+  spawned), so plain shells and SGR-color output work fine but
+  alt-screen TUIs won't suddenly start working in the new tab.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
   alongside pane-tab processes.
 

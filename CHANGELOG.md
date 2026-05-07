@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`:task-to-pane [N]` — promote a backgrounded `!` task to a
+  new pane tab.** v1.5 Phase 6b. Useful when an `!` task you
+  started turns out to need persistent attention (a long-running
+  `npm run dev`, a `cargo watch`, a `tail -F`) — promote it next
+  to claude instead of shuttling through `:fg` / `^z`.
+  - The pty keeps running through the transition. The host is
+    moved from the task into a fresh `Pane`; we resize to the
+    bottom-pane geometry, replay the captured buffer through a
+    new vt100 parser so the tab opens with the same content the
+    task viewer was showing, and SIGCONT the child if it was
+    paused.
+  - No-arg form promotes the most-recent task; numeric arg
+    targets a specific id. Already-exited tasks don't promote
+    (would just create a dead tab); flashes `task #N already
+    exited; :fg to view its output instead` and leaves the
+    task in the bg list.
+  - The promoted tab inherits the task's TERM (`dumb`, set when
+    the `!` capture spawned). Plain shells and SGR-color output
+    render fine; alt-screen TUIs (vim, htop, lazygit) won't
+    suddenly start working in the new tab — that's a property
+    of the spawned process, not the wrapper.
+  - If the task viewer was open on this id, it closes
+    automatically (the task no longer exists in
+    `background_tasks`).
+  - `:fg` continues to work for the inverse "I just want to look
+    at the buffer" case; `:task-to-pane` is the "I want this to
+    keep going as a tab" case.
+
 ### Internal
 - **v1.5 Phase 6a: shared `PtyHost`.** Pulls the pty kernel
   (master + writer + child + reader thread + event channel +

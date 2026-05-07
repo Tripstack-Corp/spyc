@@ -4114,6 +4114,28 @@ impl App {
             return PostAction::None;
         }
 
+        // :task-to-pane [N] — promote a backgrounded `!` task to a
+        // new pane tab (v1.5 Phase 6b). The pty keeps running through
+        // the transition; we just attach a vt100 emulator to it and
+        // register it in `pane_tabs`. Useful when an `!` task you
+        // started turns out to need persistent attention (e.g.
+        // `npm run dev`) — promote it next to claude instead of
+        // shuttling through `:fg` / `^z`. No arg = most-recent task;
+        // numeric arg = specific id.
+        if input == "task-to-pane" {
+            self.promote_task_to_pane(None);
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("task-to-pane ") {
+            match arg.trim().parse::<u32>() {
+                Ok(id) => self.promote_task_to_pane(Some(id)),
+                Err(_) => self
+                    .state
+                    .flash_error(format!("task-to-pane: expected task id (got {arg:?})")),
+            }
+            return PostAction::None;
+        }
+
         // :grep <pattern> — project-wide content search. Walks
         // PROJECT_HOME (or the current listing dir if unset),
         // gitignore-aware, results stream into a pager as
@@ -5112,6 +5134,109 @@ impl App {
             self.state
                 .flash_error(format!("task #{id}: SIGCONT failed"));
         }
+    }
+
+    /// `:task-to-pane [N]` — promote a backgrounded `!` task to a
+    /// new pane tab. v1.5 Phase 6b. The pty keeps running through
+    /// the transition; we resize it to the bottom-pane geometry
+    /// (capture spawned at terminal-rows × terminal-cols, the new
+    /// tab slot is usually smaller), replay the captured buffer
+    /// through a fresh vt100 parser, wake the child if it was
+    /// paused, and register the resulting `Pane` in `pane_tabs`.
+    /// `BackgroundTask` lifecycle metadata (status, finished_at,
+    /// has_unread_output, viewed_in_task_viewer) is dropped — the
+    /// task is now a pane.
+    ///
+    /// Already-exited tasks are not promoted: `:fg` is the right
+    /// route for static output (one-shot view of the captured
+    /// buffer), and a dead pty would just immediately tear down
+    /// the new tab. Flash-and-skip; the task stays in the bg
+    /// list.
+    fn promote_task_to_pane(&mut self, target: Option<u32>) {
+        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+            self.state.flash_error("no background tasks");
+            return;
+        };
+        let Some(mut task) = self.background_tasks.take(id) else {
+            self.state.flash_error(format!("no task #{id}"));
+            return;
+        };
+        if !matches!(task.status, TaskStatus::Running) {
+            // Re-add so :fg still works. flash_error so the user
+            // sees this as a non-action rather than silent.
+            self.background_tasks.tasks.push(task);
+            self.state.flash_error(format!(
+                "task #{id} already exited; :fg to view its output instead"
+            ));
+            return;
+        }
+
+        // Capture-side TERM was `dumb`; promoting doesn't change
+        // that — the child's TERM is set at spawn time. Plain shells
+        // and SGR-color output render fine; alt-screen TUIs (vim,
+        // htop, lazygit) won't suddenly start working. Document via
+        // the flash hint below.
+
+        let (rows, cols) = Self::pane_spawn_size(
+            self.effective_pane_pct(),
+            self.state.config.layout.status_position,
+        );
+        // Resize before building the parser so vt100's grid sizes
+        // match the child's view. ioctl is best-effort — if it
+        // fails, the geometry is just slightly off until the next
+        // resize event.
+        let _ = task.host.resize(rows, cols);
+
+        // Replay the captured output through a fresh parser so
+        // the visible grid reflects what the user saw in the
+        // task viewer. Same scrollback budget Pane::spawn_with_env
+        // uses (10K rows).
+        let mut parser = vt100::Parser::new(rows, cols, 10_000);
+        parser.process(&task.buffer);
+
+        // Wake a paused task — it's user-facing now, no point
+        // leaving SIGSTOP'd.
+        if task.paused {
+            if let Some(pid) = task.host.process_id() {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(pid as libc::pid_t), libc::SIGCONT);
+                }
+            }
+        }
+
+        // If the task viewer was open on this task, close it —
+        // the task no longer exists in `background_tasks`, so the
+        // viewer's task_id is stale.
+        if self.pager.as_ref().is_some_and(|v| v.task_id == Some(id)) {
+            self.pager = None;
+        }
+
+        let cmd = task.cmd_display.clone();
+        // BackgroundTask doesn't track the original cwd (capture
+        // was spawned in `state.listing.dir` at the time but we
+        // didn't save it); use current listing dir as a best-effort
+        // tab-info field. The child is already running at its own
+        // cwd regardless.
+        let cwd = self.state.listing.dir.clone();
+        let label = task.title.clone();
+        let pane = Pane::adopt(task.host, parser);
+        let mut info = TabInfo::new(&cmd, &cwd);
+        info.label.clone_from(&label);
+        let entry = TabEntry::new(pane, info);
+
+        self.state.pane_focused = true;
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            tabs.push(entry);
+            // Switch active tab to the promoted one so the user
+            // lands looking at it.
+            let last = tabs.len().saturating_sub(1);
+            tabs.switch_to(last);
+        } else {
+            self.pane_tabs = Some(PaneTabs::new(entry));
+        }
+        self.needs_full_repaint = true;
+        self.state.flash_info(format!("task #{id} → tab '{label}'"));
     }
 
     fn foreground_task(&mut self, target: Option<u32>) {

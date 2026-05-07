@@ -257,6 +257,10 @@ const SECTIONS: &[Section] = &[
             (":pause / :pause N", "pause a backgrounded task (SIGSTOP)"),
             (":resume / :resume N", "resume a paused task (SIGCONT)"),
             (
+                ":task-to-pane / :task-to-pane N",
+                "promote a backgrounded task to a new pane tab",
+            ),
+            (
                 "S / C",
                 "(in task viewer) pause / continue the underlying task",
             ),
