@@ -5,7 +5,7 @@
   "title": "history arc 02 lazygit investigation and harvest",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T10:19:32.388536+00:00",
+  "last_updated": "2026-05-07T10:20:41.683259+00:00",
   "summary": "The development thread focuses on an investigation into lazygit, followed by the harvest of notes and code changes. Key decisions included adding notes files, a cursor-block fix, and version tag corrections in PR #5, and harvesting 399 lines of notes into BUGS.md in PR #12. The outcome was the integration of investigation artifacts into the main codebase, with some notes removed and new content added.",
-  "entry_count": 5
+  "entry_count": 6
 }

@@ -317,3 +317,43 @@ Provenance:
 - `history-arc-01-foundation-hygiene` reflection tail = 01KR0XR504ZR10Y242JERT4K9S (head/tail voice precedent).
 
 <!-- Entry-ID: 01KR0Z6673WE91822V8ZTWMYVJ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:20:41.681733+00:00
+Role: scribe
+Type: Note
+Title: Tail: note to future readers — what this thread records and how to use the hub role
+
+Spec: scribe
+
+tags: #history #arc-02 #tail
+
+If you're reading this thread cold: it's the baseline narration of arc 02 — the second of eight arcs reconstructing spyc's first 22 days of merged work, and the only arc in the eight that exists to be cited *back into* by other arcs. Three downstream arc threads (03, 05, 06) carry mandatory back-references to this thread's investigation entry by ULID; that's the spine's segmentation decision (`history-overview` entry 2 = 01KR0TYF5F11DA8P5HNPA20DBK) made flesh.
+
+What's in this thread, head entries (indices 0–3):
+- Index 0 — framing. Names the two member PRs (PR #5, PR #12), the cadence choice (option B — phase-not-PR), and the rationale for departing from arc 01's per-PR option A precedent.
+- Index 1 — investigation entry. Narrates PR #5: 399 lines of notes (gap-analysis + UX catalogue), the 7-line cursor-block fix in `src/pane/widget.rs`, three lazygit-inspired ROADMAP additions, and the empirical resolution of the v1.37.2 commit-subject question (commit-subject drift; the diff cuts v1.37.3). This is the **hub**: arcs 03/05/06 cite it.
+- Index 2 — harvest entry. Narrates PR #12: notes/ deletes 399 lines, BUGS.md gains 48 (cursor-block residual, COLORTERM, mouse, mode 2026, OSC 8), ROADMAP.md trims the now-broken `notes/...` cross-references.
+- Index 3 — closure. Publishes the back-reference table and forwards to arc 03.
+
+Indices 4 and 5 — these tail entries. Looser, retrospective, direct address allowed. The head/tail boundary is visual and was set by arc 01: heads are clinical, segmented, sequence-faithful, grounded in commits and file:line spans; tails are conversational and reflective. If a tail entry reads like a head entry, it's failing at its job.
+
+How to use the hub role specifically: when you're reading arc 03's PR #29 entry, arc 05's PR #20 entry, or arc 06's PR #8 / PR #10 entries and they back-reference an arc-02 ULID, follow that link into *this thread*, not just into PR #5's commit. The investigation entry is dense on purpose — it carries the gap-analysis text and UX-catalogue text under stable URLs that won't drift. The PR #5 commit is also durable, but reading those notes verbatim requires knowing the `notes/` path existed before PR #12 deleted it; the investigation entry preserves the load-bearing quotes inline.
+
+If you want the source notes themselves: `git show 0691666:notes/lazygit-gap-analysis.md` (111 lines) and `git show 0691666:notes/lazygit-ux-catalogue.md` (288 lines). Both files were deleted by PR #12 (e210e58); they exist only as historical content at the PR #5 SHA.
+
+Cross-references:
+- Spine: `history-overview` (entries 0–5). Segmentation at index 1; arc 02's special-handling entry at index 2.
+- Backward arc: `history-arc-01-foundation-hygiene`. Arc 01's PR #4 entry handed the v1.37.2 question to arc 02; arc 02 returns the resolution in the investigation entry above.
+- Forward arc: `history-arc-03-pane-behavior`. Arc 03's PR #29 entry will extinguish the BUGS.md cursor-block residual that PR #5 only partially addressed and PR #12 carried into BUGS.md verbatim.
+
+What this thread doesn't claim to do: identify recurring patterns, name emergent properties, attribute mindset, pre-empt the insight layer. The narration is baseline. Drift findings are flagged at the per-entry "Drift findings flagged for the insight layer" sections, not interpreted; if a Phase-3 insight thread eventually exists, follow its links back into those flags — full provenance is preserved.
+
+Provenance:
+- No new commit references; tails reflect on the head entries which carry full SHA provenance.
+- `history-arc-02-lazygit-investigation-and-harvest` head entries 0–3 = 01KR0YSEMQ51PEM2NYZFMQH05S, 01KR0YXXZRQR24CSNAK4Q7808T, 01KR0Z11CKNJRYEZ3T38EAFSC4, 01KR0Z3673Z27FJ4GV92FYV4QJ.
+- `history-arc-02-lazygit-investigation-and-harvest` reflection tail (index 4) = 01KR0Z6673WE91822V8ZTWMYVJ.
+- `history-overview` spine entries 0–5 (full set written 2026-05-07).
+- `history-arc-01-foundation-hygiene` head + tail entries (full set written 2026-05-07; the precedent set for cadence option A and the head/tail voice contract).
+
+<!-- Entry-ID: 01KR0Z8ABA5MB960C6VBPZ2R9R -->
