@@ -1,0 +1,11 @@
+{
+  "id": "thread:history-arc-01-foundation-hygiene",
+  "type": "thread",
+  "topic": "history-arc-01-foundation-hygiene",
+  "title": "history arc 01 foundation hygiene",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-07T09:27:15.833974+00:00",
+  "summary": "The development thread for history arc 01 focuses on implementing three PRs as part of the establishing arc, with a per-PR cadence that sets the foundation for future development. Key decisions include the integration of hygiene-related features and the establishment of a stable release version, v1.37.2. The outcomes involve solidifying the base for the history arc and setting clear direction for subsequent developments.",
+  "entry_count": 1
+}
