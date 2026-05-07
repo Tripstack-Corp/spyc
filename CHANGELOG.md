@@ -6,6 +6,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **nvim / less / htop / lazygit cursor visible again inside spyc's
+  pty panes.** Reported by Spencer: opening nvim via `V` (top
+  overlay) or `^a-c` → `nvim` (new tab) showed an invisible cursor;
+  `v` (full TTY suspend) was fine because the OS terminal owned
+  the cursor. Root cause: the v1.41.18 alt-screen guard correctly
+  stopped us from painting a reverse-block over nvim's cursor
+  shape — but spyc hides the host cursor at startup
+  (`main.rs::setup_terminal`) and nothing was telling ratatui to
+  put it back at the child's vt100 cursor position, so alt-screen
+  TUIs ended up with neither a spyc-painted block *nor* a host
+  cursor. Now `App::render` calls `frame.set_cursor_position` for
+  the focused pty pane (overlay if `!pane_focused`, bottom pane
+  otherwise) at its vt100 cursor coordinates, gated on
+  `!screen.hide_cursor()` so DEC ?25l still hides the cursor.
+  Non-alt-screen panes keep the existing reverse-block as a
+  high-contrast cue (the host cursor sits on the same cell, no
+  conflict). Forwarding the child's *cursor shape* (beam vs.
+  block) to the host terminal is a separate piece of work.
+
 - **`^C` inside the pager is now contextual instead of leaking to
   the spyc-list status bar.** Reported with a screenshot: a `! find /`
   capture had finished (correct exit 130 from the original ^C), but

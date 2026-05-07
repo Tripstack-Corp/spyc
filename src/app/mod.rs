@@ -2353,16 +2353,42 @@ impl App {
             if let Some(divider_rect) = layout.divider {
                 self.render_pane_status_line(frame, divider_rect);
             }
-            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
-                let _ = tabs.active_mut().resize(rect.height, rect.width);
-                tabs.drain_all();
-                frame.render_widget(
-                    PaneWidget {
-                        screen: tabs.active().screen(),
-                        focused: self.state.pane_focused,
-                    },
-                    rect,
-                );
+            let bottom_pane_rect: Option<ratatui::layout::Rect> =
+                if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+                    let _ = tabs.active_mut().resize(rect.height, rect.width);
+                    tabs.drain_all();
+                    frame.render_widget(
+                        PaneWidget {
+                            screen: tabs.active().screen(),
+                            focused: self.state.pane_focused,
+                        },
+                        rect,
+                    );
+                    Some(rect)
+                } else {
+                    None
+                };
+            // Position the OS terminal cursor at the focused pty's
+            // vt100 cursor location. Without this, nvim / vim / less /
+            // any alt-screen TUI inside spyc renders an invisible
+            // cursor: spyc hides the host cursor at startup
+            // (main.rs::setup_terminal -> terminal.hide_cursor()), and
+            // the v1.41.18-era pane-widget guard correctly stops us
+            // from painting a reverse-block over the child's cursor
+            // shape in alt-screen — but the host cursor stays hidden
+            // unless something calls set_cursor_position. Call it for
+            // the focused side: overlay if !pane_focused, bottom pane
+            // when pane_focused.
+            //
+            // The ratatui frame renders one OS cursor; the last
+            // set_cursor_position wins and the cursor stays hidden if
+            // none is called.
+            if !self.overlay_awaiting_dismiss {
+                if overlay_focused {
+                    place_pty_cursor(frame, self.top_overlay.as_ref(), overlay_area);
+                } else if let Some(rect) = bottom_pane_rect {
+                    place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
+                }
             }
             return;
         }
@@ -2505,22 +2531,35 @@ impl App {
             layout.list,
         );
 
-        if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
-            let _ = tabs.active_mut().resize(rect.height, rect.width);
-            tabs.drain_all();
-            frame.render_widget(
-                PaneWidget {
-                    screen: tabs.active().screen(),
-                    focused: self.state.pane_focused,
-                },
-                rect,
-            );
-            tabs.active_mut().output_dirty = false;
-            // Quick Select labels paint *over* the pane widget so
-            // the user keeps the live output as context. Render
-            // here, after the pane, before the divider.
-            if self.quick_select.is_some() {
-                self.render_quick_select_overlay(frame, rect);
+        let bottom_pane_rect: Option<ratatui::layout::Rect> =
+            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+                let _ = tabs.active_mut().resize(rect.height, rect.width);
+                tabs.drain_all();
+                frame.render_widget(
+                    PaneWidget {
+                        screen: tabs.active().screen(),
+                        focused: self.state.pane_focused,
+                    },
+                    rect,
+                );
+                tabs.active_mut().output_dirty = false;
+                // Quick Select labels paint *over* the pane widget so
+                // the user keeps the live output as context. Render
+                // here, after the pane, before the divider.
+                if self.quick_select.is_some() {
+                    self.render_quick_select_overlay(frame, rect);
+                }
+                Some(rect)
+            } else {
+                None
+            };
+        // When the bottom pane is focused, place the OS cursor at
+        // its vt100 cursor position so alt-screen TUIs (nvim, less,
+        // htop, lazygit) actually show a cursor — see the matching
+        // call in the top_overlay branch above for the full why.
+        if self.state.pane_focused {
+            if let Some(rect) = bottom_pane_rect {
+                place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
             }
         }
 
@@ -8530,6 +8569,34 @@ impl Matcher {
 /// listing dir if any. No-op when the watcher failed to initialize or
 /// when the same dir is already being watched.
 /// Keys we intercept even when the pane is focused.
+/// Place the OS terminal cursor at the focused pty pane's vt100
+/// cursor position so alt-screen TUIs (nvim, less, htop, lazygit)
+/// render a visible cursor. Without this they show no cursor at
+/// all: spyc hides the host cursor at startup
+/// (`main.rs::setup_terminal`), and the v1.41.18-era pane-widget
+/// guard correctly stops us from painting a reverse-block over the
+/// child's cursor shape in alt-screen — but the host cursor stays
+/// hidden unless something asks ratatui to position it.
+///
+/// No-ops when the pane is missing or the child has hidden the
+/// cursor via DEC ?25l (vt100 surfaces this as `hide_cursor()`).
+/// Skips the call when the cursor would land outside the pane's
+/// drawable rect, which can happen briefly during a resize.
+fn place_pty_cursor(frame: &mut Frame, pane: Option<&Pane>, rect: ratatui::layout::Rect) {
+    let Some(pane) = pane else { return };
+    let screen = pane.screen();
+    if screen.hide_cursor() {
+        return;
+    }
+    let (cy, cx) = screen.cursor_position();
+    if u32::from(cy) >= u32::from(rect.height) || u32::from(cx) >= u32::from(rect.width) {
+        return;
+    }
+    let x = rect.x + cx;
+    let y = rect.y + cy;
+    frame.set_cursor_position((x, y));
+}
+
 const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
     resolver_pending: bool,
