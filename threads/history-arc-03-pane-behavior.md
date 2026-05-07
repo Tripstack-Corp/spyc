@@ -539,3 +539,44 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (the BUGS.md residual whose behavioral case PR #29 extinguishes; durable-record cleanup partial).
 
 <!-- Entry-ID: 01KR10SANSR30FDV8X89M8SRBC -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:04:54.267480+00:00
+Role: scribe
+Type: Note
+Title: Arc 03 told as a story: the surface that kept saying it wasn't done
+
+Spec: scribe
+
+tags: #history #arc-03 #tail
+
+The retrospective entries above (indices 7 and 8) hold the formula; this is the version that tells the story.
+
+What arc 03 actually is — once you stop counting entries — is the same surface returning five times in six days because each pass kept missing what the next pass would surface. PR #6 (zoom) is the only one that reads as a feature in the conventional sense: a daily user asked for it, and it landed as v1.38.0, the only minor cut in the arc. Everything after is the bottom pane saying, in five different registers, *no, you weren't done*.
+
+PR #22 (the shutdown cleanup) is the bug nobody had to flag explicitly because it surfaced the moment a tab got closed on something with a child tree. `npm run dev` orphans node-then-esbuild-then-workers; the dev server stays bound to its port; you discover it the next time you start the same command and it screams about EADDRINUSE. The fix isn't subtle — `Pane::shutdown(grace)` SIGTERMs the process group with negative-PID semantics, waits 250 ms, escalates to SIGKILL, reaps — but the *honesty* of the fix is in the Drop backstop. The orderly path is the soft one (SIGTERM-then-SIGKILL); the panic-or-error-propagation path can't sleep, so Drop goes straight to SIGKILL. Two paths, two policies, named in the doc-comments. This is what "we now know what 'pane closes' actually has to mean" reads like.
+
+PR #26 (the dim modifier) is the one that looks small and isn't. A single `Modifier::DIM` on the unfocused side, ~14 lines per file across `pane/widget.rs` and `list_view.rs`. But the same diff sets up the rendering machinery PR #34 will lean on hours later — the overlay-as-pane focus model needs the unfocused half to *visually* dim, and PR #34 doesn't have to invent the dimming because PR #26 just did it. Within-arc reuse, but more than that: PR #26's CHANGELOG bucket is `### Changed`, not `### Fixed` or `### Added`. The diff really is a re-rendering of existing surface. The pane wasn't broken; it was ambiguous about where focus lived, and the fix is per-cell SGR 2.
+
+Then the cursor-block lineage. This is the one worth slowing down for.
+
+PR #5 (arc 02, six days earlier) had built a narrow guard against a specific lazygit case — `if !screen.hide_cursor()`, single condition, motivated by exactly one app's behavior. The gap-analysis suspect §1 named the case verbatim: lazygit hides the cursor and draws its own selection highlight, so spyc's unconditional reverse-block sits on some panel as a stray inverted square. The fix caught lazygit. What it didn't catch is every alt-screen TUI that *doesn't* hide the cursor — vim, htop, less, claude-in-TUI-mode, nvim's beam in insert mode. Those apps weren't lazygit, so they weren't on PR #5's radar; spyc's block clobbered nvim's beam with the wrong shape, and a user filed a separate BUGS.md SMALL line about it ("user reported: block cursor in insert mode on nvim even when that is not my cursor"). PR #29 generalizes to a three-condition guard — focused, not-alt-screen, not-hide-cursor — and the policy comment names the alt-screen-TUI list explicitly. That's the supersession.
+
+What makes the supersession diagnostic isn't the guard-broadening per se — it's that nothing in either commit says "this supersedes PR #5." The commit subject is "fix: skip pane cursor block for unfocused / alt-screen panes." The CHANGELOG entry talks about nvim's beam. The diff *does* the supersession; the relationship between PR #5 and PR #29 lives only in the code's evolution and the gap-analysis text six days back. A reader scanning the 22-day commit log without arc threads would see two unrelated cursor-block fixes; with arc threads, the "PR #5 caught the case it was built for and missed the broader class; experience under PR #5's fix surfaced the broader class; PR #29 generalized" reading becomes legible. This is the kind of thing this whole exercise exists to make visible.
+
+There's a within-arc twin to that supersession that's almost more interesting because the timing is so tight. PR #26 lands at 14:16 on 2026-05-06 with the per-cell DIM modifier and leaves the cursor-block code's existing `if !self.focused { add_modifier(DIM) }` branch alone. PR #29 lands at 17:54 — 3.5 hours later, same day, same source file — and drops that dim branch entirely. Under PR #29's three-condition guard, an unfocused pane never enters the cursor-block paint path at all, so the dim branch becomes unreachable. PR #26's general-cell DIM survives untouched. PR #29's diff edits code PR #26's diff added that morning, and again: nothing in PR #29's commit subject acknowledges PR #26. The 3.5-hour gap is closer than any other within-arc gap, and it's load-bearing because the supersession is structurally a continuation of the same morning's work — but you'd never know that from the commit messages alone.
+
+PR #34 is the third pane-focus thing in the arc, and it's the one that exposes the model is now doing more than its type advertises. `pane_focused: bool` was originally list-vs-pane focus. PR #6 added a save-and-restore axis (zoom captures focus state at zoom-on, restores at zoom-off). PR #34 added overlay-vs-pane: the same boolean now means "bottom pane focused" when the overlay is up and "list focused" otherwise. And the spawn paths force it false (overlay steals focus). One bool, three meanings, the meaning depending on which other state is present. Whatever cleans this up isn't visible in the 22-day window — but it's not arc 03's job to clean it. It's arc 03's job to make the seam visible, which the PR #34 entry did.
+
+The arc-02 harvest entry projected that PR #29 would "fully extinguish" the BUGS.md cursor-block residual PR #12 had lifted from the gap analysis. That projection is half-true and worth being honest about: PR #29 closes the *behavior* the residual described — three-condition guard does catch the full class — but PR #29's diff doesn't actually delete PR #12's residual text from BUGS.md. The text is still in SMALL post-merge. PR #29 deletes a *different* SMALL line (the user's nvim-beam report). The behavioral coverage and the durable-record cleanup don't track 1:1, and a reader following the cursor-block lineage from arc 02 to arc 03 deserves to know that the residual *text* outlived its underlying-bug-fix. Whether that's intentional (residual classes still latent under the guard) or oversight (BUGS.md not re-scanned) isn't narratable from the diff. But the mismatch itself is real, and worth flagging here because arc 02 promised something that arc 03 can only half-deliver.
+
+The thread that runs through all five PRs, if you have to name one, is that each pass kept revealing the prior pass's scope had been narrower than necessary. PR #5 was lazygit-shaped; PR #29 is class-shaped. PR #6 added a focus axis (zoom); PR #34 added another (overlay). PR #22 added a path that didn't exist (clean shutdown); the Drop backstop named the path that bypasses it. PR #26 added a visual cue; PR #29 (hours later) edited what PR #26 had left untouched. None of this is failure — it's how iteration on a surface with several axes actually looks under a real-use signal — but the recurrence is the artifact, and the value of the arc thread is that the recurrence can be *read* now in a way that no commit log shows it.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-03-pane-behavior` head entries 0–6 = 01KR106N6HSW66R76HN9VJPF1Q (framing), 01KR108QNEEG64J8W8XJERJTZG (PR #6), 01KR10ASW7YSX4MB8G28X2C9N4 (PR #22), 01KR10CGQ8NV7FYX39YZTR0FPM (PR #26), 01KR10G02J2234D0WBMWMYC35M (PR #29 — the supersession-ladder entry), 01KR10JBACRS3Z71WTHGBVCPJM (PR #34), 01KR10MXSHV2F6GAR7YNGBE121 (closure).
+- Prior formulaic tails being superseded: 01KR10Q4EFHZE21PPVF32DM581 (reflection), 01KR10SANSR30FDV8X89M8SRBC (note-to-future).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (gap-analysis suspect §1; PR #5's narrow guard).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (BUGS.md residual; "fully extinguished" projection that landed half-true).
+
+<!-- Entry-ID: 01KR11S8RG29J98QKN1H0VAA6W -->
