@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **v1.5 Phase 1: `PagerView::mount`.** The pager gets an explicit
+  `Mount` field (`Overlay` / `TopPane` / `LowerPane`) so v1.5 can
+  embed the same renderer into different slots (top pane for an
+  in-app `D`, lower pane for `^a-v` scrollback) instead of always
+  drawing a centered popup. Pure plumbing — every existing caller
+  defaults to `Mount::Overlay` so nothing visible changes today;
+  rect dispatch lives in a new `pager_inner_area` helper covered
+  by 6 new unit tests. `TopPane` / `LowerPane` variants are
+  `#[allow(dead_code)]` until Phase 3 retargets callers.
+
 ### Fixed
 - **nvim / less / htop / lazygit cursor visible again inside spyc's
   pty panes.** Reported by Spencer: opening nvim via `V` (top
