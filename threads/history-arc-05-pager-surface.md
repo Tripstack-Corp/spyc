@@ -456,3 +456,90 @@ Provenance:
 - `history-arc-05-pager-surface` PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA (sibling phase-γ entry).
 
 <!-- Entry-ID: 01KR2AD5PV989H58E49E5D18NM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:56:07.059315+00:00
+Role: scribe
+Type: Note
+Title: PR #36 (fix/search-substring-match): Matcher::Prefix → Matcher::Substring; behavior change framed as fix; arc 05's outlier
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #36 closes arc 05 and is the arc's outlier. Commit subject reads "fix: / and = match by substring, not anchored prefix (v1.41.23)" (commit f505ee5, 2026-05-07). Diff: 8 files, +73/-13. The bulk lands in `src/app/state.rs` (39 insertions / 3 deletions) and `src/app/mod.rs` (15 insertions / 5 deletions); BUGS.md, CHANGELOG.md, FEATURES.md, and the help row carry the rest.
+
+**Why this PR is the outlier in arc 05.**
+
+The framing entry above named PR #36 as the outlier: the matcher shift affects `/` (listing search) and `=` (limit filter) — neither of which is the pager's `n/N` search. The pager surface is unchanged by this PR; the listing/filter surface gains the semantic shift. The segmentation entry on `history-overview` (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) filed PR #36 in arc 05 by read-surface direction and flagged it under drift findings: "PR #36 (`fix/search-substring-match`) reads as a behavior change ('/ and = match by substring, not anchored prefix') framed as a fix. Whether this is regression repair or behavior-change-as-fix is determinable only from a prior-state inspection." This entry resolves that question against the diff.
+
+**The diff: `Matcher::Prefix` → `Matcher::Substring`.**
+
+The `src/app/mod.rs` diff rewrites the `Matcher` enum. Pre-PR-36 (visible in the diff's `-` lines): `pub enum Matcher { Prefix(String), Glob(Pattern), Never, ... }` with `Self::Prefix(q) => lower.starts_with(q)` in `matches()`. Post-PR-36 (the `+` lines): `pub enum Matcher { Substring(String), Glob(Pattern), Never, ... }` with `Self::Substring(q) => lower.contains(q.as_str())` in `matches()`. The doc-comment on the enum is rewritten verbatim:
+
+```
+/// Search / filter matcher: case-insensitive substring for plain
+/// text, glob for anything with `*`, `?`, or `[`. Used by `/`
+/// (search) and `=` (limit filter). Substring (not anchored at the
+/// start) so `/env` finds `.env`, `.envrc`, and `environment.toml`
+/// — anchored prefix mode hid dot-prefixed files behind their
+/// leading `.` and was consistently surprising. Globs are still
+/// available for users who want anchoring (`env*`, `.env*`).
+```
+
+The change is a one-variant-rename plus a one-method-body change (`starts_with` → `contains`). The semantics shift is real: `/env` now finds `.env`, `.envrc`, `environment.toml` (substring); previously it found only names starting with literal `env` (anchored prefix). Globs (`*`, `?`, `[`) preserve the prior anchored semantics: `/env*` still re-anchors at the start, `*env*` is the explicit substring form. The escape hatches preserve the prior behavior for users who want it.
+
+**The test rewrites.**
+
+The `src/app/state.rs` diff (39 insertions / 3 deletions) does two things: rewrite existing tests whose data assumed prefix semantics, and add new tests pinning the substring semantics. The rewrites are diagnostic:
+
+```
+// Pick names with no shared substrings so the wrap behavior is
+// unambiguous under substring matching: only `foo` contains `f`.
+let s = state_with_rows(&["foo", "bar", "baz"]);
+assert_eq!(s.find_match("f", 1, false), Some(0));
+```
+
+— the `find_wraps_around` test had used `["alpha", "beta", "gamma"]` searching for `"a"`, which under prefix matched only "alpha" but under substring matches all three (all contain `a`). The rewrite picks data where only one row contains the search token, isolating the wrap behavior from the matcher behavior. Same shape on `apply_search_prev_finds_match` (`"a"` → `"lph"`).
+
+The new tests pin the substring semantics directly: `find_substring_matches_dot_prefixed_file` (`.env`, `.envrc`, `environment.toml` all match `env`); `find_substring_is_case_insensitive` (`README.md` matches `readme`, `Cargo.toml` matches `CARGO`); `find_glob_remains_anchored` (`env*` still matches only `envoy`, hiding `.env`).
+
+**Fix vs. behavior change — disposition resolved.**
+
+The diff is, structurally, a behavior change in matcher semantics: anchored prefix is replaced with substring; the `Matcher` enum's variant name changes; the `matches()` body changes from `starts_with` to `contains`; existing tests had to be rewritten because their data assumed the old semantics. By the criterion of "is this a different return value for the same input," yes, this is a behavior change.
+
+The classification across surfaces splits, however:
+- **Commit subject**: `fix:` prefix.
+- **CHANGELOG**: `### Changed` (not `### Fixed`).
+- **BUGS.md**: a SMALL entry pre-existing this PR — "/ should match within names - it seems to assume ^ e.g. env won't match .env" — is lifted to FIXED with `(fixed, v1.41.23)` framing.
+- **Doc-comment**: "anchored prefix mode hid dot-prefixed files behind their leading `.` and was consistently surprising" — this is regression-repair framing.
+
+The CHANGELOG's `### Changed` placement is the most honest classification of the diff: a deliberate semantic shift, with escape hatches preserved. The commit-subject `fix:` and the BUGS.md FIXED lift are honest to the user-experience-improvement framing — the prior behavior was registered in BUGS.md SMALL as a user-reported issue, and this PR resolves the registered issue. The doc-comment splits the difference: it acknowledges the shift while characterizing the prior behavior as "consistently surprising."
+
+**The disposition: behavior change, framed and shipped as fix because the prior behavior was registered in BUGS.md SMALL as a user-reported bug.** The drift the segmentation entry flagged holds — the `fix/` prefix and `fix:` subject overstate the regression-repair characterization; the diff is genuinely a semantic shift. But the framing is internally consistent within the project's own classifications: BUGS.md tracked the prior behavior as a bug; this PR resolves the registered bug; the CHANGELOG's `### Changed` placement preserves the honest semantic-shift framing for readers who don't follow BUGS.md.
+
+**Sequence-grain note.** PR #35 (previous, `feat/D-opens-pager-in-top-pane`) also lifted a BUGS.md SMALL entry to FIXED ("D in spyc pane should open in $PAGER in the top pane"). PR #36 does the same lift on the matcher entry. Two consecutive arc-05 PRs that lift BUGS.md SMALLs to FIXED is a recurrence shape worth flagging for the insight layer.
+
+**Drift findings flagged for the insight layer**:
+- The `fix/` slug + `fix:` subject + `### Changed` CHANGELOG section + BUGS.md FIXED entry classification asymmetry is the genuine drift. Captured here against the diff for the eventual insight layer's classification-surface catalogue.
+- The escape hatches (`env*` for anchored, `*env*` for explicit substring) preserve the prior behavior at the user level. A future feature that needs anchored matching at the *code* level (an LSP integration that needs strict prefix resolution, say) cannot use `Matcher` directly — the substring shift is not reversible at the enum level. The seam is named in the doc-comment ("Globs are still available for users who want anchoring") but does not generalize to the code-internal use case.
+- This PR closes the 22-day window: commit f505ee5, the second-to-last PR before PR #37 (`fix/mcp-socket-project-scoped-discovery`, a303251, 2026-05-07) which arc 07 will narrate. PR #37 lands 36 minutes after PR #36 wall-clock; arc 07 inherits a still-warm window-end.
+
+Provenance:
+- f505ee5 (PR #36 fix/search-substring-match, 2026-05-07).
+- `git diff f505ee5^1..f505ee5^2 -- CHANGELOG.md`: `### Changed` entry quoted verbatim above.
+- `git diff f505ee5^1..f505ee5^2 -- src/app/mod.rs`: `Matcher` enum rewrite (`Prefix` → `Substring`); `matches()` body change (`starts_with` → `contains`); doc-comment quoted verbatim above.
+- `git diff f505ee5^1..f505ee5^2 -- src/app/state.rs`: existing-test rewrites (`find_wraps_around`, `apply_search_prev_finds_match`); new tests `find_substring_matches_dot_prefixed_file`, `find_substring_is_case_insensitive`, `find_glob_remains_anchored`.
+- `git diff f505ee5^1..f505ee5^2 -- BUGS.md`: SMALL "/ should match within names - it seems to assume ^ e.g. env won't match .env" removed; FIXED entry added at v1.41.23.
+- `Cargo.toml:3` post-merge: `version = "1.41.23"`.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (PR #36 fix-vs-behavior-change drift flag source).
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ (outlier framing).
+- `history-arc-05-pager-surface` PR #35 entry = 01KR2AD5PV989H58E49E5D18NM (BUGS.md SMALL → FIXED lift, immediate prior-PR precedent).
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM.
+- `history-arc-05-pager-surface` PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH.
+- `history-arc-05-pager-surface` PR #17 entry = 01KR2A4DCY3BR45ZQ7FQ2YQE4Q.
+- `history-arc-05-pager-surface` PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7.
+- `history-arc-05-pager-surface` PR #23 entry = 01KR2A8PW1GRF82G4X8R7HFP6H.
+- `history-arc-05-pager-surface` PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA.
+
+<!-- Entry-ID: 01KR2AFHD42DHX6XQS7S6VK4M5 -->
