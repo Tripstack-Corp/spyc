@@ -239,3 +239,59 @@ Provenance:
 - `history-arc-04-git-integration` PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7.
 
 <!-- Entry-ID: 01KR130775Q4PKYEN6FE1743DJ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:27:16.814123+00:00
+Role: scribe
+Type: Note
+Title: PR #24 (feat/jump-git-change): ]g / [g vim-bracket family extension; not catalogue §1 (refutation)
+
+Spec: scribe
+
+tags: #history #arc-04
+
+PR #24 is the fourth move in arc 04 and the navigation axis. Commit subject reads "feat: ]g / [g jump cursor to next/prev git-changed entry (v1.41.11)" (commit 762a0a6, 2026-05-05). Diff: 9 files, +179/-5. Source code: `src/app/state.rs` +106 (50 lines logic + 50 lines tests), `src/keymap/resolver.rs` +37, `src/keymap/action.rs` +7.
+
+**The feature.** Two new chord pairs — `]g` (next) and `[g` (previous) — walk the current listing in either direction looking for a row whose `git_files` lookup returns a non-clean status, advancing the cursor to the first match and wrapping at the listing boundary. The PR's CHANGELOG names the muscle-memory anchor verbatim: "Vim-style 'next hunk' muscle memory for the file list" (commit 762a0a6, 2026-05-05). The wrap behavior is described in the same entry: "Wraps around end-of-list so the chord can be held without thinking about direction."
+
+**The implementation.** Three files carry the change:
+
+- `src/app/state.rs:200-240` (post-merge) — `AppState::jump_to_git_change(forward: bool) -> bool`. Pure-domain logic. Reuses the same `git_files` map the listing markers already consume. The walk uses `for n in 1..=len` so a press from a dirty row advances to the *next* dirty row rather than staying put (the doc-comment names this verbatim: "we never re-test the cursor's own row"). Returns `false` when the listing has no changes; the caller handles the empty case via `flash_info("no git changes in this directory")` (`src/app/state.rs:716-727` post-merge).
+
+- `src/keymap/action.rs:140-149` (post-merge) — two new `Action` variants `JumpNextGitChange` and `JumpPrevGitChange`, with describe-text strings.
+
+- `src/keymap/resolver.rs:31-40,222-241,342-353` (post-merge) — two new `PendingSeq` variants `NextBracket` and `PrevBracket`, the mid-sequence dispatch arm that handles `g` as the only sub-command, and the top-level `[` / `]` dispatch that sets the pending state. The resolver code carries an inline comment that names the existing pattern: "Bracket pairs are reserved for 'next/prev <thing>' jumps, mirroring the [t/]t and [b/]b chords in the pager" (`src/keymap/resolver.rs:344-346` post-merge).
+
+**Test surface.** Five unit tests in `src/app/state.rs:2358-2410` (post-merge) pin the cases: skip-clean-rows, wrap-forward, wrap-backward, advance-off-the-current-dirty-row, returns-false-when-no-changes. Pure-domain testing follows the same shape PR #15's `parse_porcelain_statuses` tests use — no PTY, no UI, no git subprocess.
+
+**Refutation against catalogue §1 (brief-flagged hypothesis, refuted).** The arc-04 framing entry (= 01KR12T4DHGDH3B9YYXM0F093A) named the brief's hypothesis that PR #24 executes against arc 02's lazygit-ux-catalogue §1. Verification against the catalogue text preserved verbatim in arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T):
+
+§1 ("Numbered panels & direct-jump") catalogues lazygit's `1`..`5` panel-jumping. The catalogue's recommendation is verbatim **skip**: "spyc has exactly two top-level surfaces (list, pane) where lazygit has five, so `1` and `2` would be wasted on a binding that `^W j`/`^W k` already covers cleanly." The catalogue's §1 is structurally about *cross-window* surface jumping — `1` jumps to a panel, `2` jumps to a different panel. PR #24's `]g`/`[g` is structurally about *within-window* row stepping — it never leaves the listing surface, it steps between rows of the same type with a non-clean git status. Different idiom, different inspiration.
+
+The PR #24 resolver code names the actual inspiration explicitly. The inline comment at `src/keymap/resolver.rs:344-346` (post-merge) reads "mirroring the [t/]t and [b/]b chords in the pager." Those chords are pre-existing spyc / pager-internal vim-bracket family bindings, themselves modeled on vim's `]c`/`[c` (next/previous diff hunk) family. PR #24 reads as a continuation of that family, not as catalogue execution.
+
+The empirical position: PR #24 does not execute against any catalogue section. Arc 02's published back-reference table (= 01KR0Z3673Z27FJ4GV92FYV4QJ) does not enumerate PR #24, consistent with this finding. The brief's hypothesis is refuted against the catalogue text and the diff.
+
+**Drift findings flagged for the insight layer**:
+
+- The PR's title and CHANGELOG both reach for "vim-style 'next hunk' muscle memory" as the anchor. The catalogue dispositions for vim-derived idioms vs lazygit-derived idioms read differently across arc 02's seven sections — vim parallels are accepted as native to spyc's design language, lazygit borrows require explicit borrow/adapt/skip framing. PR #24 lands as a vim-bracket family extension, not as a borrow.
+
+- The walk algorithm's wrap behavior is opinionated. The CHANGELOG names the rationale: "Wraps around end-of-list so the chord can be held without thinking about direction" (commit 762a0a6, 2026-05-05). The resolver-side state machine treats `[` and `]` as two-key chords with `g` as the only sub-command; the design leaves room for additional sub-commands (`]m`/`[m` for marks, `]p`/`[p` for picks) without changing the resolver shape. None of those land in the 22-day window.
+
+- The five unit tests deliberately pin one behavior the title/CHANGELOG do not name: pressing `]g` from a dirty row advances to the *next* dirty row rather than staying put. The doc-comment makes the rule explicit; the test (`jump_advances_off_the_current_dirty_row`) pins it. A reader scanning the title alone might assume the cursor stays on the first dirty row found in either direction — which would include the cursor's own row. The implementation is one off-by-one decision against that reading, and the test exists to keep it pinned.
+
+Provenance:
+- 762a0a6 (PR #24 feat/jump-git-change, 2026-05-05 16:26) — full PR.
+- `src/app/state.rs:200-240` (post-merge) — `jump_to_git_change` body; doc-comment quoted ("we never re-test the cursor's own row").
+- `src/app/state.rs:716-727` (post-merge) — Action dispatch arms; flash-empty case.
+- `src/app/state.rs:2358-2410` (post-merge) — five unit tests.
+- `src/keymap/action.rs:140-149` (post-merge) — `JumpNextGitChange` / `JumpPrevGitChange` Action variants.
+- `src/keymap/resolver.rs:31-40,222-241,342-353` (post-merge) — `PendingSeq::NextBracket` / `PrevBracket`, mid-sequence arm, top-level `[` / `]` dispatch; inline comment quoted ("mirroring the [t/]t and [b/]b chords in the pager").
+- `git diff 762a0a6^1..762a0a6^2 -- CHANGELOG.md` — verbatim quotes ("Vim-style 'next hunk' muscle memory for the file list"; "Wraps around end-of-list so the chord can be held without thinking about direction"; "Reuses the same `git_files` map the listing markers consume").
+- `git show 0691666:notes/lazygit-ux-catalogue.md` §1 — verbatim disposition "skip" and the rationale ("`^W j`/`^W k` already covers cleanly"). Catalogue text preserved in arc 02 investigation entry.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue text source for refutation).
+- `history-arc-02-lazygit-investigation-and-harvest` closure entry = 01KR0Z3673Z27FJ4GV92FYV4QJ (back-reference table; PR #24 not enumerated, consistent with refutation).
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A (refutation hypothesis source).
+- `history-arc-04-git-integration` PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (`parse_porcelain_statuses` test-surface precedent that this PR's pure-domain test shape inherits).
+
+<!-- Entry-ID: 01KR1327VZTQAYNNPMBCTC3SSM -->

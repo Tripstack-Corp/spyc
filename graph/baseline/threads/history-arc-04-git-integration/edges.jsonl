@@ -5,3 +5,5 @@
 {"source":"entry:01KR12W1M20SQW3QXT8VC09REK","target":"entry:01KR12XTG7E5TC0RNTJ65G67T7","type":"followed_by"}
 {"source":"thread:history-arc-04-git-integration","target":"entry:01KR130775Q4PKYEN6FE1743DJ","type":"contains"}
 {"source":"entry:01KR12XTG7E5TC0RNTJ65G67T7","target":"entry:01KR130775Q4PKYEN6FE1743DJ","type":"followed_by"}
+{"source":"thread:history-arc-04-git-integration","target":"entry:01KR1327VZTQAYNNPMBCTC3SSM","type":"contains"}
+{"source":"entry:01KR130775Q4PKYEN6FE1743DJ","target":"entry:01KR1327VZTQAYNNPMBCTC3SSM","type":"followed_by"}
