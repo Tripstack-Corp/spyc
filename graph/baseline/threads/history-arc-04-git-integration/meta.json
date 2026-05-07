@@ -5,7 +5,7 @@
   "title": "history arc 04 git integration",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T11:22:51.279821+00:00",
-  "summary": "The development thread for history arc 04 focused on integrating Git capabilities into the codebase, with multiple PRs adding distinct features without supersedes. Key decisions included prioritizing Git-aware functionality across five axes, and outcomes involved enhancing the codebase's Git integration while maintaining stability.",
-  "entry_count": 1
+  "last_updated": "2026-05-07T11:23:53.930293+00:00",
+  "summary": "The development thread for history arc 04 focused on integrating Git capabilities across five axes, with a primary goal of enhancing the system's ability to track changes. Key decisions included introducing a 1Hz diff-aware poll for git status, addressing a bug related to stale markers, and implementing a FSEvents backstop. The outcome was the addition of git-aware features without supersedes, improving the system's responsiveness and accuracy in tracking changes.",
+  "entry_count": 2
 }

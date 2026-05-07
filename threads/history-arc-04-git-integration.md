@@ -77,3 +77,46 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (PR #2 = arc 01 first commit, merged 16:50; PR #1 follows ~18 min later).
 
 <!-- Entry-ID: 01KR12T4DHGDH3B9YYXM0F093A -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:23:53.929285+00:00
+Role: scribe
+Type: Note
+Title: PR #1 (fix/git-marker-1hz-poll): the first user-facing follow-on, an FSEvents backstop, 0-dps idle preserved
+
+Spec: scribe
+
+tags: #history #arc-04
+
+PR #1 is the first move in arc 04 and the first user-facing fix of the 22-day window. It lands eighteen minutes after PR #2 (arc 01's CI hygiene merge at 16:50), making the git-marker surface the first thing the project surfaces as needing a follow-on after the window opens. Commit subject reads "git markers: 1Hz safety-net poll for missed FSEvents (v1.37.1)" (commit cd8df2e, 2026-04-30). Diff: 6 files, +71/-2. Source code: 37 lines across `src/app/state.rs` (+19) and `src/app/mod.rs` (+18).
+
+**The bug being fixed.** Stale `+`/`~`/`?` markers (and the top-bar branch/dirty string) sometimes stayed visible after a `git commit` until the user changed directories. The PR's CHANGELOG names the cause: "the `notify`-driven FSEvents watch on `.git/` would occasionally miss the `.git/index.lock` → `.git/index` atomic rename that happens on every commit -- macOS FSEvents has a known soft spot for inode replacement" (commit cd8df2e, 2026-04-30). The watcher is correct in principle and the watcher path is preserved unchanged; what this PR adds is a backstop, not a replacement.
+
+**The fix shape: 1Hz diff-aware poll.** A new `AppState::refresh_git_state` method re-runs `crate::sysinfo::git_status` and `crate::sysinfo::git_file_statuses`, compares against the live `git_info` and `git_files` fields, and returns early with `false` when nothing changed. Only on a real diff does it overwrite the live state, call `rebuild_rows`, and return `true` (`src/app/state.rs:474-494` post-merge). The doc-comment names the design-load explicitly: "The diff guard preserves the 0-dps-idle target: when nothing changed, we don't bump `list_generation` or request a repaint."
+
+The driver lives in `App::run` (`src/app/mod.rs:1352-1366` post-merge): a `last_git_poll: Instant` is updated each tick and `GIT_POLL_INTERVAL = Duration::from_secs(1)` gates re-entry. The poll fires only when `self.state.git_info.is_some()` — outside a git repo there is nothing to converge on. When `refresh_git_state()` returns `true`, the surrounding code sets `needs_draw = true; draw_reason = 3`, which is the same dirty-frame mechanism arc 03's pane-state code paths use.
+
+**Sequence-grain consequence for arc 04.** PR #1 is the genesis of the 1Hz git-poll machinery that PR #7 (`=git`/`=g` filter, this arc, two days later) reuses without modification. PR #7's CHANGELOG names the dependency directly: "The filter stays live as the 1Hz git poll updates `git_files`" (commit f3ddaf2, 2026-05-02). The poll's diff-aware return value — bumping `list_generation` only on real change — is what lets the filter re-render without burning a frame on every idle tick.
+
+**Drift findings flagged for the insight layer**:
+
+- The PR ships at v1.37.1, but the 22-day window's first merge by wall-clock is PR #2 (arc 01's `chore/ci-hygiene`, 2026-04-30 16:50), which lands as `[Unreleased]` content with no version bump (per arc 01's PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH). PR #1's `(v1.37.1)` tag therefore reads as the *first version cut* of the window — and the v1.37.1 release ships a single fix (the 1Hz poll). PR #4 cuts v1.37.2 hours later, packaging arc 01's three PRs together (per arc 01's PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS). Two release cuts on Day 0, one for arc 04, one for arc 01.
+
+- The fix is a *backstop*, not a replacement. The watcher path stays in place; the poll runs in addition. The CHANGELOG names this design choice verbatim ("Watcher path is unchanged; this is a backstop, not a replacement"). A reader scanning the title alone might infer that polling supplants the FSEvents watch; the diff and CHANGELOG together confirm the watch is preserved.
+
+- The poll only runs when in a git repo (`self.state.git_info.is_some()`). Outside a repo it never fires. The 0-dps-idle target is preserved on both axes — by the in-repo gate and by the diff-aware return value.
+
+Provenance:
+- cd8df2e (PR #1 fix/git-marker-1hz-poll, 2026-04-30 17:08) — full PR.
+- `src/app/state.rs:474-494` (post-merge) — `refresh_git_state` body; doc-comment quoted verbatim.
+- `src/app/mod.rs:999-1003,1352-1366` (post-merge) — `last_git_poll: Instant` declaration and the 1Hz gate in `App::run`.
+- `git diff cd8df2e^1..cd8df2e^2 -- CHANGELOG.md` — verbatim quotes ("FSEvents has a known soft spot for inode replacement"; "Watcher path is unchanged; this is a backstop, not a replacement"; "diff-aware -- only bumps `list_generation` and requests a repaint when something actually changed, so idle dps stays at 0").
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30 16:50) — preceding merge by wall-clock; PR #1 follows ~18 minutes later.
+- f3ddaf2 (PR #7 feat/limit-git, 2026-05-02) — downstream consumer of `refresh_git_state`'s `git_files` updates; named here for sequence-grain forward reference.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — current-state seed describing the dirty-frame `needs_draw` machinery; this PR adds a new `draw_reason = 3` source within that machinery.
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG.
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (sequence reference: PR #2 = wall-clock-first merge of the window).
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (sequence reference: PR #4 cuts v1.37.2 hours later — two release cuts on Day 0, this PR's v1.37.1 + arc 01's v1.37.2).
+
+<!-- Entry-ID: 01KR12W1M20SQW3QXT8VC09REK -->
