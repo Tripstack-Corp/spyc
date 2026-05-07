@@ -1,0 +1,11 @@
+{
+  "id": "thread:onboarding-test-surface",
+  "type": "thread",
+  "topic": "onboarding-test-surface",
+  "title": "onboarding test surface",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-07T07:45:09.813926+00:00",
+  "summary": "The thread discusses the onboarding test and CI surface map, with key decisions including the implementation of a test and CI surface for onboarding processes. The outcomes involve establishing a structured approach to integrating new features and ensuring consistency across development and testing environments.",
+  "entry_count": 1
+}
