@@ -485,3 +485,57 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` reflection tail = 01KR0Z6673WE91822V8ZTWMYVJ (head/tail voice precedent; the hand-off-as-cross-arc-trade reading).
 
 <!-- Entry-ID: 01KR10Q4EFHZE21PPVF32DM581 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:47:27.466266+00:00
+Role: scribe
+Type: Note
+Title: Tail: note to future readers — head/tail boundary, the shape choice, how to reach the cursor-block lineage
+
+Spec: scribe
+
+tags: #history #arc-03 #tail
+
+If you're reading this thread cold: it's the baseline narration of arc 03 — the third of eight arcs reconstructing spyc's first 22 days of merged work. The reconstruction was written after-the-fact (2026-05-07) but the head entries above are deliberately in present tense to preserve the as-if-real-time conceit `history-overview` set on Day 0 of this exercise. None of arc 03's narration actually happened in present tense; the voice is a choice, and we're being honest about that here in the tail because the head can't be — the head is busy holding the line.
+
+**How the thread is shaped.**
+
+- Index 0 — framing. Names the five member PRs, the diagnosis (pattern 10 register, no pivot, with per-entry shape variety), the cadence choice (option A: framing + per-PR + closure), and the mandatory back-reference contract for PR #29.
+- Indices 1–5 — one entry per PR, in arc order. PR #6 (zoom) first, then PR #22 (shutdown), PR #26 (dim-unfocused), PR #29 (cursor-block three-condition guard with arc-02 back-references), PR #34 (overlay-focus switch). Each entry's internal shape is its own — feature-compact, operational-sweep, brief-feature-note, plan-supersession-ladder, focus-routing-compact in that order.
+- Index 6 — closure. Back-reference verification, voice-variety audit, cadence precedent for arc 04, done-definition self-check.
+- Indices 7 and 8 — these tail entries. Looser, retrospective, with first-person plural and direct address allowed where they aid flow.
+
+The head/tail boundary is visual: head entries are clinical, segmented, sequence-faithful, grounded in commits and file:line spans; tails are conversational and reflective. If a tail entry reads like a head entry, it's failing at its job. Arc 01 set this boundary; arcs 02 and 03 kept it.
+
+**The shape choice, named once more.** Arc 03 picked per-entry shape variety on the diagnosis-first principle — mixing forms across entries within one arc is fine and even expected when the underlying material is differently shaped, which arc 03's was. PR #29's plan-supersession-ladder shape is the most form-laden choice in the arc, and it's the one most worth understanding if you're navigating the arc-02 → arc-03 cursor-block lineage. The supersession ladder has three rounds: PR #5 (arc 02) lands a narrow `screen.hide_cursor()` guard against the lazygit case; PR #26 (this arc, hours before PR #29) adds per-cell DIM on the unfocused pane while leaving the cursor-block treatment alone; PR #29 (this arc) lands a three-condition guard `focused && !alt_screen && !hide_cursor` that supersedes both — generalizing PR #5's narrow case, dropping PR #26's cursor-block-when-unfocused dim branch as unreachable. Reading the PR #29 entry head-on, with that ladder in mind, is the path through.
+
+**How to navigate from here.**
+
+For arc-by-arc narration: the spine (`history-overview`) lists the eight arc-thread topic names in its closure entry. Arc 04 (`history-arc-04-git-integration`) picks up next; arc 02 (`history-arc-02-lazygit-investigation-and-harvest`) is the back-reference target if you arrived here following the cursor-block lineage. Arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) holds the gap-analysis text PR #5's narrow guard was built against; arc 02's harvest entry (= 01KR0Z11CKNJRYEZ3T38EAFSC4) holds the BUGS.md residual that PR #29 behaviorally extinguishes (and durable-record-incompletely cleans up).
+
+For chronology: PR #6 lands 2026-05-01, four days before PRs #22/#26/#29/#34 cluster on 2026-05-05 and 2026-05-06. Three of the four late arc-03 PRs (PR #26, PR #29, PR #34) land on the same calendar day (2026-05-06), with PR #26 and PR #29 on the same code surface 3.5 hours apart and PR #29's diff editing logic PR #26's diff added.
+
+For the back-reference network: PR #29's per-PR entry (= 01KR10G02J2234D0WBMWMYC35M) is the only arc-03 entry with mandatory back-references to arc 02. PR #6's, PR #22's, PR #26's, and PR #34's per-PR entries do not back-reference arc 02; they each carry within-arc cross-references but no upstream-arc obligations.
+
+**What this thread doesn't claim to do.**
+
+- Identify recurring patterns. Pane behavior surfacing five times in six days is observable; whether the recurrence *means* something is for the insight layer.
+- Name emergent properties. The phrase "emergent property" does not appear in any head entry of this arc by design — that vocabulary belongs to tier-4 insight reading.
+- Attribute mindset. "The maintainer wants" / "is concerned that" / "decided to" are absent from heads in reference to the maintainer; the commit message and CHANGELOG are quoted instead, with attribution.
+- Pre-empt the insight layer. Drift findings are flagged at the per-entry "Drift findings flagged for the insight layer" sections, never interpreted. If a Phase-3 insight thread eventually exists, follow its links back into arc 03's per-PR entries — full provenance is preserved.
+
+**What's not in arc 03 that someone might expect.** Any narration of how the user discovered each bug ("the user reported X happening when they did Y") — those motivations exist only in CHANGELOG language and BUGS.md text we quoted; the actual user-facing surface those reports came through is not narratable from the diff. Any narration of the keymap-conflict surface (`^a z` arrived at PR #6 with a Resolver test renaming the previous `ctrl_w_unknown_is_ignored` probe key from `'z'` to `'q'` — the diff captures it; a story about why `'q'` was the new probe key is not narratable). Any narration of cross-arc focus-state interactions with arcs 04–08 — those will surface when their arcs' authors read PR #34's three-meaning `pane_focused: bool` carry-over.
+
+If something in the head entries is wrong, the head entries are sealed by provenance contract — what you'd amend lives in a follow-up arc thread or in a new insight thread, not in a retroactive head edit. We're betting that letting the record stand and writing forward is more honest than rewriting. Arc 01 set this convention; arcs 02 and 03 kept it.
+
+Provenance:
+- No new commit references; tails reflect on the head entries which carry full SHA provenance.
+- `history-arc-03-pane-behavior` head entries 0–6 = 01KR106N6HSW66R76HN9VJPF1Q, 01KR108QNEEG64J8W8XJERJTZG, 01KR10ASW7YSX4MB8G28X2C9N4, 01KR10CGQ8NV7FYX39YZTR0FPM, 01KR10G02J2234D0WBMWMYC35M, 01KR10JBACRS3Z71WTHGBVCPJM, 01KR10MXSHV2F6GAR7YNGBE121.
+- `history-arc-03-pane-behavior` reflection tail (index 7) = 01KR10Q4EFHZE21PPVF32DM581.
+- `history-overview` spine entries 0–5 (full set written 2026-05-07).
+- `history-arc-01-foundation-hygiene` head + tail entries (cadence option A precedent; head/tail voice precedent).
+- `history-arc-02-lazygit-investigation-and-harvest` head + tail entries (back-reference hub for PR #29; the cursor-block lineage source).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (the gap-analysis text PR #5's narrow guard targeted, which PR #29 generalizes).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (the BUGS.md residual whose behavioral case PR #29 extinguishes; durable-record cleanup partial).
+
+<!-- Entry-ID: 01KR10SANSR30FDV8X89M8SRBC -->
