@@ -157,3 +157,60 @@ Provenance:
 - Prior thread entry: framing entry 0 (`history-overview` index 0) = 01KR0TRFWT9W6WMFHC49YSW0BG.
 
 <!-- Entry-ID: 01KR0TWHTC1MPK4KJ08Y9SPE6P -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:05:24.606731+00:00
+Role: scribe
+Type: Note
+Title: PR #5 special handling: own arc with mandatory back-references
+
+Spec: scribe
+
+tags: #history #segmentation
+
+PR #5 (`investigate/lazygit-support`, commit 0691666, 2026-04-30) is the only PR in the window prefixed `investigate/`. Its commit subject reads "lazygit investigation + cursor-block fix (v1.37.2)" (commit 0691666, 2026-04-30). The diff is unusual: 444 insertions across 7 files, of which 399 lines are documentation (`notes/lazygit-gap-analysis.md`, 111 lines; `notes/lazygit-ux-catalogue.md`, 288 lines), 26 lines are roadmap additions (`ROADMAP.md`), 14 are CHANGELOG, and 7 are the cursor-block fix in `src/pane/widget.rs`. The investigation deliverable dominates the diff; the code fix is the smaller half.
+
+**Disposition: PR #5 receives its own short arc (arc 02 — `lazygit-investigation-and-harvest`), paired with PR #12 (`chore/clean-notes`, commit e210e58, 2026-05-03) — "harvest lazygit notes into BUGS, drop notes/" (commit e210e58, 2026-05-03). Downstream PRs that execute against PR #5's gap analysis or UX catalogue carry mandatory back-references to arc 02 entries.**
+
+Rationale for own arc rather than fold-with-back-refs:
+
+1. PR #12's commit subject — "harvest lazygit notes into BUGS, drop notes/" — makes the link to PR #5 explicit. Folding PR #5 into another arc would orphan PR #12 or force PR #12 into the same target arc by adoption rather than coherence. PR #12 has no other thematic home.
+2. PR #5's stated-plan output (the three ROADMAP additions, the gap-analysis suspects list) is consumed across multiple downstream arcs (arc 03 cursor-block, arc 05 pager direction, arc 06 picker pattern, arc 08 vt100 follow-on). If PR #5 lived inside any one of those arcs, the other arcs' back-references would point at a non-spine entry, and the network would lose its hub.
+3. The investigation deliverable itself is the load-bearing artifact. The two notes files (399 lines combined) are not standalone code — they are an analysis artifact whose narrative belongs in a thread of its own. The gap analysis identifies three top suspects ("Spurious cursor block from `widget.rs`," "No mouse, anywhere," "Synchronized-output (mode 2026) tearing") and the UX catalogue catalogues five borrow/adapt/skip recommendations against `lazygit-upstream/`. A single-arc-thread narration of that body matches its diff shape.
+
+Verified back-reference targets (from gap-analysis content compared against later commit subjects and titles):
+
+- **PR #29 `fix/skip-pane-cursor-block-when-uninvited`** (commit bdb8d87, 2026-05-06) executes against PR #5's gap-analysis "Top suspects" §1: "Spurious cursor block from `widget.rs`. spyc unconditionally reverse-videoes the cell at `screen.cursor_position()`, even when the child has set DEC ?25l (cursor hidden)." PR #29's title makes no mention of lazygit; the link is detectable only via the gap-analysis text. Confidence: HIGH-CONFIDENCE EXECUTION.
+- **PR #20 `feat/scroll-altscreen-hint`** (commit ee07307, 2026-05-05) — the "alt-screen scroll hint" component aligns with the catalogue's observation that pane-resident TUIs lose discoverable scroll affordance in alt-screen mode. Confidence: PARTIAL EXECUTION; PR #20's other two bundled concerns (`[pane] default_command`, `gd`-vs-HEAD) are unrelated.
+- **PR #8 `feat/harpoon`** (commit 62fc129, 2026-05-02) and **PR #10 `feat/quickselect`** (commit 9043547, 2026-05-02) — parallel to but not direct execution of `notes/lazygit-ux-catalogue.md` §4 "Generalized pager picker." Both ship picker-shaped overlays; neither rewires `pager.picker_cursor` per the catalogue's recommendation ("Adapt lazygit's `Menu` popup pattern into spyc's existing `pager.picker_cursor` machinery so any list-of-options surface is a pager mode rather than a fifth overlay"). Confidence: PARALLEL PATTERN, not direct execution.
+- **PR #33 `feat/pager-visual-line-mode`** (commit cf9e8ff, 2026-05-06) and **PR #35 `feat/D-opens-pager-in-top-pane`** (commit c243549, 2026-05-06) — additional pager-surface accretion that extends the read-through-pager direction the catalogue proposes. Confidence: DIRECTION ALIGNMENT, not direct execution of any specific catalogue item.
+
+PR #5 gap-analysis suspects that do **not** appear executed in the 22-day window (negative space; insight-layer fuel):
+
+- "No mouse, anywhere" (catalogue §3, gap-analysis suspect §2) — no mouse-capture or mouse-encoder PR appears in the 36. Aligns with `onboarding-product-charter` non-goal "mouse support beyond what already exists" (`ROADMAP.md:426-447`); the gap-analysis suspect remains as a known accepted gap rather than executable item.
+- "Synchronized-output (mode 2026) tearing" (gap-analysis suspect §3) — PR #31 (`chore/vt100-and-ratatui-upgrade`, commit 105db8d, 2026-05-06) bumps vt100 from 0.15 to 0.16. Whether 0.16 brings 2026 parsing is determinable only from inspection of vendored or upstream vt100 0.16 changelog; the upgrade commit subject does not say so. Flag for arc 08 authoring and the insight layer.
+
+Back-reference contract for downstream arc threads:
+
+When an arc thread (history-arc-NN-…) cites a PR that executes against PR #5, it must reference arc 02's entry IDs (the framing/segmentation/closure entries on `history-overview` plus the eventual arc 02 thread entries). Specifically:
+- arc 03 entry on PR #29 must back-reference arc 02 (cursor-block top-suspect link).
+- arc 05 entry on PR #20 must back-reference arc 02 (alt-screen hint catalogue alignment).
+- arc 06 entry on PR #8 / PR #10 must back-reference arc 02 (picker pattern parallelism).
+- arc 05 entries on PR #33 / PR #35 may back-reference arc 02 (read-through-pager direction); not mandatory.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — `git show --stat 0691666` shows 7 files changed, 444 insertions, 6 deletions; `notes/lazygit-gap-analysis.md` 111 lines added, `notes/lazygit-ux-catalogue.md` 288 lines added, `ROADMAP.md` 26 lines added, `src/pane/widget.rs` 7 lines changed.
+- e210e58 (PR #12 chore/clean-notes, 2026-05-03).
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06).
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05).
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02).
+- 9043547 (PR #10 feat/quickselect, 2026-05-02).
+- cf9e8ff (PR #33 feat/pager-visual-line-mode, 2026-05-06).
+- c243549 (PR #35 feat/D-opens-pager-in-top-pane, 2026-05-06).
+- 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06).
+- `notes/lazygit-gap-analysis.md` "Top suspects" §1, §2, §3 (in PR #5's diff at `git show 0691666:notes/lazygit-gap-analysis.md`).
+- `notes/lazygit-ux-catalogue.md` §2 "Context-sensitive footer" and §4 "Numbered panels & direct-jump" / "Generalized pager picker" (in PR #5's diff at `git show 0691666:notes/lazygit-ux-catalogue.md`).
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (mouse non-goal at `ROADMAP.md:426-447`).
+- Prior thread entries: history-overview index 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing); index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation).
+
+<!-- Entry-ID: 01KR0TYF5F11DA8P5HNPA20DBK -->
