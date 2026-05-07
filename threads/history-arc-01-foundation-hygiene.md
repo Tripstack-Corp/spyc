@@ -96,3 +96,48 @@ Provenance:
 - `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
 
 <!-- Entry-ID: 01KR0W81XE4K3G7BBSP42GE1HH -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:29:02.279116+00:00
+Role: scribe
+Type: Note
+Title: PR #3 (chore/security-hygiene): cargo-deny rides the rail; SECURITY.md and deny.toml land
+
+Spec: scribe
+
+tags: #history #arc-01
+
+PR #3 is the second move in arc 01. With PR #2's `make check` rail in place, this PR extends what runs on the rail. Commit subject reads "security: cargo-deny, --locked, SECURITY.md" (commit 32ebf2c, 2026-04-30). Diff: 5 files, +468/-23. Two new files dominate the line count: `SECURITY.md` (136 lines, new) and `deny.toml` (268 lines, new).
+
+**`make check` becomes the supply-chain gate.** The Makefile diff reads `check: fmt-check lint test deny` — adding `deny` to the previous `fmt-check + lint + test`. A new target `deny` calls `cargo deny --all-features check` after a guard that fails-loud if `cargo-deny` is not installed. In `bitbucket-pipelines.yml` the `cargo install cargo-audit` line is replaced with `cargo install cargo-deny` and the standalone `cargo audit --ignore RUSTSEC-2026-0009` step is removed: cargo-deny absorbs both the advisory check and four other concerns the audit step never covered (licenses, sources, bans, yanked-crate detection). The pipeline header comment is rewritten to match: "spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage."
+
+**`--locked` propagates across every cargo invocation.** The Makefile diff adds `--locked` to `RELEASE_FLAGS`, to the `cargo test` line, and to the `cargo clippy` line; the pipelines diff adds `--locked` to `cargo llvm-cov`. The PR's own CHANGELOG entry names the consequence: "Prevents a CI-time `Cargo.lock` drift from silently pulling fresh transitive deps; failures are loud."
+
+**`SECURITY.md` lands as a 136-line policy doc, not a template.** The PR's CHANGELOG entry characterizes the file: "honest posture doc covering threat model, supply-chain controls, build/install trust chain, and known caveats. Avoids signing/SBOM theater for an internal tool with no published binary distribution channel." The current-state seed `onboarding-security` entry 0 cites this exact file at line counts (`SECURITY.md:1-137`, `SECURITY.md:9-31` for threat model, `SECURITY.md:33-57` for supply-chain controls, `SECURITY.md:60-66` for distribution posture, `SECURITY.md:115-120` for reporting channel). PR #3 is the genesis of every line the security seed cites.
+
+**`deny.toml` lands as a 268-line config with documented advisory ignores.** The current-state seed `onboarding-security` entry 0 cites this file at `deny.toml:72-94` (the documented ignores: time 0.3.45, yaml-rust, bincode, paste, serial — each with a `reason` field naming the dep-graph route and the reason it is tolerable), `deny.toml:104-124` (license allow-list reflecting "the licenses present in our actual dep graph as of v1.37.1"), and `deny.toml:258` (source allow-list: only `crates.io`). PR #3 is the genesis of every line the security seed cites here too.
+
+**`make dist-sign` scaffolding lands without being wired into CI.** A new `dist-sign` Makefile target produces a detached GPG signature on `dist/checksums-sha256.txt`, with `GPG_KEY` as an opt-in environment variable for key selection. The CHANGELOG entry names the choice explicitly: "Not used today (we don't ship prebuilt binaries); SECURITY.md documents the intentional gap so a future signing rollout has a ready landing spot." This aligns with the `onboarding-security` seed's reading of the signing posture as "theater-avoided" today, "load-bearing the moment public artifacts ship."
+
+**Sequence-grain dependency on PR #2**: this PR's `make check` extension only earns its keep because PR #2 made CI call `make check` in the first place. With the rail laid by PR #2, adding `deny` to the gate becomes a one-line change in `Makefile:check` plus the new `deny` target body; without PR #2, the cargo-deny invocation would have to be wired into `bitbucket-pipelines.yml` directly and would not be runnable locally as part of the pre-commit hook. The PRs read as one-then-two; the second extends the first.
+
+**Drift findings flagged for the insight layer**:
+- The commit subject groups three concerns ("cargo-deny, --locked, SECURITY.md"). Diff inspection shows a fourth: `make dist-sign`. Captured in CHANGELOG, omitted from the commit subject.
+- This PR lands under `[Unreleased]` in the CHANGELOG; like PR #2, it does not bump the version. The release that ships PR #3's policy + tooling is cut by PR #4 as v1.37.2.
+- `TODO.md:99-104` continues to read "cargo-audit" after this PR (the `onboarding-risk-register` seed flags the same drift in current-state). The migration from cargo-audit to cargo-deny in this PR is complete in code and CI; only the doc lags. This is a one-PR-introduces-a-doc-drift signal worth carrying into the insight layer.
+
+Provenance:
+- 32ebf2c (PR #3 chore/security-hygiene, 2026-04-30).
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30) — the rail this PR extends; named for sequence dependency.
+- `Makefile:33-65` (post-merge state) — `check` target reads `fmt-check lint test deny`; `deny` target body; `--locked` on test/lint.
+- `Makefile:18,135-149` (post-merge state) — `RELEASE_FLAGS := --locked --release`; `dist-sign` target body.
+- `bitbucket-pipelines.yml:1-50` (post-merge state) — header comment rewrite; `cargo install cargo-deny` replacing `cargo install cargo-audit`; `--locked` on `cargo llvm-cov`.
+- `SECURITY.md` (new file, 136 lines).
+- `deny.toml` (new file, 268 lines).
+- `CHANGELOG.md` post-PR-#3 state, "### Security" section under `[Unreleased]`.
+- `onboarding-security` entry 0 = 01KR0PKS884SXRAKZ8A790Q438 — current-state seed; this PR is the genesis surface.
+- `onboarding-developer-experience` entry 0 = 01KR0PFHHCNVJPNJSTPA3VW62J — current-state seed citing `make check = fmt-check + lint + test + deny`; this PR is what completes the four-step gate.
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH.
+
+<!-- Entry-ID: 01KR0W9QF3P9E529E6J3XQMXDV -->

@@ -5,7 +5,7 @@
   "title": "history arc 01 foundation hygiene",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T09:28:07.602622+00:00",
-  "summary": "The development thread focuses on the establishing arc of history arc 01, with three PRs (PRs #1, #2, and #3) that ship as v1.37.2. PR #2 introduces CI changes to switch from inlined cargo commands to `make check`, adding a new target to improve workflow. The thread emphasizes improving CI hygiene and foundational infrastructure for future development.",
-  "entry_count": 2
+  "last_updated": "2026-05-07T09:29:02.280537+00:00",
+  "summary": "The development thread focuses on improving hygiene and security practices in the Cargo ecosystem, with three PRs implementing changes to CI workflows and supply-chain gateways. PR #2 introduces `make check` and a new target to streamline CI processes, while PR #3 adds `SECURITY.md` and `deny.toml` to enhance security controls. These changes set a foundation for future improvements in code quality and security.",
+  "entry_count": 3
 }
