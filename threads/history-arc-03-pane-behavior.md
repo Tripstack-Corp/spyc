@@ -112,3 +112,53 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (pane PTY ownership surface; this PR adds the first save-and-restore mechanism on `pane_focused`).
 
 <!-- Entry-ID: 01KR108QNEEG64J8W8XJERJTZG -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:39:31.716553+00:00
+Role: scribe
+Type: Note
+Title: PR #22 (feat/pane-shutdown-cleanup): SIGTERM → 250ms grace → SIGKILL → reap, with a Drop safety net
+
+Spec: scribe
+
+tags: #history #arc-03
+
+PR #22 is the second move in arc 03 and the first time arc 03's recurring concern shifts away from visual state to child-process lifetime. Commit subject reads "fix: clean shutdown of pane child trees on tab close + spyc quit (v1.41.9)" (commit a3338fa, 2026-05-05). Diff: 7 files, +141/-2. The diff is procedurally shaped — a four-stage shutdown sequence, plus a backstop — and the entry below tracks those stages in order.
+
+**The bug being fixed.** The CHANGELOG entry's lede reads verbatim: "`^a x` / `^a K` (close tab) and `Q` / `:q` / `^D` (quit spyc) used to drop the pane without signalling its child, leaving processes orphaned — most painfully `npm run dev` / `vite` / etc., where the whole `node` → `esbuild` → workers tree kept running and stayed bound to its dev-server port." The mechanism named in the same entry: `portable_pty::Child`'s default Drop is a no-op, so dropping a `Pane` without an explicit kill leaves the kernel-side process alive.
+
+**S1 — SIGTERM the process group.** `Pane::shutdown(grace: Duration)` lands on `src/pane/mod.rs` (`+90` lines). The first stage reads `pid = self.child.process_id()`, then under `#[cfg(unix)]` calls `libc::kill(-(pid as libc::pid_t), libc::SIGTERM)`. The negative-PID call is the load-bearing detail: it sends SIGTERM to the entire process group, not just the immediate child. The doc-comment names why verbatim: "(negative PID — reaches every grandchild, which is the actual user-reported scenario: `npm run dev` → node → esbuild → workers all need to die when the tab closes)." The doc also names the assumption that makes the negative-PID semantics correct: "portable-pty calls `setsid` for spawned children on Unix, so the child's PID is also its process-group leader — sending to `-pid` reaches the whole tree."
+
+**S2 — Poll for voluntary exit, capped at `grace`.** A `deadline = Instant::now() + grace` loop calls `child.try_wait()` every 20 ms; a non-`None` exit status short-circuits to "reap and return successful." The 250 ms grace is set at both call sites (the close-tab path and the quit path) — the comment-side rationale at the close-tab call site (`src/pane/tabs.rs::PaneTabs::remove_at`) reads: "going through `shutdown` here gives well-behaved children a chance to flush their own state first."
+
+**S3 — Escalate to SIGKILL on the process group.** Grace expired, the same negative-PID `libc::kill` call fires with `SIGKILL`. The doc-comment names the safety property verbatim: "SIGKILL is uncatchable so a final blocking `wait()` is safe (it won't hang)."
+
+**S4 — Reap.** `self.child.wait()` blocks until the kernel reports the exit; `self.exit_status = Some(status)`; `self.closed = true`. No zombies left behind.
+
+**The Drop backstop.** A new `impl Drop for Pane` block lands at `src/pane/mod.rs::487-510` (post-merge) as the panic-and-error-propagation safety net. The doc-comment names the trade-off explicitly: "We can't sleep here without making Drop slow, so this skips the SIGTERM grace period and goes straight to SIGKILL on the process group. The orderly close-tab and quit paths call `shutdown` explicitly first, so this rarely fires for a 'well-behaved' exit." Drop is a hard SIGKILL by design; the orderly path is the soft SIGTERM-then-SIGKILL.
+
+**The two call sites.** `PaneTabs::remove_at(idx)` (`src/pane/tabs.rs::244-264` post-merge) wraps the `tabs.remove(idx)` line with a preceding `self.tabs[idx].pane.shutdown(Duration::from_millis(250))` call; the function's doc-comment names the close-tab path explicitly. `App::run`'s clean-exit tail (`src/app/mod.rs::1710-1722` post-merge) iterates every active tab and calls `entry.pane.shutdown(Duration::from_millis(250))`; the inline comment names the quit-path consequence verbatim: "quitting spyc with a frontend dev server in a pane would leave the whole node/esbuild/worker tree orphaned and still bound to its port" — the bug the PR fixes.
+
+**The early-return short-circuit.** If `self.closed` is already true (the reader thread saw EOF), `Pane::shutdown` skips signal delivery and merely harvests `exit_status` from a non-blocking `try_wait`. This handles the "child already exited; we're just here for cleanup" case without raising the kill-signal-on-already-dead-pid issue.
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `feat/pane-shutdown-cleanup` (feature prefix), but the commit subject reads "fix:" — and BUGS.md `### FIXED ###` records the entry as `(fixed, v1.41.9)`. The diff is unambiguously a fix (orphaned children was a bug, not a missing feature). Title-prefix-vs-commit-subject drift; the commit subject is correct against the diff. Captured for the eventual drift catalogue.
+- The shutdown machinery does not surface to the user — no flash, no log, no escalation-occurred indicator. A user whose `npm run dev` ignores SIGTERM (rare but possible — uncatchable means SIGKILL works regardless) gets a 250 ms latency on tab-close that they cannot distinguish from a fast voluntary exit. Whether this no-feedback design is correct or load-bearing for a future "process tree didn't shut down cleanly" warning is for the insight layer to interpret.
+- The doc-comment leans on `portable_pty` calling `setsid` for the negative-PID semantics. If a future portable_pty version changes that behavior — or if a custom spawn path bypasses portable_pty — the negative-PID kill silently widens or narrows. Captured for the insight layer's "load-bearing-on-an-upstream-invariant" row.
+- This PR's policy comment cites "the actual user-reported scenario" without naming a BUGS.md or thread anchor for the report itself; the report's text appears only in the CHANGELOG and BUGS.md `### FIXED ###` entries this PR adds, both written from after-fix vantage. The pre-fix bug-report text is not durable in the repo.
+
+Provenance:
+- a3338fa (PR #22 feat/pane-shutdown-cleanup, 2026-05-05) — full PR.
+- 193f7ad → 2021de0 — parent and tip SHAs for the diff inspection.
+- `git diff 193f7ad..2021de0 -- src/pane/mod.rs`: +90 lines; `Pane::shutdown(grace: Duration)` body at lines 256-323 post-merge; `impl Drop for Pane` at lines 487-510 post-merge.
+- `git diff 193f7ad..2021de0 -- src/pane/tabs.rs`: +12 lines; `PaneTabs::remove_at` at lines 244-264 post-merge; doc-comment naming the close-tab path verbatim.
+- `git diff 193f7ad..2021de0 -- src/app/mod.rs`: +13 lines; quit-path shutdown loop at lines 1710-1722 post-merge.
+- `git diff 193f7ad..2021de0 -- CHANGELOG.md`: 15 lines added under `[Unreleased]` `### Fixed`; the "leaving processes orphaned" lede quoted verbatim above.
+- `git diff 193f7ad..2021de0 -- BUGS.md`: 9 lines added to `### FIXED ###` recording the v1.41.9 fix; SMALL section unchanged by this PR.
+- `git diff 193f7ad..2021de0 -- Cargo.toml`: `version = "1.41.8"` → `version = "1.41.9"`.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — current-state pane PTY ownership; this PR is the genesis of `Pane::shutdown` and `impl Drop for Pane`.
+
+<!-- Entry-ID: 01KR10ASW7YSX4MB8G28X2C9N4 -->
