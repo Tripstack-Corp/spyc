@@ -54,14 +54,44 @@ pub enum Mount {
     LowerPane,
 }
 
-/// vi-style visual line selection inside the pager. Active when
-/// `PagerView::visual` is `Some(_)`; `V` toggles, `j`/`k`/`G`/etc.
-/// move `cursor`, `y` yanks the inclusive range `[min..=max]` and
-/// exits.
+/// What flavor of visual selection is active.
+///
+/// - `Line` — vi's `V`: whole rows from `min(anchor, cursor)` to
+///   `max(anchor, cursor)`. The column fields on
+///   `VisualSelection` are ignored.
+/// - `Block` — vi's `^v`: a rectangular slice of rows × columns.
+///   Both axes (line and column) read off the anchor / cursor
+///   pair. Wrap is suppressed during block mode so the rectangle
+///   maps cleanly onto on-screen rows; vim does the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualKind {
+    Line,
+    Block,
+}
+
+/// vi-style visual selection inside the pager. Active when
+/// `PagerView::visual` is `Some(_)`. `V` toggles `Line` mode,
+/// `^v` toggles `Block`. `j`/`k`/`G`/etc. move the row cursor;
+/// in block mode, `h`/`l` extend the column cursor. `y` yanks
+/// the selection (lines for `Line`, the rectangular slice for
+/// `Block`) and exits.
+///
+/// Column indices are character indices (chars(), not display
+/// columns), so wide-char glyphs (CJK / emoji) count as 1 in
+/// the rectangle even though they paint as 2 cells. Vim does the
+/// same — full display-width-aware block selection is future
+/// work.
 #[derive(Debug, Clone, Copy)]
 pub struct VisualSelection {
     pub anchor: usize,
     pub cursor: usize,
+    /// Anchor column (character index). Meaningful only in
+    /// `Block` mode; ignored in `Line` mode.
+    pub anchor_col: usize,
+    /// Cursor column (character index). Meaningful only in
+    /// `Block` mode; ignored in `Line` mode.
+    pub cursor_col: usize,
+    pub kind: VisualKind,
 }
 
 impl VisualSelection {
@@ -71,6 +101,16 @@ impl VisualSelection {
             (self.anchor, self.cursor)
         } else {
             (self.cursor, self.anchor)
+        }
+    }
+
+    /// Inclusive `(low, high)` column indices. Only meaningful
+    /// in `Block` mode.
+    pub const fn col_range(&self) -> (usize, usize) {
+        if self.anchor_col <= self.cursor_col {
+            (self.anchor_col, self.cursor_col)
+        } else {
+            (self.cursor_col, self.anchor_col)
         }
     }
 }
@@ -405,6 +445,25 @@ impl PagerView {
     /// auto-scroll) and `y` yanks the inclusive range. No-op on an
     /// empty buffer (nothing to select).
     pub fn enter_visual(&mut self) {
+        self.enter_visual_with_kind(VisualKind::Line);
+    }
+
+    /// Enter (or upgrade to) `Block` visual mode. Anchors at the
+    /// top visible line, column 0. If a `Line` selection is
+    /// already active, preserve its anchor / cursor and just
+    /// flip the kind — vim does the same when you press `^v`
+    /// inside an active `V` selection.
+    pub fn enter_visual_block(&mut self) {
+        if let Some(sel) = self.visual.as_mut() {
+            sel.kind = VisualKind::Block;
+            // Keep anchor/cursor lines as-is. Columns default to
+            // 0/0 if they were never set (Line mode ignored them).
+        } else {
+            self.enter_visual_with_kind(VisualKind::Block);
+        }
+    }
+
+    fn enter_visual_with_kind(&mut self, kind: VisualKind) {
         if self.lines.is_empty() {
             return;
         }
@@ -413,6 +472,9 @@ impl PagerView {
         self.visual = Some(VisualSelection {
             anchor: start,
             cursor: start,
+            anchor_col: 0,
+            cursor_col: 0,
+            kind,
         });
     }
 
@@ -468,20 +530,57 @@ impl PagerView {
         }
     }
 
-    /// Yank the visual-mode selection (inclusive line range) to the
-    /// clipboard and exit visual mode. Returns the number of yanked
-    /// lines. Errors propagate from the clipboard pipe.
+    /// Move the block-mode column cursor by `delta` characters.
+    /// Clamped at column 0 on the left; uncapped on the right
+    /// (selection past the line end is allowed — vim does the same;
+    /// short rows in the rectangle just contribute fewer chars to
+    /// the yanked output). No-op outside block mode.
+    pub fn visual_col_move(&mut self, delta: isize) {
+        let Some(sel) = self.visual.as_mut() else {
+            return;
+        };
+        if sel.kind != VisualKind::Block {
+            return;
+        }
+        let new = (sel.cursor_col as isize + delta).max(0) as usize;
+        sel.cursor_col = new;
+    }
+
+    /// Yank the visual-mode selection to the clipboard and exit.
+    /// `Line` mode joins whole rows with newlines; `Block` mode
+    /// joins the rectangular slice (rows × columns), where each
+    /// row contributes `line[lo_col..=hi_col]` (character indices,
+    /// not display columns) — rows shorter than the range
+    /// contribute their available chars and stop. Returns the
+    /// number of rows yanked.
     pub fn yank_visual_to_clipboard(&mut self) -> std::io::Result<usize> {
         let Some(sel) = self.visual else {
             return Ok(0);
         };
         let (lo, hi) = sel.range();
         let hi = hi.min(self.lines.len().saturating_sub(1));
-        let text = self.lines[lo..=hi]
-            .iter()
-            .map(line_plain_text)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let text = match sel.kind {
+            VisualKind::Line => self.lines[lo..=hi]
+                .iter()
+                .map(line_plain_text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            VisualKind::Block => {
+                let (lo_col, hi_col) = sel.col_range();
+                self.lines[lo..=hi]
+                    .iter()
+                    .map(|line| {
+                        let plain = line_plain_text(line);
+                        plain
+                            .chars()
+                            .skip(lo_col)
+                            .take(hi_col + 1 - lo_col)
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        };
         pbcopy(&text)?;
         let count = hi - lo + 1;
         self.visual = None;
@@ -798,12 +897,25 @@ impl PagerView {
         if let Some(sel) = self.visual {
             let (lo, hi) = sel.range();
             let count = hi - lo + 1;
-            return Some(format!(
-                "-- VISUAL --  L{}-L{}  ({count} line{})",
-                lo + 1,
-                hi + 1,
-                if count == 1 { "" } else { "s" },
-            ));
+            return Some(match sel.kind {
+                VisualKind::Line => format!(
+                    "-- VISUAL --  L{}-L{}  ({count} line{})",
+                    lo + 1,
+                    hi + 1,
+                    if count == 1 { "" } else { "s" },
+                ),
+                VisualKind::Block => {
+                    let (lo_col, hi_col) = sel.col_range();
+                    let cols = hi_col - lo_col + 1;
+                    format!(
+                        "-- VISUAL BLOCK --  L{}-L{} C{}-C{}  ({count}×{cols})",
+                        lo + 1,
+                        hi + 1,
+                        lo_col + 1,
+                        hi_col + 1,
+                    )
+                }
+            });
         }
         if let Some(ref buf) = self.jump_buf {
             return Some(format!(":{buf}_"));
@@ -996,7 +1108,13 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         // Split into 1+ visual rows. wrap=false ⇒ exactly one piece;
         // wrap=true with body_w available width gives a Vec of
         // visually-bounded chunks, preserving styling per-span.
-        let pieces = if view.wrap && body_w > 0 {
+        // Block visual mode forces wrap off — the column-based
+        // selection rectangle only makes sense against logical
+        // rows; with wrap on, a "row" the user is selecting could
+        // be split across multiple visual rows and the rectangle
+        // would smear. Vim does the same.
+        let block_mode = view.visual.is_some_and(|v| v.kind == VisualKind::Block);
+        let pieces = if view.wrap && body_w > 0 && !block_mode {
             wrap_line(&styled, body_w)
         } else {
             vec![styled]
@@ -1053,28 +1171,51 @@ fn apply_row_styling(
     theme: &Theme,
 ) -> Line<'static> {
     let mut styled = styled_line_for_render(line, view, abs_idx, theme);
-    // Visual-line selection: paint a muted background across the
-    // inclusive range so the user can see what `y` will yank. The
-    // cursor end gets the brighter cursor_bg (so it reads like vi's
-    // visual cursor); other selected rows use cursor_bg_dim. Applied
-    // before the picker-cursor branch so visual mode wins when both
-    // would coincide (visual mode shouldn't be active inside picker
-    // overlays anyway, but be defensive).
+    // Visual selection: paint a muted background across the
+    // selected region so the user can see what `y` will yank.
+    // - Line mode (`V`): whole rows in `[lo..=hi]`. Cursor row
+    //   gets the brighter cursor_bg, others cursor_bg_dim.
+    // - Block mode (`^v`): only the rectangular slice
+    //   `[lo_col..=hi_col]` of each row in `[lo..=hi]` is
+    //   highlighted, painted character-by-character. The cursor
+    //   *cell* (cursor_line, cursor_col) gets the brighter bg.
+    // Applied before the picker-cursor branch so visual mode wins
+    // when both would coincide.
     if let Some(sel) = view.visual {
         let (lo, hi) = sel.range();
         if (lo..=hi).contains(&abs_idx) {
-            let bg = if abs_idx == sel.cursor {
-                theme.cursor_bg
-            } else {
-                theme.cursor_bg_dim
-            };
-            styled = Line::from(
-                styled
-                    .spans
-                    .into_iter()
-                    .map(|s| Span::styled(s.content, s.style.bg(bg)))
-                    .collect::<Vec<_>>(),
-            );
+            match sel.kind {
+                VisualKind::Line => {
+                    let bg = if abs_idx == sel.cursor {
+                        theme.cursor_bg
+                    } else {
+                        theme.cursor_bg_dim
+                    };
+                    styled = Line::from(
+                        styled
+                            .spans
+                            .into_iter()
+                            .map(|s| Span::styled(s.content, s.style.bg(bg)))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+                VisualKind::Block => {
+                    let (lo_col, hi_col) = sel.col_range();
+                    let cursor_col = if abs_idx == sel.cursor {
+                        Some(sel.cursor_col)
+                    } else {
+                        None
+                    };
+                    styled = paint_block_selection(
+                        &styled,
+                        lo_col,
+                        hi_col,
+                        cursor_col,
+                        theme.cursor_bg_dim,
+                        theme.cursor_bg,
+                    );
+                }
+            }
         }
     }
     if view.picker_cursor == Some(abs_idx) {
@@ -1117,6 +1258,65 @@ fn apply_row_styling(
         }
     }
     styled
+}
+
+/// Paint a block-selection rectangle's row contribution onto a
+/// styled line: chars in `[lo_col..=hi_col]` get
+/// `selection_bg` overlaid on their existing style; the
+/// `cursor_col` cell (when set) gets `cursor_bg` instead so it
+/// reads like vi's "I'm here" cell. Char index is character-
+/// based (Unicode scalars), not display-width, so wide-glyph
+/// (CJK / emoji) counts as 1 — same convention vim uses for
+/// block mode.
+///
+/// Adjacent characters with identical styles merge into a
+/// single span so we don't explode the renderer with one span
+/// per char.
+fn paint_block_selection(
+    line: &Line<'static>,
+    lo_col: usize,
+    hi_col: usize,
+    cursor_col: Option<usize>,
+    selection_bg: ratatui::style::Color,
+    cursor_bg: ratatui::style::Color,
+) -> Line<'static> {
+    let mut new_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_style: Option<Style> = None;
+    let mut col = 0usize;
+
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let in_sel = col >= lo_col && col <= hi_col;
+            let style = if in_sel {
+                if cursor_col == Some(col) {
+                    span.style.bg(cursor_bg)
+                } else {
+                    span.style.bg(selection_bg)
+                }
+            } else {
+                span.style
+            };
+            if Some(style) != current_style {
+                if !current_text.is_empty() {
+                    new_spans.push(Span::styled(
+                        std::mem::take(&mut current_text),
+                        current_style.unwrap_or_default(),
+                    ));
+                }
+                current_style = Some(style);
+            }
+            current_text.push(ch);
+            col += 1;
+        }
+    }
+    if !current_text.is_empty() {
+        new_spans.push(Span::styled(
+            current_text,
+            current_style.unwrap_or_default(),
+        ));
+    }
+    Line::from(new_spans)
 }
 
 /// Split a styled line into 1+ visual rows, each at most `width`
@@ -1488,6 +1688,10 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
                 ),
                 ("V", "enter visual line mode (j/k extend, y yanks range)"),
                 (
+                    "^v",
+                    "enter visual block mode (j/k/h/l extend, y yanks rect)",
+                ),
+                (
                     "p",
                     "open in $PAGER (less, full-screen takeover — for huge files)",
                 ),
@@ -1814,11 +2018,17 @@ mod tests {
         let sel = VisualSelection {
             anchor: 5,
             cursor: 10,
+            anchor_col: 0,
+            cursor_col: 0,
+            kind: VisualKind::Line,
         };
         assert_eq!(sel.range(), (5, 10));
         let sel = VisualSelection {
             anchor: 10,
             cursor: 5,
+            anchor_col: 0,
+            cursor_col: 0,
+            kind: VisualKind::Line,
         };
         // Cursor moved up past the anchor — range still goes low → high.
         assert_eq!(sel.range(), (5, 10));
@@ -1890,6 +2100,171 @@ mod tests {
         // anchor == cursor → single-line range.
         let s = view.status_text().expect("status while visual");
         assert!(s.contains("(1 line)"), "expected singular, got: {s}");
+    }
+
+    // ── v1.5 Phase 4: visual block (columnar) mode ─────────────────
+
+    fn block_view_with(content: &[&str]) -> PagerView {
+        PagerView::new_plain("v", content.iter().map(|&s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn enter_visual_block_starts_in_block_mode() {
+        let mut view = block_view_with(&["abc", "def", "ghi"]);
+        view.enter_visual_block();
+        let sel = view.visual.expect("visual active");
+        assert_eq!(sel.kind, VisualKind::Block);
+        assert_eq!(sel.anchor_col, 0);
+        assert_eq!(sel.cursor_col, 0);
+    }
+
+    #[test]
+    fn enter_visual_block_upgrades_existing_line_visual() {
+        let mut view = block_view_with(&["abcdef", "ghijkl", "mnopqr"]);
+        view.enter_visual();
+        view.visual_move(2, 5);
+        let pre = view.visual.expect("line visual");
+        assert_eq!(pre.kind, VisualKind::Line);
+        view.enter_visual_block();
+        let post = view.visual.expect("block visual");
+        assert_eq!(post.kind, VisualKind::Block);
+        // Anchor / cursor lines preserved through the upgrade.
+        assert_eq!(post.anchor, pre.anchor);
+        assert_eq!(post.cursor, pre.cursor);
+    }
+
+    #[test]
+    fn col_range_is_inclusive_and_order_independent() {
+        let sel = VisualSelection {
+            anchor: 0,
+            cursor: 0,
+            anchor_col: 2,
+            cursor_col: 7,
+            kind: VisualKind::Block,
+        };
+        assert_eq!(sel.col_range(), (2, 7));
+        let sel = VisualSelection {
+            anchor: 0,
+            cursor: 0,
+            anchor_col: 7,
+            cursor_col: 2,
+            kind: VisualKind::Block,
+        };
+        // Cursor moved left past anchor — range still goes low→high.
+        assert_eq!(sel.col_range(), (2, 7));
+    }
+
+    #[test]
+    fn visual_col_move_extends_and_clamps_at_zero() {
+        let mut view = block_view_with(&["abcdef"]);
+        view.enter_visual_block();
+        view.visual_col_move(3);
+        assert_eq!(view.visual.unwrap().cursor_col, 3);
+        // Clamp at 0 on the left.
+        view.visual_col_move(-100);
+        assert_eq!(view.visual.unwrap().cursor_col, 0);
+        // Anchor unchanged.
+        assert_eq!(view.visual.unwrap().anchor_col, 0);
+    }
+
+    #[test]
+    fn visual_col_move_is_noop_outside_block_mode() {
+        // Line mode: visual_col_move must not touch the cursor_col
+        // (it's stored but ignored, by design).
+        let mut view = block_view_with(&["abcdef"]);
+        view.enter_visual();
+        view.visual_col_move(3);
+        assert_eq!(view.visual.unwrap().cursor_col, 0);
+    }
+
+    #[test]
+    fn block_yank_extracts_rectangular_slice() {
+        // 4-line CSV-ish grid, yank a 3×3 rectangle (rows 0..=2,
+        // cols 1..=3) → "bcd / fgh / jkl".
+        let mut view = block_view_with(&["abcde", "efghi", "ijklm", "mnopq"]);
+        view.enter_visual_block();
+        view.visual_move(2, 5); // rows 0..=2
+        view.visual_col_move(3); // cols 0..=3 inclusive...
+        // Wait: anchor_col=0, cursor_col=3 → col_range = (0,3) → 4 chars
+        // So yank picks chars 0..=3 of each row.
+        let sel = view.visual.unwrap();
+        let (lo_col, hi_col) = sel.col_range();
+        assert_eq!((lo_col, hi_col), (0, 3));
+        // We can't exercise the pbcopy side from a unit test, but
+        // the slice math is what we want to verify. Reproduce the
+        // same logic the yank uses:
+        let plain: Vec<String> = view
+            .lines
+            .iter()
+            .take(3)
+            .map(|l| {
+                line_plain_text(l)
+                    .chars()
+                    .skip(lo_col)
+                    .take(hi_col + 1 - lo_col)
+                    .collect()
+            })
+            .collect();
+        assert_eq!(plain, vec!["abcd", "efgh", "ijkl"]);
+    }
+
+    #[test]
+    fn block_yank_handles_short_rows_gracefully() {
+        // The middle row is shorter than the column range — yank
+        // takes whatever chars are available and stops, doesn't
+        // pad or panic.
+        let mut view = block_view_with(&["abcdefgh", "xy", "1234567"]);
+        view.enter_visual_block();
+        view.visual_move(2, 5);
+        view.visual_col_move(5); // col_range = (0, 5) → 6 chars wanted
+
+        let sel = view.visual.unwrap();
+        let (lo_col, hi_col) = sel.col_range();
+        let plain: Vec<String> = view
+            .lines
+            .iter()
+            .take(3)
+            .map(|l| {
+                line_plain_text(l)
+                    .chars()
+                    .skip(lo_col)
+                    .take(hi_col + 1 - lo_col)
+                    .collect()
+            })
+            .collect();
+        assert_eq!(plain, vec!["abcdef", "xy", "123456"]);
+    }
+
+    #[test]
+    fn block_status_text_reports_rect_dimensions() {
+        let mut view = block_view_with(&["abcdef", "ghijkl", "mnopqr"]);
+        view.enter_visual_block();
+        view.visual_move(2, 5);
+        view.visual_col_move(3);
+        let s = view.status_text().expect("status while visual block");
+        assert!(s.contains("VISUAL BLOCK"), "got: {s}");
+        assert!(s.contains("L1-L3"), "got: {s}");
+        assert!(s.contains("C1-C4"), "got: {s}");
+        assert!(s.contains("(3×4)"), "got: {s}");
+    }
+
+    #[test]
+    fn block_range_stays_inclusive_when_anchor_higher_than_cursor() {
+        // Direct construction so we can pin both axes — the
+        // public API only ever sets `anchor_col = 0` at entry.
+        // Anchor at (line 5, col 7), cursor dragged up-and-left
+        // to (line 2, col 3). Both range helpers must still
+        // return low → high so the renderer and yank get a
+        // sensible rectangle.
+        let sel = VisualSelection {
+            anchor: 5,
+            cursor: 2,
+            anchor_col: 7,
+            cursor_col: 3,
+            kind: VisualKind::Block,
+        };
+        assert_eq!(sel.range(), (2, 5));
+        assert_eq!(sel.col_range(), (3, 7));
     }
 
     // ── v1.5 Phase 1: Mount enum & rect dispatch ───────────────────
