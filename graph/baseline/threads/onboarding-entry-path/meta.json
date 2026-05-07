@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:50:53.718458+00:00",
   "summary": "The development thread discusses the onboarding entry path for future contributors, focusing on selecting the appropriate sections from \"ROADMAP.md\" in the Foundations, Thesis, and Distribution categories. Key decisions include choosing the \"Remaining\" sections to ensure contributors understand the project's structure and goals. The outcome is a clear pathway for new contributors to navigate the project's content and contribute effectively.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-entry-path": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:52:45.173563+00:00",
+      "vote_score": 0
+    }
+  }
 }
