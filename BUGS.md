@@ -110,6 +110,12 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.32) Pane scrollback view (`^a-v`) opens
+  cleanly: no jump (renderer-driven scroll-to-bottom on first
+  frame); wrap on by default so long lines fold instead of
+  truncating; borderless in `Mount::LowerPane` so the pager
+  fills the slot like the pty did. Three issues reported
+  against the v1.41.29 ship, fixed in one PR.
 - (fixed, v1.41.26) nvim / less / htop / lazygit cursor visible
   again inside spyc's pty panes. Reported by Spencer: opening
   nvim via `V` or `^a-c → nvim` left no cursor on screen. The
