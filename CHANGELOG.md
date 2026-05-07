@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **MCP socket discovery is now project-scoped — no more
+  cross-project attachment.** Previously, when `$SPYC_MCP_SOCK`
+  wasn't set (claude launched outside spyc's pane, env didn't
+  propagate, or enterprise managed-mcp.json suppressed the local
+  `.mcp.json`), `discover_live_socket` scanned every
+  `~/.local/state/spyc/mcp-*.sock` on the host and returned the
+  first one that connected — a claude in project A could silently
+  attach to a spyc running in project B (or, with `$HOME` unset,
+  even another user's spyc on a shared host). Wrong-context tools
+  and file paths flowed through, with no log line saying so.
+  Discovery now walks the caller's cwd toward the filesystem
+  root, looking for `.spyc-context-<pid>.json` markers (each
+  written by a running spyc rooted at that directory). The first
+  ancestor with at least one marker is the project boundary; only
+  those PIDs become socket candidates. A parent-dir spyc never
+  shadows a child-dir spyc — locality wins. With no project
+  match, discovery returns None and the stdio proxy falls back to
+  read-only direct mode instead of attaching to the wrong host.
+  Also tightened stale-socket cleanup: only delete on
+  ConnectionRefused / NotFound, not on every connect error,
+  so a transient EAGAIN/EMFILE doesn't race-delete a healthy
+  peer's socket. 8 unit tests cover same-dir, walk-up, locality,
+  multi-instance, no-match, and end-to-end no-attach behaviors.
+
 ### Changed
 - **`/` and `=` are now case-insensitive substring matchers (was:
   case-insensitive prefix).** Reported as `env` not finding `.env`

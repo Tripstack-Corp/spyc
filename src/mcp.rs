@@ -122,9 +122,11 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
 ///
 /// Socket resolution order:
 /// 1. `$SPYC_MCP_SOCK` (set in `.mcp.json`'s `env` block) — exact match
-/// 2. Discovery scan of `~/.local/state/spyc/mcp-*.sock` — finds any
-///    live instance (handles enterprise managed-mcp.json, manual testing)
-/// 3. Falls back to read-only direct mode if nothing is alive.
+/// 2. Project-scoped discovery: walk `caller_cwd` upward looking for
+///    `.spyc-context-<pid>.json` markers; map those PIDs to live
+///    sockets. Refuses cross-project attachment (a spyc running in
+///    a different project tree can no longer be picked up).
+/// 3. Falls back to read-only direct mode if nothing matches.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
     // Try explicit socket path from env first.
     if let Ok(p) = std::env::var("SPYC_MCP_SOCK") {
@@ -138,8 +140,9 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
         }
     }
 
-    // Discovery: scan for any live mcp-*.sock.
-    if let Some(stream) = discover_live_socket() {
+    // Discovery: only consider spyc instances rooted in this project
+    // tree (caller's cwd or any ancestor). See `discover_live_socket`.
+    if let Some(stream) = discover_live_socket(&project_root) {
         return run_proxy(stream);
     }
 
@@ -148,29 +151,113 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
     run_direct(project_root)
 }
 
-/// Scan `~/.local/state/spyc/` for `mcp-*.sock` files and try to
-/// connect to each. Returns the first live connection found.
-fn discover_live_socket() -> Option<UnixStream> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let state_dir = PathBuf::from(home).join(".local/state/spyc");
-    let entries = std::fs::read_dir(&state_dir).ok()?;
+/// Project-scoped discovery: walk `caller_cwd` upward looking for any
+/// `.spyc-context-<pid>.json` markers (each is written by a running
+/// spyc rooted at that directory — see `context::context_path`).
+/// The first ancestor with at least one marker is the "project
+/// boundary"; only those PIDs become candidates. We never aggregate
+/// across levels: a parent-dir spyc shouldn't shadow a child-dir spyc
+/// when both exist.
+///
+/// Why this shape: prior to this fix, discovery scanned every socket
+/// in `~/.local/state/spyc/` and returned the first connectable one,
+/// happily attaching a claude in project A to a spyc running in
+/// project B (or even another user's spyc, depending on `$HOME`
+/// scoping). Project-scoped discovery rules that out while keeping
+/// the "claude launched outside the pane just works" ergonomic — as
+/// long as it's launched somewhere inside the spyc instance's tree.
+fn discover_live_socket(caller_cwd: &Path) -> Option<UnixStream> {
+    let candidates = collect_project_pids(caller_cwd);
+    if candidates.is_empty() {
+        mcp_log(&format!(
+            "stdio: discover: no .spyc-context-*.json found in {} or ancestors",
+            caller_cwd.display(),
+        ));
+        return None;
+    }
+    mcp_log(&format!(
+        "stdio: discover: {} project-scoped candidate(s) for {}",
+        candidates.len(),
+        caller_cwd.display(),
+    ));
+    for pid in candidates {
+        let sock = socket_path_for(pid);
+        mcp_log(&format!("stdio: discover trying {}", sock.display()));
+        match UnixStream::connect(&sock) {
+            Ok(stream) => {
+                mcp_log(&format!(
+                    "stdio: discovered live socket {} (pid {})",
+                    sock.display(),
+                    pid,
+                ));
+                return Some(stream);
+            }
+            Err(e) => {
+                // Only delete on "no peer there" errors — connect
+                // can also fail under transient resource pressure
+                // (EAGAIN, EMFILE) where a live peer's socket
+                // would survive the next attempt. Pruning on those
+                // would race-delete a healthy peer.
+                let stale = matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound,
+                );
+                if stale {
+                    let _ = std::fs::remove_file(&sock);
+                }
+                mcp_log(&format!(
+                    "stdio: discover skip {}: {} (stale={stale})",
+                    sock.display(),
+                    e.kind(),
+                ));
+            }
+        }
+    }
+    None
+}
 
+/// Walk `start` toward the filesystem root looking for
+/// `.spyc-context-<pid>.json` markers. Returns the PIDs from the
+/// first ancestor that has any matches; empty Vec otherwise.
+fn collect_project_pids(start: &Path) -> Vec<u32> {
+    let mut here: &Path = start;
+    loop {
+        let pids = read_context_pids_in_dir(here);
+        if !pids.is_empty() {
+            return pids;
+        }
+        let Some(parent) = here.parent() else {
+            return Vec::new();
+        };
+        if parent == here {
+            return Vec::new();
+        }
+        here = parent;
+    }
+}
+
+/// Read `.spyc-context-<pid>.json` filenames in `dir`, returning the
+/// PIDs parsed out of them. Order is unspecified (matches `read_dir`),
+/// which is fine because the caller tries each candidate in turn.
+fn read_context_pids_in_dir(dir: &Path) -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut pids = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if !name_str.starts_with("mcp-") || !name_str.ends_with(".sock") {
+        let Some(rest) = name_str.strip_prefix(".spyc-context-") else {
             continue;
+        };
+        let Some(pid_str) = rest.strip_suffix(".json") else {
+            continue;
+        };
+        if let Ok(pid) = pid_str.parse::<u32>() {
+            pids.push(pid);
         }
-        let sock = entry.path();
-        mcp_log(&format!("stdio: discover trying {}", sock.display()));
-        if let Ok(stream) = UnixStream::connect(&sock) {
-            mcp_log(&format!("stdio: discovered live socket {}", sock.display()));
-            return Some(stream);
-        }
-        // Stale socket — clean it up.
-        let _ = std::fs::remove_file(&sock);
     }
-    None
+    pids
 }
 
 /// Direct JSONL stdio server — no socket proxy.
@@ -1809,6 +1896,106 @@ mod tests {
         let path = socket_path();
         let pid = std::process::id();
         assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    }
+
+    // ── Project-scoped discovery ──────────────────────────────
+
+    fn touch_context(dir: &Path, pid: u32) {
+        std::fs::write(dir.join(format!(".spyc-context-{pid}.json")), b"{}").unwrap();
+    }
+
+    #[test]
+    fn read_context_pids_finds_markers() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch_context(tmp.path(), 100);
+        touch_context(tmp.path(), 200);
+        // Decoy: not our prefix.
+        std::fs::write(tmp.path().join("not-spyc-300.json"), "{}").unwrap();
+        // Decoy: malformed PID.
+        std::fs::write(tmp.path().join(".spyc-context-abc.json"), "{}").unwrap();
+        let mut pids = read_context_pids_in_dir(tmp.path());
+        pids.sort_unstable();
+        assert_eq!(pids, vec![100, 200]);
+    }
+
+    #[test]
+    fn read_context_pids_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(read_context_pids_in_dir(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn collect_pids_finds_marker_in_caller_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch_context(tmp.path(), 42);
+        assert_eq!(collect_project_pids(tmp.path()), vec![42]);
+    }
+
+    #[test]
+    fn collect_pids_walks_up_to_ancestor_marker() {
+        // spyc started at /tmp/.../proj; claude in /tmp/.../proj/src/sub.
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("proj");
+        let sub = proj.join("src").join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        touch_context(&proj, 7);
+        assert_eq!(collect_project_pids(&sub), vec![7]);
+    }
+
+    #[test]
+    fn collect_pids_first_ancestor_with_match_wins() {
+        // A spyc at /proj and another at /proj/inner. Caller in
+        // /proj/inner should NOT see /proj's spyc — locality
+        // beats inheritance.
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("proj");
+        let inner = proj.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        touch_context(&proj, 1);
+        touch_context(&inner, 2);
+        assert_eq!(collect_project_pids(&inner), vec![2]);
+    }
+
+    #[test]
+    fn collect_pids_returns_all_pids_at_same_dir() {
+        // Two spyc instances rooted at the same dir → both candidates.
+        let tmp = tempfile::tempdir().unwrap();
+        touch_context(tmp.path(), 100);
+        touch_context(tmp.path(), 200);
+        let mut pids = collect_project_pids(tmp.path());
+        pids.sort_unstable();
+        assert_eq!(pids, vec![100, 200]);
+    }
+
+    #[test]
+    fn collect_pids_no_match_returns_empty() {
+        // Cross-project case: caller's tree has no .spyc-context-*.json.
+        // Sibling dir does, but that's deliberately invisible.
+        let tmp = tempfile::tempdir().unwrap();
+        let project_a = tmp.path().join("a");
+        let project_b = tmp.path().join("b");
+        std::fs::create_dir_all(&project_a).unwrap();
+        std::fs::create_dir_all(&project_b).unwrap();
+        touch_context(&project_b, 99);
+        // Walking up from project_a hits tmp.path() (no marker), then
+        // ancestors of the temp dir which we can't predict — but the
+        // test passes as long as none of THOSE happen to have a
+        // spyc-context file. In CI / typical dev machines they won't.
+        // To make the test deterministic we anchor at project_a only.
+        let pids = collect_project_pids(&project_a);
+        assert!(
+            !pids.contains(&99),
+            "must not pick up sibling project's spyc"
+        );
+    }
+
+    #[test]
+    fn discover_live_socket_returns_none_without_project_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .spyc-context-*.json in the caller's tree → discovery
+        // must NOT fall through to scanning every socket on the
+        // host (the cross-project bug we're fixing).
+        assert!(discover_live_socket(tmp.path()).is_none());
     }
 
     #[test]
