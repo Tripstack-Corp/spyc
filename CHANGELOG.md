@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`^C` inside the pager is now contextual instead of leaking to
+  the spyc-list status bar.** Reported with a screenshot: a `! find /`
+  capture had finished (correct exit 130 from the original ^C), but
+  every subsequent ^C while the user was still looking at the
+  result printed `^C is not a quit binding` on the *background*
+  spyc-list flash row — wrong screen for the notice. Now ^C in the
+  pager dispatches contextually:
+    - Task viewer + task running → `SIGINT` to the process group,
+      flash `task #N: sent SIGINT` inside the pager (mirrors what
+      ^C does in a normal terminal; child decides exit vs. trap).
+    - Task viewer + task finished → flash `process already
+      stopped` inside the pager.
+    - Other pager views (file viewer, help, etc.) → flash `press
+      Esc or q to close pager` inside the pager (^C-as-quit is
+      muscle memory from `less`).
+  The top-level `^C is not a quit binding` flash now also excludes
+  the pager-open case, so it can never fire while a pager is up.
+
 - **MCP socket discovery is now project-scoped — no more
   cross-project attachment.** Previously, when `$SPYC_MCP_SOCK`
   wasn't set (claude launched outside spyc's pane, env didn't

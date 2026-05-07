@@ -2790,12 +2790,20 @@ impl App {
         //  - Pane focused: ^C must reach the child (zsh, etc.) so the
         //    user can interrupt a running command. Forwarding happens
         //    at the pane-focused dispatch below.
+        //  - Pager open: ^C is contextual to the pager (interrupt a
+        //    running task viewer, "process already stopped" hint
+        //    when the task is done, "press Esc / q to close" for
+        //    other pager views). Without this exclusion the user
+        //    sees the spyc-list flash on the *background* status
+        //    bar while looking at the pager — wrong screen for the
+        //    notice.
         let pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused;
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
             && !pane_has_focus
+            && self.pager.is_none()
         {
             self.state.flash_info(
                 "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",
@@ -4732,6 +4740,41 @@ impl App {
         } else {
             self.state
                 .flash_error(format!("task #{id}: SIGSTOP failed"));
+        }
+    }
+
+    /// Send SIGINT to a running task's process group. Mirrors what
+    /// pressing ^C in a normal terminal does: child's tty driver
+    /// delivers SIGINT and the child decides whether to exit
+    /// (default) or trap. Returns the human-readable result for the
+    /// caller to flash in the right place (pager footer, status
+    /// bar, etc.). `None` target = most-recent task.
+    fn interrupt_task(&self, target: Option<u32>) -> Result<String, String> {
+        let id = target
+            .or_else(|| self.background_tasks.most_recent())
+            .ok_or_else(|| "no background tasks".to_string())?;
+        let task = self
+            .background_tasks
+            .tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| format!("no task with id {id}"))?;
+        if !matches!(task.status, TaskStatus::Running) {
+            return Err("process already stopped".to_string());
+        }
+        let pid = task
+            .child
+            .process_id()
+            .ok_or_else(|| format!("task #{id}: no process id"))?;
+        // Negative pid → process group, same convention as
+        // pause_task / resume_task. SIGINT lets the child clean up
+        // (matches a real ^C); use ^\ in the live capture path for a
+        // hard kill.
+        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGINT) };
+        if r == 0 {
+            Ok(format!("task #{id}: sent SIGINT"))
+        } else {
+            Err(format!("task #{id}: SIGINT failed"))
         }
     }
 
@@ -7102,6 +7145,35 @@ impl App {
         };
         // Clear any one-shot flash message from the previous keypress.
         view.flash = None;
+
+        // ^C inside the pager is contextual:
+        //   - Task viewer + task running → SIGINT to the process group
+        //     (mirrors a real ^C in the captured task's tty), flash
+        //     the result *inside* the pager footer.
+        //   - Task viewer + task finished → flash "process already
+        //     stopped" inside the pager. Reported: extra ^C presses
+        //     after a task exits (130 from the original ^C) leaked
+        //     to the spyc-list status bar instead of telling the
+        //     user the task was already gone.
+        //   - Other pager views (file viewer, help, etc.) → flash
+        //     "press Esc or q to close" inside the pager, since
+        //     ^C-as-quit is muscle memory from `less` and the user
+        //     expects feedback in the active screen.
+        if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(id) = view.task_id {
+                match self.interrupt_task(Some(id)) {
+                    Ok(msg) | Err(msg) => {
+                        if let Some(v) = self.pager.as_mut() {
+                            v.flash = Some(msg);
+                        }
+                    }
+                }
+            } else if let Some(v) = self.pager.as_mut() {
+                v.flash = Some("press Esc or q to close pager".into());
+            }
+            return PostAction::None;
+        }
+
         // Compute the pager's actual viewport from the terminal size.
         // The pager overlay occupies ~92% of the frame height, with a
         // 1-row border on each side, and possibly a search bar at the

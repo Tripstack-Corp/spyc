@@ -1,8 +1,7 @@
 ### SMALL ###
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
-- notice of ^c while in the task viewer goes to the spyc pane instead of at the
-  top of the task pager view
+- commands that have stopped running in task runner (!) should show EOF
 - how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
@@ -105,6 +104,11 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.25) `^C` inside the pager is now contextual — it
+  flashes inside the pager footer instead of leaking to the
+  spyc-list status bar. Task viewer + running → SIGINT to the
+  process group; task viewer + finished → "process already
+  stopped"; other pager → "press Esc or q to close pager".
 - (fixed, v1.41.24) MCP socket discovery is now project-scoped.
   Walks the caller's cwd toward the filesystem root looking for
   `.spyc-context-<pid>.json` markers; only PIDs from the first
