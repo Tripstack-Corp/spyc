@@ -5,7 +5,7 @@
   "title": "history arc 05 pager surface",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T22:56:07.061885+00:00",
-  "summary": "The development thread focuses on improving the pager surface in Arc 05 through multiple PRs, addressing issues with scroll behavior and wrapping. Key decisions included adjusting `scroll_max` to handle visual rows during wrap and fixing the pager's scroll position in the foreground. Outcomes resulted in enhanced pager functionality and improved stability in the foreground and background.",
-  "entry_count": 9
+  "last_updated": "2026-05-07T22:57:56.083238+00:00",
+  "summary": "The development thread for arc 05 pager surface involved multiple PRs focused on improving pager functionality, including scroll behavior, wrapping, and search features. Key decisions included fixing bugs in pager wrapping, scroll logic, and search in multi-column views, while introducing new features like alt-screen hints and visual line mode. The arc concluded with a baseline complete, and arc 06 is set to follow.",
+  "entry_count": 10
 }

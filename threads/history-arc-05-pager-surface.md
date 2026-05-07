@@ -543,3 +543,76 @@ Provenance:
 - `history-arc-05-pager-surface` PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA.
 
 <!-- Entry-ID: 01KR2AFHD42DHX6XQS7S6VK4M5 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:57:56.079911+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 05 baseline complete; cadence-at-scale results from option A'; arc 06 (input-and-overlays) follows
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Arc 05 baseline narration complete. Eight PRs, three phases plus one outlier, written across ten head entries (framing + 8 per-PR + this closure). The arc spans 2026-05-02 (PR #11) to 2026-05-07 (PR #36), the longest baseline-arc span in the reconstruction tied with arc 04. The pager (and help-as-pager) surface accretes capability from "scrolls / seeds / searches correctly" (phase α) through "discoverability and config" (phase β) to "mode-you-enter and launchable-from-listing" (phase γ), with PR #36's matcher shift filed adjacent on read-surface direction.
+
+**Forward reference: arc 06 — `history-arc-06-input-and-overlays`.** Picks up next. Member PRs: PR #8 (`feat/harpoon`, 62fc129, 2026-05-02), PR #10 (`feat/quickselect`, 9043547, 2026-05-02), PR #25 (`fix/input-dispatch-hardening`, bfc4a18, 2026-05-06), PR #32 (`fix/chord-priority-over-user-keymap`, a7867fb, 2026-05-06). Arc 06 carries a **mandatory back-reference to arc 02**: PRs #8 and #10 are named at arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) as catalogue §4 PARALLEL PATTERN ("not direct execution of `notes/lazygit-ux-catalogue.md` §4 'Generalized pager picker'"). Arc 05 just shipped two more catalogue §4 direction-alignments (PR #33 visual-line-mode, PR #35 D-launches-pager); arc 06 ships the catalogue §4 *parallel* pattern in PRs #8 and #10. Three PRs across two arcs all align with §4 directionally without one of them executing §4's specific picker pattern; this is the kind of distribution arc 02's catalogue framing was built to make legible.
+
+**Cadence-at-scale verdict — option A' tested at 8 PRs.**
+
+Arc 01's reflection tail (= 01KR0XR504ZR10Y242JERT4K9S) named arc 05 as the explicit cadence-at-scale test point. Verdict against the lived experience of writing this thread:
+
+- **Per-PR grain held at 8 PRs.** Eight per-PR entries with provenance blocks each plus a framing and a closure scaled without strain. Each per-PR entry remained focused on its diff and ran 400–800 words; none collapsed into a one-paragraph summary that arc 01's contemplated single-summary-entry would have produced.
+- **The phase-grouping in the framing was load-bearing.** Three phases (α / β / γ) plus one outlier organized the eight PRs around their structural role rather than chronology. Without phase-grouping, the closure entry would carry the entire summarization burden at 8 PRs — exactly what arc 01's reflection tail flagged ("thirteen [entries] for eight is heavy enough that the closure entry alone won't be doing the heavy summarization"). The framing took on that summarization role explicitly, leaving the closure free to do this verdict-and-forward-pointing work.
+- **Per-PR entry IDs preserved for the back-reference network.** PR #20's mandatory back-reference to arc 02's investigation entry, and PR #33 / PR #35's optional back-references on catalogue §4 direction-alignment, both required stable per-PR entry IDs as citation targets. Option B (phase-not-PR) would have collapsed these citation targets; option A would have shipped 13 entries; option A' gave 10 entries with the per-PR citation precision intact.
+
+**Recommendation forward: arcs 06 (4 PRs) and 08 (5 PRs) inherit option A.** At those PR counts, plain option A (framing + per-PR + closure) is sufficient — the closure can summarize 4–5 PRs without straining. A' is the right shape only when the closure-summarization burden gets heavy enough that the framing needs to share it, which arc 05 found to be the case at 8. Future arcs at 6+ PRs (none in the remaining schedule) should consider A'. Option B remains the right shape for arcs whose material genuinely cohere into phases-not-PRs (as arc 02's investigation-then-harvest pair did).
+
+**Catalogue §4 cumulative reading after arc 05.** Catalogue §4 ("Generalized pager picker") was ranked at arc 02's investigation entry as "Highest-leverage of the lazygit borrows" with the proposed shape: `PagerView::picker_items: Vec<(Label, Action)>` field with Enter-to-fire dispatch. After arc 05, four PRs across two arcs hold direction alignment with §4 without any executing the specific picker pattern: arc 06's PR #8 (harpoon, parallel picker overlay), arc 06's PR #10 (quickselect, parallel picker overlay), arc 05's PR #33 (visual-line-mode on the pager), arc 05's PR #35 (D launches into $PAGER). The shape arc 02's catalogue named — `PagerView::picker_items` — has not landed in the 22-day window. Whether it lands, whether the parallel patterns make it unnecessary, or whether the §4 deferral is structural is a question for the eventual insight layer to take up.
+
+**Voice / sequence-over-timing audit on this thread:**
+- Banned mindset words referencing the maintainer ("wants," "thinks," "believes," "decided," "feels," "intends to" without "the commit message," "is concerned that"): no occurrences in head entries.
+- Hedge tokens used freely from the whitelist ("appears to," "reads as," "consistent with," "the diff shape suggests," "points toward," "aligns with," "the commit message indicates"): present across entries.
+- Verbatim commit-subject and CHANGELOG quoting: every per-PR entry carries at least one verbatim quote with `(commit <sha>, <date>)` attribution.
+- No clock-padding language ("minutes later," "in the same hour"): sequence-faithful framing privileged ("first move," "next move," "phase α closes," "phase β opens").
+
+**Drift findings carried into the insight layer (cumulative across arc 05):**
+- PR #16 bundles the `:fg` fix with an orthogonal `env_test_lock()` fix; commit-subject scopes to `:fg` only.
+- PR #20 bundles three fully-orthogonal concerns (alt-screen hint, default_command, gd-vs-HEAD) under one `feat/` slug; flagged at `history-overview` segmentation, reconfirmed against the diff.
+- PR #23's `feat/` prefix covers a `### Changed` half (help-text discoverability) — slug-level drift, CHANGELOG-level honest.
+- PR #33 names `pbcopy` specifically for clipboard plumbing; portability surface flagged for the insight layer.
+- PR #36's classification splits across surfaces: commit-subject `fix:`, CHANGELOG `### Changed`, BUGS.md FIXED. Diff is genuinely a behavior change; the project tracks it as a fix because the prior behavior was registered in BUGS.md SMALL.
+- Two consecutive arc-05 PRs (PR #35, PR #36) lift BUGS.md SMALLs to FIXED — a recurrence shape worth flagging for the insight layer's lift-pattern catalogue.
+- Implicit forward chains within arc 05: PR #11's `last_body_w` cell on `PagerView` is sibling state to PR #33's `visual: Option<VisualSelection>` field; PR #16's seed-from-buffer pattern is the path PR #35's `display_in_pane` mirror-of-`edit_in_pane` extends in spirit (launch into a pty, render content, share focus).
+- Cross-arc implicit chains: PR #20's `gd`-vs-HEAD shift aligns `gd` with the `~` marker semantics that arc 04's PR #27 enriches one day later; PR #35's `display_in_pane` consumes arc 03's PR #34 overlay-as-pane focus model; PR #35's `resolve_pager` and `shell_quote` consume arc 01's PR #4 `src/shell/mod.rs` infrastructure; PR #16's `env_test_lock()` retires arc 01's PR #2 `--test-threads=1` workaround on `Makefile:test`.
+
+**Arc 05 done-definition self-check**:
+- ☑ `watercooler_health` reported Healthy against the spyc code_path.
+- ☑ All required reads completed (`history-overview` 6 entries; `history-arc-01-foundation-hygiene` 7 entries; arc 02 investigation entry 01KR0YXXZRQR24CSNAK4Q7808T plus full thread summary; arc 03 story-tail 01KR11S8RG29J98QKN1H0VAA6W plus seams-aside 01KR11TME2KF5QFQ45GJYG8MC7 plus full thread summary; arc 04 story-tail 01KR13CJ5XS5VREYA4741JHDSQ plus full thread summary; `onboarding-architecture` entry 0; `onboarding-overview` entry 0).
+- ☑ Diagnosis stated in framing entry: option A' (per-PR with phase-grouping in framing); rationale documented.
+- ☑ Cadence shape stated explicitly: A'.
+- ☑ Phase grouping (α / β / γ + outlier) verified against diffs.
+- ☑ PR #20 entry back-references arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) for catalogue §2 PARTIAL EXECUTION.
+- ☑ PR #33 / PR #35 entries verify against catalogue §4: DIRECTION ALIGNMENT, no direct picker_items execution.
+- ☑ PR #36 entry resolves the "fix vs. behavior change" framing against the diff.
+- ☑ Each head entry follows the head voice contract.
+- ☑ Provenance blocks on every entry.
+- ☑ Tags `#history` and `#arc-05` carried on every entry; tail entries will also carry `#tail`.
+- ☑ No insight-layer claims (no recurrence-naming, emergent-property naming, forward predictions, motive attribution).
+- ☑ No PR #11/16/17/20/23/33/35/36 promoted to Decision type; all entries are Notes.
+- ☑ Thread will remain OPEN.
+
+The two tail entries that follow this closure operate under the new tail voice contract: story-shaped, no formula, honest to the underlying material rather than to a formal scaffold. The first tail tells the story of the pager-becoming-a-mode-not-just-a-display arc; the second is a seams-aside on two forward-pointing observations the story-tail glosses past. Tail count was chosen to match the material, not a target.
+
+Provenance:
+- All 8 SHAs and PR numbers from `git log --grep='Merged in' --reverse --format='%h %ai %s'` (subset for arc 05).
+- `history-arc-05-pager-surface` head entries 0–9 = 01KR29ZCRYY132QKB0HKRRRERQ, 01KR2A121DSV81GM4EBCKAVAAM, 01KR2A2XY61GKZ1W52XQWGFBAH, 01KR2A4DCY3BR45ZQ7FQ2YQE4Q, 01KR2A6TT516XA5FEGVBXYPWD7, 01KR2A8PW1GRF82G4X8R7HFP6H, 01KR2AAX12XSNRNZPTXJT2TXJA, 01KR2AD5PV989H58E49E5D18NM, 01KR2AFHD42DHX6XQS7S6VK4M5, this closure.
+- `history-overview` entries 0–5 = 01KR0TRFWT9W6WMFHC49YSW0BG, 01KR0TWHTC1MPK4KJ08Y9SPE6P, 01KR0TYF5F11DA8P5HNPA20DBK, 01KR0V01TAJVSZFE5ZNMCZHQSF, 01KR0XNGQ0GS2QYN855X25NPZ7, 01KR0XPRBJVH80FNZ9XN7DG01E.
+- `history-arc-01-foundation-hygiene` reflection tail = 01KR0XR504ZR10Y242JERT4K9S (cadence-at-scale source question).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §2 + §4 source).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-focus-sharing model PR #35 consumes); story-tail = 01KR11S8RG29J98QKN1H0VAA6W (tail register precedent); seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (tail register precedent).
+- `history-arc-04-git-integration` story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (tail register precedent for capability-accretion narration).
+- Forward reference: `history-arc-06-input-and-overlays` (next arc, mandatory back-reference to arc 02 catalogue §4).
+- `history-arc-07-codex-and-mcp-bridge` and `history-arc-08-recoverability-and-deps` (named in `history-overview` closure entry's checklist).
+
+<!-- Entry-ID: 01KR2AJVZA1E85YSKHF4FNRQQ3 -->
