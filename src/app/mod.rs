@@ -7989,23 +7989,56 @@ impl App {
             }
         }
 
-        // Visual line mode: extend / yank / cancel. Intercept first so
-        // motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move the
-        // selection cursor instead of the scroll position, and `y`
-        // yanks the inclusive range. Esc / V cancel without yanking.
+        // Visual mode: Line (`V`) or Block (`^v`). Intercept first
+        // so motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move
+        // the selection cursor instead of the scroll position, and
+        // `y` yanks the selection. `Esc` / `V` (Line) / `^v` (Block)
+        // cancel without yanking. In Block mode, `h`/`l` extend the
+        // column cursor; `^v` while a Line selection is active
+        // upgrades to Block (preserving anchor / cursor lines, vim
+        // parity).
         if view.is_visual() {
             let half_page = i32::from(viewport) / 2;
             let page = i32::from(viewport);
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('V') => {
+            let in_block = view
+                .visual
+                .is_some_and(|v| v.kind == crate::ui::pager::VisualKind::Block);
+            // Toggle / cancel keys: V cancels Line, ^v cancels Block,
+            // and ^v from Line upgrades. Esc cancels either.
+            if matches!(key.code, KeyCode::Esc) {
+                view.cancel_visual();
+                return PostAction::None;
+            }
+            if matches!(key.code, KeyCode::Char('V'))
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                if in_block {
+                    // V from block: drop down to Line (vim parity).
+                    if let Some(sel) = view.visual.as_mut() {
+                        sel.kind = crate::ui::pager::VisualKind::Line;
+                    }
+                } else {
                     view.cancel_visual();
-                    return PostAction::None;
                 }
+                return PostAction::None;
+            }
+            if matches!(key.code, KeyCode::Char('v'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                if in_block {
+                    view.cancel_visual();
+                } else {
+                    view.enter_visual_block();
+                }
+                return PostAction::None;
+            }
+            match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     match view.yank_visual_to_clipboard() {
                         Ok(n) => {
+                            let unit = if in_block { "row" } else { "line" };
                             view.flash = Some(format!(
-                                "yanked {n} line{} to clipboard",
+                                "yanked {n} {unit}{} to clipboard",
                                 if n == 1 { "" } else { "s" }
                             ));
                         }
@@ -8019,6 +8052,14 @@ impl App {
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.visual_move(-1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('h') | KeyCode::Left if in_block => {
+                    view.visual_col_move(-1);
+                    return PostAction::None;
+                }
+                KeyCode::Char('l') | KeyCode::Right if in_block => {
+                    view.visual_col_move(1);
                     return PostAction::None;
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -8197,6 +8238,13 @@ impl App {
                 // yanks the inclusive range. The interceptor above
                 // takes over all subsequent keys until Esc / V exit.
                 view.enter_visual();
+            }
+            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // ^v — enter visual *block* (columnar) mode.
+                // Anchors at the top visible line, column 0;
+                // j/k/h/l/G/etc. extend the rectangle and `y`
+                // yanks the rectangular slice. Esc / ^v exit.
+                view.enter_visual_block();
             }
             KeyCode::Char('S') if view.task_id.is_some() => {
                 // Task viewer: S (Stop) pauses the underlying task

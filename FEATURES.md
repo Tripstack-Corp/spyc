@@ -185,6 +185,13 @@ spyc.
   (auto-scrolling), the status footer shows `L{lo}-L{hi}` and the
   line count, `y` yanks the inclusive range to the clipboard and
   exits, `Esc` / `V` cancel
+- **^v** enter **visual block (columnar) mode** — vi's rectangle.
+  `j` / `k` extend rows, `h` / `l` extend columns; `y` yanks the
+  rectangle (each row contributes `chars[lo_col..=hi_col]`, rows
+  shorter than the range simply contribute fewer chars). `^v`
+  toggles back off; `V` while in block drops down to line mode
+  (vim parity). Footer reads
+  `-- VISUAL BLOCK --  L{lo}-L{hi} C{lo}-C{hi}  ({rows}×{cols})`
 - **x** toggle hex-dump view for binary files
 - **Markdown viewer** — `.md`/`.markdown` files open in rendered
   mode by default: headings styled, lists with bullets, fenced

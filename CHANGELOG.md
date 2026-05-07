@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Visual block (columnar) selection in the pager.** v1.5
+  Phase 4 — vi's `^v` rectangle. From normal pager mode `^v`
+  enters block visual; from line visual (`V`) `^v` upgrades
+  in place, preserving anchor / cursor lines. `j` / `k` extend
+  rows, `h` / `l` extend columns, all the existing pager
+  motions (`g` / `G` / `^d` / `^u` / `^f` / `^b` / Page* /
+  Space) still extend the row axis. The selection paints as a
+  rectangle (cursor cell brighter; rest of the rect dimmer);
+  `y` yanks the slice — each row contributes
+  `chars[lo_col..=hi_col]` and rows shorter than the column
+  range simply contribute fewer chars. The footer reads
+  `-- VISUAL BLOCK --  L{lo}-L{hi} C{lo}-C{hi}  ({rows}×{cols})`
+  so the dimensions are unambiguous before commit.
+  `Esc` cancels; `^v` toggles back off; `V` from inside block
+  drops down to line mode (vim parity). Wrap is forced off
+  while block mode is active so the rectangle aligns to
+  on-screen rows. `?` help updated.
+
+  Caveats: column units are character-based (Unicode scalars),
+  not display-width — so a wide CJK / emoji glyph counts as 1
+  in the rectangle even though it paints as 2 cells. Vim does
+  the same; full display-width-aware block selection is future
+  work.
+
 ### Changed
 - **`D` opens files in the in-app pager (top-pane mount), not
   `\$PAGER` as a pty overlay.** v1.5 Phase 5 — the in-app pager
