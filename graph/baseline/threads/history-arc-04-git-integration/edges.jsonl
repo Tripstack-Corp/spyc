@@ -13,3 +13,5 @@
 {"source":"entry:01KR134PZSQDAFVJK3M35FTKXF","target":"entry:01KR137J5GESFYP7CN6KCD7MAS","type":"followed_by"}
 {"source":"thread:history-arc-04-git-integration","target":"entry:01KR13CJ5XS5VREYA4741JHDSQ","type":"contains"}
 {"source":"entry:01KR137J5GESFYP7CN6KCD7MAS","target":"entry:01KR13CJ5XS5VREYA4741JHDSQ","type":"followed_by"}
+{"source":"thread:history-arc-04-git-integration","target":"entry:01KR13DSV1YWH6NNF484NJS02K","type":"contains"}
+{"source":"entry:01KR13CJ5XS5VREYA4741JHDSQ","target":"entry:01KR13DSV1YWH6NNF484NJS02K","type":"followed_by"}

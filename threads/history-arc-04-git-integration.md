@@ -494,3 +494,30 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (Day-0 wall-clock arithmetic anchor).
 
 <!-- Entry-ID: 01KR13CJ5XS5VREYA4741JHDSQ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:33:35.576558+00:00
+Role: scribe
+Type: Note
+Title: Two type-shape seams in PR #27's GitFileStatus that the story-tail gestures past
+
+Spec: scribe
+
+tags: #history #arc-04 #tail
+
+Two seams worth pulling out separate from the story-tail above, because they're the kind of thing a reader hitting the head entries can verify in five minutes and easily miss in the broader narrative.
+
+The `is_clean()` accessor PR #27 introduces sits at the consumption interface for at least three downstream callers — PR #7's `=git`/`=g` filter, PR #24's `]g`/`[g` jumper, and the listing-marker render path. A future git-aware feature that wants to ask "is this row dirty?" reaches for `is_clean()`; a feature that wants more granularity (e.g., "is this row dirty *on the staged half only*?") will need either a richer accessor or to read the struct's `staged` / `unstaged` / `untracked` fields directly. The current accessor is a one-bit summary, and the struct's three-field shape doesn't answer the more granular questions in a single call. That's not a problem in any 22-day-window diff — none of the existing callers needs more than the one bit — but the next caller that does will have to choose, and the choice will be visible in either a new accessor (centralizing the granularity question) or a leak of struct internals into a new call site (decentralizing it). Whichever choice gets made will be a decision; the type today doesn't push it either way.
+
+The struct's `untracked: bool` field is structurally orthogonal to the `staged` / `unstaged` halves. The current parser writes one of three shapes — `untracked: true, staged: None, unstaged: None` for `??`; `staged: Some(Conflicted), unstaged: Some(Conflicted), untracked: false` for `UU`/`DD`/`AA`; `staged: <decoded>, unstaged: <decoded>, untracked: false` for everything else. The struct itself doesn't enforce the "untracked rows have no staged or unstaged half" invariant — a caller constructing a `GitFileStatus` directly could write `untracked: true, staged: Some(GitChange::Added), unstaged: None`, which the parser never produces. The invariant lives in the parser's branch structure, not in the type. If a future caller bypasses the parser (constructing rows from MCP-driven git state, say, or from a future `git status -z` machine-format reader), the invariant will need to move into the type — likely as an enum wrapping the three shapes the parser actually produces — or be enforced by a constructor that rejects the impossible combinations. The struct as shipped is convenient for the parser's two-pass decode and inconvenient for invariant enforcement; that's the tradeoff worth flagging.
+
+Both observations are forward-pointing in the way the story-tail isn't, but neither is a prediction. They're notes about where the next git-data feature is most likely to expose pressure on the type, given what PR #27 actually shaped — small gifts to whoever lands next on this surface.
+
+Provenance:
+- No new commit references; this entry reflects on PR #27's diff at `src/ui/list_view.rs` (the `GitFileStatus` struct definition, the `GitChange` enum, the `is_clean()` accessor) and `src/sysinfo.rs:107-186` (the parser branch structure that enforces the three-shape invariant).
+- `history-arc-04-git-integration` PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (the `parse_porcelain_statuses` extraction this PR's parser branch structure inherits).
+- `history-arc-04-git-integration` PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF (the `GitFileStatus` type promotion this entry observes).
+- `history-arc-04-git-integration` story-tail above = 01KR13CJ5XS5VREYA4741JHDSQ.
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (register reference for the short-aside-with-specific-observation form this entry inherits).
+
+<!-- Entry-ID: 01KR13DSV1YWH6NNF484NJS02K -->
