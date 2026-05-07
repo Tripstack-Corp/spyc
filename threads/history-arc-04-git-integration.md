@@ -165,3 +165,77 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 picker pattern context for arc 06's eventual harpoon narration).
 
 <!-- Entry-ID: 01KR12XTG7E5TC0RNTJ65G67T7 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:26:10.705344+00:00
+Role: scribe
+Type: Note
+Title: PR #15 (fix/git-status-and-pane-ctrl-c): one PR, two coincident concerns — basename-collision in porcelain parsing, and the ^C-route guard
+
+Spec: scribe
+
+tags: #history #arc-04
+
+PR #15 is the third move in arc 04 and the only PR in this arc that bundles two concerns under one commit. Commit subject reads "fix: ^C → pane child + git markers don't leak across same-name files (v1.41.2)" (commit 5999261, 2026-05-04). Diff: 6 files, +125/-15. Source code: `src/sysinfo.rs` +75/-12 (the git-marker-leak half), `src/app/mod.rs` +5/-0 (the `^C`-route half).
+
+The Phase-1 segmentation entry on `history-overview` (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) flagged PR #15 as a hard cluster-boundary call. The framing entry above (= 01KR12T4DHGDH3B9YYXM0F093A) confirmed the disposition empirically: two independent fixes in different files, no shared root cause, treated as two phases under one entry rather than collapsed into one observation. The diff-weight order — git-marker leak first (87 lines including the 75-line refactor and 5 new unit tests, sysinfo.rs), `^C`-routing second (5 lines, app/mod.rs) — matches the order below. The commit subject's left-to-right order ("`^C` → pane child + git markers …") is the inverse; the title leads with the smaller half, the diff weight leads with the larger.
+
+---
+
+**Phase 1 — Git markers don't leak across same-name files (`src/sysinfo.rs:62-160`).**
+
+The bug. A clean root-level file rendered with a `~` (modified) marker when a sibling-named file in a subdirectory was actually the dirty one. The PR's CHANGELOG names the case verbatim: "root `CLAUDE.md` clean, `content-acquisition/CLAUDE.md` modified → both rows showed `~`" (commit 5999261, 2026-05-04). The pre-fix `git_file_statuses` collapsed every porcelain entry to its basename and indexed the map by that basename, so the deep file's status overwrote the root row.
+
+The fix shape. The PR extracts a pure-parser function `parse_porcelain_statuses(porcelain: &str, prefix: &str)` from the spawn-`git`-and-parse body. The parser body itself gains an `in_this_dir = (top_component == filename)` boolean that gates two distinct map writes. The CHANGELOG names the rule: "The basename now only goes into the map for files actually in the listing directory; deeper entries still mark the parent directory" (commit 5999261, 2026-05-04). In code (`src/sysinfo.rs:148-160` post-merge):
+
+- A row that *is* in the listing directory writes `name → status` (basename-keyed).
+- A row that *isn't* in the listing directory writes `top_component/ → Modified` (parent-directory-keyed) and skips the basename write entirely.
+
+The extraction is the load-bearing diff move: spawning `git` was previously inlined with the parsing, and the parser could not be unit-tested without forking a subprocess. After the extraction the parser is pure, and the PR adds five unit tests that pin the rules:
+
+1. `deep_modification_does_not_dirty_same_basename_at_root` — the regression case.
+2. `root_modification_marks_basename` — the simple positive case.
+3. `root_and_deep_same_basename_uses_root_status` — when both a root and a deep sibling exist, the root entry reflects the root status.
+4. `prefix_strips_listing_dir` — entries outside the listing prefix are filtered out.
+5. `rename_takes_new_name` — `R old.md -> new.md` keys under `new.md`.
+
+Sequence-grain consequence. PR #27 (this arc, two days later) extends `parse_porcelain_statuses` from the flat-`GitFileStatus`-enum return type to a struct-with-staged/unstaged-halves return type. The extraction PR #15 ships here is what makes PR #27's refactor land cleanly — without the pure-parser shape, the staged-vs-unstaged decode would have to live inside the spawn-`git` body. Arc 04 reads as PR #15 setting up the table that PR #27 then dresses with new fields.
+
+---
+
+**Phase 2 — `^C` reaches the pane child (`src/app/mod.rs:2679-2693`).**
+
+The bug. Pressing `^C` while the pane was focused tripped an existing footgun-flash ("`^C` is not a quit binding — use Q (or :q) to quit, Esc to cancel modes") instead of delivering `0x03` to the running child process. The CHANGELOG names the cause: "the '^C is not a quit binding' footgun-guard fired before the pane-forward path, so pressing `^C` while focused on a child process (zsh, a long-running command, etc.) flashed the hint instead of delivering `0x03` to the child" (commit 5999261, 2026-05-04).
+
+The fix shape. A new `pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused` is computed before the existing footgun-guard, and the guard's predicate gains an `&& !pane_has_focus` clause. When the pane has focus, the guard skips and the dispatch falls through to the pane-forward path that forwards every other control code (`^T`, `^D`, …) already. The CHANGELOG names this asymmetry verbatim: "Other control codes (`^T`, `^D`, …) were already forwarded; only the `^C` case carried the extra guard" (commit 5999261, 2026-05-04). The fix narrows the guard's scope rather than removing it; outside-pane `^C` still triggers the footgun-flash.
+
+Lineage check (orthogonal to PR #34). The `pane_has_focus` precondition reads `self.pane_tabs.is_some() && self.state.pane_focused` — a simple two-bit conjunction in the original list-vs-pane meaning of `pane_focused`. Arc 03's PR #34 (`fix/top-overlay-focus-switch`, 8e9fb2c, 2026-05-06; entry = 01KR10JBACRS3Z71WTHGBVCPJM) lands two days after this PR and extends `pane_focused` to also carry overlay-vs-pane meaning. PR #15 predates that extension and uses the original meaning only; the surfaces don't interact. Arc 03's seams-aside (= 01KR11TME2KF5QFQ45GJYG8MC7) names `pane_focused`'s post-PR-#34 three-meaning load and lists PR #6's zoom save-source axis, PR #34's overlay-vs-pane axis, and the original list-vs-pane meaning; PR #15 sits inside the third only.
+
+---
+
+**Drift findings flagged for the insight layer**:
+
+- The commit subject orders the bundle "`^C` → pane child + git markers don't leak across same-name files." The `^C` fix is 5 lines; the git-marker fix is 87 lines including a 75-line refactor and 5 new unit tests. The subject's left-to-right order is the inverse of the diff weight. A reader scanning subjects only weights the bundle's halves equally; the diff does not.
+
+- The two halves do not share a root cause. They share a PR. The git-marker fix touches `src/sysinfo.rs::git_file_statuses` (porcelain parsing in the file-statuses path); the `^C` fix touches `src/app/mod.rs::App::handle_key` (early-key footgun-guard in dispatch). No call-chain connects them. The bundle reads as one PR's worth of fixes-noticed-while-shipping rather than a co-located fix.
+
+- The phase-1 refactor adds a pure-parser function and a unit-test surface that previously did not exist for porcelain parsing. The five tests pin behavior cases the original inlined body could not have been tested for without forking `git`. PR #27 (this arc, two days later) extends the parser further; the test surface scales accordingly (3 new tests in PR #27).
+
+- The phase-2 fix narrows an existing footgun-guard rather than removing it. The asymmetry note in the CHANGELOG ("Other control codes were already forwarded; only the `^C` case carried the extra guard") signals that the guard was an *exception*, not the rule — the rest of the dispatch already handled the pane-forward case. The fix brings `^C` into alignment with the existing rule rather than introducing a new one.
+
+Provenance:
+- 5999261 (PR #15 fix/git-status-and-pane-ctrl-c, 2026-05-04 11:26) — full PR.
+- `src/sysinfo.rs:62-160` (post-merge) — `git_file_statuses` and the new pure-parser `parse_porcelain_statuses`.
+- `src/sysinfo.rs:349-403` (post-merge) — the five new unit tests pinning the basename / parent-directory rules.
+- `src/app/mod.rs:2679-2693` (post-merge) — `pane_has_focus` precondition and the `&& !pane_has_focus` clause on the footgun-guard.
+- `git diff 5999261^1..5999261^2 -- CHANGELOG.md` — verbatim quotes ("root `CLAUDE.md` clean, `content-acquisition/CLAUDE.md` modified → both rows showed `~`"; "The basename now only goes into the map for files actually in the listing directory"; "Other control codes (`^T`, `^D`, …) were already forwarded; only the `^C` case carried the extra guard"; "the '^C is not a quit binding' footgun-guard fired before the pane-forward path").
+- 4e2afd9 (PR #27 feat/git-staged-vs-unstaged, 2026-05-06) — downstream extender of `parse_porcelain_statuses`; named here for sequence-grain forward reference.
+- 8e9fb2c (PR #34 fix/top-overlay-focus-switch, 2026-05-06) — arc 03 lineage-check target; orthogonal.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (cluster-boundary call source).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-focus model post-dating this PR; orthogonal).
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (`pane_focused`'s three-meaning load post-PR-#34; PR #15 uses original meaning only).
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A.
+- `history-arc-04-git-integration` PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK.
+- `history-arc-04-git-integration` PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7.
+
+<!-- Entry-ID: 01KR130775Q4PKYEN6FE1743DJ -->
