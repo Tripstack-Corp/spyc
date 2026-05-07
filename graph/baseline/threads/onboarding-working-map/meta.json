@@ -1,0 +1,11 @@
+{
+  "id": "thread:onboarding-working-map",
+  "type": "thread",
+  "topic": "onboarding-working-map",
+  "title": "onboarding working map",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-07T07:42:37.539748+00:00",
+  "summary": "The thread discusses a working map for onboarding processes, focusing on local inspections and navigation. Key decisions include structuring the onboarding process with modules and defining clear steps for each phase. The outcome is a comprehensive guide that supports efficient onboarding and navigation for users.",
+  "entry_count": 1
+}
