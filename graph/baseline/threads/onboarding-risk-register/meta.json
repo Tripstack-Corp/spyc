@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:44:05.310174+00:00",
   "summary": "The development thread focuses on creating a risk register for onboarding processes, identifying risks such as volatile paths, drift risks, and load-bearing seams. Key decisions included prioritizing these risks and implementing strategies to mitigate them. The outcome was a structured risk management framework that enhances the reliability and stability of onboarding processes.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-risk-register": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:52:00.872027+00:00",
+      "vote_score": 0
+    }
+  }
 }
