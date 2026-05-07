@@ -238,3 +238,39 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS.
 
 <!-- Entry-ID: 01KR0WD8428XFNTJV11MXX59NF -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:54:23.316481+00:00
+Role: scribe
+Type: Note
+Title: Tail: looking back at arc 01 — what reads as load-bearing now
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Looking back at the five head entries above, what reads as load-bearing now is different from what looks like the headline at first glance.
+
+The headline of arc 01 reads as the shell-alias fix in PR #4 — it's the only user-visible bug fix in the arc, and the commit subject puts the version tag in parentheses next to the slug. But on a re-read, the load-bearing fact is that PR #4 is the version-cutter. Without it, PR #2's CI work and PR #3's supply-chain work sit in `[Unreleased]` indefinitely; with it, the three become v1.37.2 on a single calendar day. The framing entry already named this as the structural-binding argument for keeping PR #4 in the arc, but reading it across three per-PR entries makes the cleaner reading land: arc 01 isn't three independent moves, it's one release in three correctness layers.
+
+The cadence-shape choice (option A — framing + per-PR + closure, five entries for three PRs) was the right call here. We won't know whether it stays right until arc 05 — the largest arc, eight PRs — sits down and tries it. Five entries for three PRs is light; thirteen for eight is heavy enough that the closure entry alone won't be doing the heavy summarization. Arc 02 (two PRs, investigation + harvest) is an explicit candidate for departure from this cadence, and the arc 01 closure entry flags it. The precedent is set; departures should name themselves.
+
+Two questions arc 01 carried forward without resolving:
+
+The v1.37.2 commit-subject overlap on PR #5 — next arc, same calendar day, same version tag despite `[Unreleased]` reading "Nothing pending" right after PR #4 cut the release. Arc 01 flagged this in PR #4's drift findings and in the closure entry, then handed it to arc 02 to resolve in its own narration. From where we sit, this is exactly the cross-arc forward-reference the spine's back-reference contract was designed for — arc 02 inherits a question rather than a fact, and that's fine.
+
+The PR #4 `Pane::spawn` touch being broader than the named overlay routes (`:!cmd` / `;cmd`). The commit subject scopes the change narrowly; the diff scope is wider. The CHANGELOG names `Pane::spawn` directly, so the drift is subject-line-level only — but if a future arc 03 entry on pane behavior wants to back-reference where pane-spawn-via-`$SHELL` first lands, this PR is the genesis. That back-reference will probably matter more than it currently looks.
+
+What's not in arc 01 that someone might expect: any narration of the `make check` rail extending further (it does, in arcs 03 and 08), any narration of `cargo-deny` actually catching something (no incident in the 22-day window), any narration of `make dist-sign` getting wired into CI (it doesn't — and PR #3's CHANGELOG entry says so plainly). Arc 01 is the establishing arc; it sets the rails, it doesn't watch them in motion.
+
+Provenance:
+- No new commit references; tails reflect on the head entries which carry full SHA provenance.
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH.
+- `history-arc-01-foundation-hygiene` PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV.
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS.
+- `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (PR #4 boundary call source).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract; the v1.37.2 commit-subject question handed forward to arc 02).
+
+<!-- Entry-ID: 01KR0XR504ZR10Y242JERT4K9S -->
