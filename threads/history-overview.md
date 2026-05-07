@@ -273,3 +273,36 @@ Provenance:
 - Prior thread entries: index 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing); index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation); index 2 = 01KR0TYF5F11DA8P5HNPA20DBK (PR #5 special handling).
 
 <!-- Entry-ID: 01KR0V01TAJVSZFE5ZNMCZHQSF -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:52:57.040268+00:00
+Role: scribe
+Type: Note
+Title: Tail: looking back at the segmentation as a deliverable
+
+Spec: scribe
+
+tags: #history #segmentation
+
+Looking back at the four head entries above, the segmentation entry (index 1) is the load-bearing artifact in this thread. Everything else is scaffolding around it — the framing entry sets the voice and provenance contracts, the PR #5 special-handling entry ratifies the one disposition that doesn't fit the natural clusters, and the closure entry just hangs a Phase-2 checklist on the door. Strip those three and you'd still have the eight arcs. Strip the segmentation, and there's no Phase 2 to ship.
+
+The choices that mattered, now that arc 01 has been written and we can read them from one arc's distance:
+
+The eight-arc count was a decision, not a discovery. Thirty-six PRs across twenty-two days could have been segmented as four broad arcs (foundation, surfaces, integrations, survival) or as twelve narrow ones (one per file-system area). Eight is a midpoint that keeps each arc small enough to narrate in one session — arc 01 took one session for three PRs — while keeping the count low enough that the spine doesn't fragment. Whether eight scales for the larger arcs (arc 05's eight PRs in particular) is something only arc 05's session will tell us.
+
+Giving PR #5 its own arc reads as the right call from where we sit. Arc 01's closure entry already had to forward-reference arc 02 to flag the v1.37.2 commit-subject overlap. If PR #5 had been folded into arc 03 or arc 06, the cross-arc back-references from arcs 03/05/06 would point at a non-spine entry, and the network would lose its hub. Looking back, the alternative would have produced a denser local arc and a thinner global reading — the wrong trade for an exercise whose value is the cross-cutting reading.
+
+PR #4's disposition (kept in arc 01 on structural-binding grounds, not just timing) is the segmentation choice that will get tested most by Phase 3. The framing entry argued PR #4 belongs with PR #2 + PR #3 because it's the version-cutter; the per-PR PR #4 entry then made the structural-binding case explicit. If the eventual recurrence-or-emergence insight thread reads release-cuts as a recurring shape — and the v1.41.x cadence over arcs 03/05/08 suggests it might — then PR #4-as-version-cutter is one data point in a pattern, not just an arc-01 quirk.
+
+What's been left to later: per-arc narration (in the arc threads), the negative-space readings (gap-analysis suspects #2 mouse and #3 synchronized-output) carried into arc 02 and arc 08, and the entire insight layer (Phase 3). The spine doesn't claim to do that work. It claims only to make the work writable.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-overview` entry 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing).
+- `history-overview` entry 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation; the load-bearing artifact).
+- `history-overview` entry 2 = 01KR0TYF5F11DA8P5HNPA20DBK (PR #5 special handling).
+- `history-overview` entry 3 = 01KR0V01TAJVSZFE5ZNMCZHQSF (closure).
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A (the first arc whose existence lets us look back at the segmentation from one-arc distance).
+- `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF (forward-references arc 02 with the v1.37.2 commit-subject overlap question).
+
+<!-- Entry-ID: 01KR0XNGQ0GS2QYN855X25NPZ7 -->
