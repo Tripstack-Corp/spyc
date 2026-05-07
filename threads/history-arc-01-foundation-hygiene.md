@@ -274,3 +274,43 @@ Provenance:
 - `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract; the v1.37.2 commit-subject question handed forward to arc 02).
 
 <!-- Entry-ID: 01KR0XR504ZR10Y242JERT4K9S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:55:03.677437+00:00
+Role: scribe
+Type: Note
+Title: Tail: note to future readers — what this thread records and why it's shaped this way
+
+Spec: scribe
+
+tags: #history #arc-01
+
+If you're reading this thread cold: it's the baseline narration of arc 01 — the first of eight arcs that reconstruct spyc's first 22 days of merged work. The reconstruction was written after-the-fact (2026-05-07), but the head entries above are deliberately in present tense to preserve the as-if-real-time conceit the spine's framing entry sets. None of it actually happened in present tense. The voice is a choice; we're being honest about that here in the tail because the head can't be — the head is busy holding the line.
+
+How the thread is shaped:
+
+- Index 0 — framing. Names the arc's three PRs, the date anchor, the cadence choice (option A: framing + per-PR + closure), and the rationale for keeping PR #4 in the arc on structural-binding grounds.
+- Indices 1–3 — one entry per PR, in arc order. PR #2 first (the CI rail to `make check`), PR #3 second (cargo-deny + `--locked` + `SECURITY.md` + `deny.toml` riding on PR #2's rail), PR #4 third (the user-visible shell-alias fix and the v1.37.2 release-cut that ships all three).
+- Index 4 — closure. Forward-references arc 02 and lists the cadence + voice precedents.
+- Indices 5 and 6 — these tail entries. Looser, retrospective, with first-person plural and direct address allowed where they aid flow.
+
+The head/tail boundary is visual: head entries are clinical, segmented, sequence-faithful, grounded in commits and file:line spans. Tail entries are conversational and reflective. If a tail entry reads like a head entry, it's failing at its job.
+
+How to read this thread:
+
+Top to bottom for the as-it-happened narration. Drop into the per-PR entries (indices 1–3) for diff-level specifics — file paths, line counts, CHANGELOG quotes. The framing entry tells you why the arc exists at all and why option A was the cadence choice. The closure entry is the forward bridge to arc 02. These two tails (5 and 6) carry the human-accessible context that tells you what to do with the rest.
+
+Cross-references:
+- The spine of the eight-arc reconstruction is `history-overview`. Its segmentation entry (index 1) is what places PR #2, PR #3, and PR #4 together in arc 01 to begin with.
+- Arc 02 is `history-arc-02-lazygit-investigation-and-harvest` (forward-referenced by the closure entry above). It picks up the same calendar day as arc 01 and inherits the v1.37.2 commit-subject question PR #4's drift findings raised.
+- The remaining six arcs — 03 through 08 — exist or will exist as `history-arc-NN-<slug>` topics named in the spine's closure entry.
+
+What this thread doesn't claim to do: identify recurring patterns, name emergent properties, attribute mindset, or pre-empt the insight layer (Phase 3). The narration here is baseline. Drift findings are flagged, not interpreted. If a recurrence-or-emergence insight thread eventually exists, follow its links back into arc 01's per-PR entries — that's where the data points live, with full provenance behind every line.
+
+Provenance:
+- No new commit references; tails reflect on the head entries which carry full SHA provenance.
+- `history-arc-01-foundation-hygiene` head entries 0–4 = 01KR0W6FR7T01ZJR84MRKWA13A, 01KR0W81XE4K3G7BBSP42GE1HH, 01KR0W9QF3P9E529E6J3XQMXDV, 01KR0WBKNMQF231X2T8KTGD9KS, 01KR0WD8428XFNTJV11MXX59NF.
+- `history-arc-01-foundation-hygiene` reflection tail (index 5) = 01KR0XR504ZR10Y242JERT4K9S.
+- `history-overview` spine entries 0–3 = 01KR0TRFWT9W6WMFHC49YSW0BG, 01KR0TWHTC1MPK4KJ08Y9SPE6P, 01KR0TYF5F11DA8P5HNPA20DBK, 01KR0V01TAJVSZFE5ZNMCZHQSF.
+
+<!-- Entry-ID: 01KR0XSCA6AD371NHQBZ7HTS3V -->

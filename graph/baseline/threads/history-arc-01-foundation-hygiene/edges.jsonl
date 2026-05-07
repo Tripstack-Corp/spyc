@@ -9,3 +9,5 @@
 {"source":"entry:01KR0WBKNMQF231X2T8KTGD9KS","target":"entry:01KR0WD8428XFNTJV11MXX59NF","type":"followed_by"}
 {"source":"thread:history-arc-01-foundation-hygiene","target":"entry:01KR0XR504ZR10Y242JERT4K9S","type":"contains"}
 {"source":"entry:01KR0WD8428XFNTJV11MXX59NF","target":"entry:01KR0XR504ZR10Y242JERT4K9S","type":"followed_by"}
+{"source":"thread:history-arc-01-foundation-hygiene","target":"entry:01KR0XSCA6AD371NHQBZ7HTS3V","type":"contains"}
+{"source":"entry:01KR0XR504ZR10Y242JERT4K9S","target":"entry:01KR0XSCA6AD371NHQBZ7HTS3V","type":"followed_by"}
