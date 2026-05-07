@@ -293,3 +293,72 @@ Provenance:
 - `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
 
 <!-- Entry-ID: 01KR2A8PW1GRF82G4X8R7HFP6H -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:53:35.102244+00:00
+Role: scribe
+Type: Note
+Title: PR #33 (feat/pager-visual-line-mode): VisualSelection lands on PagerView; the pager becomes a mode; direction alignment with catalogue §4
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #33 opens phase γ — the pager-as-mode shift. Commit subject reads "feat: pager visual line mode for range yank (v1.41.20)" (commit cf9e8ff, 2026-05-06). Diff: 7 files, +407/-4. The bulk lands in two files: `src/ui/pager.rs` (283 insertions) and `src/app/mod.rs` (82 insertions). This is the largest single-PR diff in arc 05 by line count.
+
+**The capability shipped.**
+
+The PR's `### Added` CHANGELOG entry reads verbatim (the relevant block in full): "Pager visual line mode for range yank. `V` in any pager view enters vi-style visual line mode: the anchor is set at the top visible line and `j` / `k` / `^d` / `^u` / `^f` / `^b` / `PageDown` / `PageUp` / `Space` / `g` / `G` / `Home` / `End` extend the cursor end (auto-scrolling when the cursor leaves the viewport). The selection is highlighted with the muted indigo cursor-bg-dim across the range and the active cursor row gets the brighter cursor-bg, so it reads like vi's visual cursor. The status footer shows `-- VISUAL --  L{lo}-L{hi}  ({n} lines)` so the range is unambiguous before you commit. `y` / `Y` yanks the inclusive range to the system clipboard via `pbcopy` and exits; `Esc` or `V` cancels without yanking. While the mode is active unrelated keys (`/`, `:`, `f`, `l`, `w`, etc.) are swallowed — exit visual mode first to use them, so a stray `/` doesn't silently reinterpret your selection mid-flight. Top-level `y` (yank source) and `Y` (yank visible) are unchanged outside visual mode. Also surfaced in the pager `?` help." (commit cf9e8ff, 2026-05-06).
+
+**The struct shape.**
+
+The `src/ui/pager.rs` diff introduces a new `VisualSelection { anchor: usize, cursor: usize }` struct with a `range()` method that returns the inclusive `(low, high)` range with `min`/`max` chosen so the order is anchor-direction-agnostic. The struct is added to `PagerView` as `visual: Option<VisualSelection>` and initialized to `None` in three constructors (`new`, `new_ansi`, and a third builder visible in the diff). The doc-comment names the mode boundary explicitly: "Mutually exclusive with the search/jump prompts (entering them cancels visual mode)." The boundary is the load-bearing invariant — visual mode is not a layered overlay over search; entering one cancels the other.
+
+**The dispatch interception.**
+
+The `src/app/mod.rs` diff (82 insertions) places an `if view.is_visual()` block at the top of the pager-key dispatch path, before any other key handling. The block routes the motion family to `view.visual_move(delta, viewport)` (which auto-scrolls when the cursor leaves the viewport), the `g` / `G` / `Home` / `End` family to `view.visual_jump_to(line, viewport)`, the `y`/`Y` to `view.yank_visual_to_clipboard()` with a flash on success or failure, and `Esc` / `V` to `view.cancel_visual()`. The unknown-key arm is the diagnostic shape worth pulling out:
+
+```
+_ => {
+    // Unknown key while in visual mode — ignore so a
+    // stray `/` or `:` doesn't silently trigger a
+    // search/jump that the visual selection wasn't
+    // expecting. User must Esc out first.
+    return PostAction::None;
+}
+```
+
+Swallow rather than fall through. The CHANGELOG framing ("a stray `/` doesn't silently reinterpret your selection mid-flight") is honored by an explicit drop-on-the-floor in dispatch, with a code-comment naming the reason. This is mode-discipline at the dispatch layer.
+
+**Catalogue §4 alignment — direction, not execution.**
+
+Arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) frames the catalogue §4 ("Generalized pager picker") disposition for PRs in this arc: "PR #33 (`feat/pager-visual-line-mode`, cf9e8ff, 2026-05-06)... additional pager-surface accretion that extends the read-through-pager direction the catalogue proposes. Confidence: DIRECTION ALIGNMENT, not direct execution of any specific catalogue item." That disposition holds against the diff. Catalogue §4's specific recommendation (per arc 02's investigation entry, quoting the catalogue): "extend the pager into a generalized pick-from-list mode" via "a `PagerView::picker_items: Vec<(Label, Action)>` field with Enter-to-fire dispatch."
+
+PR #33 ships a *different* mode on the pager — range selection for yank, not pick-from-list with Enter-to-fire. The `VisualSelection` field is structurally analogous to `picker_items` (both are `Option`-shaped state on `PagerView` that gates a mode), but the semantics differ: `VisualSelection` selects a *line range* for one terminal action (yank), where `picker_items` would select *one of many discrete options* and dispatch an `Action`. PR #33 honors the §4 direction at the level of "the pager is the natural surface to host modes," without instantiating §4's specific picker pattern.
+
+The arc-02 disposition is **DIRECTION ALIGNMENT**. This entry back-references arc 02's investigation entry to confirm the disposition against the diff.
+
+**Sequence-grain dependency on PR #11.**
+
+The `last_body_w: std::cell::Cell<u16>` field PR #11 added to `PagerView` for wrap-correct `scroll_max` is visible alongside the new `visual: Option<VisualSelection>` field in PR #33's struct diff. The two fields are sibling state on `PagerView`, neither disturbing the other. Phase α's mechanics field is the kind of small struct addition that, by being correct and contained, makes phase γ's mode addition cheap — PR #33 doesn't have to refactor `PagerView` to add visual mode, just add a sibling field.
+
+**Drift findings flagged for the insight layer**:
+- The CHANGELOG names `pbcopy` specifically for the clipboard path. The yank-to-clipboard plumbing on macOS-only `pbcopy` is the platform contract; whether other platforms (Linux `xclip` / `wl-copy`, Windows `clip.exe`) are supported is determinable from the `view.yank_visual_to_clipboard()` implementation, which is not in the snippets quoted here. Captured for the insight layer's portability reading if relevant.
+- Visual mode swallowing `/` `:` `f` `l` `w` is the kind of "mode discipline at dispatch" that arc 03's PR #34 entry (= 01KR10JBACRS3Z71WTHGBVCPJM) noted at the overlay-vs-pane boundary. Same pattern, different surface. Flagged for the eventual recurrence-or-emergence insight thread.
+
+Provenance:
+- cf9e8ff (PR #33 feat/pager-visual-line-mode, 2026-05-06).
+- `git diff cf9e8ff^1..cf9e8ff^2 -- CHANGELOG.md`: `### Added` entry quoted verbatim above.
+- `git diff cf9e8ff^1..cf9e8ff^2 -- src/ui/pager.rs`: `VisualSelection` struct definition; `range()` method; `visual: Option<VisualSelection>` field on `PagerView` with mutually-exclusive-with-prompt doc-comment.
+- `git diff cf9e8ff^1..cf9e8ff^2 -- src/app/mod.rs`: `if view.is_visual()` interception block; unknown-key swallow arm with reason comment.
+- `git show cf9e8ff --stat`: 7 files changed, 407 insertions, 4 deletions.
+- `Cargo.toml:3` post-merge: `version = "1.41.20"`.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 source; PR #33 named at this entry as DIRECTION ALIGNMENT).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract: PR #33 / PR #35 may back-reference arc 02 on read-through-pager direction; not mandatory).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (mode-discipline-at-dispatch precedent at overlay-vs-pane boundary).
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM (`last_body_w` cell on `PagerView`; sibling field to `visual`).
+- `history-arc-05-pager-surface` PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7.
+- `history-arc-05-pager-surface` PR #23 entry = 01KR2A8PW1GRF82G4X8R7HFP6H.
+
+<!-- Entry-ID: 01KR2AAX12XSNRNZPTXJT2TXJA -->
