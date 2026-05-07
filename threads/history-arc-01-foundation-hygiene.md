@@ -187,3 +187,54 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV.
 
 <!-- Entry-ID: 01KR0WBKNMQF231X2T8KTGD9KS -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:30:57.508878+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 01 baseline complete; arc 02 (lazygit-investigation-and-harvest) follows
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Arc 01 baseline narration complete. Three PRs cover three layers of baseline correctness — CI gate, supply-chain, shell-execution — and ship together as v1.37.2 on 2026-04-30. PR #2 wires CI to call `make check`; PR #3 hangs cargo-deny + `--locked` + `SECURITY.md` + `deny.toml` on that rail; PR #4 lands the user-visible shell-alias fix and cuts the v1.37.2 release that ships all three. The arc reads as one calendar day's work in three sub-moves, with PR #4 as the structural binding (release-cut) and PR #2 → PR #3 as a rail-then-extension dependency.
+
+**Forward reference: arc 02 — `history-arc-02-lazygit-investigation-and-harvest`** picks up next. Arc 02 covers PR #5 (`investigate/lazygit-support`, commit 0691666, 2026-04-30) and PR #12 (`chore/clean-notes`, commit e210e58, 2026-05-03). PR #5 is the only PR in the 22-day window prefixed `investigate/` and dominates its diff with a 399-line investigation deliverable plus a partial cursor-block fix; PR #12 harvests the investigation notes into `BUGS.md`. Arc 02 is special-handled per `history-overview` entry 2 (= 01KR0TYF5F11DA8P5HNPA20DBK): own-arc with mandatory back-references from arc 03 (cursor-block follow-up at PR #29), arc 05 (alt-screen hint at PR #20; pager-direction at PR #33 / PR #35), and arc 06 (picker pattern at PR #8 / PR #10).
+
+**Cross-arc continuity note from arc 01 to arc 02**: PR #5 lands on the same calendar day as the three arc-01 PRs (2026-04-30) and its commit subject carries `(v1.37.2)` despite PR #4 having cut v1.37.2 with `[Unreleased]` reading "(Nothing pending; …)" immediately afterward. The version-tag overlap is for arc 02 to resolve in its own narration; arc 01 flags it without prejudgement (see PR #4 entry's drift findings).
+
+**Cadence precedent set by this thread**: option A — framing + per-PR + closure (5 entries for a 3-PR arc). Future arcs may inherit or break with stated reason; arc 02 is a candidate for departure given its 2-PR shape with phase-not-PR structure (investigation + harvest). The framing entry of this thread (= 01KR0W6FR7T01ZJR84MRKWA13A) carries the rationale.
+
+**Voice contract precedent set by this thread**: third-person observational, present tense, sequence-faithful narration with no clock-padding ("first move," "next move," "extends the rail" — not "minutes later," "in the same hour"). Verbatim commit-subject quoting honored on every per-PR entry. Hedge tokens used freely from the whitelist; banned mindset words avoided. The full audit appears in this session's hand-off summary to the operator.
+
+This thread remains OPEN for cross-arc references (arc 03 may back-reference PR #2 or PR #3 if a later src-tree change touches the same files; arc 08 may reference PR #2's `target` cache when narrating the dep-upgrade work).
+
+**Arc 01 done-definition self-check**:
+- ☑ `watercooler_health` reported Healthy against the spyc code_path.
+- ☑ All four `history-overview` entries read (indices 0–3).
+- ☑ `onboarding-developer-experience` entry 0 read.
+- ☑ `onboarding-security` entry 0 read.
+- ☑ Thread `history-arc-01-foundation-hygiene` exists with framing (index 0), three per-PR entries (PR #2, PR #3, PR #4), and this closure entry — five entries total.
+- ☑ Framing entry contains: arc title (`foundation-hygiene`), member PRs with SHAs, date range (2026-04-30 to 2026-04-30), cadence-shape rationale (option A), establishing-arc observation, back-link to `history-overview` 0–3.
+- ☑ Each per-PR entry contains at least one verbatim commit-subject quote attributed `(commit <sha>, <date>)`.
+- ☑ Every entry ends with a `Provenance:` block.
+- ☑ Voice contract held: no banned words referencing the maintainer's mindset; no clock-padding language; sequence-over-timing privileged.
+- ☑ All entries tagged `#history` and `#arc-01`.
+- ☑ No PR #5 or PR #12 content (those are arc 02).
+- ☑ No insight-layer claims — narration is baseline.
+- ☑ Thread left OPEN.
+
+Provenance:
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30) — first commit in arc 01.
+- 32ebf2c (PR #3 chore/security-hygiene, 2026-04-30).
+- 1f41b4b (PR #4 fix/shell-aliases, 2026-04-30) — last commit in arc 01; v1.37.2 release-cut.
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — first commit of arc 02; named here for forward reference.
+- e210e58 (PR #12 chore/clean-notes, 2026-05-03) — second commit of arc 02; named here for forward reference.
+- `history-overview` entry 2 = 01KR0TYF5F11DA8P5HNPA20DBK — back-reference contract for arc 02.
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH.
+- `history-arc-01-foundation-hygiene` PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV.
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS.
+
+<!-- Entry-ID: 01KR0WD8428XFNTJV11MXX59NF -->
