@@ -213,3 +213,73 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T.
 
 <!-- Entry-ID: 01KR0Z11CKNJRYEZ3T38EAFSC4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:17:53.428302+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 02 baseline complete; back-reference hub published; arc 03 (pane-behavior) follows
+
+Spec: scribe
+
+tags: #history #arc-02
+
+Arc 02 baseline narration complete. Two PRs cover an investigation phase (PR #5, 2026-04-30) and a harvest phase (PR #12, 2026-05-03), with the arc spanning three calendar days. The investigation phase produces 399 lines of analysis (gap-analysis + UX catalogue) plus a 7-line cursor-block fix and three ROADMAP additions; the harvest phase deletes the 399 lines, lifts the actionable parcels into BUGS.md, and trims the ROADMAP cross-references that would otherwise dangle. The arc reads as one move in two phases — investigation, then triage — with the v1.37.3 release-cut on PR #5 acting as the binding artifact (commit-subject mis-tag aside).
+
+**Back-reference hub published.** Per `history-overview` entry 2 (= 01KR0TYF5F11DA8P5HNPA20DBK), three downstream arcs carry mandatory back-references to arc 02. The citation targets are now machine-resolvable:
+
+| Downstream arc | Downstream PR | Cites arc-02 entry | Cites arc-02 item |
+|---|---|---|---|
+| arc 03 (pane-behavior) | PR #29 (`fix/skip-pane-cursor-block-when-uninvited`, bdb8d87) | 01KR0YXXZRQR24CSNAK4Q7808T (investigation) | gap-analysis "Top suspects" §1 (cursor-block) |
+| arc 03 (pane-behavior) | PR #29 (residual extinction context) | 01KR0Z11CKNJRYEZ3T38EAFSC4 (harvest) | BUGS.md SMALL cursor-block entry, the residual PR #29 extinguishes |
+| arc 05 (pager-surface) | PR #20 (`feat/scroll-altscreen-hint`, ee07307) | 01KR0YXXZRQR24CSNAK4Q7808T (investigation) | ux-catalogue §2 (context-sensitive footer / DIM hint at transient row when context shifts) |
+| arc 06 (input-and-overlays) | PR #8 (`feat/harpoon`, 62fc129) and PR #10 (`feat/quickselect`, 9043547) | 01KR0YXXZRQR24CSNAK4Q7808T (investigation) | ux-catalogue §4 (Generalized pager picker, parallel pattern — pickers ship as standalone overlays rather than as `pager.picker_cursor` extension) |
+| arc 05 (pager-surface) | PR #33 (`feat/pager-visual-line-mode`, cf9e8ff), PR #35 (`feat/D-opens-pager-in-top-pane`, c243549) | 01KR0YXXZRQR24CSNAK4Q7808T (investigation) | read-through-pager direction; not mandatory |
+| arc 08 (recoverability-and-deps) | PR #31 (`chore/vt100-and-ratatui-upgrade`, 105db8d) | 01KR0Z11CKNJRYEZ3T38EAFSC4 (harvest) | BUGS.md MAYBE mode-2026 entry; arc 08 verifies whether vt100 0.16 introduces 2026 parsing |
+
+Arcs 03, 05, 06, and 08 should treat the investigation and harvest entries as their citation hubs for these specific items.
+
+**Forward reference: arc 03 — `history-arc-03-pane-behavior`** picks up next. Arc 03 covers PRs #6, #22, #26, #29, #34 (5 commits; 2026-05-01 to 2026-05-06). PR #6 (`feat/pane-zoom`, 10c9276) is the first move in arc 03 and lands one calendar day after arc 02's PR #5; the visual-state branch of pane behavior begins there. PR #29 carries the mandatory back-reference to arc 02's investigation entry per the table above. Arc 03 will inherit cadence option A (per-PR; five PRs is the natural shape) unless a structural reason emerges for departure.
+
+**Cadence note**: option B was the right call here. The two phase entries (investigation, harvest) read coherently as one move in two phases; the framing entry (= 01KR0YSEMQ51PEM2NYZFMQH05S) names the rationale with the standing arc 01's framing entry forwarded. Future arcs may inherit per-PR option A or pick option B again on stated reason. The precedent now reads: option A is the default; option B is available when the diff shape is phase-shaped (one PR per phase, where the PR titles map naturally onto phase names).
+
+**Voice contract precedent held**: third-person observational, present tense; verbatim commit-subject quoting attributed `(commit <sha>, <date>)`; no banned mindset words referencing the maintainer; sequence-faithful narration with no clock-padding. The investigation entry uses "the gap-analysis text reads verbatim:" as the framing for top-suspect quotes, matching arc 01's habit of attributing source rather than asserting.
+
+**The v1.37.2 commit-subject question, returned to arc 01's hand-off:** resolved as commit-subject drift. PR #5 cuts v1.37.3 in the diff (Cargo.toml `1.37.2` → `1.37.3`; CHANGELOG `## [1.37.3] - 2026-04-30` block added with one Fixed item describing the cursor-block work); the `(v1.37.2)` tag in the commit subject is wrong against that diff. Internal CHANGELOG and Cargo.toml are consistent; the drift is commit-subject-level only. See investigation entry for diff provenance.
+
+This thread remains OPEN for cross-arc references.
+
+**Arc 02 done-definition self-check**:
+- ☑ `watercooler_health` reported Healthy against the spyc code_path.
+- ☑ All 6 `history-overview` entries read (head 0–3 + tails 4–5).
+- ☑ All 7 `history-arc-01-foundation-hygiene` entries read (head 0–4 + tails 5–6).
+- ☑ `onboarding-overview` entry 0, `onboarding-architecture` entry 0, `onboarding-product-charter` entry 0 read.
+- ☑ PR #5's `notes/lazygit-gap-analysis.md` and `notes/lazygit-ux-catalogue.md` read in full at commit 0691666.
+- ☑ PR #5's `Cargo.toml` and `CHANGELOG.md` diffs read against parent (1f41b4b) — v1.37.2 question resolved empirically as commit-subject drift.
+- ☑ Cadence shape chosen: option B (phase-not-PR) with rationale stated in framing entry.
+- ☑ Thread `history-arc-02-lazygit-investigation-and-harvest` exists with framing (index 0), investigation entry (PR #5; index 1), harvest entry (PR #12; index 2), and this closure entry (index 3) — four head entries. Two tail entries follow.
+- ☑ Each phase entry contains at least one verbatim quote from PR #5's notes attributed to the source file.
+- ☑ Every entry ends with a `Provenance:` block.
+- ☑ Voice contract held: no banned words referencing the maintainer's mindset; no clock-padding; sequence-over-timing privileged.
+- ☑ All entries tagged `#history` and `#arc-02`.
+- ☑ Back-reference hub targets explicit (gap-analysis suspects §1/§2/§3, ux-catalogue §2/§4/§5; arc-02 entry IDs published in the table above).
+- ☑ No PR #2/#3/#4 content (those are arc 01); no insight-layer claims (those are later threads); no modifications to arc 01 or the spine.
+- ☑ Thread left OPEN.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — first commit in arc 02; investigation phase.
+- e210e58 (PR #12 chore/clean-notes, 2026-05-03) — second commit in arc 02; harvest phase.
+- 10c9276 (PR #6 feat/pane-zoom, 2026-05-01) — first commit of arc 03; named here for forward reference.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — arc 03's mandatory back-reference target.
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05) — arc 05's mandatory back-reference target.
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02) and 9043547 (PR #10 feat/quickselect, 2026-05-02) — arc 06's mandatory back-reference targets.
+- cf9e8ff (PR #33 feat/pager-visual-line-mode, 2026-05-06), c243549 (PR #35 feat/D-opens-pager-in-top-pane, 2026-05-06) — arc 05's optional back-reference targets.
+- 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — arc 08's reference target for BUGS.md MAYBE mode-2026 entry verification.
+- `history-overview` entry 2 = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract).
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A (cadence-option-B standing).
+- `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF (v1.37.2 question forwarded to arc 02).
+- `history-arc-02-lazygit-investigation-and-harvest` framing entry = 01KR0YSEMQ51PEM2NYZFMQH05S.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T.
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4.
+
+<!-- Entry-ID: 01KR0Z3673Z27FJ4GV92FYV4QJ -->
