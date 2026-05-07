@@ -37,12 +37,7 @@ enum Search {
 /// pty overlay path), or embedded into the lower-pane slot
 /// (replacing the pty pane — used by `^a-v` scrollback in v1.5).
 ///
-/// Phase 1 only wires the rect-derivation; later phases retarget
-/// existing callers (`^a-v`, `D`) at the new mounts. The `TopPane`
-/// and `LowerPane` variants are unreferenced from non-test code
-/// today — that's deliberate; allow(dead_code) drops in Phase 3.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Mount {
     /// Centered (or full-width / fit-to-content) overlay drawn on
     /// top of the file list and pane. Default; matches every
