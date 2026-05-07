@@ -234,6 +234,15 @@ pub struct PagerView {
     /// history (it's an ephemeral snapshot of pane state, not a
     /// page-of-content the user wants to revisit).
     pub pane_scroll: bool,
+    /// Set true by callers that want the pager to land at the
+    /// *bottom* of the buffer on its first render — `^a-v` does
+    /// this so the recent output is visible immediately, without
+    /// computing the scroll value before the actual viewport
+    /// height is known. The renderer reads the live viewport,
+    /// calls `scroll_to_bottom(viewport)`, and clears the flag
+    /// (interior mutability via `Cell`). Subsequent frames don't
+    /// re-snap, so user scrolling is preserved.
+    pub pending_scroll_to_bottom: std::cell::Cell<bool>,
 }
 
 impl PagerView {
@@ -270,6 +279,7 @@ impl PagerView {
             visual: None,
             mount: Mount::Overlay,
             pane_scroll: false,
+            pending_scroll_to_bottom: std::cell::Cell::new(false),
         }
     }
 
@@ -303,6 +313,7 @@ impl PagerView {
             visual: None,
             mount: Mount::Overlay,
             pane_scroll: false,
+            pending_scroll_to_bottom: std::cell::Cell::new(false),
         }
     }
 
@@ -340,6 +351,7 @@ impl PagerView {
             visual: None,
             mount: Mount::Overlay,
             pane_scroll: false,
+            pending_scroll_to_bottom: std::cell::Cell::new(false),
         }
     }
 
@@ -989,8 +1001,15 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         ))
     };
     let title_right = format!("  {pos}  ");
-    let block = if view.full_width {
-        // No border in full-width mode so terminal text selection is clean.
+    // Borderless when:
+    //   - `full_width` (current behavior — terminal text selection
+    //     is clean without the box drawing).
+    //   - `Mount::LowerPane` — the pager occupies the bottom-pane
+    //     slot, which the pty renders into without a border. Drawing
+    //     a border eats two rows of usable content and visually
+    //     disrupts the layout the user just had on-screen.
+    let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
+    let block = if borderless {
         Block::default()
     } else {
         Block::default()
@@ -2265,6 +2284,37 @@ mod tests {
         };
         assert_eq!(sel.range(), (2, 5));
         assert_eq!(sel.col_range(), (3, 7));
+    }
+
+    // ── v1.5 Phase 3 polish ────────────────────────────────────────
+
+    #[test]
+    fn pending_scroll_to_bottom_default_is_false() {
+        let view = sample_view();
+        assert!(
+            !view.pending_scroll_to_bottom.get(),
+            "constructors should leave the flag off by default"
+        );
+    }
+
+    #[test]
+    fn scroll_to_bottom_with_viewport_lands_in_bottom_window() {
+        // 20 lines, viewport=5 → scroll_max = 15 (last 5 lines visible).
+        let mut view = sample_view();
+        view.scroll_to_bottom(5);
+        assert_eq!(view.scroll, 15);
+    }
+
+    #[test]
+    fn lower_pane_mount_renders_borderless() {
+        // Render-side check (no actual frame): pager_inner_area for
+        // LowerPane mount returns the area as-is — and the borderless
+        // branch of the render block uses `Block::default()` with no
+        // borders. Verify the rect helper still uses the rect as-is.
+        let mut view = sample_view();
+        view.mount = Mount::LowerPane;
+        let slot = Rect::new(0, 21, 100, 19);
+        assert_eq!(pager_inner_area(slot, &view), slot);
     }
 
     // ── v1.5 Phase 1: Mount enum & rect dispatch ───────────────────

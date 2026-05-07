@@ -5,6 +5,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pane scrollback view (`^a-v`) opens cleanly — no jump, wrap
+  on, borderless.** Three issues reported against the v1.41.29
+  Phase-3 ship, fixed in one PR:
+  - **No-jump initialization.** Used to set `scroll = lines - 1`,
+    which puts the *last* line at the *top* of the viewport (so
+    `[EOF]` showed at row 0 and the user had to scroll up). Now
+    `pending_scroll_to_bottom` is set on open, and the renderer
+    — which has the actual rect — calls
+    `scroll_to_bottom(rect.height)` before drawing the first
+    frame. Lands in the bottom window immediately.
+  - **Wrap on by default.** Long lines (compiler errors, diff
+    rows, log entries) now fold instead of truncating, since
+    horizontal scroll isn't a thing in the pager. The pager's
+    continuation-row blank-gutter behavior keeps alignment
+    intact when line numbers (`l`) are toggled on.
+  - **Borderless in `Mount::LowerPane`.** The pty has no border;
+    the pager replacing it shouldn't either. Drawing the
+    `Borders::ALL` block was eating two rows of usable content
+    and visually disrupting the layout the user just had on
+    screen. `full_width` mode already drew without a border;
+    extended that to `LowerPane` mount.
+  3 new unit tests cover the flag default, scroll-to-bottom
+  with explicit viewport, and that LowerPane mount uses the
+  rect verbatim.
+
 ### Added
 - **Visual block (columnar) selection in the pager.** v1.5
   Phase 4 — vi's `^v` rectangle. From normal pager mode `^v`

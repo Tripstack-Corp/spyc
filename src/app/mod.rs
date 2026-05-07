@@ -2590,6 +2590,20 @@ impl App {
                 tabs.drain_all();
                 if bottom_is_pager {
                     // Skip the pty widget — the pager owns this rect now.
+                    // First-frame snap: ^a-v opens the pager wanting to
+                    // see *recent* output. We can't compute the right
+                    // scroll value at construction time (no viewport
+                    // height yet), so the opener sets
+                    // `pending_scroll_to_bottom` and the renderer here
+                    // — which now knows the actual rect — does the
+                    // snap before drawing, so the user never sees a
+                    // jump frame.
+                    if let Some(view) = self.pager.as_mut() {
+                        if view.pending_scroll_to_bottom.get() {
+                            view.scroll_to_bottom(rect.height);
+                            view.pending_scroll_to_bottom.set(false);
+                        }
+                    }
                     if let Some(view) = self.pager.as_ref() {
                         crate::ui::pager::render(frame, rect, view, &self.theme);
                     }
@@ -5899,11 +5913,23 @@ impl App {
         // jump horizontally when the pager opens. Toggle with `l`.
         view.show_line_numbers = false;
         view.no_history = true;
-        view.wrap = false;
-        // Park the cursor at the bottom — the user just pressed
-        // `^a-v`, the *recent* output is what they want to read.
-        let line_count = view.lines.len();
-        view.scroll = u16::try_from(line_count.saturating_sub(1)).unwrap_or(u16::MAX);
+        // Wrap on: long lines in pane history (compiler errors,
+        // diff lines, log entries) should fold rather than truncate
+        // — the user can't scroll horizontally to see the rest, so
+        // truncation hides content. The pager's continuation rows
+        // share a blank gutter with line-numbers-on so toggling
+        // `l` doesn't break alignment.
+        view.wrap = true;
+        // Park the cursor at the bottom on first render — the user
+        // just pressed `^a-v`, the *recent* output is what they
+        // want to read. Setting `scroll` here without knowing the
+        // actual viewport height puts the last line at the *top*
+        // of the viewport (a one-frame jump). Defer to the
+        // renderer instead via `pending_scroll_to_bottom`; the
+        // App::render LowerPane branch sees the real rect, calls
+        // scroll_to_bottom(rect.height), and clears the flag — so
+        // the very first frame already shows the recent output.
+        view.pending_scroll_to_bottom.set(true);
         self.pager = Some(view);
         self.state.pane_focused = true;
         self.needs_full_repaint = true;
