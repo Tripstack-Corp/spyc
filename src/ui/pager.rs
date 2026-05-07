@@ -31,6 +31,34 @@ enum Search {
     },
 }
 
+/// Where to render the pager. v1.5 introduces this so the same
+/// `PagerView` can be a centered popup, embedded into the top-pane
+/// slot (replacing the file list — like `;less` does today via the
+/// pty overlay path), or embedded into the lower-pane slot
+/// (replacing the pty pane — used by `^a-v` scrollback in v1.5).
+///
+/// Phase 1 only wires the rect-derivation; later phases retarget
+/// existing callers (`^a-v`, `D`) at the new mounts. The `TopPane`
+/// and `LowerPane` variants are unreferenced from non-test code
+/// today — that's deliberate; allow(dead_code) drops in Phase 3.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum Mount {
+    /// Centered (or full-width / fit-to-content) overlay drawn on
+    /// top of the file list and pane. Default; matches every
+    /// pre-v1.5 caller.
+    #[default]
+    Overlay,
+    /// Mounted in place of the file list. The bottom pane is still
+    /// visible below; focus-switching with `^a-j` / `^a-k` works
+    /// the same way it does for the `;cmd` top overlay.
+    TopPane,
+    /// Mounted in place of the lower pane (the pty). Used by
+    /// pane-scrollback view: the pty keeps running, we just stop
+    /// drawing it while the pager is up.
+    LowerPane,
+}
+
 /// vi-style visual line selection inside the pager. Active when
 /// `PagerView::visual` is `Some(_)`; `V` toggles, `j`/`k`/`G`/etc.
 /// move `cursor`, `y` yanks the inclusive range `[min..=max]` and
@@ -158,6 +186,11 @@ pub struct PagerView {
     /// range `[min..=max]` and exits. Mutually exclusive with the
     /// search/jump prompts (entering them cancels visual mode).
     pub visual: Option<VisualSelection>,
+    /// Where this pager renders — overlay / top pane / lower pane.
+    /// Default `Mount::Overlay` for every pre-v1.5 caller (set in
+    /// each `new_*` constructor); v1.5 phases swap callers over to
+    /// `TopPane` (`D`) and `LowerPane` (`^a-v`).
+    pub mount: Mount,
 }
 
 impl PagerView {
@@ -192,6 +225,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            mount: Mount::Overlay,
         }
     }
 
@@ -223,6 +257,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            mount: Mount::Overlay,
         }
     }
 
@@ -258,6 +293,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            mount: Mount::Overlay,
         }
     }
 
@@ -809,13 +845,7 @@ pub const fn centered_body_width(term_w: u16) -> u16 {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
-    let inner_area = if view.full_width {
-        area
-    } else if view.fit_to_content {
-        fit_height_rect(area, view)
-    } else {
-        centered_rect(area, CENTERED_W_PCT, 92)
-    };
+    let inner_area = pager_inner_area(area, view);
 
     frame.render_widget(Clear, inner_area);
 
@@ -1495,6 +1525,36 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
 /// underlying pager that was active when `?` was pressed.
 pub const PAGER_HELP_TITLE: &str = "Pager help";
 
+/// Where the pager's outer block should draw, given the parent
+/// `area` (whatever rect the caller hands to `render`) and the
+/// view's `mount` / sizing flags.
+///
+/// - `Mount::Overlay` keeps the pre-v1.5 dispatch: full-width if
+///   the user toggled it, fit-to-content for short summaries,
+///   else the centered 90×92 % box.
+/// - `Mount::TopPane` / `Mount::LowerPane` use `area` as-is — the
+///   caller (App::render) passes the slot's rect directly so the
+///   pager fills it without extra centering.
+///
+/// `full_width` and `fit_to_content` are deliberately ignored for
+/// the pane mounts because the slot's rect already defines the
+/// pager's footprint there. We could honor them later if a use
+/// case demands it.
+fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
+    match view.mount {
+        Mount::Overlay => {
+            if view.full_width {
+                area
+            } else if view.fit_to_content {
+                fit_height_rect(area, view)
+            } else {
+                centered_rect(area, CENTERED_W_PCT, 92)
+            }
+        }
+        Mount::TopPane | Mount::LowerPane => area,
+    }
+}
+
 const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
     let w = area.width * percent_w / 100;
     let h = area.height * percent_h / 100;
@@ -1824,5 +1884,63 @@ mod tests {
         // anchor == cursor → single-line range.
         let s = view.status_text().expect("status while visual");
         assert!(s.contains("(1 line)"), "expected singular, got: {s}");
+    }
+
+    // ── v1.5 Phase 1: Mount enum & rect dispatch ───────────────────
+
+    #[test]
+    fn mount_default_is_overlay() {
+        let view = sample_view();
+        assert_eq!(view.mount, Mount::Overlay);
+    }
+
+    #[test]
+    fn pager_inner_area_overlay_centers() {
+        // 100x40 frame, default Mount::Overlay → centered 90×92 %.
+        let view = sample_view();
+        let frame = Rect::new(0, 0, 100, 40);
+        let inner = pager_inner_area(frame, &view);
+        assert!(inner.width < frame.width, "should be narrower than frame");
+        assert!(inner.height < frame.height, "should be shorter than frame");
+        assert!(inner.x > frame.x, "should be inset from left");
+        assert!(inner.y > frame.y, "should be inset from top");
+    }
+
+    #[test]
+    fn pager_inner_area_overlay_full_width_uses_whole_area() {
+        let mut view = sample_view();
+        view.full_width = true;
+        let frame = Rect::new(0, 0, 100, 40);
+        assert_eq!(pager_inner_area(frame, &view), frame);
+    }
+
+    #[test]
+    fn pager_inner_area_top_pane_uses_area_as_is() {
+        let mut view = sample_view();
+        view.mount = Mount::TopPane;
+        // Caller would pass the top-pane slot rect; pager must
+        // honor it verbatim (no extra centering / fit logic).
+        let slot = Rect::new(0, 0, 100, 20);
+        assert_eq!(pager_inner_area(slot, &view), slot);
+    }
+
+    #[test]
+    fn pager_inner_area_top_pane_ignores_full_width_and_fit() {
+        // Pane mounts deliberately ignore the overlay sizing
+        // flags — the slot's rect already defines the footprint.
+        let mut view = sample_view();
+        view.mount = Mount::TopPane;
+        view.full_width = true;
+        view.fit_to_content = true;
+        let slot = Rect::new(5, 2, 80, 15);
+        assert_eq!(pager_inner_area(slot, &view), slot);
+    }
+
+    #[test]
+    fn pager_inner_area_lower_pane_uses_area_as_is() {
+        let mut view = sample_view();
+        view.mount = Mount::LowerPane;
+        let slot = Rect::new(0, 21, 100, 19);
+        assert_eq!(pager_inner_area(slot, &view), slot);
     }
 }
