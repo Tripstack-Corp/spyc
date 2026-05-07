@@ -283,3 +283,37 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4.
 
 <!-- Entry-ID: 01KR0Z3673Z27FJ4GV92FYV4QJ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:19:32.387274+00:00
+Role: scribe
+Type: Note
+Title: Tail: looking back at arc 02 — the hub role, the phase shape, the question returned upstream
+
+Spec: scribe
+
+tags: #history #arc-02 #tail
+
+Looking back at the four head entries above, what reads as load-bearing now is the back-reference hub itself. Without arcs 03, 05, and 06 citing arc 02's investigation entry by ULID, this thread would be two phase narrations and a closure pointing forward; with the citation targets, it's the connecting tissue that lets the cross-cutting reading exist. The investigation entry is dense for a reason — three downstream arcs need to land on it and find specific items (gap-analysis §1, §2, §3; ux-catalogue §2, §4, §5) under stable text.
+
+The cadence choice (option B — phase-not-PR) reads as the right call from here. "Investigation entry" / "harvest entry" sits more naturally than "PR #5 entry" / "PR #12 entry" once you're inside the network. Whether option B becomes a recurring pattern or stays a one-off for arc 02 is a question Phase 3 will answer; arc 03 picks its own cadence on its own grounds, and the precedent now reads as "option A by default, option B available when the diff shape is phase-shaped."
+
+What this arc carried in from upstream: the v1.37.2 commit-subject question arc 01's PR #4 entry handed forward without prejudgement. Resolving it against the diff was straightforward — `Cargo.toml` bumps from 1.37.2 to 1.37.3; CHANGELOG adds a `[1.37.3]` block — and the resolution lands in the investigation entry with full diff provenance. From one-arc-and-a-spine distance, the cleaner reading is that the hand-off worked exactly as the spine's contract intended: arc 01 flagged what it could see from its vantage, arc 02 verified empirically and named the answer. The hand-off didn't require any cross-arc edit; it required only that arc 01 be honest about what it didn't know, and that arc 02 read the diff.
+
+What this arc handed forward: the citation-ready hub, plus the v1.37.3 truth (commit-subject drift, not release-coalescing), plus three BUGS.md items now load-bearing for downstream arcs — the SMALL cursor-block residual that arc 03's PR #29 will extinguish, the BIGGER mouse item (gap-analysis suspect §2), and the MAYBE mode-2026 item (gap-analysis suspect §3) that arc 08's PR #31 will need to check against the vt100 0.16 release notes.
+
+What this arc left for the insight layer: the negative-space readings the harvest couldn't interpret. Suspect §2 (mouse) sits in BUGS.md as BIGGER but in `ROADMAP.md:426-447` as a non-goal — the two coexisting is the exact recurring shape an emergence thread should pick up. The four skipped ux-catalogue recommendations (numbered panels, command log, row-verb panel reuse, two-letter chord jumps) survive nowhere in the durable record after the harvest, only here in the arc-02 thread; whether their absence is the right call or fidelity-loss is the kind of question only Phase 3 can ask cleanly.
+
+What's not in arc 02 by design: any narration of the lazygit dog-fooding session that produced the screenshot the gap-analysis cites, any narration of what happened during the three days between PR #5 and PR #12. Those would require speaking for the maintainer's mindset, which both head and tail voice contracts ban. The diff is what's narratable; the diff is what got narrated.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-02-lazygit-investigation-and-harvest` framing entry = 01KR0YSEMQ51PEM2NYZFMQH05S.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (the load-bearing hub).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4.
+- `history-arc-02-lazygit-investigation-and-harvest` closure entry = 01KR0Z3673Z27FJ4GV92FYV4QJ.
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract source).
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (v1.37.2 question source; resolution returned in this arc's investigation entry).
+- `history-arc-01-foundation-hygiene` reflection tail = 01KR0XR504ZR10Y242JERT4K9S (head/tail voice precedent).
+
+<!-- Entry-ID: 01KR0Z6673WE91822V8ZTWMYVJ -->

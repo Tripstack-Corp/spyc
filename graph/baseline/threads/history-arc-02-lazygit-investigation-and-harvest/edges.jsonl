@@ -5,3 +5,5 @@
 {"source":"entry:01KR0YXXZRQR24CSNAK4Q7808T","target":"entry:01KR0Z11CKNJRYEZ3T38EAFSC4","type":"followed_by"}
 {"source":"thread:history-arc-02-lazygit-investigation-and-harvest","target":"entry:01KR0Z3673Z27FJ4GV92FYV4QJ","type":"contains"}
 {"source":"entry:01KR0Z11CKNJRYEZ3T38EAFSC4","target":"entry:01KR0Z3673Z27FJ4GV92FYV4QJ","type":"followed_by"}
+{"source":"thread:history-arc-02-lazygit-investigation-and-harvest","target":"entry:01KR0Z6673WE91822V8ZTWMYVJ","type":"contains"}
+{"source":"entry:01KR0Z3673Z27FJ4GV92FYV4QJ","target":"entry:01KR0Z6673WE91822V8ZTWMYVJ","type":"followed_by"}
