@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **v1.5 Phase 2: scrollback adapter
+  (`src/ui/scrollback.rs`).** New module bridges a pane's
+  `vt100::Screen` (cell grid + bounded scrollback) into the
+  pager's data model (styled `Vec<Line<'static>>`), so the
+  Phase 3 `^a-v` rewrite can use the in-app pager — search,
+  jump, visual-mode range yank, line numbers — over pane
+  history. Walks the visible window backwards through scrollback
+  by mutating `scrollback_offset` (clamped by `set_scrollback`),
+  reading one page at a time. Original offset is restored
+  before the function returns. Adjacent same-style cells merge
+  into one span; trailing whitespace on each row trimmed; trailing
+  blank lines dropped. 10 unit tests cover empty buffer, live-only,
+  scrollback-then-live ordering, padding trim, offset restoration,
+  page-walk chunking with non-multiple sizes, color preservation,
+  same-style merging, sub-page scrollback, and zero-capacity
+  scrollback. Made `pane::widget::cell_style` / `convert_color`
+  `pub` so the adapter can reuse the existing vt100→ratatui style
+  mapping.
+
+  `#[allow(dead_code)]` on the module until Phase 3 wires the
+  consumer; tests still exercise it.
+
 - **v1.5 Phase 1: `PagerView::mount`.** The pager gets an explicit
   `Mount` field (`Overlay` / `TopPane` / `LowerPane`) so v1.5 can
   embed the same renderer into different slots (top pane for an

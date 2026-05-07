@@ -81,7 +81,7 @@ impl Widget for PaneWidget<'_> {
     }
 }
 
-fn cell_style(cell: &vt100::Cell) -> Style {
+pub fn cell_style(cell: &vt100::Cell) -> Style {
     let mut style = Style::default();
     style = style.fg(convert_color(cell.fgcolor()));
     style = style.bg(convert_color(cell.bgcolor()));
@@ -100,7 +100,7 @@ fn cell_style(cell: &vt100::Cell) -> Style {
     style
 }
 
-const fn convert_color(c: vt100::Color) -> Color {
+pub const fn convert_color(c: vt100::Color) -> Color {
     match c {
         vt100::Color::Default => Color::Reset,
         vt100::Color::Idx(i) => Color::Indexed(i),
