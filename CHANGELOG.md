@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **v1.5 Phase 6a: shared `PtyHost`.** Pulls the pty kernel
+  (master + writer + child + reader thread + event channel +
+  `closed` / `exit_status` / `last_size` / `debug_dump`) out of
+  `Pane`, `PendingCapture`, and `BackgroundTask` into a new
+  `pane::pty_host` module. All three consumers shrink to a thin
+  wrapper plus their own state (vt100 parser for `Pane`, flat
+  byte buffer + lifecycle metadata for `PendingCapture` /
+  `BackgroundTask`).
+
+  Pure refactor — strict no-behavior-change goal, 594 tests
+  still pass. The reader-thread protocol, debug-byte-dump, has-
+  pending flag, exit-status harvesting, and SIGTERM-then-SIGKILL
+  shutdown all match the pre-refactor paths exactly.
+
+  **Side benefit:** `spawn_capture` now retains the master in
+  the host, so backgrounded captures can be resized when the
+  terminal resizes — pre-v1.5 they couldn't, because the master
+  was dropped after extracting reader/writer. This was the
+  blocker that made Phase 6b (`:task-to-pane`) impossible.
+
+  3 new unit tests on `PtyHost`: `spawn_and_drain_echo`
+  (round-trip a real subprocess), `resize_updates_last_size_and_coalesces`
+  (geometry + coalescing), `process_id_is_some_after_spawn`.
+
 ### Fixed
 - **Pane scrollback view (`^a-v`) opens cleanly — no jump, wrap
   on, borderless.** Three issues reported against the v1.41.29

@@ -37,11 +37,11 @@ use crate::{Tui, resume_tui, suspend_tui};
 /// live, typed keys are forwarded to the child via the master writer
 /// so the user can answer prompts. Ctrl+C kills the child outright.
 struct PendingCapture {
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    /// Master-side writer — typed keys go here as encoded ANSI bytes.
-    writer: Box<dyn std::io::Write + Send>,
-    /// Receives chunks of stdout as they arrive (not all at once).
-    output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    /// Shared pty kernel (master / writer / child / reader-thread /
+    /// event channel / closed / exit_status / last_size). v1.5
+    /// Phase 6a unified the pty plumbing across PendingCapture,
+    /// BackgroundTask, and Pane.
+    host: crate::pane::pty_host::PtyHost,
     /// Accumulated raw bytes for the pager (ANSI included).
     buffer: Vec<u8>,
     title: String,
@@ -79,9 +79,11 @@ struct BackgroundTask {
     id: u32,
     title: String,
     cmd_display: String,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
-    writer: Box<dyn std::io::Write + Send>,
-    output_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    /// Shared pty kernel — same shape as PendingCapture and Pane
+    /// since v1.5 Phase 6a, which unblocks the task ↔ pane
+    /// migration coming in 6b/6c (the host moves between
+    /// containers; pty stays running).
+    host: crate::pane::pty_host::PtyHost,
     buffer: Vec<u8>,
     status: TaskStatus,
     started: std::time::Instant,
@@ -1163,14 +1165,14 @@ impl App {
                 needs_draw = true;
                 draw_reason = 3; // capture in progress
                 let mut got_data = false;
-                while let Ok(chunk) = capture.output_rx.try_recv() {
-                    if chunk.is_empty() {
-                        // EOF — child is done.
-                        capture.finished = true;
-                        break;
-                    }
+                let mut chunks: Vec<Vec<u8>> = Vec::new();
+                let drain = capture.host.drain(|bytes| chunks.push(bytes.to_vec()));
+                for chunk in chunks {
                     capture.buffer.extend_from_slice(&chunk);
                     got_data = true;
+                }
+                if drain.newly_closed {
+                    capture.finished = true;
                 }
                 // Update elapsed timer in the title while running.
                 if !capture.finished {
@@ -1221,11 +1223,22 @@ impl App {
                     }
                 }
                 if capture.finished {
-                    let status = capture.child.wait();
-                    let exit_info = match status {
-                        Ok(s) if s.success() => "exit 0".to_string(),
-                        Ok(s) => format!("exit {}", s.exit_code()),
-                        Err(e) => format!("error: {e}"),
+                    // Reader thread already saw EOF; capture.host
+                    // may have already harvested exit_status during
+                    // drain. If not (race window), wait() now —
+                    // safe because the child has exited.
+                    let exit_info = if let Some(s) = capture.host.exit_status.as_ref() {
+                        if s.success() {
+                            "exit 0".to_string()
+                        } else {
+                            format!("exit {}", s.exit_code())
+                        }
+                    } else {
+                        match capture.host.child.wait() {
+                            Ok(s) if s.success() => "exit 0".to_string(),
+                            Ok(s) => format!("exit {}", s.exit_code()),
+                            Err(e) => format!("error: {e}"),
+                        }
                     };
                     let title = format!("{} — {exit_info}", capture.title);
                     // Final rebuild with stderr included.
@@ -1252,37 +1265,46 @@ impl App {
                 if !matches!(task.status, TaskStatus::Running) {
                     continue;
                 }
-                while let Ok(chunk) = task.output_rx.try_recv() {
-                    if chunk.is_empty() {
-                        let exit = task.child.wait();
-                        let (status_text, status_val) = match exit {
-                            Ok(s) if s.success() => ("exit 0".to_string(), TaskStatus::Exited(0)),
-                            #[allow(clippy::cast_possible_wrap)]
-                            Ok(s) => {
-                                let code = s.exit_code() as i32;
-                                (format!("exit {code}"), TaskStatus::Exited(code))
-                            }
-                            Err(e) => {
-                                let msg = e.to_string();
-                                (format!("error: {msg}"), TaskStatus::Crashed(msg))
-                            }
-                        };
-                        task.status = status_val;
-                        task.finished_at = Some(std::time::Instant::now());
-                        just_finished.push((
-                            task.id,
-                            task.cmd_display.clone(),
-                            status_text,
-                            task.started.elapsed(),
-                        ));
-                        break;
-                    }
+                let mut chunks: Vec<Vec<u8>> = Vec::new();
+                let drain = task.host.drain(|bytes| chunks.push(bytes.to_vec()));
+                for chunk in chunks {
                     task.buffer.extend_from_slice(&chunk);
                     task.has_unread_output = true;
                     if task.buffer.len() > TASK_BUFFER_CAP {
                         let drop_n = task.buffer.len() - TASK_BUFFER_CAP;
                         task.buffer.drain(..drop_n);
                     }
+                }
+                if drain.newly_closed {
+                    // Reader thread observed EOF this tick. Host's
+                    // drain already tried try_wait — re-attempt
+                    // here in case it raced, then build the
+                    // status_text + TaskStatus.
+                    let exit = task
+                        .host
+                        .exit_status
+                        .take()
+                        .map_or_else(|| task.host.child.wait(), Ok);
+                    let (status_text, status_val) = match exit {
+                        Ok(s) if s.success() => ("exit 0".to_string(), TaskStatus::Exited(0)),
+                        #[allow(clippy::cast_possible_wrap)]
+                        Ok(s) => {
+                            let code = s.exit_code() as i32;
+                            (format!("exit {code}"), TaskStatus::Exited(code))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            (format!("error: {msg}"), TaskStatus::Crashed(msg))
+                        }
+                    };
+                    task.status = status_val;
+                    task.finished_at = Some(std::time::Instant::now());
+                    just_finished.push((
+                        task.id,
+                        task.cmd_display.clone(),
+                        status_text,
+                        task.started.elapsed(),
+                    ));
                 }
             }
             if !just_finished.is_empty() {
@@ -2943,8 +2965,8 @@ impl App {
             if matches!(key.code, KeyCode::Char('\\'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
-                let _ = capture.child.kill();
-                let _ = capture.child.wait();
+                let _ = capture.host.child.kill();
+                let _ = capture.host.child.wait();
                 let title = format!("{} — interrupted", capture.title);
                 if let Some(view) = self.pager.as_mut() {
                     view.title = title;
@@ -2964,8 +2986,8 @@ impl App {
             }
             let bytes = crate::pane::input::encode_key(key);
             if !bytes.is_empty() {
-                let _ = capture.writer.write_all(&bytes);
-                let _ = capture.writer.flush();
+                let _ = capture.host.writer.write_all(&bytes);
+                let _ = capture.host.writer.flush();
             }
             return Ok(PostAction::None);
         }
@@ -3472,7 +3494,7 @@ impl App {
         // already-closed pane errors here, ignored).
         let Some((cwd, fallback)) = self.pane_tabs.as_mut().and_then(|tabs| {
             let entry = tabs.tabs_mut().get_mut(tab_idx)?;
-            let _ = entry.pane.child.kill();
+            entry.pane.try_kill();
             let fallback = entry
                 .info
                 .restore_fallback
@@ -4931,15 +4953,13 @@ impl App {
     fn start_capture(&mut self, expanded: &str, title_cmd: &str, cmd_display: &str) {
         let title = format!("! {title_cmd}");
         match spawn_capture(expanded, &self.state.listing.dir) {
-            Ok((child, writer, rx)) => {
+            Ok(host) => {
                 let mut view =
                     PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
                 view.streaming = true;
                 self.pager = Some(view);
                 self.pending_capture = Some(PendingCapture {
-                    child,
-                    writer,
-                    output_rx: rx,
+                    host,
                     buffer: Vec::new(),
                     title,
                     cmd_display: cmd_display.to_string(),
@@ -4967,9 +4987,7 @@ impl App {
             id,
             title: capture.title,
             cmd_display: capture.cmd_display.clone(),
-            child: capture.child,
-            writer: capture.writer,
-            output_rx: capture.output_rx,
+            host: capture.host,
             buffer: capture.buffer,
             status: TaskStatus::Running,
             started: capture.started,
@@ -5015,7 +5033,7 @@ impl App {
             self.state.flash_info(format!("task #{id} already paused"));
             return;
         }
-        let Some(pid) = task.child.process_id() else {
+        let Some(pid) = task.host.process_id() else {
             self.state.flash_error(format!("task #{id}: no process id"));
             return;
         };
@@ -5053,7 +5071,7 @@ impl App {
             return Err("process already stopped".to_string());
         }
         let pid = task
-            .child
+            .host
             .process_id()
             .ok_or_else(|| format!("task #{id}: no process id"))?;
         // Negative pid → process group, same convention as
@@ -5082,7 +5100,7 @@ impl App {
             self.state.flash_info(format!("task #{id} is not paused"));
             return;
         }
-        let Some(pid) = task.child.process_id() else {
+        let Some(pid) = task.host.process_id() else {
             self.state.flash_error(format!("task #{id}: no process id"));
             return;
         };
@@ -5116,7 +5134,7 @@ impl App {
         // this, `:fg` on a paused task would re-attach the streaming
         // capture but the child would stay frozen.
         if task.paused {
-            if let Some(pid) = task.child.process_id() {
+            if let Some(pid) = task.host.process_id() {
                 unsafe {
                     libc::kill(-(pid as libc::pid_t), libc::SIGCONT);
                 }
@@ -5145,9 +5163,7 @@ impl App {
                 view.scroll_to_bottom_auto();
                 self.pager = Some(view);
                 self.pending_capture = Some(PendingCapture {
-                    child: task.child,
-                    writer: task.writer,
-                    output_rx: task.output_rx,
+                    host: task.host,
                     buffer: task.buffer,
                     title: task.title,
                     cmd_display: task.cmd_display,
@@ -5330,11 +5346,7 @@ impl App {
                 continue;
             }
             let bad_exit = entry.pane.is_closed()
-                && entry
-                    .pane
-                    .exit_status
-                    .as_ref()
-                    .is_some_and(|s| s.exit_code() != 0);
+                && entry.pane.exit_status().is_some_and(|s| s.exit_code() != 0);
             // Always re-scan once dump_grace has elapsed: claude often
             // prints the entire crash dump in <1s then sits quiescent,
             // and `output_dirty` gets cleared on every render — gating
@@ -8905,22 +8917,13 @@ fn sync_listing_watch(
     }
 }
 
-/// Spawn a shell command with stdout+stderr merged into one pipe.
-/// The reader thread sends chunks as they arrive so the pager can
-/// stream output in real-time. An empty Vec signals EOF.
-/// Spawn `cmd` under a PTY for `!` captures. Returns the child handle,
-/// a receiver streaming stdout/stderr/`/dev/tty` bytes, and the master
-/// writer for forwarding the user's keystrokes to the child.
-///
-/// PTY (vs. a plain piped `Command`) is what stops sudo / ssh / gpg
-/// from writing their password prompts directly to our real terminal:
-/// inside the child, `/dev/tty` resolves to the slave PTY, so those
-/// bytes flow back through the master and into the pager buffer.
-type CaptureHandles = (
-    Box<dyn portable_pty::Child + Send + Sync>,
-    Box<dyn std::io::Write + Send>,
-    std::sync::mpsc::Receiver<Vec<u8>>,
-);
+// `CaptureHandles` retired in v1.5 Phase 6a — `spawn_capture` now
+// returns a `PtyHost` directly, the same shape `Pane` and
+// `BackgroundTask` use. PTY (vs. a plain piped `Command`) is what
+// stops sudo / ssh / gpg from writing their password prompts directly
+// to our real terminal: inside the child, `/dev/tty` resolves to the
+// slave PTY, so those bytes flow back through the master and into
+// the pager buffer.
 
 /// Normalize captured pty output for the pager.
 ///
@@ -8995,90 +8998,37 @@ fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<CaptureHandles> {
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-    use std::io::Read as _;
-    use std::sync::mpsc;
-
+fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_host::PtyHost> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    let pty_system = native_pty_system();
-    let pair = pty_system.openpty(PtySize {
+    // TERM=dumb so TUI programs refuse to run as a TUI inside our
+    // capture (the pager only renders SGR colors and CRLF, not
+    // cursor positioning / alt-screen). FORCE_COLOR / CLICOLOR_FORCE
+    // / COLORTERM ride alongside so tools that respect those (cargo,
+    // eza, bat, ripgrep) keep their color output anyway. PAGER=cat /
+    // GIT_PAGER=cat / MANPAGER=cat stops tools that auto-invoke a
+    // sub-pager (git log, man) from launching `less` against our
+    // pty and freezing the capture.
+    let env: &[(&str, &str)] = &[
+        ("CLICOLOR_FORCE", "1"),
+        ("FORCE_COLOR", "1"),
+        ("COLORTERM", "truecolor"),
+        ("PAGER", "cat"),
+        ("GIT_PAGER", "cat"),
+        ("MANPAGER", "cat"),
+    ];
+    crate::pane::pty_host::PtyHost::spawn(crate::pane::pty_host::PtySpec {
+        command: cmd,
         rows,
         cols,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-
-    // Use the user's $SHELL with -i so aliases and rc-file PATH
-    // entries from .zshrc / .bashrc are honored — `:!gemma` should
-    // resolve a user alias the same way it does in their terminal.
-    let (shell, shell_args) = crate::shell::user_shell_invocation(cmd);
-    let mut builder = CommandBuilder::new(&shell);
-    builder.args(shell_args.iter().map(String::as_str));
-    builder.cwd(cwd);
-    // We're not actually a vt100 terminal -- the capture pager only
-    // renders ANSI SGR (colors) and treats CR/LF intelligently;
-    // cursor positioning, alt-screen, mouse codes, etc. all get
-    // stripped or rendered as garbage. Advertising
-    // `xterm-256color` would lie about that, and tools like `less`,
-    // `vim`, `htop` would happily switch into alt-screen TUI mode
-    // and freeze the capture (or render unrenderable cursor games
-    // into the pager body). `TERM=dumb` is the canonical "nothing
-    // fancy" signal: TUI programs refuse to run as a TUI (they
-    // dump to stdout or print a friendly error and exit), which is
-    // exactly the behavior we want for `!` captures. Users who
-    // genuinely want a TUI program should use `;cmd` (foreground
-    // pane) instead.
-    //
-    // FORCE_COLOR / CLICOLOR_FORCE / COLORTERM are kept so tools
-    // that respect those override TERM=dumb's "no color" implication
-    // -- cargo, eza, bat, ripgrep all keep their color output. Tools
-    // that key off TERM alone (older `git`, default `ls`) will
-    // produce plain output, which is acceptable.
-    builder.env("TERM", "dumb");
-    builder.env("CLICOLOR_FORCE", "1");
-    builder.env("FORCE_COLOR", "1");
-    builder.env("COLORTERM", "truecolor");
-    builder.env("COLUMNS", cols.to_string());
-    builder.env("LINES", rows.to_string());
-    // We're already running this child *inside* spyc's pager. Tools
-    // that probe `isatty(stdout)` and auto-invoke a sub-pager (`git
-    // log`, `man`, anything that defers to $PAGER) would otherwise
-    // launch `less` against our PTY and freeze the capture waiting
-    // for keystrokes. Force a no-op pager so tools just dump their
-    // output and our pager wraps the whole thing. `cat` is safer
-    // than empty/unset, since some tools fall back to a default
-    // when $PAGER is unset.
-    builder.env("PAGER", "cat");
-    builder.env("GIT_PAGER", "cat");
-    builder.env("MANPAGER", "cat");
-
-    let child = pair.slave.spawn_command(builder)?;
-    // Drop the slave handle — once the child exits, the master read
-    // side will see EOF, which is how we detect "done".
-    drop(pair.slave);
-
-    let mut reader = pair.master.try_clone_reader()?;
-    let writer = pair.master.take_writer()?;
-
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-        // Signal EOF with an empty vec.
-        let _ = tx.send(Vec::new());
-    });
-
-    Ok((child, writer, rx))
+        cwd,
+        env,
+        term: "dumb",
+        // No SIGWINCH nudge for captures — they aren't interactive
+        // shells with rc-file prompts to redraw.
+        nudge_winch: false,
+        // Captures don't enable the per-byte debug dump (Pane does).
+        debug_dump: false,
+    })
 }
 
 /// Build a PostAction that runs `cmd` through `sh -c` so shell features
