@@ -145,3 +145,42 @@ Provenance:
 - `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
 
 <!-- Entry-ID: 01KR2A2XY61GKZ1W52XQWGFBAH -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:50:02.548693+00:00
+Role: scribe
+Type: Note
+Title: PR #17 (fix/help-pager-search-multicol): scroll_to_match maps global → chunk-local in multi-column views
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #17 closes phase α. Commit subject reads "fix: pager n/N follows match into column 2 of multi-col views (v1.41.4)" (commit 4f2f3ad, 2026-05-05). Diff: 5 files, +106/-3. The bulk of the change is concentrated in `src/ui/pager.rs` (82 insertions / 1 deletion); BUGS.md (12 insertions), CHANGELOG.md (11 insertions), and the version bump (Cargo.toml + Cargo.lock) round out the rest.
+
+**The bug.** The PR's `### Fixed` CHANGELOG entry leads verbatim: "`/...` then `n n n` in the help pager left the view stuck at the bottom." (commit 4f2f3ad, 2026-05-05). The user-visible failure is precise and small: search for a token in the help overlay, advance with `n`, watch the viewport pin itself to the bottom and the actual match disappear.
+
+**The diagnosis.** The CHANGELOG entry continues verbatim: "The help overlay renders in two columns when the terminal is wide enough; in multi-column mode `scroll` is interpreted per-column (each column applies the same offset within its own chunk), but `scroll_to_match` was treating it as a global line offset. A match in column 2 produced a `scroll` value larger than `scroll_max` (= longest-chunk - viewport_h), got clamped to the bottom, and pinned every column at the end of its chunk — hiding the actual match." Two scroll semantics (per-column vs global line offset) used interchangeably by `scroll_to_match`; the per-column one is correct in multi-column mode and the bug is the conflation.
+
+**The fix.** The CHANGELOG entry continues verbatim: "Now translates the match's global line index to a chunk-local offset before assigning to `self.scroll`. Single-column pagers behave unchanged. Pinned by a regression test." The translation is the surgery: take the global match index, divide by the chunk length, and use the remainder as the per-column scroll. Single-column pagers preserve their existing semantics because the global-vs-local distinction collapses when there is only one column.
+
+**Sequence-grain dependency on PR #11.** The wrap-off / multi-column boundary PR #11 preserved (its CHANGELOG named it: "Wrap-off pagers and multi-column pickers keep the original logical-line bound") is exactly the boundary PR #17 lands inside. PR #11 left `scroll_max` for multi-column views computed against `longest-chunk - viewport_h` — that's the same `scroll_max` PR #17's diagnosis names ("`scroll_max` (= longest-chunk - viewport_h)"). PR #11 didn't break the multi-column case; PR #17 fixes a different scroll-related bug in the same code region. Phase α reads as three small fixes in `src/ui/pager.rs` that respect each other's boundaries.
+
+**Sequence-grain forward note.** The help pager's two-column rendering is the same surface PR #23 (next, `feat/help-yf-and-percent-docs`) extends — PR #23 adds the `%` substitution row and the default-command precedence row to `src/ui/help.rs` (14 insertions / 1 deletion in PR #23's diff on that file), and the help text fits within the per-column budget PR #17 just made search-correct. PR #17 is the "search works in this overlay" fix that makes PR #23's discoverability addition land on a search-navigable surface.
+
+**Drift findings flagged for the insight layer**:
+- The commit subject scopes the change cleanly to `n/N` and "column 2 of multi-col views." The CHANGELOG diagnosis quotes a specific user-experience symptom ("stuck at the bottom") and names the precise scroll-clamp pathway that produces it. No drift between subject, CHANGELOG, and diff at this PR.
+- The bug-class is a unit-mismatch: `scroll_to_match` mixed global-line and per-column-line units. The fix narrows to the translation point. A future feature that wants global navigation (search-across-columns ordering, say) would have to confront the same unit asymmetry from the other side; the seam is named in the diff but not generalized.
+
+Provenance:
+- 4f2f3ad (PR #17 fix/help-pager-search-multicol, 2026-05-05).
+- `git diff 4f2f3ad^1..4f2f3ad^2 -- CHANGELOG.md`: `### Fixed` entry quoted verbatim above.
+- `git show 4f2f3ad --stat`: 5 files changed, 106 insertions, 3 deletions; `src/ui/pager.rs` carries 82 insertions / 1 deletion.
+- `Cargo.toml:3` post-merge: `version = "1.41.4"`.
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM (multi-column / wrap-off boundary preserved at PR #11; PR #17 lands inside that boundary).
+- `history-arc-05-pager-surface` PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH.
+- Forward reference: PR #23 (eb6ddf6, 2026-05-05) extends `src/ui/help.rs` with `%` substitution and default-command precedence rows on the same multi-column help-pager surface.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+
+<!-- Entry-ID: 01KR2A4DCY3BR45ZQ7FQ2YQE4Q -->
