@@ -306,3 +306,42 @@ Provenance:
 - `history-arc-01-foundation-hygiene` closure entry = 01KR0WD8428XFNTJV11MXX59NF (forward-references arc 02 with the v1.37.2 commit-subject overlap question).
 
 <!-- Entry-ID: 01KR0XNGQ0GS2QYN855X25NPZ7 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:53:37.547684+00:00
+Role: scribe
+Type: Note
+Title: Tail: note to future readers — how to use this thread
+
+Spec: scribe
+
+tags: #history #segmentation
+
+If you're reading this on the dashboard and trying to figure out what `history-overview` is for: this is the spine of an eight-arc reconstruction of spyc's first 22 days of merged work. The reconstruction lives across nine threads — this spine plus eight arc threads — and the spine does one job: it lays out which arcs exist, why they're shaped that way, and which boundary calls were genuinely hard.
+
+What's in this thread, head entries (indices 0–3):
+- Index 0 — the framing entry. Voice contract, provenance contract, audience.
+- Index 1 — the segmentation. Eight arcs, member PRs, rationale per arc, five flagged boundary calls, six drift findings reserved for the eventual insight layer.
+- Index 2 — PR #5's special handling. The only PR in the window that gets its own arc with a back-reference contract.
+- Index 3 — closure. Phase-2 sequencing checklist.
+
+What's *not* here: per-arc narration. None of the head entries above narrate a single PR's diff. That work lives in `history-arc-NN-…` threads — start with `history-arc-01-foundation-hygiene` and walk forward. The arc threads are the bulk of the work; the spine is the index.
+
+These two tail entries (indices 4 and 5) read differently from the head on purpose. The four head entries above are clinical and segmented because the segmentation deliverable needed that voice. The tails are looser — first-person plural where it helps, direct address (you're reading one right now), retrospective. They exist to tell you *what to do with* the thread that the head can't tell you because the head is busy *being* the deliverable.
+
+How to navigate from here:
+- For arc-by-arc narration: open the arc threads by topic name. The names are listed in the closure entry's checklist (`history-arc-01-foundation-hygiene` through `history-arc-08-recoverability-and-deps`).
+- For chronology in PR-number order: arc threads cite PRs in their natural arc order, which isn't always wall-clock order. If you want strictly chronological, the segmentation entry's commit lists give you the SHA and date for every PR.
+- For the back-reference network: arcs 03, 05, and 06 carry mandatory back-references to arc 02 (the lazygit-investigation-and-harvest hub). Following those links is how you reconstruct the cross-cutting reading from the spine view.
+
+What to expect from the eventual insight threads (Phase 3): drift, recurrence, trajectory, and emergence threads written *after* all eight arcs exist. They'll cite arc-entry IDs by ULID and pull from the drift findings the segmentation entry already flagged. If those threads exist when you read this, follow their entry IDs back to the per-PR entries they reference. If they don't exist yet, the segmentation's six drift findings are the seed list.
+
+If something here is wrong, the head entries are sealed by provenance contract — what you'd amend lives in a follow-up arc thread or in a new insight thread, not in a retroactive head edit. We're betting that letting the record stand and writing forward is more honest than rewriting.
+
+Provenance:
+- No new commit references; tails reflect on the head entries which carry full SHA provenance.
+- `history-overview` entries 0–3 = 01KR0TRFWT9W6WMFHC49YSW0BG, 01KR0TWHTC1MPK4KJ08Y9SPE6P, 01KR0TYF5F11DA8P5HNPA20DBK, 01KR0V01TAJVSZFE5ZNMCZHQSF.
+- `history-overview` tail entry 4 = 01KR0XNGQ0GS2QYN855X25NPZ7 (the reflection tail this note-to-future-readers entry sits beside).
+- `history-arc-01-foundation-hygiene` thread (the only arc thread written at the time of this tail; topic-name template for the others).
+
+<!-- Entry-ID: 01KR0XPRBJVH80FNZ9XN7DG01E -->
