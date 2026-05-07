@@ -1,3 +1,5 @@
 {"source":"thread:history-arc-04-git-integration","target":"entry:01KR12T4DHGDH3B9YYXM0F093A","type":"contains"}
 {"source":"thread:history-arc-04-git-integration","target":"entry:01KR12W1M20SQW3QXT8VC09REK","type":"contains"}
 {"source":"entry:01KR12T4DHGDH3B9YYXM0F093A","target":"entry:01KR12W1M20SQW3QXT8VC09REK","type":"followed_by"}
+{"source":"thread:history-arc-04-git-integration","target":"entry:01KR12XTG7E5TC0RNTJ65G67T7","type":"contains"}
+{"source":"entry:01KR12W1M20SQW3QXT8VC09REK","target":"entry:01KR12XTG7E5TC0RNTJ65G67T7","type":"followed_by"}

@@ -120,3 +120,48 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (sequence reference: PR #4 cuts v1.37.2 hours later — two release cuts on Day 0, this PR's v1.37.1 + arc 01's v1.37.2).
 
 <!-- Entry-ID: 01KR12W1M20SQW3QXT8VC09REK -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:24:52.092443+00:00
+Role: scribe
+Type: Note
+Title: PR #7 (feat/limit-git): =git/=g filter, the BUGS.md split, fork-out to arc 06's harpoon
+
+Spec: scribe
+
+tags: #history #arc-04
+
+PR #7 is the second move in arc 04 and the first additive feature on the git-awareness surface. Commit subject reads "limit: =git / =g shows files in git status (v1.38.1)" (commit f3ddaf2, 2026-05-02). Diff: 9 files, +57/-11. Source code: 22 lines in `src/app/state.rs`.
+
+**The feature.** A new limit-filter pattern `git` (or shorthand `g`) — typed at the `=` prompt — restricts the listing to entries whose `git_files` lookup returns a non-`Clean` status. Implementation is a single `else if` arm in `AppState::apply_temp_filter` (`src/app/state.rs:441-456` post-merge): for each row, look up `self.git_files.get(&r.display)`, default to `Clean` on miss, retain the row if non-clean. The filter coexists with `git_files`'s parent-directory marking (a deep entry's basename + `/` is keyed in the map under PR #15's later parent-marking rule), so directories containing changes stay navigable when the filter is active.
+
+A second arm in the `=` prompt-handler (`src/app/state.rs:1230-1236` post-merge) adds the no-changes guard: when `self.git_files.is_empty()` the filter flashes "not in a git repo (or no changes)" instead of presenting an empty list. The PR's CHANGELOG entry names this verbatim: "Outside a git repo (or with no changes), applying `=git` flashes 'not in a git repo (or no changes)' instead of silently showing an empty list" (commit f3ddaf2, 2026-05-02).
+
+**Reuse of PR #1's machinery.** The CHANGELOG names the dependency directly: "The filter stays live as the 1Hz git poll updates `git_files`" (commit f3ddaf2, 2026-05-02). PR #1 (this arc, two days earlier) added `AppState::refresh_git_state` whose diff-aware behavior bumps `list_generation` only on real change. PR #7's filter consumes the resulting `git_files` map without itself touching the poll machinery — when a user stages or commits while the filter is active, the listing converges within a second through PR #1's backstop. The 0-dps-idle target is preserved transitively.
+
+**The BUGS.md fork.** The PR's BUGS.md edit (`git diff f3ddaf2^1..f3ddaf2^2 -- BUGS.md`) replaces a single SMALL line — "= should be able to show 'files being worked on' which could be files included in git status or setup like the harpoon tool in neovim" — with two SMALL items. The first half ("`=git` / `=g` filter") ships in this PR. The second half ("harpoon-style 'currently working on' pinned set") is rewritten as a deferred design pass: "small ordered per-project file list with quick numeric jumps, persistent across sessions; not just a filter mode. Distinct from picks (per-dir, ephemeral), marks (single-file pointer per letter), inventory (yank stash). Needs a real design pass — design space overlaps existing concepts." (BUGS.md post-merge, 2026-05-02).
+
+The harpoon-style pinned set ships four hours later in arc 06's PR #8 (`feat/harpoon`, 62fc129, 2026-05-02 18:04). Arc 04 is therefore the genesis of `=git` *and* a fork point for arc 06's harpoon: the BUGS.md split rewrites the original combined request into two artifacts, only one of which lives in arc 04. Arc 06 will narrate PR #8 against the arc-02 lazygit-ux-catalogue §4 picker pattern; the BUGS.md text PR #7 leaves behind is the design-space framing that arc 06 inherits.
+
+**Drift findings flagged for the insight layer**:
+
+- The PR cuts v1.38.1, but the prior version on `main` post-merge of PR #6 (arc 03's `feat/pane-zoom`, 2026-05-01) is v1.38.0. PR #7 is therefore a patch-level bump on top of arc 03's minor cut. The version cadence does not run lock-step with arc number: arc 04's first PR cut v1.37.1 (Day 0), arc 03's first PR cut v1.38.0 (Day 1), arc 04's second PR cuts v1.38.1 (Day 2). The arcs interleave at the version axis without colliding.
+
+- The CHANGELOG framing reads "Requested via BUGS.md; the harpoon-style pinned-set part of that request is split out for a deeper design pass" (commit f3ddaf2, 2026-05-02). The split itself is named in the changelog, but the destination of the split (PR #8 four hours later) is not. A reader walking the changelog forward sees the split announced but not closed; arc 06's narration is what closes it.
+
+- Code-shape detail: the filter implementation is 22 lines and lives entirely on `AppState`. There is no resolver work, no UI work, no help-text update beyond a one-line addition in `src/ui/help.rs`. The CHANGELOG calls out the no-empty-listing flash; the help text adds "`=git` / `=g`" to the limit-filter list. This is a small, scoped diff that earns its keep by reusing PR #1's machinery on one axis and `apply_temp_filter`'s pre-existing pattern-dispatch on another.
+
+Provenance:
+- f3ddaf2 (PR #7 feat/limit-git, 2026-05-02 11:53) — full PR.
+- cd8df2e (PR #1 fix/git-marker-1hz-poll, 2026-04-30) — `refresh_git_state` and 1Hz poll machinery this PR reuses without modification.
+- `src/app/state.rs:441-456` (post-merge) — filter arm in `apply_temp_filter`.
+- `src/app/state.rs:1230-1236` (post-merge) — no-changes guard in the `=` prompt handler.
+- `git diff f3ddaf2^1..f3ddaf2^2 -- BUGS.md` — the SMALL-line split (one entry → two; harpoon half rewritten as deferred design pass).
+- `git diff f3ddaf2^1..f3ddaf2^2 -- CHANGELOG.md` — verbatim quotes ("The filter stays live as the 1Hz git poll updates `git_files`"; "harpoon-style pinned-set part of that request is split out for a deeper design pass").
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02 18:04) — arc 06 destination for the deferred half; named here for fork-out forward reference.
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A.
+- `history-arc-04-git-integration` PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (arc-04 PR list; arc 06 PR list).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 picker pattern context for arc 06's eventual harpoon narration).
+
+<!-- Entry-ID: 01KR12XTG7E5TC0RNTJ65G67T7 -->
