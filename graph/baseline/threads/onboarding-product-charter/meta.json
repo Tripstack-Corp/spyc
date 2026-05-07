@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:39:33.336415+00:00",
   "summary": "The onboarding product charter outlines Spyc as a Rust TUI file commander that integrates with Claude Code in a split pane, exposing itself to users. Key decisions include the design of the interface and integration with Claude Code, while the outcome is a streamlined, efficient tool for managing code files.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-product-charter": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:51:30.620980+00:00",
+      "vote_score": 0
+    }
+  }
 }
