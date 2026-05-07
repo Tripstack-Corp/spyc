@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:49:40.186637+00:00",
   "summary": "The thread discusses the implementation of OAuth2 authentication using JWT for onboarding security, focusing on securing the security posture and supply-chain controls. Key decisions included the adoption of JWT for authentication and the integration of supply-chain controls to ensure secure onboarding processes. The outcome is a strengthened security framework for onboarding activities.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-security": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:52:38.014811+00:00",
+      "vote_score": 0
+    }
+  }
 }
