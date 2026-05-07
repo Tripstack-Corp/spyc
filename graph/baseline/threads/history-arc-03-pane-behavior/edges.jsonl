@@ -9,3 +9,5 @@
 {"source":"entry:01KR10CGQ8NV7FYX39YZTR0FPM","target":"entry:01KR10G02J2234D0WBMWMYC35M","type":"followed_by"}
 {"source":"thread:history-arc-03-pane-behavior","target":"entry:01KR10JBACRS3Z71WTHGBVCPJM","type":"contains"}
 {"source":"entry:01KR10G02J2234D0WBMWMYC35M","target":"entry:01KR10JBACRS3Z71WTHGBVCPJM","type":"followed_by"}
+{"source":"thread:history-arc-03-pane-behavior","target":"entry:01KR10MXSHV2F6GAR7YNGBE121","type":"contains"}
+{"source":"entry:01KR10JBACRS3Z71WTHGBVCPJM","target":"entry:01KR10MXSHV2F6GAR7YNGBE121","type":"followed_by"}

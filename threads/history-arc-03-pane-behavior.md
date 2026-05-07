@@ -357,3 +357,82 @@ Provenance:
 - `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M.
 
 <!-- Entry-ID: 01KR10JBACRS3Z71WTHGBVCPJM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:45:03.675137+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 03 baseline complete; arc 02 back-references published; arc 04 (git-integration) follows
+
+Spec: scribe
+
+tags: #history #arc-03
+
+Arc 03 baseline narration complete. Five PRs cover the bottom pane's recurring concern across six calendar days: visual state at PR #6 (zoom) and PR #26 (dim-unfocused), child-process lifetime at PR #22 (shutdown), rendering correctness at PR #29 (cursor-block three-condition guard), focus routing at PR #34 (overlay-vs-bottom-pane focus switch). The arc reads as five sub-moves on the same surface, with two within-arc supersessions on the same calendar day (PR #29 supersedes PR #5's narrow guard from arc 02; PR #29 also drops one branch of PR #26's cursor-block treatment hours after PR #26 landed) and two within-arc dependencies (PR #34 leans on PR #26's `PaneWidget` DIM machinery; PR #34's overlay-focus model coexists with PR #6's zoom-focus save-and-restore on the same `pane_focused: bool` slot).
+
+**Mandatory back-reference contract verified.** PR #29's per-PR entry (= 01KR10G02J2234D0WBMWMYC35M) cites:
+
+| Citation | Arc-02 entry | Item cited |
+|---|---|---|
+| Gap-analysis "Top suspects" §1 | investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T | PR #5's narrow `screen.hide_cursor()` guard, the case that motivated the spuriotic-block fix |
+| BUGS.md SMALL cursor-block-reverse-video residual | harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 | PR #12's lifted residual text; behaviorally extinguished by PR #29's three-condition guard, durable-record cleanup incomplete (PR #12's text remains in BUGS.md SMALL post-PR-#29) |
+
+The back-reference contract per `history-overview` entry 2 (= 01KR0TYF5F11DA8P5HNPA20DBK) is therefore satisfied — both citations are explicit, both target arc-02 entries by ULID, and the resolution against the diff (behavioral coverage; durable-record-cleanup mismatch) is named in the PR #29 entry.
+
+**Voice-variety audit, per the diagnosis-first contract.** The framing entry (= 01KR106N6HSW66R76HN9VJPF1Q) committed to per-entry shape variety; the per-PR entries followed:
+
+- PR #6 (= 01KR108QNEEG64J8W8XJERJTZG): feature-shaped, compact. ~600 words.
+- PR #22 (= 01KR10ASW7YSX4MB8G28X2C9N4): operational-sweep / numbered-stage flavor (S1–S4 + Drop backstop). The diff is a procedural sequence; the entry treated it as one.
+- PR #26 (= 01KR10CGQ8NV7FYX39YZTR0FPM): brief feature note. Shortest per-PR entry. The diff is short; the narration is too.
+- PR #29 (= 01KR10G02J2234D0WBMWMYC35M): plan-supersession-ladder flavor. Three numbered rounds (PR #5 → PR #26 → PR #29) plus the within-arc cursor-block supersession plus the dual back-reference resolution. Longest per-PR entry. Material drove the form.
+- PR #34 (= 01KR10JBACRS3Z71WTHGBVCPJM): focus-routing-shaped. Four numbered touch points walked in dispatch order.
+
+The variety reads as material-driven rather than aesthetic. PR #29 needed the supersession-ladder shape because two distinct supersessions land in the same diff; a uniform-feature-note shape would have flattened the dual move. PR #22 needed the operational-sweep shape because a `SIGTERM-grace-SIGKILL-reap` sequence is procedurally shaped; a uniform-feature-note would have buried the safety properties of each stage. The shorter entries (PR #6, PR #26) didn't need any of that.
+
+**Voice contract held.** Third-person observational, present tense; verbatim commit-subject quoting attributed `(commit <sha>, <date>)`; banned mindset words (wants, thinks, believes, decided, feels, intends to, is concerned that) audited and absent in reference to the maintainer; sequence-faithful narration with no clock-padding ("first move," "next move," "3.5 hours after this PR's merge," "same calendar day" — not "minutes later," "later that evening"). The hedge-token whitelist was used freely (appears to, reads as, consistent with, the diff shape suggests, points toward, aligns with, the commit message indicates).
+
+**Forward reference: arc 04 — `history-arc-04-git-integration`** picks up next. Arc 04 covers PRs #1, #7, #15, #24, #27 (5 commits; 2026-04-30 to 2026-05-06; longest span of any arc). PR #1 (`fix/git-marker-1hz-poll`, cd8df2e) is the first move and lands on Day 0 alongside arc 01. PR #15 (`fix/git-status-and-pane-ctrl-c`, 5999261) is the cluster-boundary call flagged in `history-overview` entry 1 — the segmentation entry filed it under arc 04 (git-marker leak) over arc 03 (pane control), and arc 04 inherits the question of whether the call holds.
+
+**Cross-arc continuity note from arc 03 to arc 04.** Arc 03 closes with `pane_focused: bool` carrying three meanings post-PR-#34 (list-vs-pane, overlay-vs-pane, zoom save-source). Arc 04's PR #15 handles `^C` → pane-child routing, which sits adjacent to focus routing. Whether any cross-arc interaction surfaces is for arc 04 to determine; arc 03 flags it without prejudgement.
+
+**Cadence precedent set by this thread.** Cadence option A inherited and held — five PRs, five per-PR entries, framing + closure brackets. Internal-shape variety added to the precedent: future arcs may now choose per-entry shape on per-PR-material grounds without requiring uniform house style. The framing entry's diagnosis-first paragraph names the pattern blend explicitly so downstream arcs can reference the precedent or break it deliberately.
+
+This thread remains OPEN for cross-arc references (insight-layer threads will likely cite arc 03's PR-by-PR entries; arc 04's PR #15 closure may reference PR #22's child-process-lifetime work).
+
+**Arc 03 done-definition self-check:**
+
+- ☑ `watercooler_health` reported Healthy against the spyc code_path.
+- ☑ All 6 `history-overview` entries read (head 0–3 + tails 4–5).
+- ☑ All 7 `history-arc-01-foundation-hygiene` entries read (head 0–4 + tails 5–6).
+- ☑ All 6 `history-arc-02-lazygit-investigation-and-harvest` entries read (head 0–3 + tails 4–5), including the investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) and harvest entry (= 01KR0Z11CKNJRYEZ3T38EAFSC4) cited by PR #29.
+- ☑ `onboarding-architecture` entry 0 (= 01KR0P4W3ED1QZ8F44PFB2WPDZ) and `onboarding-overview` entry 0 (= 01KR0NZNJ3KM6BJY09Q4P9D0NE) read.
+- ☑ Diagnosis-first: framing entry (= 01KR106N6HSW66R76HN9VJPF1Q) names the pattern blend (pattern 10 register, no pivot, with per-entry shape variety) and rationale for arc 03 fitting that shape.
+- ☑ Cadence shape chosen: option A (per-PR; five per-PR entries plus framing and closure) with rationale stated in framing entry.
+- ☑ Thread `history-arc-03-pane-behavior` exists with framing (index 0), five per-PR entries (PRs #6, #22, #26, #29, #34; indices 1–5), and this closure entry (index 6) — seven head entries. Two tail entries follow.
+- ☑ PR #29 entry back-references arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) for gap-analysis "Top suspects" §1, and arc 02's harvest entry (= 01KR0Z11CKNJRYEZ3T38EAFSC4) for the BUGS.md SMALL cursor-block-reverse-video residual item.
+- ☑ Each head entry follows the head voice contract; variety in internal structure is exercised but no banned words / no clock-padding / no mindset attribution.
+- ☑ Each per-PR entry contains at least one verbatim commit-subject quote attributed `(commit <sha>, <date>)` plus at least one verbatim block from the diff (CHANGELOG, doc-comment, or BUGS.md text).
+- ☑ Every entry ends with a `Provenance:` block with real SHAs and file:line spans.
+- ☑ All entries tagged `#history` and `#arc-03`.
+- ☑ No PR #2/#3/#4/#5/#12 content (those are arcs 01/02). No insight-layer claims (recurrence-naming, emergent properties, forward predictions, motive attribution).
+- ☑ Thread left OPEN.
+
+Provenance:
+- 10c9276 (PR #6 feat/pane-zoom, 2026-05-01) — first commit in arc 03.
+- a3338fa (PR #22 feat/pane-shutdown-cleanup, 2026-05-05).
+- 20fba00 (PR #26 feat/dim-unfocused-pane, 2026-05-06).
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06).
+- 8e9fb2c (PR #34 fix/top-overlay-focus-switch, 2026-05-06) — last commit in arc 03.
+- cd8df2e (PR #1 fix/git-marker-1hz-poll, 2026-04-30) — first commit of arc 04; named here for forward reference.
+- 5999261 (PR #15 fix/git-status-and-pane-ctrl-c, 2026-05-04) — cluster-boundary call flagged on `history-overview` segmentation; named here for forward reference.
+- `history-overview` entry 2 = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (PR #29 back-reference target).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (PR #29 back-reference target).
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG.
+- `history-arc-03-pane-behavior` PR #22 entry = 01KR10ASW7YSX4MB8G28X2C9N4.
+- `history-arc-03-pane-behavior` PR #26 entry = 01KR10CGQ8NV7FYX39YZTR0FPM.
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M.
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM.
+
+<!-- Entry-ID: 01KR10MXSHV2F6GAR7YNGBE121 -->
