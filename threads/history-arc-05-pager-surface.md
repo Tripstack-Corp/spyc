@@ -104,3 +104,44 @@ Provenance:
 - `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (arc-05 member list).
 
 <!-- Entry-ID: 01KR2A121DSV81GM4EBCKAVAAM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:49:13.841111+00:00
+Role: scribe
+Type: Note
+Title: PR #16 (fix/fg-tail): :fg seeds pager from buffer + scrolls to bottom; bundled with env_test_lock for parallel-test flake
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #16 is the second move in phase α. Commit subject reads "fix: :fg seeds pager from buffer + scrolls to bottom (v1.41.3)" (commit 34907a3, 2026-05-04). Diff: 14 files, +97/-17. The two-day gap from PR #11 is the longest within phase α and spans arc 04's PR #15 (`fix/git-status-and-pane-ctrl-c`, 2026-05-04) by two minutes wall-clock — the `^C`-route change in PR #15's CHANGELOG also appears in PR #16's diff context, but the surfaces are orthogonal (PR #15 in `app/mod.rs` `^C` dispatch; PR #16 in `:fg` foreground-task pager seeding).
+
+**The bug.** The PR's `### Fixed` CHANGELOG entry leads verbatim: "`:fg` opened the pager scrolled to the top with the live tail off-screen. Resuming a backgrounded `cargo build` (or any chatty task) showed an empty pager, or — once the next chunk landed — content scrolled to row 0 with the latest output invisible, so it looked like nothing was running." (commit 34907a3, 2026-05-04). The user signal is named: a backgrounded long-running task resumed via `:fg` reads as "broken" because the pager's seed-from-empty plus tail-on-arrival behavior pushed any already-buffered output off the visible viewport.
+
+**The root cause.** The CHANGELOG entry continues verbatim: "Root cause: `foreground_task`'s Running branch built the `PagerView` with `lines: Vec::new()` and only the streaming-tick repopulated it on the next chunk." The fix is named in the same paragraph: "Now seeded the same way `:task N`'s peek viewer is — render `task.buffer` into the pager and call `scroll_to_bottom_auto()` before handing the buffer to `pending_capture`." Two existing surfaces — `:task N`'s peek viewer and `:fg`'s resume — converge on one seeding pattern. The path that didn't seed-from-buffer was the bug; the path that did was the model.
+
+**The bundle: env_test_lock.** PR #16 also lands a parallel-execution fix unrelated to the `:fg` work. The CHANGELOG entry under the same `### Fixed` section reads verbatim: "Flaky test suite under parallel execution. Several state-module tests (graveyard / harpoon / inventory / marks / sessions) and the shell-module tests mutate process-global env vars (`XDG_STATE_HOME`, `SHELL`) and raced when run in parallel, surfacing as random `NotFound` errors deep inside graveyard restores or wrong-shell-path assertions. `make check` was papered over with `--test-threads=1`; the CI Coverage step ran parallel and was failing intermittently. Added a single shared `crate::state::env_test_lock()` mutex; each affected test holds it for its full body. 15 consecutive parallel runs now pass."
+
+The diff shape confirms the bundle: `src/state/graveyard.rs`, `src/state/harpoon.rs`, `src/state/inventory.rs`, `src/state/marks.rs`, `src/state/mod.rs`, `src/state/sessions.rs`, and `src/shell/mod.rs` each gain a small lock-acquisition addition; `src/state/mod.rs` gains the `env_test_lock()` helper itself; `Makefile` drops the `--test-threads=1` paper-over (per the diff: 4 lines / 3 deletions on `Makefile`). The `:fg` fix itself touches `src/app/mod.rs` (14 lines), `src/app/state.rs` (6 lines), and `BUGS.md` (16 lines). Two unrelated concerns under one `fix/fg-tail` slug.
+
+**The Makefile diff is small but worth pulling out.** Arc 01's PR #2 (`chore/ci-hygiene`, d9b9360) wired `make check` to `Makefile:test` and the test path carried `--test-threads=1` to work around the env-var race. PR #16's `env_test_lock()` makes the lock structural, so the `--test-threads=1` workaround can come out of the Makefile. The arc-01 → arc-05 thread is implicit but real: arc 01 paid the workaround cost to make CI green; PR #16 here pays the structural cost so the workaround can retire. No commit names this; the diff edit on `Makefile` is the trace.
+
+**Drift findings flagged for the insight layer**:
+- The commit subject scopes the change to `:fg` seeding behavior. The diff includes a fully-orthogonal parallel-test fix across seven state and shell module files. The CHANGELOG names both fixes under one `### Fixed` section, so the drift is at the commit-subject level only — but the title-prefix `fix/fg-tail` does not signal the bundle.
+- BUGS.md is updated as part of this PR (16 lines). The current-state seed `onboarding-architecture` (entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ) describes `:fg` and `pending_capture` as part of the captured-shell plumbing pattern: "`^Z` from a streaming `!` pager moves the `(child, writer, output_rx, buffer)` tuple from `App.pending_capture` into a `BackgroundTasks` collection." PR #16 is the genesis of the seed-from-buffer pattern on the resume path that completes the round trip the seed describes.
+
+Provenance:
+- 34907a3 (PR #16 fix/fg-tail, 2026-05-04).
+- `git diff 34907a3^1..34907a3^2 -- CHANGELOG.md`: both `### Fixed` entries quoted verbatim above.
+- `git show 34907a3 --stat`: 14 files changed, 97 insertions, 17 deletions.
+- `src/state/mod.rs` post-merge: `crate::state::env_test_lock()` helper (named in the CHANGELOG; the call sites in `graveyard`, `harpoon`, `inventory`, `marks`, `sessions`, and `shell` test bodies are visible in the corresponding files' diffs).
+- `Makefile` post-merge: `--test-threads=1` paper-over removed (4 lines / 3 deletions in the diff).
+- `Cargo.toml:3` post-merge: `version = "1.41.3"`.
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (`--test-threads=1` workaround genesis on `Makefile:test`).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (`pending_capture` / `BackgroundTasks` round-trip surface).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+
+<!-- Entry-ID: 01KR2A2XY61GKZ1W52XQWGFBAH -->
