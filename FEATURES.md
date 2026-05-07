@@ -19,7 +19,10 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **gg / G** to jump to top or bottom
 - **^B / ^F** page up and down
 - **Count prefix** — `5j`, `10k`, etc. with visual display in the prompt area
-- **/ search** with incremental filtering (prefix match, or glob with `*`, `?`, `[`)
+- **/ search** case-insensitive substring match by default (so `/env`
+  finds `.env`, `.envrc`, *and* `environment.toml`); switches to glob
+  the moment the query contains `*`, `?`, or `[` — `/env*` re-anchors
+  at the start when you want that
 - **n / N** to repeat search forward / backward
 
 ## Directory browsing
