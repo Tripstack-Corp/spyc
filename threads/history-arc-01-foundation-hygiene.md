@@ -141,3 +141,49 @@ Provenance:
 - `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH.
 
 <!-- Entry-ID: 01KR0W9QF3P9E529E6J3XQMXDV -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:30:04.155296+00:00
+Role: scribe
+Type: Note
+Title: PR #4 (fix/shell-aliases): the user-facing fix and the v1.37.2 cut
+
+Spec: scribe
+
+tags: #history #arc-01
+
+PR #4 is the third move in arc 01 and the only PR in this arc that touches application logic. Commit subject reads "shell: aliases work in :!cmd / ;cmd via $SHELL -i (v1.37.2)" (commit 1f41b4b, 2026-04-30). Diff: 7 files, +157/-10. The version-bump suffix `(v1.37.2)` in the commit subject is load-bearing — see release-cut below.
+
+**The bug being fixed.** The PR's CHANGELOG entry leads with the user-visible failure verbatim: "A user running `:!gemma` (where `gemma` is an alias for a local `llama.cpp` invocation) got `sh: gemma: command not found`." The diagnosis named in the same entry: "spyc spawned `sh -c <cmd>` regardless of the user's `$SHELL`, and even setting `$SHELL` would not have helped: aliases / functions live in interactive rc files (`.zshrc`, `.bashrc`) which non-interactive shells don't load." The fix has to resolve `$SHELL` and pass `-i` so rc-file aliases load.
+
+**The fix introduces a new module: `src/shell/mod.rs` (114 lines, new).** The module's docstring reads as a policy statement: "Running a child process from a TUI requires tearing the terminal state down so the child can own the tty, then restoring our state when it exits. The actual teardown helpers live in `main.rs` because they touch the `Tui` value directly; this module supplies the policy (which binary, which args, whether a file is viewable)." The module exports `resolve_editor`, `resolve_pager`, `user_shell_invocation`, and re-exports `expand_percent` and `shell_quote` from a sub-module. `user_shell_invocation` returns `(shell_path, [args...])` and selects between `-i` and plain `-c` by shell family; the CHANGELOG names the families: "shells that source rc files in interactive mode (`zsh`, `bash`, `fish`, `ksh`, `mksh`); POSIX `sh` / `dash` get plain `-c` since they don't read rc files in `-i` mode anyway."
+
+**Two call sites adopt the helper.** `src/app/mod.rs` gains 8 lines (the `:!cmd` capture path, named in the CHANGELOG as `spawn_capture`); `src/pane/mod.rs` gains 13 lines (the pane spawn path, named as `Pane::spawn`). Both routes through `shell::user_shell_invocation`. The `;cmd` route — also named in the commit subject — flows through one of these call sites by way of the same helper.
+
+**The CHANGELOG entry names a known tradeoff verbatim.** "Tradeoff: heavy `.zshrc` / `.bashrc` setups (oh-my-zsh banners, p10k init) may now print init noise into capture pagers; well-behaved rc files gate that behind `[[ -t 1 ]]` / `[[ $- == *i* ]]` and stay quiet." The fix accepts that boundary explicitly rather than working around it.
+
+**The release cut: PR #4 is the v1.37.2 release.** `Cargo.toml` bumps `version = "1.37.1"` to `version = "1.37.2"`. The `CHANGELOG.md` diff reshapes `[Unreleased]` into `## [1.37.2] - 2026-04-30`. Inspection of the post-merge `CHANGELOG.md` confirms the `[1.37.2]` block contains four sub-sections: **Fixed** (this PR's shell-alias work), **Changed** (the prior `make install` → `~/.local/bin` work), **CI / Tooling** (PR #2's content, verbatim), **Security** (PR #3's content, verbatim). `[Unreleased]` post-merge reads "(Nothing pending; see [1.37.2] for the most recent release.)" The release cut packages the three arc-01 PRs together as one user-visible release.
+
+**Sequence-grain consequence**: PR #4 is the structural binding force for arc 01. The headline is the shell-alias fix, but the version-cut work in CHANGELOG and Cargo.toml is what turns PR #2 + PR #3 + PR #4 from three independent commits into a coherent v1.37.2 release. Without PR #4, the work in PR #2 and PR #3 sits in `[Unreleased]` with no version bump.
+
+**Drift findings flagged for the insight layer**:
+- PR #5 (next in arc 02, 2026-04-30) carries `(v1.37.2)` in its commit subject too, despite v1.37.2 being cut by this PR with `[Unreleased]` reading "(Nothing pending; …)" immediately afterward. Resolution of the version-tag overlap is for arc 02 to handle; flagged here for the cross-arc reference.
+- PR #4's commit subject scopes the change to "`:!cmd` / `;cmd`" but the diff also touches `src/pane/mod.rs::Pane::spawn` — which is the path used for pane child processes broadly, not only the `:!cmd` / `;cmd` overlay routes. Title-vs-diff scope mismatch; the CHANGELOG names `Pane::spawn` directly, so the drift is subject-line-level only.
+- `FEATURES.md` is updated as part of this PR (6 lines added, named in the CHANGELOG: "FEATURES.md updated to describe the new behavior"). Doc-with-code on this PR is consistent with the documentation contract that the `onboarding-docs-contracts` seed will name in current-state.
+
+Provenance:
+- 1f41b4b (PR #4 fix/shell-aliases, 2026-04-30).
+- 32ebf2c (PR #3 chore/security-hygiene, 2026-04-30) — content packaged into v1.37.2 by this release-cut.
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30) — content packaged into v1.37.2 by this release-cut.
+- `src/shell/mod.rs` (new file, 114 lines) — module docstring quoted; `resolve_editor`, `resolve_pager`, `user_shell_invocation` exports.
+- `src/app/mod.rs` (post-merge) — `spawn_capture` adoption, 8-line diff.
+- `src/pane/mod.rs` (post-merge) — `Pane::spawn` adoption, 13-line diff.
+- `Cargo.toml:3` (post-merge) — `version = "1.37.2"`.
+- `CHANGELOG.md` post-PR-#4 state — `## [1.37.2] - 2026-04-30` block; `[Unreleased]` parenthetical.
+- `FEATURES.md` (post-merge) — 6 lines added.
+- `onboarding-developer-experience` entry 0 = 01KR0PFHHCNVJPNJSTPA3VW62J.
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
+- `history-arc-01-foundation-hygiene` PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH.
+- `history-arc-01-foundation-hygiene` PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV.
+
+<!-- Entry-ID: 01KR0WBKNMQF231X2T8KTGD9KS -->
