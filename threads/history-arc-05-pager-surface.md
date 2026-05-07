@@ -658,3 +658,31 @@ Provenance:
 - `history-arc-04-git-integration` PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF (`GitFileStatus` enum-to-struct; same shape as PR #20's `gd`-vs-HEAD marker-correction move in a different domain).
 
 <!-- Entry-ID: 01KR2ANRAEFWWR5W9FQP11A0DB -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T23:00:17.182420+00:00
+Role: scribe
+Type: Note
+Title: Two seams the story-tail walks past: PR #35's launching mechanism, and PR #36's matcher escape hatch
+
+Spec: scribe
+
+tags: #history #arc-05 #tail
+
+Two seams worth pulling out separate from the story-tail above, because they're the kind of thing a reader hitting the head entries can verify in five minutes and easily slide past in the broader narrative.
+
+PR #35's `display_in_pane` is structurally a *launching pattern*, not a feature. Take the cursor row, validate (kind, env), build a command via `shell::resolve_pager` + `shell::shell_quote`, size the overlay via `top_overlay_size` + `effective_pane_pct`, capture cwd + context_path, and `Pane::spawn` into `top_overlay`. The doc-comment names the mirror relationship to `edit_in_pane` ("Mirror of `edit_in_pane` for the read path"); both methods are private to `App`, both inhabit the same shape, and neither is factored as a standalone helper. The catalogue §4 picker pattern arc 02 named — `pick a row, fire an Action against it` — could ride this exact dance with a different `resolve_*` step at the front. The launching machinery exists. What doesn't exist is the picker-cursor-into-launcher dispatch that connects a pager-mode pick to the `Pane::spawn` step. A future feature wanting "pick a worktree, launch into `$PAGER` showing its log" or "pick a project, launch into `$EDITOR` opening its README" would have to either re-implement this dance or refactor the two private mirror-methods into a common helper. The seam is not whether the mechanism is reusable — it visibly is. It's where the connection point lives, and right now it lives in nobody's accessor.
+
+PR #36's `env*` escape hatch reads as a small forward-pointing observation about reversibility. The doc-comment names it: "Globs are still available for users who want anchoring (`env*`, `.env*`)." At the user level, the prior anchored behavior is preserved — type `env*` to re-anchor, type `*env*` to make the substring explicit. At the *code* level the substring shift is one-way: `Matcher::Prefix` no longer exists; the enum variant is `Matcher::Substring`, and `matches()` calls `contains()` rather than `starts_with()`. A future feature that needs anchored matching at code-internal granularity (an LSP integration that has to resolve a symbol strictly against a name, an importer that wants prefix-matched namespaces, a watcher whose path-filter has to anchor at the start) cannot reach for `Matcher::Prefix` — that path is gone. The escape hatch protects user-facing surfaces; it does not protect program-internal call sites. Whatever wants strict prefix at the code level has to either route through `Matcher::Glob` with an explicit `*` suffix, or build a separate matcher entirely. Knowing which one the next feature will reach for is the seam.
+
+Both observations are forward-pointing in the way the story-tail isn't, but neither is a prediction. They're notes about where the next bug-or-design-question is most likely to land, given what the diffs in arc 05 actually shaped.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-05-pager-surface` PR #35 entry = 01KR2AD5PV989H58E49E5D18NM (`display_in_pane` body quoted in full; `Mirror of edit_in_pane` doc-comment).
+- `history-arc-05-pager-surface` PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5 (`Matcher::Prefix` → `Matcher::Substring` rewrite; "Globs are still available for users who want anchoring" doc-comment).
+- `history-arc-05-pager-surface` story-tail above = 01KR2ANRAEFWWR5W9FQP11A0DB.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 picker pattern; `pager.picker_cursor` proposed shape that the launching mechanism could host).
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (precedent for seams-aside register; same forward-pointing-not-predicting voice).
+
+<!-- Entry-ID: 01KR2AQ5M13KAR1M7A4561B5GM -->
