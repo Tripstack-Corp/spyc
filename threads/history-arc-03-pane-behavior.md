@@ -436,3 +436,52 @@ Provenance:
 - `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM.
 
 <!-- Entry-ID: 01KR10MXSHV2F6GAR7YNGBE121 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:46:15.972791+00:00
+Role: scribe
+Type: Note
+Title: Tail: looking back at arc 03 — what carried, what handed forward, what we left for later
+
+Spec: scribe
+
+tags: #history #arc-03 #tail
+
+Looking back at the seven head entries above, the load-bearing question on arc 03 wasn't "what shape should each entry take" but "did the per-entry shape variety actually pay for itself, or was it costume-changes for the sake of variety." From one-arc-and-a-spine distance, here's how that lands.
+
+**What we carried in.** Two things, mostly. From `history-overview` entry 2 (= 01KR0TYF5F11DA8P5HNPA20DBK), the mandatory back-reference contract on PR #29: gap-analysis §1 cited from the investigation hub, BUGS.md residual cited from the harvest. Easy to satisfy in the abstract. Less easy once we hit the diff and discovered that PR #29's "extinguishment" of the BUGS.md residual is half-true — the *behavior* the residual described is closed by the three-condition guard, but PR #12's residual *text* is still sitting in BUGS.md SMALL post-PR-#29. Arc 02's harvest entry projected "fully extinguished"; the diff showed otherwise. We named that mismatch in the PR #29 entry rather than smoothing over it. The hand-off worked the way the spine designed it: arc 02 made a load-bearing projection it couldn't verify from its own vantage, arc 03 verified against the diff and named the discrepancy. From the spine's design contract, that's a clean cross-arc trade — neither arc had to lie to keep the network coherent. Whether the BUGS.md text staying in SMALL is the right call (because residual classes are still latent) or oversight (because the durable record didn't get re-checked) is the kind of question only the insight layer can ask cleanly; arc 03 records the discrepancy and lets the question sit.
+
+The other thing we carried in was arc 02's framing-entry permission to depart from cadence option A on stated reason. Arc 03 didn't take that permission — the diff shape didn't ask for option B (no investigation/harvest split, no phase boundaries) and didn't ask for option C (per-PR provenance is what PR #29's back-reference contract leans on). The permission was offered, declined, and the rationale named. That feels like the right way for permissions to be inherited: state them as available, take them only when material warrants.
+
+**The shape-variety call, revisited.** PR #29 needed the supersession-ladder shape because two distinct supersessions land in the same diff (PR #5's narrow guard, and PR #26's cursor-block dim-when-unfocused branch). A uniform feature-note shape would have buried one or the other. PR #22 needed the operational-sweep shape because the diff *is* a four-stage procedure with a Drop backstop — flattening it into prose would have lost the safety property each stage carries (SIGTERM is catchable, SIGKILL is uncatchable, the deadline cap is what makes the blocking `wait()` after SIGKILL safe). The shorter entries (PR #6 zoom; PR #26 dim-unfocused) didn't reach for any of that — they were short because the diffs were short. From here, the variety reads as material-driven rather than aesthetic. Whether arcs 04–08 should adopt the same per-entry-shape-mapping move is for those sessions to decide on their own diff shapes; the precedent now reads as "shape variety is permitted; demonstrate it's material-driven, not stylistic indulgence."
+
+**What handed forward.** Three things to arc 04 specifically and the insight layer broadly:
+
+- `pane_focused: bool` carries three meanings post-PR-#34 (list-vs-pane focus; overlay-vs-pane focus when overlay is up; the source axis for PR #6's zoom save-and-restore). A single boolean doing more work than its type advertises is the kind of seam the insight layer's "names-that-out-grew-their-scope" reading should pick up. Arc 04's PR #15 (`fix/git-status-and-pane-ctrl-c`) handles `^C` → pane-child routing, which sits adjacent to focus routing; whether any cross-arc interaction surfaces is for arc 04 to verify, not for arc 03 to predict.
+- Three of the five PRs in arc 03 (PR #6's zoom-resize comment, PR #29's policy-comment list, PR #34's CHANGELOG workflow) name "claude" as the implicit primary user of the bottom pane. The recurrence is observable and was named factually in three per-PR entries; whether that recurrence reads as motive (the maintainer designs for one specific tenant) or observation (claude is the most common bottom-pane occupant in the maintainer's own daily use) is the kind of thing only the insight layer can interpret. Arc 03 records.
+- The within-arc supersession on the cursor-block (PR #26 → PR #29 in 3.5 hours) is the kind of fast-iteration cadence the insight layer's velocity reading should observe. PR #26 added per-cell DIM and left the cursor-block dim branch alone; PR #29 dropped that branch entirely under the new three-condition guard. The 3.5-hour gap is a sequence-fact, not a clock-padding reference. We named it because the supersession makes more sense once the order is clear.
+
+**What we left for later.** A few things this arc deliberately didn't address:
+
+- Whether PR #6's zoom and PR #34's overlay-focus model compose correctly when both are active. Nothing in the 22-day window exercises `;less` plus `^a-z`. Whether the `pane_focus_before_zoom: Option<bool>` save-and-restore handles the case where the zoom-target slot is currently the overlay (not the pane) is determinable only by reading the code; the diff alone doesn't establish it. We named the question in the PR #34 entry without resolving.
+- Whether arc 08's PR #31 (`chore/vt100-and-ratatui-upgrade`) addresses the gap-analysis suspect §3 (synchronized-output mode 2026 tearing). PR #29's three-condition guard covers a different class of rendering glitches than mode 2026 tearing; the two are independent. Arc 08 inherits the question.
+- Whether the durable-record-cleanup half of PR #29 (the BUGS.md SMALL residual still present) is intentional or oversight. The insight layer's drift / cross-thread-fidelity reading is the natural home for that question.
+
+**The recurrence observation, named factually.** Pane behavior surfaces five times in six calendar days. The arc records the sequence; whether the recurrence is an emergent property, a known-surface-being-iterated, or just-five-PRs-that-touched-the-same-area is for the insight layer. We held that line — every time a per-entry write tempted toward "this is a recurring pattern," the line got rewritten as "the surface returns to be re-examined under new constraints" with no implication that the recurrence *means* something. The discipline is small but compounding; if every arc-thread author reaches for emergence-claims at the head, the insight layer has nothing left to do.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG.
+- `history-arc-03-pane-behavior` PR #22 entry = 01KR10ASW7YSX4MB8G28X2C9N4.
+- `history-arc-03-pane-behavior` PR #26 entry = 01KR10CGQ8NV7FYX39YZTR0FPM.
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (the supersession-ladder; the back-reference resolution).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM.
+- `history-arc-03-pane-behavior` closure entry = 01KR10MXSHV2F6GAR7YNGBE121.
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract source).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (gap-analysis §1; PR #29's first supersession target).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (BUGS.md residual; "fully extinguished" projection that landed half-true against the diff).
+- `history-arc-01-foundation-hygiene` reflection tail = 01KR0XR504ZR10Y242JERT4K9S (head/tail voice precedent).
+- `history-arc-02-lazygit-investigation-and-harvest` reflection tail = 01KR0Z6673WE91822V8ZTWMYVJ (head/tail voice precedent; the hand-off-as-cross-arc-trade reading).
+
+<!-- Entry-ID: 01KR10Q4EFHZE21PPVF32DM581 -->
