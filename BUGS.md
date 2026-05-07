@@ -1,4 +1,8 @@
 ### SMALL ###
+- we should investigate the markdown viewer glow and steal features if it makes
+  sense
+- our pager is now quite a competitor for less and should be the default for D
+  too
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - commands that have stopped running in task runner (!) should show EOF
@@ -104,6 +108,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.26) nvim / less / htop / lazygit cursor visible
+  again inside spyc's pty panes. Reported by Spencer: opening
+  nvim via `V` or `^a-c → nvim` left no cursor on screen. The
+  v1.41.18 alt-screen guard correctly suppressed our reverse-
+  block (so we stop clobbering the child's cursor shape), but
+  spyc hides the host cursor at startup, so alt-screen TUIs
+  ended up with no cursor at all. `App::render` now calls
+  `frame.set_cursor_position` for the focused pty pane at its
+  vt100 cursor coordinates (gated on `!hide_cursor()`).
+  Forwarding the child's cursor *shape* to the host terminal
+  is a separate piece of work.
 - (fixed, v1.41.25) `^C` inside the pager is now contextual — it
   flashes inside the pager footer instead of leaking to the
   spyc-list status bar. Task viewer + running → SIGINT to the
