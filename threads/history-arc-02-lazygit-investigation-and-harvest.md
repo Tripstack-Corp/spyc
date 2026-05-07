@@ -147,3 +147,69 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` framing entry = 01KR0YSEMQ51PEM2NYZFMQH05S.
 
 <!-- Entry-ID: 01KR0YXXZRQR24CSNAK4Q7808T -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:16:43.070823+00:00
+Role: scribe
+Type: Note
+Title: Harvest (PR #12): notes/ deletes 399 lines, BUGS.md gains 48, the three ROADMAP entries lose their notes/ cross-references
+
+Spec: scribe
+
+tags: #history #arc-02
+
+PR #12 is the harvest phase of arc 02, three days after the investigation phase. Commit subject reads "chore: harvest lazygit notes into BUGS, drop notes/" (commit e210e58, 2026-05-03). Diff: 4 files, +50/-406. The deletion column is the load-bearing one — both notes files PR #5 added are removed (`notes/lazygit-gap-analysis.md` -111 lines; `notes/lazygit-ux-catalogue.md` -288 lines). The 50 insertions are split between BUGS.md (48 lines added; one pre-existing line moves position) and ROADMAP.md (a small trim, see below). The `chore/` prefix is faithful to the diff: no source code changes.
+
+**The diff shape: convert investigation artifacts to actionable items.**
+
+The diff reads as a triage of the 399-line investigation deliverable. Items the gap analysis identified as suspects but which are not yet executed (mouse, mode 2026, OSC 8) move into BUGS.md under their appropriate severity bucket. The cursor-block suspect (§1) — already partially fixed by PR #5 itself — also lands in BUGS.md, framed as a residual ("most likely cause" of the lazygit-pane glitches) since the PR #29 generalization is still six PRs and three days in the future from PR #12's vantage. The catalogue's adapt/skip recommendations do not migrate into BUGS.md; the three "adapt" recommendations already became ROADMAP entries in PR #5 itself, and the four "skip" recommendations were always non-actionable. The catalogue's narrative tissue (the seven-section structure, the borrow/adapt/skip framing, the DESIGN.md citations) does not survive the harvest; only the actionable parcels do.
+
+**BUGS.md gains, by severity bucket** (per `git diff e210e58^1..e210e58^2 -- BUGS.md`):
+
+- **SMALL (47 lines added at the section head, 1 line repositioned):**
+  - **Cursor-block reverse-video.** The verbatim text reads: "pane widget always paints a reverse-video cursor block at `screen.cursor_position()` even when the child has set `DEC ?25l` (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`; `src/pane/widget.rs:43-54` just doesn't read it. Most likely cause of the rendering glitch reported when running lazygit in the lower pane (lazygit hides the cursor and draws its own selection highlight, so the stray block shows up as a cell inverted in the wrong place). Fix is a single guard on `screen.hide_cursor()` before the reverse-video paint." Note the harvest text is written in present tense as if PR #5's fix had not landed; the gap-analysis text is the source. Arc 03's PR #29 entry will narrate the residual that PR #5's narrow fix leaves behind, which BUGS.md captures-by-omission rather than by explicit residual flag.
+  - **`COLORTERM=truecolor` not set on pane spawn.** Verbatim: "We already set `TERM=xterm-256color` (`src/pane/mod.rs:102` in pre-quickselect numbering), but modern apps that runtime-negotiate truecolor (lazygit/tcell, bat, fzf) check `$COLORTERM` first and silently downgrade to 256-color when it's missing. Symptom: diff palettes look 'close but slightly off' inside the pane vs. a bare terminal tab. One-line addition next to the existing `TERM` env line." This was an honourable-mention in the gap-analysis (not in the top-three suspects) and lands as a separate SMALL item.
+  - The graveyard-item line ("graveyard should include files that have been removed with R") moves position within the SMALL bucket, repositioned next to other small items rather than at its previous location. The diff registers a -1 / +1 inside the otherwise-additive section.
+
+- **BIGGER (14 lines added at the section head):**
+  - **Mouse not forwarded to the child.** Verbatim: "pane forwards no mouse events to the child. spyc never calls `EnableMouseCapture` on the host terminal (`src/main.rs::setup_terminal`), and `src/pane/input.rs` has no encoder for `Event::Mouse(_)`. `vt100` *tracks* the mouse protocols when the child enables them (1000/1002/1003/1006), but no events ever reach the pty. Apps that default to `MouseEvents: true` (lazygit, htop, broot in mouse mode) look half-broken — clicks on panel headers / commit list / footer keybindings, scroll-wheel on diffs, all silently no-op. Two-layer fix: enable mouse capture on the host terminal *and* add the `Event::Mouse` arm in `pane::input::encode_key` to encode SGR mouse reports the child expects. Worth designing carefully because spyc itself doesn't want mouse events outside the pane — the right shape is 'forward to pane only when pane is focused.'" This is gap-analysis suspect §2; the BUGS.md placement under BIGGER (rather than skipping) acknowledges the suspect's reality even though `onboarding-product-charter` (= 01KR0P18MCE1H57Q5ZTAGKAJNH) lists "mouse support beyond what already exists" in non-goals at `ROADMAP.md:426-447`. The "designing carefully" framing reads as a partial reconciliation: the suspect is real and BUGS-tracked, but the non-goal does not change. No PR in the 22-day window executes against this item.
+
+- **MAYBE (15 lines added at the section head):**
+  - **Mode 2026 unparsed.** Verbatim: "vt100 0.15 doesn't parse `\x1b[?2026h…\x1b[?2026l` (synchronized output / 'mode 2026'). Apps that wrap every redraw in 2026 (lazygit/tcell, recent neovim) get partial-frame tearing during fast scrolls — the renderer reads a half-finished frame and paints it. spyc already *emits* mode 2026 itself (perf refactor, see FIXED entries), so the protocol is well-supported on the host side; only the pane's vt100 parser is behind. Either upgrade the `vt100` crate (the unmaintained 0.15 → a community-fork or alacritty's `vte` parser) or live with the tearing. Big dep change; defer until someone notices." This is gap-analysis suspect §3. The MAYBE placement names the dep-upgrade cost as the deferral reason. Arc 08's PR #31 (vt100 0.15 → 0.16, 105db8d, 2026-05-06) bumps the minor version of vt100; whether 0.16 introduces 2026 parsing is for arc 08 to verify against the upstream changelog and is not addressed here.
+  - **OSC 8 hyperlinks unparsed.** Verbatim: "vt100 0.15 doesn't parse OSC 8 (terminal hyperlinks). lazygit's footer ('Donate' / 'Ask Question') and any modern tool that emits `\x1b]8;;url\x07label\x1b]8;;\x07` will show stray bytes or a label without the link. Same dep-upgrade story as mode 2026 above; same defer rationale." Honourable-mention from the gap analysis, MAYBE-bucketed; same dep dependency as mode 2026.
+
+**ROADMAP.md trim** (per `git diff e210e58^1..e210e58^2 -- ROADMAP.md`):
+
+The three ROADMAP entries PR #5 added (Generalized pager picker, Context-sensitive prompt-row hint, Scoped `?` help) all carry verbatim trailing pointers like "Full analysis at `notes/lazygit-ux-catalogue.md` §4." With `notes/` deleted, the cross-references would point at nothing. The diff removes the three "Full analysis at..." pointer lines (one per ROADMAP entry) and leaves the body of each entry intact. Net change: 4 lines added (sentence reformatting), 5 lines removed; total -1. The roadmap entries themselves survive verbatim minus those trailing references.
+
+The diff does not migrate the `notes/lazygit-ux-catalogue.md` content into the ROADMAP entries or BUGS.md. The three "adapt" recommendations stay as ROADMAP work; the four "skip" recommendations (numbered panels, command log, row-verb panel reuse, two-letter chord jumps) are dropped from the durable record entirely. The justification reads, structurally, in the catalogue itself — those four were already non-actionable per the catalogue's own analysis — so dropping them at harvest is consistent rather than information-loss.
+
+**Sequence-grain consequences for downstream arcs:**
+
+- The SMALL cursor-block item lands in BUGS.md describing the very condition PR #5's fix already addressed (`screen.hide_cursor()` not consulted). Read against the date — the harvest is post-fix — the BUGS.md entry can be read as either a stale artifact (the harvest didn't notice the fix had landed) or a placeholder for the broader class PR #29 generalizes. The harvest's text ("Most likely cause of the rendering glitch reported when running lazygit in the lower pane") points toward the second reading: the suspect's *cause* is preserved as the bug record, while the partial fix sits silently in `widget.rs`. Arc 03's PR #29 entry will narrate how the BUGS.md residual gets fully extinguished.
+
+- The MAYBE mode 2026 item lands six PRs before arc 08's PR #31 vt100 upgrade (PR #31 is 105db8d, 2026-05-06). PR #12's "Big dep change; defer until someone notices" framing pre-dates the upgrade by three calendar days. Arc 08's PR #31 entry will check whether the upgrade addresses the suspect (vt100 0.15 → 0.16 is a minor bump; release notes inspection is required to know).
+
+- The BIGGER mouse item is, structurally, the negative-space item this arc hands to the eventual insight layer. It exists in BUGS.md and in the gap analysis, but the charter has it as a non-goal. The two coexist because BUGS.md tracks the suspect's reality; ROADMAP non-goals govern the prioritization. Insight-layer threads will likely cite this as a recurring shape.
+
+**Drift findings flagged for the insight layer**:
+
+- The investigation deliverable's narrative form (initialization-fingerprint trace, gap table, top-three-suspects ranking, methodology section) does not survive the harvest. Only the actionable items do. A reader of BUGS.md alone cannot reconstruct the investigation's reasoning chain — the audit is irrecoverable from the post-harvest record. The arc-02 thread itself is now the only durable home for that narrative tissue.
+- BUGS.md picks up the gap-analysis suspect §1 text as a SMALL item three days after PR #5 itself partially-fixed it. The harvest does not flag the residual (the alt-screen-without-hide-cursor case PR #29 generalizes); it carries the suspect verbatim. A reader inferring "this is what's still broken" from BUGS.md at PR #12's date overreads the residual scope.
+- The harvest reduces fidelity in service of durability. The notes/ files were not durable — they would have aged out of relevance once the dep landscape shifted. BUGS.md is durable. The trade is fidelity for persistence; the arc-02 thread's investigation entry preserves the lossy half.
+- The chore/clean-notes title accurately describes the diff: clean (drop notes/), notes (the artifact). The commit subject's "harvest" verb is what carries the closer relationship to PR #5's investigation; without that verb, the PR could read as pure cleanup.
+
+Provenance:
+- e210e58 (PR #12 chore/clean-notes, 2026-05-03) — full PR.
+- 7b941a4 → d9cf6e6 — parent and tip SHAs for the diff inspection.
+- `git show --stat e210e58`: 4 files changed, 50 insertions, 406 deletions; BUGS.md +48/-1, ROADMAP.md +4/-5, notes/lazygit-gap-analysis.md -111, notes/lazygit-ux-catalogue.md -288.
+- `git diff e210e58^1..e210e58^2 -- BUGS.md`: SMALL (cursor-block, COLORTERM, graveyard repositioning), BIGGER (mouse), MAYBE (mode 2026, OSC 8) — verbatim text quoted above.
+- `git diff e210e58^1..e210e58^2 -- ROADMAP.md`: three "Full analysis at notes/..." trailing pointer lines removed; body of each ROADMAP entry preserved.
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — investigation phase whose artifacts this PR harvests.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — six PRs and three days after PR #12; will extinguish the BUGS.md cursor-block residual.
+- 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — six PRs and three days after PR #12; arc 08 will narrate against the BUGS.md MAYBE mode-2026 entry.
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (mouse non-goal at `ROADMAP.md:426-447`; the BIGGER mouse item coexists with the non-goal).
+- `history-arc-02-lazygit-investigation-and-harvest` framing entry = 01KR0YSEMQ51PEM2NYZFMQH05S.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T.
+
+<!-- Entry-ID: 01KR0Z11CKNJRYEZ3T38EAFSC4 -->
