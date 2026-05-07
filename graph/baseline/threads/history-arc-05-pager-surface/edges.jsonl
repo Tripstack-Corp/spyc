@@ -17,3 +17,5 @@
 {"source":"entry:01KR2AD5PV989H58E49E5D18NM","target":"entry:01KR2AFHD42DHX6XQS7S6VK4M5","type":"followed_by"}
 {"source":"thread:history-arc-05-pager-surface","target":"entry:01KR2AJVZA1E85YSKHF4FNRQQ3","type":"contains"}
 {"source":"entry:01KR2AFHD42DHX6XQS7S6VK4M5","target":"entry:01KR2AJVZA1E85YSKHF4FNRQQ3","type":"followed_by"}
+{"source":"thread:history-arc-05-pager-surface","target":"entry:01KR2ANRAEFWWR5W9FQP11A0DB","type":"contains"}
+{"source":"entry:01KR2AJVZA1E85YSKHF4FNRQQ3","target":"entry:01KR2ANRAEFWWR5W9FQP11A0DB","type":"followed_by"}

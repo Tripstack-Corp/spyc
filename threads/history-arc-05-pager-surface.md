@@ -616,3 +616,45 @@ Provenance:
 - `history-arc-07-codex-and-mcp-bridge` and `history-arc-08-recoverability-and-deps` (named in `history-overview` closure entry's checklist).
 
 <!-- Entry-ID: 01KR2AJVZA1E85YSKHF4FNRQQ3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:59:30.764025+00:00
+Role: scribe
+Type: Note
+Title: Tail: arc 05 told as a story — the pager goes from a thing that displays to a mode you live in
+
+Spec: scribe
+
+tags: #history #arc-05 #tail
+
+What changes between PR #11 and PR #36 isn't just the pager's capabilities — it's what the pager *is for*.
+
+The arc opens with three fixes to a pager that, structurally, is a thing that displays text. PR #11 fixes a wrap-accounting bug so trailing logical lines aren't lost at the bottom of the viewport. PR #16 fixes a seed-from-buffer bug so `:fg`'s pager doesn't open empty when a long-running task gets resumed. PR #17 fixes a multi-column scroll-translation bug so `n` after `/` lands on the actual match instead of pinning the viewport to the bottom of column 2. All three ship under `### Fixed`. None of them adds capability; all three repair the pager's existing job. Phase α is the pager doing what it's already doing, correctly.
+
+The arc ends — five days later — with a pager you press `V` to enter as a mode for range-yank, a pager you press `D` to launch from the listing as a top overlay alongside the bottom pane, and a search semantics that finds `.env` when you type `env` instead of betraying you because of a leading dot. None of those things are "the pager displays." They're "the pager *is* something the user does." The shape of the surface stayed the same. Its grammar in the user's hands didn't.
+
+The middle is the part where this gets interesting, because the middle is also where the catalogue §4 thread runs through arc 05 without ever quite landing on it.
+
+Arc 02's investigation entry catalogued five lazygit borrow/adapt/skip recommendations and ranked §4 ("Generalized pager picker") as "highest-leverage." The proposal was specific: extend `PagerView` with a `picker_items: Vec<(Label, Action)>` field, wire `Enter` to fire the action under the cursor, let any list-of-options surface (project chooser, worktree picker, branch checkout) be a pager mode rather than a fifth overlay. That field doesn't exist after PR #36. What does exist is two pager-mode extensions in arc 05 (PR #33 visual-line-mode, PR #35 D-launches-pager) and two parallel picker overlays in arc 06 (PR #8 harpoon, PR #10 quickselect, both shipping earlier in the window outside this arc). Four PRs aligned with §4 directionally; zero PRs executing §4's specific shape. Arc 02 named the catalogue framing this way: DIRECTION ALIGNMENT, not direct execution. After arc 05 that framing reads as load-bearing — the catalogue's *direction* (pager as the host of modes; render *into* the pager rather than splintering into overlays) is honored across both arcs, while the specific picker_items pattern remains undone. Whether that means the parallel patterns made the picker pattern unnecessary, or whether the picker pattern is structurally still ahead, isn't narratable from the diffs in arc 05.
+
+PR #20's bundle is the drift moment of the arc. Three concerns under one `feat/` slug — the alt-screen scroll hint, `[pane] default_command`, and `gd`-vs-HEAD — and the cluster the segmentation entry (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) flagged as "drift fuel for the insight layer" because the bundling itself is the artifact, not any individual half. From inside arc 05 a few things become legible that weren't from outside. The alt-screen hint is the catalogue §2 alignment partner — partial execution, the broader options-map idea unfulfilled. The `[pane] default_command` config is the piece PR #23 will surface to the help text 13 hours later (arc 05's second-most-load-bearing implicit chain; PR #23's diff names the precedence chain in the help row exactly to the form PR #20 added). And the `gd`-vs-HEAD shift is the same shape as arc 04's PR #27 GitFileStatus enum-to-struct work — both are "make the existing marker mean what it visibly says it means" moves. None of these halves are wrong; the bundling means a reader scanning commit subjects sees one feature, when the diff is three.
+
+The phase α → phase γ implicit chain inside arc 05 is also worth pausing on, because nothing in the commits names it. PR #11 lands a `last_body_w: std::cell::Cell<u16>` field on `PagerView` to make wrap-aware `scroll_max` work. That field becomes part of the struct's permanent furniture. Four days and four PRs later, PR #33 lands a `visual: Option<VisualSelection>` field on the same struct — sibling state to `last_body_w`, neither disturbing the other. PR #33 doesn't have to refactor `PagerView` to add visual mode; it adds a field next to the field PR #11 added, and the struct expands. This is what *enables* phase γ being cheap. PR #11's mechanics work was small and contained, which is what made the room for visual-mode to land later as additive surgery rather than restructuring. PR #16's seed-from-buffer pattern (render `task.buffer` into the pager and call `scroll_to_bottom_auto()` before handing the buffer off) is a similar shape: small contained correction now, structural enabler later — PR #35's `display_in_pane` reads as a parallel of `edit_in_pane` for the read path, taking a listing row and launching it into a pty in the top overlay, sharing focus with the bottom pane. None of this is "designed up front." It reads as small correct moves making large additive moves cheap.
+
+PR #35 is the move that exposes how much arc 03's ground-clearing was carrying for arc 05. PR #34 (arc 03's last move, two days earlier) taught the overlay-vs-pane focus model — `;cmd` overlays can share focus with the bottom pane, `^a-j`/`^a-k` chord keys bridging the two. Without PR #34, opening `$PAGER` as a top overlay traps focus in the overlay; with PR #34, the same spawn produces the docs-and-claude-side-by-side workflow PR #35's CHANGELOG names. The arc-03 → arc-05 link isn't visible in either commit. It's visible in the fact that PR #35 ships at all without re-doing PR #34's work.
+
+PR #36 is the outlier, and it's worth being honest about. The matcher shift affects the listing — `/` and `=` — not the pager's `n/N`. The segmentation entry on `history-overview` filed PR #36 in arc 05 by read-surface direction; the per-PR entry above was upfront that the fit is curatorial rather than structural. A reader filing PR #36 as arc 04 (git-integration's correctness shape) or as a one-PR side-arc would not be wrong. What PR #36 *does* share with arc 05 is the project-internal classification asymmetry — the diff is genuinely a behavior change, the CHANGELOG places it under `### Changed`, the commit subject says `fix:`, and BUGS.md lifts a SMALL entry to FIXED. PR #35 lifted a BUGS.md SMALL the same way the day before. The lift-from-SMALL-to-FIXED move recurs at the close of arc 05 in two consecutive PRs; it's a local pattern, not a forward prediction.
+
+The eight PRs span five days. The pager surface they shape doesn't quite become what arc 02's catalogue §4 named at the start of the window, but it becomes something — modes-not-just-display, launchable-from-listing, search-that-doesn't-betray. Whether that's "the picker pattern, taking a different route" or "the picker pattern, deferred indefinitely" isn't yet decidable from the data points arc 05 ships. It's the question carried forward into the eventual insight layer.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-05-pager-surface` head entries 0–9 = 01KR29ZCRYY132QKB0HKRRRERQ (framing), 01KR2A121DSV81GM4EBCKAVAAM (PR #11), 01KR2A2XY61GKZ1W52XQWGFBAH (PR #16), 01KR2A4DCY3BR45ZQ7FQ2YQE4Q (PR #17), 01KR2A6TT516XA5FEGVBXYPWD7 (PR #20), 01KR2A8PW1GRF82G4X8R7HFP6H (PR #23), 01KR2AAX12XSNRNZPTXJT2TXJA (PR #33), 01KR2AD5PV989H58E49E5D18NM (PR #35), 01KR2AFHD42DHX6XQS7S6VK4M5 (PR #36), 01KR2AJVZA1E85YSKHF4FNRQQ3 (closure).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (PR #20 three-concern bundle drift flag; PR #36 fix-vs-behavior-change drift flag).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §2 + §4 source; §4 ranking; PARTIAL EXECUTION + DIRECTION ALIGNMENT framings).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-as-pane focus model; PR #35's prerequisite).
+- `history-arc-03-pane-behavior` story-tail = 01KR11S8RG29J98QKN1H0VAA6W (recurring-concern shape; this tail's contrasting capability-accretion shape).
+- `history-arc-04-git-integration` story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (capability-accretion register precedent).
+- `history-arc-04-git-integration` PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF (`GitFileStatus` enum-to-struct; same shape as PR #20's `gd`-vs-HEAD marker-correction move in a different domain).
+
+<!-- Entry-ID: 01KR2ANRAEFWWR5W9FQP11A0DB -->
