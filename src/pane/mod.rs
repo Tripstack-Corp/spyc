@@ -15,7 +15,7 @@ pub mod tabs;
 mod widget;
 
 pub use tabs::{PaneTabs, TabEntry, TabInfo};
-pub use widget::PaneWidget;
+pub use widget::{PaneWidget, cell_style};
 
 use std::io::{Read, Write};
 use std::path::Path;
