@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:46:22.383400+00:00",
   "summary": "The thread discusses the mapping of documentation to code during onboarding, with rules to ensure consistency. Key decisions include synchronizing documentation with code and enforcing specific guidelines. The outcome is improved clarity and consistency between documentation and code.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-docs-contracts": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:52:15.709855+00:00",
+      "vote_score": 0
+    }
+  }
 }
