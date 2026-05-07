@@ -215,15 +215,10 @@ impl PaneTabs {
         for entry in &mut self.tabs {
             if entry.pane.is_closed() && !entry.info.label.contains("[exited") {
                 // Retry exit status harvest if drain_output missed it.
-                if entry.pane.exit_status.is_none() {
-                    if let Ok(Some(status)) = entry.pane.child.try_wait() {
-                        entry.pane.exit_status = Some(status);
-                    }
-                }
+                entry.pane.try_harvest_exit_status();
                 let code = entry
                     .pane
-                    .exit_status
-                    .as_ref()
+                    .exit_status()
                     .map_or_else(|| "?".to_string(), |s| s.exit_code().to_string());
                 entry.info.label = format!("{} [exited {}]", entry.info.label, code);
                 changed = true;

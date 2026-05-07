@@ -17,37 +17,28 @@ mod widget;
 pub use tabs::{PaneTabs, TabEntry, TabInfo};
 pub use widget::{PaneWidget, cell_style};
 
-use std::io::{Read, Write};
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::thread;
+// v1.5 Phase 6a: shared pty kernel that `Pane`, `PendingCapture`
+// and `BackgroundTask` all wrap. Phase 6b/6c (promotion / demotion)
+// becomes a state shift on the same handles.
+pub mod pty_host;
 
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use std::path::Path;
+
+use crate::pane::pty_host::{PtyHost, PtySpec};
 
 /// A hosted subprocess + its terminal emulator state.
+///
+/// v1.5 Phase 6a: pty kernel (master/writer/child/reader thread/
+/// event channel/last_size/closed/exit_status/has_pending/debug_dump)
+/// lives in `host: PtyHost`. `Pane` is the vt100-parser shell on top.
+/// Same struct shape `BackgroundTask` will adopt in 6a step 3, which
+/// is what unlocks promotion / demotion in 6b/6c.
 pub struct Pane {
+    /// Shared pty kernel. Owns master/writer/child/reader-thread/
+    /// event channel/closed/exit_status/last_size/debug_dump.
+    pub host: PtyHost,
     /// Terminal emulator parser — keeps the cell grid we render.
     parser: vt100::Parser,
-    /// Write half of the pty master (our stdin → child's stdin).
-    writer: Box<dyn Write + Send>,
-    /// The master; held so the pty stays open as long as the Pane lives.
-    master: Box<dyn MasterPty + Send>,
-    /// The child process handle. Used to retrieve exit status on close.
-    pub(crate) child: Box<dyn portable_pty::Child + Send + Sync>,
-    /// Reader-thread events (bytes to process, or a "closed" signal).
-    event_rx: mpsc::Receiver<PaneEvent>,
-    /// Set by the reader thread when data is available; cleared by drain.
-    has_pending: Arc<std::sync::atomic::AtomicBool>,
-    /// Set when the reader thread observed EOF on the master — the
-    /// subprocess has exited and the pane should be torn down.
-    closed: bool,
-    /// Exit status captured when the child process exits.
-    pub exit_status: Option<portable_pty::ExitStatus>,
-    /// Cached at construction so we don't call `std::env::var` per tick.
-    debug_dump: bool,
-    /// Last size passed to resize(), to skip redundant ioctl+SIGWINCH.
-    last_size: (u16, u16),
     /// Set by `drain_output()` when new bytes arrived; cleared after render.
     pub output_dirty: bool,
     /// When > 0, the visible viewport is shifted into the scrollback
@@ -59,14 +50,6 @@ pub struct Pane {
     /// scrollback instead of being forwarded to the child.
     /// `drain_output()` still runs so no output is lost.
     scrolling: bool,
-}
-
-/// Messages posted by the pty reader thread.
-enum PaneEvent {
-    Bytes(Vec<u8>),
-    /// Child exited or the master was closed. Emitted exactly once before
-    /// the reader thread terminates.
-    Closed,
 }
 
 impl Pane {
@@ -96,131 +79,94 @@ impl Pane {
         context_path: &Path,
         extra_env: &[(&str, &str)],
     ) -> anyhow::Result<Self> {
-        let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
+        // Pane env: tell child processes (e.g. Claude CLI's MCP server)
+        // where this spyc instance's context file lives.
+        let context_str = context_path.to_string_lossy().into_owned();
+        let mut env: Vec<(&str, &str)> = Vec::with_capacity(extra_env.len() + 1);
+        env.push((crate::context::CONTEXT_ENV_VAR, context_str.as_str()));
+        env.extend(extra_env.iter().copied());
+
+        let host = PtyHost::spawn(PtySpec {
+            command,
             rows,
             cols,
-            pixel_width: 0,
-            pixel_height: 0,
+            cwd,
+            env: &env,
+            term: "xterm-256color",
+            // Send SIGWINCH right after spawn so rc-file shells
+            // (p10k / oh-my-zsh) re-query the pty size and render
+            // their first prompt at the right geometry.
+            nudge_winch: true,
+            debug_dump: std::env::var("SPYC_PTY_DEBUG").is_ok(),
         })?;
-
-        // Use the user's $SHELL with -i (where supported) so aliases,
-        // rc-file PATH entries, and shell functions all work the way
-        // they do in a regular terminal tab. Falls back to sh -c on
-        // POSIX-only shells. See `shell::user_shell_invocation`.
-        let (shell, shell_args) = crate::shell::user_shell_invocation(command);
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.args(shell_args.iter().map(String::as_str));
-        // Use the caller-specified working directory.
-        cmd.cwd(cwd);
-        // Ensure the child sees correct terminal type and dimensions.
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLUMNS", cols.to_string());
-        cmd.env("LINES", rows.to_string());
-        // Tell child processes (e.g. Claude CLI's MCP server) where to
-        // find this spyc instance's context file.
-        cmd.env(
-            crate::context::CONTEXT_ENV_VAR,
-            context_path.to_string_lossy().as_ref(),
-        );
-        for (k, v) in extra_env {
-            cmd.env(k, v);
-        }
-
-        let child = pair.slave.spawn_command(cmd)?;
-        drop(pair.slave); // We don't need our own handle on the slave.
-
-        let reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
-
-        // Background thread pumps reader → channel. We don't block the
-        // render loop on child output.
-        let (tx, event_rx) = mpsc::channel::<PaneEvent>();
-        let has_pending = Arc::new(AtomicBool::new(false));
-        let pending_flag = Arc::clone(&has_pending);
-        thread::spawn(move || reader_loop(reader, &tx, &pending_flag));
-
         let parser = vt100::Parser::new(rows, cols, 10_000);
-        let debug_dump = std::env::var("SPYC_PTY_DEBUG").is_ok();
+        Ok(Self::adopt(host, parser))
+    }
 
-        // Nudge: send SIGWINCH so shells (especially p10k/oh-my-zsh)
-        // re-query the pty size and render their first prompt correctly.
-        let _ = pair.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
-
-        Ok(Self {
+    /// Build a `Pane` around an already-spawned `PtyHost` and a
+    /// vt100 parser. v1.5 Phase 6 promotion path: a backgrounded
+    /// task hands over its `PtyHost`, we wrap it in a fresh parser
+    /// (or one pre-fed with the task's captured output), and the
+    /// pty keeps running through the transition.
+    pub const fn adopt(host: PtyHost, parser: vt100::Parser) -> Self {
+        Self {
+            host,
             parser,
-            writer,
-            master: pair.master,
-            child,
-            event_rx,
-            has_pending,
-            closed: false,
-            exit_status: None,
-            debug_dump,
-            last_size: (rows, cols),
             output_dirty: false,
             scroll_offset: 0,
             scrolling: false,
-        })
+        }
+    }
+
+    /// Drain any pending output from the child into the parser. Call
+    /// Quick check whether the reader thread has posted data since
+    /// the last drain. Uses a relaxed atomic — no locking, no
+    /// syscall. Delegates to the shared `PtyHost`.
+    pub fn has_pending_output(&self) -> bool {
+        self.host.has_pending_output()
     }
 
     /// Drain any pending output from the child into the parser. Call
     /// each render tick before drawing. A `Closed` event marks the
-    /// Quick check whether the reader thread has posted data since the
-    /// last drain. Uses a relaxed atomic — no locking, no syscall.
-    pub fn has_pending_output(&self) -> bool {
-        self.has_pending.load(Ordering::Relaxed)
-    }
-
     /// subprocess as finished so the caller can tear the pane down.
     /// Returns `true` if any bytes were processed.
     pub fn drain_output(&mut self) -> bool {
-        let mut had_bytes = false;
-        while let Ok(event) = self.event_rx.try_recv() {
-            // Debug: dump raw pty bytes when SPYC_PTY_DEBUG was set at spawn.
-            if self.debug_dump {
-                if let PaneEvent::Bytes(ref bytes) = event {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/spyc_pty_debug.bin")
-                    {
-                        let _ = f.write_all(bytes);
-                    }
-                }
-            }
-            match event {
-                PaneEvent::Bytes(bytes) => {
-                    had_bytes = true;
-                    self.process_bytes_safe(&bytes);
-                }
-                PaneEvent::Closed => {
-                    self.closed = true;
-                    // Non-blocking harvest — if the child hasn't been
-                    // reaped yet, mark_exited will retry on subsequent
-                    // iterations. Never call wait() here — it blocks.
-                    if let Ok(Some(status)) = self.child.try_wait() {
-                        self.exit_status = Some(status);
-                    }
-                }
-            }
+        // Pull bytes through the pty host into a local Vec so the
+        // borrow on `self.host` doesn't overlap with the
+        // `process_bytes_safe(&mut self, ...)` call below — vt100
+        // reasoning is per-Pane, not per-host, so the parser stays
+        // outside the kernel.
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        let result = self.host.drain(|bytes| chunks.push(bytes.to_vec()));
+        for chunk in &chunks {
+            self.process_bytes_safe(chunk);
         }
-        self.has_pending.store(false, Ordering::Relaxed);
-        if had_bytes {
+        if result.had_bytes {
             self.output_dirty = true;
         }
-        had_bytes
+        result.had_bytes
     }
 
     /// True once the subprocess has exited (reader thread saw EOF).
     pub const fn is_closed(&self) -> bool {
-        self.closed
+        self.host.closed
+    }
+
+    /// Exit status captured from the reaped child, if available.
+    /// Replaces the pre-v1.5 `pub exit_status` field.
+    pub const fn exit_status(&self) -> Option<&portable_pty::ExitStatus> {
+        self.host.exit_status.as_ref()
+    }
+
+    /// Retry harvesting the exit status if `drain_output` missed it
+    /// (the reader thread closes before `try_wait` can reap).
+    /// `tabs.rs::label_exited_panes` calls this once per tick.
+    pub fn try_harvest_exit_status(&mut self) {
+        if self.host.exit_status.is_none() {
+            if let Ok(Some(status)) = self.host.child.try_wait() {
+                self.host.exit_status = Some(status);
+            }
+        }
     }
 
     /// Feed bytes to the vt100 parser, recovering from any panic.
@@ -241,8 +187,9 @@ impl Pane {
     fn process_bytes_safe(&mut self, bytes: &[u8]) {
         // Capture the grid size before the parse; even reading
         // `parser.screen()` after a panic isn't safe, so we use the
-        // cached `last_size` we already maintain for resize coalescing.
-        let (rows, cols) = self.last_size;
+        // cached `last_size` from the host (maintained for resize
+        // coalescing).
+        let (rows, cols) = self.host.last_size;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.parser.process(bytes);
         }));
@@ -263,16 +210,10 @@ impl Pane {
     /// cell grid matches — without this, the child keeps drawing at the
     /// old dimensions.
     pub fn resize(&mut self, rows: u16, cols: u16) -> anyhow::Result<()> {
-        if (rows, cols) == self.last_size {
+        if (rows, cols) == self.host.last_size {
             return Ok(());
         }
-        self.last_size = (rows, cols);
-        self.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
+        self.host.resize(rows, cols)?;
         self.parser.screen_mut().set_size(rows, cols);
         Ok(())
     }
@@ -281,7 +222,7 @@ impl Pane {
     pub fn send_key(&mut self, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
         let bytes = input::encode_key(key);
         if !bytes.is_empty() {
-            self.writer.write_all(&bytes)?;
+            self.host.write_all(&bytes)?;
         }
         Ok(())
     }
@@ -289,7 +230,13 @@ impl Pane {
     /// PID of the spawned child, if available. `None` after the child
     /// has been reaped or if portable_pty couldn't surface it.
     pub fn process_id(&self) -> Option<u32> {
-        self.child.process_id()
+        self.host.process_id()
+    }
+
+    /// Best-effort kill of just the immediate child (no signal-group
+    /// escalation). Used by tab-restart, which then re-spawns.
+    pub fn try_kill(&mut self) {
+        let _ = self.host.child.kill();
     }
 
     /// Orderly shutdown of the child and its descendants. Sends
@@ -305,62 +252,16 @@ impl Pane {
     /// `-pid` reaches the whole tree. Already-exited children
     /// short-circuit (the reader thread set `closed`).
     pub fn shutdown(&mut self, grace: std::time::Duration) {
-        if self.closed {
-            // Reader thread already saw EOF; just harvest exit_status
-            // if we haven't yet. Non-blocking.
-            if self.exit_status.is_none() {
-                if let Ok(Some(status)) = self.child.try_wait() {
-                    self.exit_status = Some(status);
-                }
-            }
-            return;
-        }
-        let Some(pid) = self.child.process_id() else {
-            // No PID (already reaped, or platform didn't surface one).
-            // Best-effort: ask portable-pty to kill the immediate child
-            // and move on.
-            let _ = self.child.kill();
-            self.closed = true;
-            return;
-        };
-
-        #[cfg(unix)]
-        unsafe {
-            // SIGTERM to the process group. Most well-behaved children
-            // shut down cleanly within a few hundred ms.
-            libc::kill(-(pid as libc::pid_t), libc::SIGTERM);
-        }
-        // Poll for voluntary exit. Cap iterations at `grace`.
-        let deadline = std::time::Instant::now() + grace;
-        while std::time::Instant::now() < deadline {
-            match self.child.try_wait() {
-                Ok(Some(status)) => {
-                    self.exit_status = Some(status);
-                    self.closed = true;
-                    return;
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-                Err(_) => break,
-            }
-        }
-        // Grace expired — escalate to SIGKILL on the process group, then
-        // reap. SIGKILL is uncatchable so a final blocking wait() is
-        // safe (it won't hang).
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-        }
-        if let Ok(status) = self.child.wait() {
-            self.exit_status = Some(status);
-        }
-        self.closed = true;
+        // Delegated to the host — same SIGTERM-then-SIGKILL escalation
+        // as the pre-v1.5 inline implementation, just owned by the
+        // shared kernel now.
+        self.host.shutdown(grace);
     }
 
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
     #[allow(dead_code)] // wired into the S-key handler in the next step
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
-        self.writer.write_all(bytes)?;
-        Ok(())
+        self.host.write_all(bytes)
     }
 
     pub fn screen(&self) -> &vt100::Screen {
@@ -529,53 +430,8 @@ impl Pane {
     }
 }
 
-/// Best-effort safety net: any code path that drops a `Pane` without
-/// going through `shutdown` (panic unwind, `?`-propagated error in
-/// the main loop, etc.) still gets the child tree torn down. We
-/// can't sleep here without making Drop slow, so this skips the
-/// SIGTERM grace period and goes straight to SIGKILL on the process
-/// group. The orderly close-tab and quit paths call `shutdown`
-/// explicitly first, so this rarely fires for a "well-behaved" exit.
-impl Drop for Pane {
-    fn drop(&mut self) {
-        if self.closed {
-            return;
-        }
-        if let Some(pid) = self.child.process_id() {
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-            }
-        } else {
-            let _ = self.child.kill();
-        }
-        // Non-blocking reap; the kernel will clean up if it's already
-        // gone or about to be.
-        let _ = self.child.try_wait();
-    }
-}
-
-/// Pump bytes from the pty master until the child exits.
-fn reader_loop(
-    mut reader: Box<dyn Read + Send>,
-    tx: &mpsc::Sender<PaneEvent>,
-    pending: &AtomicBool,
-) {
-    let mut buf = [0u8; 8192];
-    loop {
-        match reader.read(&mut buf) {
-            // Ok(0) is EOF; Err is any I/O failure. Both mean the child is gone.
-            Ok(0) | Err(_) => {
-                pending.store(true, Ordering::Relaxed);
-                let _ = tx.send(PaneEvent::Closed);
-                return;
-            }
-            Ok(n) => {
-                pending.store(true, Ordering::Relaxed);
-                if tx.send(PaneEvent::Bytes(buf[..n].to_vec())).is_err() {
-                    return; // Parent has dropped the Pane.
-                }
-            }
-        }
-    }
-}
+// Drop and reader_loop moved into `pty_host.rs` in Phase 6a — Pane
+// no longer owns the pty kernel directly, so the safety-net SIGKILL
+// and the byte-pump thread live with the kernel. PtyHost::Drop
+// fires when a Pane is dropped (PtyHost is the only field that
+// owns the child).
