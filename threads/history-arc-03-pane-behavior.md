@@ -206,3 +206,100 @@ Provenance:
 - `history-arc-03-pane-behavior` PR #22 entry = 01KR10ASW7YSX4MB8G28X2C9N4.
 
 <!-- Entry-ID: 01KR10CGQ8NV7FYX39YZTR0FPM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:42:21.882346+00:00
+Role: scribe
+Type: Note
+Title: PR #29 (fix/skip-pane-cursor-block-when-uninvited): three-condition guard generalizing PR #5 — and editing PR #26's cursor-block branch hours after it landed
+
+Spec: scribe
+
+tags: #history #arc-03
+
+PR #29 is the fourth move in arc 03 and the rendering-correctness move. It is also the entry whose internal shape is most explicitly a supersession ladder — two earlier guards on the same code surface get superseded in this PR's diff. Commit subject reads "fix: skip pane cursor block for unfocused / alt-screen panes (v1.41.16)" (commit bdb8d87, 2026-05-06). Diff: 6 files, +49/-13. The single source file is `src/pane/widget.rs` (+22/-6 net on the cursor-block block).
+
+The supersession ladder reads as:
+
+- **Round 1 — PR #5 (arc 02), 2026-04-30.** The narrow `screen.hide_cursor()` guard. Catches the lazygit case the gap analysis named in "Top suspects" §1: lazygit hides the cursor and draws its own selection highlight. Misses every TUI app that *doesn't* hide the cursor but does paint its own (nvim's beam in insert mode, vim's block, etc.).
+- **Round 2 — PR #26 (this arc), 2026-05-06 14:16.** The pane-widget DIM modifier on every cell when unfocused. Touches the general-cell rendering, not the cursor-block guard; the cursor-block kept its `Modifier::REVERSED` paint with a separate `if !self.focused { add_modifier(DIM) }` branch for unfocused-pane dimming.
+- **Round 3 — PR #29 (this entry), 2026-05-06 17:54.** The three-condition guard. Generalizes PR #5; drops PR #26's cursor-block dim-when-unfocused branch.
+
+**The new guard.** The pre-PR-#29 code (post-PR-#5, post-PR-#26) reads:
+
+```rust
+if !self.screen.hide_cursor() {
+    let (cy, cx) = self.screen.cursor_position();
+    if cy < draw_rows && cx < draw_cols {
+        // ...
+        let mut s = cell_ref.style().add_modifier(Modifier::REVERSED);
+        if !self.focused {
+            s = s.add_modifier(Modifier::DIM);
+        }
+        cell_ref.set_style(s);
+    }
+}
+```
+
+The post-PR-#29 code reads:
+
+```rust
+let want_block_cursor =
+    self.focused && !self.screen.alternate_screen() && !self.screen.hide_cursor();
+if want_block_cursor {
+    let (cy, cx) = self.screen.cursor_position();
+    if cy < draw_rows && cx < draw_cols {
+        // ...
+        let s = cell_ref.style().add_modifier(Modifier::REVERSED);
+        cell_ref.set_style(s);
+    }
+}
+```
+
+The transformation does three things at once: the guard goes from one condition (`!hide_cursor()`) to three (`focused && !alternate_screen() && !hide_cursor()`); the dim-when-unfocused branch is removed (because under the new guard, an unfocused pane never reaches this block); and the policy comment lands as a verbatim three-numbered-rationale block.
+
+**The policy comment, verbatim.** The diff's new comment reads:
+
+> "1. Pane is focused. Otherwise the user's eye isn't here and a block in an unfocused pane is just visual clutter / a pseudo-second-cursor that competes with the real input target above (the file list).
+> 2. Child hasn't switched to the alternate screen. Full-screen TUIs (nvim, vim, less, htop, lazygit, claude in TUI mode) paint their own cursor in their own shape — beam in nvim insert mode, e.g. — and our hard-coded block clobbers it with the wrong shape and color.
+> 3. Child hasn't explicitly hidden the cursor (DEC ?25l).
+>
+> Net effect: a plain shell / REPL on the main screen still gets the visibility cue (where the next char will land); alt-screen TUIs and unfocused panes show their natural state."
+
+The named alt-screen TUIs ("nvim, vim, less, htop, lazygit, claude in TUI mode") are the empirical answer to the question PR #5's gap analysis raised — the apps PR #5's hide-cursor-only guard misses. lazygit *also* sets hide-cursor and was caught by PR #5; the addition of nvim, vim, less, htop, and claude-in-TUI-mode names the broader class.
+
+**Back-reference: arc 02 investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) — gap-analysis "Top suspects" §1.** PR #5's gap-analysis text reads (preserved verbatim in arc 02's investigation entry): "spyc unconditionally reverse-videoes the cell at `screen.cursor_position()`, even when the child has set DEC ?25l (cursor hidden). vt100 already exposes `screen.hide_cursor()`, but `src/pane/widget.rs:43–55` never reads it. lazygit hides the cursor and draws its own selection highlight, so a stray reverse-video square sits on some panel — visually reads exactly as 'rendering glitch'." Suspect §1 was the explicit motivating case for PR #5's narrow guard. PR #29's three-condition guard generalizes from "the case where the child set DEC ?25l" to "the broader class of cases where spyc has no business painting its own block."
+
+**Back-reference: arc 02 harvest entry (= 01KR0Z11CKNJRYEZ3T38EAFSC4) — BUGS.md SMALL cursor-block-reverse-video item.** PR #12 lifted the gap-analysis suspect §1 text into BUGS.md as a SMALL item three days after PR #5's partial fix landed. The arc-02 harvest entry's projection: "Arc 03's PR #29 entry will narrate how the BUGS.md residual gets fully extinguished." The empirical resolution: PR #29's three-condition guard *behaviorally* extinguishes the case PR #12's text describes (the alt-screen-without-hide-cursor cases the projection had in mind), but the BUGS.md text itself — verbatim "pane widget always paints a reverse-video cursor block at `screen.cursor_position()` even when the child has set `DEC ?25l` (cursor hidden)" — is **not removed by PR #29's diff**. Inspection of `BUGS.md` at PR #29's tip confirms the PR #12-added cursor-block-reverse-video block is still present in the SMALL bucket post-merge.
+
+What PR #29's BUGS.md diff actually removes is a *different* SMALL line: "user reported: block cursor in insert mode on nvim even when that is not my cursor (ntd: we should remove any cursor overrides?)" — a separate user-report entry, predating PR #5's gap analysis. PR #29 removes that line, behaviorally addresses the case PR #12's text describes, and leaves PR #12's text in BUGS.md SMALL. The harvest entry's "fully extinguished" projection lands as half-true: the *behavior* is extinguished; the *durable-record cleanup* is incomplete. Whether that incompleteness is intentional (PR #12's text describes a residual class still latent under the three-condition guard) or oversight (the durable record was not re-checked against the new guard) is not narratable from the diff alone.
+
+**Within-arc supersession: PR #26's cursor-block dim-when-unfocused branch.** PR #26 (3.5 hours earlier) added per-cell DIM to the unfocused PaneWidget's general-cell rendering. The cursor-block treatment retained its own `if !self.focused { add_modifier(DIM) }` branch (preserved from earlier code, untouched by PR #26). PR #29 drops that cursor-block dim branch entirely — under the new three-condition guard, an unfocused pane never enters the cursor-block paint path at all, so the dim branch becomes unreachable code. PR #26's general-cell DIM modifier on the unfocused pane survives PR #29 untouched; the supersession is on the cursor-block specifically. Two visual-state mechanisms (PR #26's per-cell DIM and PR #29's three-condition cursor-block guard) coexist post-PR-#29, with PR #29's guard preempting the cursor-block-dim case PR #26 kept.
+
+**The user-visible motivation, from the CHANGELOG.** The fix's lede reads verbatim: "Spyc used to paint a reverse-block at the pty cursor position unconditionally (modulo `?25l`-hidden), which fought with TUI apps that draw their own cursor — most visibly nvim's beam in insert mode, where users saw a block when the app was clearly asking for a beam." nvim's beam is the named example; the broader class is the policy comment's alt-screen-TUI list.
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `fix/skip-pane-cursor-block-when-uninvited` (fix prefix); the commit subject reads "fix:"; CHANGELOG buckets under `### Fixed`. All three align. Captured for the eventual drift catalogue's positive-control row.
+- The arc-02 harvest entry's projection that PR #29 would "extinguish the BUGS.md residual" is behaviorally true and durable-record-incomplete. The mismatch between behavioral coverage and durable-record cleanup is the kind of discrepancy the insight layer's drift / cross-thread-fidelity reading should pick up — a residual flagged in BUGS.md outlives its underlying-bug-fix because no one re-checked the record. Captured here for that reading.
+- PR #29's policy comment names "claude in TUI mode" alongside the standard alt-screen TUIs (nvim, vim, less, htop, lazygit). The "claude in TUI mode" reference locates this PR's primary user (the bottom pane's most common occupant per README/FEATURES.md framing) inside the bug class. Same self-locating-as-user signal as PR #6's `toggle_pane_zoom` resize-comment ("otherwise Claude's UI is the wrong size"). Captured for the recurrence reading.
+- PR #29 lands 3.5 hours after PR #26 on the same calendar day. The cursor-block dim branch PR #29 drops was presumably read against a PR #26 — pre-merge or post-merge — and the supersession-within-three-hours shape is the kind of fast-iteration cadence the insight layer's velocity reading should observe. Captured factually, not interpreted.
+- The diff also removes the FEATURES.md line "Pane cursor shows as a bright reverse-video block when focused, dim block when unfocused" and replaces it with the new three-condition policy — durable-doc cleanup tracks the diff exactly here, in contrast to the BUGS.md residual question above.
+
+Provenance:
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — full PR.
+- 306b43f → b2f3e2e — parent and tip SHAs for the diff inspection.
+- `git diff 306b43f..b2f3e2e -- src/pane/widget.rs`: the cursor-block guard-and-paint block at lines 48-79 post-merge; pre-state at lines 51-65 pre-merge with `if !self.screen.hide_cursor()` wrapping `if !self.focused { add_modifier(DIM) }`; post-state with `let want_block_cursor = self.focused && !self.screen.alternate_screen() && !self.screen.hide_cursor();` and the dim branch removed.
+- `git diff 306b43f..b2f3e2e -- CHANGELOG.md`: 13 lines added under `[Unreleased]` `### Fixed`; nvim-beam lede quoted verbatim above.
+- `git diff 306b43f..b2f3e2e -- BUGS.md`: 2 lines removed from SMALL ("user reported: block cursor in insert mode on nvim even when that is not my cursor"); 6 lines added to `### FIXED ###` for `(fixed, v1.41.16)`. PR #12-added cursor-block-reverse-video text in SMALL is not touched.
+- `git show bdb8d87^2:BUGS.md` confirms the PR #12-added cursor-block-reverse-video block ("pane widget always paints a reverse-video cursor block at `screen.cursor_position()` even when the child has set `DEC ?25l`...") remains in BUGS.md SMALL post-merge.
+- `git diff 306b43f..b2f3e2e -- FEATURES.md`: 7 lines added / 2 lines removed; the focused/unfocused-block sentence replaced with the three-condition policy.
+- `git diff 306b43f..b2f3e2e -- Cargo.toml`: `version = "1.41.15"` → `version = "1.41.16"`.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T — gap-analysis "Top suspects" §1 text; PR #5's narrow `screen.hide_cursor()` guard.
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 — BUGS.md SMALL cursor-block-reverse-video item; the "fully extinguished" projection.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG.
+- `history-arc-03-pane-behavior` PR #22 entry = 01KR10ASW7YSX4MB8G28X2C9N4.
+- `history-arc-03-pane-behavior` PR #26 entry = 01KR10CGQ8NV7FYX39YZTR0FPM (within-arc supersession partner).
+
+<!-- Entry-ID: 01KR10G02J2234D0WBMWMYC35M -->
