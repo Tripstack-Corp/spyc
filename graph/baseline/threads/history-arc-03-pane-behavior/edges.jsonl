@@ -3,3 +3,5 @@
 {"source":"entry:01KR106N6HSW66R76HN9VJPF1Q","target":"entry:01KR108QNEEG64J8W8XJERJTZG","type":"followed_by"}
 {"source":"thread:history-arc-03-pane-behavior","target":"entry:01KR10ASW7YSX4MB8G28X2C9N4","type":"contains"}
 {"source":"entry:01KR108QNEEG64J8W8XJERJTZG","target":"entry:01KR10ASW7YSX4MB8G28X2C9N4","type":"followed_by"}
+{"source":"thread:history-arc-03-pane-behavior","target":"entry:01KR10CGQ8NV7FYX39YZTR0FPM","type":"contains"}
+{"source":"entry:01KR10ASW7YSX4MB8G28X2C9N4","target":"entry:01KR10CGQ8NV7FYX39YZTR0FPM","type":"followed_by"}

@@ -162,3 +162,47 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — current-state pane PTY ownership; this PR is the genesis of `Pane::shutdown` and `impl Drop for Pane`.
 
 <!-- Entry-ID: 01KR10ASW7YSX4MB8G28X2C9N4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:40:27.801752+00:00
+Role: scribe
+Type: Note
+Title: PR #26 (feat/dim-unfocused-pane): SGR 2 on the unfocused side, BUGS.md SMALL extinguished
+
+Spec: scribe
+
+tags: #history #arc-03
+
+PR #26 is the third move in arc 03 and the second visual-state move (PR #6 zoom was the first). Commit subject reads "feat: dim unfocused side so focus is obvious at a glance (v1.41.13)" (commit 20fba00, 2026-05-06). Diff: 7 files, +47/-5. Two source files carry the work: `src/pane/widget.rs` (+13/-1) and `src/ui/list_view.rs` (+13/-1). The diff is short; the entry is too.
+
+**The behavior.** Each side renders a per-cell `Modifier::DIM` (SGR 2) when it is not the input target. When the pane has focus, the file list above renders DIM on every non-cursor row. When the list has focus, the pty pane below renders DIM on every cell. The CHANGELOG names the design property verbatim: "SGR 2 lands as ~50% lightness on every supported terminal — no theme work or layout shift, just a clean visual cue for 'input goes here vs. there.'"
+
+**The two diffs read as one pattern.** Both `PaneWidget::render` and `ListView::render` gain the same shape: a `let dim = if self.focused { Modifier::empty() } else { Modifier::DIM };` binding above the per-cell loop, then `style.add_modifier(dim)` (or in the list case, `marker_style.add_modifier(dim)` and `name_style.add_modifier(dim)`) applied to the non-cursor rendering. The cursor-row treatment is left untouched: the file list's `cursor_bg_dim` already handled the focused-vs-pane-focused cursor coloring before this PR; the pane's cursor-block had its own focused/unfocused dim distinction (which PR #29 will modify hours later — see PR #29 entry). The CHANGELOG names the stack: "The cursor row's existing `cursor_bg_dim` treatment stacks on top so the highlighted row stays distinguishable in either state."
+
+**The BUGS.md item this PR closes.** `BUGS.md` SMALL drops the line "darken screen on unfocused pane to better distinguish focus" (one-line removal); `### FIXED ###` gains a `(fixed, v1.41.13)` entry recording the per-cell DIM modifier. The dropped SMALL line is the explicit precedent — pane-vs-list focus ambiguity was a recorded concern before this PR; the fix lifts it from SMALL to FIXED in one diff.
+
+**Cross-references inside arc 03.**
+
+- PR #29 (next per-PR entry below; same calendar day, 3.5 hours after this PR's merge) modifies the pane's *cursor-block* treatment, not its general-cell treatment. PR #29 drops the cursor-block-when-unfocused dim branch entirely (because under PR #29's three-condition guard, an unfocused pane never paints a cursor block at all). PR #26's general-cell DIM modifier on the pane is left intact by PR #29; the two visual-state mechanisms compose cleanly. The within-arc supersession is on the cursor-block specifically, not on PR #26's per-cell DIM.
+- PR #34 (final per-PR entry below; same calendar day, 9.4 hours after this PR's merge) reuses PR #26's `PaneWidget` DIM behavior to indicate unfocused-overlay state. The render call at `src/app/mod.rs::2316` post-PR-#34 sets `PaneWidget::focused: overlay_focused`, where `overlay_focused = !self.state.pane_focused`. The DIM-when-unfocused machinery PR #26 added becomes the visual cue PR #34 leans on — without PR #26, PR #34's overlay-focus-switch would have no native rendering to differentiate "overlay holds focus" from "bottom pane holds focus."
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `feat/dim-unfocused-pane` (feature prefix); the commit subject reads "feat:" and the CHANGELOG buckets the change under `### Changed`, not `### Added` or `### Fixed`. Three-way prefix-vs-subject-vs-changelog: feature/feature/changed. The Changed bucket reads as the most accurate against the diff (existing surface re-renders with a new modifier; no new capability gates).
+- The dropped SMALL line ("darken screen on unfocused pane to better distinguish focus") was a one-line BUGS.md item. Whether it was the maintainer's own pre-emptive note or a user report is not narratable from the diff alone — the line carries no attribution. Captured here as a flag for the insight layer's BUGS.md-source catalogue.
+- This PR's per-cell DIM on `PaneWidget` is the load-bearing rendering for PR #34's overlay focus indicator. The dependency goes pane-widget → overlay-rendering — the overlay shares the `PaneWidget` render path. PR #26 lands the mechanism; PR #34 extends its consumer set. Within-arc reuse is captured for the eventual recurrence reading.
+
+Provenance:
+- 20fba00 (PR #26 feat/dim-unfocused-pane, 2026-05-06) — full PR.
+- bfc4a18 → 7683e22 — parent and tip SHAs for the diff inspection.
+- `git diff bfc4a18..7683e22 -- src/pane/widget.rs`: +13/-1; `let dim = if self.focused { Modifier::empty() } else { Modifier::DIM };` binding added at lines 25-34 post-merge; `cell_style(cell).add_modifier(dim)` at line 44 post-merge.
+- `git diff bfc4a18..7683e22 -- src/ui/list_view.rs`: +13/-1; matching `let dim = ...` binding above the per-row loop; `(marker_style.add_modifier(dim), name_style.add_modifier(dim))` for non-cursor rows.
+- `git diff bfc4a18..7683e22 -- BUGS.md`: 1 line removed from SMALL ("darken screen on unfocused pane to better distinguish focus"); 5 lines added to `### FIXED ###` for `(fixed, v1.41.13)`.
+- `git diff bfc4a18..7683e22 -- CHANGELOG.md`: 10 lines added under `[Unreleased]` `### Changed`; SGR 2 / ~50% lightness sentence quoted verbatim above.
+- `git diff bfc4a18..7683e22 -- FEATURES.md`: 4 lines added; "The whole unfocused side dims" entry under the "switching between the file list and the pane" section.
+- `git diff bfc4a18..7683e22 -- Cargo.toml`: `version = "1.41.12"` → `version = "1.41.13"`.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG.
+- `history-arc-03-pane-behavior` PR #22 entry = 01KR10ASW7YSX4MB8G28X2C9N4.
+
+<!-- Entry-ID: 01KR10CGQ8NV7FYX39YZTR0FPM -->

@@ -5,7 +5,7 @@
   "title": "history arc 03 pane behavior",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T10:39:31.718572+00:00",
+  "last_updated": "2026-05-07T10:40:27.802918+00:00",
   "summary": "The development thread focuses on enhancing the behavior of the bottom pane in a history arc, introducing features like tmux-style zoom and a shutdown process with safety nets. Key decisions include adding a `[ZOOM]` tag for zoom functionality and implementing a four-stage shutdown mechanism to ensure proper cleanup. The outcomes are improved pane management and enhanced stability.",
-  "entry_count": 3
+  "entry_count": 4
 }
