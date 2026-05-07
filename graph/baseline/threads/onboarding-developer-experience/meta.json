@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-05-07T07:47:21.235731+00:00",
   "summary": "The thread discusses the onboarding process for developers, focusing on the local build and testing workflow that uses two task runners, Makefile and Justfile, along with a quickstart guide. Key decisions include the integration of these tools to streamline development, and the outcome is a streamlined onboarding experience that enhances developer productivity.",
-  "entry_count": 1
+  "entry_count": 1,
+  "annotations": {
+    "onboarding-developer-experience": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-05-07T07:52:22.991282+00:00",
+      "vote_score": 0
+    }
+  }
 }
