@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **`D` opens files in the in-app pager (top-pane mount), not
+  `\$PAGER` as a pty overlay.** v1.5 Phase 5 — the in-app pager
+  has been the more capable viewer for a while now (search, jump,
+  visual range yank, syntax highlighting, markdown render, hex
+  dump for binaries) and Phase 1's `Mount::TopPane` is the rail
+  for landing it in the same screen slot the old overlay used.
+  Bottom pane stays visible alongside; `^a-j` / `^a-k` flips
+  focus between the in-app pager and the pty just like it did
+  for the old overlay. `Esc` / `q` closes the pager and returns
+  focus to the file list.
+  - **Huge-file fallback:** files past `MAX_PAGER_BYTES` (5 MB)
+    are still handed to `\$PAGER` as a top-overlay pty, because
+    `less` streams from disk while the in-app pager loads the
+    (already truncated) buffer into memory. Streaming wins for
+    multi-GB logs.
+  - Binary files use the existing hex-dump pager view (same as
+    `Enter` / `d` does), not `\$PAGER`'s raw-byte spew.
+  - The file-loading body of `Enter` / `d` and `D` is now
+    shared via a new `App::build_pager_view_for_file` helper —
+    truncation banner, syntax highlighting, markdown rendering,
+    hex dump all behave identically across the two openers.
+
 - **`^a-v` (pane scrollback view) is now a real pager.** First
   user-visible piece of the v1.5 unification. The old scroll
   mode was a flat byte-buffer view: `j` / `k` / `g` / `G` only,

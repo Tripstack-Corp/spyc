@@ -2393,6 +2393,48 @@ impl App {
             return;
         }
 
+        // v1.5 Phase 5: a `TopPane`-mounted pager (today: only `D`
+        // opening a file in-pager) replaces the status + list +
+        // prompt area, just like the `;cmd` top overlay does, so the
+        // bottom pane (claude / zsh) keeps running visibly below.
+        // The pager's own title bar provides the visual identity;
+        // status / prompt rows aren't drawn behind it.
+        let top_pager = self
+            .pager
+            .as_ref()
+            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
+        if top_pager {
+            let top_area = ratatui::layout::Rect {
+                x: layout.status.x,
+                y: layout.status.y,
+                width: layout.status.width,
+                height: layout.status.height + layout.list.height + layout.prompt.height,
+            };
+            if let Some(view) = self.pager.as_ref() {
+                crate::ui::pager::render(frame, top_area, view, &self.theme);
+            }
+            // Divider + bottom pane render normally below.
+            if let Some(divider_rect) = layout.divider {
+                self.render_pane_status_line(frame, divider_rect);
+            }
+            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+                let _ = tabs.active_mut().resize(rect.height, rect.width);
+                tabs.drain_all();
+                frame.render_widget(
+                    PaneWidget {
+                        screen: tabs.active().screen(),
+                        focused: self.state.pane_focused,
+                    },
+                    rect,
+                );
+                tabs.active_mut().output_dirty = false;
+                if self.state.pane_focused {
+                    place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
+                }
+            }
+            return;
+        }
+
         let (path, suffix) = self.header_parts();
         let project_label = self
             .state
@@ -2642,13 +2684,11 @@ impl App {
         }
 
         // Pager comes after list but before help (help always wins).
-        // `LowerPane`-mounted pagers were already rendered into the
-        // pane slot above; only `Overlay` and `TopPane` mounts hit
-        // this centered render path. (`TopPane` mount is reserved
-        // for Phase 5 — `D` opening files in-pager — and uses the
-        // top-pane area when wired.)
+        // `LowerPane` and `TopPane` mounts already rendered into
+        // their slots above; only `Overlay` mount hits this centered
+        // render path.
         if let Some(view) = &self.pager {
-            if !matches!(view.mount, crate::ui::pager::Mount::LowerPane) {
+            if matches!(view.mount, crate::ui::pager::Mount::Overlay) {
                 pager::render(frame, frame.area(), view, &self.theme);
             }
         }
@@ -2960,10 +3000,20 @@ impl App {
             return Ok(self.handle_harpoon_menu_key(key));
         }
 
-        // Pager eats all keys until dismissed.
-        if self.pager.is_some() {
-            let post = self.handle_pager_key(key);
-            return Ok(post);
+        // Pager eats all keys until dismissed — except a `TopPane`-
+        // mounted pager (v1.5 `D`) coexists with a focusable bottom
+        // pane. When the bottom pane has focus and the key isn't a
+        // spyc meta chord (^a / ^w / ^\ / F10), let it fall through
+        // to the pane-focused forwarding path below so the user can
+        // type into claude while the doc stays visible above.
+        if let Some(view) = self.pager.as_ref() {
+            let top_pane_pager = matches!(view.mount, crate::ui::pager::Mount::TopPane);
+            let bottom_owns = top_pane_pager && self.pane_tabs.is_some() && self.state.pane_focused;
+            let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
+            if !bottom_owns || is_meta {
+                let post = self.handle_pager_key(key);
+                return Ok(post);
+            }
         }
         // When the pane is in scroll mode, navigation keys are handled
         // here instead of being forwarded to the child subprocess.
@@ -4637,10 +4687,24 @@ impl App {
         }
     }
 
-    /// `D` — open the cursor file in `$PAGER` as a top-overlay pty so
-    /// the bottom pane (claude / zsh / etc.) stays visible alongside.
-    /// Mirror of `edit_in_pane` for the read path. Common workflow:
-    /// `D` on a doc, `^a-j` into claude, work, `^a-k` to scroll.
+    /// `D` — open the cursor file in spyc's in-app pager mounted in
+    /// the top-pane slot, so the bottom pane (claude / zsh / etc.)
+    /// stays visible. Mirror of `edit_in_pane` for the read path.
+    /// Common workflow: `D` on a doc, `^a-j` into claude, work,
+    /// `^a-k` back to scroll.
+    ///
+    /// v1.5 Phase 5 swapped the implementation from
+    /// "spawn `\$PAGER` as a pty top overlay" to "use the in-app
+    /// pager." The pager is more capable on every axis we care about
+    /// (search, jump, syntax highlighting, range yank, markdown
+    /// render, hex dump for binaries), and uses the existing
+    /// `Mount::TopPane` rail laid in Phase 1.
+    ///
+    /// **Huge-file fallback:** files past `MAX_PAGER_BYTES` are
+    /// still handed to `\$PAGER` as a top overlay because `less`
+    /// streams from disk while the in-app pager loads the (already
+    /// truncated) buffer into memory. Streaming wins for multi-GB
+    /// logs.
     fn display_in_pane(&mut self) {
         let Some(row) = self.state.rows.get(self.state.cursor.index) else {
             return;
@@ -4650,6 +4714,154 @@ impl App {
             self.state.flash_error("D: cannot page a directory");
             return;
         }
+        let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
+        if file_size > crate::fs::ops::MAX_PAGER_BYTES {
+            // Huge file: $PAGER's stream-from-disk wins over our
+            // in-memory pager. Fall back to the pre-v1.5 behavior
+            // (spawn $PAGER as a top overlay).
+            self.spawn_pager_overlay_for_path(&path);
+            return;
+        }
+        let Some(mut view) = self.build_pager_view_for_file(&path) else {
+            return;
+        };
+        view.mount = crate::ui::pager::Mount::TopPane;
+        // Don't push to buffer history: this is a fresh open, not a
+        // page the user navigated away from and might want to revisit
+        // via `[b` / `]b`.
+        view.no_history = true;
+        self.pager = Some(view);
+        self.state.pane_focused = false;
+        self.needs_full_repaint = true;
+    }
+
+    /// Build a `PagerView` from a file on disk. Handles text (with
+    /// markdown rendering / syntax highlighting / truncation banner
+    /// for big files) and binary (hex dump). Flashes a read error
+    /// and returns `None` on failure. The returned view has
+    /// `mount = Overlay` (the default); callers override for
+    /// `TopPane` / `LowerPane` mounts. Extracted from the old
+    /// inline body of `ActivateIntent::Display` so both `Enter` /
+    /// `d` (overlay) and `D` (top pane) share the same loading
+    /// path.
+    fn build_pager_view_for_file(&mut self, path: &Path) -> Option<PagerView> {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if shell::looks_like_text(path) {
+            let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
+            // Big files used to OOM us: read_to_string + syntect every
+            // token = file size × ~50 in pager state. Cap at
+            // MAX_PAGER_BYTES; past that, load just MAX_PAGER_LINES of
+            // plain text and tell the user how to hand off to $PAGER
+            // for the full thing.
+            let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
+                crate::fs::ops::read_truncated(path, crate::fs::ops::MAX_PAGER_LINES)
+            } else {
+                std::fs::read_to_string(path).map(|c| {
+                    let n = c.lines().count();
+                    (c, n, false)
+                })
+            };
+            let (content, _line_count, truncated) = match load_result {
+                Ok(t) => t,
+                Err(e) => {
+                    self.state.flash_error(format!("read: {e}"));
+                    return None;
+                }
+            };
+            let content = expand_tabs(&content);
+            let is_md = crate::ui::markdown::is_markdown_path(path);
+            // Source-side lines: syntect-highlighted if available AND
+            // we loaded the whole file (highlighting a partial file
+            // would still mostly work but blows memory, and the
+            // savings is the whole point of truncation).
+            let source_lines: Vec<ratatui::text::Line<'static>> = if truncated {
+                content
+                    .lines()
+                    .map(|l| ratatui::text::Line::from(l.to_string()))
+                    .collect()
+            } else {
+                crate::ui::syntax::highlight_to_lines(&name, &content).unwrap_or_else(|| {
+                    content
+                        .lines()
+                        .map(|l| ratatui::text::Line::from(l.to_string()))
+                        .collect()
+                })
+            };
+            let mut view = if is_md && !truncated {
+                // Pre-compute both views; default to rendered. `m`
+                // toggles. Yank/save always hit the source via
+                // `source_text()`. Skipped for truncated files since
+                // markdown rendering of half a doc looks weird
+                // (broken refs, half-closed code fences).
+                let rendered = crate::ui::markdown::render(&content, &self.theme);
+                let mut v = PagerView::new_styled(name, rendered);
+                v.alt_lines = Some(source_lines);
+                v.markdown_rendered = true;
+                v
+            } else {
+                let display_name = if truncated {
+                    format!(
+                        "{name} \u{26a0} truncated · {} MB",
+                        file_size / (1024 * 1024)
+                    )
+                } else {
+                    name
+                };
+                let mut v = PagerView::new_styled(display_name, source_lines);
+                if truncated {
+                    // Append a banner row pointing at the escape
+                    // hatch so the user knows the cap fired and what
+                    // to do.
+                    let warn_style = ratatui::style::Style::default()
+                        .fg(self.theme.pick)
+                        .add_modifier(ratatui::style::Modifier::BOLD);
+                    v.lines.push(ratatui::text::Line::from(""));
+                    v.lines
+                        .push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                            format!(
+                                "[truncated at {} lines · {} MB total · press p to open in $PAGER]",
+                                crate::fs::ops::MAX_PAGER_LINES,
+                                file_size / (1024 * 1024)
+                            ),
+                            warn_style,
+                        )));
+                    // Also flash an immediate hint — the banner is at
+                    // the bottom and the user might not scroll there
+                    // before wondering what happened to their file.
+                    v.flash = Some(format!(
+                        "truncated at {} lines · press p for full file in $PAGER",
+                        crate::fs::ops::MAX_PAGER_LINES
+                    ));
+                }
+                v
+            };
+            view.source_path = Some(path.to_path_buf());
+            Some(view)
+        } else {
+            // Binary file: hex dump via pretty-hex.
+            match fs::ops::hex_dump_lines(path, &self.theme) {
+                Ok(lines) => {
+                    let mut view = PagerView::new_plain(format!("{name} [hex]"), Vec::new());
+                    view.lines = lines;
+                    Some(view)
+                }
+                Err(e) => {
+                    self.state.flash_error(format!("hex: {e}"));
+                    None
+                }
+            }
+        }
+    }
+
+    /// Pre-v1.5 `D` behavior: spawn `\$PAGER` as a top overlay pty.
+    /// Now used only as the huge-file fallback path from
+    /// `display_in_pane` — files past `MAX_PAGER_BYTES` benefit from
+    /// `less`'s stream-from-disk over our in-memory pager.
+    fn spawn_pager_overlay_for_path(&mut self, path: &Path) {
         let argv = shell::resolve_pager();
         if argv.is_empty() {
             self.state.flash_error("no $PAGER set");
@@ -8458,129 +8670,10 @@ impl App {
         // File: dispatch based on intent.
         match intent {
             ActivateIntent::Display => {
-                if shell::looks_like_text(&path) {
-                    // Show text files in the in-app pager: no TUI teardown,
-                    // consistent keybindings, keeps the pane running below.
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
-                    // Big files used to OOM us: read_to_string + syntect
-                    // every token = file size × ~50 in pager state. Now
-                    // we cap at MAX_PAGER_BYTES; past that, load just
-                    // MAX_PAGER_LINES of plain text and tell the user how
-                    // to hand off to $PAGER for the full thing.
-                    let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
-                        crate::fs::ops::read_truncated(&path, crate::fs::ops::MAX_PAGER_LINES)
-                    } else {
-                        std::fs::read_to_string(&path).map(|c| {
-                            let n = c.lines().count();
-                            (c, n, false)
-                        })
-                    };
-                    match load_result {
-                        Ok((content, _line_count, truncated)) => {
-                            let content = expand_tabs(&content);
-                            let is_md = crate::ui::markdown::is_markdown_path(&path);
-                            // Source-side lines: syntect-highlighted if
-                            // available AND we loaded the whole file
-                            // (highlighting a partial file would still
-                            // mostly work but blows memory and the savings
-                            // is the whole point of truncation).
-                            let source_lines: Vec<ratatui::text::Line<'static>> = if truncated {
-                                content
-                                    .lines()
-                                    .map(|l| ratatui::text::Line::from(l.to_string()))
-                                    .collect()
-                            } else {
-                                crate::ui::syntax::highlight_to_lines(&name, &content)
-                                    .unwrap_or_else(|| {
-                                        content
-                                            .lines()
-                                            .map(|l| ratatui::text::Line::from(l.to_string()))
-                                            .collect()
-                                    })
-                            };
-                            let mut view = if is_md && !truncated {
-                                // Pre-compute both views; default to
-                                // rendered. `m` toggles. Yank/save always
-                                // hit the source via `source_text()`.
-                                // Skipped for truncated files since the
-                                // markdown rendering of half a doc looks
-                                // weird (broken refs, half-closed code
-                                // fences).
-                                let rendered = crate::ui::markdown::render(&content, &self.theme);
-                                let mut v = PagerView::new_styled(name, rendered);
-                                v.alt_lines = Some(source_lines);
-                                v.markdown_rendered = true;
-                                v
-                            } else {
-                                let display_name = if truncated {
-                                    format!(
-                                        "{name} \u{26a0} truncated · {} MB",
-                                        file_size / (1024 * 1024)
-                                    )
-                                } else {
-                                    name
-                                };
-                                let mut v = PagerView::new_styled(display_name, source_lines);
-                                if truncated {
-                                    // Append a banner row pointing at the
-                                    // escape hatch so the user knows the
-                                    // cap fired and what to do.
-                                    let warn_style = ratatui::style::Style::default()
-                                        .fg(self.theme.pick)
-                                        .add_modifier(ratatui::style::Modifier::BOLD);
-                                    v.lines.push(ratatui::text::Line::from(""));
-                                    v.lines.push(ratatui::text::Line::from(
-                                        ratatui::text::Span::styled(
-                                            format!(
-                                                "[truncated at {} lines · {} MB total · press p to open in $PAGER]",
-                                                crate::fs::ops::MAX_PAGER_LINES,
-                                                file_size / (1024 * 1024)
-                                            ),
-                                            warn_style,
-                                        ),
-                                    ));
-                                    // Also flash an immediate hint -- the
-                                    // banner is at the bottom and the user
-                                    // might not scroll there before
-                                    // wondering what happened to their
-                                    // file.
-                                    v.flash = Some(format!(
-                                        "truncated at {} lines · press p for full file in $PAGER",
-                                        crate::fs::ops::MAX_PAGER_LINES
-                                    ));
-                                }
-                                v
-                            };
-                            view.source_path = Some(path.clone());
-                            self.pager = Some(view);
-                        }
-                        Err(e) => self.state.flash_error(format!("read: {e}")),
-                    }
-                    PostAction::None
-                } else {
-                    // Binary file: hex dump via pretty-hex.
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    match fs::ops::hex_dump_lines(&path, &self.theme) {
-                        Ok(lines) => {
-                            let mut view =
-                                PagerView::new_plain(format!("{name} [hex]"), Vec::new());
-                            // Replace the empty lines with our pre-styled hex lines.
-                            view.lines = lines;
-                            self.pager = Some(view);
-                        }
-                        Err(e) => self.state.flash_error(format!("hex: {e}")),
-                    }
-                    PostAction::None
+                if let Some(view) = self.build_pager_view_for_file(&path) {
+                    self.pager = Some(view);
                 }
+                PostAction::None
             }
             ActivateIntent::Edit => {
                 let mut argv = shell::resolve_editor();

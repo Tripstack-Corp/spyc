@@ -40,7 +40,7 @@ const SECTIONS: &[Section] = &[
                 "enter dir / editor ($EDITOR) on file (suspends TUI)",
             ),
             ("V", "open $EDITOR in top pane (bottom pane stays visible)"),
-            ("D", "open $PAGER  in top pane (bottom pane stays visible)"),
+            ("D", "open in pager (top pane, bottom pane stays visible)"),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
             ("J", "jump to a path (~, $VAR expanded)"),

@@ -3,6 +3,8 @@
   sense
 - our pager is now quite a competitor for less and should be the default for D
   too
+- "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
+  the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - commands that have stopped running in task runner (!) should show EOF

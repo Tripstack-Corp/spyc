@@ -30,9 +30,14 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **d / Enter** descend into a directory, or view a text file in the pager
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
 - **V** open `$EDITOR` in the top pane — bottom pane stays visible
-- **D** open `$PAGER` (e.g. `less`) in the top pane — bottom pane stays
-  visible. Workflow: `D` on a doc, `^a-j` into the bottom pane to do
-  work, `^a-k` back to scroll the doc
+- **D** open the cursor file in spyc's in-app pager mounted in the
+  top-pane slot — bottom pane stays visible. Same loader as `Enter`
+  / `d` (syntax highlighting, markdown render, hex dump for
+  binaries, truncation banner for big files) but mounted in the
+  top slot instead of as a centered overlay. Workflow: `D` on a
+  doc, `^a-j` into the bottom pane to do work, `^a-k` back to
+  scroll the doc. Files past 5 MB fall back to `$PAGER` as a top
+  overlay (streaming from disk wins for multi-GB logs)
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **H / ~** jump to home
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
