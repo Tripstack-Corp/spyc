@@ -295,3 +295,82 @@ Provenance:
 - `history-arc-04-git-integration` PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (`parse_porcelain_statuses` test-surface precedent that this PR's pure-domain test shape inherits).
 
 <!-- Entry-ID: 01KR1327VZTQAYNNPMBCTC3SSM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:28:38.053925+00:00
+Role: scribe
+Type: Note
+Title: PR #27 (feat/git-staged-vs-unstaged): GitFileStatus from enum to struct, two-cell XY display; not catalogue (refutation)
+
+Spec: scribe
+
+tags: #history #arc-04
+
+PR #27 is the fifth and final move in arc 04 and the marker-fidelity axis. Commit subject reads "feat: two-char git markers for staged-vs-unstaged distinction (v1.41.14)" (commit 4e2afd9, 2026-05-06). Diff: 9 files, +272/-78 — the largest src diff in the arc. Source code: `src/ui/list_view.rs` +174/-46, `src/sysinfo.rs` +116/-28, `src/app/state.rs` +13/-13, plus a 1-line touch in `src/app/mod.rs`. Three new parser tests in `src/sysinfo.rs`.
+
+**The feature.** The left gutter on each listing row now shows the full porcelain XY pair (column 0 = staged side, column 1 = unstaged side), mirroring `git status -s`. The PR's CHANGELOG names the cases verbatim: "`M ` is staged-only, ` M` is unstaged-only, `MM` is partially staged + further edits, `R~` is staged rename + further unstaged edits, ` ?` is untracked. Each char carries its own color so the staged/unstaged halves are independently legible at a glance" (commit 4e2afd9, 2026-05-06). The marker column was already 2 cells wide pre-PR (a single glyph plus a trailing space); the layout does not shift.
+
+**The refactor.** The structural move is a type promotion. Pre-PR, `GitFileStatus` is a flat enum with variants `Clean`, `Modified`, `Added`, `Deleted`, `Renamed`, `Untracked`, `Conflicted` — one row of state per file. Post-PR, `GitFileStatus` is a struct (`src/ui/list_view.rs`):
+
+- `staged: Option<GitChange>` — the index/staged half (porcelain X column).
+- `unstaged: Option<GitChange>` — the working-tree half (porcelain Y column).
+- `untracked: bool` — the special-case `??` row (orthogonal to staged/unstaged).
+
+A new `GitChange` enum carries the per-side kind (`Modified`, `Added`, `Deleted`, `Renamed`, `Conflicted`). The CHANGELOG names the design choice verbatim: "Internally `GitFileStatus` is now a struct (`staged: Option<GitChange>`, `unstaged:`, `untracked: bool`) instead of a flat enum; new `GitChange` carries the per-side kind" (commit 4e2afd9, 2026-05-06).
+
+**The parser change.** PR #15's `parse_porcelain_statuses` (= 01KR130775Q4PKYEN6FE1743DJ) is the extension point. Pre-PR-#27, the parser returned the flat-enum status by collapsing `xy` to a single variant via a chain of pattern guards (`s.starts_with('R') || s.ends_with('R') => Renamed`). Post-PR-#27, the parser decodes each half independently via a new `decode_half(c: char) -> Option<GitChange>` helper and constructs the struct from the two halves separately:
+
+```
+Some(GitChange::Modified) for 'M'|'T',
+Some(GitChange::Added) for 'A',
+Some(GitChange::Deleted) for 'D',
+Some(GitChange::Renamed) for 'R'|'C',
+Some(GitChange::Conflicted) for 'U',
+None for ' ' (and ?, !)
+```
+(`src/sysinfo.rs:107-117` post-merge.)
+
+The conflict shapes (`UU`, `DD`, `AA`) bypass the per-half decode and write `Conflicted` to both halves directly, so the marker reads `!!` and stands out — the CHANGELOG does not name this; the code comment does (`src/sysinfo.rs:152-156` post-merge): "Conflicts (`UU`, `DD`, `AA`) collapse to Conflicted on both halves so the marker reads `!!` and stands out."
+
+**Test surface.** Three new parser tests in `src/sysinfo.rs:425-461` (post-merge): `staged_only_modify` (`M  foo.rs`), `partially_staged_modify` (`MM foo.rs` — both halves set), `conflict_marks_both_halves` (`UU foo.rs` — both halves Conflicted). The five tests PR #15 introduced are all updated in-place to read the new struct-shape getters (`s.unstaged.is_some()`, `s.staged == Some(GitChange::Renamed)`) instead of comparing flat-enum equality.
+
+**Consumer-side updates.** PR #24's `jump_to_git_change` consumed the flat-enum return type via `!= GitFileStatus::Clean`. Post-PR-#27 it consults a new `is_clean()` accessor: `self.git_files.get(&r.display).copied().is_some_and(|s| !s.is_clean())` (`src/app/state.rs:215-220` post-merge). The `=git`/`=g` filter from PR #7 gets the same mechanical update at `src/app/state.rs:554-560` (post-merge). Two arc-04 consumers touched, both via the same `is_clean()` interface; neither's behavior changes.
+
+**Refutation against the catalogue (brief-flagged hypothesis, refuted).** The arc-04 framing entry (= 01KR12T4DHGDH3B9YYXM0F093A) named the brief's hypothesis that PR #27 executes against arc 02's lazygit-ux-catalogue. Verification against the catalogue text preserved verbatim in arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T):
+
+The seven catalogue sections cover panel-jump (§1, skip), context-sensitive footer (§2, adapt — the prompt-row hint), command log + random tip (§3, skip-the-log/adapt-the-tip), popups/pickers (§4, adapt — extend the pager), scoped help (§5, adapt), single-key row-verbs (§6, skip), two-letter chord jumps (§7, skip). All seven are about UI/affordance patterns. None catalogue git-data fidelity at the marker-display level. The catalogue's leading framing acknowledges the divergence with lazygit on the mouse axis; it does not catalogue git's own porcelain XY pair display.
+
+The display choice in PR #27 — a two-cell XY pair, each half independently colored, mirroring `git status -s` — reads structurally similar to git's *own* shell-side output, not to lazygit's two-panel staged/unstaged split. lazygit's idiom (per arc 02 investigation entry's catalogue read of `lazygit-upstream/`) is a separate "Files" panel showing the porcelain pair as text rows; PR #27 inlines the pair into the existing listing's marker column.
+
+The empirical position: PR #27 does not execute against any catalogue section. Arc 02's published back-reference table (= 01KR0Z3673Z27FJ4GV92FYV4QJ) does not enumerate PR #27, consistent with this finding. The brief's hypothesis is refuted against the catalogue text and the diff.
+
+**Drift findings flagged for the insight layer**:
+
+- The CHANGELOG entry sits under `### Changed`, not `### Added` or `### Fixed`. The bucket choice tracks the diff: existing functionality (the marker column) gets a richer rendering, no new key bindings, no new commands. The rendering change is wide (174 lines in `list_view.rs`) but additive only at the type-shape level; user-facing surface is the same column, fuller content.
+
+- PR #15's `parse_porcelain_statuses` extraction (= 01KR130775Q4PKYEN6FE1743DJ) two days earlier is what makes this PR's parser refactor land cleanly. Without the pure-parser shape, the per-half `decode_half` helper would have to live inside the spawn-`git`-and-parse body, and the three new struct-shape tests could not be written without forking a subprocess. The extension PR #27 ships against PR #15's table is structural, not just semantic — the table is what lets the new fields land.
+
+- The directory-marking rule from PR #15 (`top_component/ → Modified`) is preserved structurally but updated semantically. Pre-PR-#27, the directory-keyed entry stored a flat `Modified`. Post-PR-#27, it stores `GitFileStatus::unstaged(GitChange::Modified)` (a helper constructor on the new struct, `src/sysinfo.rs:188-192` post-merge). The CHANGELOG does not name this; the code comment does ("directories don't have a meaningful per-half staging concept"). The choice keeps PR #7's `=git` filter and PR #24's `]g`/`[g` jumper both operating on subtree-marker rows without surface change.
+
+- The CHANGELOG names "3 new parser tests cover the staged-only / partially-staged / conflict shapes" — but the diff also rewrites all five PR #15 tests to read the new struct-shape getters. Test-surface count goes from 5 to 8; test-rewrite cost is the load-bearing-but-unnamed half of PR #27's test work.
+
+Provenance:
+- 4e2afd9 (PR #27 feat/git-staged-vs-unstaged, 2026-05-06 16:51) — full PR. Last commit in arc 04.
+- 5999261 (PR #15 fix/git-status-and-pane-ctrl-c, 2026-05-04) — `parse_porcelain_statuses` extraction this PR extends; named for sequence-grain dependency.
+- 762a0a6 (PR #24 feat/jump-git-change, 2026-05-05) — `jump_to_git_change` consumer this PR updates via `is_clean()`.
+- f3ddaf2 (PR #7 feat/limit-git, 2026-05-02) — `=git` filter consumer this PR updates via `is_clean()`.
+- `src/sysinfo.rs:107-117` (post-merge) — `decode_half` helper.
+- `src/sysinfo.rs:148-192` (post-merge) — struct-construction in `parse_porcelain_statuses`; conflict-collapse path; directory-marker `unstaged(Modified)` shape.
+- `src/sysinfo.rs:425-461` (post-merge) — three new parser tests (`staged_only_modify`, `partially_staged_modify`, `conflict_marks_both_halves`).
+- `src/app/state.rs:215-220,554-560` (post-merge) — `is_clean()` updates at the two arc-04 consumer sites.
+- `git diff 4e2afd9^1..4e2afd9^2 -- CHANGELOG.md` — verbatim quotes ("`M ` is staged-only, ` M` is unstaged-only, `MM` is partially staged + further edits, `R~` is staged rename + further unstaged edits, ` ?` is untracked"; "Each char carries its own color so the staged/unstaged halves are independently legible at a glance"; "Marker column was already 2 cells wide (was `~` + space) — no layout shift"; "Internally `GitFileStatus` is now a struct").
+- `git show 0691666:notes/lazygit-ux-catalogue.md` (read for empirical refutation) — none of §1–§7 catalogues git-data fidelity at the marker-display level.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue text source for refutation; lazygit-upstream Files-panel idiom).
+- `history-arc-02-lazygit-investigation-and-harvest` closure entry = 01KR0Z3673Z27FJ4GV92FYV4QJ (back-reference table; PR #27 not enumerated, consistent with refutation).
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A.
+- `history-arc-04-git-integration` PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK.
+- `history-arc-04-git-integration` PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7.
+- `history-arc-04-git-integration` PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (`parse_porcelain_statuses` extension target).
+- `history-arc-04-git-integration` PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM (`jump_to_git_change` consumer).
+
+<!-- Entry-ID: 01KR134PZSQDAFVJK3M35FTKXF -->
