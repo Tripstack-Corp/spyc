@@ -303,3 +303,57 @@ Provenance:
 - `history-arc-03-pane-behavior` PR #26 entry = 01KR10CGQ8NV7FYX39YZTR0FPM (within-arc supersession partner).
 
 <!-- Entry-ID: 01KR10G02J2234D0WBMWMYC35M -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:43:38.913990+00:00
+Role: scribe
+Type: Note
+Title: PR #34 (fix/top-overlay-focus-switch): meta-key fall-through, overlay-as-pane focus model, ;cmd no longer traps
+
+Spec: scribe
+
+tags: #history #arc-03
+
+PR #34 is the fifth and final move in arc 03. It is the focus-routing move — the one that extends `pane_focused`'s meaning from "list-vs-bottom-pane" to "list-or-overlay-vs-bottom-pane." Commit subject reads "fix: ;cmd overlay shares focus with bottom pane (v1.41.21)" (commit 8e9fb2c, 2026-05-06). Diff: 6 files, +79/-16. The single source file is `src/app/mod.rs` (+50/-8) — three distinct touch points, walked in order below.
+
+**The bug being fixed.** Pre-fix, the `;cmd` interactive-overlay code path was an unconditional key takeover. The pre-PR comment in the dispatch block reads verbatim: "Top overlay (interactive `;` command) owns all keys — it's a full takeover of the top area. The user exits by quitting the subprocess itself (q in top, :q in vim, etc.)." With a bottom pane already running claude or zsh, that meant the user had to quit the overlay subprocess to glance at the lower pane. The CHANGELOG names the user-visible workflow this PR enables: "`;less docs/architecture.md`, `^a-j` into claude, do work, `^a-k` back to scroll the doc, repeat."
+
+**Touch point 1 — the dispatch fall-through.** The pre-PR overlay-eats-everything block (`src/app/mod.rs::2849-2852` post-merge area) becomes a guarded fall-through: `is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())` and `bottom_owns = has_bottom && self.state.pane_focused`. If the key is neither a meta key (ctrl-a/ctrl-w/ctrl-backslash/F10) nor a key that the bottom pane should own, the overlay still gets it via `overlay.send_key(key)` — preserving the in-overlay `q` / `:q` / scrolling semantics. Otherwise the dispatch falls through to the chord resolver (for meta keys) or the pane-forwarding block (for bottom-pane-focused keys). The replaced policy comment names the change verbatim: "Used to be an unconditional takeover ('the user exits by quitting the subprocess itself'), which was fine when only the overlay existed — but if the user has a bottom pane too (e.g. claude open), they couldn't pop down to it without quitting the overlay first."
+
+**Touch point 2 — overlay rendering tracks focus.** The overlay's `frame.render_widget(PaneWidget { ..., focused: true }, overlay_area)` becomes `focused: overlay_focused`, where `overlay_focused = !self.state.pane_focused`. Symmetrically, the bottom-pane render (a few lines below, in the same draw block) changes from `focused: false` to `focused: self.state.pane_focused`. Both render paths now read the same `pane_focused` boolean as their input-target signal, with the overlay treating it as the inverted slot. The visual-state consequence is that the unfocused side (overlay or bottom pane) renders with `Modifier::DIM` per `PaneWidget`'s rendering — which is precisely the behavior PR #26 (entry above) added to `PaneWidget`. PR #34 leans on PR #26's machinery without modifying it; the overlay-focus-switch becomes visible to the user because the unfocused half dims.
+
+**Touch point 3 — overlay spawn forces focus to the overlay.** Three call sites that spawn into `self.top_overlay` (the `;cmd` dispatch path, the prompt-completion path, and the D-key file-open path that PR #35 introduces but lands on this same release stream) all gain a `self.state.pane_focused = false;` line immediately after `self.top_overlay = Some(p);`. The inline comment names the rationale verbatim: "Initial focus is on the new overlay so the user can drive the subprocess directly. ^a-j hands focus to the bottom pane (when one is open)." New overlays steal focus on spawn; subsequent `^a-j`/`^a-k` chord taps flip between overlay and bottom pane.
+
+**Touch point 4 — focus flash labels.** `App::flash_focus` (or its equivalent at the focus-toggle path) gains a branch: when the non-pane side is currently the overlay (i.e. `self.top_overlay.is_some()`), the flash reads `focus: overlay`; otherwise it still reads `focus: spyc`. The inline comment names the user-visible ambiguity this resolves: "When a `;cmd` overlay is showing the spyc-list slot, the 'non-pane' side is the overlay subprocess, not the file list. Label accordingly so the user can read what just got focus instead of guessing."
+
+**The state model after PR #34.** Two save-and-restore axes now share `pane_focused: bool`:
+
+- PR #6's zoom: `pane_focus_before_zoom: Option<bool>` saves `pane_focused` at zoom-on, restores it at zoom-off. Zoom forces focus into the pane.
+- PR #34's overlay: no save-and-restore; spawn forces focus to overlay (`pane_focused = false`); chord-toggle flips between overlay and bottom pane.
+
+The two mechanisms compose without conflict: zoom-while-overlay-is-up is not exercised by any diff in arc 03 (no commit lands a `;less` plus `^a-z` interaction); whether the composition is correct is a question for whoever runs that workflow, not narratable from the diff. Captured for the eventual insight layer's "implicit-state-coexistence" reading.
+
+**The BUGS.md item this PR closes.** `BUGS.md` SMALL drops the line "using editor in top pane prevents switching to bottom pane" (one-line removal at the top of the SMALL bucket); `### FIXED ###` gains a `(fixed, v1.41.21)` entry recording the fall-through machinery. The dropped SMALL line is the explicit precedent — the focus-trap was a recorded concern; the fix lifts it from SMALL to FIXED in one diff, the same shape PR #26 used. (Two unrelated SMALL items also reposition in this PR's BUGS.md diff: `D in spyc pane should open in $PAGER in the top pane` and `/ should match within names - it seems to assume ^`. Both are unrelated to the overlay focus-switch and read as incidental SMALL-bucket reordering.)
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `fix/top-overlay-focus-switch` (fix prefix); the commit subject reads "fix:"; CHANGELOG buckets under `### Fixed`. All three align. Positive-control row for the drift catalogue.
+- `pane_focused: bool` becomes a three-meaning slot in the post-PR-#34 surface: (a) list-vs-pane focus, (b) overlay-vs-pane focus when the overlay is up, (c) the source axis for PR #6's zoom save-and-restore. The single boolean is doing more work than its type advertises. Captured for the insight layer's "names-that-out-grew-their-scope" reading.
+- The `is_spyc_meta_when_pane_focused` helper-name reads as a hint that meta-key fall-through was already a concept somewhere upstream (possibly bottom-pane-focused-meta-key handling, possibly chord-resolver pre-empting). The diff calls into the helper but does not introduce it. Whether the helper is from this PR or pre-existing is determinable only from its definition site; flagged here without resolution.
+- The CHANGELOG entry's named user-visible workflow (`;less docs/architecture.md`, then `^a-j` into claude, then back) is the third arc-03 PR to surface "claude in the bottom pane" as the implicit primary user (PR #6's resize comment, PR #29's policy-comment list, PR #34's CHANGELOG workflow). Recurrence-reading material for the insight layer; arc 03 names the recurrence factually only.
+- New overlays-steal-focus reverses the previous default (spawn put focus on `pane_focused: true` at the bottom-pane path). Whether any pre-PR-#34 muscle memory expected the bottom pane to keep focus across overlay spawns is not narratable from the diff; captured for the insight layer's behavior-change-as-fix reading.
+
+Provenance:
+- 8e9fb2c (PR #34 fix/top-overlay-focus-switch, 2026-05-06) — full PR.
+- cf9e8ff → ef24eb4 — parent and tip SHAs for the diff inspection.
+- `git diff cf9e8ff..ef24eb4 -- src/app/mod.rs`: +50/-8; four touch points walked above.
+- `git diff cf9e8ff..ef24eb4 -- CHANGELOG.md`: 18 lines added under `[Unreleased]` `### Fixed`; the workflow lede ("`;less docs/architecture.md`, `^a-j` into claude...") quoted verbatim above.
+- `git diff cf9e8ff..ef24eb4 -- BUGS.md`: 1 line removed from SMALL ("using editor in top pane prevents switching to bottom pane"); 8 lines added to `### FIXED ###` for `(fixed, v1.41.21)`; two unrelated SMALL items reposition.
+- `git diff cf9e8ff..ef24eb4 -- FEATURES.md`: 7 lines added / 3 lines removed under "Three modes of running commands"; `^a-j`/`^a-k` overlay-vs-pane focus flip described.
+- `git diff cf9e8ff..ef24eb4 -- Cargo.toml`: `version = "1.41.20"` → `version = "1.41.21"`.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG (zoom save-and-restore, the other `pane_focused` axis).
+- `history-arc-03-pane-behavior` PR #26 entry = 01KR10CGQ8NV7FYX39YZTR0FPM (the `PaneWidget` DIM machinery PR #34 leans on).
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M.
+
+<!-- Entry-ID: 01KR10JBACRS3Z71WTHGBVCPJM -->
