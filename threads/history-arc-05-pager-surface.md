@@ -362,3 +362,97 @@ Provenance:
 - `history-arc-05-pager-surface` PR #23 entry = 01KR2A8PW1GRF82G4X8R7HFP6H.
 
 <!-- Entry-ID: 01KR2AAX12XSNRNZPTXJT2TXJA -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:54:49.561802+00:00
+Role: scribe
+Type: Note
+Title: PR #35 (feat/D-opens-pager-in-top-pane): D launches $PAGER as top overlay; the pager becomes launchable from the listing; direction alignment with catalogue §4
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #35 is the second move in phase γ. Commit subject reads "feat: D opens cursor file in $PAGER as top overlay (v1.41.22)" (commit c243549, 2026-05-06). Diff: 9 files, +81/-13. The bulk lands in `src/app/mod.rs` (47 insertions); the keymap and help layers carry the rest.
+
+**The capability shipped.**
+
+The PR's `### Changed` CHANGELOG entry reads verbatim: "`D` now opens the cursor file in `$PAGER` as a top overlay (was: flash the date/time). Mirror of `V` for $EDITOR and a natural use of the focus-sharing overlay landed in v1.41.21. Workflow this enables: `D` on `docs/architecture.md`, `^a-j` into claude, work, `^a-k` to scroll the doc — without quitting less. The old date utility is still reachable via the typed command `:date`. `D` flashes an error on directories ('D: cannot page a directory') and when `$PAGER` is unset. Updated `?` help and FEATURES.md." (commit c243549, 2026-05-06). The capability statement is dense; the verbs that matter are *opens*, *as a top overlay*, and *focus-sharing*.
+
+**The launching mechanism — `display_in_pane`.**
+
+The `src/app/mod.rs` diff (47 insertions) introduces a private method on `App`:
+
+```
+fn display_in_pane(&mut self) {
+    let Some(row) = self.state.rows.get(self.state.cursor.index) else { return; };
+    let path = row.path.clone();
+    if row.kind == EntryKind::Dir {
+        self.state.flash_error("D: cannot page a directory");
+        return;
+    }
+    let argv = shell::resolve_pager();
+    if argv.is_empty() {
+        self.state.flash_error("no $PAGER set");
+        return;
+    }
+    let cmd = format!("{} {}", argv.join(" "), shell::shell_quote(&path.display().to_string()));
+    let (rows, cols) = Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+    let cwd = self.state.listing.dir.clone();
+    match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+        Ok(p) => { self.top_overlay = Some(p); self.state.pane_focused = false; }
+        Err(e) => self.state.flash_error(format!("spawn: {e}")),
+    }
+}
+```
+
+The doc-comment names the mirror relationship: "Mirror of `edit_in_pane` for the read path. Common workflow: `D` on a doc, `^a-j` into claude, work, `^a-k` to scroll." The `Action::DisplayInPane` arm in the dispatch lands as a one-line call to `self.display_in_pane()`; the keymap diff in `src/keymap/action.rs` (10 insertions / 4 deletions) and `src/keymap/resolver.rs` (4 insertions / 2 deletions) registers the action and binds `D` to it.
+
+**The displaced `D` behavior.**
+
+The CHANGELOG's parenthetical ("was: flash the date/time") names the prior binding. The diff preserves the date utility behind a typed command — `src/app/mod.rs` adds a `:date` arm:
+
+```
+if input == "date" {
+    let _ = self.apply(&Action::Date);
+    return PostAction::None;
+}
+```
+
+with a comment naming the migration: "Used to be bound to `D` but `D` now opens the cursor file in $PAGER (the common request); the date utility lives on as a typed command for the rare hand-on-keyboard moment you actually want it." The displaced behavior is preserved on a less-common surface; the prime keystroke (`D`) is reassigned to the more-common request.
+
+**Sequence-grain dependency on PR #34 (arc 03).**
+
+The CHANGELOG names the dependency explicitly: "a natural use of the focus-sharing overlay landed in v1.41.21." PR #34 (`fix/top-overlay-focus-switch`, 8e9fb2c, 2026-05-06) — arc 03's last move — taught the overlay-vs-pane focus model that `;cmd` overlays can share focus with the bottom pane (`pane_focused = false` on overlay open, `^a-j`/`^a-k` chord keys bridging the two). PR #35's `display_in_pane` rides exactly that surface: the spawn into `top_overlay` plus the explicit `self.state.pane_focused = false` gives the user the docs-and-claude-side-by-side workflow the CHANGELOG names. Without PR #34, opening `$PAGER` as `top_overlay` would trap focus in the overlay; with PR #34, the same spawn produces the focus-sharing workflow.
+
+Arc 03's PR #34 entry (= 01KR10JBACRS3Z71WTHGBVCPJM) named the model. Arc 05's PR #35 is the first new feature to consume it.
+
+**The launching pattern — what it is structurally.**
+
+The `display_in_pane` shape is a *launching pattern*: take the cursor row, validate (kind, env), build a command via `resolve_pager` + `shell_quote`, size the overlay via `top_overlay_size` + `effective_pane_pct`, capture cwd + context_path, and `Pane::spawn` into `top_overlay`. The pager is the destination, but the mechanism is general: any "open this listing row in a launched pty alongside the bottom pane" feature could ride the same dance with a different `resolve_*` helper. The `shell::resolve_pager` and `shell::shell_quote` re-exports trace back to arc 01's PR #4 (`fix/shell-aliases`, 1f41b4b, 2026-04-30), which introduced the `src/shell/mod.rs` module — the launching mechanism here consumes infrastructure landed on Day 0.
+
+**Catalogue §4 alignment — direction, not execution.**
+
+Per arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T), PR #35 holds DIRECTION ALIGNMENT with catalogue §4: it extends the read-through-pager direction the catalogue proposes ("render *into* the pager") to a launchable-from-listing surface. The catalogue's specific recommendation — "extend the pager into a generalized pick-from-list mode" via `PagerView::picker_items: Vec<(Label, Action)>` — is not directly executed: PR #35 launches an external `$PAGER` (less, most, etc.) into a pty overlay; it does not populate spyc's internal `PagerView` with picker items. The pager-as-mode reading at PR #35 is "the listing now launches into the pager as a read-mode alongside other modes (the bottom pane, claude)," not "the pager hosts a generalized picker."
+
+The arc-02 disposition holds: **DIRECTION ALIGNMENT**, no direct catalogue-item execution. This entry back-references arc 02's investigation entry to confirm the disposition against the diff.
+
+**Drift findings flagged for the insight layer**:
+- BUGS.md SMALL had an entry pre-existing this PR: "D in spyc pane should open in $PAGER in the top pane." PR #35 lifts the entry to FIXED with verbatim provenance ("(fixed, v1.41.22) `D` now opens the cursor file in `$PAGER`..."). The same arc 05 PR #36 (next) does the same lifting move with the substring matcher; two such lifts in two consecutive PRs flagged for the insight layer's recurrence catalogue.
+- The launching mechanism (`display_in_pane`) is private to `App` and not factored as a standalone helper. A future feature that wants the same shape (open this script in `$EDITOR` alongside, open this directory in `$FILE_MANAGER` alongside) would either re-implement the dance or refactor `display_in_pane` / `edit_in_pane` into a common helper. The seam is named in the doc-comments ("Mirror of `edit_in_pane`") but not factored.
+
+Provenance:
+- c243549 (PR #35 feat/D-opens-pager-in-top-pane, 2026-05-06).
+- `git diff c243549^1..c243549^2 -- CHANGELOG.md`: `### Changed` entry quoted verbatim above.
+- `git diff c243549^1..c243549^2 -- src/app/mod.rs`: `display_in_pane` method body (quoted in full above), `:date` typed-command migration with comment, `Action::DisplayInPane` dispatch arm.
+- `git diff c243549^1..c243549^2 -- BUGS.md`: SMALL line "D in spyc pane should open in $PAGER in the top pane" removed; FIXED entry added at v1.41.22.
+- `git diff c243549^1..c243549^2 -- src/keymap/action.rs` / `src/keymap/resolver.rs`: `Action::DisplayInPane` registration; `D` binding.
+- `Cargo.toml:3` post-merge: `version = "1.41.22"`.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 source; PR #35 named at this entry as DIRECTION ALIGNMENT).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract: PR #33 / PR #35 may back-reference arc 02 on read-through-pager direction).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-as-pane focus model; PR #35 is the first feature to consume it).
+- `history-arc-01-foundation-hygiene` PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (`src/shell/mod.rs` genesis; `resolve_pager` and `shell_quote` re-exports consumed here).
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA (sibling phase-γ entry).
+
+<!-- Entry-ID: 01KR2AD5PV989H58E49E5D18NM -->

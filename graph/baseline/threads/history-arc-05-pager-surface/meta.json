@@ -5,7 +5,7 @@
   "title": "history arc 05 pager surface",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-07T22:53:35.104791+00:00",
+  "last_updated": "2026-05-07T22:54:49.564543+00:00",
   "summary": "The development thread focuses on improving the pager surface in Arc 05 through multiple PRs, addressing issues with scroll behavior and wrapping. Key decisions included adjusting `scroll_max` to handle visual rows during wrap and fixing the pager's scroll position in the foreground. Outcomes resulted in enhanced pager functionality and improved stability in the foreground and background.",
-  "entry_count": 7
+  "entry_count": 8
 }
