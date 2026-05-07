@@ -244,3 +244,52 @@ Provenance:
 - `history-arc-05-pager-surface` PR #17 entry = 01KR2A4DCY3BR45ZQ7FQ2YQE4Q.
 
 <!-- Entry-ID: 01KR2A6TT516XA5FEGVBXYPWD7 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:52:24.140035+00:00
+Role: scribe
+Type: Note
+Title: PR #23 (feat/help-yf-and-percent-docs): yf joins the y-prefix family; help text gains % substitution and default_command precedence
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #23 closes phase β. Commit subject reads "feat: yf yanks cursor path + help-text discoverability fixes (v1.41.10)" (commit eb6ddf6, 2026-05-05). Diff: 8 files, +81/-3. Two concerns share the slug — a new keybinding (`yf`) and two help-text additions — and unlike PR #20's bundle, both halves serve the same surface (the help-as-pager surface gaining discoverability).
+
+**Half 1 — `yf` joins the y-prefix family.**
+
+The PR's `### Added` CHANGELOG entry on this half reads verbatim: "`yf` — yank cursor file path (or all picks) to clipboard. New binding in the `y`-prefix family. Yields absolute paths so the receiving shell resolves them correctly regardless of where the user pastes them. With picks active, joins them newline-separated for one-per-line consumption (`xargs`, `git restore $(pbpaste)`, etc.). Came from a real-world ask — 'easy way to copy a file path for a one-off `git restore`' — that previously had to route through `!git restore %`." (commit eb6ddf6, 2026-05-05).
+
+The diff distributes the work across the keymap and dispatch layers: `src/keymap/action.rs` (2 insertions) registers a new `Action` variant; `src/keymap/resolver.rs` (1 insertion) wires `yf` into the resolver; `src/app/mod.rs` (40 insertions) implements the yank-path-to-clipboard handler; `FEATURES.md` (3 insertions) documents the binding. The picks-active branch joins absolute paths newline-separated, mirroring the listing's existing pick-aware semantics in other y-prefix bindings.
+
+**Half 2 — help text discoverability fixes.**
+
+The PR's `### Changed` CHANGELOG entry on this half reads verbatim: "`?` help text discoverability. Added the long-missing `%` substitution under the `!` row (`%` = cursor file or all picks, shell-quoted; `%%` = literal percent), so a new user looking at the help can find the substitution mechanism without having to read source or remember the spy heritage. Updated the pane default-command row to reflect the v1.41.7 precedence chain (`$SPYC_PANE_CMD` env > `[pane] default_command` config > `\"claude\"` fallback) — the prior text only mentioned the env var." (commit eb6ddf6, 2026-05-05).
+
+The `src/ui/help.rs` diff (14 insertions / 1 deletion) lands the two help-text additions on the same multi-column help-pager surface PR #17 made search-correct. The `%` substitution row had been a documented capability missing from `?`'s discoverable surface; the default-command row mirrors PR #20's precedence chain so a reader of `?` can see the env-var-then-config-then-claude order without going to the changelog.
+
+**Sequence-grain dependency on PR #20.** The default_command precedence row in PR #23's help diff names the chain `$SPYC_PANE_CMD env > [pane] default_command config > "claude" fallback`. That precedence is exactly the one PR #20 established (PR #20's entry above quotes the call site in `start_new_tab_prompt`). PR #20 added the config field and the call-site precedence; PR #23 surfaces both to the help surface. The two PRs land 13 hours apart wall-clock and read as one capability shipped in two halves: PR #20 makes the config exist; PR #23 makes the config legible.
+
+**Sequence-grain dependency on PR #17.** The help pager renders in two columns when the terminal is wide enough; the same multi-column surface PR #17 fixed for search correctness is the surface PR #23 extends. Without PR #17, the new `%` substitution row and the rewritten default-command row would land on a search-broken surface — `n/N` to find them would still pin to the bottom of the chunk. Phase α's mechanics fix is what makes phase β's discoverability addition land on a navigable surface.
+
+**Sequence-grain forward note.** The `%` substitution row in PR #23 reads as a documentation extension of an existing surface (the `!`-capture path was already in place per `ARCHITECTURE.md:97-101`, "`!` captured commands also use a slave PTY since v1.12.0"). PR #36's substring matcher (the arc-05 outlier) does not touch the `%` substitution path; the two are orthogonal. The forward chain from PR #23's help-text discoverability fixes is into the eventual broader-help-text catalogue §5 ("Scoped `?` help") — a roadmap item carried at arc 02's investigation entry as a deferral pending §4's machinery, with no executing PR in the 22-day window. PR #23 widens the existing dump rather than scoping it; the §5 deferral remains.
+
+**Drift findings flagged for the insight layer**:
+- The `feat/` prefix scopes PR #23 as feature work; the `### Changed` half (help text) is documentation-of-existing-behavior under what the diff shape supports as a feature-classification by association with the `yf` half. The CHANGELOG itself splits the two halves cleanly (`### Added` for `yf`, `### Changed` for the help text), so the drift is at the slug-level only.
+- The "real-world ask" framing in the CHANGELOG (`yf` "came from a real-world ask") is the kind of provenance signal that, if recurring across the window, would feed a recurrence reading at the insight layer. Captured here without interpretation.
+
+Provenance:
+- eb6ddf6 (PR #23 feat/help-yf-and-percent-docs, 2026-05-05).
+- `git diff eb6ddf6^1..eb6ddf6^2 -- CHANGELOG.md`: `### Added` (yf) and `### Changed` (help text) entries quoted verbatim above.
+- `git show eb6ddf6 --stat`: 8 files changed, 81 insertions, 3 deletions; `src/app/mod.rs` carries 40 insertions; `src/ui/help.rs` carries 14 insertions / 1 deletion.
+- `Cargo.toml:3` post-merge: `version = "1.41.10"`.
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM.
+- `history-arc-05-pager-surface` PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH.
+- `history-arc-05-pager-surface` PR #17 entry = 01KR2A4DCY3BR45ZQ7FQ2YQE4Q (multi-column help-pager surface PR #23 extends).
+- `history-arc-05-pager-surface` PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7 (`[pane] default_command` precedence chain genesis; PR #23 surfaces it to help text).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §5 deferral; PR #23 widens the existing dump rather than executing §5's scoping).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+
+<!-- Entry-ID: 01KR2A8PW1GRF82G4X8R7HFP6H -->
