@@ -275,7 +275,7 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Search",
         rows: &[
-            ("/", "incremental search (prefix, or glob if * ? [)"),
+            ("/", "incremental search (substring, or glob if * ? [)"),
             ("n", "repeat search forward"),
             ("N", "repeat search backward"),
             ("F", "project-wide fuzzy filename finder (gitignore-aware)"),

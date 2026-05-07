@@ -8416,10 +8416,15 @@ impl App {
     }
 }
 
-/// Search matcher: prefix match for plain text, glob for anything with
-/// `*`, `?`, or `[`. Both modes are case-insensitive.
+/// Search / filter matcher: case-insensitive substring for plain
+/// text, glob for anything with `*`, `?`, or `[`. Used by `/`
+/// (search) and `=` (limit filter). Substring (not anchored at the
+/// start) so `/env` finds `.env`, `.envrc`, and `environment.toml`
+/// — anchored prefix mode hid dot-prefixed files behind their
+/// leading `.` and was consistently surprising. Globs are still
+/// available for users who want anchoring (`env*`, `.env*`).
 pub enum Matcher {
-    Prefix(String),
+    Substring(String),
     Glob(Pattern),
     /// An invalid glob produced by a malformed pattern. Matches nothing.
     Never,
@@ -8435,14 +8440,14 @@ impl Matcher {
                 Err(_) => Self::Never,
             }
         } else {
-            Self::Prefix(lower)
+            Self::Substring(lower)
         }
     }
 
     pub fn matches(&self, name: &str) -> bool {
         let lower = name.to_lowercase();
         match self {
-            Self::Prefix(q) => lower.starts_with(q),
+            Self::Substring(q) => lower.contains(q.as_str()),
             Self::Glob(p) => p.matches(&lower),
             Self::Never => false,
         }

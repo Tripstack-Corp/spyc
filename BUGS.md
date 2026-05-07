@@ -1,5 +1,4 @@
 ### SMALL ###
-- / should match within names - it seems to assume ^ e.g. env won't match .env
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - notice of ^c while in the task viewer goes to the spyc pane instead of at the
@@ -122,6 +121,13 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.23) `/` (and `=`) now match by case-insensitive
+  substring, not anchored prefix. Reported as `env` failing to
+  match `.env`. Substring fixes the dot-prefixed case
+  (`.env`, `.envrc`) and also picks up midway hits
+  (`environment.toml`). Globs (`*`, `?`, `[`) are unchanged and
+  still anchored, so `env*` and `*env*` are the explicit
+  prefix / substring escape hatches.
 - (fixed, v1.41.22) `D` now opens the cursor file in `$PAGER`
   as a top overlay (was: flash date/time). Mirror of `V` for
   `$EDITOR` and a natural use of the focus-sharing overlay

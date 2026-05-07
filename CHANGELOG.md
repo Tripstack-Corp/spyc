@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **`/` and `=` are now case-insensitive substring matchers (was:
+  case-insensitive prefix).** Reported as `env` not finding `.env`
+  even though it's right there — the matcher anchored at the start
+  of the name, so dot-prefixed files were unreachable without
+  typing the leading dot. Substring fixes that:
+  `/env` → `.env`, `.envrc`, `environment.toml`. Globs (queries
+  containing `*`, `?`, `[`) are unchanged and still anchored, so
+  `/env*` re-anchors at the start when that's what you want, and
+  `*env*` is the explicit substring form. Same behavior change for
+  the `=` filter prompt (it shares the matcher), so `=test`
+  shrinks the listing to anything containing `test` in its name.
+  `?` help and FEATURES.md updated.
+
 - **`D` now opens the cursor file in `$PAGER` as a top overlay**
   (was: flash the date/time). Mirror of `V` for $EDITOR and a
   natural use of the focus-sharing overlay landed in v1.41.21.

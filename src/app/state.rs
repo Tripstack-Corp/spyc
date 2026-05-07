@@ -1838,8 +1838,10 @@ mod tests {
 
     #[test]
     fn find_wraps_around() {
-        let s = state_with_rows(&["alpha", "beta", "gamma"]);
-        assert_eq!(s.find_match("a", 2, false), Some(0)); // wraps from gamma to alpha
+        // Pick names with no shared substrings so the wrap behavior is
+        // unambiguous under substring matching: only `foo` contains `f`.
+        let s = state_with_rows(&["foo", "bar", "baz"]);
+        assert_eq!(s.find_match("f", 1, false), Some(0)); // wraps from bar/baz back to foo
     }
 
     #[test]
@@ -1865,6 +1867,34 @@ mod tests {
     fn find_empty_rows() {
         let s = test_state();
         assert_eq!(s.find_match("a", 0, false), None);
+    }
+
+    /// Regression: `/env` used to anchor at the start of the name,
+    /// so dot-prefixed files (`.env`, `.envrc`) were unreachable
+    /// without typing the dot. Now substring — `env` finds them all.
+    #[test]
+    fn find_substring_matches_dot_prefixed_file() {
+        let s = state_with_rows(&[".env", ".envrc", "main.rs", "environment.toml"]);
+        assert_eq!(s.find_match("env", 0, false), Some(0));
+        assert_eq!(s.find_match("env", 1, false), Some(1));
+        assert_eq!(s.find_match("env", 2, false), Some(3));
+    }
+
+    /// Substring match is case-insensitive on both sides.
+    #[test]
+    fn find_substring_is_case_insensitive() {
+        let s = state_with_rows(&["README.md", "src", "Cargo.toml"]);
+        assert_eq!(s.find_match("readme", 0, false), Some(0));
+        assert_eq!(s.find_match("CARGO", 0, false), Some(2));
+    }
+
+    /// Globs are still anchor-aware (no implicit substring) so the
+    /// power-user escape hatch keeps working: `env*` only matches
+    /// names *starting* with `env`, hiding `.env` etc.
+    #[test]
+    fn find_glob_remains_anchored() {
+        let s = state_with_rows(&[".env", "envoy", "main.rs"]);
+        assert_eq!(s.find_match("env*", 0, false), Some(1));
     }
 
     // ── flash ─────────────────────────────────────────────────────
@@ -2487,9 +2517,12 @@ mod tests {
 
     #[test]
     fn apply_search_prev_finds_match() {
+        // Only `alpha` contains `lph`, so the backward sweep from
+        // gamma → beta → alpha lands unambiguously on idx 0 under
+        // substring matching too.
         let mut s = state_with_rows(&["alpha", "beta", "gamma"]);
         s.cursor.index = 2;
-        s.last_search = Some("a".to_string());
+        s.last_search = Some("lph".to_string());
         s.apply(&Action::SearchPrev);
         assert_eq!(s.cursor.index, 0);
     }
