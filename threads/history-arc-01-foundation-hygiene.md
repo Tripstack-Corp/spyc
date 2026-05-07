@@ -60,3 +60,39 @@ Provenance:
 - `history-overview` entry 3 = 01KR0V01TAJVSZFE5ZNMCZHQSF (closure; arc thread name list).
 
 <!-- Entry-ID: 01KR0W6FR7T01ZJR84MRKWA13A -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:28:07.601165+00:00
+Role: scribe
+Type: Note
+Title: PR #2 (chore/ci-hygiene): the rails get wired to make check
+
+Spec: scribe
+
+tags: #history #arc-01
+
+PR #2 is the first move in arc 01 and the first move of the 22-day window. Commit subject reads "ci: align with make check, add target cache + pre-commit hook" (commit d9b9360, 2026-04-30). Diff: 9 files, +122/-76. Three concerns are bundled under the `chore/` prefix, and the PR's own CHANGELOG entry under "### CI / Tooling" names them in order.
+
+**The CI rail switches from inlined cargo commands to `make check`.** The previous `bitbucket-pipelines.yml` step inlined `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets`. The CHANGELOG names the cost: "CI was inlining `cargo test --all-targets` without that flag and hitting the race, leaving CI red on `main`" — the missing flag is `--test-threads=1`, required because two state-module tests mutate `XDG_STATE_HOME` and race when parallel. After this PR, the pipeline script reads `make check`; the Makefile owns the gate definition and the `--test-threads=1` constraint moves into `Makefile:test`. The CHANGELOG entry frames the consequence as "Calling `make check` keeps CI and local on the same exact gate." This rail will carry the cargo-deny extension that PR #3 lands next.
+
+**Target-cache and pre-commit hook ride the same PR.** A `target` cache definition is added to `bitbucket-pipelines.yml` alongside the existing `cargo` cache, both keyed on `Cargo.lock` and `rust-toolchain.toml`. A new `Makefile` target `install-hooks` writes `scripts/git-hooks/pre-commit` (10 new lines) into `.git/hooks/pre-commit`, and the hook itself runs `make check` on every commit (bypassable with `git commit --no-verify`, named in the install-hooks target's own echoed reminder).
+
+**The 139-line src/* lint-clean sweep is the price of entry.** Five files outside infrastructure carry diff: `src/app/mod.rs` (43 lines), `src/ui/markdown.rs` (60 lines), `src/ui/pager.rs` (21 lines), `src/fs/ops.rs` (10 lines), `src/ui/line_edit.rs` (5 lines). The CHANGELOG attributes these to a "**Code-tree `cargo fmt --all` sweep** to clear pre-existing formatting drift" and adds explicitly: "No behavior changes." Inspection of `src/ui/markdown.rs` is consistent with that framing — the diff reads as whitespace and bracketing normalization, not logic. The drift cleared here is the drift that would otherwise have failed the new gate the moment CI started enforcing it; the sweep and the gate-tightening land in the same commit so neither half ships broken.
+
+**Sequence-grain detail for arc 03 / arc 08 cross-references**: at PR #2 the Makefile's `check` target is `fmt-check + lint + test` only — no `deny` target exists yet. The `cargo audit --ignore RUSTSEC-2026-0009` step is preserved in `bitbucket-pipelines.yml` outside `make check`. The supply-chain extension to the rail arrives in PR #3.
+
+**Drift findings flagged for the insight layer**:
+- The commit subject reads as pure CI work ("ci: align with make check, add target cache + pre-commit hook"), but the diff bundles 139 lines of src/* lint-fix code — accurately captured under `### CI / Tooling` in the CHANGELOG, less so in the commit subject. A reader scanning subjects only points toward "no source changes here," which the diff does not match.
+- This PR lands under `[Unreleased]` in the CHANGELOG; it does not bump the version. The release that ships these CI changes is cut by PR #4 as v1.37.2 (see arc 01 framing entry).
+
+Provenance:
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30).
+- `Makefile:147-154` (post-merge state) — `install-hooks` target.
+- `bitbucket-pipelines.yml:14-44` (post-merge state) — `target` cache definition and `make check` invocation; `cargo audit` step preserved.
+- `scripts/git-hooks/pre-commit:1-10` (new file) — the hook body.
+- `src/app/mod.rs`, `src/fs/ops.rs`, `src/ui/line_edit.rs`, `src/ui/markdown.rs`, `src/ui/pager.rs` — the 139-line sweep; characterization grounded in the CHANGELOG ("No behavior changes") plus inspection of `src/ui/markdown.rs` diff hunks.
+- `CHANGELOG.md` post-PR-#2 state, "### CI / Tooling" section under `[Unreleased]`.
+- `onboarding-developer-experience` entry 0 = 01KR0PFHHCNVJPNJSTPA3VW62J — current-state seed describing `make check` + `make install-hooks` as established surface; this PR is the genesis of `make install-hooks` and the genesis of CI calling `make check`.
+- `history-arc-01-foundation-hygiene` framing entry = 01KR0W6FR7T01ZJR84MRKWA13A.
+
+<!-- Entry-ID: 01KR0W81XE4K3G7BBSP42GE1HH -->
