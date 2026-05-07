@@ -374,3 +374,89 @@ Provenance:
 - `history-arc-04-git-integration` PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM (`jump_to_git_change` consumer).
 
 <!-- Entry-ID: 01KR134PZSQDAFVJK3M35FTKXF -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:30:11.292087+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 04 baseline complete; two empirical refutations published; arc 05 (pager-surface) follows
+
+Spec: scribe
+
+tags: #history #arc-04
+
+Arc 04 baseline narration complete. Five PRs cover five facets of git-awareness — marker reliability (PR #1), filtering (PR #7), marker correctness + a coincident pane-control fix (PR #15), navigation (PR #24), marker fidelity (PR #27) — across the longest span of any arc (Day 0 to Day 21). The arc reads as capability accretion along independent axes, not as a recurring concern. PR #1's 1Hz machinery becomes the consistency rail PR #7's filter and PR #24's jumper both quietly reuse; PR #15's `parse_porcelain_statuses` extraction becomes the table PR #27's struct refactor extends. PR #15 is the bundle: two coincident concerns under one PR, treated within one entry as two phases.
+
+**Sequence-grain summary**:
+
+- PR #1 (Day 0, 17:08) — first user-facing fix of the project, ~18 min after PR #2's CI hygiene. v1.37.1 cut.
+- PR #7 (Day 2, 11:53) — `=git`/`=g` filter; reuses PR #1's machinery. BUGS.md fork-out: harpoon half deferred to arc 06's PR #8 four hours later. v1.38.1 cut.
+- PR #15 (Day 4, 11:26) — bundle: ^C-route guard (5 lines, app/mod.rs) + parser extraction (87 lines, sysinfo.rs). v1.41.2 cut.
+- PR #24 (Day 5, 16:26) — `]g`/`[g` jumper; pure-domain on AppState. v1.41.11 cut.
+- PR #27 (Day 21*, 16:51) — type promotion from flat enum to struct; extends PR #15's parser, updates PR #7 and PR #24 consumers via new `is_clean()`. v1.41.14 cut.
+
+(* Day 21 by date arithmetic from 2026-04-30 to 2026-05-21? — correction: 2026-05-06 is Day 6. The arc spans Day 0 to Day 6 inclusive, not Day 21. The framing entry's claim of "the full 22-day window" reflects the *positional* placement of the first and last arc-04 PRs in a window that ends with PR #37 on Day 7 (2026-05-07). PR #27 is not the last PR of the window — PR #28 through PR #37 land after it on Day 6 and Day 7. The framing entry's "longest span of any arc" is correct in the relative sense: arc 04 spans Day 0 to Day 6 (inclusive), seven calendar days, longest of any arc per the segmentation entry's own date-anchors. The "full 22-day window" phrase is an overstatement of the *absolute* span and is corrected here for the durable record; the relative observation — longest arc span — stands.)
+
+**Cadence shape (precedent observation, not prescription).** Option A inherits cleanly. Five PRs → five per-PR entries plus framing and closure → seven head entries. PR #15's within-entry phase split is the cadence variation arc 04 commits to; arcs 05–08 may inherit, ignore, or break with their own stated reasons. Arc 03's per-entry shape variety carries forward — the five per-PR entries below register differently (feature-compact for PR #1 and PR #7; bundle-with-phase-split for PR #15; feature-with-refutation for PR #24 and PR #27). Pattern-8's reference register holds the framing entry; the per-PR entries draw from feature-shaped, refactor-shaped, and bundle-shaped registers as their diffs ask.
+
+**Empirical refutations published**:
+
+- **PR #24 does not execute against catalogue §1.** Catalogue §1 (Numbered panels & direct-jump) is **skip** verbatim per arc 02's investigation entry; spyc has effectively two top-level surfaces and `^W j`/`^W k` already covers them. PR #24's `]g`/`[g` is a vim-bracket family extension, mirroring spyc's pre-existing `[t/]t` and `[b/]b` pager chords, themselves modeled on vim's `]c`/`[c` next/previous-hunk family. The PR #24 resolver code names the inheritance explicitly. (Full refutation in PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM.)
+
+- **PR #27 does not execute against any catalogue section.** All seven catalogue sections cover UI/affordance patterns (panel routing, footer, popups, scoped help, row verbs, chord jumps); none catalogue git-data fidelity at the marker-display level. PR #27's two-cell XY pair display reads structurally similar to `git status -s`'s native rendering, not to lazygit's two-panel staged/unstaged split. (Full refutation in PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF.)
+
+The empirical position: arc 04 carries no mandatory back-references to arc 02. Arc 04 cites arc 02 only in service of these two refutations — to walk the catalogue text that PR #12 deleted from `notes/` and that survives only inline in arc 02's investigation entry.
+
+**Cross-arc continuity notes from arc 04 to arc 05 (forward) and arc 06 (sideways)**:
+
+- Arc 05 (`history-arc-05-pager-surface`, 8 PRs, 2026-05-02 to 2026-05-07; the largest arc by PR count) follows next. No direct dependency from arc 04 → arc 05 surfaces in the diffs. Arc 05's PR #20 (`feat/scroll-altscreen-hint`, ee07307) carries an arc-02 catalogue §2 back-reference per the spine's PR #5 special-handling entry (= 01KR0TYF5F11DA8P5HNPA20DBK); arc 04 makes no claim against arc 05's PR list.
+
+- Arc 06 (`history-arc-06-input-and-overlays`, 4 PRs) inherits the harpoon design space from PR #7's BUGS.md fork. PR #8 (`feat/harpoon`, 62fc129, 2026-05-02 18:04) lands four hours after PR #7's merge and ships the "currently working on" pinned-set half PR #7 deferred. Arc 06's eventual PR #8 entry should back-reference both PR #7 entry (= 01KR12XTG7E5TC0RNTJ65G67T7) for the BUGS.md fork-out and arc 02 investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) for catalogue §4 picker-pattern parallelism.
+
+**Voice contract precedent observations (not new precedent — inheritance from arcs 01/02/03)**:
+
+- Verbatim commit-subject quoting honored on every per-PR entry, attributed `(commit <sha>, <date>)`.
+- No mindset attribution to Derek anywhere in head entries. No first-person "I/we" in heads.
+- Sequence-over-timing privileged. The "first move," "next move," "extends the table" register from arc 01 carries forward; clock-padding language avoided.
+- Hedge-token whitelist used freely from the brief's list ("appears to," "reads as," "consistent with," "the diff shape suggests," "points toward," "aligns with," "the commit message indicates").
+- Banned mindset words audited: no "wants," "thinks," "believes," "decided," "feels," "intends to" (without "the commit message"), "is concerned that" referencing Derek's mindset.
+
+**Arc 04 done-definition self-check**:
+
+- ☑ `watercooler_health` reported Healthy against the spyc code_path at session start.
+- ☑ Required reads completed: history-overview, history-arc-01, history-arc-02 (full investigation entry verbatim), history-arc-03 (story-tail and seams-aside verbatim, full PR #34 and PR #29 references), `notes/lazygit-ux-catalogue.md` at commit 0691666, `onboarding-architecture` entry 0, `onboarding-overview` entry 0.
+- ☑ Diagnosis stated in framing entry: capability accretion across five axes, pattern-8 register for framing, per-entry shape variety inherits from arc 03.
+- ☑ Cadence shape stated in framing: option A per-PR with PR #15's within-entry phase split.
+- ☑ Thread `history-arc-04-git-integration` exists with framing + 5 per-PR entries + this closure (7 head entries). Tail(s) follow.
+- ☑ PR #15 entry addresses the bundle explicitly: within-entry phase split (basename-collision phase + ^C-route phase), with the empirical no-shared-root-cause finding stated.
+- ☑ PR #24 and PR #27 entries verify against arc 02's investigation entry for ux-catalogue items they were hypothesized to execute against — finding: neither executes against any catalogue section. Refutations published with arc-02 entry IDs cited.
+- ☑ Each head entry follows head voice contract (third-person observational, present tense, sequence-faithful, verbatim commit-subject quoting attributed).
+- ☑ Provenance blocks on every entry.
+- ☑ Tags `#history` and `#arc-04` on every entry.
+- ☑ No insight-layer claims. Drift findings flagged, not interpreted. No emergent-property naming. No motive attribution. No forward predictions.
+- ☐ Thread to be left OPEN after tail(s).
+
+This thread will remain OPEN for cross-arc references after the tail(s) are written.
+
+Provenance:
+- cd8df2e (PR #1, 2026-04-30 17:08) — first commit in arc 04.
+- f3ddaf2 (PR #7, 2026-05-02 11:53).
+- 5999261 (PR #15, 2026-05-04 11:26) — cluster-boundary call; bundle.
+- 762a0a6 (PR #24, 2026-05-05 16:26).
+- 4e2afd9 (PR #27, 2026-05-06 16:51) — last commit in arc 04 by wall-clock.
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02 18:04) — arc 06 destination for PR #7's BUGS.md fork-out; named here for sideways reference.
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05) — arc 05 carrier of catalogue §2 back-reference; named here for arc-05 forward-reference.
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK.
+- `history-overview` closure entry = 01KR0V01TAJVSZFE5ZNMCZHQSF.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T.
+- `history-arc-02-lazygit-investigation-and-harvest` closure entry = 01KR0Z3673Z27FJ4GV92FYV4QJ.
+- `history-arc-04-git-integration` framing entry = 01KR12T4DHGDH3B9YYXM0F093A.
+- `history-arc-04-git-integration` PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK.
+- `history-arc-04-git-integration` PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7.
+- `history-arc-04-git-integration` PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ.
+- `history-arc-04-git-integration` PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM.
+- `history-arc-04-git-integration` PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF.
+
+<!-- Entry-ID: 01KR137J5GESFYP7CN6KCD7MAS -->
