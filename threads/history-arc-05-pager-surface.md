@@ -184,3 +184,63 @@ Provenance:
 - `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
 
 <!-- Entry-ID: 01KR2A4DCY3BR45ZQ7FQ2YQE4Q -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:51:22.089698+00:00
+Role: scribe
+Type: Note
+Title: PR #20 (feat/scroll-altscreen-hint): three-concern bundle; alt-screen hint partially executes catalogue §2
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #20 opens phase β. Commit subject reads "feat: alt-screen scroll hint + [pane] default_command + gd-vs-HEAD (v1.41.7)" (commit ee07307, 2026-05-05) — three concerns under one slug, named explicitly in the subject. The segmentation entry on `history-overview` (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) flagged this PR as a hard cluster-boundary call: "PR #20 (`feat/scroll-altscreen-hint`) bundles three unrelated concerns: alt-screen scroll hint, `[pane] default_command`, and `gd`-vs-HEAD. Filed under arc 05 (pager) on the basis of the alt-screen hint as the user-visible headline; the bundling itself is drift fuel for the insight layer."
+
+Diff: 11 files, +161/-14. The three halves do not share a code path; they share a PR.
+
+**Half 1 — Alt-screen scroll-mode hint (the catalogue §2 alignment partner).**
+
+The PR's `### Added` CHANGELOG entry on this half reads verbatim: "Alt-screen scroll-mode hint. `^a v` against a full-screen TUI (codex, claude post-startup, vim, htop, lazygit) now flashes `scroll: on — alt-screen app, no scrollback (use the app's own history)` instead of the generic `(j/k nav, s save, Esc exit)` message. Alt-screen apps don't write to main-screen scrollback, so there's nothing for `^a v` to surface — the hint redirects the user to the app's built-in history viewer rather than letting them think scroll-back is broken. Detection via vt100's `Screen::alternate_screen()`. Single-screen apps (bash, plain shells) keep the old flash." (commit ee07307, 2026-05-05).
+
+The diff shape (`git diff ee07307^1..ee07307^2 -- src/app/mod.rs`) shows the implementation: in the `Action::PaneScrollEnter` arm, the active pane's `is_alternate_screen()` is checked before flashing the message; an `if on_alt_screen` branch chooses the alt-screen hint, otherwise the generic message fires. The detection path is one method call on the `Pane` (which delegates to vt100's `Screen::alternate_screen()`); the routing is a one-branch conditional in the existing flash-info path.
+
+**Catalogue §2 alignment — verified against arc 02.** The arc 02 investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) names PR #20 explicitly: "PR #20 (`feat/scroll-altscreen-hint`, ee07307) ships an alt-screen scroll-hint component aligned with §2 in pattern (DIM hint at a transient row when context shifts), though PR #20 narrows to alt-screen detection rather than the broader options-map idea." Catalogue §2 ("Context-sensitive footer") proposes (per the same investigation entry, quoting the catalogue text): "into the prompt row, not the status bar... a `context_hints()` accessor on each overlay returning a `Vec<(key, label)>`; paint via `Style::DIM` when the prompt is otherwise idle." PR #20 honors the *spirit* — a context-sensitive hint surfaced when context shifts (the scroll-mode flash gains a context-aware variant) — without executing the catalogue's proposed shape (a per-overlay `context_hints()` accessor). The flash-info path is hardcoded in one `Action` arm; no `context_hints()` accessor is introduced.
+
+The arc 02 disposition stands: **PARTIAL EXECUTION of catalogue §2**, narrowed to alt-screen detection. This entry confirms that disposition against the diff and back-references arc 02's investigation entry as the catalogue §2 source.
+
+**Half 2 — `[pane] default_command` config key.**
+
+The CHANGELOG entry on this half reads verbatim: "`[pane] default_command` config key. `^a c` (new pane tab) pre-fills its prompt with this command instead of the hardcoded `\"claude\"`. Precedence: `$SPYC_PANE_CMD` env var > config > `\"claude\"` fallback. The env var still wins so users can experiment per-shell without editing config; the new key just fixes the default for users who've switched to codex (or anything else) as their daily driver." (commit ee07307, 2026-05-05).
+
+The diff (`src/config/mod.rs`, 62 insertions) introduces a new `PaneConfig` struct with a `default_command: Option<String>` field, the on-disk `FilePane` shape with `serde(deny_unknown_fields)`, and a per-field merge in `Config::merge`. The call site in `src/app/mod.rs::start_new_tab_prompt` is rewritten to thread the precedence chain explicitly: `std::env::var("SPYC_PANE_CMD").ok().or_else(|| self.state.config.pane.default_command.clone()).unwrap_or_else(|| "claude".to_string())`. The doc-comment on the call site names the precedence verbatim.
+
+**Half 3 — `gd` now matches what the `~` marker says.**
+
+The CHANGELOG entry on this half reads verbatim: "`gd` now matches what the `~` marker says. `gd` was running bare `git diff` (working-tree-vs-index) and flashing 'no unstaged changes' on rows the listing had marked dirty with `~`, because once you `git add` a file the diff lives in the index and unstaged is empty. `~` flags anything different from HEAD, so `gd` is now `git diff HEAD` — covers staged + unstaged + still folds in untracked-as-new — and the empty-flash now says 'no uncommitted changes'. `gD` (`--cached`) is unchanged for the 'what would commit' view." (commit ee07307, 2026-05-05).
+
+The `src/app/mod.rs` diff shows the surgery: an `else { args.push("HEAD"); }` branch lands next to the existing `if cached { args.push("--cached"); }`, the empty-flash label moves from "unstaged" to "uncommitted," and the success label moves from "git diff (+ new)" to "git diff HEAD (+ new)." The doc-comment added to the diff names the marker-semantics alignment: "`gd` shows diff-vs-HEAD (staged + unstaged) so it matches the `~` marker semantics."
+
+**Sequence-grain link to arc 04.** The `~` marker logic is the surface arc 04's PR #27 (`feat/git-staged-vs-unstaged`, 4e2afd9, 2026-05-06) extends one day later by splitting `GitFileStatus` from enum to struct with staged + unstaged halves. PR #20's `gd`-vs-HEAD shift aligns `gd` with the marker's pre-PR-#27 semantics ("anything different from HEAD"); PR #27 then enriches the marker to a two-cell display without disturbing the `gd` shift. The chain is implicit; arc 04's PR #27 entry (= 01KR134PZSQDAFVJK3M35FTKXF) names the marker-fidelity work without back-referencing PR #20.
+
+**Drift findings flagged for the insight layer**:
+- Three-concern bundle under one `feat/` slug. The segmentation entry already flagged this (= 01KR0TWHTC1MPK4KJ08Y9SPE6P, drift findings); arc 05 reconfirms against the diff. Each half is a clean, individually shippable change; the bundling itself is the drift, not any individual half.
+- The catalogue §2 alignment is partial-not-direct. A reader who sees only PR #20's commit subject and CHANGELOG would not know the alt-screen hint is the alignment partner for an explicit roadmap item. The link is detectable only via `notes/lazygit-ux-catalogue.md` §2 (relocated to `BUGS.md` post-PR-#12) and arc 02's investigation entry. The PR itself does not cite the catalogue.
+- The `gd`-vs-HEAD shift is a semantic-correction-on-an-existing-marker move — the kind of thing PR #36 (`fix/search-substring-match`, three days later) also embodies in the matcher domain. Same shape, different surfaces; flagged here for the eventual recurrence-or-emergence insight thread.
+
+Provenance:
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05).
+- `git diff ee07307^1..ee07307^2 -- CHANGELOG.md`: three `### Added` entries (alt-screen hint, `[pane] default_command`, `gd` HEAD) quoted verbatim above.
+- `git diff ee07307^1..ee07307^2 -- src/app/mod.rs`: alt-screen branch in `Action::PaneScrollEnter`; `args.push("HEAD")` branch in `gd` path; precedence chain in `start_new_tab_prompt`.
+- `git diff ee07307^1..ee07307^2 -- src/config/mod.rs`: `PaneConfig` struct, `FilePane` on-disk shape, `Config::merge` per-field merge.
+- `Cargo.toml:3` post-merge: `version = "1.41.7"`.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §2 source; PR #20 named at this entry as the §2 alignment partner with PARTIAL EXECUTION disposition).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (three-concern bundle drift flag).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (mandatory back-reference contract for arc 05's PR #20 entry).
+- `history-arc-04-git-integration` PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF (`GitFileStatus` enum-to-struct refactor; downstream of PR #20's `~` marker semantic-alignment shift).
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- `history-arc-05-pager-surface` PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM.
+- `history-arc-05-pager-surface` PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH.
+- `history-arc-05-pager-surface` PR #17 entry = 01KR2A4DCY3BR45ZQ7FQ2YQE4Q.
+
+<!-- Entry-ID: 01KR2A6TT516XA5FEGVBXYPWD7 -->
