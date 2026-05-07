@@ -1,0 +1,11 @@
+{
+  "id": "thread:onboarding-release-process",
+  "type": "thread",
+  "topic": "onboarding-release-process",
+  "title": "onboarding release process",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-07T07:48:30.693977+00:00",
+  "summary": "The onboarding process involves a local-only release flow using SSH cloning and `make install`, with SemVer enforced through pull requests. Key decisions include the use of SSH for cloning and the enforcement of SemVer via PRs. The outcome is a streamlined onboarding process that ensures consistency and version control.",
+  "entry_count": 1
+}

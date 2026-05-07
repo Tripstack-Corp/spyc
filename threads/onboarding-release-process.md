@@ -1,0 +1,57 @@
+# onboarding-release-process — Thread
+Status: OPEN
+Ball: Claude Code (caleb)
+Topic: onboarding-release-process
+Created: 2026-05-07T07:48:30.692537+00:00
+
+---
+Entry: Claude Code (caleb) 2026-05-07T07:48:30.692537+00:00
+Role: scribe
+Type: Note
+Title: Onboarding: release and distribution flow
+
+Spec: docs
+
+Purpose: Capture the (intentionally narrow) release flow today and the in-flight distribution work, so a contributor knows what "ship a change" means right now and which surfaces will gain new contracts as public distribution lands.
+
+Observed:
+- **Today's release flow is local-only.** Engineers install spyc by SSH-cloning the Bitbucket repo and running `make install` (`README.md:60-66`, `SECURITY.md:60-66`). There is no prebuilt binary distribution, no release page, no Homebrew tap, no AUR package — `SECURITY.md:65-66` is explicit: "There is no prebuilt binary distribution. Engineers install spyc by cloning the repo and running `make install`."
+- **SemVer is enforced via PR.** `CONTRIBUTING.md:118-126` states the version lives in `Cargo.toml` and must be bumped in the PR that ships a user-visible change. Patch for fixes, minor for features, major for stable / public-API commitments. `AGENTS.md:77` reinforces: "Always bump the version in `Cargo.toml` when shipping user-visible changes."
+- **Changelog convention.** `CHANGELOG.md` follows Keep-a-Changelog format. The current entry stack lives under `## [Unreleased]` until released; entries land in the same commit as the code change per the doc-sync rule. `CHANGELOG.md:1-100` confirms recent entries (v1.41.24 MCP socket discovery fix, v1.41.23 substring matcher, v1.41.22 D-pager-overlay) are tracked under Unreleased; the maintainer's release flow promotes Unreleased → versioned section in the bump commit.
+- **Build-time artifacts in the binary.** `build.rs:1-26` embeds `SPYC_GIT_SHA` (short HEAD SHA), `SPYC_BUILD_TIME` (UTC `date -u`), and `SPYC_RUSTC_VERSION`. Exposed via `spyc --version --verbose` (`src/main.rs:110-126`). This means **every release build is traceable to a commit even without external metadata**, which matters because the repo doesn't yet emit a separate SBOM.
+- **macOS ad-hoc signing exists; Developer ID does not.** `Makefile:152-164` invokes `codesign -s - -v` on macOS as part of `make install`. `SECURITY.md:74-80` is candid about the meaning: "ad-hoc signing, not Developer ID signing. It's enough for the binary to keep entitlements across rebuilds (and to silence some Gatekeeper-on-translocation noise), but it does **not** prove the binary came from a specific person and would not survive notarization."
+- **Distribution scaffolding already exists in the Makefile** for the future public-release flow:
+  - `dist` — builds Linux x86_64-musl, Linux aarch64-musl, and macOS universal into `dist/` (`Makefile:117-129`).
+  - `dist-checksums` — writes `dist/checksums-sha256.txt` (`Makefile:131-134`).
+  - `dist-sign` — produces a detached GPG signature on the checksums file; `GPG_KEY=<id>` selects a key (`Makefile:140-146`). The maintainer's plan: "the signing key fingerprint will be published here when that happens" (`SECURITY.md:81-87`). Today, the GPG key is not committed — the recipe is pre-staged.
+- **CI does not yet run release automation.** `bitbucket-pipelines.yml:56-77` defines only `branches.main` and `pull-requests:**`, both running `quality + coverage` in parallel. There is no tag-triggered (`v[0-9]+.*`) cross-compile + upload pipeline yet — that's tracked in `ROADMAP.md` Distribution / `LAUNCH_PREP.md`.
+- **Remote deploy target exists for one engineer's VM.** `Makefile:182-185` `deploy-fika` builds Linux x86_64 musl and `scp`s to `drek@10.130.1.36:~/bin/spyc`. Treat as a personal convenience target, not a release artifact. (Maintainer's local nickname; sees `derek.marshall@tripstack.com` as the project's external contact, `SECURITY.md:7,115`.)
+- **In-flight distribution scope** (sources: `ROADMAP.md` Distribution section + `LAUNCH_PREP.md`):
+  - GitHub move (org account undecided — Etraveli vs Tripstack vs personal); blocks Cargo.toml `repository`, `.github/` workflows, Homebrew tap namespace (`LAUNCH_PREP.md:21-25`).
+  - Release automation in Bitbucket Pipelines on `v[0-9]+.*` tag push: cross-compile matrix, artifact upload, release notes from `CHANGELOG.md`, Homebrew formula bump, crates.io publish (`ROADMAP.md:367-371`).
+  - macOS Developer ID code signing + notarization (`ROADMAP.md:372-377`).
+  - Linux signing via minisign or cosign with the public key in the repo (`ROADMAP.md:378-381`).
+  - Reproducible build verification: `SOURCE_DATE_EPOCH` honored, `cargo-auditable` to embed metadata, second CI job rebuilds from tag and diffs (`ROADMAP.md:382-386`).
+  - SBOM at release: `cargo-sbom` or `cargo-auditable` emits SPDX/CycloneDX (`ROADMAP.md:387-389`).
+  - Package registries: `cargo publish` to crates.io, `tripstack/homebrew-spyc` tap, AUR `spyc-bin` (`ROADMAP.md:389-393`); deliberately skipping nixpkgs / Debian / Fedora.
+  - GitHub mirror at `github.com/tripstack/spyc` for discoverability — "Mirror, don't migrate" (`ROADMAP.md:394-397`).
+- **v2.0 is a signaling bump.** `ROADMAP.md:472-476` calls v2.0 "a signaling choice as much as a semver one. The tool has been shipping 1.x for a while, but the MCP positioning shift + public distribution justifies a major bump to mark the transition." Target: mid-to-late May 2026 (`ROADMAP.md:467-468`).
+
+Inferred:
+- The current "release" is a `git pull` + `make install` away — adopting a new version on a teammate's machine is a person-touches-the-machine flow. — confidence: high — basis: `SECURITY.md:60-66` and the absence of any tag-triggered pipeline. How to apply: any change with a security-sensitive footprint (e.g., MCP socket discovery) needs explicit pull-and-install instructions in the PR description and CHANGELOG entry until automation lands.
+- The signing posture today is "theater-avoided"; that flips to "actually meaningful" only when prebuilt binaries get published. — confidence: high — basis: maintainer's own framing in `SECURITY.md:122-136` ("When to revisit this document"). How to apply: any PR that adds a release artifact (Homebrew tap, GitHub release, crates.io publish) MUST also land the signing posture in the same PR — the threat model assumes those flip together.
+- The `dist-sign` recipe was added pre-emptively so the public-release commit doesn't have to invent it; treat the GPG key fingerprint as the missing piece. — confidence: medium — basis: `Makefile:140-146` is fully working modulo `GPG_KEY`; `SECURITY.md:84-87` says explicitly "scaffolding for the right thing."
+
+Next query: `watercooler_search(query="release version distribution signing", thread_topic="onboarding-release-process", code_path=".")`
+
+Related:
+- `onboarding-overview` — front door.
+- `onboarding-developer-experience` — `make install`, `dist`, `dist-checksums`, `dist-sign`, `deploy-fika` are the developer-side surfaces this entry generalizes.
+- `onboarding-product-charter` — the v2.0 framing comes from the same maintainer-authored thesis.
+- `onboarding-security` — supply-chain controls and the threat model that release work has to preserve.
+
+Provenance:
+- Files read: `Makefile:117-185` (dist + deploy + install), `SECURITY.md:60-87,122-136`, `bitbucket-pipelines.yml:56-77`, `CONTRIBUTING.md:118-126`, `AGENTS.md:77`, `README.md:60-66`, `ROADMAP.md:354-468`, `LAUNCH_PREP.md:1-40`, `CHANGELOG.md:1-100`, `build.rs:1-26`, `src/main.rs:110-126`.
+- Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-developer-experience = 01KR0PFHHCNVJPNJSTPA3VW62J`, `onboarding-product-charter = 01KR0P18MCE1H57Q5ZTAGKAJNH`.
+
+<!-- Entry-ID: 01KR0PHNA4XW7CWPQ2D93K24HC -->
