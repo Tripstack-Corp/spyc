@@ -68,3 +68,39 @@ Provenance:
 - `onboarding-overview` entry 0 = 01KR0NZNJ3KM6BJY09Q4P9D0NE (front door).
 
 <!-- Entry-ID: 01KR29ZCRYY132QKB0HKRRRERQ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T22:48:12.621932+00:00
+Role: scribe
+Type: Note
+Title: PR #11 (fix/pager-wrap-bottom): scroll_max walks visual rows when wrap is on; last_body_w cell lands on PagerView
+
+Spec: scribe
+
+tags: #history #arc-05
+
+PR #11 is the first move in arc 05 and the first move in phase α (pager mechanics). Commit subject reads "pager: scroll_max accounts for wrapped visual rows (v1.40.1)" (commit 7b941a4, 2026-05-02). Diff: 4 files, +145/-11. The version bump in the commit subject is load-bearing: 138 of the 145 insertions land in `src/ui/pager.rs`, and Cargo.toml moves to `1.40.1`.
+
+**The bug in user-visible terms.** The PR's CHANGELOG entry under `### Fixed` reads verbatim: "Pager: trailing logical lines were unreachable when long lines wrapped. A file with N logical lines (some long enough to wrap to multiple visual rows) showed 'Bot' before all content was visible — `scroll_max` capped the scroll using logical-line count, so wrapped portions of earlier lines consumed the visual budget and pushed the last few lines off-screen." (commit 7b941a4, 2026-05-02). The reproduction is named in the same entry: "Reported on `docs/spyc-logo.svg` (154 lines, several path elements wrap; lines 151-154 never appeared at 'Bot')." A reader who hits "Bot" expects to have seen everything; the wrap budget being mis-accounted broke that contract.
+
+**The fix shape.** The CHANGELOG entry continues verbatim: "`scroll_max` now walks lines from the end summing visual rows when wrap is on, using a `last_body_w` cache the renderer updates each frame. Wrap-off pagers and multi-column pickers keep the original logical-line bound. Two regression tests in `pager::tests`." The walk-from-the-end approach reads as "how many logical lines fit in the viewport, going backward, when each line might consume multiple visual rows" — symmetric to the existing logical-line bound but priced in visual rows. The `last_body_w` cache is the bridge between the renderer (which knows the body width) and `scroll_max` (which needs the width to compute wrap rows).
+
+**Sequence-grain consequence for arc 05.** The `last_body_w` cell appears in the `PagerView` struct as a `std::cell::Cell<u16>` field with a doc-comment that names its purpose for the bug it solves: "lines that wrap to multiple rows don't cause the trailing logical lines to fall off the viewport at 'Bot'." This field survives unchanged into PR #33's `feat/pager-visual-line-mode` work, where the same `PagerView` struct gains the `visual: Option<VisualSelection>` field alongside `last_body_w`. The forward chain is implicit but real: PR #11's struct addition is the small piece of pager-state machinery PR #33 inherits, and PR #33 adds its own field next to it without disturbing the cell. Phase α's mechanics work is what makes phase γ's mode work cheap.
+
+**Wrap-off and multi-column preservation.** The CHANGELOG names the boundary explicitly: "Wrap-off pagers and multi-column pickers keep the original logical-line bound." PR #17 (`fix/help-pager-search-multicol`, three days later) lands in the multi-column branch of the same `scroll_max` family — the help pager renders in two columns when wide enough, and PR #11's preservation of the original logical-line bound for multi-column views is what keeps PR #17's work scoped to the search path rather than re-touching `scroll_max`. The mechanics phase reads as three small fixes that don't collide because each one respects the others' boundaries.
+
+**Drift findings flagged for the insight layer**:
+- The commit subject scopes the change cleanly to `scroll_max` accounting for wrapped visual rows. The CHANGELOG names the user-visible failure (the trailing-lines bug) and the reproduction file (`docs/spyc-logo.svg`) verbatim. No drift between subject, CHANGELOG, and diff at this PR; clean baseline for the rest of arc 05's drift comparisons.
+- The version bump to v1.40.1 makes this the patch following PR #10's v1.40.0 (`feat/quickselect`, arc 06). PR #11 cuts a release alone (no bundling with adjacent arc-06 or arc-04 PRs that landed within hours); the release-cut shape here reads as "small bug fix, ship it now" rather than the bundled-cut PR #4 modeled in arc 01.
+
+Provenance:
+- 7b941a4 (PR #11 fix/pager-wrap-bottom, 2026-05-02).
+- `git diff 7b941a4^1..7b941a4^2 -- CHANGELOG.md`: `### Fixed` entry quoted verbatim above.
+- `git show 7b941a4 --stat`: 4 files changed, 145 insertions, 11 deletions; `src/ui/pager.rs` carries 138 insertions / 8 deletions.
+- `src/ui/pager.rs` post-merge: `last_body_w: std::cell::Cell<u16>` field on `PagerView` (doc-comment quoted above; visible at the same struct in PR #33's diff).
+- `Cargo.toml:3` post-merge: `version = "1.40.1"`.
+- `history-arc-05-pager-surface` framing entry = 01KR29ZCRYY132QKB0HKRRRERQ.
+- Forward references: PR #17 (4f2f3ad, 2026-05-05) preserves wrap-off / multi-column branch; PR #33 (cf9e8ff, 2026-05-06) inherits `last_body_w` cell on `PagerView` struct.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (arc-05 member list).
+
+<!-- Entry-ID: 01KR2A121DSV81GM4EBCKAVAAM -->
