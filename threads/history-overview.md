@@ -214,3 +214,62 @@ Provenance:
 - Prior thread entries: history-overview index 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing); index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation).
 
 <!-- Entry-ID: 01KR0TYF5F11DA8P5HNPA20DBK -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T09:06:16.551210+00:00
+Role: scribe
+Type: Note
+Title: Closure: segmentation published; awaiting review before Phase 2
+
+Spec: scribe
+
+tags: #history #segmentation
+
+Segmentation proposal published, awaiting operator + observer review before Phase 2 (arc 01).
+
+This thread (`history-overview`) remains OPEN to receive arc-session cross-references. No arc threads have been written this session; only the spine.
+
+**Arc threads that will exist after Phase 2 completes** (observer checklist):
+
+- `history-arc-01-foundation-hygiene` — PRs #2, #3, #4 (3 commits; 2026-04-30)
+- `history-arc-02-lazygit-investigation-and-harvest` — PRs #5, #12 (2 commits; 2026-04-30 to 2026-05-03; SPECIAL HANDLING)
+- `history-arc-03-pane-behavior` — PRs #6, #22, #26, #29, #34 (5 commits; 2026-05-01 to 2026-05-06)
+- `history-arc-04-git-integration` — PRs #1, #7, #15, #24, #27 (5 commits; 2026-04-30 to 2026-05-06)
+- `history-arc-05-pager-surface` — PRs #11, #16, #17, #20, #23, #33, #35, #36 (8 commits; 2026-05-02 to 2026-05-07)
+- `history-arc-06-input-and-overlays` — PRs #8, #10, #25, #32 (4 commits; 2026-05-02 to 2026-05-06)
+- `history-arc-07-codex-and-mcp-bridge` — PRs #18, #19, #21, #37 (4 commits; 2026-05-05 to 2026-05-07)
+- `history-arc-08-recoverability-and-deps` — PRs #13, #14, #28, #30, #31 (5 commits; 2026-05-03 to 2026-05-06)
+
+Total: 8 arc threads, 36 PRs accounted for (3 + 2 + 5 + 5 + 8 + 4 + 4 + 5 = 36).
+
+**Pre-Phase-2 review surface for the observer:**
+
+1. Cluster boundary calls flagged at the segmentation entry (5 of them; PR #15, PR #4, PR #8/#10, PR #20, PR #14). Each is filed under one arc but defensibly belongs to another.
+2. PR #5 disposition (own arc + back-reference contract, see special-handling entry). Alternative: fold PR #5 into arc 03 with cursor-block link, lose hub.
+3. Drift findings (6 captured at the segmentation entry). Each is fuel for the eventual insight layer; observer review can confirm or contest before any arc thread freezes them in.
+4. The "negative space" reading captured at the special-handling entry: gap-analysis suspects #2 (mouse) and #3 (synchronized-output) have no executing PR in the window. PR #31's vt100 0.15 → 0.16 upgrade may incidentally close suspect #3; verification is deferred to arc 08 authoring.
+
+**Phase 2 expected sequencing:**
+
+- Arc 01 first (smallest arc, lowest risk; validates the voice and provenance contracts on a 3-PR set).
+- Arc 02 next (anchors the back-reference network for arcs 03, 05, 06).
+- Arcs 03 / 04 / 05 / 06 / 07 / 08 in any order; 03 and 05 carry mandatory back-references to arc 02.
+- Phase 3 (insight layer) blocks on all eight arc threads existing.
+
+**This session's done-definition (self-check):**
+- ☑ `watercooler_health` reported Healthy against the spyc code_path.
+- ☑ Three onboarding seeds read before write (overview, product-charter, architecture).
+- ☑ Thread `history-overview` exists with framing, segmentation, PR #5 special-handling, and closure entries (4 entries).
+- ☑ Every entry carries a `Provenance:` block with real SHAs.
+- ☑ Every entry follows the voice contract — banned words audit: no occurrence of "wants," "thinks," "believes," "decided" (about the maintainer's mindset; the word appears here only in self-referential framing of segmentation choices), "feels," "intends to" (without "the commit message"), "is concerned that" in reference to the maintainer's mindset.
+- ☑ Closure entry lists every proposed arc thread name.
+- ☑ No arc threads written this session.
+- ☑ Tags `#history` and `#segmentation` carried on every entry.
+
+Provenance:
+- d9b9360 (PR #2 chore/ci-hygiene, 2026-04-30) — start of window.
+- a303251 (PR #37 fix/mcp-socket-project-scoped-discovery, 2026-05-07) — end of window.
+- All 36 SHAs and PR numbers from `git log --grep='Merged in' --reverse --format='%h %ai %s'`.
+- Prior thread entries: index 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing); index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation); index 2 = 01KR0TYF5F11DA8P5HNPA20DBK (PR #5 special handling).
+
+<!-- Entry-ID: 01KR0V01TAJVSZFE5ZNMCZHQSF -->
