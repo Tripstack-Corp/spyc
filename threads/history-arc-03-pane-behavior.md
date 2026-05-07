@@ -580,3 +580,32 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (BUGS.md residual; "fully extinguished" projection that landed half-true).
 
 <!-- Entry-ID: 01KR11S8RG29J98QKN1H0VAA6W -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T11:05:38.799205+00:00
+Role: scribe
+Type: Note
+Title: Two seams the story-tail glosses over: pane_focused's three meanings, and the cursor-block guard's flat conjunction
+
+Spec: scribe
+
+tags: #history #arc-03 #tail
+
+A pair of specific seams worth pulling out separate from the story-tail above (which itself supersedes the formulaic tails at indices 7 and 8), because they're the kind of thing a reader hitting the head entries can verify in five minutes and easily miss in the broader narrative.
+
+`pane_focused: bool` post-PR-#34 carries three different meanings depending on what other state is present. When the overlay is up, it means "bottom pane has focus" (its inverse means "overlay has focus") — that's PR #34's axis. When zoom is active, it's the source value for `pane_focus_before_zoom: Option<bool>`'s save-and-restore — that's PR #6's axis. And the original case stays: list-vs-pane focus. Three meanings don't conflict in any 22-day-window diff because no commit exercises all three at once (`;less` plus `^a-z` doesn't appear), but they share one bool, and the spawn paths in PR #34 force `pane_focused = false` to make the overlay focused. That overlap is the thing that should make a future maintainer pause: the boolean's name is from the original case, the new meanings aren't named anywhere in the type, and the only indication that the overlay-vs-pane axis exists at all is the inline comments at the render site and the focus-flash branch. What this becomes from here — a proper enum (`FocusTarget::List | Pane | Overlay`), or an implicit-state-coexistence puzzle the next focus-related bug forces open — isn't visible in the window arc 03 covers. The seam is.
+
+The second seam is smaller and almost the inverse. PR #29's cursor-block guard is a flat conjunction in code: `focused && !alternate_screen() && !hide_cursor()`. The *reasoning* behind each condition is policy, named in the doc-comment as three numbered rationales: "is the user looking here," "does the child have its own cursor renderer," "did the child explicitly hide the cursor." If a fourth condition ever needs to land — synchronized output and mode-2026 tearing was on arc 02's gap-analysis suspect §3 list and didn't get an executing PR in this window — the guard will need a structural rethink, not a fourth `&&`. Three conditions reading as a flat boolean is the right shape when the policies happen to conjunct cleanly; the moment one of them needs an "or" or a precedence, the structure collapses.
+
+Both observations are forward-pointing in the way the story-tail isn't, but neither is a prediction. They're notes about where the next bug-or-design-question is most likely to land, given what the diffs in arc 03 actually shaped — small gifts to whoever lands next on this surface.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-03-pane-behavior` PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG (zoom save-and-restore on `pane_focused`).
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (the three-condition guard quoted verbatim from `src/pane/widget.rs`).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-vs-pane axis on the same `pane_focused` bool).
+- `history-arc-03-pane-behavior` story-tail above = 01KR11S8RG29J98QKN1H0VAA6W.
+- Prior formulaic tails being superseded alongside the story-tail above: 01KR10Q4EFHZE21PPVF32DM581 (reflection), 01KR10SANSR30FDV8X89M8SRBC (note-to-future).
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (BUGS.md MAYBE mode-2026 entry — the suspect §3 fourth-condition candidate that didn't land in this window).
+
+<!-- Entry-ID: 01KR11TME2KF5QFQ45GJYG8MC7 -->
