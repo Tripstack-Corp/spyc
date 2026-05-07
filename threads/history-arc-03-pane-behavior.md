@@ -68,3 +68,47 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (current-state pane PTY ownership; the surface arc 03's PRs touch).
 
 <!-- Entry-ID: 01KR106N6HSW66R76HN9VJPF1Q -->
+
+---
+Entry: Claude Code (caleb) 2026-05-07T10:38:23.836828+00:00
+Role: scribe
+Type: Note
+Title: PR #6 (feat/pane-zoom): tmux-style zoom, [ZOOM] tag in divider, v1.38.0 minor cut
+
+Spec: scribe
+
+tags: #history #arc-03
+
+PR #6 is the first move in arc 03 and the first time the bottom pane gets a new visual-state mode. Commit subject reads "pane: ^a z fullscreen-toggle (zoom) for the bottom pane (v1.38.0)" (commit 10c9276, 2026-05-01). Diff: 12 files, +157/-23. Cargo.toml bumps `version = "1.37.3"` to `version = "1.38.0"` — a minor bump, the only minor bump in arc 03; the other four PRs all ride on patch bumps within the v1.41.x range.
+
+**The capability.** `^a z` (and the screen-style alias `^w z`) toggles a tmux-style zoom on the bottom pane: the file list collapses to 0 rows and the pane fills the middle region between the status bar and the prompt. The CHANGELOG entry frames the design choice verbatim: "Tmux-style — the status bar and prompt row stay visible, focus is forced into the pane on zoom-on and the prior focus is restored on un-zoom. The user's preferred `pane_height_pct` is preserved untouched so the prior split returns exactly on un-zoom. A `[ZOOM]` tag renders in the divider while active. `^a +` / `^a -` are no-ops while zoomed (with a status flash). Closing the pane (`^a \\`) clears the zoom flag. Requested by a daily user."
+
+**The state shape.** Two new fields land on `AppState` (`src/app/state.rs:117-127` post-merge): `pane_zoomed: bool` and `pane_focus_before_zoom: Option<bool>`. The doc-comments name the contract: zoom preserves the user's `pane_height_pct` untouched so un-zoom restores the prior split exactly; the `Option<bool>` captures focus state at zoom-on and restores it at zoom-off. Layout, sizing, and pane-spawn computations gate through a new `App::effective_pane_pct(&self) -> u16` helper that returns 100 when zoomed and `pane_height_pct` otherwise — six call sites in `src/app/mod.rs` adopt the helper instead of reading `pane_height_pct` directly, so zoom-vs-split renders correctly without per-call-site branching.
+
+**Resize-on-toggle.** `App::toggle_pane_zoom` ends with a deliberate dimension-rebroadcast loop: read `crossterm::terminal::size()`, compute the new layout against `effective_pane_pct()`, and call `entry.pane.resize(pane_rect.height, pane_rect.width)` for every tab. The inline comment names the consequence verbatim: "Resize all pty children to the new pane rect so their child shells re-render at the right dimensions; otherwise Claude's UI is the wrong size until the next terminal resize." The "Claude" reference in the policy comment locates this PR's primary consumer of the bottom pane, which is consistent with the README and FEATURES.md framing of the pane as Claude's home.
+
+**The keymap and divider tag.** `Action::TogglePaneZoom` lands on the action enum (`src/keymap/action.rs:104-216`); `KeyCode::Char('z' | 'Z')` after `^w` resolves to it (`src/keymap/resolver.rs:171-172`). The divider tag-rendering block in the status row (`src/app/mod.rs:1948-2015`) refactors from a single `tag` slot into two: `zoom_tag = " [ZOOM]"` painted in the prompt-prefix theme color with `Modifier::BOLD`, and the existing `scroll_tag = " [SCROLL]"` painted in the pick color. Both tags can be live simultaneously (the budget reservation accounts for both lengths), so a zoomed pane in scroll mode shows ` [ZOOM] [SCROLL]`. The two-tag-coexistence reading is the diff's, not an inferred constraint.
+
+**Drift findings flagged for the insight layer.**
+
+- The PR title prefix is `feat/` and the commit subject opens with `pane:`. Both align with the diff (a feature add). No commit-vs-diff drift here; flagged for the insight layer's positive-control row of the eventual drift catalogue.
+- `pane_focus_before_zoom: Option<bool>` is the first save-and-restore mechanism for `pane_focused` state; PR #34's overlay focus-switch later in this arc reuses the same `pane_focused: bool` slot for a different save-and-restore axis (overlay vs. bottom pane). Whether the two state-machines coexist cleanly in the post-PR-#34 surface is for arc 03's closure entry to summarize and for the insight layer to interpret.
+- `Cargo.toml` bumps to v1.38.0 — a minor bump, consistent with the new-capability framing. The remaining four arc-03 PRs ride on patch bumps within v1.41.x; the version cadence reads in two phases (one minor cut at PR #6, then four patch cuts at PRs #22/#26/#29/#34), but the cadence is not arc 03's load-bearing fact and is named here only as a recurrence-friendly observation.
+- The CHANGELOG's "Requested by a daily user" sentence is verbatim user-attribution external signal. Arc 03 quotes it without attributing motive: the commit message attests to the request; nothing more is narratable from the diff.
+
+Provenance:
+- 10c9276 (PR #6 feat/pane-zoom, 2026-05-01) — full PR.
+- 0691666 → 329222b — parent and tip SHAs for the diff inspection.
+- `git diff 0691666..329222b -- Cargo.toml`: `version = "1.37.3"` → `version = "1.38.0"`.
+- `git diff 0691666..329222b -- src/app/state.rs`: `pane_zoomed: bool` and `pane_focus_before_zoom: Option<bool>` added at `AppState` lines 117-127 post-merge; same pair added to the test-default `AppState` constructor at lines 1388-1392 post-merge.
+- `git diff 0691666..329222b -- src/app/mod.rs`: `effective_pane_pct(&self) -> u16` helper added; six call sites adopted; `toggle_pane_zoom` body with the focus save/restore + pty resize loop; divider tag-rendering block split into `zoom_tag` + `scroll_tag` with bold + pick coloring.
+- `git diff 0691666..329222b -- src/keymap/action.rs`: `Action::TogglePaneZoom` enum variant + display-string.
+- `git diff 0691666..329222b -- src/keymap/resolver.rs`: `KeyCode::Char('z' | 'Z')` mapped after `^w`; new `ctrl_w_z_zooms_pane` test added; the previous `ctrl_w_unknown_is_ignored` test's probe key changed from `'z'` to `'q'`.
+- `git diff 0691666..329222b -- CHANGELOG.md`: 12 lines added; new "Pane zoom (fullscreen toggle)" entry under `[Unreleased]` `### Added`.
+- `git diff 0691666..329222b -- FEATURES.md`: 4 lines added; `^a z` documented under the pane-keys table.
+- `git diff 0691666..329222b -- README.md`: 1 line added; `^a z` row in the keys table.
+- `git diff 0691666..329222b -- BUGS.md`: 9 lines added at the SMALL section head (gum picker, wezterm-picker idea, scroll-mode top/bottom marker, pane focused ^c forwarding); not the same items as the BUGS.md additions in PR #12. PR #6's BUGS.md additions are unrelated to the zoom feature in the same diff.
+- `history-arc-03-pane-behavior` framing entry = 01KR106N6HSW66R76HN9VJPF1Q.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (pane PTY ownership surface; this PR adds the first save-and-restore mechanism on `pane_focused`).
+
+<!-- Entry-ID: 01KR108QNEEG64J8W8XJERJTZG -->
