@@ -1,0 +1,11 @@
+{
+  "id": "thread:onboarding-overview",
+  "type": "thread",
+  "topic": "onboarding-overview",
+  "title": "onboarding overview",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-07T07:38:41.222747+00:00",
+  "summary": "The thread discusses the onboarding process for spyc, a Rust TUI file commander, focusing on repository overview and reading order. Key decisions included structuring the code to facilitate easy navigation and understanding, while the outcome was a streamlined onboarding experience that enhances user familiarity with the tool.",
+  "entry_count": 1
+}
