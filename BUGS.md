@@ -3,20 +3,6 @@
   the task in the lower pane to erroneously cancel
 - notice of ^c while in the task viewer goes to the spyc pane instead of at the
   top of the task pager view
-- MCP socket discovery can attach to the wrong spyc instance. When
-  `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's
-  pane, env didn't propagate, or the local `.mcp.json` was suppressed
-  by enterprise managed-mcp), `discover_live_socket` in
-  `src/mcp.rs:153` returns the first connectable
-  `~/.local/state/spyc/mcp-*.sock` it finds — could be any other
-  spyc on the host, including another user's. Conflicts with the
-  multi-instance isolation model. Design fixes worth weighing:
-  (a) require explicit `$SPYC_MCP_SOCK`, no discovery fallback;
-  (b) gate discovery on a per-project marker (e.g. only accept
-  sockets whose context file's project_root matches the caller's
-  cwd); (c) include user/uid in the socket path. Option (b) feels
-  most spyc-shaped — keeps the "just works" ergonomics while
-  ruling out cross-instance attachment.
 - how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
@@ -43,8 +29,6 @@
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
   updated; need to try and reproduce
-- something funky is happening with our MCP support - we need to ensure that
-  multiple running spyc's don't interfere with eachother
 - a pane that has ended should not be so easy to dismiss with ESC; it should
   require ^a-x so that the user purposefully says they are done with it e.g. I
   may still way to try and restart it
@@ -121,6 +105,17 @@
   scrollback. Solution t.b.d.
 
 ### FIXED ###
+- (fixed, v1.41.24) MCP socket discovery is now project-scoped.
+  Walks the caller's cwd toward the filesystem root looking for
+  `.spyc-context-<pid>.json` markers; only PIDs from the first
+  ancestor with at least one match become socket candidates. A
+  parent-dir spyc never shadows a child-dir spyc. With no
+  project match, falls through to read-only direct mode instead
+  of attaching to a stranger's spyc. Also tightened stale-socket
+  cleanup so transient connect failures don't race-delete a
+  healthy peer's socket. The "something funky is happening with
+  our MCP support — multiple running spyc's interfering with
+  each other" entry below is also resolved by this change.
 - (fixed, v1.41.23) `/` (and `=`) now match by case-insensitive
   substring, not anchored prefix. Reported as `env` failing to
   match `.env`. Substring fixes the dot-prefixed case
