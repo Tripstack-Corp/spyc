@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`^a-v` (pane scrollback view) is now a real pager.** First
+  user-visible piece of the v1.5 unification. The old scroll
+  mode was a flat byte-buffer view: `j` / `k` / `g` / `G` only,
+  no search, no jump, no yank-by-range. Replace it with a
+  `PagerView` mounted in the lower pane slot, fed by the new
+  scrollback adapter (Phase 2). All the pager features come
+  along for free: `/` search with `n` / `N`, `:N` jump,
+  `V` visual line mode + `y` range yank to clipboard, `l`
+  toggle line numbers (off by default — opening the pager would
+  otherwise jump existing content rightward), `w` whitespace
+  markers, `W` wrap toggle. `Esc` / `q` snaps the pty back to
+  live and clears the divider's `[SCROLL]` indicator. The pty
+  keeps running off-screen while the pager is up; output you
+  miss while reading lands in scrollback for the next view.
+  Alt-screen apps (codex, vim, htop, lazygit) still flash the
+  "no scrollback" hint and skip opening — there's nothing to
+  scroll back through and the app's own history viewer is the
+  right tool.
+
 ### Internal
 - **v1.5 Phase 2: scrollback adapter
   (`src/ui/scrollback.rs`).** New module bridges a pane's

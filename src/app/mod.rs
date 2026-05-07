@@ -2531,22 +2531,40 @@ impl App {
             layout.list,
         );
 
+        // v1.5 Phase 3: a `LowerPane`-mounted pager (today: only
+        // pane scrollback view, opened via `^a-v`) replaces the
+        // pty widget in the bottom slot — the pty keeps running
+        // off-screen but the user is reading a frozen snapshot
+        // through the pager. The standard centered-overlay pager
+        // path further down is skipped for `LowerPane`-mounted
+        // views (rect dispatch happens here instead).
+        let bottom_is_pager = self
+            .pager
+            .as_ref()
+            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
             if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
-                frame.render_widget(
-                    PaneWidget {
-                        screen: tabs.active().screen(),
-                        focused: self.state.pane_focused,
-                    },
-                    rect,
-                );
+                if bottom_is_pager {
+                    // Skip the pty widget — the pager owns this rect now.
+                    if let Some(view) = self.pager.as_ref() {
+                        crate::ui::pager::render(frame, rect, view, &self.theme);
+                    }
+                } else {
+                    frame.render_widget(
+                        PaneWidget {
+                            screen: tabs.active().screen(),
+                            focused: self.state.pane_focused,
+                        },
+                        rect,
+                    );
+                }
                 tabs.active_mut().output_dirty = false;
                 // Quick Select labels paint *over* the pane widget so
                 // the user keeps the live output as context. Render
                 // here, after the pane, before the divider.
-                if self.quick_select.is_some() {
+                if self.quick_select.is_some() && !bottom_is_pager {
                     self.render_quick_select_overlay(frame, rect);
                 }
                 Some(rect)
@@ -2624,8 +2642,15 @@ impl App {
         }
 
         // Pager comes after list but before help (help always wins).
+        // `LowerPane`-mounted pagers were already rendered into the
+        // pane slot above; only `Overlay` and `TopPane` mounts hit
+        // this centered render path. (`TopPane` mount is reserved
+        // for Phase 5 — `D` opening files in-pager — and uses the
+        // top-pane area when wired.)
         if let Some(view) = &self.pager {
-            pager::render(frame, frame.area(), view, &self.theme);
+            if !matches!(view.mount, crate::ui::pager::Mount::LowerPane) {
+                pager::render(frame, frame.area(), view, &self.theme);
+            }
         }
 
         // Harpoon menu overlay — modal, drawn on top of everything
@@ -5620,6 +5645,60 @@ impl App {
 
     /// Handle keys while the pane is in scroll mode. Vi-style navigation
     /// through the scrollback buffer; `Esc`/`q` exit back to live view.
+    /// `^a-v` — open the active pane's scrollback (cell grid +
+    /// off-screen history) in a `PagerView` mounted in the lower
+    /// pane slot. Search, jump, visual range yank, line numbers
+    /// — every pager feature works on the captured snapshot.
+    ///
+    /// Snapshots the pty state at entry; live output keeps flowing
+    /// to the parser but the pager view is frozen until the user
+    /// closes it. Esc / `q` exits, the pty pane snaps back to live.
+    ///
+    /// Alt-screen apps (codex, vim, htop, lazygit) still flash the
+    /// "no scrollback" hint and skip opening the pager — there's
+    /// genuinely nothing to scroll back through, and the app's own
+    /// history viewer is the right tool.
+    fn open_pane_scroll_pager(&mut self) {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            return;
+        };
+        // Read the label first (immutable borrow) so we can hold
+        // the mutable borrow on the active pane below without
+        // overlapping. Cloning is cheap; tab labels are short.
+        let label = tabs.active_info().label.clone();
+        let active = tabs.active_mut();
+        if active.is_alternate_screen() {
+            self.state
+                .flash_info("scroll: alt-screen app, no scrollback (use the app's own history)");
+            return;
+        }
+        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        // Setting the pane's "is scrolling" flag keeps the existing
+        // visual cues alive (divider re-color, [SCROLL] tag, tab
+        // uppercase) — they read off `pane.is_scrolling()` and we
+        // want them to mean the same thing under the new path.
+        active.enter_scroll_mode();
+
+        let mut view =
+            crate::ui::pager::PagerView::new_styled(format!(" {label} (history)"), lines);
+        view.mount = crate::ui::pager::Mount::LowerPane;
+        view.pane_scroll = true;
+        // Default off so the gutter doesn't make existing content
+        // jump horizontally when the pager opens. Toggle with `l`.
+        view.show_line_numbers = false;
+        view.no_history = true;
+        view.wrap = false;
+        // Park the cursor at the bottom — the user just pressed
+        // `^a-v`, the *recent* output is what they want to read.
+        let line_count = view.lines.len();
+        view.scroll = u16::try_from(line_count.saturating_sub(1)).unwrap_or(u16::MAX);
+        self.pager = Some(view);
+        self.state.pane_focused = true;
+        self.needs_full_repaint = true;
+        self.state
+            .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
+    }
+
     fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
         use crossterm::event::{KeyCode, KeyModifiers};
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -7775,6 +7854,19 @@ impl App {
 
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
+                // v1.5 pane-scroll pager: snap the underlying pty
+                // back to live and clear the divider's [SCROLL]
+                // indicator. The pager is closed in the regular
+                // path below.
+                if self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+                    if let Some(tabs) = self.pane_tabs.as_mut() {
+                        tabs.active_mut().exit_scroll_mode();
+                    }
+                    self.pager = None;
+                    self.needs_full_repaint = true;
+                    self.state.flash_info("scroll: off");
+                    return PostAction::None;
+                }
                 // Pager-help overlay: dismiss just the help, restore
                 // whatever pager was active when `?` was pressed
                 // (we pushed it to back-stack at open time). Without
@@ -8194,27 +8286,7 @@ impl App {
             Action::PaneShrink => self.resize_pane(-5),
             Action::TogglePaneZoom => self.toggle_pane_zoom(),
             Action::PaneScrollEnter => {
-                if let Some(tabs) = self.pane_tabs.as_mut() {
-                    let active = tabs.active_mut();
-                    let on_alt_screen = active.is_alternate_screen();
-                    active.enter_scroll_mode();
-                    self.state.pane_focused = true;
-                    // Full-screen TUIs (codex, vim, htop, lazygit, etc.)
-                    // paint into the alternate screen, which never lands
-                    // in main-screen scrollback. `^a v` still works
-                    // (j/k nav over the current viewport, s saves it),
-                    // but there's nothing to scroll *back* to — point
-                    // users at the app's own history viewer instead of
-                    // letting them think scrollback is broken.
-                    if on_alt_screen {
-                        self.state.flash_info(
-                            "scroll: on — alt-screen app, no scrollback (use the app's own history)",
-                        );
-                    } else {
-                        self.state
-                            .flash_info("scroll: on (j/k nav, s save, Esc exit)");
-                    }
-                }
+                self.open_pane_scroll_pager();
             }
             Action::PaneScrollSave => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {

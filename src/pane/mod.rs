@@ -367,6 +367,15 @@ impl Pane {
         self.parser.screen()
     }
 
+    /// Mutable access to the underlying vt100 screen. Needed by
+    /// the v1.5 scrollback adapter, which walks the scrollback
+    /// buffer by mutating `scrollback_offset` and restoring it
+    /// before returning. Don't use from the render loop — the
+    /// adapter is the right entry point.
+    pub fn parser_screen_mut(&mut self) -> &mut vt100::Screen {
+        self.parser.screen_mut()
+    }
+
     /// True when the child has switched to the xterm alternate screen
     /// (`\e[?1049h` or `\e[?47h`). Full-screen TUIs (codex, claude
     /// post-startup, vim, htop, lazygit) live there. Content drawn in

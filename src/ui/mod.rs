@@ -18,10 +18,6 @@ pub mod list_view;
 pub mod markdown;
 pub mod pager;
 pub mod prompt;
-// Phase 2 of the v1.5 plan: the adapter is consumed in Phase 3 by
-// the `^a-v` rewrite. Until then nothing in the binary calls it,
-// so the dead-code lint fires; allow until the consumer lands.
-#[allow(dead_code)]
 pub mod scrollback;
 pub mod status;
 pub mod syntax;
