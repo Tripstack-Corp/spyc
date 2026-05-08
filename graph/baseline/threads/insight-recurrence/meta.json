@@ -5,7 +5,7 @@
   "title": "insight recurrence",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T09:04:05.059439+00:00",
+  "last_updated": "2026-05-08T09:05:58.878857+00:00",
   "summary": "The development thread focuses on insight-recurrence, identifying recurring event-shape patterns across multiple PRs. Pattern 1, Bundle-as-shape, highlights bundling of multiple concerns in six PRs across five arcs. Pattern 2, Supersession-acknowledgement, describes a scenario where a later PR supersedes an earlier one, with acknowledgment at different time grains and registers. The outcomes include a structured understanding of recurring patterns and their relationships in project management.",
-  "entry_count": 6
+  "entry_count": 7
 }

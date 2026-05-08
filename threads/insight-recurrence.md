@@ -413,3 +413,80 @@ Provenance:
 - `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
 
 <!-- Entry-ID: 01KR3D8RH5DNYC37WSGFVETXT3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:05:58.875678+00:00
+Role: scribe
+Type: Note
+Title: Pattern 6: Implicit-machinery-chain — three instances across three arcs (one within-arc 04, one within-arc 05, one cross-arc 03→05) where commit subjects don't name "this enables that"
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+**Pattern statement.** One PR establishes infrastructure (a struct field, a helper function, a parser shape, a focus-routing model). A later PR consumes that infrastructure (extends the struct, calls the helper, parses richer output, builds on the routing model). The consumer's commit subject and commit body do not name the establisher PR; the chain is real and observable from the diffs but lives only in the code's evolution. The shape is *the chain is implicit*: each PR's text is locally legible, but the cumulative chain that makes a later capability cheap is visible only at cross-PR or cross-arc grain.
+
+This pattern is the inverse of Pattern 4 (named-then-fixed bracket): in the bracket, the open-side PR *names* the issue the close-side PR will fix; in the implicit-machinery-chain, the establisher PR *does not name* what its infrastructure will eventually enable. The two patterns are not mutually exclusive — instance 4's PR #18 names a future fix in BUGS.md AND canonicalizes the marker file PR #37 will consume — but the implicit-machinery-chain pattern's identity is the *not-naming* part.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **Arc 04 within-arc machinery chain — PR #1's `git_files` map → PR #7's filter consumer → PR #24's bracket-jumper consumer → PR #15's `parse_porcelain_statuses` extraction → PR #27's struct-refactor consumer.**
+   - PR #1 (`fix/git-marker-1hz-poll`, commit cd8df2e, 2026-04-30 17:08 UTC) builds a 1Hz git poll on `AppState`, populating the `git_files` map.
+   - PR #7 (`feat/limit-git`, commit f3ddaf2, 2026-05-02 11:53 UTC) reuses `git_files` for the `=git`/`=g` filter. PR #7's CHANGELOG names the machinery directly: *"the filter stays live as the 1Hz git poll updates `git_files`."*
+   - PR #24 (`feat/jump-git-change`, commit 762a0a6, 2026-05-05 16:26 UTC) consumes the same `git_files` map for `]g`/`[g` navigation. PR #24's CHANGELOG names the consistency claim: *"Reuses the same `git_files` map the listing markers consume, so detection is consistent with what the user sees."*
+   - PR #15 (`fix/git-status-and-pane-ctrl-c`, commit 5999261, 2026-05-04 11:26 UTC) extracts `parse_porcelain_statuses` as a pure-parser function with five unit tests. The parser is the contract.
+   - PR #27 (`feat/git-staged-vs-unstaged`, commit 4e2afd9, 2026-05-06 16:51 UTC) extends the parser's return type from enum to struct, lands cleanly because PR #15 made the parser pure. The five PR-#15 tests get rewritten in-place against the new struct getters; three new tests land for the staged-only / partially-staged / conflict shapes.
+
+   The chain has five PRs spanning seven calendar days. PR #7 and PR #24 *do* name `git_files` in their CHANGELOG entries (both consumers acknowledge the establisher contract by name); PR #27 does *not* name PR #15's parser-purity refactor as the precondition that makes its struct refactor cheap. The chain is partially-named in commit text (the consumer-of-shared-data-map half) and fully-implicit in the parser-extraction-then-extension half. The arc-04 story-tail (= 01KR13CJ5XS5VREYA4741JHDSQ) frames this factually: *"None of the commits says 'this enables that.' But the chain is real, and it's what lets the arc read as additive rather than thrashing."*
+
+   *Cite: arc-04 story-tail = 01KR13CJ5XS5VREYA4741JHDSQ; arc-04 PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK; arc-04 PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7; arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ; arc-04 PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM; arc-04 PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF.*
+
+2. **Arc 05 within-arc machinery chain — two parallel sub-chains within `PagerView`'s field-accretion.**
+   - Sub-chain A: PR #11 (`fix/pager-wrap-bottom`, commit 7b941a4, 2026-05-02 21:48 UTC) lands a `last_body_w: std::cell::Cell<u16>` field on `PagerView` to make wrap-aware `scroll_max` work. That field becomes part of the struct's permanent furniture. PR #33 (`feat/pager-visual-line-mode`, commit cf9e8ff, 2026-05-06 21:35 UTC) lands a `visual: Option<VisualSelection>` field on the same struct — sibling state to `last_body_w`, neither disturbing the other. The arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) frames this factually: *"PR #33 doesn't have to refactor `PagerView` to add visual mode; it adds a field next to the field PR #11 added, and the struct expands. This is what enables phase γ being cheap."*
+   - Sub-chain B: PR #16 (`fix/fg-tail`, commit 34907a3, 2026-05-04 15:48 UTC) introduces the seed-from-buffer pattern (render `task.buffer` into the pager and call `scroll_to_bottom_auto()` before handing the buffer off). PR #35 (`feat/D-opens-pager-in-top-pane`, commit c243549, 2026-05-06 23:53 UTC) ships `display_in_pane`, which the arc-05 tail describes as *"a parallel of `edit_in_pane` for the read path, taking a listing row and launching it into a pty in the top overlay, sharing focus with the bottom pane."* The seed-from-buffer pattern PR #16 introduced is structurally upstream of PR #35's pane-launching mechanism.
+
+   Both sub-chains are within-arc-05; both are implicit at commit-subject level (PR #33's commit subject does not name PR #11's `last_body_w` field; PR #35's commit subject does not name PR #16's seed-from-buffer pattern). The arc-05 story-tail makes the two sub-chains explicit and the implicit-naming observation factual. *Cite: arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB; arc-05 PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM; arc-05 PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH; arc-05 PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA; arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM.*
+
+3. **Cross-arc 03 → arc 05 machinery chain — PR #34's overlay-focus model → PR #35's launching mechanism.**
+   - PR #34 (`fix/top-overlay-focus-switch`, commit 8e9fb2c, 2026-05-06 23:37 UTC) teaches the overlay-vs-pane focus model: `;cmd` overlays can share focus with the bottom pane, with `^a-j`/`^a-k` chord keys bridging the two.
+   - PR #35 (`feat/D-opens-pager-in-top-pane`, commit c243549, 2026-05-06 23:53 UTC) lands 16 minutes later. The arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) frames this factually: *"Without PR #34, opening `$PAGER` as a top overlay traps focus in the overlay; with PR #34, the same spawn produces the docs-and-claude-side-by-side workflow PR #35's CHANGELOG names. The arc-03 → arc-05 link isn't visible in either commit. It's visible in the fact that PR #35 ships at all without re-doing PR #34's work."*
+
+   The chain crosses arc boundaries: PR #34 is arc 03's last PR; PR #35 is arc 05's late PR. PR #35's commit subject and CHANGELOG name the workflow ("docs-and-claude-side-by-side") but do not name PR #34 or the overlay-vs-pane focus model. The 16-minute gap is the closest cross-arc consumer-of-establisher gap in the eight-arc record. *Cite: arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB; arc-03 PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM; arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM.*
+
+**Instance count: three.** Three instances across four arc affiliations (arc 04 within-arc; arc 05 within-arc with two sub-chains; arc 03 → arc 05 cross-arc). The within-arc-05 instance (instance 2) carries two sub-chains under one pattern instance — sub-chain A (`last_body_w` → `visual`) and sub-chain B (seed-from-buffer → `display_in_pane`) are both within-arc-05 PagerView field-accretion shape and the catalogue holds them as one pattern instance with two sub-chains.
+
+**Notes on chain shape and pattern boundary.**
+
+- *Implicit-vs-explicit at consumer-side.* Across the three instances, the consumer-side commit text is partially explicit and partially implicit. Arc-04's chain has *partial naming*: PR #7 and PR #24 name `git_files` in their CHANGELOG entries; PR #27 does not name PR #15's parser-purity refactor. Arc-05's chain is *implicit* in commit subjects but partially-named in code-level: PR #33's `visual` field is added next to `last_body_w` without commit-message acknowledgement; PR #35's `display_in_pane` mirrors `edit_in_pane` without commit-message acknowledgement of PR #16's seed-from-buffer pattern. Arc 03 → arc 05's chain is *fully implicit* at commit-message level: neither PR #35's commit subject nor its CHANGELOG names PR #34 or the focus model. The implicit-vs-explicit shading is a sub-shape consideration; the catalogue does not promote it to separate sub-patterns (three instances, with the implicit-vs-explicit shading varying continuously, is too thin for sub-categorization).
+
+- *Time-grain spread.* From 16 minutes (cross-arc 03→05 instance 3) to seven calendar days (within-arc-04 PR #1 → PR #27 spans Day-0 to Day-7). The time-grain spread is wide; what holds across all three is the *implicit chain* shape — establisher ships, consumer ships, the relationship lives in the diff alone (or partially in CHANGELOG cross-references that name the data structure but not the establisher PR).
+
+- *No 1:N or N:1 chains in the catalogue.* All three instances are 1:1 or 1:1+1 chains (one establisher, one or two consumers per chain). Verification did not reveal a 1:N chain (one establisher consumed by N>2 distinct consumer PRs in the eight arcs) or an N:1 chain (N>1 establishers culminating in one consumer). The catalogue does not promote-from-absence; the absence is observable.
+
+- *Why this is recurrence-not-drift.* No establisher PR mis-describes its own diff at moment of merge; the establishers' commit subjects accurately name what their PRs introduce (a poll, a filter, a parser, a focus model). The implicit-chain shape is at the consumer-side description-of-relationship level, not at the per-PR misnaming-at-merge level. The boundary holds.
+
+- *The arc-04 chain partially crosses Pattern 1 (bundle-as-shape).* PR #15 is a Pattern-1 bundle instance (basename-collision parser-extraction + ^C-route guard). The parser-extraction half of PR #15 is what enables PR #27's later struct refactor. The bundling and the chain are both real; the same PR contributes to two patterns through its parser-extraction half.
+
+- *Boundary with Pattern 4 (named-then-fixed bracket).* Pattern 4 is *issue-named-then-fixed*: open-side text exists, close-side fix removes/lifts the text. Pattern 6 is *infrastructure-built-then-consumed*: no open-side issue-text exists; the establisher's commit subject describes its own PR accurately, not as setup for a future PR. The two patterns are different shapes despite both being cross-PR observations.
+
+- *No additional instances.* The arc-07 substrate-vs-registration observation (the arc-07 story-tail's "one socket, two registration files" framing) is *not* an implicit-machinery-chain in this pattern's sense — the substrate (`spyc --mcp` proxy + Unix socket + `discover_live_socket` walk) was established BEFORE the 22-day window and the codex-side parallel implementation built explicitly atop it. PR #19, PR #21, PR #37 all *name* the shared substrate. This is explicit-machinery-share, not implicit-machinery-chain. Captured factually as a non-instance.
+
+Provenance:
+- arc-04 story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (instance 1 framing; "*None of the commits says 'this enables that'*").
+- arc-04 PR #1 entry = 01KR12W1M20SQW3QXT8VC09REK (instance 1 establisher).
+- arc-04 PR #7 entry = 01KR12XTG7E5TC0RNTJ65G67T7 (instance 1 first consumer).
+- arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (instance 1 parser-extraction; also Pattern 1 bundle instance).
+- arc-04 PR #24 entry = 01KR1327VZTQAYNNPMBCTC3SSM (instance 1 second consumer).
+- arc-04 PR #27 entry = 01KR134PZSQDAFVJK3M35FTKXF (instance 1 struct refactor consumer).
+- arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (instance 2 framing; both sub-chains; instance 3 framing).
+- arc-05 PR #11 entry = 01KR2A121DSV81GM4EBCKAVAAM (instance 2 sub-chain A establisher).
+- arc-05 PR #16 entry = 01KR2A2XY61GKZ1W52XQWGFBAH (instance 2 sub-chain B establisher).
+- arc-05 PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA (instance 2 sub-chain A consumer).
+- arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM (instance 2 sub-chain B consumer; instance 3 consumer).
+- arc-03 PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (instance 3 establisher).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (substrate-vs-registration shape; named at provenance as the non-instance contrast).
+- `insight-recurrence` Pattern 1 entry = 01KR3CW3DBHPTB6K8R8047TBCP (boundary with bundle-as-shape; PR #15 cross-listed there).
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3 (boundary with named-then-fixed bracket).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+
+<!-- Entry-ID: 01KR3DC7E4B0JC1NN212PYVT56 -->
