@@ -490,3 +490,93 @@ Provenance:
 - `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
 
 <!-- Entry-ID: 01KR3DC7E4B0JC1NN212PYVT56 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:07:47.151252+00:00
+Role: scribe
+Type: Closure
+Title: Closure: insight-recurrence catalogue assembled — six patterns, observations flagged for insight-trajectory and insight-emergent-properties
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+The catalogue is assembled. Six patterns across the eight-arc record. Per-pattern instance counts:
+
+- **Pattern 1: Bundle-as-shape (recurrence reading)** — 6 instances across 5 arcs. Cross-referenced to insight-drift Pattern B (= 01KR3BCQXGGB20V8C6Y6Z1Y944) for the misnaming-at-merge enumeration; this thread claims the recurrence reading and adds the sub-shape distribution observation (2-2-1-1 across noticed-while-shipping / shared-infrastructure / equal-weight / rename-plus-groundwork).
+- **Pattern 2: Supersession-acknowledgement** — 3 canonical instances at 3 grains × 3 registers (3.5h-silent / 49min-explicit-reframing / 25min-behavior-described), plus 1 long-grain instance at six calendar days (silent, cross-arc). Total: 4 instances. The arc-08 story-tail's three-grain × three-register matrix is the load-bearing structure.
+- **Pattern 3: BUGS.md SMALL/MAYBE-to-FIXED lift** — 6 verified instances across 5 arcs (one brief candidate dropped: arc-06 PR #25 adds a fresh FIXED entry without a SMALL precursor). Genesis instance (arc-02 PR #12) is structurally upstream; five lift instances drain the bucket.
+- **Pattern 4: Named-then-fixed bracket** — 3 instances at 3 time grains (one-PR with cross-arc upstream open-side; 49 minutes; two days). PR #18 → PR #37 carries the only instance with weighted design options at the open-side.
+- **Pattern 5: v1.41.x patch cadence** — 4 minor cuts cluster in the first 48 hours of the window; 24 consecutive v1.41.x patches recur across the rest of the window. The recurrence is the 24 consecutive patches under one minor.
+- **Pattern 6: Implicit-machinery-chain** — 3 instances across 3 arc-affiliations (within-arc 04, within-arc 05 with two sub-chains, cross-arc 03 → 05). Three instances span time grains from 16 minutes to 7 calendar days.
+
+**Six patterns, ~25 instances total** depending on how the count carries the genesis instances and the 24-patch sequence (the sequence-as-recurrence is one shape with 24 elements; each minor cut is a separate observation).
+
+**What this catalogue contributes to the network.**
+
+- *A name for the project-shape patterns the arcs flagged piecemeal.* Each arc's per-PR drift-findings sections and story-tails surfaced specific instances, but the *shape* — *the bucket-drain pattern recurs six times*, *the supersession-acknowledgement shape recurs at three grains and three registers*, *the implicit chain recurs across arcs* — is visible only at the cumulative grain. This thread names the shape in a register the arcs themselves did not own.
+
+- *A correction to the brief's seven-pattern list.* Verification dropped *feature-plus-immediate-hotfix* as a standalone pattern (one true instance, already counted under supersession-acknowledgement) and dropped *arc-06 PR #25* as a SMALL-to-FIXED lift instance (PR #25 adds-to-FIXED without a SMALL precursor). Brief's seven becomes six; brief's seven instances under Pattern 3 become six. Conservative honesty is the analyst register's discipline.
+
+- *A canonical placement for cross-cutting observations.* Insight-drift's closure entry placed three observables (bundle-as-shape, supersession-acknowledgement, BUGS.md SMALL-to-FIXED lift) explicitly. This thread's catalogue holds those three plus three more (named-then-fixed bracket, v1.41.x patch cadence, implicit-machinery-chain). The placement of bundle-as-shape (in both threads, with cross-references) versus supersession-acknowledgement (here only, cross-referenced from insight-drift's pattern-boundary notes) versus BUGS.md SMALL-to-FIXED lift (here only, no cross-reference needed) holds.
+
+- *A factual base for the next two insight threads.* Patterns recur; the *why* is interpretation; the interpretation is the next two threads' work. The catalogue counts and names; the analyst register's discipline at tier-2 is to refuse the *why* questions and hand them forward with citations.
+
+**Cross-thread observation for `insight-trajectory`'s author (Phase 10C, next session).**
+
+`insight-trajectory` will read the eight-arc record against stated plans (ROADMAP.md, the gap analysis at PR #5's `notes/lazygit-gap-analysis.md` and `notes/lazygit-ux-catalogue.md`, the BUGS.md catalog post-PR-#12-harvest, the charter at `ROADMAP.md:3-23`, the architecture description at `onboarding-architecture` entry 0). Its tier-3 question is: *do the project's actual moves track its stated trajectory?* This catalogue's six patterns differ in their relationship to stated plans; the trajectory thread should note the differences:
+
+- **Pattern 3 (SMALL/MAYBE-to-FIXED lift) is highly correlated with stated plans.** PR #12's harvest creates the BUGS.md SMALL/MAYBE buckets from PR #5's gap analysis suspects. Five of six lift instances drain entries that *originated* in stated-plan documents (PR #5's gap analysis → PR #12's harvest → BUGS.md → eventual lift). The lift recurrence is partially a property of the gap-analysis methodology PR #5 introduced; whether the lifts execute against the plan PR #5 wrote, or whether the plan was a post-hoc rationalization of work that would have happened anyway, is squarely tier-3 territory. The trajectory thread can ask: *of the SMALL/MAYBE entries the harvest created, how many were eventually lifted within the 22-day window vs. left in the bucket?* If most are lifted, the trajectory tracks the plan; if most are left, the trajectory diverges. This catalogue does not have the bucket-residual count; the trajectory thread's verification step will produce it.
+
+- **Pattern 5 (v1.41.x patch cadence) is correlated with the SemVer policy that exists nowhere as a stated plan but is observed everywhere as a working pattern.** No ROADMAP entry says *"minor cuts will cluster early; patches will dominate the rest of the window."* The pattern is observable; the policy is implicit. The trajectory thread can ask: *was the post-v1.41.0 patch-only cadence anticipated, or did it emerge from the work itself?* Tier-3 territory; this catalogue declines.
+
+- **Pattern 1 (bundle-as-shape) is uncorrelated with stated plans.** No ROADMAP entry or charter section addresses bundling-discipline. The recurrence is purely a project-shape property at the merge-grain; it has no stated-plan vantage. The trajectory thread can confirm or refute that *no stated-plan document anticipates bundling-shape*; if confirmed, Pattern 1 is a tier-2-only observation that does not extend to tier-3.
+
+- **Pattern 2 (supersession-acknowledgement) is uncorrelated with stated plans.** No ROADMAP entry addresses *how-supersedences-should-be-acknowledged-in-commit-messages*. The three registers are observable; the variance is observable; the absence-of-a-stated-policy on acknowledgement-register is a tier-3 observation the trajectory thread can make explicit (*the trajectory of acknowledgement-register varies across PRs without a stated policy governing the choice*).
+
+- **Pattern 4 (named-then-fixed bracket) is correlated with stated plans, partially.** Instance 3 (PR #18 → PR #37) carries weighted design options at the open-side; the open-side text *is itself a stated micro-plan* with a marked preferred option. PR #37 implements the marked option. The bracket *is* the stated-plan trajectory at micro-scale. Instances 1 and 2 do not carry weighted options at the open-side, so they are not stated-plan trajectories in the same sense. The trajectory thread can ask: *do all named-then-fixed brackets represent stated micro-plans, or is the option-weighting at PR #18 unique?* Tier-3 territory.
+
+- **Pattern 6 (implicit-machinery-chain) is uncorrelated with stated plans by definition.** The pattern's identity is the consumer-side *not-naming* of the establisher; if a stated plan named the chain, the chain wouldn't be implicit. Verification might reveal an architecture document or design-note that names some of the chains — `onboarding-architecture` entry 0 (= 01KR0P4W3ED1QZ8F44PFB2WPDZ) describes the current end-state surfaces — but the per-PR commit-message-grain implicit-naming is the pattern's defining property. The trajectory thread can confirm whether the chains track *some* stated plan even if the per-PR commits don't name it.
+
+**Cross-thread observation for `insight-emergent-properties`'s author (Phase 10D).**
+
+`insight-emergent-properties` will read the catalogue's recurrences and ask *what kind of property each recurrence is*. The tier-4 question takes a recurrence as data and produces a property name (the recurrence reflects *X working pattern* / *Y release dynamic* / *Z communication style*). The catalogue does not pre-name the properties — that's the next thread's job — but flags which patterns have tier-4 weight:
+
+- **Pattern 2 (supersession-acknowledgement) has heavy tier-4 weight.** Three registers at three grains, plus a fourth long-grain instance, is a substantial recurrence. The variance in acknowledgement register (silent / behavior-described / explicit-reframing) is the most acute candidate for emergent-property naming in the catalogue. The temptation to interpret *why* the registers vary was itself the most acute tier-2-discipline test of this thread. The emergent-properties author can name; this thread declines.
+
+- **Pattern 3 (SMALL/MAYBE-to-FIXED lift) has tier-4 weight, partially shared with tier-3.** As noted in the trajectory observation above, this pattern is also correlated with stated plans (PR #5's gap analysis, PR #12's harvest). The emergent-property reading would name the property at the working-discipline grain (*the maintainer treats the BUGS.md bucket as the queue; landing PRs drain it*); the trajectory reading would track the lifts against the stated-plan trajectory. Both readings are real; both are tiered. The emergent-properties thread should not collapse the property into the trajectory.
+
+- **Pattern 5 (v1.41.x patch cadence) has heavy tier-4 weight.** 24 consecutive patches under one minor across ~18 calendar days is a substantial recurrence. The emergent-property reading would name the property at the release-dynamics grain — possibilities include *capability-introductions cluster early; later-window work is refinement-and-correction*; *the maintainer's SemVer policy treats minor as capability-additions only*; *the post-v1.41.0 work is by-shape patches even when the diff weight is feature-comparable to earlier minors*. The catalogue does not name; the emergent-properties author can.
+
+- **Pattern 6 (implicit-machinery-chain) has tier-4 weight.** The implicit-naming-pattern recurs across three arcs and varies from fully-implicit to partially-named. The emergent-property reading would name the property at the communication-style grain or the working-discipline grain. Captured factually here for naming there.
+
+- **Pattern 1 (bundle-as-shape) has shared tier-1 / tier-4 weight.** Insight-drift's Pattern B already named the misnaming-at-merge aspect (tier-1 drift); the recurrence reading here named the project-shape sub-shape distribution (tier-2 recurrence). The emergent-property reading would name *what kind of project produces this bundling distribution* — the 2-2-1-1 sub-shape distribution is rich enough to support property-naming.
+
+- **Pattern 4 (named-then-fixed bracket) has tier-4 weight, with a singular sub-shape (weighted-options-at-open-side) that is one-instance-only.** The emergent-property reading would name the bracket-discipline property; the singular sub-shape might be its own observation (*PR #18's open-side carries a stated micro-plan with weighted options; the close-side at PR #37 implements the marked option*). The catalogue holds this as one instance with a noted sub-shape; the emergent-properties author can name.
+
+**Per-pattern instance counts, final.**
+
+- Pattern 1: 6 instances across 5 arcs (cross-referenced to insight-drift Pattern B for enumeration).
+- Pattern 2: 4 instances total (3 canonical at 3 grains × 3 registers; 1 long-grain at six days).
+- Pattern 3: 6 instances across 5 arcs (1 genesis + 5 lifts; 1 brief candidate dropped after verification).
+- Pattern 4: 3 instances at 3 time grains.
+- Pattern 5: 4 minor cuts + 24 consecutive v1.41.x patches.
+- Pattern 6: 3 instances across 3 arc-affiliations (one with two sub-chains).
+
+**The thread is left OPEN.** Cross-arc references from `insight-trajectory` and `insight-emergent-properties` will cite this catalogue's per-pattern entry IDs.
+
+Provenance:
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+- `insight-recurrence` Pattern 1 entry = 01KR3CW3DBHPTB6K8R8047TBCP.
+- `insight-recurrence` Pattern 2 entry = 01KR3CZEM22Y5BRT1F2VQZ6EKZ.
+- `insight-recurrence` Pattern 3 entry = 01KR3D2G1S7DXYSPDZDRXQBPDX.
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3.
+- `insight-recurrence` Pattern 5 entry = 01KR3D8RH5DNYC37WSGFVETXT3.
+- `insight-recurrence` Pattern 6 entry = 01KR3DC7E4B0JC1NN212PYVT56.
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 (boundary rule for placement of cross-cutting observables).
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (the directly-handed-off three-grain × three-register supersession summary).
+- All eight arc threads' per-PR entries with their drift-findings sections plus story-tails are the load-bearing infrastructure this catalogue was built atop; the per-pattern entries above cite the specific arc-entry ULIDs.
+
+<!-- Entry-ID: 01KR3DFHA7FRV3BXEH2Z8SFJQN -->
