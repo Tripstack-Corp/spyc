@@ -177,3 +177,70 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (cargo-deny convention; the punt-list foot-gun naming `:undo` v1.41.1 verbatim).
 
 <!-- Entry-ID: 01KR38VEGHFT9JGRDCXXBFX8V1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T07:48:08.637710+00:00
+Role: scribe
+Type: Note
+Title: PR #14 (fix/undo-command): two lines on the punt list, 25 minutes after PR #13, no PR-#13 citation
+
+Spec: scribe
+
+tags: #history #arc-08
+
+PR #14 is the second move in arc 08 and the supersession-of-PR-#13's-routing move. The diff is the smallest in arc 08 (6 files, +14/-2; the load-bearing change is two lines added to one function in `src/app/state.rs`). The commit subject reads "fix: route :undo / :graveyard to App's handler (v1.41.1)" (commit 24c49a0, 2026-05-02 22:48 -04 / merged 2026-05-03 03:06 UTC) — 25 minutes after PR #13's merge.
+
+**The two lines.**
+
+`src/app/state.rs:1239` post-fix:
+
+```rust
+            || input == "undo"
+            || input == "graveyard"
+```
+
+These join an existing chain inside `AppState::dispatch_command` that returns `CommandResult::NotHandled` for command names whose handler lives on App's terminal-touching half (per the `onboarding-architecture` seed entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ description of the partially-complete Elm refactor: "AppState::apply(action) returns an ApplyResult enum (Handled, OpenPager, Post(PostAction)) with no terminal access"). The chain pre-fix already included `pause`, `pause <args>`, `resume`, `resume <args>` (and an extended list above the snippet); without `undo` or `graveyard` on it, both fell through to the line-1247 "unknown command:" fallthrough.
+
+**The bug PR #13 left.**
+
+PR #13's diff added App's handler for `:undo` and `:graveyard`. The handler exists; the routing does not. The user-visible artifact, per PR #14's commit body verbatim: "Repro: type `:undo` → flash 'unknown command: undo'." The same bug applied to `:graveyard` (the command form of `gy` viewer-toggle). Both commands documented in PR #13's CHANGELOG `### Added` block fail at merge time of PR #13.
+
+The 25-minute supersession means the bug existed in `main` for 25 minutes between PR #13's merge (2026-05-03 02:41 UTC) and PR #14's merge (2026-05-03 03:06 UTC). The arc-08-framing's two-pairs reading names this pair the tighter of the two within-arc twins; PR #30 → PR #31 is the looser at 49 minutes. Both pairs are intra-day; PR #13/#14 is intra-hour.
+
+**The acknowledgement shape: bug-described, predecessor-not-cited.**
+
+PR #14's CHANGELOG entry verbatim:
+
+> "**`:undo` and `:graveyard` returned 'unknown command'.** State's command dispatcher routes a fixed list of names to App's terminal-touching arms; `undo` and `graveyard` weren't on it, so they hit the unknown-command fallthrough before App's handler could see them. Added both to the punt list."
+
+The CHANGELOG names the bug accurately. It does not name PR #13. It does not say "regression introduced in v1.41.0" (the prior release). It does not link to PR #13's commit. The reader who reads only PR #14's CHANGELOG knows the routing-vs-handler split caused the bug; the reader does not know which prior PR shipped the broken pairing without grepping for `undo` against the PR-#13 commit body.
+
+This shape is the diagnostic-of-interest. Arc 03's story-tail (= 01KR11S8RG29J98QKN1H0VAA6W) named the same shape on PR #29 verbatim: "What makes the supersession diagnostic isn't the guard-broadening per se — it's that nothing in either commit says 'this supersedes PR #5.'" Arc 08 has the same shape at a tighter time grain. PR #14's commit-body-and-CHANGELOG describe the bug exactly without acknowledging that 25 minutes earlier PR #13 had shipped the bug. The relationship between PR #13 and PR #14 lives in the diff's adjacency on `main`, not in any commit message text.
+
+**The seed already carries the canonical reference.**
+
+The `onboarding-risk-register` seed entry 0 (= 01KR0P9JC8Z3DF6FQ1GJPF3VKA) catalogues this exact bug as the named instance of the dual-`:command`-dispatch foot-gun verbatim: "Bitten on `:undo` (v1.41.1) and `:limit` historically." The v1.41.1 reference is PR #14's release tag. The seed predates arc 08 (entry timestamp 2026-05-07T07:44:05). So the foot-gun-with-named-instance documentation already exists at risk-register level by the time arc 08 reaches PR #14; the per-PR entry's job is to record that the seed's name-of-the-instance is grounded in this PR's two-line fix, not to relitigate the foot-gun.
+
+**Drift findings flagged for the insight layer.**
+
+- The supersession is silent at PR #14's commit-message level and explicit at the seed level. The cross-thread coverage is asymmetric: the seed (`onboarding-risk-register`) catalogues the bug class with this PR's release tag; PR #14's own commit message does not cite PR #13. Whether the insight layer reads this as a recurring "later observers reconstruct the supersession the original commits did not name" pattern is the insight layer's question. Captured factually here.
+- PR #14 also adds two lines to `.gitignore` (per `git show --stat c7419c1`: 2 lines). The diff's content for `.gitignore` is not the load-bearing part of the PR but is bundled in. Whether the .gitignore additions are graveyard-related (e.g. ignoring `*.tar.zst` debug artifacts) or unrelated cleanup is verifiable from the diff but tangential to the routing fix. Captured factually; not load-bearing for the supersession reading.
+- Patch-bump cadence: v1.41.0 → v1.41.1. The arc-01 reflection tail (= 01KR0XR504ZR10Y242JERT4K9S, restated at later arc-01 tails) named the v1.41.x cadence as the rhythm of patch-after-feature. PR #14 is one of the two within-arc-08 patch-bumps that follow a same-arc capability bump (the other is PR #28 → PR #30 → PR #31, where each is a patch on the prior). The patch-after-immediate-feature shape is intra-arc-08 here; arc 06's framing observed it across-arc (six minor cuts between PR #8's v1.39.0 and PR #32's v1.41.19). The pattern is recurrent; arc 08 records the instance.
+
+Provenance:
+- c7419c1 (PR #14 fix/undo-command, 2026-05-03) — full PR.
+- 24c49a0 — PR #14's feature-branch commit; commit body quoted: "Repro: type `:undo` → flash 'unknown command: undo'."
+- 6b2be36 → 24c49a0 — parent and tip SHAs for the diff inspection.
+- `git diff 6b2be36..24c49a0 -- src/app/state.rs`: 2 lines added at line 1239 (`|| input == "undo"`, `|| input == "graveyard"`).
+- `git diff 6b2be36..24c49a0 -- CHANGELOG.md`: 7 lines added under `[Unreleased]` `### Fixed`; the four-line description quoted verbatim above.
+- `git diff 6b2be36..24c49a0 -- Cargo.toml`: `version = "1.41.0"` → `version = "1.41.1"`.
+- `git diff 6b2be36..24c49a0 -- .gitignore`: 2 lines added (content not narrated in this entry; tangential).
+- `git diff 6b2be36..24c49a0 -- CLAUDE.md`: 1 line added (content not narrated; tangential).
+- `git diff 6b2be36..24c49a0 -- Cargo.lock`: 2 lines (the version bump's lockfile reflection).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA — names "Bitten on `:undo` (v1.41.1)" verbatim as the foot-gun's historical instance.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — describes the partially-complete Elm refactor: "AppState::apply(action) returns an ApplyResult enum...with no terminal access. State transitions are pure-ish and unit-testable without a TUI." The dual-dispatch the foot-gun lives in.
+- `history-arc-03-pane-behavior` story-tail = 01KR11S8RG29J98QKN1H0VAA6W — within-arc-twin precedent ("nothing in either commit says 'this supersedes PR #5'") quoted at this entry's acknowledgement-shape paragraph.
+- `history-arc-08-recoverability-and-deps` framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80.
+- `history-arc-08-recoverability-and-deps` PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1.
+
+<!-- Entry-ID: 01KR38XPJ07ZFQHH1TG6X461WN -->
