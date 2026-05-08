@@ -151,3 +151,64 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HG2GEBH1W8BKGT3CW6S9P -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:19:12.159840+00:00
+Role: scribe
+Type: Note
+Title: Property 2: The fifteen-and-zero asymmetry — the codebase honors negative-recommendation stated plans uniformly; positive-recommendation stated plans land in modified shape
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** Across three independent maintainer-authored stated-plan documents, the codebase exhibits a uniform structural asymmetry: stated-state and negative-recommendation items are honored exactly; positive-recommendation items land in modified shape (partial / parallel / direction-aligned / deferred), never in their exactly-specified form. Reads as: spyc, as artifact, has different anchoring discipline at its negative-recommendation surface than at its positive-recommendation surface — what *should not* happen is anchored stably; what *should* happen is anchored loosely.
+
+This is the strongest single tier-4 candidate in the network per `insight-trajectory` Tail 2 (= 01KR3FEAYFQS8QVXCPN4KQ8QYK): *"Fifteen-and-zero is the most surprising number in the catalogue."*
+
+**Evidence enumeration.**
+
+Three independent stated-plan documents, each exhibiting the same asymmetry:
+
+*Document 1 — UX catalogue at PR #5's `notes/lazygit-ux-catalogue.md` §1-§7* (per `insight-trajectory` Document #2 = 01KR3ESJ42TT0ZGJHGHJ5CTNYC):
+- Negative recommendations (skip): §1 (Numbered panels), §3-log-half (Command log), §6 (Single-key action vocabulary on rows), §7 (Two-letter chord jumps). **4 of 4 honored exactly across the window** — no PR introduces numbered-panel direct-jumps, command-log surface, panel-scoped key reuse, or flat 2-letter mnemonics.
+- Positive recommendations (adapt): §2 (Context-sensitive footer), §3-tip-half (One-shot startup tip), §4 (Generalized pager picker), §5 (Scoped `?` help). **0 of 4 executed-as-specified**: §2 partial (alt-screen scroll-mode flash via PR #20 narrows to alt-screen detection; broader options-map idea unfulfilled); §3-tip-half non-executed; §4 four-PR DIRECTION ALIGNMENT (PR #33, PR #35, PR #8, PR #10) without `PagerView::picker_items` shape; §5 non-executed-against-conditional ("becomes nearly free once §4 lands"; §4 unlanded).
+
+*Document 2 — product charter non-goals at `ROADMAP.md:445-447`* (per `insight-trajectory` Documents #4-5 = 01KR3EZDWSTW7TPWBY7KXB0KB3):
+- Six non-goals (Native Windows; plugin system; localization; telemetry; SLSA L3 / supply-chain theatre; mouse beyond what already exists). **6 of 6 honored across the window** — no PR adds Windows compilation guards, plugin-loading surface, i18n directory, telemetry plumbing, full SLSA attestation, or mouse capture in `src/main.rs::setup_terminal`.
+
+*Document 3 — cargo-deny advisory-ignore catalogue at `deny.toml:72-94`* (per `insight-trajectory` Document #8 = 01KR3F65XSQ4B74MDSQMYEM2R0):
+- Five long-lived advisory ignores (RUSTSEC-2026-0009; RUSTSEC-2024-0320; RUSTSEC-2025-0141; RUSTSEC-2024-0436; RUSTSEC-2017-0008). **5 of 5 survive across the window's largest dep change** — PR #31's vt100/ratatui/ansi-to-tui trio bump (839 lines of `Cargo.lock`) touches `ratatui` and the syntect-syndicated set; `deny.toml` diff at PR #31 is empty. Zero ignores reduced opportunistically.
+
+Cross-document totals: **15 honor instances; 0 exact executions of positive recommendations.**
+
+The cross-document recurrence per Tail 2: *"three independent stated-plan documents, written at different times in different contexts (PR #5's catalogue authored 2026-04-30; the charter and non-goals authored before the window; the advisory-ignore catalogue authored before the window and seed-recorded at bootstrap), all converge on the same honor-asymmetry shape."* The convergence across three documents authored in different registers — UX recommendation, charter declaration, security policy — is the property-level evidence.
+
+**Strongest evidence.**
+
+The cross-document convergence is the load-bearing observation. Three documents, three different authorial registers, three different time horizons of authorship — all showing the same uniform-honor-on-negative / modified-shape-on-positive pattern. No single document could have surfaced this; the cumulative reading across stated-plan documents at trajectory grain is what makes the property visible at artifact grain.
+
+Tail 2's framing is structurally important: *"these are not three statements of one stated-plan-discipline; they are three independent surfaces in which the same trajectory shape recurs."* The independence of the three documents is what elevates the asymmetry from "one document's quirk" to "a property of the artifact."
+
+The two halves of the charter document corroborate inside one document: positive framing (`ROADMAP.md:3-23`'s "Claude... bidirectional awareness" sentence) sees substrate-level partial-widening with registration-level peer-specific stay-as-is; negative framing (six non-goals at `:445-447`) sees uniform honor. The same document carries both halves of the asymmetry across its own positive-and-negative pair.
+
+**Where the property would falsify.**
+
+A single positive-recommendation execution exactly-as-specified within the 22-day window would weaken the property; multiple would refute. Within the window: zero exact executions across catalogue §1-§7 adapts, ROADMAP additions #1-#3 (per `insight-trajectory` Document #3 = 01KR3EW3166JZ59TDR8PYMGN4T, three-zero ratio), charter "Claude" word, and gap-analysis suspect resolutions. Suspect §1 (RESOLVED-with-durable-record-incompleteness) and §3 (RESOLVED-with-test-coverage-gap) carry partial-trajectory asterisks per `insight-trajectory` Document #1 (= 01KR3ENV1WP6R9SFRE1QME291S); they register as *resolved-with-asterisk*, not as *exactly-honored*.
+
+A single ignored non-goal within the window would also weaken the property; none observed (six of six non-goals are honored).
+
+A new advisory ignore added during the window — opening a new ignore that wasn't there at bootstrap — would weaken the stable-state honoring; the `deny.toml` diff at PR #31 is empty (per Document #8), the only window PR that touched the dep family. Stable state holds.
+
+**Tier-5 forward prediction.**
+
+Citing Tail 2's fifteen-and-zero recurrence across three independent stated-plan documents: future positive recommendations from new stated-plan documents will land in modified shape (partial / direction-aligned / deferred); future negative recommendations and stable-state items will be honored exactly. (Tail 2 + Document #2 + Documents #4-5 + Document #8.)
+
+Provenance:
+- `insight-trajectory` framing = 01KR3EJ0RWZXEBMYHY9EEZQX4A; Document #1 = 01KR3ENV1WP6R9SFRE1QME291S; Document #2 = 01KR3ESJ42TT0ZGJHGHJ5CTNYC; Document #3 = 01KR3EW3166JZ59TDR8PYMGN4T; Documents #4-5 = 01KR3EZDWSTW7TPWBY7KXB0KB3; Document #8 = 01KR3F65XSQ4B74MDSQMYEM2R0; closure = 01KR3F9EF9WF9Q34FRAR2XPSZS; Tail 2 (the fifteen-and-zero observation) = 01KR3FEAYFQS8QVXCPN4KQ8QYK.
+- `onboarding-product-charter` entry 0 (charter and non-goals source) = 01KR0P18MCE1H57Q5ZTAGKAJNH.
+- `onboarding-risk-register` entry 0 (advisory-ignore catalogue source) = 01KR0P9JC8Z3DF6FQ1GJPF3VKA.
+- Arc-02 investigation entry (PR #5 catalogue source) = 01KR0YXXZRQR24CSNAK4Q7808T.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HJ9ZVA966149ME2TBTB5B -->
