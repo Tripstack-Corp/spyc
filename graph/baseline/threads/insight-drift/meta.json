@@ -5,7 +5,7 @@
   "title": "insight drift",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T08:37:12.668436+00:00",
+  "last_updated": "2026-05-08T08:38:39.434255+00:00",
   "summary": "The thread explores insight drift, a phenomenon where observed patterns across multiple arcs are aggregated to identify recurring themes in code changes. Key patterns include Commit-subject vs. diff-scope understatement, Bundle-as-shape, and Documented-vs-wired drift, each highlighting specific issues in code evolution. The final catalogue compiles six patterns with sixteen instances, offering insights into how code changes and documentation evolve over time.",
-  "entry_count": 8
+  "entry_count": 9
 }

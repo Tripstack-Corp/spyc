@@ -441,3 +441,47 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (Pattern D's seed-level naming).
 
 <!-- Entry-ID: 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:38:39.431807+00:00
+Role: scribe
+Type: Note
+Title: Tail: the negative space — what kinds of drift the 22-day window does not produce
+
+Spec: scribe
+
+tags: #insight #drift #tail
+
+The catalogue holds what was found. Sixteen instances, six patterns, dominantly at the narrative-and-description layer of the work. Pattern A is descriptive; Pattern B is structural-but-still-at-the-slug-level; Pattern C is classification-surface; Pattern E is framing-of-the-framing; Pattern F is unit-of-measurement. Pattern D is the only one of the six whose drift is *functional* — a documented capability not delivered by the code at moment of merge — and even Pattern D's single instance was closed within 25 minutes by a two-line punt-list addition. The dominant drift register in the spyc 22-day window is *how the work is described*, not *whether the work works*.
+
+What the catalogue does not contain is worth saying out loud.
+
+There is no *stub-then-fill-in* drift. The catalogue holds no instance of a function shipped with `todo!()` or `unimplemented!()` left in place, no instance of a CHANGELOG entry pointing at a feature whose code is a placeholder. The closest the record comes is PR #5's `investigate/` PR shipping a partial cursor-block fix that PR #29 generalizes six days later — but that is *fix-the-narrow-case-then-generalize*, which is a different shape from *ship-a-stub-then-fill-it-in*. The narrow fix is correct against the case it targets; PR #29 broadens the policy. No stub.
+
+There is no *test-asserts-wrong-thing* drift. The catalogue holds no instance of a test pinning an incorrect contract, of a regression hidden behind a passing test suite, of an assertion that diverges from what the code under test should be doing. The arc-04 PR #15 entry's five new unit tests pin behavior the prior inlined parser could not have tested for; arc-08 PR #28's three new unit tests pin the cap behavior at small denominators; arc-05 PR #36's existing tests had to be rewritten because their data assumed the old prefix semantics — but in every case the test suite ended up reflecting the post-change reality, not asserting against a stale expectation. Test-vs-feature drift is not in the record.
+
+There is no *config-vs-code-default* drift. The catalogue holds no instance of a config schema permitting a value the code refuses, of a documented default in the README disagreeing with the actual default in `src/config/mod.rs`. The PR #20 entry's `[pane] default_command` config key (one of the three concerns under that PR's `feat/` slug) lands with explicit precedence chain, doc-comment, and config schema in one diff. The shape that *would* be a config drift — *the config doc says X, the code reads Y* — is not in the eight arcs.
+
+There is no *renamed-but-not-everywhere* drift. PR #18's `CLAUDE.md` → `AGENTS.md` rename touches twelve files in one diff and the source-comment references propagate cleanly; the rename does not leave half the references on the old name. The reverse — a *new* name introduced and the old name left lingering — would be a different drift, and is also not in the record.
+
+There is no *phantom feature* drift, where the code can do something no documentation describes. Spyc's documentation surface is rich enough that the inverse drift (Pattern D — documented but unwired) is the one that surfaces; the un-cited code path drift would require reading the source for capabilities not named anywhere in the docs, and the eight arcs do not flag any such instance.
+
+There is no *commit body / CHANGELOG / BUGS.md disagreement* drift outside the within-PR self-correction case Pattern E catalogues for PR #30. The three text channels generally agree across the eight arcs; where they don't, the disagreement is the catalogued one.
+
+The negative-space observation is this: the spyc 22-day window produces drift in *how the work is talked about* and produces almost no drift in *what the work does*. A user who reads the CHANGELOG and types the documented commands gets the documented behavior in 35 of 36 PRs (the one exception is `:undo` for 25 minutes). A maintainer who reads the commit subjects and infers the diff content gets a less-honest picture in 5 of 36 PRs (Pattern A's instances). A future reader who reads the spine's *"22-day window"* phrasing and computes per-day metrics against that denominator gets the wrong denominator (Pattern F).
+
+This is a useful asymmetry to name. Description-layer drift is, by its nature, local to the description — the code does not know that the commit subject undersells it. Functional drift is, by its nature, observable to the user. The window's drift profile is dominantly the kind that does not affect the running spyc, and dominantly not the kind that does. Whether that asymmetry generalizes to other projects, or whether it is a property of the maintainer-experience-axis the analyst register is forbidden to attribute to, is a question the catalogue declines.
+
+What the catalogue notices: the maintainer-or-onboarding-author cared enough about the documented-vs-wired class of drift to write a seed entry naming it (`onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA), with PR #14's release tag verbatim, before arc 08 was written. The single functional drift in the record gets the most observer-side attention. The five subject-level drifts and the six bundle-as-shape drifts get observer-side attention only via the arcs' drift-findings-flagged-for-the-insight-layer practice. Description-layer drift survives in the network because it was flagged for the insight layer; functional drift survives because the seed names the bug class. The two channels work in different registers and protect against different reading failures.
+
+Provenance:
+- All six pattern entries above (= 01KR3BA3CZWA6TZCDKNJZDPAGH, 01KR3BCQXGGB20V8C6Y6Z1Y944, 01KR3BEGGEYB9VKTJ32WJNDG93, 01KR3BGMAKS4AZNZE2QFXH10W4, 01KR3BK1VP3SZ5DM9VAQ01FFYX, 01KR3BN3N6YF60414FFVHAM50Y).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (the seed that names Pattern D's class).
+- arc-02 PR #5 entry = 01KR0YXXZRQR24CSNAK4Q7808T (the closest-to-stub-then-fill-in instance: PR #5's narrow cursor-block fix → PR #29's generalization; not classified as drift by the catalogue).
+- arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (parser extraction with five new pinning tests).
+- arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5 (test rewrites under the matcher-semantics shift).
+- arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M (three pinning tests at small denominators).
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (the rename-touches-twelve-files-cleanly observation).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4.
+
+<!-- Entry-ID: 01KR3BT6MNZMWRMHX14QMYZ86Y -->
