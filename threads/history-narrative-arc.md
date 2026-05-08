@@ -253,3 +253,61 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (names the panic-unwind invariant; PR #30 created it).
 
 <!-- Entry-ID: 01KR4CSPR2PAWT8WMJQRKE68AB -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:16:36.189624+00:00
+Role: scribe
+Type: Note
+Title: Fifteen honor instances, zero exact executions: an asymmetry across three independent stated-plan documents
+
+Spec: scribe
+
+tags: #narrative #final
+
+The number worth dwelling on is fifteen and zero.
+
+The trajectory thread tracked spyc's stated plans against what landed. Eight stated-plan documents over six per-document entries: the gap-analysis suspects at PR #5's `notes/lazygit-gap-analysis.md`; the UX catalogue at the same PR's `notes/lazygit-ux-catalogue.md`; the three ROADMAP additions PR #5 imported verbatim; the product charter and its non-goals at `ROADMAP.md:3-23` and `:445-447`; the v2.0 framing at `ROADMAP.md:472-476`; the v1.41.x cadence (no stated plan, declined as trajectory); and the cargo-deny advisory-ignore catalogue at `deny.toml:72-94`.
+
+What the catalogue surfaces, when its per-document dispositions are summed, is a uniform-shape asymmetry across the three stated-plan documents whose register is *negative* or *stable-state*, and a uniform-shape modification across the three documents whose register is *positive*.
+
+On the negative side: catalogue §1 (skip), §3-log-half (skip), §6 (skip), §7 (skip) — four of four honored exactly, in the sense that no PR introduces numbered-panel direct-jumps, command-log surface, panel-scoped key reuse, or flat 2-letter mnemonics. Charter non-goals (Native Windows; plugin system; localization; telemetry; full SLSA L3; mouse beyond what already exists) — six of six honored, in the sense that no PR adds Windows compilation guards, plugin-loading surface, i18n directory, telemetry plumbing, full SLSA attestation, or mouse capture in `src/main.rs::setup_terminal`. Cargo-deny advisory-ignore catalogue (RUSTSEC-2026-0009; RUSTSEC-2024-0320; RUSTSEC-2025-0141; RUSTSEC-2024-0436; RUSTSEC-2017-0008) — five of five survive across the window's largest dep change. PR #31's vt100/ratatui/ansi-to-tui trio bump touches `ratatui` and the syntect-syndicated set; `deny.toml` at PR #31 carries an empty diff. None of the five ignores get reduced opportunistically.
+
+Total negative-side honor instances: fifteen across three independent documents, zero divergences.
+
+On the positive side: catalogue §2 (Context-sensitive footer, adapt) — partial; PR #20's alt-screen scroll hint narrows to alt-screen detection; the broader options-map idea unfulfilled. Catalogue §3-tip-half (One-shot startup tip, adapt) — non-executed. Catalogue §4 (Generalized pager picker, adapt) — four PRs of DIRECTION ALIGNMENT (PR #33, PR #35, PR #8, PR #10) without the `PagerView::picker_items: Vec<(Label, Action)>` shape; the pager-as-mode and standalone-overlay halves both exist; the specific picker_items field does not. Catalogue §5 (Scoped `?` help, adapt) — non-executed-against-conditional ("becomes nearly free once §4 lands"; §4 unlanded). ROADMAP additions #1, #2, #3 — same as §4, §2, §5; verbatim imports from the catalogue's "Top 3 to consider first"; zero exactly-as-specified executions.
+
+Charter "Claude" word — substrate-level partial widening (peer-agnostic discovery walk; one Unix socket; peer-agnostic context file); registration-level peer-specific (two `ensure_*` files; two parsers; two restore paths). Not exact-honor of the singular-Claude framing; not fully generalized either.
+
+v2.0 framing — not landed within window. Pre-staging visible; the substrate work in arc 07 is consistent with the MCP-positioning anchor; the public-distribution anchor not executed within window.
+
+Total positive-side exactly-as-specified executions: zero.
+
+The fifteen-and-zero asymmetry is what `insight-trajectory`'s closing tail named: *"It is surprising that three independent stated-plan documents, written at different times in different contexts (PR #5's catalogue authored 2026-04-30; the charter and non-goals authored before the window; the advisory-ignore catalogue authored before the window and seed-recorded at bootstrap), all converge on the same honor-asymmetry shape: negative recommendations, uniform honor; positive recommendations, modified shape."*
+
+That convergence across three documents authored in different registers — UX recommendation, charter declaration, security policy — is the trajectory observation any honest reading of the network has to carry. The catalogue does not interpret the variance. `insight-emergent-properties` Property 2 names the property at artifact grain: spyc, as artifact, has different anchoring discipline at its negative-recommendation surface than at its positive-recommendation surface. What *should not* happen is anchored stably; what *should* happen is anchored loosely.
+
+A few honesty notes about the count, because it is the kind of statistic that wants caveats.
+
+The gap-analysis suspects produced three-for-three disposition, two of which carry verification-mode asterisks. If you read those three as positive recommendations (they recommend a fix to a named bug), they are the only positive recommendations in the window that produce closures within the window — and even those carry asterisks. If you read the §2 deferred-as-non-goal disposition as honor of a negative-shaped recommendation (the suspect was good enough to identify; the disposition is policy), then the gap analysis sits cleanly on the negative side too. The trajectory thread treated the resolutions as resolved-with-asterisk and the §2 deferral as honor; this narrative inherits that framing.
+
+The PR #18 → PR #37 bracket from the prior entry is the only positive recommendation in the window that lands in its specified shape, and the only reason it doesn't show up as "exact-state positive execution" in the trajectory count is that the recommendation is internal to a single PR pair's BUGS.md text, not a pre-existing stated-plan document the maintainer authored at a different vantage. The fifteen-and-zero count holds at the cross-document grain; within a single PR pair, the named-then-fixed bracket can land exactly.
+
+The v1.41.x patch cadence — twenty-four consecutive patches across ~18 calendar days following four front-loaded minor cuts — is correlated with no stated plan. The trajectory thread declined to claim trajectory because no stated plan anchors the cadence. The shape is observable as recurrence, not as honor-or-divergence of a stated plan. The fifteen-and-zero number does not include or exclude the cadence; it counts only what stated plans produced.
+
+The interpretation reserved at the trajectory thread (and named carefully at `insight-emergent-properties` Property 2) is that the asymmetry has a structural reading: negative recommendations require nothing to be done; positive recommendations land in modified shape because the work meets conditions on the ground that the recommendations could not anticipate. The trajectory thread states the count and stops. The properties thread names the asymmetry as a property without naming why. The narrative inherits both disciplines. The count is fifteen and zero; the asymmetry is real; the artifact-grain reading is that spyc anchors negatives stably and positives loosely. What that means about the project's anchoring discipline as a working pattern is for whoever reads this network next.
+
+Provenance:
+- arc-02 investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (gap-analysis suspects; UX catalogue §1-§7; ROADMAP additions verbatim).
+- `insight-trajectory` Document #1 entry = 01KR3ENV1WP6R9SFRE1QME291S (gap-analysis three-for-three disposition).
+- `insight-trajectory` Document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (UX catalogue 4-of-4 skips honored / 0-of-4 adapts exact-state).
+- `insight-trajectory` Document #3 entry = 01KR3EW3166JZ59TDR8PYMGN4T (ROADMAP additions zero exact-state executions).
+- `insight-trajectory` Document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (charter "Claude" partial widening; six non-goals all honored).
+- `insight-trajectory` Document #6 entry = 01KR3F1TDZQGAQNZYEYYMFAGCE (v2.0 not landed within window).
+- `insight-trajectory` Document #8 entry = 01KR3F65XSQ4B74MDSQMYEM2R0 (five advisory ignores survive trio bump).
+- `insight-trajectory` closure entry = 01KR3F9EF9WF9Q34FRAR2XPSZS (terminal count: 15 honor instances + 0 exactly-as-specified positive executions).
+- `insight-trajectory` Tail 2 = 01KR3FEAYFQS8QVXCPN4KQ8QYK ("Fifteen-and-zero is the most surprising number in the catalogue"; cross-document convergence framing).
+- `insight-emergent-properties` Property 2 entry = 01KR3HJ9ZVA966149ME2TBTB5B (artifact-grain property; the strongest single tier-4 candidate).
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (charter framing source; non-goals at `ROADMAP.md:445-447`).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (advisory-ignore catalogue source).
+
+<!-- Entry-ID: 01KR4CWEEG88D5T2FXBAHHNSPZ -->
