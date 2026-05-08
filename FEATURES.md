@@ -128,12 +128,15 @@ spyc's workflow: browse files above, talk to Claude below.
   rows so the pane fills the middle region; the prior split is
   restored on un-zoom. Status + prompt rows stay visible (tmux-style).
   A `[ZOOM]` tag appears in the divider while active.
-- **^a v** enter scroll mode — browse up to 10K lines of scrollback
-  without interrupting the child process; **s** saves to a file.
-  When the child has switched to the alternate screen (full-screen
-  TUIs like codex, vim, htop, lazygit), the flash hints that
-  scroll-back is unavailable and points you at the app's own
-  history viewer.
+- **^a v** enter scrollback view — browse up to 10K lines of pane
+  history in the **in-app pager** (v1.5). All pager keys work: `/`
+  search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual
+  block, `y` yanks the selection, `l` toggles line numbers, `w`
+  whitespace markers. The pty keeps running off-screen — output
+  you miss while reading lands in scrollback for the next view.
+  `Esc` snaps back to live. Alt-screen apps (codex, vim, htop,
+  lazygit) skip the pager and flash a "no scrollback" hint
+  pointing at the app's own history viewer.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

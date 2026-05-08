@@ -6137,13 +6137,27 @@ impl App {
                 .flash_info("scroll: alt-screen app, no scrollback (use the app's own history)");
             return;
         }
-        // Drain any pending bytes from the reader thread into the
-        // vt100 parser before snapshotting. Without this, output
-        // that arrived between the last render and the user pressing
-        // `^a-v` (e.g. a HUD plugin's most-recent paint) is still
-        // sitting in the channel and won't make it into the snapshot.
-        // The user reported the symptom: "the pager view does not
-        // include all of the text on screen".
+        // Drain pending bytes into the vt100 parser before
+        // snapshotting. The reader thread reads the OS pipe and
+        // posts to a channel; `drain_output` pulls everything in
+        // the channel (non-blocking try_recv). But bytes that hit
+        // the OS pipe between the last render tick and the user
+        // pressing `^a-v` may still be in flight — read by the
+        // reader thread but not yet posted, OR in the OS pipe but
+        // not yet read.
+        //
+        // Drain in a short loop with a small yield between
+        // iterations so the reader thread gets scheduled and can
+        // flush in-flight bytes. ~30 ms total worst-case wait;
+        // imperceptible on a key event but enough to capture a
+        // HUD plugin's most-recent paint that fired moments
+        // before the keypress. Reported as "the pager view does
+        // not include all of the text on screen (e.g. claude HUD
+        // plugin)".
+        for _ in 0..3 {
+            active.drain_output();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         active.drain_output();
         let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
         // Setting the pane's "is scrolling" flag keeps the existing
