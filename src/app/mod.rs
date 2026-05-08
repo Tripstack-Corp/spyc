@@ -8991,16 +8991,25 @@ impl App {
             Action::PaneTabByIndex(n) => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
+                    // Switching tabs implies "I want to interact
+                    // with this other tab" — pull focus into the
+                    // pane so the next keystroke lands in the
+                    // child, not the file list. Matches the
+                    // behavior of `^a c` (new tab) which already
+                    // does this in `open_pane_tab_in`.
+                    self.state.pane_focused = true;
                 }
             }
             Action::PaneNextTab => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.next();
+                    self.state.pane_focused = true;
                 }
             }
             Action::PanePrevTab => {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.prev();
+                    self.state.pane_focused = true;
                 }
             }
             Action::PaneRenameTab => {

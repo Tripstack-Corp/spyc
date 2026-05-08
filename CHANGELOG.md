@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Switching pane tabs (`^a-n` / `^a-p` / `^a-1..9`) now pulls
+  focus into the pane.** Reported: switching tabs from the
+  file-list-focused state changed the active tab but kept focus
+  on the file list — the next keystroke went to spyc, not the
+  newly-active tab. Matches the existing behavior of `^a c`
+  (new tab), which has always pulled focus.
+
 - **Opening `?` no longer flickers the underlying pane back to
   live-pty / file-list rendering.** Reported as the polish
   follow-up to v1.50.1: the help overlay opens correctly and
