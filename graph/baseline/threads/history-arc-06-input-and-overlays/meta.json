@@ -5,7 +5,7 @@
   "title": "history arc 06 input and overlays",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T00:36:51.423108+00:00",
-  "summary": "The development focused on implementing picker overlays and ensuring dispatch correctness in a 2+2 calendar split for arc 06, with key decisions including the implementation of overlays and verification of dispatch logic. The outcome was improved accuracy and consistency in scheduling across the calendar split.",
-  "entry_count": 1
+  "last_updated": "2026-05-08T00:39:19.932744+00:00",
+  "summary": "The development thread focuses on improving picker overlays and dispatch correctness in a 2+2 calendar split, with key decisions including the introduction of a per-project pinned working set, a new H chord prefix family, and an =h filter. These changes enhance the picker's functionality and usability in managing musical compositions.",
+  "entry_count": 2
 }
