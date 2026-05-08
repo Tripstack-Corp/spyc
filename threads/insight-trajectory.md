@@ -569,3 +569,75 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A (recommendation to name the absence-of-stated-plan rather than claim trajectory).
 
 <!-- Entry-ID: 01KR3F3Y55NW2GAC0GY05FCYAD -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:37:37.669339+00:00
+Role: scribe
+Type: Note
+Title: Document #8: the cargo-deny advisory-ignore catalogue — five ignores survive the window's largest dep change; stated state holds
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** The `onboarding-risk-register` seed (entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA) catalogues five long-lived `cargo-deny` advisory ignores at `deny.toml:72-94` with documented reasons. Verified at the seed entry verbatim:
+
+> *"`cargo-deny` advisory ignores in `deny.toml:72-94` are five long-lived transitive issues (time/yaml-rust/bincode/paste/serial). Each carries a documented `reason`. New ignores must follow that pattern; don't silently add a bare ID."*
+
+The five ignores, per the seed's catalogue plus verification through the per-PR entries' BUGS.md and Cargo.lock readings:
+
+- *RUSTSEC-2026-0009* — `time` via `syntect → plist`. Transitive.
+- *RUSTSEC-2024-0320* — `yaml-rust` via `syntect`. Transitive.
+- *RUSTSEC-2025-0141* — `bincode` via `syntect`. Transitive.
+- *RUSTSEC-2024-0436* — `paste` via `ratatui`. Transitive.
+- *RUSTSEC-2017-0008* — `serial` via `portable-pty`. Transitive.
+
+The seed entry frames the catalogue as a *stated state of acceptance* — each ignore carries a `reason` field that documents the transitive-issue context plus the maintainer-authored disposition (deferred until upstream fixes; not load-bearing for the project's own surface; etc.). The catalogue is itself the stated plan: the five ignores are accepted, and new ignores must follow the documented-reason pattern.
+
+**Window-trajectory observation.**
+
+The 22-day window's largest dep change is PR #31 (= 01KR397RTYNS34SAGM46YJJRBY): the trio bump of `vt100 0.15 → 0.16`, `ratatui 0.29 → 0.30`, `ansi-to-tui 7 → 8`, plus the dep-graph trio's transitive churn (839 lines of `Cargo.lock` change). The forcing function is `unicode-width ≥0.2.1` from `vt100 0.16` versus `=0.2.0` from `ratatui 0.29`. Two of the five advisory ignores reference crates in this dep family:
+
+- *RUSTSEC-2024-0436* (`paste` via `ratatui`) — the seed entry flagged this as "transit-via-ratatui."
+- *RUSTSEC-2025-0141* (`bincode` via `syntect`) — `syntect` was also affected by the trio's dep churn (the seed names `syntect` as the source of three ignores: `time`, `yaml-rust`, `bincode`).
+
+PR #31's diff against `deny.toml`: empty. The arc 08 PR #31 entry (= 01KR397RTYNS34SAGM46YJJRBY) verifies: *"`git diff 105db8d^1..105db8d^2 -- deny.toml` is empty. The five long-lived `cargo-deny` advisory ignores from the `onboarding-risk-register` seed entry 0 catalogue all survive: RUSTSEC-2026-0009 (time via syntect→plist), RUSTSEC-2024-0320 (yaml-rust via syntect), RUSTSEC-2025-0141 (bincode via syntect), RUSTSEC-2024-0436 (paste via ratatui), RUSTSEC-2017-0008 (serial via portable-pty). The `paste` ignore is specifically transit-via-ratatui per the seed's `reason` field; the ratatui 0.29 → 0.30 bump did not eliminate the `paste` dependency."*
+
+**Trajectory disposition: STATED STATE OF ACCEPTANCE HOLDS ACROSS THE WINDOW'S LARGEST DEP CHANGE.**
+
+Five ignores; zero reduced. The major-version trio bump did not opportunistically resolve any of the five long-lived ignores, despite touching two of the named upstream crates (`ratatui` and the syntect-syndicated set). The seed's catalogue — as both the inventory of five ignores and the stated rule that new ignores follow the documented-reason pattern — survives intact post-PR-#31.
+
+The trajectory observation is structurally cleaner than catalogue-§-trajectory or ROADMAP-additions-trajectory: there is no partial-execution to flag, no direction-alignment-without-execution to name, no deferral-against-conditional to note. The catalogue says "five accepted"; the post-window state shows "five accepted"; zero divergence.
+
+**The asymmetry-of-stable-state observation.**
+
+This entry's trajectory parallels the charter-non-goals trajectory at this thread's document #5 entry (= 01KR3EZDWSTW7TPWBY7KXB0KB3): both are stated *negative-or-stable-state* plans that the window honored uniformly. The charter's six non-goals all honored across the window; the advisory-ignore catalogue's five ignores all survive the trio bump. Both are uniform-honor trajectories.
+
+The structural distinction worth flagging at trajectory-grain: the charter non-goals are *not-pursued* state (no PR adds telemetry, mouse, plugin system, etc.), while the advisory ignores are *not-resolved* state (the dep churn could have eliminated transitive ignores opportunistically; it did not). One is non-execution-against-not-doing; the other is non-execution-against-could-have-done. Both register as uniform-honor against their respective stated plans, but the *space of permissible execution* differs:
+
+- For non-goals: any PR that *adds* the non-goal capability would violate the trajectory. Zero such PRs landed; trajectory honored.
+- For advisory ignores: any PR could have eliminated zero, one, or all of the ignores opportunistically (trio bump touched the dep family); zero were eliminated. The trajectory holds at the stated stable-state.
+
+The asymmetry is between *constraints that bind execution* (non-goals) and *constraints whose dissolution would have been possible* (advisory ignores). Both register as honored; the *nature* of the honoring is different. Captured for tier-4 reading at `insight-emergent-properties`.
+
+**Cross-thread cross-reference.**
+
+`insight-recurrence`'s closure (= 01KR3DFHA7FRV3BXEH2Z8SFJQN) flagged Pattern 3 (BUGS.md SMALL/MAYBE-to-FIXED lift) as *"highly correlated with stated plans"* — the lift recurrence is partially a property of the gap-analysis methodology PR #5 introduced. The advisory-ignore trajectory here is *uncorrelated* with that lift recurrence: the five ignores do not appear in BUGS.md as SMALL/MAYBE entries; they live at `deny.toml:72-94` only. The non-correlation is structural — `cargo-deny` advisory ignores live in the supply-chain control surface, not in the user-reportable bug catalogue. The two stated-plan registers (BUGS.md SMALL/MAYBE versus `deny.toml` advisory ignores) speak to different surfaces and have different recurrence-and-trajectory dispositions.
+
+The arc 08 PR #28 (huge directory cap) and PR #31 (trio bump) entries are the ones most adjacent to the supply-chain surface; neither names the advisory ignores. The seed entry 0 is the only stated-plan document at the catalogue-level. Captured factually.
+
+**Boundary with `insight-emergent-properties`.**
+
+The cleanness of the advisory-ignore trajectory plus the uniformity of the charter non-goals trajectory plus the asymmetry between not-pursued versus could-have-done is the most acute tier-4 temptation in this entry. The temptation to name *what kind of stated-state-discipline* produces uniform-honor across two surfaces is high. The trajectory thread states the count (five ignores survive; zero reduced; trio bump touched the dep family without opportunistic resolution); the property name is `insight-emergent-properties`'s.
+
+Provenance:
+- `deny.toml:72-94` current state — five long-lived advisory ignores; per-ignore `reason` field documenting transitive-issue context.
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA — the catalogue source; "five long-lived transitive issues (time/yaml-rust/bincode/paste/serial)" verbatim.
+- 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — the window's largest dep change.
+- `git diff 105db8d^1..105db8d^2 -- deny.toml`: empty (per arc 08 PR #31 entry verification).
+- `history-arc-08-recoverability-and-deps` PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (trio bump structure; `deny.toml` empty diff; advisory-ignore catalogue verification).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN (Pattern 3 stated-plan correlation; non-correlation with this trajectory).
+- `insight-trajectory` document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (charter non-goals trajectory parallel; uniform-honor cross-reference).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3F65XSQ4B74MDSQMYEM2R0 -->
