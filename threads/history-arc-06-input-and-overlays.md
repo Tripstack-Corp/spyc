@@ -189,3 +189,143 @@ Provenance:
 - `history-arc-06-input-and-overlays` framing entry = 01KR2G8042HWE419X0ESWKN205.
 
 <!-- Entry-ID: 01KR2GCH3Q8DR9DATBBC802Q8W -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T00:41:47.627253+00:00
+Role: scribe
+Type: Note
+Title: PR #10 (feat/quickselect): ^a u labeled-overlay picker for pane output, alphabetic labels with case-as-intent — picker-shaped overlay, parallel pattern with §4, refutation against §1
+
+Spec: scribe
+
+tags: #history #arc-06
+
+PR #10 is the second move in phase α, landing 2 hours and 48 minutes after PR #8 the same calendar day. Commit subject reads "quick select: ^a u labeled-overlay picker for pane output (v1.40.0)" (commit 9043547, 2026-05-02). The version bump is a second minor cut on the same day (1.39.0 → 1.40.0); the rapid sequential minor cuts read as feature-shipped-feature-shipped, not coalesced. Diff: 15 files, 985 insertions / 15 deletions. The bulk lands in two files: `src/pane/quick_select.rs` (436 insertions, new module) and `src/app/mod.rs` (331 insertions). `src/pane/mod.rs` gains 24 lines (the new `pickable_text` helper).
+
+**The capability shipped.**
+
+The `### Added` CHANGELOG entry reads verbatim (the relevant block in full): "Quick Select — labeled overlay picker (`^a u`). Borrowed from WezTerm's mode of the same name. Press `^a u` to scan the visible pane for URLs, file paths, git SHAs, IPv4 addresses, and any user-defined regex patterns; each match is overlaid with a 1- or 2-letter label. Lowercase label → yank to clipboard. **Uppercase label → 'open' intent**, dispatched per match kind: URLs → system handler (`open` / `xdg-open`); Paths → cursor-jump in spyc; Git SHAs → `git show <sha>` in the in-app pager; Custom patterns with a `url = 'https://.../{}'` template → fill `{}` with the match, then `open`/`xdg-open`; Other kinds → fall back to yank with a flash hint. Scroll mode 'just works': the picker scans exactly the user's visible viewport, so scrolling up to a Claude reply and pressing `^a u` labels the URLs in *that* reply." (commit 9043547, 2026-05-02).
+
+The `### Fixed` half is a side-fix bundled under the same PR: "`gf` / `gF` now honor scroll mode. Previously `goto_file_from_pane` temporarily forced scrollback to its deepest position, so a path the user had scrolled up to was ignored — the scanner read a different region of history. Now routes through a new `Pane::pickable_text()` helper: when scrolling, scans exactly the visible viewport; when live, the prior 200-line behavior is preserved so paths in large diffs that just scrolled past the bottom are still findable." (commit 9043547, 2026-05-02). The fix shares infrastructure with the new feature — the `pickable_text` helper exists primarily to feed quick select but is also wired into the path-scanner that `gf`/`gF` use.
+
+**The struct shape.**
+
+The picker model lives in `src/pane/quick_select.rs`:
+
+```
+pub struct QuickSelect {
+    pub matches: Vec<Match>,
+    pub pending_first: Option<char>,  // first key buffered when labels are 2-letter
+    pub all_two_letter: bool,         // true iff every label is 2-letter (>23 matches)
+    pub open_intent: bool,            // sticky bit for uppercase-first in 2-letter case
+}
+```
+
+`Match` is structured per match: `text`, `kind: MatchKind`, `label`, `row`, `col`. `MatchKind` is an enum: `Url`, `Path`, `GitSha`, `Ipv4`, `Custom { name: String, url_template: Option<String> }`. The custom variant carries the `url_template` so dispatch can fill `{}` with the matched text and hand off to `open`/`xdg-open`; without a template, custom matches fall back to yank.
+
+The struct lives on `App` as `quick_select: Option<QuickSelect>` (active when the mode is open; `None` when closed), and the dispatch path checks for it before normal pane-key handling. The doc-comment names a concrete behavioral choice: "the snapshot of visible text isn't retained — we extract matches with their coordinates and let the live pane keep rendering underneath. If the pane scrolls during the mode the labels go stale; the simplest correct behavior is to close the picker on the next event tick that detects pane growth."
+
+**The alphabet — and what it deliberately excludes.**
+
+`src/pane/quick_select.rs` defines `const ALPHABET: &[u8] = b"abcdefghilmnoprstuvwxyz";` — 23 letters, with three deliberate omissions:
+
+```
+/// Reserved keys we mustn't generate as labels: `q`/`Q` exits the
+/// mode; the alphabet skips both. Keeping it lowercase-only keeps
+/// the uppercase forms free for the "open" intent (`A` opens `a`,
+/// etc.). We also skip `j`/`k` so that someone who reflexively
+/// reaches for vi motions during the mode just gets ignored input
+/// instead of an accidental action.
+```
+
+`q` and `Q` are reserved for the mode-exit binding, so they're omitted from the label generator (otherwise pressing the exit key would trigger an action instead of exiting). `j` and `k` are omitted so vi-reflex motions during the mode produce no-op input rather than firing whichever match happened to land on those labels. The reasoning is preserved verbatim in the source comment.
+
+Label assignment is in `assign_labels`: 1-letter labels when `matches.len() <= ALPHABET.len()` (23 or fewer matches), otherwise 2-letter labels. The hard cap is `MAX_MATCHES = ALPHABET.len() * ALPHABET.len()` = 529; viewport scans yielding more matches than that truncate to the cap with the rationale: "they're the most likely to scroll past anyway, and a forest of 3-letter labels would be unreadable."
+
+**The case-as-intent dispatch.**
+
+The mode interprets keystrokes by case. Lowercase = yank: pressing the label letters yanks the matched text to the clipboard via `pbcopy` and exits. Uppercase = "open" intent, dispatched per match kind: URL → system handler (`open` / `xdg-open`); Path → cursor-jump in spyc; GitSha → `git show <sha>` into the pager; Custom with `url_template` → format the URL and hand off to the system handler; other kinds → fall back to yank with a flash hint naming the kind.
+
+The 2-letter case adds the `open_intent` sticky bit: an uppercase first keystroke preserves the open-intent across the second keystroke, so `Ab` opens (same as `aB` or `AB`). In the 1-letter case the sticky bit is unused — the single keystroke commits directly with case-as-intent.
+
+**The match kinds and built-in patterns.**
+
+Five kinds. The built-in regexes (in `build_patterns` order, which determines overlap precedence — earlier patterns win on overlap):
+
+- `URL_PATTERN`: `r"https?://\S+"`. Trailing punctuation (`.`, `,`, `;`, `:`, `!`, `?`, `]`, `}`, `>`) is trimmed via `trim_url`; parens are deliberately *not* trimmed because "many real URLs have balanced parens (Wikipedia, MSDN). This errs on capturing slightly too much rather than silently dropping a URL char."
+- `GIT_SHA_PATTERN`: `r"\b[0-9a-f]{7,40}\b"`. Lower bound is git's `--short` default; upper bound rules out 64-hex SHA-256 hashes "that aren't SHAs (commonly seen in Cargo.lock checksums)."
+- `IPV4_PATTERN`: `r"\b\d{1,3}(?:\.\d{1,3}){3}\b"`. Doesn't validate octet ranges ("would just refuse 256.256.256.256 etc., which never appear in real output anyway").
+- Custom patterns: user-defined via `[[scan.patterns]]` in `.spycrc.toml`, with `name`, `regex`, optional `url`. Bad regexes are dropped at config load with a debug-log note; "one typo never blocks startup."
+- `PATH_PATTERN`: `r"[\w./~][\w./~+\-]*/[\w./~+\-]+"`. Last in the precedence order (broadest, most likely to over-match other things).
+
+The regex compile happens once at config load via `build_patterns`; `RegexSet` is deliberately not used because "it tells us *which* regexes matched but not *where*, and we need the spans to place labels."
+
+**The `pickable_text` helper and the `gf`/`gF` side-fix.**
+
+`src/pane/mod.rs` gains a new method on `Pane`:
+
+```
+pub fn pickable_text(&mut self, recent_n: usize) -> Vec<String> {
+    if self.is_scrolling() {
+        self.visible_lines()
+    } else {
+        self.recent_lines(recent_n)
+    }
+}
+```
+
+The doc-comment names the design contract: "Text that interactive pickers (`gf`/`gF`, `^a u`) should scan: what the user is currently looking at. While scrolling, that is the exact visible viewport at the user's scroll position; while live, we widen to the last `recent_n` lines so paths/URLs that just rolled past the bottom are still findable. Without this distinction, scanning from a fixed slice means a user who scrolled up to find a URL would have it ignored — the picker would read a different region than their eyes."
+
+The helper has two callers in PR #10's diff: the new quick-select scanner and the rerouted `gf`/`gF` path. The pre-existing `goto_file_from_pane` had a bug — it temporarily forced scrollback to its deepest position, breaking path-scan in scroll mode. The fix routes through `pickable_text` instead, getting "follows the user's eye" for free.
+
+The side-fix is bundled with the feature because they share infrastructure. From PR #10's vantage the two halves read as one structural move (introduce `pickable_text` as the contract for "what the picker should scan") with two consumers; from outside, the bundling is the kind of thing the eventual insight layer's drift catalogue might note (a `feat:` PR carrying a `### Fixed` block).
+
+**Catalogue §4 alignment — parallel pattern, not direct execution.**
+
+Arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) names PR #10 alongside PR #8 as "parallel-but-different" — picker-shaped overlays that don't extend `PagerView::picker_items`. That disposition holds against the diff.
+
+Three structural distances from §4's specific shape:
+- The picker structure lives on `Pane`-adjacent code, not on `PagerView`. `QuickSelect` is in `src/pane/quick_select.rs`, alongside `pane/input.rs` and `pane/widget.rs`; it is co-located with the rest of the pane code because, per the module doc-comment, "Quick Select is only meaningful when there's a pty pane to scan, and its input is the pane's visible text grid." `PagerView` is not involved.
+- The dispatch shape is case-as-intent, not Enter-to-fire. Lowercase-vs-uppercase dispatches to two different intents (yank vs open) per single keystroke. §4's pattern envisions Enter as the dispatch trigger over a `Vec<(Label, Action)>` substrate. Quick select's dispatch is per-label-keystroke, not per-Enter.
+- The action substrate is closed and kind-typed. `Match::kind` is an enum (`Url` / `Path` / `GitSha` / `Ipv4` / `Custom { url_template }`), and the open-intent dispatch is a switch on the kind — not a generalized `Action` slot. §4's `Vec<(Label, Action)>` envisions the substrate as parametric over any `Action`; quick-select dispatches based on what kind of thing was matched, not what action was attached.
+
+The arc-02 disposition holds: **PARALLEL PATTERN**, not direct execution of §4. This entry back-references arc 02's investigation entry to confirm the disposition against the diff.
+
+Cross-arc parallel-pattern partners are the same as for PR #8: arc 05's PR #33 entry (= 01KR2AAX12XSNRNZPTXJT2TXJA, DIRECTION ALIGNMENT) and PR #35 entry (= 01KR2AD5PV989H58E49E5D18NM, DIRECTION ALIGNMENT) hold §4 alignment from the pager-as-mode side; PR #8 and PR #10 hold parallel pattern from the standalone-overlay side. Arc 05's closure (= 01KR2AJVZA1E85YSKHF4FNRQQ3) and story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) carry the cumulative reading: four PRs, two arcs, zero `picker_items` execution.
+
+**Catalogue §1 disposition — refutation, honestly.**
+
+Catalogue §1 ("Numbered panels & direct-jump") could be expected to apply to a labeled-overlay picker; the framing entry flagged the question. Reading PR #10's diff against §1's shape: the labels are alphabetic (`a`..`z` minus `q`/`j`/`k`), not numeric. The catalogue's §1 pattern is specifically lazygit's `[N]-Status`, `[N]-Files` etc. with `1`..`5` as direct-jump targets to top-level panels; the catalogue ranks §1 **skip** for spyc on the grounds that "spyc has exactly two top-level surfaces (list, pane) where lazygit has five, so `1` and `2` would be wasted on a binding that `^W j`/`^W k` already covers cleanly. The `[N+]`/`[N●]` task-divider glyphs (DESIGN.md) already use single digits in titles for *task* numbers; hijacking `1`..`9` globally would collide."
+
+PR #10 doesn't ship numbered direct-jumps to anything. The labeled-overlay picker is structurally a different idiom: ephemeral 1- or 2-letter labels assigned per match per scan, alphabetic alphabet, case-as-intent dispatch. The §1 SKIP recommendation is not invalidated by PR #10's existence; PR #10 is not a §1 instance. The relevant catalogue cross-reference for PR #10 is §4, not §1.
+
+(One minor surface where digits *do* reach the pane via PR #10: the GitSha pattern matches 7-40 hex characters, including digits. But that's regex content matching, not numeric-direct-jump labels in the §1 sense.)
+
+**Drift findings flagged for the insight layer**:
+
+- The `feat/quickselect` PR ships a `### Fixed` half (`gf`/`gF` scroll-mode honoring) bundled under the feature slug. The bundling pattern recurs in this arc: PR #25 below also bundles a defensive fix with diagnostic infrastructure. Captured for the eventual insight layer's bundle-shape catalogue. Arc 04's PR #15 entry already named one such bundle from the git side (a pane-control fix bundled with a git-marker leak fix); the bundle pattern is recurring, not one-off.
+- The `pickable_text` helper is the kind of contract-introducing shape that becomes structural infrastructure when a third caller arrives — quick-select and `gf`/`gF` are two callers; whether a future picker (a hypothetical `^a o` for OSC-8 hyperlinks, etc.) joins or whether `pickable_text` stays at two consumers is determinable only outside the 22-day window.
+- The "labels go stale on scroll" close-on-pane-growth behavior named in the doc-comment is a specific design choice with alternatives (re-scan on growth, freeze the snapshot, scroll-lock the pane). Whether the close-on-growth choice gets revisited is fuel for the insight layer if a recurrence shows up.
+
+Provenance:
+- 9043547 (PR #10 feat/quickselect, 2026-05-02).
+- `git diff 9043547^1..9043547^2 -- CHANGELOG.md`: `### Added` and `### Fixed` entries quoted verbatim above.
+- `git show 9043547^2:src/pane/quick_select.rs` (436 lines, new module): `QuickSelect` struct definition; `MatchKind` enum (Url/Path/GitSha/Ipv4/Custom); `ALPHABET` constant with reserved-keys doc-comment quoted verbatim above; `assign_labels` implementation and 1-vs-2-letter logic; `build_patterns` overlap-precedence ordering; `URL_PATTERN`, `GIT_SHA_PATTERN`, `IPV4_PATTERN`, `PATH_PATTERN` constants.
+- `git diff 9043547^1..9043547^2 -- src/pane/mod.rs`: new `pickable_text` method on `Pane` (quoted in full above); `quick_select` module declaration.
+- `git diff 9043547^1..9043547^2 -- src/keymap/action.rs`: new `Action::QuickSelectOpen` variant with comment "^a u — scan visible pane, label matches, pick to yank/open".
+- `git diff 9043547^1..9043547^2 -- src/keymap/resolver.rs`: `^a` chord prefix gains `KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen)` arm.
+- `git diff 9043547^1..9043547^2 -- BUGS.md`: SMALL entry "we should steal some ideas from https://wezterm.org/ e.g. simple visual picker for urls / id's from the terminal view" removed (2 lines).
+- `git diff 9043547^1..9043547^2 -- src/config/mod.rs`: 49 lines added for `[[scan.patterns]]` config schema.
+- `Cargo.toml:3` post-merge: `version = "1.40.0"` (1.39.0 → 1.40.0 minor cut, two minor cuts on the same calendar day).
+- `notes/lazygit-ux-catalogue.md` §1 (skip recommendation; numbered-panels rationale "spyc has exactly two top-level surfaces" / "hijacking `1`..`9` globally would collide" — quoted verbatim above), at `git show 0691666:notes/lazygit-ux-catalogue.md`.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 source; PR #10 named at this entry as "parallel-but-different" / parallel pattern).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract: PR #8 / PR #10 to arc 02 mandatory).
+- `history-arc-05-pager-surface` PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA (cross-arc DIRECTION ALIGNMENT partner — pager-as-mode side).
+- `history-arc-05-pager-surface` PR #35 entry = 01KR2AD5PV989H58E49E5D18NM (cross-arc DIRECTION ALIGNMENT partner — pager-launchable-from-listing side).
+- `history-arc-05-pager-surface` closure = 01KR2AJVZA1E85YSKHF4FNRQQ3 (cumulative §4 reading after arc 05).
+- `history-arc-05-pager-surface` story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (deferred §4 question to insight layer).
+- `history-arc-04-git-integration` PR #15 entry (bundle-shape precedent for bundled fix-with-feature; arc 04's narration of the pane-control + git-marker leak bundle).
+- `history-arc-06-input-and-overlays` framing entry = 01KR2G8042HWE419X0ESWKN205.
+- `history-arc-06-input-and-overlays` PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W (sibling phase-α entry; same parallel-pattern disposition with §4).
+
+<!-- Entry-ID: 01KR2GH1D9QCGDPZEMWW09R898 -->
