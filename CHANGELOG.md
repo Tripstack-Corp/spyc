@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Spawned panes now advertise `COLORTERM=truecolor`.** Reported by
+  Gemini code review: `TERM=xterm-256color` alone doesn't tell apps
+  that negotiate truecolor (bat, fzf, delta, lazygit, …) that the
+  surrounding terminal can render 24-bit color, so they silently
+  downgrade their palette to 256. portable-pty inherits the parent
+  env so it usually leaks through, but "usually" depends on which
+  terminal launched spyc. Set it explicitly in `pane::spawn_with_env`
+  alongside `SPYC_CONTEXT` so panes are consistent regardless of host
+  terminal. Background-task capture (TERM=dumb) is unaffected — it
+  builds its own env and is non-interactive by design.
+
 - **Switching pane tabs (`^a-n` / `^a-p` / `^a-1..9`) now pulls
   focus into the pane.** Reported: switching tabs from the
   file-list-focused state changed the active tab but kept focus
