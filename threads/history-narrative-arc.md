@@ -161,3 +161,54 @@ Provenance:
 - `insight-emergent-properties` Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z (artifact-grain property named).
 
 <!-- Entry-ID: 01KR4CM50GPNZ5JEK5J94SA8Z1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:13:46.322647+00:00
+Role: scribe
+Type: Note
+Title: PR #18 to PR #37: a bracket that opens with a BUGS.md note and closes with a 21-line policy comment
+
+Spec: scribe
+
+tags: #narrative #final
+
+Arc 07 has four PRs over two calendar days. Considered as a single closed arc, what it does is widen spyc's MCP bridge from one AI peer to two while hardening its discovery against cross-project attachment. Considered as a story, what it does is open a bracket on Day 6, expand the codepath the bracket guards across Day 6 and Day 7, and close the bracket on Day 8. The bracket structure is the cleanest example in the network of stated-plan-meets-execution at a single-arc grain.
+
+The bracket opens at PR #18 (`chore/agents-md-and-mcp-hygiene`, commit bad8bfc, 2026-05-05). Inside its `chore/`-prefixed bundle, three substantive things happen at once. The agent-instructions file is renamed `CLAUDE.md` to `AGENTS.md`. `Pane::spawn` and `Pane::spawn_with_env` widen to take a `context_path: &Path` parameter, threaded through every overlay and pane spawn from one canonical place — App writes one `<start_dir>/.spyc-context-<pid>.json` per spyc instance, full stop. And a 13-line note appears at the top of `BUGS.md`'s SMALL bucket:
+
+> *"MCP socket discovery can attach to the wrong spyc instance. When `$SPYC_MCP_SOCK` is unset (e.g. `claude` launched outside spyc's pane, env didn't propagate, or the local `.mcp.json` was suppressed by enterprise managed-mcp), `discover_live_socket` in `src/mcp.rs:153` returns the first connectable `~/.local/state/spyc/mcp-*.sock` it finds — could be any other spyc on the host, including another user's. Conflicts with the multi-instance isolation model. Design fixes worth weighing: (a) require explicit `$SPYC_MCP_SOCK`, no discovery fallback; (b) gate discovery on a per-project marker (e.g. only accept sockets whose context file's project_root matches the caller's cwd); (c) include user/uid in the socket path. Option (b) feels most spyc-shaped — keeps the 'just works' ergonomics while ruling out cross-instance attachment."* (commit bad8bfc, 2026-05-05.)
+
+That's the open side. A bug, three weighted design options, a marked preferred option, an ergonomic preservation rule named in the same paragraph.
+
+Then the codepath the bracket guards expands. Twenty-six minutes after PR #18, PR #19 (`feat/codex-resume`, commit d6d3088, 2026-05-05) introduces a peer-agnostic data model — one `AgentKind` enum, two field-renames with serde aliases for old saves, one `effective_kind()` that infers Claude for legacy data — sitting above two parallel parsers, two parallel command-strippers, two restore-spawn paths that branch by kind. Forty-six minutes after that, PR #21 (`feat/codex-mcp-config`, commit 193f7ad, 2026-05-05) ships the codex-side `ensure_codex_config_toml` directly below the existing `ensure_mcp_json` in `src/mcp.rs`, with a doc-comment opening *"Codex's equivalent of `ensure_mcp_json`. Writes a stdio MCP entry for spyc into `<dir>/.codex/config.toml` so the codex CLI discovers us automatically, the same way claude does via `.mcp.json`. The registration re-execs `spyc --mcp` and forwards through to the same Unix socket as the claude side, so a single MCP server backs both agents."* (commit 193f7ad, 2026-05-05.)
+
+One socket, two registration files, two parsers, two CLI mechanics. The substrate is genuinely shared; the registration layer is parallel. The arc-07 story-tail named this distinction precisely: the substrate widens to be peer-shape-agnostic; the registration layer stays peer-specific. The doc-comments on the matched-pair functions repeat the word *mirrors* twice; "parallel by design, not waiting for refactor" is the chosen shape.
+
+Two days later, PR #37 (`fix/mcp-socket-project-scoped-discovery`, commit a303251, 2026-05-07) closes the bracket. The function `discover_live_socket` is replaced wholesale: pre-PR, 16 lines that scanned every `mcp-*.sock` on the host and returned the first connector; post-PR, a 21-line doc-comment plus a project-scoped walk implementing exactly option (b) from PR #18's BUGS.md note. The 21-line policy comment at the new function reads:
+
+> *"Project-scoped discovery: walk `caller_cwd` upward looking for any `.spyc-context-<pid>.json` markers (each is written by a running spyc rooted at that directory — see `context::context_path`). The first ancestor with at least one marker is the 'project boundary'; only those PIDs become candidates. We never aggregate across levels: a parent-dir spyc shouldn't shadow a child-dir spyc when both exist. Why this shape: prior to this fix, discovery scanned every socket in `~/.local/state/spyc/` and returned the first connectable one, happily attaching a claude in project A to a spyc running in project B (or even another user's spyc, depending on `$HOME` scoping). Project-scoped discovery rules that out while keeping the 'claude launched outside the pane just works' ergonomic — as long as it's launched somewhere inside the spyc instance's tree."* (commit a303251, 2026-05-07.)
+
+The marker file the walk reads — `.spyc-context-<pid>.json` — is the file PR #18 made canonical. The 13-line BUGS.md SMALL entry PR #18 added is removed in the same diff, alongside an older 2-line entry that predates the window. A new `(fixed, v1.41.24)` block names both as resolved.
+
+The mechanical link between PR #18 and PR #37 lives in the file naming convention's role across two diffs. If PR #18 had not threaded `context_path` through every pane spawn, the markers PR #37 walks for would not reliably exist at the directory PR #37 walks from. The two diffs together form the single architectural rule "one spyc instance writes one marker at one canonical place, and discovery walks from the caller's cwd to find it"; neither diff completes the rule alone. Neither commit message names the dependency on the other.
+
+What makes the bracket diagnostic — and worth pausing on — isn't that PR #18 named the bug and PR #37 fixed it. That's normal hygiene. The diagnostic part is that PR #18 also made the file the fix would consume canonical, in the same chore bundle, before the codex-parity expansion that increased the urgency of fixing the bug ran. A bug that lets a claude in project A attach to a spyc running in project B becomes structurally worse when the very same `discover_live_socket` walk would now also let codex in project A attach to a spyc running in project B's claude-only or codex-only context. The expansion phase didn't *cause* the bug; the bug was already there. The expansion increased the number of attack surfaces enough that the fix-as-deferred became fix-as-must-ship-this-arc. What's visible in the diffs is that the order *is* set-up, expand, knock-down; the BUGS.md note pre-existed the codex-parity expansion that made the note mandatory; the canonical marker file PR #37 needed was already in the codebase by the time PR #19 and PR #21 widened the codepath that fed it.
+
+The narrative worth attaching to the bracket, beyond the per-PR and arc-tail accounts, is that this is the only stated-plan in the entire 22-day window where the open side carries weighted design options and the close side implements the marked one. Everything else in `insight-trajectory`'s eight stated-plan documents either skips the positive recommendation (catalogue §1, §3-log-half, §6, §7), executes in modified shape (catalogue §2, §3-tip-half, §4, §5; ROADMAP additions #1, #2, #3), or honors the negative recommendation (charter non-goals, advisory ignores). The PR #18 → PR #37 bracket is the only positive recommendation in the window that lands in its specified shape. The reason the trajectory thread does not promote it to "exact-state honor" is that the recommendation is internal to a single PR pair's BUGS.md text, not a pre-existing stated-plan document the maintainer authored at a different vantage.
+
+That distinction is small but not unimportant. The bracket reads as the project's working pattern for tracked design-work-deferred-then-knocked-down at single-arc grain. It is what stated-plan documents at multi-arc-grain do *not* do in this window.
+
+Provenance:
+- bad8bfc (PR #18 chore/agents-md-and-mcp-hygiene, 2026-05-05) — BUGS.md SMALL entry verbatim above; `Pane::spawn` `context_path` parameter.
+- d6d3088 (PR #19 feat/codex-resume, 2026-05-05) — peer-agnostic data model; parallel parsers / command-strippers.
+- 193f7ad (PR #21 feat/codex-mcp-config, 2026-05-05) — `ensure_codex_config_toml` mirror function; doc-comment verbatim above.
+- a303251 (PR #37 fix/mcp-socket-project-scoped-discovery, 2026-05-07) — closing the bracket; 21-line policy comment verbatim above; BUGS.md cleanup.
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (the BUGS.md SMALL entry; the `context_path` parameter widening; mechanical-link foreshadowing).
+- arc-07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ (the close side; named-then-fixed bracket completed; 21-line policy comment).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (substrate-shared / registration-parallel framing; "the substrate is genuinely shared" verbatim).
+- `insight-recurrence` Pattern 4 = 01KR3D5B59F5DX6BZZPB1VTQB3 (the named-then-fixed bracket pattern; this is one of three instances).
+- `insight-trajectory` Document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (substrate-vs-registration distinction; charter "Claude" word partial widening).
+- `insight-emergent-properties` Property 4 = 01KR3HQCRV761KG6CVD6T11QNM (additive-substrate / parallel-registration property at artifact grain).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (cites PR #37 as "Recently-strengthened invariant (v1.41.24)").
+
+<!-- Entry-ID: 01KR4CQ8PP53V6QFDYVYAQD37A -->
