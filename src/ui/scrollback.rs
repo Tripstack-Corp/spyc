@@ -35,10 +35,13 @@ use ratatui::{
 use crate::pane::cell_style;
 
 /// Snapshot the whole vt100 buffer (scrollback + live screen) as
-/// styled lines, in chronological order (oldest first). Trailing
-/// blank lines and trailing-whitespace runs within a line are
-/// trimmed so the result reads like a vi buffer rather than a
-/// fixed-grid screen dump.
+/// styled lines, in chronological order (oldest first). The live-
+/// screen portion is preserved verbatim — including blank rows
+/// below the cursor — so the snapshot mirrors the on-screen
+/// geometry the user just had in front of them. Trailing-
+/// whitespace runs within a single row are dropped because vt100
+/// pads short rows with spaces out to the full column width and
+/// that's a fixed-grid artifact, not user content.
 ///
 /// `&mut Screen` is required because the implementation walks the
 /// scrollback by adjusting `scrollback_offset`; the original
@@ -79,13 +82,16 @@ pub fn lines_from_scrollback(screen: &mut vt100::Screen) -> Vec<Line<'static>> {
 
     screen.set_scrollback(saved_offset);
 
-    // Drop trailing blank lines so the pager's [EOF] marker lands
-    // right under the last content row instead of after a stretch
-    // of empty cells the live screen happened to be padded with.
-    while out.last().is_some_and(line_is_blank) {
-        out.pop();
-    }
-
+    // Deliberately do NOT trim trailing blank lines. The live
+    // screen often has the cursor mid-grid with empty rows below
+    // (a shell prompt sitting at row 5 of 24, blank rows 6..23).
+    // Trimming those would chop the snapshot's bottom up to the
+    // cursor row and the pager's "scroll to bottom on entry"
+    // would then anchor at the cursor row — visually shifting
+    // content up vs. what was just on screen. Reported as "the
+    // positioning of text jumps when entering ^a-v". Mirroring
+    // the screen geometry verbatim makes ^a-v feel like a frozen
+    // copy of the live pty.
     out
 }
 
@@ -158,12 +164,6 @@ fn trim_trailing_whitespace_run(spans: &mut Vec<Span<'static>>) {
     }
 }
 
-fn line_is_blank(line: &Line<'_>) -> bool {
-    line.spans
-        .iter()
-        .all(|s| s.content.chars().all(|c| c == ' ' || c.is_whitespace()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,26 +182,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_buffer_yields_empty_vec() {
+    fn empty_buffer_yields_blank_live_rows() {
+        // 4-row screen, no input → 4 blank live rows. We
+        // deliberately preserve them so the pager mirrors the
+        // on-screen geometry: an empty live screen renders as
+        // empty rows in the pager, not as nothing.
         let mut p = parser_with(4, 20, 100, b"");
         let lines = lines_from_scrollback(p.screen_mut());
-        // Live screen is 4 rows of all-spaces; trailing-blank trim
-        // should drop them all.
-        assert!(lines.is_empty(), "got: {:?}", plain_lines(&lines));
+        let plain = plain_lines(&lines);
+        assert_eq!(plain, vec!["", "", "", ""]);
     }
 
     #[test]
-    fn live_screen_only_lines_appear_in_order() {
+    fn live_screen_lines_appear_in_order_with_blank_tail() {
+        // 4-row screen with 3 lines of content; cursor lands on
+        // row 3 (blank). The blank row is preserved so the
+        // snapshot reflects what the user just saw.
         let mut p = parser_with(4, 20, 100, b"alpha\r\nbeta\r\ngamma\r\n");
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
-        assert_eq!(plain, vec!["alpha", "beta", "gamma"]);
+        assert_eq!(plain, vec!["alpha", "beta", "gamma", ""]);
     }
 
     #[test]
     fn scrollback_lines_appear_before_live_lines() {
         // 2-row screen with 100-line scrollback. Push 6 lines so
-        // 4 spill into scrollback and 2 remain live.
+        // 4 spill into scrollback and 2 remain live. The trailing
+        // CRLF leaves the cursor on a blank live row, which we
+        // preserve verbatim — that's the on-screen geometry.
         let mut p = parser_with(
             2,
             20,
@@ -210,17 +218,21 @@ mod tests {
         );
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
-        assert_eq!(plain, vec!["one", "two", "three", "four", "five", "six"]);
+        assert_eq!(
+            plain,
+            vec!["one", "two", "three", "four", "five", "six", ""]
+        );
     }
 
     #[test]
     fn trailing_padding_trimmed_within_line() {
         // Cell-grid emulator pads to cols=20. We emit "hi" (2
-        // chars), not "hi" + 18 spaces.
+        // chars), not "hi" + 18 spaces. The trailing CRLF leaves
+        // the second row blank, which we preserve.
         let mut p = parser_with(2, 20, 0, b"hi\r\n");
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
-        assert_eq!(plain, vec!["hi"]);
+        assert_eq!(plain, vec!["hi", ""]);
     }
 
     #[test]
@@ -241,7 +253,8 @@ mod tests {
     fn paged_walk_is_chunked_correctly() {
         // 3-row screen, lots of content. Tests that the page-walk
         // doesn't double-read or skip rows when scrollback_len is
-        // not a multiple of rows_len.
+        // not a multiple of rows_len. Trailing CRLF leaves a blank
+        // live row at the end, preserved verbatim.
         let payload: String = (1..=20).fold(String::new(), |mut acc, i| {
             use std::fmt::Write as _;
             let _ = write!(acc, "line{i:02}\r\n");
@@ -250,18 +263,21 @@ mod tests {
         let mut p = parser_with(3, 20, 100, payload.as_bytes());
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
-        let expected: Vec<String> = (1..=20).map(|i| format!("line{i:02}")).collect();
+        let mut expected: Vec<String> = (1..=20).map(|i| format!("line{i:02}")).collect();
+        expected.push(String::new());
         assert_eq!(plain, expected);
     }
 
     #[test]
     fn styled_text_preserves_colors() {
-        // Red "hi" — verify the resulting line has at least one
-        // span with a red foreground.
+        // Red "hi" — verify the result has a red span. No trailing
+        // CRLF here so the cursor stays on the content row and the
+        // first emitted line is the styled one (the second row is
+        // a blank live row, still preserved).
         use ratatui::style::Color;
-        let mut p = parser_with(2, 20, 100, b"\x1b[31mhi\x1b[0m\r\n");
+        let mut p = parser_with(2, 20, 100, b"\x1b[31mhi\x1b[0m");
         let lines = lines_from_scrollback(p.screen_mut());
-        assert_eq!(lines.len(), 1);
+        assert!(!lines.is_empty(), "expected at least one line");
         let red_span = lines[0]
             .spans
             .iter()
@@ -274,9 +290,11 @@ mod tests {
     fn adjacent_same_style_cells_merge_into_one_span() {
         // No styling means every cell shares Style::default(); they
         // should land in a single span, not 5 single-char spans.
-        let mut p = parser_with(2, 20, 100, b"hello\r\n");
+        // Drop the trailing CRLF so the cursor stays on the content
+        // row — keeps the test focused on the merge behavior.
+        let mut p = parser_with(2, 20, 100, b"hello");
         let lines = lines_from_scrollback(p.screen_mut());
-        assert_eq!(lines.len(), 1);
+        assert!(!lines.is_empty());
         assert_eq!(
             lines[0].spans.len(),
             1,
@@ -290,11 +308,13 @@ mod tests {
     fn scrollback_smaller_than_one_page_works() {
         // 5-row screen; only 2 lines of input → no scrollback
         // overflow. The page-walk's `while remaining > 0` should
-        // skip cleanly and we still get the live rows.
+        // skip cleanly and we still get the live rows. Trailing
+        // CRLF leaves the next 3 live rows blank, preserved
+        // verbatim.
         let mut p = parser_with(5, 20, 100, b"a\r\nb\r\n");
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
-        assert_eq!(plain, vec!["a", "b"]);
+        assert_eq!(plain, vec!["a", "b", "", "", ""]);
     }
 
     #[test]

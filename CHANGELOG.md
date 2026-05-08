@@ -5,6 +5,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-v` snapshot now mirrors the live screen geometry.**
+  Reported: opening pane scrollback via `^a-v` made text "jump"
+  vertically and the latest pty output (e.g. claude HUD plugin
+  paint) was missing from the snapshot. Two fixes:
+  1. Drain pending bytes from the reader thread into the vt100
+     parser *before* snapshotting, so output that arrived between
+     the last render and the user pressing `^a-v` is captured.
+  2. Stop trimming trailing blank live rows from the snapshot.
+     The live screen often has the cursor mid-grid with empty
+     rows below (a shell prompt at row 5 of 24, blank rows
+     6..23). Trimming them anchored the pager at the cursor row
+     and shifted content up vs. what was just on screen.
+     Mirroring the screen verbatim makes `^a-v` feel like a
+     frozen copy of the live pty.
+
+- **`v` (edit) from a `LowerPane`/`TopPane` pager returns to
+  the same slot, not a centered overlay.** Reported: editing
+  from the lower-pane scrollback view, then quitting `$EDITOR`,
+  re-opened the buffer as a centered popup (regression, the
+  `mount` field was reset to default `Overlay`). `PagerReturn`
+  now carries `mount` and `pane_scroll` across the round-trip,
+  so the post-edit pager lands back in the original slot with
+  the original Esc semantics.
+
+- **`:pane-to-task N` (numeric arg form) now works.** Reported
+  as "unknown command: pane-to-task 2". Phase 6c shipped only
+  the no-arg form (active tab); the numeric arg form lets you
+  demote a specific tab by 1-indexed number, matching the
+  divider's `[1]` `[2]` labels. Out-of-range numbers flash a
+  clear error.
+
 ### Added
 - **`:pane-to-task` — demote the active pane tab to a background
   task.** v1.5 Phase 6c, the symmetric inverse of `:task-to-pane`.

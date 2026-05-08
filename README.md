@@ -121,7 +121,8 @@ restores all pane tabs and resumes Claude conversations via
 | `gg` / `G` | Top / bottom |
 | `d` / `Enter` | Descend into dir or view file in pager |
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
-| `V` | Open `$EDITOR` in top pane (Claude pane stays visible) |
+| `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
+| `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental, glob-aware) |
 | `H` / `~` | Jump to home |
@@ -181,7 +182,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a P` | Pipe file contents to pane |
 | `^a z` | Zoom pane (fullscreen toggle) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
-| `^a v` | Scroll mode (10K line scrollback) |
+| `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
@@ -189,8 +190,21 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 ### Pager
 
 Press `d` or `Enter` on a file to view it in the built-in pager with
-syntax highlighting, search, line numbers, hex dump, and ANSI color
-support. Press `?` inside the pager for its own help overlay.
+syntax highlighting, search, line numbers, hex dump, markdown
+rendering, and ANSI color support. Press `?` inside the pager for
+its own help overlay.
+
+The pager is more than a centered overlay — it can also mount
+in-place:
+
+- **`D`** opens the cursor file in the **top pane** (bottom pane
+  stays visible alongside).
+- **`^a v`** mounts a frozen snapshot of pane scrollback in the
+  **bottom pane**.
+
+Inside the pager: `/` search with `n`/`N`, `:N` jump-to-line,
+`V` enters visual line mode (`y` yanks the line range), `^v`
+enters visual block mode for rectangular selection.
 
 ### Shell
 

@@ -226,9 +226,16 @@ enum PagerReturn {
         path: PathBuf,
         title: String,
         scroll: u16,
+        mount: crate::ui::pager::Mount,
+        pane_scroll: bool,
     },
     /// On-disk file: reopen from the original path.
-    SourceFile { path: PathBuf, scroll: u16 },
+    SourceFile {
+        path: PathBuf,
+        scroll: u16,
+        mount: crate::ui::pager::Mount,
+        pane_scroll: bool,
+    },
 }
 
 pub struct Prompt {
@@ -1561,6 +1568,8 @@ impl App {
                                         path,
                                         title,
                                         scroll,
+                                        mount,
+                                        pane_scroll,
                                     } => {
                                         if let Ok(content) = std::fs::read_to_string(&path) {
                                             let lines: Vec<String> =
@@ -1568,11 +1577,18 @@ impl App {
                                             let mut view = PagerView::new_plain(title, lines);
                                             view.scroll = scroll;
                                             view.saveable = true;
+                                            view.mount = mount;
+                                            view.pane_scroll = pane_scroll;
                                             self.pager = Some(view);
                                         }
                                         let _ = std::fs::remove_file(&path);
                                     }
-                                    PagerReturn::SourceFile { path, scroll } => {
+                                    PagerReturn::SourceFile {
+                                        path,
+                                        scroll,
+                                        mount,
+                                        pane_scroll,
+                                    } => {
                                         let name = path
                                             .file_name()
                                             .unwrap_or_default()
@@ -1584,6 +1600,8 @@ impl App {
                                             let mut view = PagerView::new_plain(name, lines);
                                             view.source_path = Some(path);
                                             view.scroll = scroll;
+                                            view.mount = mount;
+                                            view.pane_scroll = pane_scroll;
                                             self.pager = Some(view);
                                         }
                                     }
@@ -4092,6 +4110,18 @@ impl App {
             let _ = self.apply(&Action::Date);
             return PostAction::None;
         }
+        // :dump-scrollback — diagnostic for the v1.5 ^a-v
+        // snapshot path. Drains the active pane and writes the
+        // resulting snapshot (as plain text, one line per row) to
+        // /tmp/spyc-scrollback.txt. Useful when content visible on
+        // the live pane (e.g. a HUD plugin overlay) seems to go
+        // missing in the pager view — `cat /tmp/spyc-scrollback.txt
+        // | tail` shows whether the bytes are actually reaching
+        // our vt100 emulator at snapshot time.
+        if input == "dump-scrollback" {
+            self.dump_scrollback_snapshot();
+            return PostAction::None;
+        }
         // :graveyard — open the graveyard viewer (typed alias for `gy`).
         if input == "graveyard" {
             self.state.open_graveyard_view();
@@ -4136,13 +4166,35 @@ impl App {
             return PostAction::None;
         }
 
-        // :pane-to-task — demote the active pane tab to a
-        // background task (v1.5 Phase 6c). Inverse of
-        // `:task-to-pane`. The pty keeps running; we just stop
-        // displaying it, and the user can return to it via `:fg`
-        // or `:task-to-pane`.
+        // :pane-to-task [N] — demote a pane tab to a background
+        // task (v1.5 Phase 6c). Inverse of `:task-to-pane`. The
+        // pty keeps running; we just stop displaying it, and the
+        // user can return to it via `:fg` or `:task-to-pane`. No
+        // arg = active tab; numeric arg = 1-indexed tab number
+        // (matches the divider's `[1]` `[2]` labels).
         if input == "pane-to-task" {
             self.demote_pane_to_task();
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("pane-to-task ") {
+            match arg.trim().parse::<usize>() {
+                Ok(n) if n >= 1 => {
+                    let idx = n - 1;
+                    let len = self.pane_tabs.as_ref().map_or(0, PaneTabs::len);
+                    if idx >= len {
+                        self.state
+                            .flash_error(format!("pane-to-task: no tab #{n} (have {len})"));
+                    } else {
+                        if let Some(tabs) = self.pane_tabs.as_mut() {
+                            tabs.switch_to(idx);
+                        }
+                        self.demote_pane_to_task();
+                    }
+                }
+                _ => self
+                    .state
+                    .flash_error(format!("pane-to-task: expected tab number (got {arg:?})")),
+            }
             return PostAction::None;
         }
 
@@ -6083,6 +6135,44 @@ impl App {
     /// "no scrollback" hint and skip opening the pager — there's
     /// genuinely nothing to scroll back through, and the app's own
     /// history viewer is the right tool.
+    /// `:dump-scrollback` diagnostic. Runs the same drain +
+    /// snapshot path as `^a-v`, then writes the captured lines as
+    /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to
+    /// confirm whether content visible on the live pane (HUD
+    /// overlays, etc.) is actually reaching our vt100 emulator at
+    /// snapshot time.
+    fn dump_scrollback_snapshot(&mut self) {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            self.state.flash_error("dump-scrollback: no pane open");
+            return;
+        };
+        let active = tabs.active_mut();
+        for _ in 0..3 {
+            active.drain_output();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        active.drain_output();
+        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let path = std::path::Path::new("/tmp/spyc-scrollback.txt");
+        let mut out = String::new();
+        for line in &lines {
+            for span in &line.spans {
+                out.push_str(&span.content);
+            }
+            out.push('\n');
+        }
+        match std::fs::write(path, &out) {
+            Ok(()) => {
+                self.state
+                    .flash_info(format!("wrote {} lines to {}", lines.len(), path.display()));
+            }
+            Err(e) => {
+                self.state
+                    .flash_error(format!("dump-scrollback: write failed: {e}"));
+            }
+        }
+    }
+
     fn open_pane_scroll_pager(&mut self) {
         let Some(tabs) = self.pane_tabs.as_mut() else {
             return;
@@ -6097,6 +6187,28 @@ impl App {
                 .flash_info("scroll: alt-screen app, no scrollback (use the app's own history)");
             return;
         }
+        // Drain pending bytes into the vt100 parser before
+        // snapshotting. The reader thread reads the OS pipe and
+        // posts to a channel; `drain_output` pulls everything in
+        // the channel (non-blocking try_recv). But bytes that hit
+        // the OS pipe between the last render tick and the user
+        // pressing `^a-v` may still be in flight — read by the
+        // reader thread but not yet posted, OR in the OS pipe but
+        // not yet read.
+        //
+        // Drain in a short loop with a small yield between
+        // iterations so the reader thread gets scheduled and can
+        // flush in-flight bytes. ~30 ms total worst-case wait;
+        // imperceptible on a key event but enough to capture a
+        // HUD plugin's most-recent paint that fired moments
+        // before the keypress. Reported as "the pager view does
+        // not include all of the text on screen (e.g. claude HUD
+        // plugin)".
+        for _ in 0..3 {
+            active.drain_output();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        active.drain_output();
         let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
         // Setting the pane's "is scrolling" flag keeps the existing
         // visual cues alive (divider re-color, [SCROLL] tag, tab
@@ -8509,6 +8621,12 @@ impl App {
                 let argv = shell::resolve_editor();
                 let editor_cmd = argv.join(" ");
                 let scroll = view.scroll;
+                // Preserve the v1.5 mount + pane_scroll across the
+                // editor round-trip so a `v` from the lower-pane
+                // scrollback pager doesn't return as a centered
+                // overlay (reported as a regression).
+                let mount = view.mount;
+                let pane_scroll = view.pane_scroll;
                 // Determine the file to edit and the return state.
                 let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
                     (
@@ -8516,6 +8634,8 @@ impl App {
                         PagerReturn::SourceFile {
                             path: src.clone(),
                             scroll,
+                            mount,
+                            pane_scroll,
                         },
                     )
                 } else {
@@ -8527,6 +8647,8 @@ impl App {
                                 path: tmp,
                                 title,
                                 scroll,
+                                mount,
+                                pane_scroll,
                             },
                         ),
                         Err(e) => {

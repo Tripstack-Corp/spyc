@@ -34,7 +34,7 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Directories & files",
         rows: &[
-            ("d  Enter", "enter dir / pager ($PAGER) on text file"),
+            ("d  Enter", "enter dir / open file in the in-app pager"),
             (
                 "e  v",
                 "enter dir / editor ($EDITOR) on file (suspends TUI)",
@@ -201,17 +201,23 @@ const SECTIONS: &[Section] = &[
             ("^a R", "restart active tab command"),
             ("^a +  ^a -", "grow / shrink the pane"),
             ("^a z", "zoom pane (fullscreen toggle)"),
-            ("^a v", "scroll pane history"),
+            (
+                "^a v",
+                "scroll pane history in the in-app pager (/, n/N, :N, V, ^v, y)",
+            ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             ("^a s", "send selection paths to pane stdin"),
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),
             ("Ctrl+J", "newline in pane (multi-line input)"),
-            (
-                "  default cmd",
-                "$SPYC_PANE_CMD env > [pane] default_command in .spycrc.toml > \"claude\"",
-            ),
         ],
+    },
+    Section {
+        title: "Pane default command (^a c)",
+        rows: &[(
+            "resolves",
+            "$SPYC_PANE_CMD env → [pane] default_command in .spycrc.toml → \"claude\"",
+        )],
     },
     Section {
         title: "Shell-out & commands",
@@ -221,22 +227,26 @@ const SECTIONS: &[Section] = &[
                 "capture output → pager (PTY-backed; sudo/ssh prompts work)",
             ),
             ("!!", "repeat last captured command"),
-            (
-                "  %",
-                "= cursor file (or all picks/inventory if any), shell-quoted",
-            ),
-            ("  %%", "literal percent sign"),
-            (
-                "  while running",
-                "keys → child, ^C interrupt, ^\\ kill, ^Z background",
-            ),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
-            (";", "interactive → runs in top pane (top, vim, htop)"),
+            (";", "interactive → runs in top pane (top, vim, htop, less)"),
             ("$", "drop into $SHELL in current dir"),
             (
                 ":",
                 "command line (:cd, :sort, :grep, :limit, :set, :!, :;, :q)",
             ),
+        ],
+    },
+    Section {
+        title: "Capture mode (! / !!) — substitution & runtime keys",
+        rows: &[
+            (
+                "%",
+                "cursor file (or all picks/inventory if any), shell-quoted",
+            ),
+            ("%%", "literal percent sign"),
+            ("^C", "interrupt the running capture (SIGINT to child)"),
+            ("^\\", "hard-kill the running capture"),
+            ("^Z", "send to background; resume later with :fg"),
         ],
     },
     Section {
@@ -261,16 +271,12 @@ const SECTIONS: &[Section] = &[
                 "promote a backgrounded task to a new pane tab",
             ),
             (
-                ":pane-to-task",
-                "demote the active pane tab to a background task",
+                ":pane-to-task / :pane-to-task N",
+                "demote a pane tab (active or numbered) to a background task",
             ),
             (
                 "S / C",
                 "(in task viewer) pause / continue the underlying task",
-            ),
-            (
-                "  divider glyphs",
-                "[N+] new output, [N●] running, [N⏸] paused, [N✓] exit 0, [N✗] error",
             ),
             ("g p", "reopen the most-recently-closed pager buffer"),
             (":bprev / :bnext", "walk pager buffer history back/forward"),
@@ -278,6 +284,18 @@ const SECTIONS: &[Section] = &[
                 "[b  ]b",
                 "(in pager) walk buffer history back/forward (chord)",
             ),
+        ],
+    },
+    Section {
+        title: "Divider glyphs",
+        rows: &[
+            ("[N+]", "task #N has new unread output"),
+            ("[N●]", "task #N is currently running"),
+            ("[N⏸]", "task #N is paused (SIGSTOP)"),
+            ("[N✓]", "task #N exited cleanly (status 0)"),
+            ("[N✗]", "task #N exited with error / signal"),
+            ("[SCROLL]", "lower pane is in scrollback view (^a v)"),
+            ("[ZOOM]", "the bottom pane is zoomed (^a z)"),
         ],
     },
     Section {
