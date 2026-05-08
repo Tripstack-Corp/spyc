@@ -3,3 +3,5 @@
 {"source":"entry:01KR3CSQ2YHQ2TD8EAE6DJCTS3","target":"entry:01KR3CW3DBHPTB6K8R8047TBCP","type":"followed_by"}
 {"source":"thread:insight-recurrence","target":"entry:01KR3CZEM22Y5BRT1F2VQZ6EKZ","type":"contains"}
 {"source":"entry:01KR3CW3DBHPTB6K8R8047TBCP","target":"entry:01KR3CZEM22Y5BRT1F2VQZ6EKZ","type":"followed_by"}
+{"source":"thread:insight-recurrence","target":"entry:01KR3D2G1S7DXYSPDZDRXQBPDX","type":"contains"}
+{"source":"entry:01KR3CZEM22Y5BRT1F2VQZ6EKZ","target":"entry:01KR3D2G1S7DXYSPDZDRXQBPDX","type":"followed_by"}

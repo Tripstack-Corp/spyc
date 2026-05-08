@@ -202,3 +202,68 @@ Provenance:
 - `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
 
 <!-- Entry-ID: 01KR3CZEM22Y5BRT1F2VQZ6EKZ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:00:39.877988+00:00
+Role: scribe
+Type: Note
+Title: Pattern 3: BUGS.md SMALL/MAYBE-to-FIXED lift — six verified instances across five arcs (one brief candidate dropped after verification)
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+**Pattern statement.** BUGS.md's SMALL and MAYBE buckets are the working surface for tracked-but-not-yet-fixed concerns. A landing PR that closes one of those concerns lifts the corresponding entry from SMALL/MAYBE to FIXED — typically by deleting the SMALL/MAYBE line and adding a `(fixed, v1.41.X)`-tagged FIXED block, or by editing the entry's bucket inline. The shape is: *the bucket is the queue; landing PRs drain it.* The pattern is recurrence-only; no misnaming aspect at moment of merge distinguishes it from project-shape, so it does not appear in `insight-drift`.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **Arc 02 PR #12 (genesis) — harvest creates the SMALL/BIGGER/MAYBE buckets from PR #5's gap analysis.** PR #12 (`chore/clean-notes`, commit e210e58, 2026-05-03) is the *genesis* instance: 399 lines deleted from `notes/lazygit-gap-analysis.md` and `notes/lazygit-ux-catalogue.md`; 48 lines added to BUGS.md across the SMALL bucket (cursor-block, COLORTERM, graveyard repositioning), the BIGGER bucket (mouse), and the MAYBE bucket (mode 2026, OSC 8). The harvest *creates* the entries that downstream PRs lift from. PR #12 is not itself a SMALL-to-FIXED lift; it is the upstream act that makes the recurrent lift shape possible. *Cite: arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4.*
+
+2. **Arc 05 PR #35 — `D opens pager in top pane` lifts the BUGS.md SMALL `D`-user-request to FIXED.** PR #35 (`feat/D-opens-pager-in-top-pane`, commit c243549, 2026-05-06 23:53 UTC) implements the user's `D` request and lifts the corresponding SMALL entry to FIXED in the same diff. *Cite: arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM; arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB ("PR #35 lifted a BUGS.md SMALL the same way the day before").*
+
+3. **Arc 05 PR #36 — `/` and `=` substring-match lifts the BUGS.md SMALL substring-match request to FIXED.** PR #36 (`fix/search-substring-match`, commit f505ee5, 2026-05-07 00:18 UTC) shifts the matcher semantics and lifts the corresponding SMALL entry to FIXED. *Cite: arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5; arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB ("BUGS.md lifts a SMALL entry to FIXED").*
+
+4. **Arc 07 PR #18 → PR #37 — the named-then-fixed bracket: PR #18 *adds* the BUGS.md SMALL note; PR #37 lifts it to FIXED two days later.** PR #18 (`chore/agents-md-and-mcp-hygiene`, commit bad8bfc, 2026-05-05 00:41 UTC) adds a 13-line BUGS.md SMALL entry naming the cross-project MCP-attachment bug, weighting three design fixes and marking option (b) as *"most spyc-shaped."* PR #37 (`fix/mcp-socket-project-scoped-discovery`, commit a303251, 2026-05-07 00:54 UTC) implements exactly option (b), removes PR #18's 13-line SMALL entry, removes an older 2-line entry that predates the window (*"something funky is happening with our MCP support"*), and adds a `(fixed, v1.41.24)` block to FIXED whose closing line names the older entry: *"is also resolved by this change."* This is the only verified instance in the catalogue where the same arc *opens and closes the same SMALL entry* — the bracket recurs at Pattern 4 too. *Cite: arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ; arc-07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ; arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V.*
+
+5. **Arc 08 PR #28 — directory cap lifts BUGS SMALL #4 (huge directory) to FIXED.** PR #28 (`fix/huge-directory-cap`, commit 306b43f, 2026-05-06 17:30 UTC) caps directory listings at 50,000 entries. PR #28's commit body names BUGS SMALL #4 directly, names the failure mode (`stat()` syscalls × entry count = event-loop block on slow filesystems), and names the chosen-but-not-empirically-defended cap by listing what fits under it. The corresponding SMALL entry is lifted to FIXED. *Cite: arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M; arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 ("PR #28's commit body names BUGS SMALL #4 directly").*
+
+6. **Arc 08 PR #31 — vt100/ratatui upgrade lifts BUGS.md MAYBE entries (mode 2026, OSC 8) to FIXED.** PR #31 (`chore/vt100-and-ratatui-upgrade`, commit 105db8d, 2026-05-06 19:16 UTC) deletes PR #30's BUGS.md MAYBE block (the `vt100 0.15 unmaintained` claim PR #30 had partially retracted in its own diff) *and* lifts the older MAYBE entries from PR #12's harvest (mode 2026, OSC 8) to FIXED. Three MAYBE-to-FIXED lifts in a single diff, naming the upstream-fix at three independent surfaces (commit body, BUGS.md MAYBE-removal, BUGS.md FIXED-block). *Cite: arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY; arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 ("PR #31's diff names mode 2026 (synchronized output) at three independent surfaces").*
+
+**Instance count: six.** Five lift instances (instances 2, 3, 4, 5, 6) plus the genesis instance (instance 1: PR #12 creates the bucket). All five lift instances verified against arc-entry citations.
+
+**One brief candidate dropped after verification.**
+
+The brief named *"Arc 06 PR #25 lifts BUGS.md SMALL items related to dispatch."* Verification at the arc-06 PR #25 entry (= 01KR2GMSNX29CWFN154QBK6TJ3) reveals that PR #25 *adds* a fresh `### FIXED ###` block tagged `(defensive, v1.41.12)` describing the user report and the response shape, *without removing a prior SMALL entry of the same content*. PR #25's BUGS.md edit is `+15 / -0`: a fresh FIXED entry, no SMALL precursor. The shape is *"add to FIXED to record what was just fixed"* — a related but distinct shape from *"lift SMALL/MAYBE to FIXED."* The lift requires a SMALL or MAYBE entry to already exist; PR #25 has no such precursor in the BUGS.md state PR #18's bundle had left the previous day. *Drop instance from the catalogue's SMALL/MAYBE-to-FIXED lift count; flag the related shape as observation. The brief's "items related to dispatch" wording is consistent with PR #25 directly responding to a user report rather than draining a queued entry. Cite: arc-06 PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (BUGS.md FIXED block with `(defensive, v1.41.12)` tag, quoted verbatim there; no SMALL deletion).*
+
+The catalogue holds six instances with one brief candidate dropped. Honest counting is what the analyst register requires.
+
+**Notes on lift shape and pattern boundary.**
+
+- *The lift is multi-channel.* Most lift instances (2, 3, 4, 5, 6) exercise the same multi-channel pattern: the predecessor SMALL/MAYBE entry is deleted, a FIXED entry is added (typically with a `(fixed, v1.41.X)` tag), and the CHANGELOG carries an `### Added`/`### Changed`/`### Fixed` block. Three text channels for one act. The recurrence reading does not need to count the channels per instance; the consistent multi-channel shape is itself the recurrence.
+
+- *The genesis matters.* Without instance 1 (PR #12's harvest creating the SMALL/BIGGER/MAYBE buckets), the lift shape would have nothing to lift from. The genesis is structurally upstream of every other lift instance. This makes the BUGS.md SMALL/MAYBE-to-FIXED lift recurrence *partially* a property of the gap-analysis methodology PR #5 introduced and PR #12 harvested — a question for `insight-trajectory` to interpret (*does the lift recurrence reflect direct execution against the gap-analysis plan, or is it a project-shape pattern that would have emerged anyway?*). This thread does not interpret. Captured factually here for the trajectory thread's author.
+
+- *Time-grain spread.* Instance 2 (arc-05 PR #35) lifts a SMALL entry; the entry's age in the SMALL bucket isn't necessarily traceable from the diff alone, since SMALL entries enter from multiple sources (PR #12 harvest; PR #18 inline addition; user reports the maintainer files at unknown times). Instance 6 (arc-08 PR #31) lifts MAYBE entries that traceably entered at PR #12's harvest three calendar days earlier. Instance 4 (arc-07 PR #18 → PR #37) opens *and* closes its own SMALL entry within the same arc, two calendar days. The lift-from-genesis time grains span from same-arc-bracket (PR #18 → PR #37, 2 days) to multi-arc lag (PR #12's MAYBE entries lifted by arc 08's PR #31, 3 days). The catalogue does not promote the time-grain variance to a sub-shape; the variance is observable and is captured here factually.
+
+- *Asymmetry between SMALL lifts and MAYBE lifts.* Of the five lift instances, three lift SMALL entries (instances 2, 3, 5) and one lifts MAYBE entries (instance 6); instance 4 lifts a SMALL entry it had itself added two days earlier. The SMALL bucket's lifts are dominantly small-fix-shaped (a `D` request, a substring-match shift, a directory cap); the MAYBE bucket's single lift is a major-version dep upgrade. Whether the SMALL-vs-MAYBE distinction tracks fix-amplitude (*small concerns lift cheap; maybe concerns lift expensive*) or just naming-honesty (*MAYBE means the maintainer wasn't sure when authoring; the lift confirmed*) is for `insight-emergent-properties`. Captured factually.
+
+- *Boundary with Pattern 4 (named-then-fixed bracket).* Instance 4 (PR #18 → PR #37) is *both* a SMALL-to-FIXED lift instance here and a named-then-fixed bracket instance at Pattern 4. The catalogue does not double-count the recurrence; the same observable resolves to two distinct shapes. The SMALL-to-FIXED lift is *the bucket-drain shape*; the named-then-fixed bracket is *the same-author-opens-then-closes-the-issue shape*. PR #18 → PR #37 is the only instance that satisfies both shapes simultaneously; the other lifts are bucket-drains where the SMALL entry was authored by an earlier process (PR #12's harvest, or a user report the maintainer filed without an associated PR), not by a self-bracketing PR.
+
+- *No additional instances.* Verification did not reveal a seventh lift instance in the eight arcs. The brief's seven minus one dropped equals six, matching the pre-existing eight-arc ground.
+
+Provenance:
+- arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (instance 1 genesis; SMALL/BIGGER/MAYBE bucket creation).
+- arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM (instance 2).
+- arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5 (instance 3).
+- arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (instances 2 and 3 SMALL-to-FIXED lift framing).
+- arc-06 PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (the dropped brief candidate; fresh FIXED-without-SMALL-precursor shape).
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (instance 4 open-side; the BUGS.md SMALL entry's authorship).
+- arc-07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ (instance 4 close-side; the BUGS.md SMALL → FIXED lift, plus the older 2-line entry resolved-by-this-change).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (instance 4 named-then-fixed bracket framing; cross-referenced from Pattern 4).
+- arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M (instance 5; BUGS SMALL #4 named in commit body).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (instance 6; MAYBE-to-FIXED for mode 2026 and OSC 8).
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (instances 5 and 6 framing).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 (boundary-rule placement: SMALL-to-FIXED lift is recurrence-only, not drift).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+
+<!-- Entry-ID: 01KR3D2G1S7DXYSPDZDRXQBPDX -->
