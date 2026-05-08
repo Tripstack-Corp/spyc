@@ -311,3 +311,53 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (advisory-ignore catalogue source).
 
 <!-- Entry-ID: 01KR4CWEEG88D5T2FXBAHHNSPZ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:18:09.191592+00:00
+Role: scribe
+Type: Note
+Title: What the network now holds
+
+Spec: scribe
+
+tags: #narrative #final
+
+Five observations were strong enough that any honest narrative of the eight-arc reconstruction has to carry them. The five middle entries above named one of each: the gap analysis as method (three for three on suspect disposition over eight days); the cursor-block lineage (a 3×3 supersession-acknowledgement matrix populated by kind, not by elapsed time); the MCP-bridge bracket (substrate widens, registration stays parallel, BUGS.md note opens-and-closes within two days); the 49-minute reframing (defensive-then-corrected, with explicit "Smaller than I'd previously framed it" register variation); and the fifteen-and-zero asymmetry (uniform honor on negative recommendations across three independent stated-plan documents, modified shape on positive across the same three).
+
+What the network now holds, beyond those five observations, is a record dense enough to support readings that no single layer carries.
+
+A reader of `git log` for spyc's first 22 days sees thirty-six merged PRs, ordered chronologically, each with a one-line subject. The reader sees patterns at that grain — version cuts cluster early; vt100 work clusters on Day 6; codex parity ships in three PRs over forty-six minutes — but the reader cannot see the cursor-block lineage trace from PR #5 through PR #29 across six days, because nothing in either commit's subject names the relationship. The reader cannot see the BUGS.md note opening at PR #18 and closing at PR #37, because the subjects of the four arc-07 PRs are separated by chore/feat prefix and bundled with other work. The reader cannot see that catalogue §4's "Generalized pager picker" generates four PRs of DIRECTION ALIGNMENT across two arcs, because no PR's subject names the catalogue.
+
+A reader of the diffs alongside `git log` sees more — the per-PR weight of each change, the actual code shapes, the cross-PR file overlaps. But even this reader sees the supersession events as four unrelated 0-to-1 transitions, not as one matrix whose cells are populated by supersession-kind. The reader has to carry the matrix in their head while reading; the catalogue carries it on the page.
+
+A reader of the eight arc threads gets the per-arc cumulative reading: each arc's story told as a story. But arc 03 alone cannot see arc 08's PR #14 → PR #13 silent-but-tighter supersession; arc 04 alone cannot see arc 07's substrate-vs-registration distinction. The story-tails at the arc grain summed across PRs *within* an arc; the cross-arc shapes had to wait for the insight threads.
+
+A reader of the four insight threads gets the cumulative-grain observations. `insight-drift` counted misnamings; `insight-recurrence` counted shapes; `insight-trajectory` counted promised-vs-landed; `insight-emergent-properties` named six properties at artifact-grain. Each insight thread's tier discipline held — none promoted across tiers, none crossed into forward prediction without explicit citation, none attributed motive. The four-tier ladder produced something distinct from any single layer: an interpretation whose evidence is the prior layer, whose claims are tested against four independent vantages, whose forward predictions are bounded to recurrences explicitly cited.
+
+The strongest property the network surfaces is one that would be invisible at any single layer. *Property 2* — the fifteen-and-zero negative-vs-positive asymmetry across three independent stated-plan documents — could not be named by any one document; the trajectory thread's job was to make the cross-document reading legible. *Property 3* — the supersession-acknowledgement register correlating with supersession kind — could not be named by any one PR pair; the recurrence thread's matrix was the upstream that made the property visible. *Property 4* — substrate widens additively; registration widens by replication — required the substrate-vs-registration distinction at arc 07, the implicit-machinery-chain pattern at recurrence, and the §4 four-PR cluster at trajectory all together.
+
+These are the things an artifact's record can reveal once the cumulative reading exists. They are not in any commit message. They are not in the CHANGELOG. They are not in BUGS.md, ARCHITECTURE.md, ROADMAP.md, or AGENTS.md. They are properties of *what the running spyc is*, observable only across the cumulative reading of the work that produced it.
+
+The negative-space asymmetry from `insight-drift`'s closing tail is worth restating because it sits underneath everything else: the spyc 22-day window produces drift in *how the work is talked about* and produces almost no drift in *what the work does*. A user who reads the CHANGELOG and types the documented commands gets the documented behavior in 35 of 36 PRs (the one exception is `:undo` for 25 minutes). The description-layer carries 16 misnamings; the functional-layer carries one, closed in 25 minutes by a two-line punt-list addition. This is a useful asymmetry to carry forward — the running code is the honesty surface; the messages around the code are less precise. Everything in the catalogues is consistent with that asymmetry; nothing in the catalogues contradicts it.
+
+What the practice produced, beyond the observations: a network where any future reader can pick up at the spine, walk to an arc, follow its story-tail to a per-PR entry, follow that entry's provenance to the commit SHA and the verbatim CHANGELOG quote. The chain is reversible by following ULIDs. Every reading-grade claim has a verifiable source. Every artifact claim has a commit attribution. The discipline is what lets the narrative carry interpretive weight without overreach, and what lets a reader who disagrees with an interpretation locate the source they want to re-read instead.
+
+The catalogues are still OPEN. Any future arc, any future insight, any future PR that supersedes work in the window or that re-anchors a stated-plan document, can be added. The eight-arc reconstruction does not foreclose; it provides an index that subsequent work can extend. If a third MCP-speaking peer arrives and lands as a third parallel `ensure_*` function (per Property 4's tier-5 forward prediction), the catalogue gains an instance and a corroborating data point. If a positive recommendation from a future stated-plan document lands exactly-as-specified, the fifteen-and-zero asymmetry weakens and the catalogue records the weakening. The network can hold its shape and absorb new work; that's part of what made it worth assembling in the first place.
+
+What's left unsaid by the network — and worth naming as honest residual — is whether spyc's anchoring asymmetry, supersession-acknowledgement register, additive-substrate-vs-parallel-registration shape, and front-loaded-minor-then-sustained-patch cadence generalize to other projects, or whether they are specific to this artifact at this terminus. The catalogue declined to claim. The narrative inherits that decline.
+
+You wrote this work, Derek. The narrative says nothing about why; it does not need to. What the narrative says is that the work, considered as artifact, exhibits these patterns, and that the patterns are visible together at a grain that no single layer of the work itself carries. That visibility is what assembling the network produces. Whether the produced visibility is the kind of thing worth producing for other projects is a question this thread cannot answer — and is exactly the kind of question that requires reading the network end-to-end before it can be well-posed.
+
+The thread is left OPEN.
+
+Provenance:
+- All five middle entries above (this thread): each cites its arc, insight, and onboarding sources at its own provenance block.
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG; segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- All eight arc threads' framing, per-PR, and story-tail entries (cited individually at the relevant middle entries above).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4; negative-space tail = 01KR3BT6MNZMWRMHX14QMYZ86Y (the description-layer-vs-functional-layer asymmetry; "the spyc 22-day window produces drift in how the work is talked about and produces almost no drift in what the work does" verbatim).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN; story-tails-as-upstream tail = 01KR3DM9DBRV6MBA4D516KRR12.
+- `insight-trajectory` closure entry = 01KR3F9EF9WF9Q34FRAR2XPSZS; Tail 2 = 01KR3FEAYFQS8QVXCPN4KQ8QYK.
+- `insight-emergent-properties` closure entry = 01KR3HZNC62XT11V4CW2GZ5V0S; four-tier ladder tail = 01KR3J1JKR98RY75JBYA8EKC1X.
+- All six emergent-properties entries: Property 1 = 01KR3HG2GEBH1W8BKGT3CW6S9P; Property 2 = 01KR3HJ9ZVA966149ME2TBTB5B; Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z; Property 4 = 01KR3HQCRV761KG6CVD6T11QNM; Property 5 = 01KR3HSK97596MXH0V41K7TYM2; Property 6 = 01KR3HW4T1GQKFFWNYSRT0639S.
+
+<!-- Entry-ID: 01KR4CZ9BK9PXV5M1NHEE8WZYS -->

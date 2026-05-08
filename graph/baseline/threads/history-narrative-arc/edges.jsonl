@@ -9,3 +9,5 @@
 {"source":"entry:01KR4CQ8PP53V6QFDYVYAQD37A","target":"entry:01KR4CSPR2PAWT8WMJQRKE68AB","type":"followed_by"}
 {"source":"thread:history-narrative-arc","target":"entry:01KR4CWEEG88D5T2FXBAHHNSPZ","type":"contains"}
 {"source":"entry:01KR4CSPR2PAWT8WMJQRKE68AB","target":"entry:01KR4CWEEG88D5T2FXBAHHNSPZ","type":"followed_by"}
+{"source":"thread:history-narrative-arc","target":"entry:01KR4CZ9BK9PXV5M1NHEE8WZYS","type":"contains"}
+{"source":"entry:01KR4CWEEG88D5T2FXBAHHNSPZ","target":"entry:01KR4CZ9BK9PXV5M1NHEE8WZYS","type":"followed_by"}
