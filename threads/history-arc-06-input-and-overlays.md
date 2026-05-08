@@ -329,3 +329,149 @@ Provenance:
 - `history-arc-06-input-and-overlays` PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W (sibling phase-α entry; same parallel-pattern disposition with §4).
 
 <!-- Entry-ID: 01KR2GH1D9QCGDPZEMWW09R898 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T00:43:50.644397+00:00
+Role: scribe
+Type: Note
+Title: PR #25 (fix/input-dispatch-hardening): two defensive guards under one bug, plus a --key-trace diagnostic switch user-visible at the CLI
+
+Spec: scribe
+
+tags: #history #arc-06
+
+PR #25 opens phase β. Commit subject reads "fix: input dispatch hardening + --key-trace diagnostic switch (v1.41.12)" (commit bfc4a18, 2026-05-06). Diff: 7 files, 205 insertions / 4 deletions. Bulk lands in `src/app/mod.rs` (83 insertions) and a new `src/key_trace.rs` module (64 insertions); `src/main.rs` adds 11 lines for the CLI wiring.
+
+**The bundle, named at the slug.**
+
+PR #25's title is unusually explicit about the bundling — `fix: <hardening> + <diagnostic switch>` — and the diff shape matches the slug literally. Two distinct hardening guards plus one diagnostic infrastructure module under one PR. The hardening half is multi-staged in the sense that two distinct code paths are touched, but the staging is enumeration (two named cases under one user report), not a numbered ladder of progressively-broader fixes.
+
+**The user report and the "couldn't reproduce" framing.**
+
+BUGS.md's `### FIXED ###` block names the report verbatim and the response shape:
+
+```
+(defensive, v1.41.12) "switching panes input doesn't work when done
+too quickly" — couldn't reproduce, but two plausible failure modes
+were addressed: (1) post-chord bounce: a focus-switch chord
+(`^a-j`/`^a-k`) now suppresses a same-key Press/Repeat within 60 ms
+so a fast chord doesn't leak a stray byte into the just-focused
+pane; (2) stranded paste: `Event::Paste` outside Prompting / with
+no pane open now flashes "paste ignored" instead of silently
+dropping. Also added `--key-trace`/`SPYC_KEY_TRACE` for diagnosing
+the next report — writes every event + dispatch decision to
+`/tmp/spyc-key-trace-<ts>.log` with elapsed-since-start timestamps.
+```
+
+The framing is honest: "couldn't reproduce, but two plausible failure modes were addressed." The fix is defensive, not a confirmed root-cause repair. The diagnostic switch ships *with* the defensive fix specifically so the next report comes with a reproduction log.
+
+**Hardening case 1: post-chord bounce-suppression.**
+
+`src/app/mod.rs` adds a new field on `App`:
+
+```
+focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
+```
+
+The doc-comment names the failure mode: "When a focus-switch chord (^a-j / ^a-k) just completed, this captures (when, the key that completed it). The next dispatch drops any Press/Repeat of the same key within ~60 ms — without this guard, fast typing of `^a-j-...` produced a stray `j` byte to the now-focused pane child (the `j` Press completes the chord, but a brief OS-level Repeat or a too-quick second Press would otherwise arrive with the new focus already active)."
+
+The dispatch path adds two pieces. The chord-completing path stamps the field when `Action::PaneFocusDown` or `Action::PaneFocusUp` resolves:
+
+```
+if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
+    self.focus_chord_completed = Some((std::time::Instant::now(), key.code));
+}
+```
+
+The next dispatch checks the field at the top of `handle_key`:
+
+```
+if let Some((at, code)) = self.focus_chord_completed {
+    let within_window = at.elapsed() < Duration::from_millis(60);
+    if within_window
+        && key.code == code
+        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        && key.modifiers.is_empty()
+    {
+        crate::key_trace::log("  swallowed (post-chord bounce)");
+        return Ok(PostAction::None);
+    }
+    if !within_window {
+        self.focus_chord_completed = None;
+    }
+}
+```
+
+The 60ms window is named in the doc-comment: "60 ms covers system-key-repeat (~30-50 ms) and kitty-keyboard Repeat events without affecting deliberate double-taps." Modifiers-empty check filters to bare keypresses (so a deliberate `^a-j` after the chord completes still fires; only a bare `j` is swallowed).
+
+The interaction with arc 03's focus axis is structural but indirect. Arc 03's seams-aside (= 01KR11TME2KF5QFQ45GJYG8MC7) named that `pane_focused: bool` post-PR-#34 carries three different meanings (list-vs-pane, zoom save-restore source, overlay-vs-pane). PR #25 does not change `pane_focused` or its meanings; it adds a sibling state field (`focus_chord_completed`) that fires specifically on the chord-driven focus-switch path. The chord-driven focus-switch is one branch of the bool's behavior — the same branch arc 03's PR #34 entry (= 01KR10JBACRS3Z71WTHGBVCPJM) named as the overlay-vs-pane axis — but PR #25 corrects a leak in the *transition*, not the *meaning*. The seam arc 03 named is unchanged.
+
+**Hardening case 2: stranded-paste flash.**
+
+`src/app/mod.rs`'s `Event::Paste` handler had two branches before PR #25: route to `state.mode` if `Mode::Prompting`, route to the active pane otherwise. PR #25 adds a third branch — the fall-through case where the user is neither prompting nor has a pane open:
+
+```
+} else {
+    // No prompt and no pane — there's nowhere
+    // sensible to send the paste. Some terminals
+    // wrap rapid-fire keystrokes in bracketed
+    // paste sequences, so silently dropping
+    // could swallow real input. Flash a hint so
+    // the user knows it happened.
+    let n = text.chars().count();
+    self.state.flash_info(format!(
+        "paste ignored ({n} chars) — open `:` or `^\\` to paste"
+    ));
+}
+```
+
+The hypothesis the diff bakes in: some terminals wrap rapid-fire keystrokes in bracketed paste sequences, which the previous code silently dropped. The flash is the visible signal that an input arrived but had no destination.
+
+**The `--key-trace` diagnostic — user-visible at the CLI.**
+
+`src/main.rs` adds a new CLI argument:
+
+```
+/// Trace every key event + dispatch decision to
+/// /tmp/spyc-key-trace-<ts>.log. Useful for diagnosing
+/// "input doesn't work when done too quickly" reports.
+/// Equivalent to setting SPYC_KEY_TRACE=1.
+#[arg(long)]
+key_trace: bool,
+```
+
+The `main` function calls `key_trace::init(cli.key_trace)` after `debug_log::init`, with a startup banner: `eprintln!("spyc: key trace → {p}");` when active. The flag is opt-in, off by default; mirrors the pre-existing `--debug` / `SPYC_DEBUG` pattern.
+
+The new `src/key_trace.rs` module (64 lines, full content readable in one screen) provides three functions: `init(flag) -> Option<String>` (called once at startup; returns the log path when active), `is_enabled() -> bool` (cheap-guard for callers to skip expensive formatting when disabled), and `log(msg: &str)` (writes one line with elapsed-since-start ms prefix). The implementation uses a single `Mutex<Option<TraceState>>` static and `OpenOptions::create+append` on the log file at `/tmp/spyc-key-trace-<epoch_secs>.log`.
+
+The trace points: `handle_key` entry logs `"RX kind={:?} code={:?} mods={:?} pane_focused={} pending={:?}"`; the resolver outcome logs `"  resolver -> {outcome:?}"`; the paste path logs `"RX paste len={} pane_focused={} mode={:?}"`; the bounce-suppression swallow path logs `"  swallowed (post-chord bounce)"`. The trace is per-key dispatch evidence, not a sampled metric — every event annotated with elapsed time and the dispatch decision.
+
+The doc-comment names the diagnostic intent explicitly: "The intent is diagnostic-only: when a user reports an input bug ('typed ^a-j too fast and the focus didn't switch'), they can flip the flag, reproduce, and ship the log." The infrastructure ships in advance of the next report; there is no current consumer of the trace beyond the immediate one — PR #25 is the bundle that puts both the defensive fix and the diagnostic for *future* defensive fixes into the codebase at once. The connection between the "couldn't reproduce" framing and the diagnostic shipping at the same time is the load-bearing observation: PR #25 is acknowledging that next time, the report should come with a log.
+
+**The two-cases-under-one-symptom shape.**
+
+The user report ("switching panes input doesn't work when done too quickly") is one symptom; the fix is two distinct hypotheses about the symptom's cause, both addressed defensively. Hypothesis 1 (bounce) addresses the focus-switch case directly: a chord-driven focus switch was leaving a stray byte. Hypothesis 2 (stranded paste) addresses a different mechanism: bracketed paste might have been silently swallowing keystrokes the user typed too fast. Either could explain "input doesn't work when done too quickly" depending on terminal and keyboard timings; PR #25 ships both, plus the diagnostic to disambiguate next time.
+
+The shape is not a plan-supersession ladder (no superseded fix exists; this is the first fix attempt). It's not a single-rule fix either (two distinct code paths change). It's an enumerated-cases bundle: two named cases under one symptom, addressed defensively, with diagnostic infrastructure for next time.
+
+**Drift findings flagged for the insight layer**:
+
+- The `--key-trace` infrastructure ships with no immediate consumer beyond the bug PR #25 already addresses. Whether it gets used in a future "input doesn't work" report is determinable only outside the 22-day window. The shape — *ship the diagnostic with the defensive fix so the next report is reproducible* — is fuel for the insight layer's future-proofing catalogue.
+- The bundle-pattern (defensive fix + diagnostic infrastructure under one PR slug) recurs in this arc: PR #10 above bundles a `### Fixed` half (`gf`/`gF` scroll-mode honoring) under a `feat/` slug. The bundle pattern is recurring across arcs (arc 04's PR #15 entry already named one); the eventual insight layer can decide whether the bundling is fuel for drift or for the recurrence catalogue.
+- The chord-completing-key stamp specifically fires only on `Action::PaneFocusDown | Action::PaneFocusUp`. Other chord families (`H`, `]`, `y`, `m`, `'`, `W`, `[`) don't mark the chord-completing key, so a hypothetical "post-chord bounce" on those families would not be caught by PR #25's guard. Whether the focus-switch chord is uniquely susceptible to the bounce (because it's the only chord that changes which child consumes raw bytes) or whether other chord families have latent equivalents is determinable only with `--key-trace` data from the field.
+
+Provenance:
+- bfc4a18 (PR #25 fix/input-dispatch-hardening, 2026-05-06).
+- `git diff bfc4a18^1..bfc4a18^2 -- CHANGELOG.md`: `### Fixed` (Input dispatch hardening for fast typing) and `### Added` (--key-trace / SPYC_KEY_TRACE) blocks quoted in part above.
+- `git diff bfc4a18^1..bfc4a18^2 -- BUGS.md`: `### FIXED ###` entry "(defensive, v1.41.12)" quoted verbatim above.
+- `git diff bfc4a18^1..bfc4a18^2 -- src/app/mod.rs`: `focus_chord_completed: Option<(std::time::Instant, KeyCode)>` field on `App` with full doc-comment; `handle_key` swallow guard quoted above; `Event::Paste` fall-through branch quoted above; chord-completion stamp on `PaneFocusDown`/`PaneFocusUp`.
+- `git show bfc4a18^2:src/key_trace.rs` (64 lines, new module): `init`/`is_enabled`/`log` API; `Mutex<Option<TraceState>>` static; `OpenOptions::create+append` on `/tmp/spyc-key-trace-<epoch_secs>.log`; module doc-comment naming diagnostic intent.
+- `git diff bfc4a18^1..bfc4a18^2 -- src/main.rs`: `--key-trace` CLI argument with `SPYC_KEY_TRACE` env var equivalence; `key_trace::init(cli.key_trace)` startup call; `eprintln!("spyc: key trace → {p}")` banner.
+- `Cargo.toml:3` post-merge: `version = "1.41.12"`.
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (`pane_focused`-three-meanings observation; PR #25 corrects the chord-driven focus-switch transition without touching the bool's three meanings).
+- `history-arc-03-pane-behavior` PR #34 entry = 01KR10JBACRS3Z71WTHGBVCPJM (overlay-vs-pane focus axis; PaneFocusDown/PaneFocusUp are the chord-driven actions PR #34 routed through the overlay-vs-pane axis).
+- `history-arc-04-git-integration` PR #15 entry (bundle-pattern precedent; pane-control fix bundled with git-marker leak fix).
+- `history-arc-06-input-and-overlays` framing entry = 01KR2G8042HWE419X0ESWKN205.
+- `history-arc-06-input-and-overlays` PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (bundle-pattern precedent within this arc; `gf`/`gF` fix under a `feat/` slug).
+
+<!-- Entry-ID: 01KR2GMSNX29CWFN154QBK6TJ3 -->
