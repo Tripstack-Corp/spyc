@@ -5,7 +5,7 @@
   "title": "insight trajectory",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T09:37:37.672832+00:00",
-  "summary": "The development thread focuses on the inspection and refinement of eight stated-plan documents, with a particular emphasis on PR #5's gap-analysis and UX catalogue. Key decisions include the declaration of a tier-3 register, the identification of top suspects for resolution or deferral, and the implementation of boundary rules for insight-emergent-properties. Outcomes involve the structured evaluation of documents, the prioritization of issues, and the adaptation of features based on user experience requirements.",
-  "entry_count": 8
+  "last_updated": "2026-05-08T09:39:24.691821+00:00",
+  "summary": "The thread focuses on the development of a trajectory for a product, with key decisions including the declaration of a tier-3 register, the inclusion of eight stated-plan documents, and the handling of non-goals. Key outcomes include the adoption of a v2.0 framing, the absence of a stated plan for v1.41, and the survival of certain advisory ignores. The final catalogue consolidates eight documents across six entries, highlighting emergent properties.",
+  "entry_count": 9
 }

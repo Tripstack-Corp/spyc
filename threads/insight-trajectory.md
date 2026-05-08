@@ -641,3 +641,96 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3F65XSQ4B74MDSQMYEM2R0 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:39:24.688280+00:00
+Role: scribe
+Type: Closure
+Title: Closure: insight-trajectory catalogue assembled — eight stated-plan documents handled across six per-document entries; observations flagged for insight-emergent-properties
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+The catalogue is assembled. Eight stated-plan documents across six per-document entries plus framing. Per-document trajectory dispositions:
+
+- **Document #1 (gap-analysis Top Suspects)** — three for three on suspect-resolution-or-deferral (§1 RESOLVED with durable-record incompleteness; §2 DEFERRED-AS-NON-GOAL; §3 RESOLVED with test-coverage gap). Methodology #9 folded in: NAMED-NOT-CITED.
+- **Document #2 (UX catalogue)** — 4-of-4 skips honored exactly; 0-of-4 adapts executed-as-specified, 1-of-4 partial (§2), 1-of-4 non-executed-against-conditional (§5), 2-of-4 non-executed (§3-tip-half; §4-specific-shape). Skip-vs-adapt asymmetry the load-bearing observation.
+- **Document #3 (ROADMAP additions)** — three positive-recommendation entries; zero exactly-as-specified executions. One PARTIAL (#2); two deferred (#1 DIRECTION ALIGNMENT BY FOUR PRs; #3 NON-EXECUTED-AGAINST-CONDITIONAL).
+- **Documents #4 + #5 (charter + non-goals)** — substrate-level widening with registration-level peer-specificity (charter's "Claude" word slightly modifiable but not generalized); six non-goals all honored across the window (the cleanest uniform-honor trajectory).
+- **Document #6 (v2.0 framing)** — NOT LANDED WITHIN WINDOW; pre-staging visible; signaling fragment's MCP-positioning anchor partially executed at substrate-level; public-distribution anchor not executed within window.
+- **Document #7 (v1.41.x cadence)** — NO STATED PLAN TO TRACK; cadence is what shipped, not what was promised; trajectory thread declines to claim trajectory and names the absence factually.
+- **Document #8 (advisory-ignore catalogue)** — STATED STATE OF ACCEPTANCE HOLDS across the window's largest dep change; five ignores survive the trio bump.
+
+**What this catalogue contributes to the network.**
+
+- *A name for the catalogue's load-bearing asymmetry.* The 22-day window's stated-plan-vs-execution shape carries a *negative-vs-positive asymmetry* across multiple surfaces: charter non-goals (six honored) plus catalogue skip recommendations (four honored) all uniformly honored; charter positive framing (substrate-level partial widening) plus catalogue adapt recommendations (four with shape) plus ROADMAP additions (three with shape) all in modified shape, none exactly-as-specified. Skip-honored-exactly is consistent across two stated-plan documents; adapt-all-modified is consistent across three. The asymmetry is the catalogue's load-bearing observation at trajectory-grain.
+
+- *A confirmation of the longest-single-trajectory hypothesis.* The framing entry posited the gap-analysis suspects three-for-three trajectory as the longest single trajectory in the network. Document #1's verification confirms the hypothesis: three suspects in one document; eight calendar days from specification (PR #5 on Day 0) to terminal disposition (§1 at PR #29 on Day 6; §2 deferred-as-non-goal across the window; §3 at PR #31 on Day 6). Two arcs touched for resolution; one arc of non-execution-as-honored (the entire window, against the charter non-goal). The catalogue's seven-section trajectory does not exceed this longevity — its dispositions cluster around DIRECTION ALIGNMENT (§4) rather than terminal-RESOLVED.
+
+- *A factual placement decision for the v1.41.x cadence question.* insight-recurrence's closure handed the cadence forward as "correlated with the SemVer policy that exists nowhere as a stated plan." This thread's document #7 entry confirms the absence factually: there is no stated plan to track. The cadence is recurrence-grade observation (Pattern 5); it is not trajectory-grade observation. Both readings are honest; the boundary between them is the *stated-plan-existence* question.
+
+- *A clean tier-3-vs-tier-4 boundary at six sites.* Each per-document entry flagged the strongest tier-4 temptation it faced. Document #2's adapt-all-modified ratio; Document #3's three-zero ratio; Document #5's six-honored uniformity asymmetry against positive framing; Document #6's signaling-fragment partial anchoring; Document #7's interpretation-against-implicit-SemVer-policy temptation; Document #8's stated-state-discipline temptation. All six held to tier-3 by stating the count and refusing the property name. The tier-3 discipline is most acute at document #3 (three positive-recommendation ROADMAP entries; zero exactly-as-specified executions) where the ratio's interpretive pull is highest.
+
+**Cross-thread observation for `insight-emergent-properties`'s author (Phase 10D).**
+
+`insight-emergent-properties` will read the catalogue's tier-3 trajectory observations and ask *what kind of property each trajectory is*. The catalogue does not pre-name the properties — that is the next thread's job — but flags which trajectory observations have tier-4 weight, which are tier-3-only, and which are candidates the catalogue gave the author explicit material on.
+
+**Tier-4 candidates flagged with explicit data:**
+
+- **The catalogue skip-vs-adapt asymmetry (document #2).** 4-of-4 skips honored exactly; 0-of-4 adapts executed-as-specified, 4-of-4 in modified shape. The data is rich enough that the property name could be *the catalogue is more reliable as a refusal mechanism than as an execution mechanism*; or *positive recommendations land in modified shape because adapt-pattern executes against the maintainer's working surfaces, while skip-recommendations land exactly because they require no execution at all*; or any other framing that names the asymmetry as a property. The trajectory thread states the count; the emergent-properties thread can name.
+
+- **The charter non-goals plus advisory-ignore catalogue uniform-honor (documents #5 and #8).** Six non-goals all honored; five advisory ignores all survive the window's largest dep change. The trajectory parallels are real; the *kind* of honor differs (constraints-that-bind versus constraints-whose-dissolution-would-have-been-possible). The emergent-property reading would name *what kind of stated-state-discipline produces uniform-honor*; this trajectory thread sketched the asymmetry between *not-pursued* (non-goals) and *not-resolved* (advisory ignores).
+
+- **The DIRECTION ALIGNMENT four-PR cluster against catalogue §4 (documents #2 and #3).** Four PRs across two arcs hold §4 alignment from two different families (pager-as-mode side at arc 05; standalone-overlay side at arc 06); zero execute the `PagerView::picker_items: Vec<(Label, Action)>` shape. The data is rich (four PRs, two families, one bracket-open-at-window-terminus). The emergent-property reading would name *what kind of execution dynamic produces parallel-not-substrate execution* or *the picker shape lives at multiple surfaces because surface-specific instantiation is the project's working pattern*. The trajectory thread states the count; the property name is the next thread's.
+
+- **The substrate-vs-registration distinction in the charter trajectory (document #4).** The charter's "Claude" word widens at substrate-level (peer-agnostic discovery); stays peer-specific at registration-level (two `ensure_*` files side-by-side). The emergent-property reading would name *what kind of architectural discipline produces substrate-generalize-but-registration-keep-specific*; possibilities include "the registration surface is intentionally peer-specific because each peer's config-file convention is its own contract"; "substrate widens cheaply, registration widens at the cost of supporting infrastructure each peer's tooling expects"; etc. The trajectory thread sketched the asymmetry; the property name is reserved.
+
+**Tier-3-only observations:**
+
+- **The longest-single-trajectory observation (document #1).** Three suspects, three dispositions, eight calendar days, two arcs. The longevity is structural; the *property* of why the gap-analysis suspects produced a complete trajectory while the catalogue's adapt recommendations did not is tier-4 territory but the *count* is tier-3 only. Per-suspect dispositions are tier-3.
+
+- **The verbatim-import observation (document #3).** Three ROADMAP entries verbatim-imported from the catalogue's "Top 3 to consider first." The verbatim-importation itself is fact at tier-3; whether it reflects an emergent property of the planning-vs-execution dynamic is tier-4 and reserved.
+
+- **The methodology-named-not-cited observation (document #1).** PR #5's empirical-verification methodology was named in the gap analysis; the actual empirical run is not narratable from any per-PR entry. The named-not-cited fact is tier-3; whether it reflects an emergent property of *what kind of evidence the project treats as load-bearing* (commit-level diff comparison versus per-PR empirical trace) is tier-4 and reserved.
+
+**Boundary cases — observations that should NOT be promoted to tier-4:**
+
+- **The v1.41.x cadence as trajectory.** Document #7 declined to claim trajectory because no stated plan anchors the cadence. The emergent-properties thread can name what kind of property the cadence reveals (Pattern 5 already gave the recurrence-side framing; multiple candidate property names flagged at insight-recurrence's closure). But the trajectory thread *did not extend Pattern 5 into a claimed trajectory*; the emergent-properties thread should not retroactively promote it to a stated-plan trajectory either. The honest framing is *"observed everywhere as a working pattern; nowhere as a stated plan."*
+
+- **The v2.0 forward prediction.** Document #6 stated within-window observations only. The v2.0 target window (mid-to-late May 2026) starts at the eight-arc record's terminus. Forward predictions of v2.0 landing within the target are tier-5 and require citing a specific recurrence as the basis for extrapolation. The emergent-properties thread can do this if it cites Pattern 5 (cadence) or the pre-staging-visibility observation (per arc 01) as the basis; it should not extrapolate without citation.
+
+**Per-document trajectory disposition counts, final.**
+
+- *Executed-as-specified*: 0 across all eight documents.
+- *Partial / direction-aligned*: 1 (catalogue §2 + ROADMAP entry #2 = same observation); 4 PRs hold DIRECTION ALIGNMENT against catalogue §4 + ROADMAP entry #1; 1 substrate-level partial-widening (charter "Claude" word).
+- *Non-executed-against-conditional*: 1 (catalogue §5 + ROADMAP entry #3 = same).
+- *Non-executed*: 1 (catalogue §3-tip-half); 1 (v2.0 within-window); §4 specific shape across four PRs.
+- *Resolved*: 2 (gap-analysis §1; gap-analysis §3).
+- *Deferred-as-non-goal* (uniform honor): 1 (gap-analysis §2 + 6 charter non-goals — same trajectory family).
+- *Skip-honored exactly*: 4 (catalogue §1, §3-log-half, §6, §7); 6 (charter non-goals); 5 (advisory ignores).
+
+The catalogue's skip-or-non-goal-or-stated-state honor count: 15 across the window. The catalogue's exactly-as-specified positive-recommendation execution count: 0.
+
+**Voice / register audit, brief.**
+
+The analyst register held throughout. The most acute tier-3-discipline test moments were document #3 (the three-zero positive-recommendation ratio); document #5 (the six non-goals' uniform-honor cleanness); document #7 (the cadence-as-trajectory boundary case). All three held. No motive attribution to the maintainer anywhere. No tier-4 property naming anywhere. No tier-5 forward prediction anywhere.
+
+**The thread is left OPEN.** Cross-thread references from `insight-emergent-properties` will cite this catalogue's per-document entry IDs.
+
+Provenance:
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+- `insight-trajectory` document #1 entry = 01KR3ENV1WP6R9SFRE1QME291S (gap-analysis suspects + methodology).
+- `insight-trajectory` document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (UX catalogue).
+- `insight-trajectory` document #3 entry = 01KR3EW3166JZ59TDR8PYMGN4T (ROADMAP additions).
+- `insight-trajectory` document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (charter + non-goals).
+- `insight-trajectory` document #6 entry = 01KR3F1TDZQGAQNZYEYYMFAGCE (v2.0 framing).
+- `insight-trajectory` document #7 entry = 01KR3F3Y55NW2GAC0GY05FCYAD (v1.41.x cadence; absence-of-plan named).
+- `insight-trajectory` document #8 entry = 01KR3F65XSQ4B74MDSQMYEM2R0 (advisory-ignore catalogue).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 (boundary rule for cross-cutting observables).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN (cross-thread observations directly handed forward).
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- All eight arc threads' per-PR entries (cited at the relevant per-document entries) are the load-bearing infrastructure this catalogue was built atop.
+
+<!-- Entry-ID: 01KR3F9EF9WF9Q34FRAR2XPSZS -->
