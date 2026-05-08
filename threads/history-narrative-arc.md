@@ -38,3 +38,53 @@ Provenance:
 - `insight-emergent-properties` four-tier ladder tail (the assembly-vs-cumulative ratio inverting across the ladder) = 01KR3J1JKR98RY75JBYA8EKC1X.
 
 <!-- Entry-ID: 01KR4CESQSGA7061ZTY9TM4QWX -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:10:44.944649+00:00
+Role: scribe
+Type: Note
+Title: The gap analysis as method: 399 lines, three suspects, eight days to disposition
+
+Spec: scribe
+
+tags: #narrative #final
+
+PR #5 is the only PR in the 22-day window with the `investigate/` prefix. Commit subject: "lazygit investigation + cursor-block fix (v1.37.2)" (commit 0691666, 2026-04-30). Of the 444 insertions, 399 are documentation in a freshly-created `notes/` directory; the actual code change is seven lines in `src/pane/widget.rs` guarding the cursor block on a new condition. The diff weight inverts the title: the investigation is the load-bearing half, the code fix is the smaller and narrower one.
+
+What makes the investigation worth pausing on, six entries into a five-entry walk, is what the methodology produced once it ran.
+
+`notes/lazygit-gap-analysis.md` named three top suspects for the user-reported "rendering / conflict issues." Each was identified verbatim in the diff. §1: *"Spurious cursor block from `widget.rs`. spyc unconditionally reverse-videoes the cell at `screen.cursor_position()`, even when the child has set DEC ?25l (cursor hidden). vt100 already exposes `screen.hide_cursor()`, but `src/pane/widget.rs:43–55` never reads it. lazygit hides the cursor and draws its own selection highlight, so a stray reverse-video square sits on some panel — visually reads exactly as 'rendering glitch.'"* §2: *"No mouse, anywhere. Mouse capture is not enabled on the host terminal..."* §3: *"Synchronized-output (mode 2026) tearing... vt100 0.15 has no parse arm for 2026 — bytes are dropped... during a fast diff scroll or commit-list page-down the renderer reads a half-finished frame and paints it. Looks like flicker / a sliver of stale text under the new content for one frame."* (commit 0691666, 2026-04-30.)
+
+Eight calendar days later, all three are dispositioned.
+
+§1 closed at PR #29 (`fix/skip-pane-cursor-block-when-uninvited`, commit bdb8d87, 2026-05-06). The narrow guard PR #5 shipped — `if !self.screen.hide_cursor()`, single condition — generalizes to a three-condition guard: `focused && !alternate_screen() && !hide_cursor()`. The guard's policy comment lands as a verbatim three-numbered rationale in the diff, and names the alt-screen TUIs the broader class catches: *"nvim, vim, less, htop, lazygit, claude in TUI mode"* (commit bdb8d87, 2026-05-06). Six days from spec to generalization.
+
+§2 closed across the window as deferred-as-non-goal. No PR adds mouse capture in `src/main.rs::setup_terminal`. `ROADMAP.md:445-447` names "mouse support beyond what already exists" as an explicit non-goal of the project. The suspect was good enough to identify; the disposition is policy, not work. The trajectory thread treats deferred-as-non-goal as honor — the suspect was not ignored, it was answered against the charter.
+
+§3 closed at PR #31 (`chore/vt100-and-ratatui-upgrade`, commit 105db8d, 2026-05-06). The vt100 0.15 → 0.16 trio bump (which forces ratatui 0.29 → 0.30 because vt100 0.16 needs `unicode-width ≥0.2.1` and ratatui 0.29 pinned `=0.2.0`, which then forces ansi-to-tui 7 → 8) ships with the commit-body claim *"Also retires the two MAYBE entries from BUGS.md about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks) — both should now parse correctly under 0.16"* (commit fc1789d, 2026-05-06). The BUGS.md MAYBE entry PR #12 had lifted from the gap analysis on Day 4 is removed in PR #31's diff; a `(fixed, v1.41.18)` block names mode 2026 directly.
+
+Three-for-three disposition is the structural fact. None of the three suspects was wrong; none was abandoned; each found its terminal state at the grain its content warranted. The chain itself is worth tracing because no single thread of commit messages shows it: §1 lives in PR #5's gap-analysis text, then in PR #12's BUGS.md harvest, then in arc 03's PR #29 narration. §3 lives in PR #5's gap-analysis text, then in PR #12's BUGS.md harvest, then in arc 08's PR #30 BUGS.md MAYBE expansion, then in PR #31's commit body and FIXED block. The five-PR, four-entry, eight-day chain is what the catalogues now hold.
+
+The asymmetry in the verifications is worth acknowledging. §1 closes with durable-record incompleteness — PR #29's diff *behaviorally* extinguishes the case PR #12's BUGS.md text describes, but the BUGS.md text itself stays in the SMALL bucket post-merge. The arc-03 PR #29 entry caught this honestly: PR #29 removes a different SMALL line (a user's nvim-beam report), behaviorally addresses the case PR #12's text describes, and leaves the original residual in place. The behavior and the durable-record cleanup don't track 1:1. §3 closes with test-coverage gap — vt100 0.16 is the "proper fix" for the parser bug per the commit body, but no test in PR #31 exercises the specific `screen.rs:934.unwrap()` byte stream. The verification rests on the maintainer's claim more than on a regression test, with PR #30's `catch_unwind` safety net silently catching any persistent edge case if one exists.
+
+These honesty notes are not failures of the closure. They are the catalogue's record of what *exact-as-specified* would have meant, and where the closure actually landed. Three for three on disposition; two of the three carry verification-mode asterisks; one carries policy-of-the-project as its honor.
+
+What this exhibits at trajectory grain is the point you'd miss if you read only the commit log. The gap analysis is the only document in the network whose internal sub-recommendations end up dispositioned three-for-three within the window. The UX catalogue's four adapt recommendations (§2 context-sensitive footer, §3-tip-half, §4 generalized pager picker, §5 scoped help) all land in modified shape; zero land exactly-as-specified. The ROADMAP additions that PR #5 imported verbatim from the catalogue's "Top 3 to consider first" — §4 generalized pager picker, §2 context-sensitive prompt-row hint, §5 scoped `?` help — also end up at zero exact executions, with §4 in particular spawning four PRs of DIRECTION ALIGNMENT (PR #33, PR #35, PR #8, PR #10) without the specific `PagerView::picker_items: Vec<(Label, Action)>` field.
+
+The gap analysis disposition rate is the outlier: three for three at exact-state disposition (one resolved-clean, two resolved-with-asterisk; or in negative-recommendation framing, one honored-as-non-goal and two resolved). Other documents authored at the same vantage produce trajectory shape but not exact-state honor. This is one of the asymmetries the network surfaces; later entries in this narrative will make it more general.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — gap-analysis suspects §1, §2, §3 verbatim from `notes/lazygit-gap-analysis.md`.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — §1 closure; three-condition guard policy comment with the alt-screen TUI list verbatim.
+- 105db8d / fc1789d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — §3 closure; commit body retires the BUGS.md MAYBE entries verbatim.
+- e210e58 (PR #12 chore/clean-notes, 2026-05-03) — BUGS.md harvest of the gap-analysis suspects.
+- arc-02 investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (the gap-analysis text source; suspects quoted verbatim).
+- arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (the BUGS.md residual that bridges the cursor-block lineage).
+- arc-03 PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (§1 closure with durable-record-incompleteness honesty note).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (§3 closure with test-coverage-gap honesty note).
+- `insight-trajectory` Document #1 entry = 01KR3ENV1WP6R9SFRE1QME291S (three-for-three disposition; resolved-with-asterisk framing).
+- `insight-trajectory` Document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (UX catalogue 4-of-4 skips honored / 0-of-4 adapts exactly-executed).
+- `insight-trajectory` Document #3 entry = 01KR3EW3166JZ59TDR8PYMGN4T (ROADMAP additions zero-of-three exactly-executed).
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (the §2 honored-as-non-goal disposition source; non-goals at `ROADMAP.md:445-447`).
+
+<!-- Entry-ID: 01KR4CHQ6XEXYC4FCC9AYKDB5V -->
