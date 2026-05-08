@@ -5,7 +5,7 @@
   "title": "history arc 07 codex and mcp bridge",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T01:06:41.956563+00:00",
-  "summary": "The development thread focuses on the history arc 07 codex and MCP bridge, with key decisions including the MCP transport's peer-agnostic expansion and improvements to the bridge system. The arc spans four PRs from 2026-05-05 to 2026-05-07, aiming to enhance transport capabilities and integration. The outcomes include a more flexible and interconnected transport network, facilitating smoother interactions between different systems.",
-  "entry_count": 1
+  "last_updated": "2026-05-08T01:08:23.769688+00:00",
+  "summary": "The development thread focuses on the evolution of the MCP transport system, with key decisions including the renaming of `CLAUDE.md` to `AGENTS` and the introduction of a groundwork bundle to improve hygiene practices. These changes laid the foundation for subsequent improvements and expansions in the MCP transport system.",
+  "entry_count": 2
 }
