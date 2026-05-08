@@ -92,3 +92,88 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (deny.toml advisory-ignore catalogue; `process_bytes_safe` panic-unwind note).
 
 <!-- Entry-ID: 01KR38QZ1XQ6EP2A4QC94DRD80 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T07:46:54.483982+00:00
+Role: scribe
+Type: Note
+Title: PR #13 (feat/graveyard-undo): four primitives at one diff — soft-delete cache, viewer, :undo, system-trash cascade — and the R-prompt blast-radius surfacing
+
+Spec: scribe
+
+tags: #history #arc-08
+
+PR #13 is the first move in arc 08 and the file-undo subsystem move. The diff is the largest in arc 08 by every measure (16 files, +1483/-54; `src/state/graveyard.rs` is a 536-line new file; `src/app/mod.rs` gains 319 lines; three new runtime deps land — `tar`, `zstd`, `trash` — plus a `tempfile` promotion from dev-deps to runtime). The commit subject reads "graveyard: R-undo + per-entry tar.zst + system trash cascade (v1.41.0)" (commit f25d635, 2026-05-02 22:29 -04 / merged 2026-05-03 02:41 UTC). The minor cut to v1.41.0 — the only minor cut in arc 08 — is consistent with the diff shape: this is the new capability the rest of arc 08 reacts to.
+
+The entry below narrates four primitives the diff lands at once, then names the one user-facing-prompt change the same diff slips in alongside, then catches the explicit non-goal in the commit body.
+
+**Primitive 1 — the per-entry tar.zst archive schema.**
+
+Before PR #13, items expelled from inventory used a paired `<uuid>.json` (metadata) + `<uuid>.dat` (raw payload bytes) graveyard schema in `$XDG_STATE_HOME/spyc/graveyard/`. PR #13 replaces this with a `<uuid>.json` + `<uuid>.tar.zst` pair — one schema for both single regular files and entire directory trees, so there is one read/write code path for both. The commit body names the design intent verbatim: "single regular files and entire directory trees use the same schema, so there's one read/write code path for both." Permission preservation is opt-in via `tar`'s `HeaderMode::Complete` (mode bits, mtime, best-effort UID/GID); restore opts in to `set_preserve_permissions(true)` and `set_preserve_mtime(true)`; `set_overwrite(false)` refuses to clobber existing files (commit body, fc25d635).
+
+Pre-v1.41.0 paired `<uuid>.json` + `<uuid>.dat` entries are silently ignored by the new reader. The commit body's rationale, verbatim: "the graveyard is a transient soft-delete cache; major version bumps may lose recovery state — leaving the bytes in place is safer than trying to migrate." This is the diff shape that explains the choice not to ship a one-off migration tool — recovery state is not durable across major versions by design. `src/state/inventory.rs` (+55 / -55 net 0; same line count, full body rewrite) routes `move_to_graveyard` through the new schema so the graveyard is uniform from PR #13 forward.
+
+**Primitive 2 — the `gy` viewer with its own keymap.**
+
+A new viewer overlay surfaces the graveyard newest-first. The CHANGELOG names the keymap verbatim:
+
+- **`gy`** — open the graveyard view (newest first); also toggles closed.
+- Inside the view: **`p`** restore-to-cwd, **`P`** restore-to-original, **`dd`**/**`x`** purge entry to system trash, **`Z`** purge ALL (single-key confirm), **`Esc`**/**`gy`** close.
+
+The asymmetry between `p` (lowercase, cwd) and `P` (uppercase, original) is the case-as-intent dispatch shape that arc 06's PR #10 (quickselect) ships in a different domain (lowercase yank, uppercase open). Arc 06 records the case-as-intent pattern factually; observing that PR #13's viewer ships the same shape independently is observational, not pattern-attribution turf.
+
+Two new keymap actions land in `src/keymap/action.rs` (+4) and `src/keymap/resolver.rs` (+1). The viewer body itself is part of `src/app/mod.rs`'s 319-line gain.
+
+**Primitive 3 — the `:undo` command as one-shot escape hatch.**
+
+Distinct from the viewer: `:undo` restores the most-recent entry to its original path without opening the viewer. The commit body frames it as the "one-shot escape hatch." This is the command PR #14 will fix the routing for 25 minutes later; PR #13's diff lands the App-side handler but does not add `undo` to `AppState::dispatch_command`'s punt list. The drift is named in PR #14's entry, not here. From PR #13's vantage, `:undo` is a working command in the App's handler — the dispatch routing the punt list governs is the delta PR #14 catches.
+
+**Primitive 4 — the 500 MB system-trash cascade at startup.**
+
+A two-stage policy: the graveyard is the spyc-internal soft-delete cache (compressed, undo-able from the viewer); when it exceeds 500 MB, the **oldest entries cascade to the system trash** (FIFO) until the graveyard is back under cap. The commit body explains the design intent: "the unpacked content lands in Finder/Files with its original name so OS-native recovery still works." The cascade fires only at startup; a flash reports the count moved. Net pipeline: `R` → graveyard (compressed, spyc-recoverable) → system trash (uncompressed, OS-recoverable) when the cap is hit.
+
+The 500 MB cap and FIFO-by-oldest are policy choices the diff doesn't justify against alternatives (size cap vs. age cap, 500 MB vs. some other number). The commit body names the cap and the policy without arguing for them; the catalogue of justifications — if any — lives outside this diff. Captured factually.
+
+**The R-prompt blast-radius surfacing — a separate change in the same diff.**
+
+Arc 08's framing flagged that PR #13 is substantial because the system has multiple primitives. There is also a behavior change to the existing `R` prompt that lands quietly inside the same PR. Pre-PR-#13: `R` prompted "remove N file(s)?". Post-PR-#13: `R` pre-walks any selected directory to count files inside and prompts "remove DIR (recursive, N file(s)) + M file(s)? (y/N)" — explicitly surfacing the recursive blast radius so that a reflexive `y` doesn't hide a 47-file delete behind a one-line prompt. The CHANGELOG bucket for this change is `### Changed`, distinct from the graveyard's `### Added` bucket. The change reads as a related-but-separate hardening: the graveyard makes hard-deletes recoverable, *and* the prompt makes the magnitude of recursive deletes legible, *and* both ship together because both address "you may not realize what `R` is about to do" from different angles. Naming the two changes as related-but-distinct is the read the diff supports; whether they read as one feature or two is for the reader.
+
+**The explicit non-goal: xattrs / ACLs / macOS resource forks.**
+
+The commit body names the scope boundary verbatim: "xattrs / ACLs / macOS resource forks are not preserved (out of scope for v1)." This is a recoverability gap the diff explicitly opts into — a graveyard entry restored from `.tar.zst` will not carry extended attributes back to the file. For spyc's audience (developers on macOS/Linux, file commander use case), the gap is a limitation worth knowing; for graveyard entries originating from sources that depend on extended attributes (Finder color labels, macOS quarantine bits, ACL-controlled corporate files), the `R` → restore round-trip silently strips state. The "(out of scope for v1)" framing positions this as a deferred item, not an indefinite one. No PR in the 22-day window appears to address it; flagging factually for the insight layer's negative-space catalogue.
+
+**The dependency additions.**
+
+New runtime deps in `Cargo.toml`: `tar = "0.4"`, `zstd = "0.13"`, `trash = "5"`. `tempfile` is promoted from dev-deps to runtime deps with a doc-comment justification verbatim from the diff: "tempfile is a runtime dep (not just dev-deps) because the graveyard's cascade-to-trash and legacy-migration paths stage files into a TempDir before handing them to the system trash." The commit body confirms: "All four pass cargo-deny." `Cargo.lock` carries 338 lines of transitive-dep changes from the four additions.
+
+The `cargo-deny` check passing here is consistent with the `onboarding-risk-register` seed entry 0 (= 01KR0P9JC8Z3DF6FQ1GJPF3VKA) noting that new ignores must follow the documented-reason pattern. PR #13 adds none, which the entry flags as the positive-control case for the convention.
+
+**Drift findings flagged for the insight layer.**
+
+- The graveyard's cascade-to-system-trash policy fires only at startup. The diff does not justify why startup-only over event-driven (e.g. after each `R`) — startup-only is the chosen point but the alternatives are not catalogued. Captured for the insight layer's design-decision negative-space reading.
+- The CHANGELOG's `### Added` bucket for the graveyard contains the `:undo` reference; the same `:undo` is broken at merge time because `AppState::dispatch_command`'s punt list does not include it. The drift between "documented capability" and "wired capability" is the seed `onboarding-risk-register` entry 0 names: "Bitten on `:undo` (v1.41.1) and `:limit` historically." PR #14 (next entry) is the historical instance the seed cites. PR #13's CHANGELOG ships the documented-capability promise; the wiring drift surfaces 25 minutes later. Captured for arc 08's two-pair recurrence reading and the eventual insight layer.
+- Three new runtime deps land in one PR. Arc 01's PR #3 (security-hygiene) had cataloged the cargo-deny advisory-ignore baseline; this PR adds none, which is good, but the dep-graph expansion (338 lines of `Cargo.lock`) is the kind of change that increases the surface for future advisory ignores. Captured factually, no claim about future risk.
+- The graveyard schema (`<uuid>.json` + `<uuid>.tar.zst`) is incompatible with pre-v1.41.0 paired entries by design. Users with prior `<uuid>.dat`-shaped entries find them silently ignored. The commit body names this as policy ("transient soft-delete cache"), but the user-visible artifact is "items deleted before v1.41.0 are no longer recoverable from spyc's viewer." Whether any user noticed this is not narratable from any commit in the 22-day window.
+- The R-prompt blast-radius change ships under `### Changed` while the graveyard ships under `### Added`. The same diff makes two CHANGELOG buckets land at once. Arc 03's PR #26 (`Modifier::DIM` on the unfocused side) had the same shape — `### Changed` for a re-rendering of existing surface, distinct from feature add. Captured as observation; the "one-PR-two-CHANGELOG-buckets-with-internal-coherence" shape is recurring across arcs 03 and 08.
+
+Provenance:
+- 6b2be36 (PR #13 feat/graveyard-undo, 2026-05-03) — full PR.
+- f25d635 — PR #13's feature-branch commit; commit body quoted verbatim throughout this entry.
+- e210e58 → f25d635 — parent and tip SHAs for the diff inspection.
+- `git diff e210e58..f25d635 -- src/state/graveyard.rs`: 536 lines new (file did not exist pre-PR-#13).
+- `git diff e210e58..f25d635 -- src/app/mod.rs`: +319 net.
+- `git diff e210e58..f25d635 -- src/app/state.rs`: +156 net.
+- `git diff e210e58..f25d635 -- src/state/inventory.rs`: +55 / -55 net 0; rewrite-via-replacement of `move_to_graveyard`.
+- `git diff e210e58..f25d635 -- Cargo.toml`: +10/-1 net; new deps `tar = "0.4"`, `zstd = "0.13"`, `trash = "5"`; `tempfile = "3"` promoted from `[dev-dependencies]` to `[dependencies]` with verbatim doc-comment.
+- `git diff e210e58..f25d635 -- CHANGELOG.md`: 42 lines added; `### Added` graveyard block + `### Changed` R-prompt + inventory-schema blocks.
+- `git diff e210e58..f25d635 -- BUGS.md`: 2 lines (the SMALL "no undo for R" entry presumably gets the v1.41.0 close treatment; verified by reading the diff, the line is updated to the FIXED bucket).
+- `git diff e210e58..f25d635 -- src/keymap/action.rs`: +4 (two new viewer-action enum variants per CHANGELOG keymap).
+- `git diff e210e58..f25d635 -- src/keymap/resolver.rs`: +1.
+- `git diff e210e58..f25d635 -- README.md`: +17 (the user-visible recovery-surface description).
+- `git diff e210e58..f25d635 -- FEATURES.md`: +34/-2 (the recovery-feature section).
+- `git diff e210e58..f25d635 -- Cargo.lock`: +338/+0 net (transitive-dep additions from `tar`, `zstd`, `trash`, `tempfile` promotion).
+- Commit body verbatim quotations: "single regular files and entire directory trees use the same schema, so there's one read/write code path for both"; "xattrs / ACLs / macOS resource forks are not preserved (out of scope for v1)"; "the graveyard is a transient soft-delete cache; major version bumps may lose recovery state — leaving the bytes in place is safer than trying to migrate"; "All four pass cargo-deny"; "13 new unit tests (6 in graveyard, others in dispatch / view)."
+- `history-arc-08-recoverability-and-deps` framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80.
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (cargo-deny convention; the punt-list foot-gun naming `:undo` v1.41.1 verbatim).
+
+<!-- Entry-ID: 01KR38VEGHFT9JGRDCXXBFX8V1 -->
