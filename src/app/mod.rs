@@ -226,9 +226,16 @@ enum PagerReturn {
         path: PathBuf,
         title: String,
         scroll: u16,
+        mount: crate::ui::pager::Mount,
+        pane_scroll: bool,
     },
     /// On-disk file: reopen from the original path.
-    SourceFile { path: PathBuf, scroll: u16 },
+    SourceFile {
+        path: PathBuf,
+        scroll: u16,
+        mount: crate::ui::pager::Mount,
+        pane_scroll: bool,
+    },
 }
 
 pub struct Prompt {
@@ -1561,6 +1568,8 @@ impl App {
                                         path,
                                         title,
                                         scroll,
+                                        mount,
+                                        pane_scroll,
                                     } => {
                                         if let Ok(content) = std::fs::read_to_string(&path) {
                                             let lines: Vec<String> =
@@ -1568,11 +1577,18 @@ impl App {
                                             let mut view = PagerView::new_plain(title, lines);
                                             view.scroll = scroll;
                                             view.saveable = true;
+                                            view.mount = mount;
+                                            view.pane_scroll = pane_scroll;
                                             self.pager = Some(view);
                                         }
                                         let _ = std::fs::remove_file(&path);
                                     }
-                                    PagerReturn::SourceFile { path, scroll } => {
+                                    PagerReturn::SourceFile {
+                                        path,
+                                        scroll,
+                                        mount,
+                                        pane_scroll,
+                                    } => {
                                         let name = path
                                             .file_name()
                                             .unwrap_or_default()
@@ -1584,6 +1600,8 @@ impl App {
                                             let mut view = PagerView::new_plain(name, lines);
                                             view.source_path = Some(path);
                                             view.scroll = scroll;
+                                            view.mount = mount;
+                                            view.pane_scroll = pane_scroll;
                                             self.pager = Some(view);
                                         }
                                     }
@@ -4136,13 +4154,35 @@ impl App {
             return PostAction::None;
         }
 
-        // :pane-to-task — demote the active pane tab to a
-        // background task (v1.5 Phase 6c). Inverse of
-        // `:task-to-pane`. The pty keeps running; we just stop
-        // displaying it, and the user can return to it via `:fg`
-        // or `:task-to-pane`.
+        // :pane-to-task [N] — demote a pane tab to a background
+        // task (v1.5 Phase 6c). Inverse of `:task-to-pane`. The
+        // pty keeps running; we just stop displaying it, and the
+        // user can return to it via `:fg` or `:task-to-pane`. No
+        // arg = active tab; numeric arg = 1-indexed tab number
+        // (matches the divider's `[1]` `[2]` labels).
         if input == "pane-to-task" {
             self.demote_pane_to_task();
+            return PostAction::None;
+        }
+        if let Some(arg) = input.strip_prefix("pane-to-task ") {
+            match arg.trim().parse::<usize>() {
+                Ok(n) if n >= 1 => {
+                    let idx = n - 1;
+                    let len = self.pane_tabs.as_ref().map_or(0, PaneTabs::len);
+                    if idx >= len {
+                        self.state
+                            .flash_error(format!("pane-to-task: no tab #{n} (have {len})"));
+                    } else {
+                        if let Some(tabs) = self.pane_tabs.as_mut() {
+                            tabs.switch_to(idx);
+                        }
+                        self.demote_pane_to_task();
+                    }
+                }
+                _ => self
+                    .state
+                    .flash_error(format!("pane-to-task: expected tab number (got {arg:?})")),
+            }
             return PostAction::None;
         }
 
@@ -6097,6 +6137,14 @@ impl App {
                 .flash_info("scroll: alt-screen app, no scrollback (use the app's own history)");
             return;
         }
+        // Drain any pending bytes from the reader thread into the
+        // vt100 parser before snapshotting. Without this, output
+        // that arrived between the last render and the user pressing
+        // `^a-v` (e.g. a HUD plugin's most-recent paint) is still
+        // sitting in the channel and won't make it into the snapshot.
+        // The user reported the symptom: "the pager view does not
+        // include all of the text on screen".
+        active.drain_output();
         let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
         // Setting the pane's "is scrolling" flag keeps the existing
         // visual cues alive (divider re-color, [SCROLL] tag, tab
@@ -8509,6 +8557,12 @@ impl App {
                 let argv = shell::resolve_editor();
                 let editor_cmd = argv.join(" ");
                 let scroll = view.scroll;
+                // Preserve the v1.5 mount + pane_scroll across the
+                // editor round-trip so a `v` from the lower-pane
+                // scrollback pager doesn't return as a centered
+                // overlay (reported as a regression).
+                let mount = view.mount;
+                let pane_scroll = view.pane_scroll;
                 // Determine the file to edit and the return state.
                 let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
                     (
@@ -8516,6 +8570,8 @@ impl App {
                         PagerReturn::SourceFile {
                             path: src.clone(),
                             scroll,
+                            mount,
+                            pane_scroll,
                         },
                     )
                 } else {
@@ -8527,6 +8583,8 @@ impl App {
                                 path: tmp,
                                 title,
                                 scroll,
+                                mount,
+                                pane_scroll,
                             },
                         ),
                         Err(e) => {

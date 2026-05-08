@@ -261,8 +261,8 @@ const SECTIONS: &[Section] = &[
                 "promote a backgrounded task to a new pane tab",
             ),
             (
-                ":pane-to-task",
-                "demote the active pane tab to a background task",
+                ":pane-to-task / :pane-to-task N",
+                "demote a pane tab (active or numbered) to a background task",
             ),
             (
                 "S / C",
