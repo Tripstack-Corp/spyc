@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.50.0] - 2026-05-08
+
+The pager / task-viewer unification. The pager grew from "overlay
+you summon" into "renderer you mount anywhere" — `^a-v` is a real
+pager, `D` opens files in-pager, `:task-to-pane` and
+`:pane-to-task` move pty hosts between display containers, MCP
+socket discovery is project-scoped (no more cross-project
+attachment), and a long tail of daily-driver UX fixes from
+internal usage. See the [Unreleased] section above for the
+collected changelog entries since v1.41.1.
+
 ### Fixed
 - **`^a-v` scroll now keeps the bottom of the snapshot reachable.**
   Reported: pressing `k` after entering scrollback view collapsed
