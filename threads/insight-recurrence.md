@@ -621,3 +621,43 @@ Provenance:
 - `insight-drift` negative-space tail = 01KR3BT6MNZMWRMHX14QMYZ86Y (the negative-space methodology this tail's complement observation echoes).
 
 <!-- Entry-ID: 01KR3DJ9KJY1T9FFP8KDEPTBJ1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:10:22.938294+00:00
+Role: scribe
+Type: Note
+Title: Tail: the story-tails carried what this thread needed — recurrence is a cumulative-grain pattern, and the arc-grain story-tails were the upstream that made the cumulative-grain reading legible
+
+Spec: scribe
+
+tags: #insight #recurrence #tail
+
+Insight-drift's infrastructure tail (= 01KR3BVVYN37WDWJ5A3D8A5XWH) named that *the arc-side per-PR drift-findings practice* did the load-bearing work for that catalogue. Each arc's per-PR entries flagged drift instances locally; the catalogue's job was assembly. This thread's catalogue had a different upstream. The recurrence patterns came mostly from the *arc story-tails* — the cumulative-grain entries at the arc layer — not from the per-PR drift-findings sections.
+
+The arc-08 story-tail (= 01KR3A23E11K8F7VNVSM5XY6M2) is the load-bearing example. It said: *"three such instances at three time grains (3.5 hours, 49 minutes, 25 minutes) with three different acknowledgement registers (silent in arc 03; behavior-described in PR #14; explicit reframing in PR #31)."* That sentence is the structure of Pattern 2. The arc-08 story-tail wrote it as cumulative-grain observation about how the eight-arc network now reads. The brief carried that observation forward. This thread's Pattern 2 entry verifies the three instances against per-PR entries and adds a fourth long-grain instance the arc-03 story-tail had named separately. But the *matrix* was already there. The arc-08 story-tail did the structural work; this thread did the verification and the additive observation.
+
+The arc-04 story-tail (= 01KR13CJ5XS5VREYA4741JHDSQ) carried Pattern 6's first instance. Its sentence: *"None of the commits says 'this enables that.' But the chain is real, and it's what lets the arc read as additive rather than thrashing."* That observation is the entire structure of Pattern 6 in one paragraph. The arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) carried the within-arc PagerView field-accretion sub-chains and the cross-arc PR #34 → PR #35 chain. The arc-07 story-tail (= 01KR2JM67RTQHQYN0223GTKH1V) carried Pattern 4 instance 3 and the substrate-vs-registration distinction. The arc-03 story-tail (= 01KR11S8RG29J98QKN1H0VAA6W) carried both the cross-arc PR #5 → PR #29 silent supersession and the within-arc PR #26 → PR #29 silent supersession. The arc-06 story-tail (cited at provenance throughout, not directly read this session) carried the v1.41.x patch cadence framing for Pattern 5.
+
+Five of the six patterns trace their primary cumulative-grain observation to a story-tail. Pattern 1 (bundle-as-shape, recurrence reading) is the exception — it traces to insight-drift's Pattern B, which itself assembled from per-PR drift-findings. The recurrence reading of Pattern 1 is the cross-thread reading insight-drift's closure entry placed; this thread carried the placement. So Pattern 1's upstream is *insight-drift's closure entry* rather than an arc story-tail; even there, the drift-findings practice that fed insight-drift was per-PR, but the cross-thread placement decision was at the cumulative-grain insight-drift closure.
+
+The asymmetry between insight-drift's upstream and this thread's upstream is structural, not coincidental. *Drift* is a per-PR observation: each instance is its own moment of misnaming-at-merge. *Recurrence* is a cross-PR observation: the pattern is the count and the cross-grain structure. Per-PR entries can flag drift at the moment they author the per-PR view; recurrence requires the cumulative grain — the story-tail layer — to *see* the count. The arc story-tails are what made the recurrence patterns legible *as patterns*. Without them, this thread would have needed to derive the patterns from per-PR drift-findings alone, which would have produced a thinner catalogue (the per-PR entries flagged individual instances; only the story-tails *summed*).
+
+What this means for the next two insight threads. `insight-trajectory`'s upstream will likely be a mix: stated-plan documents (ROADMAP.md, the gap analysis, BUGS.md post-harvest, the charter) plus the arc-grain trajectory observations the story-tails carry (e.g., arc-05's lazygit-ux-catalogue §4 deferred-question; arc-07's substrate-vs-registration distinction; arc-04's machinery-chain-without-naming as enabling-additive-rather-than-thrashing). The mix favors the trajectory-thread author; trajectory questions cross both layers. `insight-emergent-properties`'s upstream will run heavier on cumulative-grain synthesis: emergent properties are tier-4, structurally upstream of any single arc, like Pattern F (span-phrasing) was for insight-drift. The infrastructure-tail forecast there held: emergent-properties will run heavier on cumulative observation than assembly.
+
+This thread's contribution at the cumulative grain itself, separate from arc-grain assembly: the convergence-shape observation the prior tail named, the brief-candidate verification (dropping arc-06 PR #25 from Pattern 3; consolidating feature-plus-immediate-hotfix into Pattern 2), and the cross-product observations (Pattern 2's grain × register matrix, Pattern 4's grain × open-side-shape ladder, Pattern 1's sub-shape distribution). These are not work the story-tails did; they are the work the catalogue does *atop* the story-tails. Two-thirds story-tail-assembly, one-third cumulative-grain refinement. The infrastructure-tail's *five-sixths assembly / one-sixth cumulative observation* forecast for this thread held roughly true.
+
+The thread is left OPEN.
+
+Provenance:
+- `insight-drift` infrastructure tail = 01KR3BVVYN37WDWJ5A3D8A5XWH (the upstream-naming pattern this tail re-uses with a different upstream).
+- arc-03 story-tail = 01KR11S8RG29J98QKN1H0VAA6W (Pattern 2 instances 1 and 4 upstream).
+- arc-04 story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (Pattern 6 instance 1 upstream).
+- arc-05 story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (Pattern 6 instance 2 sub-chains and instance 3 upstream).
+- arc-06 story-tail entry = 01KR2GYQPQRX08SV980SPHHZ80 (Pattern 5 v1.41.x cadence framing upstream; cited at provenance throughout, not directly read this session).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (Pattern 4 instance 3 upstream).
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (Pattern 2 three-grain × three-register matrix upstream; the load-bearing example).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 (Pattern 1 cross-thread placement upstream).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+- `insight-recurrence` convergence tail = 01KR3DJ9KJY1T9FFP8KDEPTBJ1.
+
+<!-- Entry-ID: 01KR3DM9DBRV6MBA4D516KRR12 -->
