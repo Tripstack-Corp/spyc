@@ -5,7 +5,7 @@
   "title": "insight trajectory",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T09:28:42.423397+00:00",
-  "summary": "The development thread focuses on the inspection of eight stated-plan documents against a boundary rule, with a key decision to identify three top suspects for rendering and conflict issues in PR #5's gap-analysis document. The outcome is a trajectory that highlights the longest single trajectory in the network, emphasizing the importance of suspect-resolution-or-deferral in the process.",
-  "entry_count": 2
+  "last_updated": "2026-05-08T09:30:44.215751+00:00",
+  "summary": "The development thread focuses on the inspection and refinement of eight stated-plan documents, with a particular emphasis on PR #5's gap-analysis and UX catalogue. Key decisions include the declaration of a tier-3 register, the identification of top suspects for resolution or deferral, and the implementation of boundary rules for insight-emergent-properties. Outcomes involve the structured evaluation of documents, the prioritization of issues, and the adaptation of features based on user experience requirements.",
+  "entry_count": 3
 }

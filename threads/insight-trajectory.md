@@ -180,3 +180,82 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3ENV1WP6R9SFRE1QME291S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:30:44.211984+00:00
+Role: scribe
+Type: Note
+Title: Document #2: PR #5's UX catalogue — skip honored exactly, adapt all modified-not-executed (the load-bearing observation)
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** PR #5 added `notes/lazygit-ux-catalogue.md` (288 lines, since relocated to `BUGS.md` by PR #12). Seven sections, each with a borrow / adapt / skip recommendation; closing "Top 3 to consider first" section ranks §4 (Generalized pager picker), §2 (Context-sensitive prompt-row hint), §5 (Scoped `?` help). The catalogue opens with a tension-acknowledgement: *"lazygit is mouse-first with keyboard parity... spyc's DESIGN.md is explicit that 'Keys are the API; mouse is a courtesy.' That difference shows up most strongly in surfaces 4 (popups) and 6 (row verbs) below: the *affordance* lazygit shows on screen often only earns its keep because clicking it is a primary input. Where I recommend adapting, I'm recommending the keyboard half, not the click target."*
+
+The catalogue's seven-section recommendation table:
+
+- §1 Numbered panels & direct-jump — **skip** ("spyc has exactly two top-level surfaces (list, pane) where lazygit has five, so `1` and `2` would be wasted on a binding that `^W j`/`^W k` already covers cleanly").
+- §2 Context-sensitive footer — **adapt** ("into the prompt row, not the status bar... a `context_hints()` accessor on each overlay returning a `Vec<(key, label)>`; paint via `Style::DIM` when the prompt is otherwise idle").
+- §3 Command log + "Random tip" — **skip** the log ("Spyc doesn't *run* git or other commands behind the user's back the way lazygit does"); **adapt** the tip ("Adapt as a one-shot flash on first launch of the session, not a panel").
+- §4 Popups / pickers (Menu, Confirm, Alert, Prompt, Toast) — **adapt** ("extend the pager into a generalized pick-from-list mode... A `PagerView::picker_items: Vec<(Label, Action)>` with Enter-to-fire gives spyc lazygit's Menu without adding a fifth overlay").
+- §5 Sub-menu drill-down — scoped help — **adapt** ("scope `?` to current overlay first, then `?` again for global"; effort note: *"becomes nearly free once §4 lands"*).
+- §6 Single-key action vocabulary on rows — **skip** ("spyc has effectively one (the list), so the same letter shouldn't be taught two meanings").
+- §7 Two-letter chord jumps — **skip** ("spyc's chord-family discipline... is the right call for a file commander").
+
+**Per-section trajectory.**
+
+**§1 — SKIP HONORED. Refuted explicitly by arc 06's PR #10 (= 01KR2GH1D9QCGDPZEMWW09R898).** PR #10 (commit 9043547, 2026-05-02) ships the labeled-overlay quickselect with alphabetic labels (`abcdefghilmnoprstuvwxyz`, 23 letters with `q`/`Q`/`j`/`k` deliberately omitted), case-as-intent dispatch, ephemeral 1- or 2-letter labels assigned per match per scan. The PR #10 entry explicitly reads PR #10 against the §1 reading and refutes it: *"the labels are alphabetic (`a`..`z` minus `q`/`j`/`k`), not numeric. The catalogue's §1 pattern is specifically lazygit's `[N]-Status`, `[N]-Files` etc. with `1`..`5` as direct-jump targets to top-level panels... PR #10 doesn't ship numbered direct-jumps to anything. The labeled-overlay picker is structurally a different idiom... The §1 SKIP recommendation is not invalidated by PR #10's existence; PR #10 is not a §1 instance."* §1 stays skip-honored across the window.
+
+**§2 — PARTIAL EXECUTION. Half-landed by arc 05's PR #20 (= 01KR2A6TT516XA5FEGVBXYPWD7).** PR #20 (commit ee07307, 2026-05-05) ships an alt-screen scroll-mode hint: `^a v` against a full-screen TUI (codex, claude post-startup, vim, htop, lazygit) flashes a context-aware message instead of the generic one. The PR #20 entry verifies the disposition: *"PR #20 honors the *spirit* — a context-sensitive hint surfaced when context shifts (the scroll-mode flash gains a context-aware variant) — without executing the catalogue's proposed shape (a per-overlay `context_hints()` accessor). The flash-info path is hardcoded in one `Action` arm; no `context_hints()` accessor is introduced."* PR #20 narrows to alt-screen detection; the broader options-map idea — a per-overlay `context_hints()` accessor on each overlay returning `Vec<(key, label)>`, painted in DIM at the prompt row when otherwise idle — does not land. §2 trajectory disposition: PARTIAL EXECUTION, narrowed to alt-screen detection.
+
+**§3 — NON-EXECUTED.** No PR in the 22-day window ships a command log or a one-shot startup tip surface. The catalogue's recommendation has two halves (skip the log; adapt the tip); only the skip-half is observable as honored (no command-log surface lands). The adapt-half (one-shot flash via `Action::describe`-keyed tip table) is non-executed. §3 trajectory disposition: SKIP-HALF HONORED, ADAPT-HALF NON-EXECUTED.
+
+**§4 — DIRECTION ALIGNMENT BY FOUR PRs ACROSS TWO ARCS; SPECIFIC SHAPE NON-EXECUTED.** This is the catalogue's load-bearing observation, ranked #1 in the "Top 3 to consider first" closing section as "Highest-leverage of the lazygit borrows." The catalogue's specific recommendation — extend the pager via `PagerView::picker_items: Vec<(Label, Action)>` with Enter-to-fire dispatch — is not directly executed by any PR in the 22-day window. Four PRs hold DIRECTION ALIGNMENT, in two arcs:
+
+- *arc 05 PR #33* (= 01KR2AAX12XSNRNZPTXJT2TXJA, `feat/pager-visual-line-mode`, cf9e8ff, 2026-05-06) — ships `VisualSelection { anchor, cursor }` field on `PagerView`, structurally analogous to `picker_items` (both are `Option`-shaped state on `PagerView` that gates a mode), but selects a *line range* for one terminal action (yank), not pick-from-many discrete options. PR #33's entry: "DIRECTION ALIGNMENT, not direct execution."
+- *arc 05 PR #35* (= 01KR2AD5PV989H58E49E5D18NM, `feat/D-opens-pager-in-top-pane`, c243549, 2026-05-06) — `display_in_pane` launches an external `$PAGER` (less, most, etc.) into a pty overlay; does not populate spyc's internal `PagerView` with picker items. PR #35's entry: "DIRECTION ALIGNMENT, no direct catalogue-item execution."
+- *arc 06 PR #8* (= 01KR2GCH3Q8DR9DATBBC802Q8W, `feat/harpoon`, 62fc129, 2026-05-02) — ships `HarpoonMenu` as a standalone modal `Block` rendered by `App::render_harpoon_menu`, with its own cursor and `delete_armed` state, dispatched through `App::handle_harpoon_menu_key`; the pager is not involved. PR #8's entry: "PARALLEL PATTERN, not direct execution of §4."
+- *arc 06 PR #10* (= 01KR2GH1D9QCGDPZEMWW09R898, `feat/quickselect`, 9043547, 2026-05-02) — ships `QuickSelect` co-located with `Pane`-adjacent code, with case-as-intent dispatch; `PagerView` is not involved. PR #10's entry: "PARALLEL PATTERN, not direct execution of §4."
+
+The four PRs' joint-disposition is named at arc 05's closure (= 01KR2AJVZA1E85YSKHF4FNRQQ3): *"four PRs across two arcs hold §4 alignment; zero execute the `PagerView::picker_items` shape."* Arc 05's story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) deferred the question to the insight layer factually. §4 trajectory disposition: DIRECTION ALIGNMENT BY FOUR PRs, SPECIFIC SHAPE NON-EXECUTED.
+
+A property of the four-PR alignment worth naming at trajectory-grain: the four PRs split 2-2 between pager-as-mode-side (arc 05) and standalone-overlay-side (arc 06). Two different families of "the picker shape, but not as a pager mode." The catalogue's §4 thesis ("render *into* the pager") is honored by the arc 05 half (pager hosts the mode) and refused by the arc 06 half (the picker stands alone). Both halves count as DIRECTION ALIGNMENT against the catalogue's general "render through pager" framing; neither half lands the specific `PagerView::picker_items: Vec<(Label, Action)>` field.
+
+**§5 — DEFERRED-ON-§4. Non-executed; consistent with the catalogue's own effort note.** The catalogue's effort note for §5 reads verbatim: *"becomes nearly free once §4 lands."* Inversely, §5 stays expensive while §4 stays unlanded. No PR in the 22-day window restructures `src/ui/help.rs` to scope `?` first to current overlay then to global. Verified by absence: arc 05's PR #23 (`feat/help-yf-and-percent-docs`) adds a help-yf binding and discoverability fixes without restructuring the help dump's section ordering. §5 trajectory disposition: NON-EXECUTED, consistent with the catalogue's own conditional-on-§4 framing.
+
+**§6 — SKIP HONORED.** The catalogue's skip rationale was structural: spyc's globally-consistent verb vocabulary is the right call for a one-list-pane file commander. No PR in the 22-day window introduces panel-scoped key reuse where the same letter does different things in different panels. Verified by absence: arc 06's chord-family fixes (PR #25 input-dispatch hardening; PR #32 chord-priority) reinforce the existing chord-prefix discipline rather than introducing panel-scoped overload. §6 trajectory disposition: SKIP HONORED.
+
+**§7 — SKIP HONORED.** The catalogue's skip rationale named existing chord-family discipline (`g <x>` / `^a <x>` / `^W <x>` / `H <x>` / `W <x>` / `m <x>` / `' <x>`). No PR in the 22-day window introduces flat 2-letter mnemonics. PR #8's harpoon family adds `H1`..`H9` / `Ha` / `Hx` / `Hh` (under the new `H` chord prefix) — that's chord-prefixed, not flat 2-letter. §7 trajectory disposition: SKIP HONORED.
+
+**The load-bearing observation, summarized.**
+
+Negative recommendations (skip): four sections ranked skip — §1, §3-log-half, §6, §7. *All four were honored exactly across the 22-day window.* No PR introduced numbered panels-jump, command log surface, panel-scoped key reuse, or flat 2-letter mnemonics.
+
+Positive recommendations (adapt): four sections ranked adapt — §2, §3-tip-half, §4, §5. *All four landed in modified shape — partial / parallel / deferred — none executed exactly as the catalogue specified.*
+- §2: PARTIAL (alt-screen-hint half only; broader options-map idea non-executed).
+- §3-tip-half: NON-EXECUTED.
+- §4: DIRECTION ALIGNMENT BY FOUR PRs; specific shape non-executed.
+- §5: NON-EXECUTED (consistent with the catalogue's conditional-on-§4 framing).
+
+**The asymmetry is the trajectory observation.** The catalogue's skip recommendations were honored as specified; the catalogue's adapt recommendations all landed in modified shape, none as specified. Counting the dispositions: 4-of-4 skips honored; 0-of-4 adapts executed-as-specified, 1-of-4 partial, 1-of-4 non-executed-against-conditional, 2-of-4 non-executed (§3-tip-half; pieces of §4 specifically). The skip-vs-adapt asymmetry holds across the entire seven-section catalogue.
+
+**Cross-thread cross-reference.** This entry refers to insight-recurrence Pattern 4 (named-then-fixed bracket) for the bracket-shape question: catalogue §4's specification has held open across the window with four DIRECTION ALIGNMENT PRs without a closing PR that lands `PagerView::picker_items`. Whether the §4 bracket is a *long-grain* named-then-fixed bracket awaiting closure (and Pattern 4's three-instance count understates the population) or a *non-bracket* (where the four PRs are the trajectory and there is no eventual close to the catalogue's specific shape) is determinable only beyond the window. Tier-3 trajectory observation: at the window's terminus, §4's bracket sits open with four DIRECTION ALIGNMENT PRs in lieu of one specific-shape execution.
+
+**Boundary with `insight-emergent-properties`.** The asymmetry between skip-honored-exactly and adapt-all-modified is data; whether it reflects an emergent property of "the catalogue is more reliable as a refusal mechanism than as an execution mechanism" or "the maintainer's working-style produces parallel-not-substrate execution" or any other property naming is *tier-4 territory* and forbidden here. The trajectory thread states the asymmetry; the property name is `insight-emergent-properties`'s.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — full PR.
+- `notes/lazygit-ux-catalogue.md` §1-§7 verbatim, including the "Top 3 to consider first" closing section, verified at `git show 0691666:notes/lazygit-ux-catalogue.md`.
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05) — §2 PARTIAL EXECUTION; verified at arc 05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7.
+- cf9e8ff (PR #33 feat/pager-visual-line-mode, 2026-05-06) — §4 DIRECTION ALIGNMENT (pager-as-mode side); verified at arc 05 PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA.
+- c243549 (PR #35 feat/D-opens-pager-in-top-pane, 2026-05-06) — §4 DIRECTION ALIGNMENT (pager-launchable-from-listing side); verified at arc 05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM.
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02) — §4 PARALLEL PATTERN (standalone-overlay side); verified at arc 06 PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W.
+- 9043547 (PR #10 feat/quickselect, 2026-05-02) — §4 PARALLEL PATTERN (standalone-overlay side); §1 explicit refutation; verified at arc 06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898.
+- `history-arc-05-pager-surface` closure entry = 01KR2AJVZA1E85YSKHF4FNRQQ3 (cumulative §4 reading after arc 05; "four PRs across two arcs hold §4 alignment; zero execute the `PagerView::picker_items` shape").
+- `history-arc-05-pager-surface` story-tail entry = 01KR2ANRAEFWWR5W9FQP11A0DB (deferred §4 question to insight layer).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue source; per-PR §-disposition assignments).
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3 (named-then-fixed bracket recurrence; cross-reference for the §4 bracket-open-at-window-terminus question).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3ESJ42TT0ZGJHGHJ5CTNYC -->

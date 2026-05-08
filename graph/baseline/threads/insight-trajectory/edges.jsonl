@@ -1,3 +1,5 @@
 {"source":"thread:insight-trajectory","target":"entry:01KR3EJ0RWZXEBMYHY9EEZQX4A","type":"contains"}
 {"source":"thread:insight-trajectory","target":"entry:01KR3ENV1WP6R9SFRE1QME291S","type":"contains"}
 {"source":"entry:01KR3EJ0RWZXEBMYHY9EEZQX4A","target":"entry:01KR3ENV1WP6R9SFRE1QME291S","type":"followed_by"}
+{"source":"thread:insight-trajectory","target":"entry:01KR3ESJ42TT0ZGJHGHJ5CTNYC","type":"contains"}
+{"source":"entry:01KR3ENV1WP6R9SFRE1QME291S","target":"entry:01KR3ESJ42TT0ZGJHGHJ5CTNYC","type":"followed_by"}
