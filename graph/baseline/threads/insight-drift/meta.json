@@ -1,0 +1,11 @@
+{
+  "id": "thread:insight-drift",
+  "type": "thread",
+  "topic": "insight-drift",
+  "title": "insight drift",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-08T08:28:30.468082+00:00",
+  "summary": "The development thread focuses on insight drift, a methodology that aggregates observed patterns across multiple arcs to identify pure trends. Key decisions include the naming of six patterns and the establishment of a tier-1 observation framework. The outcome is a structured approach to detecting and analyzing insight drift in data.",
+  "entry_count": 1
+}
