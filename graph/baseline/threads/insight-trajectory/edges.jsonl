@@ -7,3 +7,5 @@
 {"source":"entry:01KR3ESJ42TT0ZGJHGHJ5CTNYC","target":"entry:01KR3EW3166JZ59TDR8PYMGN4T","type":"followed_by"}
 {"source":"thread:insight-trajectory","target":"entry:01KR3EZDWSTW7TPWBY7KXB0KB3","type":"contains"}
 {"source":"entry:01KR3EW3166JZ59TDR8PYMGN4T","target":"entry:01KR3EZDWSTW7TPWBY7KXB0KB3","type":"followed_by"}
+{"source":"thread:insight-trajectory","target":"entry:01KR3F1TDZQGAQNZYEYYMFAGCE","type":"contains"}
+{"source":"entry:01KR3EZDWSTW7TPWBY7KXB0KB3","target":"entry:01KR3F1TDZQGAQNZYEYYMFAGCE","type":"followed_by"}

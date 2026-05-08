@@ -427,3 +427,73 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3EZDWSTW7TPWBY7KXB0KB3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:35:14.840281+00:00
+Role: scribe
+Type: Note
+Title: Document #6: the v2.0 framing — within-window observation only; v2.0 not landed at v1.41.24, with pre-staging visible
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** The v2.0 framing at `ROADMAP.md:472-476`, verified at current state:
+
+> *"The v2.0 version bump is a signaling choice as much as a semver one. The tool has been shipping 1.x for a while, but the MCP positioning shift + public distribution justifies a major bump to mark the transition."*
+
+The release ladder around v2.0 at `ROADMAP.md:455-471`:
+
+> *"v1.8 (current) -- Writable MCP actions... v1.7 -- Performance refactor... v1.9 -- Distribution track. Release automation, macOS notarization, Homebrew tap, asciinema demo. v2.0 -- Public distribution launch. Gated on: thesis-track items #1-#2 shipped (session forking, prompt templates), remaining Distribution track complete. External announcement: TripStack engineering blog post, optional Show HN. Target: mid-to-late May 2026."*
+
+The v2.0 plan has three load-bearing properties: it is *signaling-as-much-as-semver*; it ties to MCP positioning shift plus public distribution; it has a target window of *mid-to-late May 2026*.
+
+**The drift-vs-actual that this entry confronts before tracking trajectory.** The release-ladder narrative names "v1.8 (current)" and lists v1.7 as the prior step, with v1.9 as the next step. The actual `Cargo.toml:3` value at the eight-arc record's terminus is `1.41.24` (per arc 08 PR #31's diff inspection plus arc 07 PR #37's diff inspection). The release-ladder section's "v1.8 (current)" is stale relative to the post-window state by approximately 33 minor versions. The release-ladder's *narrative* and the *Cargo.toml truth* are decoupled. The trajectory observation here treats the *v2.0 framing paragraph* (the signaling-choice-and-target-window framing at `ROADMAP.md:472-476`) as the load-bearing stated-plan, since it is the maintainer-authored framing that survives unmodified at current-state and is internally coherent regardless of where the version-current-state sentence is.
+
+**Within-window trajectory.**
+
+The 22-day window closes at v1.41.24 on 2026-05-07. v2.0 has not landed. Trajectory disposition for the v2.0 framing: **NOT LANDED WITHIN WINDOW**.
+
+Pre-staging is visible at multiple surfaces. Per arc 01's framing and the `onboarding-release-process` seed:
+
+- *Arc 01's PR #2 (`chore/ci-hygiene`, 2026-04-30)* — `make check` and target cache scaffolding for CI pipelines that public distribution would consume.
+- *Arc 01's PR #3 (`chore/security-hygiene`, 2026-04-30)* — `SECURITY.md` and `cargo-deny` plus `--locked`. Public-distribution disposition: SECURITY.md is the responsible-disclosure surface a public distribution would point at.
+- *Distribution-related Make targets* — `make dist-checksums`, `make dist-sign` infrastructure named in the brief and consistent with the `ROADMAP.md:462-463` "v1.9 -- Distribution track. Release automation, macOS notarization, Homebrew tap, asciinema demo" framing. The release-automation surface is pre-staged within the window even as the version stays in v1.41.x.
+
+The pre-staging is observable in arc 01; the v2.0 cut is not landed. Trajectory observation: pre-staging visible; the v2.0 cut itself sits at the window's edge.
+
+**The window's last day (2026-05-07) is also the start of the v2.0 target window ("mid-to-late May 2026").** The eight-arc record terminates as the v2.0 target window opens. The within-window observation cannot extend past the trajectory's terminus; whether v2.0 lands in the next ~7-21 days beyond the window is *outside scope* for this thread (tier-5 forward prediction, reserved for `insight-emergent-properties` if it cites a specific recurrence pattern as the basis for extrapolation).
+
+**The intensity-per-day denominator question (per insight-drift Pattern F).**
+
+Insight-drift's Pattern F entry (= 01KR3BN3N6YF60414FFVHAM50Y) named the spine's *"22-day window"* phrasing as project-age rather than merge-window — the actual merge-window is ~7-8 calendar days. For the v2.0 trajectory, the merge-window denominator is the relevant one: 36 PRs over ~7-8 calendar days is ~4.5-5 PRs per calendar day, sustained merge cadence. Whether this cadence is sufficient to land v2.0's gate items ("thesis-track items #1-#2 shipped (session forking, prompt templates), remaining Distribution track complete") in the next 7-21 days is a tier-5 question and forbidden here.
+
+The within-window observation is the load-bearing one: at the window's terminus, *(a)* the v2.0 framing has not landed; *(b)* the pre-staging is visible at multiple infrastructural surfaces; *(c)* the gate items the v2.0 framing names (session forking, prompt templates, remaining Distribution track) are not narratable as landed in any per-PR entry; *(d)* the target window (mid-to-late May 2026) starts at the eight-arc record's terminus.
+
+**The signaling-as-semver framing (the second load-bearing fragment).**
+
+The v2.0 paragraph names the version bump as *"a signaling choice as much as a semver one."* The paragraph anchors the signaling to *"MCP positioning shift + public distribution"*. The MCP positioning shift trajectory is treated at this thread's document #4 entry (= 01KR3EZDWSTW7TPWBY7KXB0KB3 — the charter's substrate-level widening; codex as second peer; PR #37's project-scoped discovery). The public-distribution side is not narratable as landed in the per-PR entries: no public-binary distribution PR, no Homebrew tap PR, no notarization PR lands within the window. The signaling-as-semver framing has *one* of its two anchor surfaces (MCP positioning shift) executing partially within the window; the *other* anchor surface (public distribution) does not execute within the window.
+
+Trajectory observation for the signaling fragment: half-anchored within window; the second anchor's execution sits beyond the window. This is *not* a within-window divergence (the v2.0 framing names mid-to-late May 2026 as the target, which sits at the window's edge); it is a within-window-vs-anchored-future read. The trajectory thread states the half-anchoring; the *forward* prediction of when the second anchor lands is forbidden here.
+
+**Cross-thread cross-reference.**
+
+`insight-recurrence` Pattern 5 (v1.41.x patch cadence; this thread's document #7 entry) reads against the within-window v2.0-not-landed observation. The cadence shipped 24 consecutive v1.41.x patches; no minor cut and no major cut landed after PR #13's v1.41.0 on Day 4. Whether the patch-only cadence reflects a *holding pattern* before the v2.0 gate or a *steady-state* unrelated to v2.0 is *unstated* — there is no maintainer-authored document linking the patch cadence to the v2.0 gate. The trajectory thread observes the parallelism (the cadence shipped while v2.0 was framed-but-not-landed); the linkage is absent from any stated plan.
+
+**Boundary with `insight-emergent-properties`.**
+
+The strongest tier-5 temptation in this entry is to extrapolate from the pre-staging visibility plus the cadence pattern to a forward prediction of v2.0 landing within the v2.0 target window. That extrapolation is forbidden here. The within-window observation is the load-bearing observation: *v2.0 not landed at v1.41.24; pre-staging visible; signaling fragment's MCP-positioning anchor partially executed at substrate-level; signaling fragment's public-distribution anchor not executed within window; the v2.0 target window begins at the eight-arc record's terminus*. That is the trajectory at tier-3.
+
+Provenance:
+- `ROADMAP.md:472-476` current state — v2.0 paragraph quoted verbatim above; signaling-as-semver framing.
+- `ROADMAP.md:455-471` current state — release ladder; v2.0 gate items quoted verbatim above ("session forking, prompt templates, remaining Distribution track complete"); target "mid-to-late May 2026."
+- Arc 01 framing entry (foundation-hygiene; PR #2 / PR #3 / PR #4) — pre-staging observable at CI hygiene plus `SECURITY.md` plus `cargo-deny` plus `--locked` surfaces.
+- `onboarding-release-process` thread — local-only release flow via SSH cloning plus `make install`; SemVer enforcement via PRs; pre-staging context.
+- `Cargo.toml:3` post-window state — `version = "1.41.24"` (verified at arc 07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ and arc 08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY).
+- `history-arc-07-codex-and-mcp-bridge` PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ (MCP positioning shift; substrate-level widening; one anchor of signaling fragment executes partially within window).
+- `insight-drift` Pattern F entry = 01KR3BN3N6YF60414FFVHAM50Y (merge-window denominator question; intensity-per-day reading).
+- `insight-recurrence` Pattern 5 entry = 01KR3D8RH5DNYC37WSGFVETXT3 (v1.41.x cadence; cross-reference for parallelism with v2.0-not-landed observation).
+- `insight-trajectory` document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (charter trajectory; MCP positioning shift; cross-reference for signaling fragment's first anchor).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3F1TDZQGAQNZYEYYMFAGCE -->
