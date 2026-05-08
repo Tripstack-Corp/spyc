@@ -1309,6 +1309,7 @@ impl AppState {
             || input == "undo"
             || input == "graveyard"
             || input == "date"
+            || input == "dump-scrollback"
         {
             return CommandResult::NotHandled;
         }

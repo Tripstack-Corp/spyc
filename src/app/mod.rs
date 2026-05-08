@@ -4110,6 +4110,18 @@ impl App {
             let _ = self.apply(&Action::Date);
             return PostAction::None;
         }
+        // :dump-scrollback — diagnostic for the v1.5 ^a-v
+        // snapshot path. Drains the active pane and writes the
+        // resulting snapshot (as plain text, one line per row) to
+        // /tmp/spyc-scrollback.txt. Useful when content visible on
+        // the live pane (e.g. a HUD plugin overlay) seems to go
+        // missing in the pager view — `cat /tmp/spyc-scrollback.txt
+        // | tail` shows whether the bytes are actually reaching
+        // our vt100 emulator at snapshot time.
+        if input == "dump-scrollback" {
+            self.dump_scrollback_snapshot();
+            return PostAction::None;
+        }
         // :graveyard — open the graveyard viewer (typed alias for `gy`).
         if input == "graveyard" {
             self.state.open_graveyard_view();
@@ -6123,6 +6135,44 @@ impl App {
     /// "no scrollback" hint and skip opening the pager — there's
     /// genuinely nothing to scroll back through, and the app's own
     /// history viewer is the right tool.
+    /// `:dump-scrollback` diagnostic. Runs the same drain +
+    /// snapshot path as `^a-v`, then writes the captured lines as
+    /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to
+    /// confirm whether content visible on the live pane (HUD
+    /// overlays, etc.) is actually reaching our vt100 emulator at
+    /// snapshot time.
+    fn dump_scrollback_snapshot(&mut self) {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            self.state.flash_error("dump-scrollback: no pane open");
+            return;
+        };
+        let active = tabs.active_mut();
+        for _ in 0..3 {
+            active.drain_output();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        active.drain_output();
+        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let path = std::path::Path::new("/tmp/spyc-scrollback.txt");
+        let mut out = String::new();
+        for line in &lines {
+            for span in &line.spans {
+                out.push_str(&span.content);
+            }
+            out.push('\n');
+        }
+        match std::fs::write(path, &out) {
+            Ok(()) => {
+                self.state
+                    .flash_info(format!("wrote {} lines to {}", lines.len(), path.display()));
+            }
+            Err(e) => {
+                self.state
+                    .flash_error(format!("dump-scrollback: write failed: {e}"));
+            }
+        }
+    }
+
     fn open_pane_scroll_pager(&mut self) {
         let Some(tabs) = self.pane_tabs.as_mut() else {
             return;
