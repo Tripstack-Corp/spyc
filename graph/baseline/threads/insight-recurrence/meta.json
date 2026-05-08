@@ -5,7 +5,7 @@
   "title": "insight recurrence",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T09:07:47.154686+00:00",
+  "last_updated": "2026-05-08T09:09:17.591413+00:00",
   "summary": "The development thread focuses on identifying recurring event-shape patterns in PRs, with six key patterns identified, including bundling, supersession, BUGS.md lift, named-then-fixed mechanisms, patch cadence, and implicit machinery. These patterns reveal how issues are tracked, resolved, and integrated across the project lifecycle. The outcomes include a catalog of recurring patterns that help understand the project's development trajectory and emergent properties.",
-  "entry_count": 8
+  "entry_count": 9
 }

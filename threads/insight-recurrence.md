@@ -580,3 +580,44 @@ Provenance:
 - All eight arc threads' per-PR entries with their drift-findings sections plus story-tails are the load-bearing infrastructure this catalogue was built atop; the per-pattern entries above cite the specific arc-entry ULIDs.
 
 <!-- Entry-ID: 01KR3DFHA7FRV3BXEH2Z8SFJQN -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:09:17.589660+00:00
+Role: scribe
+Type: Note
+Title: Tail: convergence shapes — a small handful of PRs sit at the intersection of multiple pattern instances, and the convergences are observable
+
+Spec: scribe
+
+tags: #insight #recurrence #tail
+
+The catalogue holds six patterns and ~25 instances. The instances overlap: a small handful of PRs surface in two or three of the catalogue's patterns, and the overlaps are not noise — they are convergence shapes worth seeing.
+
+PR #29 is the most-converged-upon successor PR in the eight-arc record. It carries Pattern 2 instance 1 (3.5-hour silent supersession of PR #26) *and* Pattern 2 instance 4 (six-day silent cross-arc supersession of PR #5). Two supersessions converge on the same diff: a within-arc twin at 3.5 hours and a cross-arc lineage at six days, both silent. PR #29's three-condition cursor-block guard is the *close* in both cases. The convergence is not a coincidence of timing — PR #29's *generalization* is what makes both supersessions possible at once. The narrow PR #5 fix and the per-cell DIM modifier PR #26 added are *both* superseded by the same broadening of policy. One generalization, two supersessions, one diff. The arc-03 story-tail named the within-arc twin and the cross-arc lineage separately; reading them together at insight-grain reveals the convergence.
+
+PR #18 is the most-converged-upon establisher PR. It carries Pattern 1 instance 5 (bundle-as-shape: rename + MCP hygiene + the deferred-design BUGS.md note), Pattern 4 instance 3 open-side (the BUGS.md SMALL note that PR #37 will close two days later), and the canonical-marker-file infrastructure (`.spyc-context-<pid>.json`) that PR #37 will consume. Three patterns converge in one bundle: the bundle, the bracket, and the implicit-infrastructure-for-future-fix. The arc-07 story-tail observed this factually with a sentence the catalogue can re-read at insight-grain: *"the BUGS.md note pre-existed the codex-parity expansion that made the note mandatory; the canonical marker file PR #37 needed was already in the codebase by the time PR #19 and PR #21 widened the codepath that fed it."* Three structural moves at once, none of them named in the commit subject as preconditions for any other.
+
+PR #31 is the most-converged-upon close PR. It carries Pattern 2 instance 3 (49-minute explicit-reframing supersession of PR #30), Pattern 3 instance 6 (MAYBE-to-FIXED lift for mode-2026 and OSC-8), and Pattern 4 instance 2 close-side (the 49-minute bracket whose open-side was PR #30's MAYBE block). Three patterns converge in one diff. The diff retracts PR #30's deferral framing, lifts the harvest's MAYBE entries to FIXED, and supersedes PR #30's panic-recovery as the proper-fix-rather-than-defensive-fix. *"Smaller than I'd previously framed it"* is five words doing three patterns' worth of work.
+
+PR #15 sits at a smaller intersection: Pattern 1 instance 1 (bundle-as-shape) *and* Pattern 6 instance 1 partial node (the parser-extraction half is what enables PR #27's later struct refactor). Two patterns, one PR. The bundling (basename-collision parser-extraction + ^C-route guard) and the chain-establishment (parser-purity refactor that makes PR #27 cheap) live in the same diff because the same diff that bundles also establishes the contract.
+
+Four convergence PRs (PR #29, PR #18, PR #31, PR #15) carry between 2 and 3 patterns each. Twenty-some other PR slots in the catalogue carry one pattern each. The convergence-vs-singleton ratio is small — convergence is the exception, not the rule — but the convergences are not random. PR #29 converges *because* its generalization closes multiple supersessions. PR #18 converges *because* its bundle also brackets and infrastructures. PR #31 converges *because* the upgrade *is* the proper fix the prior PR's MAYBE block deferred. PR #15 converges *because* the parser-extraction is both bundle-half and chain-establisher. Each convergence has a structural reason that lives in the diff; the catalogue holds the *what* (these PRs sit at multiple-pattern intersections); the *why-each-particular-convergence-takes-the-shape-it-does* is `insight-emergent-properties`'s.
+
+What the convergence shapes contribute to the network's reading: a future analyst entering the catalogue at any single pattern can follow the convergence cross-references and find that the same handful of PRs reappear. PR #29 in Pattern 2 (twice). PR #18 in Patterns 1 and 4. PR #31 in Patterns 2, 3, 4. PR #15 in Patterns 1 and 6. The catalogue's per-pattern entries cite each convergence factually; this tail names *that the convergences exist as a class*, which no per-pattern entry could see.
+
+The negative-space observation in insight-drift's tail (= 01KR3BT6MNZMWRMHX14QMYZ86Y) named what kinds of drift the 22-day window does not produce. The convergence-shape observation here is its complement at recurrence-grain: what the catalogue's overlapping instance-citations look like when read together. Five-of-six patterns share at least one instance with another pattern; only Pattern 5 (v1.41.x patch cadence) holds entirely separate instances. The convergence-density is itself observable.
+
+Provenance:
+- `insight-recurrence` Pattern 1 entry = 01KR3CW3DBHPTB6K8R8047TBCP (PR #18 instance 5; PR #15 instance 1).
+- `insight-recurrence` Pattern 2 entry = 01KR3CZEM22Y5BRT1F2VQZ6EKZ (PR #29 instances 1 and 4; PR #31 instance 3).
+- `insight-recurrence` Pattern 3 entry = 01KR3D2G1S7DXYSPDZDRXQBPDX (PR #31 instance 6).
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3 (PR #18 instance 3 open-side; PR #31 instance 2 close-side).
+- `insight-recurrence` Pattern 6 entry = 01KR3DC7E4B0JC1NN212PYVT56 (PR #15 parser-extraction half).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- arc-03 story-tail = 01KR11S8RG29J98QKN1H0VAA6W (PR #29 within-arc twin and cross-arc lineage observation source).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (PR #18's three-structural-moves-at-once observation source).
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (PR #31's "Smaller than I'd previously framed it" verbatim).
+- arc-04 story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (PR #15's parser-extraction-as-chain-establisher observation source).
+- `insight-drift` negative-space tail = 01KR3BT6MNZMWRMHX14QMYZ86Y (the negative-space methodology this tail's complement observation echoes).
+
+<!-- Entry-ID: 01KR3DJ9KJY1T9FFP8KDEPTBJ1 -->
