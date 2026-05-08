@@ -341,3 +341,68 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HQCRV761KG6CVD6T11QNM -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:23:11.120094+00:00
+Role: scribe
+Type: Note
+Title: Property 5: Front-loaded-minors / sustained-patch-corridor — the codebase's released-history exhibits four minor cuts in the first 48 hours and 24 consecutive patches across the rest of the window
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** The codebase's released-history layer (Cargo.toml versions, CHANGELOG sections, git tags) exhibits a front-loaded release-dynamics shape: four minor cuts (v1.38.0, v1.39.0, v1.40.0, v1.41.0) cluster in the first 48 hours of the window; 24 consecutive v1.41.x patches land across the remaining ~18 calendar days; no major bump within the window; no spyc-internal SemVer policy document anchors the cadence. Reads as: spyc, as released artifact, exhibits a release-shape where capability-introducing PRs cluster at the window's start and refinement PRs sustain a long patch-only corridor.
+
+This property is named at the released-artifact grain. Per `insight-trajectory` Document #7 (= 01KR3F3Y55NW2GAC0GY05FCYAD), no stated SemVer policy anchors the cadence — the cadence is *what shipped*, observed in the post-PR Cargo.toml record, not what was promised. The trajectory thread declined trajectory-claim where no plan exists; this property thread names the cadence as a property of the released artifact rather than as honoring a stated plan.
+
+**Evidence enumeration.**
+
+The minor-cut cadence (per `insight-recurrence` Pattern 5 = 01KR3D8RH5DNYC37WSGFVETXT3):
+
+- v1.38.0 = PR #6 (arc 03; pane zoom; 2026-05-01).
+- v1.39.0 = PR #8 (arc 06; harpoon; 2026-05-02).
+- v1.40.0 = PR #10 (arc 06; quickselect; 2026-05-02).
+- v1.41.0 = PR #13 (arc 08; graveyard-undo; 2026-05-03).
+
+Four minor cuts in three calendar days; each tied to a capability-introducing PR (zoom; harpoon overlay; quickselect overlay; graveyard subsystem with R-undo + per-entry tar.zst + system trash cascade).
+
+The patch corridor (per Pattern 5's enumeration): v1.41.1 (PR #14) through v1.41.24 (PR #37) — 24 consecutive patches across PRs 14-37, distributed across arcs 03, 04, 05, 06, 07, 08. The closing version is v1.41.24 at PR #37; the next minor sits beyond the window.
+
+The cross-arc cadence distribution: minor cuts land in three arcs (arc 03 once at PR #6; arc 06 twice at PR #8 and PR #10; arc 08 once at PR #13). Arcs 01, 02, 04, 05, 07 ship zero minors in the window. Arc 04's five PRs ship at v1.37.1, v1.38.1, v1.41.2, v1.41.11, v1.41.14 — all patches across the entire arc. Arc 05's eight PRs are similarly all-patches across the arc.
+
+The non-stated-plan boundary (per `insight-trajectory` Document #7): the closest stated reference at `ROADMAP.md:451-453` is procedural — *"Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of the PR that ships the change. The `CHANGELOG.md` entry lands in the same commit"* — not a policy on minor-vs-patch granularity. SemVer's broad pre-1.0-or-post-1.0 conventions apply by reference; no spyc-internal policy document anchors the cadence shape.
+
+**Strongest evidence.**
+
+The 24-consecutive-patch corridor is the load-bearing observation. After v1.41.0 lands at PR #13 (~Day 3 of the window), no further minor cuts occur across the next 24 PRs. The corridor spans six arcs and ~18 calendar days. The cluster-then-corridor shape — front-loaded capability introductions followed by sustained refinement — is the cadence's structural property at the released-artifact grain.
+
+The arc-affiliation distribution corroborates: the arcs that ship zero minors (arcs 01, 02, 04, 05, 07) are all-patches arcs across all their PRs; the arcs that ship minors (03, 06, 08) cluster the minor at their first capability-introducing PR. Arc 06 is the densest minor-emitting arc (two of its four PRs cut a minor), reflecting two distinct picker-overlay capabilities (harpoon, quickselect) within hours of each other.
+
+**Where the property would falsify.**
+
+A minor cut after PR #13 within the window would weaken the cluster-then-corridor shape. None observed; the corridor is unbroken from v1.41.0 onward.
+
+A capability-introducing PR shipping as a patch within the window would weaken the minor-cut association with capability-introduction. PR #28 (huge directory cap; 50,000-entry hard cap) and PR #30 (vt100 panic recovery; new defensive infrastructure) each ship as v1.41.15 and v1.41.17 patches and each introduce non-trivial new behavior — but each repairs an existing failure surface (PR #28 against directory listings of pathological size; PR #30 against vt100 0.15's parser panic) rather than adding a new user-facing surface. The minor-cuts-as-capability-introduction reading holds, but the boundary between capability-introduction and refinement is judgment-dependent at these two PRs; the property is named with that boundary acknowledged.
+
+A stated SemVer policy document landing within the window would weaken the no-stated-policy framing. None observed; the cadence remains observed-everywhere-as-working-pattern, nowhere-as-stated-plan.
+
+**Tier-5 forward predictions.**
+
+Citing Pattern 5's minor-cut clustering at capability-introducing PRs: post-window the next minor cut after v1.41.x will land via a capability-introducing PR (a new user-facing surface), not via a refinement-only PR. (Pattern 5 = 01KR3D8RH5DNYC37WSGFVETXT3.)
+
+Citing Pattern 5 plus the v2.0 framing at `ROADMAP.md:472-476` (per `insight-trajectory` Document #6 = 01KR3F1TDZQGAQNZYEYYMFAGCE) plus the pre-staging-visibility observable at PR #2 / PR #3: when v2.0 lands beyond the window, it will land via a capability-introducing minor-cut sequence breaking the v1.41.x corridor, not via a single direct major bump. (Pattern 5 + Document #6 + arc-01 pre-staging observables.)
+
+Provenance:
+- `insight-recurrence` framing = 01KR3CSQ2YHQ2TD8EAE6DJCTS3; Pattern 5 (the v1.41.x cadence enumeration; 4 minor cuts + 24 consecutive patches) = 01KR3D8RH5DNYC37WSGFVETXT3; closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- `insight-trajectory` Document #6 (the v2.0 framing; pre-staging-visibility observable) = 01KR3F1TDZQGAQNZYEYYMFAGCE; Document #7 (the no-stated-plan discipline boundary case; *"observed everywhere as a working pattern; nowhere as a stated plan"*) = 01KR3F3Y55NW2GAC0GY05FCYAD; closure = 01KR3F9EF9WF9Q34FRAR2XPSZS.
+- `history-overview` segmentation entry (full PR list with version tags) = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- Arc-03 PR #6 entry (v1.38.0; pane zoom) = 01KR108QNEEG64J8W8XJERJTZG.
+- Arc-06 PR #8 entry (v1.39.0; harpoon) = 01KR2GCH3Q8DR9DATBBC802Q8W.
+- Arc-06 PR #10 entry (v1.40.0; quickselect) = 01KR2GH1D9QCGDPZEMWW09R898.
+- Arc-08 PR #13 entry (v1.41.0; graveyard-undo) = 01KR38VEGHFT9JGRDCXXBFX8V1.
+- Arc-08 PR #28 entry (v1.41.15; huge dir cap; the boundary-case judgment) = 01KR3903VA7DTNDJKQAFZ6DP8M.
+- Arc-08 PR #30 entry (v1.41.17; vt100 panic recovery; the boundary-case judgment) = 01KR393P15VTJSZ1WGYGZ8ZS01.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HSK97596MXH0V41K7TYM2 -->

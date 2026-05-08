@@ -7,3 +7,5 @@
 {"source":"entry:01KR3HJ9ZVA966149ME2TBTB5B","target":"entry:01KR3HMF3F7A5EBXBQYEWHYR3Z","type":"followed_by"}
 {"source":"thread:insight-emergent-properties","target":"entry:01KR3HQCRV761KG6CVD6T11QNM","type":"contains"}
 {"source":"entry:01KR3HMF3F7A5EBXBQYEWHYR3Z","target":"entry:01KR3HQCRV761KG6CVD6T11QNM","type":"followed_by"}
+{"source":"thread:insight-emergent-properties","target":"entry:01KR3HSK97596MXH0V41K7TYM2","type":"contains"}
+{"source":"entry:01KR3HQCRV761KG6CVD6T11QNM","target":"entry:01KR3HSK97596MXH0V41K7TYM2","type":"followed_by"}
