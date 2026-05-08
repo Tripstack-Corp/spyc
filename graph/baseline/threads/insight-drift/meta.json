@@ -5,7 +5,7 @@
   "title": "insight drift",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T08:28:30.468082+00:00",
-  "summary": "The development thread focuses on insight drift, a methodology that aggregates observed patterns across multiple arcs to identify pure trends. Key decisions include the naming of six patterns and the establishment of a tier-1 observation framework. The outcome is a structured approach to detecting and analyzing insight drift in data.",
-  "entry_count": 1
+  "last_updated": "2026-05-08T08:29:52.048891+00:00",
+  "summary": "The development thread focuses on \"insight drift,\" a methodology that aggregates observed patterns across multiple arcs to identify pure trends. Pattern A highlights that commit subjects often underestimate diff scopes, with five instances across five arcs. The outcome is a framework for tier-1 observation that emphasizes identifying and addressing insight drift in software development processes.",
+  "entry_count": 2
 }

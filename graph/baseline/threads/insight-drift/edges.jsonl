@@ -1,1 +1,3 @@
 {"source":"thread:insight-drift","target":"entry:01KR3B7KW5QNRWHG6YTV9QSF07","type":"contains"}
+{"source":"thread:insight-drift","target":"entry:01KR3BA3CZWA6TZCDKNJZDPAGH","type":"contains"}
+{"source":"entry:01KR3B7KW5QNRWHG6YTV9QSF07","target":"entry:01KR3BA3CZWA6TZCDKNJZDPAGH","type":"followed_by"}
