@@ -7842,17 +7842,34 @@ impl App {
         }
 
         // Compute the pager's actual viewport from the terminal size.
-        // The pager overlay occupies ~92% of the frame height, with a
-        // 1-row border on each side, and possibly a search bar at the
-        // bottom.
+        // Compute the pager's actual content viewport. Prefer the
+        // renderer's cached `last_viewport_h` — it's the real
+        // body-area row count from the most recent frame and is
+        // correct for every mount (Overlay / TopPane / LowerPane).
+        // Fall back to the centered-overlay heuristic only on the
+        // very first key event (renderer hasn't run yet).
+        //
+        // Bug this fixes: `Mount::LowerPane` (`^a-v`) renders into
+        // the lower-pane slot (~40 % of terminal height), but the
+        // old heuristic always used `term_h * 92 / 100 - 2` —
+        // viewport-too-tall, so `scroll_by`'s clamp via
+        // `scroll_max(viewport)` returned a value smaller than the
+        // real maximum. After the first `k` keypress, `scroll`
+        // capped well above the snapshot's last lines (the HUD)
+        // and the pager looked like it had truncated the bottom.
         let viewport = {
-            let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
-            let pager_h = if view.full_width {
-                term_h
+            let cached = view.last_viewport_h.get();
+            if cached >= 2 {
+                cached
             } else {
-                (u32::from(term_h) * 92 / 100) as u16
-            };
-            pager_h.saturating_sub(2).max(2)
+                let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let pager_h = if view.full_width {
+                    term_h
+                } else {
+                    (u32::from(term_h) * 92 / 100) as u16
+                };
+                pager_h.saturating_sub(2).max(2)
+            }
         };
 
         // While typing a search query, most keys feed the buffer.
