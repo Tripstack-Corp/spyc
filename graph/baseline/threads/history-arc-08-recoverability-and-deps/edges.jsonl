@@ -9,3 +9,5 @@
 {"source":"entry:01KR3903VA7DTNDJKQAFZ6DP8M","target":"entry:01KR393P15VTJSZ1WGYGZ8ZS01","type":"followed_by"}
 {"source":"thread:history-arc-08-recoverability-and-deps","target":"entry:01KR397RTYNS34SAGM46YJJRBY","type":"contains"}
 {"source":"entry:01KR393P15VTJSZ1WGYGZ8ZS01","target":"entry:01KR397RTYNS34SAGM46YJJRBY","type":"followed_by"}
+{"source":"thread:history-arc-08-recoverability-and-deps","target":"entry:01KR39Y00VB3N7AEEAFX54DF03","type":"contains"}
+{"source":"entry:01KR397RTYNS34SAGM46YJJRBY","target":"entry:01KR39Y00VB3N7AEEAFX54DF03","type":"followed_by"}

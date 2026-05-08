@@ -512,3 +512,90 @@ Provenance:
 - `history-arc-08-recoverability-and-deps` PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 — the diff PR #31 reframes within 49 minutes.
 
 <!-- Entry-ID: 01KR397RTYNS34SAGM46YJJRBY -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:05:46.622068+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 08 written; the baseline phase complete; what eight arcs together make readable
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Arc 08 (`history-arc-08-recoverability-and-deps`) is complete. Five per-PR head entries plus this closure plus the framing make seven head entries; tails follow this closure under the new tail voice contract. The thread remains OPEN per the protocol — the insight layer will cite arc 08's entry IDs by ULID.
+
+**Arc 08's deliverables (head entries 0–6):**
+
+- Index 0 — framing (= 01KR38QZ1XQ6EP2A4QC94DRD80). Diagnosis: failure-mode hardening across three subgroups (file-undo, directory-listing, pane-parser); cadence option A; two within-arc twins with diagnostically-different acknowledgement shapes; arc 02 → arc 08 cross-thread closure plan; PR #31 advisory-ignore reduction = zero.
+- Index 1 — PR #13 graveyard (= 01KR38VEGHFT9JGRDCXXBFX8V1). Four primitives: tar.zst archive schema, `gy` viewer keymap, `:undo` one-shot escape hatch, 500 MB system-trash cascade at startup. Plus the R-prompt blast-radius surfacing under `### Changed`. Plus the explicit non-goal: xattrs / ACLs / macOS resource forks not preserved.
+- Index 2 — PR #14 routing fix (= 01KR38XPJ07ZFQHH1TG6X461WN). Two lines on `AppState::dispatch_command`'s punt list, 25 minutes after PR #13, no PR-#13 citation in commit message or CHANGELOG. The `onboarding-risk-register` seed already names the bug-class with this PR's release tag verbatim ("Bitten on `:undo` (v1.41.1)").
+- Index 3 — PR #28 directory cap (= 01KR3903VA7DTNDJKQAFZ6DP8M). 50,000-entry cap on `Listing::read`, BUGS.md SMALL #4 closed within the same PR, three unit tests using cap=5 and cap=100 to avoid burning real time on 50k stat() calls.
+- Index 4 — PR #30 panic recovery (= 01KR393P15VTJSZ1WGYGZ8ZS01). `process_bytes_safe` wrapping `parser.process` in `catch_unwind` with `AssertUnwindSafe`; parser respawn at cached `last_size` dimensions and 10k-line scrollback; the `panic = "abort"` → `unwind` profile flip without which the recovery is a no-op in release. Three text channels (commit body / BUGS.md / CHANGELOG) carrying three slightly different framings of vt100 0.15's maintenance status, with the BUGS.md MAYBE block self-correcting the commit body's "unmaintained" framing intra-diff.
+- Index 5 — PR #31 dep upgrade (= 01KR397RTYNS34SAGM46YJJRBY). The trio: vt100 0.15 → 0.16, ratatui 0.29 → 0.30, ansi-to-tui 7 → 8, dep-graph-coupled via the `unicode-width` transitive pin. Six pane/mod.rs call-site adjustments + one `&` borrow drop in widget.rs. The "Smaller than I'd previously framed it" reframing of PR #30 in the same hour. Mode-2026 / OSC 8 closure of arc 02's gap-analysis suspect §3 (option a) at three independent surfaces. Zero advisory-ignore reduction in deny.toml.
+- Index 6 — this entry.
+
+**Arc 08's verifications, against the brief's done-definition:**
+
+- ☑ `watercooler_health` reported Healthy at session start.
+- ☑ Required reads completed (history-overview, arc 02 investigation entry, arc 03 framing + PR #29 + story-tail, arc 06 story-tail + framing, arc 07 story-tail + framing, onboarding-architecture entry 0, onboarding-risk-register entry 0).
+- ☑ Diagnosis stated in framing: failure-mode hardening across three subgroups; the three other patterns from the brief (postmortem-twin, capability-and-correction, capability-accretion) were considered and rejected against the diff.
+- ☑ Cadence: plain option A (five per-PR + framing + closure = seven head entries).
+- ☑ Thread `history-arc-08-recoverability-and-deps` exists with framing + 5 per-PR + closure + tails-pending.
+- ☑ PR #30 → PR #31 pair: safety-net-bought-budget framing **partly true, partly refuted** against the diff. Cited at framing entry and PR #31 entry.
+- ☑ PR #13 → PR #14 pair: feature-plus-immediate-hotfix shape confirmed. Supersession-acknowledgement: **bug-described, predecessor-not-cited**. Same shape as arc 03's PR #26 → PR #29 pair, tighter in time. Cited at PR #14 entry.
+- ☑ Suspect §3 (mode-2026) verification: ANSWERED at option (a). Three independent surfaces in PR #31's diff explicitly name mode 2026 / synchronized output as resolved. Cited at PR #31 entry.
+- ☑ PR #31 advisory-ignore reduction: **zero**. All five RUSTSEC ignores from the `onboarding-risk-register` seed entry 0 catalogue survive. Cited at framing entry and PR #31 entry.
+- ☑ Each head follows the head voice contract (third-person observational, hedge-whitelist hedges only, no Derek-mindset attribution). Verbatim commit-message / CHANGELOG / BUGS.md quoting carries `(commit <sha>, <date>)` attribution.
+- ☑ Provenance blocks on every entry.
+- ☑ Tags `#history` and `#arc-08` on every entry.
+- ☑ No insight-layer claims. The recurrence-of-tight-twins observation across arcs 03 and 08 is named factually as observation; the three-for-three suspect resolution is named factually as cross-thread closure. Neither is interpreted as emergent property.
+- ☑ Thread will be left OPEN.
+
+Tails (the new contract; story-shaped, no formula) follow this closure.
+
+**Pre-Phase-3 review surface for the observer:**
+
+The arc-02-to-arc-08 cross-thread is the longest single trace in the eight-arc network, and PR #31 closes it cleanly. Arc 03's cursor-block lineage closed at PR #29 with a slight half-truth (the *behavior* extinguished but the *durable record* in BUGS.md SMALL was not cleaned by PR #29; arc 03's story-tail named this honestly). Arc 08's mode-2026 lineage closes at PR #31 with the durable-record cleanup intact (PR #31's BUGS.md diff actually deletes the MAYBE entry alongside fixing the underlying parser support). The two cross-thread closures land with different durable-record fidelity; this is fact-of-the-record territory worth flagging factually for the eventual insight layer.
+
+**What the eight arcs together now make legible.**
+
+This is the bridge to the insight layer. Per the brief's hand-off requirement (item 12), this section names what the cumulative reading enables without interpreting it.
+
+The eight arcs together make four classes of reading possible that no single arc could:
+
+1. **Cross-thread back-reference traces.** Arc 02 → arc 03 (cursor-block, suspect §1, closed at PR #29). Arc 02 → arc 05 (alt-screen hint, catalogue §2, partial alignment at PR #20). Arc 02 → arc 06 (picker pattern, catalogue §4, parallel-but-different at PRs #8 / #10). Arc 02 → arc 08 (mode-2026, suspect §3, closed at PR #31). Arc 07 → arc 04 (implicit-primary-user reading from arcs 03 / 04 / 07, named at arc 07's tail). With eight arcs in place, a reader can follow any cross-thread trace from origin to disposition.
+
+2. **Within-arc supersession shapes.** Arc 03 has one (PR #26 → PR #29, 3.5 hours, silent). Arc 08 has two (PR #13 → PR #14, 25 minutes, behavior-described; PR #30 → PR #31, 49 minutes, explicit reframing). Three within-arc supersession instances across two arcs with three different acknowledgement shapes. With three instances, the reader can compare; with one, the reader could only describe.
+
+3. **Patch-after-feature cadence at arc-08-released v1.41.x grain.** Arc 01's reflection tail named the v1.41.x cadence; arc 06's framing observed six minor cuts between PR #8's v1.39.0 and PR #32's v1.41.19; arc 08 contains the only minor cut (v1.41.0, PR #13) followed by the only intra-arc-08 patch-after-feature (v1.41.1, PR #14). The cadence-as-pattern is now visible across arcs as a recurring shape; the reader can ask whether the v1.41.x patches cluster around arcs that introduce capability vs arcs that fix existing capability.
+
+4. **The named-then-fixed bracket shape, at multiple grains.** Arc 07 named the closed bracket on PR #18 → PR #37 over two days (BUGS.md note added in PR #18, fixed by PR #37 using the canonical file PR #18 made canonical). Arc 08 has the bracket at one-PR grain (PR #28: BUGS.md SMALL #4 cited in commit body, fixed in same PR, BUGS.md entry moved to FIXED in same diff). Arc 08 also has the bracket at within-PR-and-cross-PR grain (PR #30 adds BUGS.md MAYBE block describing the upgrade-as-deferral; PR #31 49 minutes later removes the MAYBE block and ships the upgrade). Three bracket shapes: two-day cross-PR (arc 07), one-PR (arc 08 PR #28), 49-minute cross-PR (arc 08 PR #30 → PR #31). With three instances, the reader can ask what makes a bracket span multiple PRs vs. close in one.
+
+These four classes are not insight-layer claims — they are the navigation surface eight arcs make available. Arc 08's job ends at making the surface visible. The insight layer's job is to interpret what the navigation surface implies about how spyc was built across these 22 days.
+
+**Phase 3 expected sequencing (per `history-overview` entry 3 = 01KR0V01TAJVSZFE5ZNMCZHQSF):**
+
+- Phase 3 (insight layer) blocks on all eight arc threads existing. With arc 08 complete, all eight exist.
+- Drift, recurrence, trajectory, emergence threads written next, citing arc-entry IDs by ULID.
+- Phase 3 inherits the segmentation entry's six drift findings (history-overview entry 1) plus the per-arc drift findings each arc captured.
+
+Provenance:
+- 6b2be36 (PR #13 feat/graveyard-undo, 2026-05-03), c7419c1 (PR #14 fix/undo-command, 2026-05-03), 306b43f (PR #28 fix/huge-directory-cap, 2026-05-06), e39f462 (PR #30 fix/vt100-panic-recovery, 2026-05-06), 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — the five PRs of arc 08.
+- `history-overview` entry 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing).
+- `history-overview` entry 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (segmentation; arc 08's three-paragraph rationale).
+- `history-overview` entry 3 = 01KR0V01TAJVSZFE5ZNMCZHQSF (closure; Phase 2 / Phase 3 sequencing).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (suspect §3 source; verification deferred to arc 08).
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (within-arc-twin precedent; cursor-block closure).
+- `history-arc-03-pane-behavior` story-tail = 01KR11S8RG29J98QKN1H0VAA6W (the "behavioral coverage and durable-record cleanup don't track 1:1" framing; cited at this entry's review-surface paragraph).
+- `history-arc-06-input-and-overlays` story-tail = 01KR2GYQPQRX08SV980SPHHZ80 (capability-and-correction precedent; ruled out as a fit for arc 08).
+- `history-arc-07-codex-and-mcp-bridge` story-tail = 01KR2JM67RTQHQYN0223GTKH1V (named-then-fixed bracket precedent at two-day grain; cited at item 4 of the cumulative-reading section).
+- `history-arc-08-recoverability-and-deps` head entries:
+  - 01KR38QZ1XQ6EP2A4QC94DRD80 — framing.
+  - 01KR38VEGHFT9JGRDCXXBFX8V1 — PR #13.
+  - 01KR38XPJ07ZFQHH1TG6X461WN — PR #14.
+  - 01KR3903VA7DTNDJKQAFZ6DP8M — PR #28.
+  - 01KR393P15VTJSZ1WGYGZ8ZS01 — PR #30.
+  - 01KR397RTYNS34SAGM46YJJRBY — PR #31.
+
+<!-- Entry-ID: 01KR39Y00VB3N7AEEAFX54DF03 -->
