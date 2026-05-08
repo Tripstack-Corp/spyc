@@ -244,3 +244,70 @@ Provenance:
 - `history-arc-08-recoverability-and-deps` PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1.
 
 <!-- Entry-ID: 01KR38XPJ07ZFQHH1TG6X461WN -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T07:49:27.722830+00:00
+Role: scribe
+Type: Note
+Title: PR #28 (fix/huge-directory-cap): a 50,000-entry cap on `Listing::read`, BUGS SMALL #4 closed, three unit tests
+
+Spec: scribe
+
+tags: #history #arc-08
+
+PR #28 is the third move in arc 08 and the directory-listing failure-mode-hardening move. The diff is feature-shaped at hardening grain (6 files, +102/-5; the load-bearing changes are 70 added lines in `src/fs/listing.rs` plus a 15-line `### Fixed` block in `CHANGELOG.md` and 11 lines in `src/app/state.rs`). Commit subject reads "fix: cap directory listings at 50k entries to avoid hangs (v1.41.15)" (commit f98604c, 2026-05-06 13:16 -04 / merged 2026-05-06 17:30 UTC). PR #28 opens the 2026-05-06 cluster of three runtime-survival PRs.
+
+**The user-report origin.**
+
+The commit body opens by naming the BUGS.md item the fix closes verbatim: "BUGS SMALL #4: user reported entering a stale tmp directory and having to kill the terminal to recover." `BUGS.md` SMALL #4 (verified at PR #28 parent commit) was a one-line entry: "user reported: timeout on viewing large directory (went into a messy tmp directory by accident and had to kill the terminal)." PR #28's BUGS.md diff removes the entry from SMALL and adds a FIXED block: "(fixed, v1.41.15) Huge directories no longer hang spyc on chdir. `Listing::read` caps at 50,000 entries; truncated reads flash a hint so the user knows the listing isn't the full picture. The pre-fix behavior on a 1M-entry tmp dir was a multi-minute event loop block that required killing the terminal." The user-report-to-fix shape is **named-then-fixed within the same PR**, not bracketed across multiple PRs (the bracket shape arc 07's PR #18 → PR #37 named over two days; PR #28 is one-PR-named-then-fixed at the same release).
+
+**The cap, the rationale, the testability extraction.**
+
+The cap value (50,000) is named at code-level in a doc-commented constant verbatim from the diff:
+
+> "Hard cap on entries Listing::read will materialize. A user reported entering a tmp directory with so many entries that spyc hung and they had to kill the terminal — every entry costs a `stat()` syscall plus a sort comparison, so 1M entries can spend minutes blocking the event loop on a slow filesystem. Most real directories the user wants to navigate are well under this cap; when we hit it, `truncated` is set so the caller can surface a flash and the user can `R` / `:!find` / climb out instead of waiting for the read to finish."
+
+`MAX_ENTRIES: usize = 50_000` is the named constant. The cap is justified against the failure mode (`stat()` cost × entry count = event-loop block) and against the false-positive surface (the commit body lists the directories that fit under 50k explicitly: "Real navigation directories (monorepos, chubby node_modules, build trees) read in full; only pathological cases (message queues, log spools, runaway tmp) trip the cap."). The chosen point is not arbitrary; the diff does not, however, justify 50k against alternate values (10k, 100k). The cap is one-of-many-reasonable-defensive-numbers; the diff defends "we need a cap" rather than "we need 50,000 specifically."
+
+The diff extracts a `pub fn read_capped(dir, cap)` from `Listing::read`, with `Listing::read` becoming a one-liner that calls `read_capped(dir, MAX_ENTRIES)`. The doc-comment names the rationale: "Public for tests; production code goes through `read` (with `MAX_ENTRIES`)." The extraction is testability-driven, not generality-driven — the only consumer of `read_capped` is the three unit tests appended below the impl block.
+
+**The user-visible truncation hint.**
+
+A new `pub truncated: bool` field on `Listing` carries the truncation signal. `src/app/state.rs` (+11 lines) adds a chdir-time check that flashes "listing capped at 50000 entries — directory has more" when `truncated` is `true`. The flash is the user's discovery channel; the diff explicitly distrusts the alternative (showing a partial listing as if it were complete, leaving the user with a wrong mental model of the directory).
+
+**The three unit tests.**
+
+The diff appends a `#[cfg(test)] mod tests` block with three tests, each verbatim from the diff:
+
+- `read_capped_truncates_when_over_cap` — 8 files, cap=5; asserts `entries.len() == 5` and `truncated == true`.
+- `read_capped_does_not_truncate_under_cap` — 3 files, cap=100; asserts `entries.len() == 3` and `truncated == false`.
+- `empty_listing_is_not_truncated` — `Listing::empty(...)`; asserts `truncated == false`.
+
+The tests use cap=5 and cap=100 to "burn no real time on 50k stat() calls" (verbatim from the doc-comment). The testability split (production const vs. test-supplied cap) is the kind of small-scale design decision that arc 04's tail — by the brief's reference — would describe as "the diff's machinery shape" turf; arc 08 records it factually.
+
+**The relationship to PR #30 / PR #31.**
+
+PR #28 lands at 17:30 UTC. PR #30 lands at 18:27 UTC. PR #31 lands at 19:16 UTC. All three are 2026-05-06; PR #28 is the day's first runtime-survival fix, the panic-recovery is the second, the dep upgrade is the third. The three PRs do not share a code surface — `src/fs/listing.rs` (PR #28), `src/pane/mod.rs` (PR #30), `src/pane/mod.rs` + `src/pane/widget.rs` + `Cargo.toml` (PR #31) — but they share a register: each defends a different way the pre-arc-08 spyc could fail under inputs the user did not control. Naming this as a register, not a coordinated effort, is the read the diffs support; the calendrical clustering on a single day across three independent failure modes is observable factually.
+
+**Drift findings flagged for the insight layer.**
+
+- The cap value (50k) is documented at code-level but unjustified against alternates. The choice reads as defensive-default rather than measured-empirically. A reader coming back to this diff in a year would have to re-derive whether 50k is still the right value for the contemporary `stat()` cost. The doc-comment commits to the failure mode, not to the cap value's optimality. Captured for the insight layer's design-decision-vs-measured-decision negative-space catalogue.
+- The chdir-time flash is the user's only discovery channel for truncation. A user who navigates into a >50k directory and immediately presses `J` to scroll, or `:` to issue a command, may scroll past the flash before reading it. The fallback channel — checking a status indicator that persists — is not in the diff. The diff's choice is "show once, don't keep nagging"; whether a persistent indicator (a tag in the prompt row, e.g.) would be more correct is an interface choice the diff doesn't address. Captured.
+- PR #28's CHANGELOG bucket is `### Fixed`, not `### Added`. The diff adds a constant, a field, an extracted public function, and three tests — by feature-add measure this is `### Added` work. The bucket choice reads as honoring the user-reported origin (a fix to a regression-from-good-experience) rather than the diff-shape (additive). Arc 06's PR #25 framing flagged a similar choice for defensive-bundle-as-fix; arc 08's PR #28 makes the same call. Recurring shape; observed factually.
+- The BUGS.md SMALL #4 entry that PR #28 closes had stood since pre-window (it pre-dates 2026-04-30). Whether the user-report-was-known-before-PR-#28-was-written is verifiable from BUGS.md's git-blame; the relationship between the report's age and the fix's timing is not narratable from PR #28 alone. The BUGS.md → fix shape arc 07's PR #18 → PR #37 named is also present here at one-PR grain (named-and-fixed in the same PR), not bracketed across PRs.
+
+Provenance:
+- 306b43f (PR #28 fix/huge-directory-cap, 2026-05-06) — full PR.
+- f98604c — PR #28's feature-branch commit; commit body verbatim quoted at "BUGS SMALL #4" and "Real navigation directories (monorepos, chubby node_modules, build trees) read in full; only pathological cases (message queues, log spools, runaway tmp) trip the cap."
+- 4e2afd9 → f98604c — parent and tip SHAs for the diff inspection.
+- `git diff 4e2afd9..f98604c -- src/fs/listing.rs`: +70 / -1 net; new `pub const MAX_ENTRIES: usize = 50_000`; new `pub truncated: bool` field on `Listing`; new `pub fn read_capped(dir, cap)` extracted from `read`; three unit tests appended.
+- `git diff 4e2afd9..f98604c -- src/app/state.rs`: +11 (chdir-time flash on `truncated`).
+- `git diff 4e2afd9..f98604c -- CHANGELOG.md`: 15 lines added under `[Unreleased]` `### Fixed`; user-report origin and behavior-pre-fix quoted verbatim.
+- `git diff 4e2afd9..f98604c -- BUGS.md`: -2 (the SMALL #4 entry removed); +5 (new FIXED block with v1.41.15 tag).
+- `git diff 4e2afd9..f98604c -- Cargo.toml`: `version = "1.41.14"` → `version = "1.41.15"`.
+- `git diff 4e2afd9..f98604c -- Cargo.lock`: 2-line version bump reflection.
+- Doc-comment verbatim: "Hard cap on entries Listing::read will materialize... Most real directories the user wants to navigate are well under this cap; when we hit it, `truncated` is set so the caller can surface a flash and the user can `R` / `:!find` / climb out instead of waiting for the read to finish."
+- `history-arc-08-recoverability-and-deps` framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80.
+- `history-arc-08-recoverability-and-deps` PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN.
+
+<!-- Entry-ID: 01KR3903VA7DTNDJKQAFZ6DP8M -->

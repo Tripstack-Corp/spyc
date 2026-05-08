@@ -5,7 +5,7 @@
   "title": "history arc 08 recoverability and deps",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T07:48:08.638897+00:00",
+  "last_updated": "2026-05-08T07:49:27.724283+00:00",
   "summary": "The development thread focuses on improving failure-mode hardening in Arc 08, with key decisions including the introduction of a new schema for graveyard storage and addressing bugs related to undo commands. The outcomes include enhanced recovery mechanisms and improved system stability.",
-  "entry_count": 3
+  "entry_count": 4
 }
