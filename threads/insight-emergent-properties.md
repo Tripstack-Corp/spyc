@@ -471,3 +471,89 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HW4T1GQKFFWNYSRT0639S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:26:29.774599+00:00
+Role: scribe
+Type: Closure
+Title: Closure: insight-emergent-properties catalogue assembled — six properties promoted, two declined; what the cumulative four-tier reading enables that no single thread does
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+The catalogue is closed at six properties, with two candidates declined.
+
+**Properties promoted, with strongest-evidence anchor.**
+
+1. *Description-layer permissiveness vs. functional reliability* (= 01KR3HG2GEBH1W8BKGT3CW6S9P). 16 description-layer drift instances across Patterns A-F; 1 functional drift instance (Pattern D, closed in 25 minutes). Strongest evidence: `insight-drift` Tail 1's categorical-absence enumeration (zero stub-and-fill-in; zero test-vs-feature; zero config-vs-default; zero phantom features).
+
+2. *The fifteen-and-zero negative-vs-positive recommendation asymmetry* (= 01KR3HJ9ZVA966149ME2TBTB5B). 15 honor instances across three independent stated-plan documents; 0 exact executions of positive recommendations. Strongest evidence: the cross-document recurrence — three independent documents, three different authorial registers, same asymmetry shape. The strongest single tier-4 candidate in the network.
+
+3. *Acknowledgement-register-correlates-with-supersession-kind* (= 01KR3HMF3F7A5EBXBQYEWHYR3Z). Four instances populating a kind × register correlation: guard-policy generalizations carry silent (at 3.5h and 6 days); missing-wire fix carries behavior-described (at 25 min); design-framing revision carries explicit-reframing (at 49 min). Strongest evidence: PR #31's *"Smaller than I'd previously framed it"* commit body verbatim. The most acute work-vs-worker discipline test of the catalogue.
+
+4. *Additive-substrate / parallel-registration* (= 01KR3HQCRV761KG6CVD6T11QNM). Substrate widens cheaply via three implicit-machinery-chain instances (Pattern 6) plus arc-07's peer-agnostic discovery walk; registration widens by replication via two `ensure_*` functions, two parallel pickers (harpoon, quickselect), and the §4 four-PR DIRECTION ALIGNMENT cluster (2-2 split between pager-as-mode and standalone-overlay). Strongest evidence: arc-07's substrate-vs-registration distinction in one arc carrying both halves of the property in the same diff family. The single property consolidating findings from three prior insight threads simultaneously.
+
+5. *Front-loaded-minors / sustained-patch-corridor* (= 01KR3HSK97596MXH0V41K7TYM2). Four minor cuts in the first 48 hours; 24 consecutive v1.41.x patches across the rest of the window; no spyc-internal SemVer policy document anchors the cadence. Strongest evidence: the 24-consecutive-patch corridor across six arcs and ~18 calendar days, with all-patches arcs (01, 02, 04, 05, 07) corroborating the cluster-then-corridor shape.
+
+6. *BUGS.md as drained in-tree working-surface* (= 01KR3HW4T1GQKFFWNYSRT0639S). Six SMALL/MAYBE-to-FIXED lifts; the bucket nets toward drained. Strongest evidence: the PR #18 → PR #37 named-then-fixed bracket — the same in-tree-text layer that opens the bracket (13-line SMALL note with weighted options) is the layer that closes it (`(fixed, v1.41.24)` block). Property kept distinct from the trajectory-thread's gap-analysis-methodology reading per `insight-recurrence`'s closure warning.
+
+**Candidates declined, with reasoning.**
+
+- *Pattern F (span-phrasing) as `project-age-as-temporal-frame`*. One drift instance with two surfaces (the spine's "22-day window" introduction; arc-04's closure walkback). Structurally about the *spine* — a documentation convention of the network — not about the codebase as artifact. Promoting to tier-4 would name a property of how the network frames its own work, not a property the codebase exhibits. Declined for evidence-thinness at the artifact grain.
+
+- *Pattern 1 sub-shape distribution as separate property*. The 2-2-1-1 bundle sub-shape distribution (`insight-recurrence` Pattern 1) is encompassed by Property 1 (description-layer permissiveness). Bundle-as-shape is a sub-instance of description-layer drift; splitting it would over-count. Declined for over-counting risk.
+
+**Tier-5 forward predictions, total.**
+
+Each property carries at least one tier-5 forward prediction citing the recurrence pattern it extrapolates from. Property 5 carries two predictions (the next-minor-cut and the v2.0 framing) because the cadence material plus the v2.0 boundary case both support extrapolation from Pattern 5. Total: seven tier-5 predictions, each one-line, each citing its recurrence:
+- Property 1: description-layer-vs-functional-drift cadence will continue. (Patterns A-F + Pattern D + Tail 1.)
+- Property 2: future negative recommendations honored exactly; future positive recommendations in modified shape. (Tail 2 + Documents #2 / #4-5 / #8.)
+- Property 3: register-correlates-with-kind in post-window supersessions. (Pattern 2.)
+- Property 4: third MCP-speaking peer arrives as a third parallel `ensure_*`, substrate unchanged. (Document #4 + Document #2 + Pattern 6.)
+- Property 5a: next minor cut via capability-introducing PR. (Pattern 5.)
+- Property 5b: v2.0 lands via capability-introducing minor-cut sequence, not direct major bump. (Pattern 5 + Document #6 + arc-01 pre-staging observables.)
+- Property 6: in-flight BUGS.md SMALL entries close as territories are touched. (Pattern 3.)
+
+**What the cumulative four-tier reading enables that no single thread does.**
+
+`insight-drift` named misnaming-at-merge as 16 instances across 6 patterns, dominantly description-layer.
+`insight-recurrence` named event-shape recurrence at 6 patterns, with the 4-instance supersession kind × register correlation as the heaviest single observation.
+`insight-trajectory` named stated-plan-vs-execution at 8 documents, with the fifteen-and-zero asymmetry as the strongest single tier-4 candidate.
+`insight-emergent-properties` (this thread) names six properties, drawing across all three prior threads simultaneously and consolidating where the same observable surfaced at multiple grains.
+
+The cumulative reading enables observations no single thread carries:
+
+- *Property 1* names what `insight-drift` could not name from inside its own register. The drift catalogue counted; the property names what the count means as a shape of the artifact (the running code is the honesty surface; the messages around the code are less precise).
+
+- *Property 2* names what `insight-trajectory` explicitly held. The trajectory thread named the fifteen-and-zero count and reserved the property reading; this thread names *what kind of artifact produces this asymmetry across three independent stated-plan documents* — an artifact with different anchoring discipline at its negative-recommendation surface than at its positive-recommendation surface.
+
+- *Property 3* names what neither `insight-recurrence` nor any single arc could name from inside its own register. The arcs named the supersessions; the recurrence thread named the kind × register matrix and held the property reading at the *"Maintainer-experience axis declined"* paragraph; this thread names the matrix as a property of the artifact's commit-history layer (not as a property of the maintainer's mind).
+
+- *Property 4* names what arc-07 alone could only foreshadow. Arc-07's substrate-vs-registration distinction is a single-arc observation; Pattern 6 is recurrence-thread material at substrate-grain; the §4 four-PR cluster is trajectory material at registration-grain. Bringing the three together names a single cross-cutting expansion-behavior property of the codebase.
+
+- *Property 5* names the released-history as a property of the artifact rather than as a counted recurrence. The shape (front-loaded minors; sustained patches) is observable as *what spyc has shipped* at the released-artifact grain — release-dynamics property, not just version-tag count.
+
+- *Property 6* names the in-tree working-surface architecture. BUGS.md is a structural feature of the codebase that draws a queue inside the source tree and has it drained by PRs that touch the territories — distinct from the gap-analysis methodology the trajectory thread tracked.
+
+**Cross-reference for the final-narrative session.**
+
+The final-narrative session inherits four insight threads — drift (10 entries), recurrence (10 entries), trajectory (11 entries), and this thread (10 entries when all postings complete) — each holding its tier discipline; plus eight arc threads with their per-PR entries and story-tails; plus the spine. The shape the final narrative needs to honor:
+
+- Each of the four insight threads held its tier discipline. None promoted across tiers. The framing register escalated from tier-1 (counting) through tier-4 (interpreting) without crossing into tier-5 (forward prediction without citation) or tier-6 (motive attribution).
+- The fifteen-and-zero negative-vs-positive asymmetry (Property 2) is the network's strongest single tier-4 finding — the load-bearing observation any final reading must carry.
+- The 3-grain × 3-register supersession matrix consolidated by kind (Property 3) is the most acute work-vs-worker discipline test the network passed. The framing that holds names the artifact, not the worker.
+- The additive-substrate / parallel-registration property (Property 4) is the single property consolidating findings from three prior insight threads simultaneously — and the property that most directly speaks to "how spyc grows."
+- The five required-read arc story-tails (= 01KR11S8RG29J98QKN1H0VAA6W, 01KR13CJ5XS5VREYA4741JHDSQ, 01KR2ANRAEFWWR5W9FQP11A0DB, 01KR2JM67RTQHQYN0223GTKH1V, 01KR3A23E11K8F7VNVSM5XY6M2) carried the cumulative-grain observations that made tier-2, tier-3, and tier-4 work feasible. Without them, the cumulative readings would have had to derive properties from per-PR entries alone — a structurally thinner basis. Their narrative-grain accomplishment was also tier-2 / tier-3 / tier-4-grain enabling.
+- The thread is left OPEN. The final narrative may extend the property catalogue if cumulative-grain observations not yet seen surface at narrative-grain.
+
+Provenance:
+- All six property entries above (this thread): Property 1 = 01KR3HG2GEBH1W8BKGT3CW6S9P; Property 2 = 01KR3HJ9ZVA966149ME2TBTB5B; Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z; Property 4 = 01KR3HQCRV761KG6CVD6T11QNM; Property 5 = 01KR3HSK97596MXH0V41K7TYM2; Property 6 = 01KR3HW4T1GQKFFWNYSRT0639S.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+- `insight-drift` framing = 01KR3B7KW5QNRWHG6YTV9QSF07; closure = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4; Tail 1 = 01KR3BT6MNZMWRMHX14QMYZ86Y; Pattern F (declined as separate property) = 01KR3BN3N6YF60414FFVHAM50Y.
+- `insight-recurrence` framing = 01KR3CSQ2YHQ2TD8EAE6DJCTS3; closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN; Pattern 1 (declined as separate property) = 01KR3CW3DBHPTB6K8R8047TBCP; Pattern 2 = 01KR3CZEM22Y5BRT1F2VQZ6EKZ; Pattern 5 = 01KR3D8RH5DNYC37WSGFVETXT3; Pattern 6 = 01KR3DC7E4B0JC1NN212PYVT56.
+- `insight-trajectory` framing = 01KR3EJ0RWZXEBMYHY9EEZQX4A; closure = 01KR3F9EF9WF9Q34FRAR2XPSZS; Tail 2 (the fifteen-and-zero observation) = 01KR3FEAYFQS8QVXCPN4KQ8QYK.
+- Five required-read arc story-tails: arc 03 = 01KR11S8RG29J98QKN1H0VAA6W; arc 04 = 01KR13CJ5XS5VREYA4741JHDSQ; arc 05 = 01KR2ANRAEFWWR5W9FQP11A0DB; arc 07 = 01KR2JM67RTQHQYN0223GTKH1V; arc 08 = 01KR3A23E11K8F7VNVSM5XY6M2.
+- `history-overview` framing = 01KR0TRFWT9W6WMFHC49YSW0BG; segmentation = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+
+<!-- Entry-ID: 01KR3HZNC62XT11V4CW2GZ5V0S -->
