@@ -5,7 +5,7 @@
   "title": "insight emergent properties",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T10:27:32.475135+00:00",
-  "summary": "The thread focuses on the emergence of properties in codebases, highlighting asymmetries between description and functionality, structural differences in plans, and the growth of code through stacking and parallel registration. Key decisions include the declaration of tier-4 register and tier-5 permission, while six properties are identified, with two being declined. The outcome is a catalog of properties that collectively reveal emergent patterns in code evolution.",
-  "entry_count": 9
+  "last_updated": "2026-05-08T10:28:35.966480+00:00",
+  "summary": "The thread explores insight-emergent-properties, focusing on six key properties that describe structural and functional asymmetries in a codebase. The main decisions include declaring the thread at tier-4, introducing recurrence-citation requirements, and naming six properties that highlight the interplay between description, functionality, and code evolution. The outcomes show that while six properties were promoted, two were declined, emphasizing the cumulative nature of insight threads.",
+  "entry_count": 10
 }

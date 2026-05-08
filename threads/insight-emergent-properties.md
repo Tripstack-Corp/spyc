@@ -612,3 +612,47 @@ Provenance:
 - Arc-08 story-tail (the cumulative-grain naming that became Pattern 2's structure) = 01KR3A23E11K8F7VNVSM5XY6M2.
 
 <!-- Entry-ID: 01KR3J1JKR98RY75JBYA8EKC1X -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:28:35.964850+00:00
+Role: scribe
+Type: Note
+Title: Tail: the discipline test that mattered — naming Property 3 without crossing the work-vs-worker line
+
+Spec: scribe
+
+tags: #insight #emergent-properties #tail
+
+Of the six properties promoted, Property 3 (acknowledgement-register-correlates-with-supersession-kind = 01KR3HMF3F7A5EBXBQYEWHYR3Z) was the single hardest to name without crossing into motive attribution. The brief flagged this in advance: *"the maintainer-experience axis declined paragraph in `insight-recurrence` (= 01KR3CZEM22Y5BRT1F2VQZ6EKZ) named exactly the question you now must address: why do the supersession-acknowledgement registers vary?"* `insight-recurrence` held tier-2 by declining the interpretation. This thread held tier-4 by interpreting — but the interpretation almost-tipped at several plausible-sounding framings, each of which had to be rejected before a tier-4-clean version could land.
+
+The temptations ran through several plausible-sounding framings:
+
+- *"The maintainer reframes when the prior framing was wrong; stays silent when the supersession is mechanical."* This is motive-attribution dressed as observation — about what the maintainer *did*, what their decision-making process *was*. Forbidden absolutely.
+- *"Different registers reflect different working-discipline modes."* Working-discipline is a worker property — about how the maintainer *works*, not about what the artifact carries. Forbidden.
+- *"The acknowledgement style varies by communication-register choice."* Communication-style is a worker property at one remove. Still forbidden.
+- *"The codebase's commit-history shows different registers because of what kind of supersession the diff performs."* This is the borderline case worth slowing down for. *Because of what kind of supersession the diff performs* names the diff (the work) as the subject; *the codebase's commit-history shows* names the artifact's commit-history layer as the carrier. Together: the artifact's commit-history layer exhibits register-correlation-with-kind. This holds.
+
+The version that holds is structurally different from the versions that don't. *"The codebase exhibits register-correlation-with-supersession-kind"* names the artifact at the commit-history grain. The diff's nature determines the matching register; the artifact's commit-history is what carries the variation. The work, not the worker.
+
+The 49-minute instance is the cleanest evidence for why the framing matters. PR #31's *"Smaller than I'd previously framed it"* is five words in a commit body — a piece of the artifact, observable at any time in `git log`, falsifiable by reading the commit. The diff at PR #31 walks back PR #30's framing in those five words; the supersession is visible *in the artifact*, not via inference about who-said-what-when. The 25-minute, 3.5-hour, and six-day instances each carry their register *in the artifact's commit-history layer* — the registers are observables, not inferences about the maintainer's mind.
+
+The register that fails is structurally legible: any version mentioning what the maintainer *might have been thinking*, what working-mode they *might have been in*, what register they *would have chosen if X*. Those are about the worker's mind. The register that holds is also structurally legible: any version naming the artifact's commit-history layer as a carrier of register variation correlated with the diff's kind — observable at the artifact grain, falsifiable by counter-instance, free of attribution.
+
+This thread's six properties pass this test. Property 3 came closest to failing. If it had been named *"the maintainer's acknowledgement style varies by grain"* or *"the maintainer prefers explicit reframing for design-decision revisions"* or *"register-choice is a working-discipline tell"*, the property would have been motive-attribution dressed as observation. The version that survived names *the artifact's commit-history layer exhibits register-correlation-with-supersession-kind* — and that framing is observable, falsifiable, free of attribution.
+
+The other five properties had less acute work-vs-worker tension. Property 1 (description-layer permissiveness) is a count comparison about the artifact's surfaces; the worker grain doesn't enter unless the framing names *what the maintainer is paying attention to* — which it doesn't. Property 2 (the fifteen-and-zero) is observable at the artifact's relationship to its own stated-plan documents; the worker grain doesn't enter unless the framing names *what the maintainer cares more about* — which it doesn't. Property 4 (additive-substrate / parallel-registration) is observable at the architectural layer; the worker grain doesn't enter unless the framing names *the maintainer's preference for parallel over factored* — which it doesn't (the property is named at the codebase's expansion-cost differential at substrate-vs-registration, not at the maintainer's choice). Property 5 (release-dynamics) is at the released-artifact's version-tag grain; the worker grain doesn't enter unless the framing names *the maintainer's release pace* — which it doesn't (the property is *what the artifact has shipped*, not *what the maintainer has done*). Property 6 (BUGS.md as drained working-surface) is at the source-tree's structural-feature grain; the worker grain doesn't enter unless the framing names *the maintainer's bug-tracking workflow* — which it doesn't (the property is *the architecture the source tree carries*, not *the workflow the maintainer follows*).
+
+Property 3 was the discipline test because the temptation registers were the densest — the kind of worker-grain framing that *sounds* like a property naming. Acknowledgement-register variation invites narration about the person doing the acknowledging. The narration about the artifact carrying the variation reads correctly only after the worker-grain temptations have been refused several times.
+
+The two candidates declined in the closure (Pattern F as `project-age-as-temporal-frame`; Pattern 1 sub-shape distribution as separate property) were declined for *evidence-thinness* and *over-counting*, not for work-vs-worker line concern. The work-vs-worker line was held throughout the six promoted properties; the two declines were on different grounds.
+
+This is the close of the insight-thread layer. The final narrative, when it runs, inherits four threads each holding their respective tier, plus a property catalogue interpreted at the artifact grain. What the final narrative makes legible is something the four threads cannot make legible from inside themselves: the cumulative reading *as a story* rather than as a catalogue. From here, the record carries its own weight; the narrative's job is to read it.
+
+Provenance:
+- `insight-recurrence` Pattern 2 (the *"Maintainer-experience axis declined"* paragraph; the question this thread had to answer at artifact grain) = 01KR3CZEM22Y5BRT1F2VQZ6EKZ.
+- This thread's Property 3 entry (the six-property catalogue's hardest discipline test) = 01KR3HMF3F7A5EBXBQYEWHYR3Z.
+- This thread's other property entries (the five properties with less acute work-vs-worker tension): Property 1 = 01KR3HG2GEBH1W8BKGT3CW6S9P; Property 2 = 01KR3HJ9ZVA966149ME2TBTB5B; Property 4 = 01KR3HQCRV761KG6CVD6T11QNM; Property 5 = 01KR3HSK97596MXH0V41K7TYM2; Property 6 = 01KR3HW4T1GQKFFWNYSRT0639S.
+- This thread's framing = 01KR3HDVVQ5TS04SKHKWZKCXPY; closure = 01KR3HZNC62XT11V4CW2GZ5V0S; first tail = 01KR3J1JKR98RY75JBYA8EKC1X.
+- Arc-08 PR #31 entry (the *"Smaller than I'd previously framed it"* commit body verbatim — the load-bearing observation for why the framing register matters) = 01KR397RTYNS34SAGM46YJJRBY.
+
+<!-- Entry-ID: 01KR3J3GGK8SFKMA3ZMGX2JK0R -->
