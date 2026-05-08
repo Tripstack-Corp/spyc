@@ -7,3 +7,5 @@
 {"source":"entry:01KR3CZEM22Y5BRT1F2VQZ6EKZ","target":"entry:01KR3D2G1S7DXYSPDZDRXQBPDX","type":"followed_by"}
 {"source":"thread:insight-recurrence","target":"entry:01KR3D5B59F5DX6BZZPB1VTQB3","type":"contains"}
 {"source":"entry:01KR3D2G1S7DXYSPDZDRXQBPDX","target":"entry:01KR3D5B59F5DX6BZZPB1VTQB3","type":"followed_by"}
+{"source":"thread:insight-recurrence","target":"entry:01KR3D8RH5DNYC37WSGFVETXT3","type":"contains"}
+{"source":"entry:01KR3D5B59F5DX6BZZPB1VTQB3","target":"entry:01KR3D8RH5DNYC37WSGFVETXT3","type":"followed_by"}

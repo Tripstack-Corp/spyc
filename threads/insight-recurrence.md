@@ -326,3 +326,90 @@ Provenance:
 - `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
 
 <!-- Entry-ID: 01KR3D5B59F5DX6BZZPB1VTQB3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:04:05.056663+00:00
+Role: scribe
+Type: Note
+Title: Pattern 5: v1.41.x patch cadence — four minor cuts cluster early, then 24 consecutive patches under one minor across the rest of the window
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+**Pattern statement.** The 22-day window's release-version ladder runs v1.37.x → v1.38.0 → v1.38.x → v1.39.0 → v1.40.0 → v1.40.x → v1.41.0 → v1.41.x and then stays at v1.41.x for the rest of the window. Four minor cuts (v1.38.0, v1.39.0, v1.40.0, v1.41.0) cluster across PRs 6, 8, 10, 13 — the first six wall-clock days of the window — and ship under arc 03 (zoom) and arc 06 (harpoon, quickselect) and arc 08 (graveyard). After v1.41.0 lands, no further minor cuts occur. Twenty-four consecutive v1.41.x patch versions land across PRs 14 through 37, distributed across arcs 03, 04, 05, 06, 07, and 08.
+
+The pattern is recurrence-of-versioning-shape: minor cuts cluster at capability-introducing PRs early in the window; the post-v1.41.0 era is patch-only. The recurrence is *that the post-v1.41.0 patches recur 24 times in a row*, not that minor cuts recur (4 minors is a small sample). The catalogue counts and names; the *why* is `insight-emergent-properties`'s.
+
+**Instance enumeration with arc-entry citations and version verification.**
+
+The version map is verifiable from `Cargo.toml` post-merge plus the commit subjects' `(v1.X.Y)` parenthetical tags as catalogued at `history-overview`'s segmentation entry (= 01KR0TWHTC1MPK4KJ08Y9SPE6P). The map for the 22-day window:
+
+- **v1.37.1 (PR #1, arc 04, 2026-04-30 17:08)** — `git markers: 1Hz safety-net poll for missed FSEvents (v1.37.1)`. *Pre-window minor base; this is a patch on v1.37.0.*
+- **v1.37.2 (PR #4, arc 01, 2026-04-30 20:48)** — `shell: aliases work in :!cmd / ;cmd via $SHELL -i (v1.37.2)`. *Patch.*
+- **v1.37.2 (PR #5, arc 02, 2026-04-30 22:53)** — `lazygit investigation + cursor-block fix (v1.37.2)`. *Same-version-tag as PR #4 — the cursor-block fix shipped at the same patch level the shell-aliases fix authored. Sequential merges did not bump the patch.*
+- **v1.38.0 (PR #6, arc 03, 2026-05-01 19:47)** — `pane: ^a z fullscreen-toggle (zoom) for the bottom pane (v1.38.0)`. *Minor cut #1: zoom is a capability addition that justifies the minor.*
+- **v1.38.1 (PR #7, arc 04, 2026-05-02 11:53)** — `limit: =git / =g shows files in git status (v1.38.1)`. *Patch on v1.38.x — `=git`/`=g` is a filter, not a capability that justifies a minor.*
+- **v1.39.0 (PR #8, arc 06, 2026-05-02 18:04)** — `harpoon: per-project pinned working set + =h filter (v1.39.0)`. *Minor cut #2: harpoon is a capability addition.*
+- **v1.40.0 (PR #10, arc 06, 2026-05-02 20:52)** — `quick select: ^a u labeled-overlay picker for pane output (v1.40.0)`. *Minor cut #3: quickselect is a capability addition. Two minor cuts inside arc 06 within the same calendar day; arc 06 is the only arc with two minors.*
+- **v1.40.1 (PR #11, arc 05, 2026-05-02 21:48)** — `pager: scroll_max accounts for wrapped visual rows (v1.40.1)`. *Patch — wrap-accounting fix.*
+- **v1.41.0 (PR #13, arc 08, 2026-05-03 02:41)** — `graveyard: R-undo + per-entry tar.zst + system trash cascade (v1.41.0)`. *Minor cut #4: the graveyard subsystem is a capability addition; this is the last minor cut of the 22-day window.*
+
+**The post-v1.41.0 ladder — 24 consecutive patch versions across arcs 03, 04, 05, 06, 07, 08:**
+
+- v1.41.1 = PR #14 (arc 08; routing fix to PR #13)
+- v1.41.2 = PR #15 (arc 04; basename collision + ^C-route)
+- v1.41.3 = PR #16 (arc 05; :fg pager seeding)
+- v1.41.4 = PR #17 (arc 05; pager n/N multi-col)
+- v1.41.5 = PR #18 (arc 07; AGENTS.md rename + MCP hygiene)
+- v1.41.6 = PR #19 (arc 07; codex resume)
+- v1.41.7 = PR #20 (arc 05; alt-screen scroll bundle)
+- v1.41.8 = PR #21 (arc 07; codex MCP config)
+- v1.41.9 = PR #22 (arc 03; pane shutdown)
+- v1.41.10 = PR #23 (arc 05; help yf)
+- v1.41.11 = PR #24 (arc 04; jump git change)
+- v1.41.12 = PR #25 (arc 06; input dispatch + key-trace)
+- v1.41.13 = PR #26 (arc 03; dim unfocused pane)
+- v1.41.14 = PR #27 (arc 04; git staged-vs-unstaged)
+- v1.41.15 = PR #28 (arc 08; huge dir cap)
+- v1.41.16 = PR #29 (arc 03; skip cursor block)
+- v1.41.17 = PR #30 (arc 08; vt100 panic recovery)
+- v1.41.18 = PR #31 (arc 08; vt100/ratatui upgrade)
+- v1.41.19 = PR #32 (arc 06; chord priority)
+- v1.41.20 = PR #33 (arc 05; pager visual line mode)
+- v1.41.21 = PR #34 (arc 03; top overlay focus)
+- v1.41.22 = PR #35 (arc 05; D opens pager)
+- v1.41.23 = PR #36 (arc 05; substring search)
+- v1.41.24 = PR #37 (arc 07; MCP socket project-scoped)
+
+**Instance count: four minor cuts (v1.38.0, v1.39.0, v1.40.0, v1.41.0) plus 24 consecutive v1.41.x patches.** The minor-cut count is small (4); the patch-cadence recurrence is the load-bearing observation (24 consecutive patches under one minor).
+
+**Notes on cadence and pattern boundary.**
+
+- *Minor cuts cluster early.* The first minor (v1.38.0) lands on day 2 of the window; the last minor (v1.41.0) lands on day 4. The four minors span *48 hours of the 22-day window*. The post-v1.41.0 era is the remaining ~18 calendar days of merge activity, all under v1.41.x. The clustering is observable; whether it reflects an early phase of capability-additions giving way to a later phase of refinement-and-correction is a question for `insight-emergent-properties`.
+
+- *Arc affiliation of minor cuts.* The four minors land across three arcs (arc 03 once, arc 06 twice, arc 08 once). Arcs 01, 02, 04, 05, 07 do not get a minor cut in the 22-day window. Arc 04 (git-integration) is notable for *not* getting a minor: the five arc-04 PRs span Day-0 to Day-7 of the window and ship at v1.37.1, v1.38.1, v1.41.2, v1.41.11, v1.41.14 — all patches. Arc 05 (pager-surface) is similarly all-patches across its eight PRs (v1.40.1, v1.41.3, v1.41.4, v1.41.7, v1.41.10, v1.41.20, v1.41.22, v1.41.23). Whether the all-patches arcs differ structurally from the minor-introducing arcs is a question for `insight-emergent-properties`.
+
+- *The two-minor arc.* Arc 06 is the only arc with two minor cuts (PR #8 v1.39.0 harpoon; PR #10 v1.40.0 quickselect), both on the same calendar day, separated by 2 hours and 48 minutes. Two distinct capability-introducing PRs back-to-back, each cutting its own minor. The cadence within arc 06's α-phase is observable; the catalogue does not promote it to a sub-shape (one arc, two events).
+
+- *The closing-ladder cadence.* The arc-08 story-tail (= 01KR3A23E11K8F7VNVSM5XY6M2) framed this factually: *"the v1.41.x cadence — one minor cut per arc-α PR; four 1.41.x patches in between for unrelated work landing in arcs 03/05/08; PR #25 at v1.41.12, PR #32 at v1.41.19."* The brief carried this observation forward. The arc-06 story-tail's framing is the arc-grain source; the cumulative-grain reading this entry assembles is broader: 24 consecutive patches, distributed across all five arcs whose PRs land after v1.41.0 (arcs 03, 04, 05, 06, 07, 08 — only arcs 01 and 02 conclude before v1.41.0).
+
+- *Why this is recurrence and not drift.* No PR's commit subject misnames its own version — every `(v1.X.Y)` tag in the commit subject matches the post-merge `Cargo.toml` value. The pattern is at the *project release shape* level, not at the per-PR-description level. Insight-drift's closure entry (= 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4) places this material here implicitly via the boundary rule: no per-PR misnaming at moment of merge means the observation is not drift.
+
+- *Why the catalogue counts but does not interpret.* The pattern's emergent-property reading would name *what kind of release-cadence shape this is* (release-pressure-as-merge-velocity-signal; SemVer-as-honest-versioning; capability-introductions-as-mood-marker; etc.). Each of those is tier-4 and forbidden here. The catalogue states: minor cuts are 4; consecutive v1.41.x patches are 24. The shape recurs (the *recurrence* is the 24 consecutive patches without a minor). The interpretation is `insight-emergent-properties`'s.
+
+- *No additional instances.* Verification did not reveal a pre-window or post-window context that changes the count. PR #1's v1.37.1 is the first version-tag in the window; PR #37's v1.41.24 is the last. The window's release ladder is closed.
+
+Provenance:
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (full version-to-PR mapping; one source of truth for the version ladder).
+- arc-06 story-tail entry not directly read this session; the brief's quote of arc-06 story-tail (*"the v1.41.x cadence — one minor cut per arc-α PR; four 1.41.x patches in between"*) is the framing source. Arc-06 story-tail entry = 01KR2GYQPQRX08SV980SPHHZ80 (cited at arc-08 story-tail provenance block, second-stop reference).
+- arc-08 story-tail entry = 01KR3A23E11K8F7VNVSM5XY6M2 (closing-ladder framing; *"v1.41.0 → v1.41.18 as the closing ladder"*).
+- Minor-cut PRs:
+  - arc-03 PR #6 entry = 01KR108QNEEG64J8W8XJERJTZG (zoom; v1.38.0).
+  - arc-06 PR #8 entry source: not directly read this session; arc-06's framing entry = 01KR2G8042HWE419X0ESWKN205 (cited at arc-06 PR #25 provenance, second-stop reference).
+  - arc-06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (quickselect; v1.40.0; cited at insight-drift Pattern B).
+  - arc-08 PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1 (graveyard; v1.41.0; cited at insight-drift Pattern D).
+- `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 (boundary-rule placement: no per-PR misnaming, so this is recurrence not drift).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+
+<!-- Entry-ID: 01KR3D8RH5DNYC37WSGFVETXT3 -->
