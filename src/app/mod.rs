@@ -514,6 +514,16 @@ pub struct App {
     pager_pending_bracket: Option<char>,
     pager_was_open: bool,
     pager_jump_buf: Option<String>,
+    /// Stash for the pager that was active when `?` opened the
+    /// pager-help overlay. Restored verbatim on Esc/q dismissal so
+    /// the user lands back in the same view (same content, same
+    /// mount). Separate from `pager_history` because the latter
+    /// silently drops `no_history=true` views (used by `^a-v`
+    /// scrollback and `D` in-app pager — both v1.5 mounts) — going
+    /// through history would lose them and pop a stale
+    /// file-viewer instead. Always single-slotted; nested `?` is
+    /// undefined territory the user can't reach.
+    pager_help_stash: Option<PagerView>,
     pane_tabs: Option<PaneTabs>,
     /// Active harpoon list — small per-project pinned set of file
     /// pointers. `None` when `PROJECT_HOME` is unset; loaded from
@@ -786,6 +796,7 @@ impl App {
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,
+            pager_help_stash: None,
             pager_jump_buf: None,
             pane_tabs: None,
             harpoon,
@@ -8475,17 +8486,19 @@ impl App {
                     return PostAction::None;
                 }
                 // Pager-help overlay: dismiss just the help, restore
-                // whatever pager was active when `?` was pressed
-                // (we pushed it to back-stack at open time). Without
-                // this, ESC would close help AND drop us back to the
-                // file list -- the user just wanted to glance at the
-                // keys, not lose their place.
+                // whatever pager was active when `?` was pressed.
+                // Restore from the dedicated `pager_help_stash` slot
+                // so the original mount (Overlay / TopPane /
+                // LowerPane) and `pane_scroll` flag come back intact
+                // — going through `pager_history` here would lose
+                // the v1.5 mount mounts (filtered by `no_history`)
+                // and pop a stale file-viewer instead.
                 if self
                     .pager
                     .as_ref()
                     .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
                 {
-                    self.pager = self.pager_history.back.pop();
+                    self.pager = self.pager_help_stash.take();
                     self.pager_jump_buf = None;
                     self.pager_pending_bracket = None;
                     self.needs_full_repaint = true;
@@ -8686,9 +8699,17 @@ impl App {
                 );
             }
             KeyCode::Char('?') | KeyCode::F(1) => {
-                // Push current pager into history, open pager help on top.
+                // Stash the current pager so dismissing the help
+                // (Esc/q) restores it verbatim — same content,
+                // same mount. Going through `pager_history.push`
+                // here was the v1.5 regression: it filters out
+                // `no_history=true` views (which both
+                // `Mount::LowerPane` `^a-v` and `Mount::TopPane`
+                // `D` set, intentionally) — so the help would
+                // dismiss to either nothing or a stale older
+                // file-viewer pulled off the back stack.
                 if let Some(current) = self.pager.take() {
-                    self.pager_history.push(current);
+                    self.pager_help_stash = Some(current);
                 }
                 self.pager = Some(crate::ui::pager::build_pager_help(&self.theme));
                 self.needs_full_repaint = true;
