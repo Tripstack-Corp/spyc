@@ -5,7 +5,7 @@
   "title": "insight trajectory",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T09:40:54.751614+00:00",
+  "last_updated": "2026-05-08T09:42:04.971205+00:00",
   "summary": "The development thread focuses on the management of stated-plan documents in a project, with key decisions including the declaration of a tier-3 register, the enumeration of eight documents, and the handling of boundary rules. The main outcomes involve the integration of these documents into the roadmap, with observations flagged for insight-emergent-properties. The thread also highlights the absence of a clear trajectory for certain versions and the importance of maintaining a consistent back-reference architecture for cross-document readability.",
-  "entry_count": 10
+  "entry_count": 11
 }

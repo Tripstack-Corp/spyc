@@ -786,3 +786,76 @@ Provenance:
 - `insight-trajectory` closure entry = 01KR3F9EF9WF9Q34FRAR2XPSZS.
 
 <!-- Entry-ID: 01KR3FC6D4NH972M9MF4NYDYC6 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:42:04.967390+00:00
+Role: scribe
+Type: Note
+Title: Tail: the negative-vs-positive recommendation asymmetry as the catalogue's most surprising structural observation — fifteen honor instances, zero exact executions
+
+Spec: scribe
+
+tags: #insight #trajectory #tail
+
+The catalogue's most surprising structural observation, restated cleanly because it spans three per-document entries and the closure listed it without ceremony.
+
+Where the maintainer's stated plans take the form of *negative* or *stable-state* recommendations, the 22-day window honors them with high uniformity:
+
+- Catalogue §1 (skip), §3-log-half (skip), §6 (skip), §7 (skip) — *4 of 4 honored exactly*. This thread's document #2.
+- Charter non-goals (Native Windows; plugin system; localization; telemetry; SLSA L3; mouse beyond what already exists) — *6 of 6 honored across the window*. This thread's documents #4-#5.
+- Advisory-ignore catalogue (RUSTSEC-2026-0009; RUSTSEC-2024-0320; RUSTSEC-2025-0141; RUSTSEC-2024-0436; RUSTSEC-2017-0008) — *5 of 5 survive across the window's largest dep change*. This thread's document #8.
+
+That is fifteen honor instances across three independent stated-plan documents with zero divergences. The fifteen are uniformly honored at the *exact-state* grain — no PR introduces telemetry, no PR ships a command-log surface, no PR opportunistically reduces the `time` advisory ignore via the syntect bump.
+
+Where the maintainer's stated plans take the form of *positive* recommendations — actions to take, capabilities to ship, surfaces to extend — the 22-day window's trajectory has *shape* but not *exact-state honor*:
+
+- Catalogue §2, §3-tip-half, §4, §5 (adapt-positive recommendations) — 0 of 4 executed-as-specified; 1 partial; 1 non-executed-against-conditional; 2 non-executed.
+- ROADMAP additions #1, #2, #3 (verbatim-positive imports) — 0 of 3 executed-as-specified; 1 partial; 2 deferred-or-non-executed.
+- Charter "Claude" word — substrate-level partially widens; registration-level stays peer-specific. Not exact-honor; not fully generalized.
+- v2.0 framing — not landed within window.
+- Gap-analysis suspect §1 — RESOLVED with durable-record incompleteness. Suspect §3 — RESOLVED with test-coverage gap. (Suspect §2 honors as non-goal, which is the *negative*-recommendation register, not positive.)
+
+The positive-recommendation execution count: zero exactly-as-specified (the gap-analysis suspect resolutions are partial-trajectory: §1 has durable-record incompleteness; §3 has test-coverage gap; both register as RESOLVED-with-asterisk rather than RESOLVED-cleanly). The positive-recommendation shape count is high — partial, direction-aligned, deferred — but the *clean-honor* count is zero.
+
+**Fifteen-and-zero is the most surprising number in the catalogue.**
+
+The catalogue does not interpret the asymmetry. (Tier-3 holds. The interpretation is forbidden here; the property name is `insight-emergent-properties`'s.) But the catalogue can name what makes the count surprising at the trajectory grain.
+
+It is surprising that *three independent stated-plan documents*, written at different times in different contexts (PR #5's catalogue authored 2026-04-30; the charter and non-goals authored before the window; the advisory-ignore catalogue authored before the window and seed-recorded at bootstrap), all converge on the same *honor-asymmetry shape*: negative recommendations, uniform honor; positive recommendations, modified shape. That convergence across three documents authored in different registers is structurally unusual — these are not three statements of one stated-plan-discipline; they are three independent surfaces in which the same trajectory shape recurs.
+
+The catalogue's six per-document entries each named the local asymmetry: document #2 named the catalogue's skip-vs-adapt asymmetry; document #5 named the non-goals' uniform honor against the charter's partial widening; document #8 named the advisory-ignore stable state. The *cross-document recurrence* of the asymmetry is a fact at trajectory-grain only. None of the per-document entries could name it; the cross-document reading is the catalogue's contribution.
+
+**What the recurrence is not.**
+
+It is not insight-recurrence Pattern 1 (bundle-as-shape) — bundling is at the per-PR grain; this is at the per-stated-plan-document grain.
+
+It is not Pattern 2 (supersession-acknowledgement) — supersession is between PRs that share code paths; this is between stated-plan recommendations that share *register* (positive vs. negative).
+
+It is not Pattern 4 (named-then-fixed bracket) — the bracket pattern operates at single-PR-or-cross-PR grain with weighted options at the open-side; this is at multi-document grain with no bracketing structure.
+
+It is not Pattern 5 (v1.41.x cadence) — the cadence is at the version-tag grain; this is at the recommendation-disposition grain.
+
+It is not Pattern 6 (implicit-machinery-chain) — the chain pattern is about consumer-side not-naming of establishers; this is about whether stated-plan recommendations land in their specified shape.
+
+The fifteen-and-zero observation does not fit any insight-recurrence pattern. It is *trajectory-grain* observation specifically — what makes it visible is the cross-product of *stated-plan recommendation register* (negative vs. positive) and *execution disposition* (honored vs. shape-but-not-honored). Both axes are trajectory-grain; neither is recurrence-grain.
+
+**Why this matters for the network.**
+
+The framing entry's tier-3-vs-tier-4 boundary case named *the cumulative reading the eight arcs enable* as emergent-property territory. The fifteen-and-zero observation is on this side of the boundary, but barely — it is *cross-document trajectory shape*, not *cross-document property*. The property reading would be something like *"the project produces uniform honor on negative recommendations because they require nothing to be done; positive recommendations land in modified shape because the work meets conditions on the ground that the recommendations could not anticipate"* — but that property-naming is forbidden here. The trajectory thread states the count: fifteen honor instances; zero exactly-as-specified positive-recommendation executions.
+
+The closure entry's per-document disposition counts (`Skip-honored exactly: 15; Executed-as-specified positive-recommendation: 0`) are the count at its terminal form. This tail names *that the count is structurally surprising* — three independent stated-plan documents, three different registers, same asymmetry shape. Restated for the durable record because the count alone, distributed across the catalogue, did not foreground its surprise.
+
+The thread is left OPEN.
+
+Provenance:
+- `insight-trajectory` document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (catalogue skip-vs-adapt asymmetry; 4 skips honored / 4 adapts modified).
+- `insight-trajectory` document #3 entry = 01KR3EW3166JZ59TDR8PYMGN4T (ROADMAP additions; 3 positive-recommendation entries / zero exactly-as-specified executions).
+- `insight-trajectory` document #4-and-#5 entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (charter non-goals; 6 honored uniformly / charter positive framing partial widening).
+- `insight-trajectory` document #6 entry = 01KR3F1TDZQGAQNZYEYYMFAGCE (v2.0 not landed within window).
+- `insight-trajectory` document #1 entry = 01KR3ENV1WP6R9SFRE1QME291S (gap-analysis suspects; §1 + §3 resolved-with-asterisk; §2 deferred-as-non-goal).
+- `insight-trajectory` document #8 entry = 01KR3F65XSQ4B74MDSQMYEM2R0 (advisory-ignore catalogue; 5 of 5 survive trio bump).
+- `insight-trajectory` closure entry = 01KR3F9EF9WF9Q34FRAR2XPSZS (terminal count: 15 honor instances + 0 exactly-as-specified positive-recommendation executions).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A (tier-3 register; the counting-not-interpreting discipline this tail honors).
+- `insight-recurrence` Patterns 1-6 (closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN) — the reference set this tail confirms the fifteen-and-zero observation does not fit.
+
+<!-- Entry-ID: 01KR3FEAYFQS8QVXCPN4KQ8QYK -->
