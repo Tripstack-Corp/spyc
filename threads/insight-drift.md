@@ -367,3 +367,77 @@ Provenance:
 - `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07 (Pattern F's structurally-upstream-of-arcs framing declared).
 
 <!-- Entry-ID: 01KR3BN3N6YF60414FFVHAM50Y -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:37:12.666892+00:00
+Role: scribe
+Type: Closure
+Title: Closure: insight-drift catalogue assembled — what this thread contributes, where future readers should look, cross-reference observation for insight-recurrence
+
+Spec: scribe
+
+tags: #insight #drift
+
+The catalogue is assembled. Six patterns, sixteen instances total (5 in A, 6 in B, 3 in C, 1 in D, 1 in E by strict count, 1 in F), spread across the spine plus all eight arcs (A: 5 arcs; B: 5 arcs; C: 2 arcs; D: 1 arc; E: 1 arc; F: spine plus arc 04). Pattern B is the densest with six instances; Pattern D and Pattern E and Pattern F each hold a single verified instance with a counting-convention or pattern-boundary note.
+
+**What this catalogue contributes to the network.**
+
+- *A name for what the arcs flagged piecemeal.* Each arc's drift-findings sections flagged instances locally without claiming the pattern. This thread names the pattern. Future readers entering the network at any single arc can follow the per-arc drift findings to this catalogue's per-pattern entries and see the cumulative shape.
+
+- *A canonical placement decision for cross-cutting observations.* Some observable phenomena (bundle-as-shape, supersession-acknowledgement) are visible as drift at moment-of-merge *and* as recurrence across multiple PRs. Where the catalogue made a placement choice, the cross-mention is named at the relevant pattern entry. Pattern B is in this thread because the unit of observation is the *misnaming* (one slug, multiple concerns); the same observable as *recurrence* (bundling happens N times across the project) belongs to `insight-recurrence`. Pattern D is in this thread because the unit of observation is the *documented-vs-wired drift at moment of merge* (the 25-minute window during which `:undo` was on `main` as a documented but unwired capability); the silent supersession at the commit-message level (PR #14 doesn't cite PR #13) is recurrence material that lives also in arc 03's PR #29 → PR #5 silent supersession and arc 08's PR #31 → PR #30 explicit reframing.
+
+- *A spine-level drift named.* Pattern F is the only catalogue entry whose drift source is the spine, not an arc PR. Naming it here makes downstream insight threads' per-time-unit observations more reliable.
+
+**Where future readers should look for the pattern in subsequent work.**
+
+- For Pattern A (commit-subject vs. diff-scope understatement): the segmentation entry on `history-overview` (= 01KR0TWHTC1MPK4KJ08Y9SPE6P) carries the original drift-findings flag. Per-PR entries' drift-findings blocks are the second-stop authoritative source. This catalogue is the third-stop assembled reading.
+
+- For Pattern B (bundle-as-shape): same path, with an additional layer — arc 01's segmentation entry carries the original PR #20 / PR #36 drift flags; the per-PR entries verify against the diff; this catalogue assembles cross-arc.
+
+- For Pattern C (bucket-vs-content asymmetry): the arc-08 entries on PRs #28 and #31 are the densest source. Arc 05's PR #36 entry carries the four-way asymmetry as the broadest single-PR instance.
+
+- For Pattern D (documented-vs-wired drift): the seed `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA names the bug class with PR #14's release tag verbatim; arc-08 PR #13 / PR #14 entries carry the per-PR shape. The seed-level naming and the per-PR entries are mutually reinforcing.
+
+- For Pattern E (within-PR self-correction): arc-08 PR #30 / PR #31 entries are the only source. The 49-minute pair is the only 22-day-window cluster of the pattern.
+
+- For Pattern F (span-phrasing): the spine's framing entry (= 01KR0TRFWT9W6WMFHC49YSW0BG) introduces the framing; arc-04's closure entry (= 01KR137J5GESFYP7CN6KCD7MAS) walks it back; this thread's Pattern F entry catalogues the inheritance-without-correction at the other six arcs.
+
+**Cross-reference observation for `insight-recurrence`'s author (next session).**
+
+The next insight thread, `insight-recurrence`, will count same-shape-events-across-multiple-PRs. Several observables in the eight-arc record are visible both as drift (the unit is *misnaming-at-moment-of-merge*) and as recurrence (the unit is *N-instances-of-the-same-shape*). The placement question — should the observable appear in both threads, or only in one with a cross-reference — is answered here for three observables this catalogue treats:
+
+1. **Bundle-as-shape** is in `insight-drift` as Pattern B (six instances of the misnaming at moment of merge — slug names one concern, diff carries multiple). The same observable belongs in `insight-recurrence` as a recurrence claim — *bundling happens repeatedly across the project, six times across five arcs*. The recurrence framing emphasizes the project-shape; the drift framing emphasizes the per-PR descriptive accuracy. **Recommendation**: appear in both, with a cross-reference to this catalogue's Pattern B entry (= 01KR3BCQXGGB20V8C6Y6Z1Y944). The recurrence-thread author should not re-litigate the instance enumeration; the recurrence-thread author should claim *the recurrence reading* of the same instances.
+
+2. **Supersession-acknowledgement** is *not* a Pattern E instance per the strict reading adopted here, but it is a recurrence shape that has three substantive instances at three time grains with three acknowledgement registers (the 3.5-hour silent supersession arc 03 named on PR #29 → PR #5; the 25-minute behavior-described supersession at Pattern D's site of PR #14 → PR #13; the 49-minute explicit reframing of PR #31 → PR #30). The arc-08 story-tail (= 01KR3A23E11K8F7VNVSM5XY6M2) makes exactly this observation factually. **Recommendation**: this is `insight-recurrence` material, not `insight-drift` material. Pattern D and Pattern E mention the supersession-acknowledgement aspect in their pattern-boundary notes but place the recurrence reading in `insight-recurrence`'s scope.
+
+3. **BUGS.md SMALL-to-FIXED lift recurrence** (PR #35 then PR #36 in arc 05; PR #28 closing BUGS SMALL #4; PR #18 → PR #37 closing the BUGS.md MAYBE note PR #18 itself opened) is a recurrence shape this catalogue does *not* claim as drift. The shape — *user-reportable bug catalogued in BUGS.md, lifted to FIXED at the close-PR* — is project-shape, not misnaming-at-moment-of-merge. **Recommendation**: this is squarely `insight-recurrence` material. No cross-reference from `insight-drift` needed.
+
+The boundary rule the catalogue resolves to: **a recurrence shape is *also* a drift if and only if the recurrence has a misnaming aspect at the moment of merge that distinguishes it from the project-shape reading.** Bundle-as-shape qualifies (the slug *misnames* the diff's contents at every instance). Supersession-acknowledgement does not (no commit subject claims the PR is a supersession; the silence-or-explicitness is at the description-of-the-relationship level, not at the misnaming-at-the-moment-of-merge level). BUGS.md SMALL-to-FIXED does not qualify (the project-shape is consistent and accurately described per-PR).
+
+**Per-pattern instance counts, final.**
+
+- Pattern A: 5 instances across 5 arcs (PR #2, PR #4, PR #5, PR #18, PR #31).
+- Pattern B: 6 instances across 5 arcs (PR #15, PR #20, PR #10, PR #25, PR #18, PR #14). Densest.
+- Pattern C: 3 instances across 2 arcs (PR #28, PR #31, PR #36). Arc-08-internal inverse-asymmetry pair noted.
+- Pattern D: 1 instance (PR #13 → PR #14). Observer-side seed-level naming present.
+- Pattern E: 1 instance under strict reading (PR #30 intra-diff); 1 between-PR reframing (PR #31) flagged in the same 49-minute pair, related-but-distinct.
+- Pattern F: 1 instance with two surfaces (spine creation; arc-04 closure correction). Structurally upstream.
+
+**Sixteen instances total.** Sixteen instances in 36 merged PRs is approximately 44% of PRs surface at least one drift instance, but that statistic is misleading because some PRs (PR #18, PR #31) surface multiple patterns. Naming the rate at instance-grain is more honest: sixteen instances across six patterns means an average of 2.7 instances per pattern, dominated by Pattern B's six and Pattern A's five.
+
+**The thread is left OPEN.** Cross-arc references from `insight-recurrence`, `insight-trajectory`, and `insight-emergent-properties` will cite this catalogue's per-pattern entry IDs.
+
+Provenance:
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
+- `insight-drift` Pattern A entry = 01KR3BA3CZWA6TZCDKNJZDPAGH (5 instances).
+- `insight-drift` Pattern B entry = 01KR3BCQXGGB20V8C6Y6Z1Y944 (6 instances; densest).
+- `insight-drift` Pattern C entry = 01KR3BEGGEYB9VKTJ32WJNDG93 (3 instances; arc-08 inverse pair).
+- `insight-drift` Pattern D entry = 01KR3BGMAKS4AZNZE2QFXH10W4 (1 instance; seed-level observer naming).
+- `insight-drift` Pattern E entry = 01KR3BK1VP3SZ5DM9VAQ01FFYX (1 strict + 1 between-PR; counting convention named).
+- `insight-drift` Pattern F entry = 01KR3BN3N6YF60414FFVHAM50Y (1 instance with two surfaces; spine-level upstream).
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+- arc-08 story-tail entry = 01KR3A23E11K8F7VNVSM5XY6M2 (supersession-acknowledgement three-grain summary; cross-reference for `insight-recurrence`).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (Pattern D's seed-level naming).
+
+<!-- Entry-ID: 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4 -->
