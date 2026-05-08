@@ -267,3 +267,62 @@ Provenance:
 - `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
 
 <!-- Entry-ID: 01KR3D2G1S7DXYSPDZDRXQBPDX -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:02:13.052875+00:00
+Role: scribe
+Type: Note
+Title: Pattern 4: Named-then-fixed bracket — three instances at three grains (one-PR / 49-minute / two-day) where the same author opens and closes a named issue
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+**Pattern statement.** A bug, design issue, or deferred concern is *named* in durable text by one PR (or one diff): a BUGS.md SMALL/MAYBE entry, a commit-body framing, a doc-comment, or a CHANGELOG hedge. A later PR (or the same PR's later half) *closes* the named issue and removes/lifts the naming. The bracket is the open-side text plus the close-side fix; the recurrence is that the bracket-shape appears at three different time grains in the eight-arc record.
+
+This pattern overlaps with Pattern 3 (SMALL-to-FIXED lift) in the case where the named text is a BUGS.md entry. The distinction is at the framing level: Pattern 3 counts *bucket drains*; Pattern 4 counts *bracketed authorship* (same author opens and closes an issue, possibly within the same PR, possibly across PRs separated by hours or days). The two patterns share instance 4 of Pattern 3 (PR #18 → PR #37); the catalogue does not double-count the *observable* but treats the two pattern questions as distinct.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **Arc 08 PR #28 (one-PR bracket).** PR #28 (`fix/huge-directory-cap`, commit 306b43f, 2026-05-06 17:30 UTC) closes BUGS SMALL #4 (huge directory). The open-side: the SMALL #4 entry traceably entered the BUGS.md record via PR #12's harvest (= 01KR0Z11CKNJRYEZ3T38EAFSC4 carries the harvest's bucket additions; the harvest PR's diff added BIGGER mouse and MAYBE mode-2026/OSC-8 verbatim, and the SMALL bucket gained cursor-block and COLORTERM at the harvest, with SMALL #4 traceable to the gap-analysis suspect record from PR #5's investigation). The close-side: PR #28's diff caps directory listings at 50,000 entries and lifts SMALL #4 to FIXED.
+
+   The bracket grain is *one-PR* in the sense that PR #28 is the close. The open-side is upstream-author-of-record-different (PR #12 harvest from PR #5 investigation), making the strict reading: this is a *cross-arc same-codebase bracket* where the open-side and close-side are different PRs, and the close-side is one PR. The catalogue holds it as the *one-PR-grain bracket* because the close happens in a single landed PR with no in-between fix-attempts; the *open-side authorship* across PR #5 → PR #12 → PR #28 is the long-tail context that makes the bracket an issue-named-then-fixed shape rather than a casual bug fix. *Cite: arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M; arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (open-side recordable-text source); arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 ("PR #28's commit body names BUGS SMALL #4 directly").*
+
+2. **Arc 08 PR #30 → PR #31 (49-minute bracket).** PR #30 (`fix/vt100-panic-recovery`, commit e39f462, 2026-05-06 18:27 UTC) opens the bracket: a BUGS.md MAYBE block argues the upgrade *"touches every place that holds a `vt100::Screen` reference"* and recommends *"defer until someone has a clear afternoon."* The open-side names the cost and weights the fix as not-yet-tractable. PR #31 (`chore/vt100-and-ratatui-upgrade`, commit 105db8d, 2026-05-06 19:16 UTC) lands 49 minutes later, deletes PR #30's MAYBE block, and lifts the older PR-#12-authored MAYBE entries (mode 2026, OSC 8) to FIXED in the same diff. The bracket close also reframes the cost: *"Smaller than I'd previously framed it"* — the same five words that carry the explicit-reframing register at Pattern 2's instance 3.
+
+   The bracket grain is *49 minutes*. The open-side and close-side are different PRs by the same author within the same hour. *Cite: arc-08 PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01; arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY; arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 ("the 'clear afternoon' had arrived as the same afternoon the deferral was authored").*
+
+3. **Arc 07 PR #18 → PR #37 (two-day bracket).** PR #18 (`chore/agents-md-and-mcp-hygiene`, commit bad8bfc, 2026-05-05 00:41 UTC) opens the bracket: a 13-line BUGS.md SMALL note names the cross-project MCP-attachment bug, weights three design fixes, and marks option (b) — *"keeps the 'just works' ergonomics while ruling out cross-instance attachment"* — as *"most spyc-shaped."* The open-side is unusually detailed for a SMALL entry: it names the bug, names the threat ($HOME-unset widening to cross-user), weights three solutions, picks one. PR #37 (`fix/mcp-socket-project-scoped-discovery`, commit a303251, 2026-05-07 00:54 UTC) lands two calendar days later, implements exactly option (b) (project-scoped walk reading the canonical `.spyc-context-<pid>.json` marker file PR #18 made canonical in the same bundle), removes PR #18's 13-line SMALL entry, and adds a `(fixed, v1.41.24)` block.
+
+   The bracket grain is *two calendar days*. The open-side and close-side are different PRs by the same author at the same arc. PR #18's open-side has a property the other two brackets do not: the open-side *also* canonicalizes the file (`.spyc-context-<pid>.json`) that the close-side will consume. The bracket is not just "name the bug, fix it later"; it is *"name the bug AND build the infrastructure the fix will need, then fix it later."* The arc-07 story-tail makes this observation factually: *"the BUGS.md note pre-existed the codex-parity expansion that made the note mandatory; the canonical marker file PR #37 needed was already in the codebase by the time PR #19 and PR #21 widened the codepath that fed it."* *Cite: arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ; arc-07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ; arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V.*
+
+**Instance count: three.** Three brackets at three time grains: one-PR (arc 08 PR #28, with cross-arc upstream open-side from PR #12 / PR #5); 49 minutes (arc 08 PR #30 → PR #31); two days (arc 07 PR #18 → PR #37). Cross-product against open-side authorship: instance 1's open-side is upstream-cross-arc; instances 2 and 3 are same-author-same-arc-self-bracketing. Cross-product against weighted-options-at-open-side: instance 3 is the only bracket whose open-side weights design options and marks one as preferred; instance 2's open-side weights cost-vs-benefit (defer-because-too-big) without ranked options; instance 1's open-side is descriptive (the gap-analysis suspect text PR #12 lifted) without ranked options.
+
+**Notes on time-grain × bracket-shape and pattern boundary.**
+
+- *Time-grain spread.* From one-PR (instance 1, where the close-side is single-PR with cross-arc upstream open-side) to 49 minutes (instance 2, same-day same-author) to two calendar days (instance 3, same-arc cross-PR). The grain spread is wide; what holds across all three grains is the *bracket shape* — text names the issue, code closes it, durable record updates to FIXED.
+
+- *The brief's third grain candidate revisited.* The brief named *"Arc 08 PR #28 is potentially a one-PR bracket (named in BUGS.md SMALL by some prior PR; closed by PR #28 itself; verify which PR opened the SMALL entry, if any)."* Verification: SMALL #4 traces to PR #12's harvest, which traces to PR #5's gap analysis. So the *open-side authorship* of instance 1 is two PRs upstream of the close-side, across two arcs. The *close-side* is single-PR. The catalogue holds instance 1 as the *one-PR-close-grain* bracket because the close-action is a single PR; the cross-arc open-side authorship is the long-tail context that makes the bracket recur as bracket rather than as casual bug fix. The brief's "verify which PR opened the SMALL entry" question is answered: PR #12 carries the harvest text; PR #5 carries the gap-analysis source.
+
+- *The PR #18 weighted-options open-side as a sub-shape.* PR #18's BUGS.md note is the only open-side in the catalogue with explicitly-weighted design options (three options, one marked "most spyc-shaped"). PR #30's MAYBE block weights cost-vs-benefit but does not enumerate options. PR #12's harvest entries describe gap-analysis suspects with one fix path implied per entry. The arc-07 story-tail observed this factually: *"the BUGS.md note frames the design issue, ranks the options, and PR #37 implements exactly option (b)."* The catalogue does not promote weighted-options-open-side to a separate sub-shape (one instance is too thin); it notes the singularity factually. Whether weighted options at open-side correlate with longer bracket-grain (instance 3 is two days; the other instances are 49 minutes and one-PR) is a question for `insight-emergent-properties`. Captured factually.
+
+- *Boundary with Pattern 3 (SMALL-to-FIXED lift).* The same observable underlies Pattern 3's instance 4 and this Pattern's instance 3 (arc-07 PR #18 → PR #37). The catalogue does not double-count the *PR pair*; it asks two distinct pattern questions of the same observable. Pattern 3's question: *did this PR drain a queued bucket entry?* (Yes; SMALL → FIXED.) Pattern 4's question: *did the same author author both the open-side text and the close-side fix, and at what time grain?* (Yes; same arc, two calendar days.) Two readings, two threads-within-thread, one observable.
+
+- *Boundary with Pattern 2 (supersession-acknowledgement).* Instance 2 (PR #30 → PR #31) is also Pattern 2's instance 3 (49-minute explicit-reframing). The named-then-fixed bracket reading and the supersession-acknowledgement reading attend to different aspects of the same diff pair: the bracket reading attends to *PR #30's MAYBE block being deleted by PR #31*; the supersession reading attends to *"Smaller than I'd previously framed it"* in PR #31's commit body. Both are real; both are observable; the same diff pair carries both shapes.
+
+- *No additional instances.* Verification did not reveal a fourth bracket in the eight arcs that satisfied the *named-in-durable-text-then-fixed* criterion at a different grain. Bug-fix PRs that *did not* have an open-side text in BUGS.md / commit body / doc-comment do not qualify; the bracket pattern requires the open-side naming.
+
+Provenance:
+- arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M (instance 1 close-side; "PR #28's commit body names BUGS SMALL #4 directly").
+- arc-08 PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 (instance 2 open-side; the BUGS.md MAYBE block).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (instance 2 close-side; "Smaller than I'd previously framed it").
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (instances 1 and 2 framing; named-then-fixed bracket at three grains).
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (instance 3 open-side; the 13-line SMALL entry weighting three design options).
+- arc-07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ (instance 3 close-side; the option-(b) implementation).
+- arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V (instance 3 framing; "groundwork → expansion → closure" shape).
+- arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (instance 1 open-side recordable-text source).
+- `insight-recurrence` Pattern 2 entry = 01KR3CZEM22Y5BRT1F2VQZ6EKZ (boundary with supersession-acknowledgement; instance 2 cross-listed there as instance 3).
+- `insight-recurrence` Pattern 3 entry = 01KR3D2G1S7DXYSPDZDRXQBPDX (boundary with SMALL-to-FIXED lift; instance 3 cross-listed there as instance 4).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+
+<!-- Entry-ID: 01KR3D5B59F5DX6BZZPB1VTQB3 -->
