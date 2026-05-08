@@ -5,7 +5,7 @@
   "title": "insight emergent properties",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T10:20:23.062385+00:00",
+  "last_updated": "2026-05-08T10:21:58.861876+00:00",
   "summary": "The thread focuses on insight-emergent-properties, a new insight-layer thread that addresses emergent properties in codebases. It highlights a strong asymmetry between description and functionality, as well as a uniform structural asymmetry in stated plans. Key decisions include declaring a tier-4 register and implementing a tier-5 permission with recurrence-citation requirements. The outcome is a structured approach to understanding and managing emergent properties in software development.",
-  "entry_count": 4
+  "entry_count": 5
 }

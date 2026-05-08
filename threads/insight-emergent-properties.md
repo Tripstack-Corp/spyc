@@ -274,3 +274,70 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HMF3F7A5EBXBQYEWHYR3Z -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:21:58.860553+00:00
+Role: scribe
+Type: Note
+Title: Property 4: Additive-substrate / parallel-registration — the codebase grows by stacking atop existing substrate and by placing peer surfaces side-by-side at the registration layer
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** The codebase exhibits a two-layer expansion behavior: at the *substrate layer*, new capability lands additively atop existing infrastructure (struct fields stack; map consumers multiply; one Unix socket serves additional peers; doc-commented enabling chains run cheap), without disturbing existing capability and without commit-message acknowledgement of the chain. At the *registration layer*, peer surfaces and overlay surfaces are placed side-by-side rather than factored over a parametric base — two `ensure_*` functions for two MCP peers; two parallel pickers (harpoon, quickselect) instead of one generalized `picker_items` field; pager-as-mode and standalone-overlay co-existing for the §4 territory. Reads as: spyc, as artifact, has different expansion costs at substrate versus registration — substrate widens cheaply, registration widens by replication.
+
+This property consolidates findings from three prior insight threads simultaneously: `insight-recurrence` Pattern 6 (implicit-machinery-chain) at the substrate layer; `insight-trajectory` Document #4's substrate-vs-registration distinction at the architectural layer; `insight-trajectory` Document #2's DIRECTION ALIGNMENT four-PR cluster against catalogue §4 at the registration layer.
+
+**Evidence enumeration.**
+
+*Substrate-layer additive accretion* (per `insight-recurrence` Pattern 6 = 01KR3DC7E4B0JC1NN212PYVT56):
+
+- *Arc-04's `git_files` chain*: PR #1 establishes a 1Hz git poll on `AppState`; PR #7 reuses `git_files` for the `=git` / `=g` filter; PR #15 extracts `parse_porcelain_statuses` as pure parser with five unit tests; PR #24 reuses the same map for `]g` / `[g` jumper; PR #27 extends the parser to a struct without refactor cost (the five PR #15 tests get rewritten in-place; three new tests land for staged-only / partially-staged / conflict shapes). Five PRs, one chain, zero commit-message "this enables that" claims. Arc-04 story-tail (= 01KR13CJ5XS5VREYA4741JHDSQ) names the property factually: *"None of the commits says 'this enables that.' But the chain is real, and it's what lets the arc read as additive rather than thrashing."*
+- *Arc-05's `PagerView` field-accretion*: PR #11 adds `last_body_w: std::cell::Cell<u16>`; PR #33 adds `visual: Option<VisualSelection>` next to it without disturbing the existing field. The struct expands; existing fields hold. PR #16's seed-from-buffer pattern enables PR #35's `display_in_pane` as a parallel of `edit_in_pane` for the read path. Arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB).
+- *Arc-03 → arc-05 cross-arc*: PR #34's overlay-vs-pane focus model becomes load-bearing for PR #35's `D`-opens-pager-in-top-pane sixteen minutes later; PR #35's commit subject does not name PR #34. Cross-arc additive chain at the focus-routing substrate.
+
+Three implicit-machinery-chain instances; verified count at Pattern 6.
+
+*Substrate widens at architectural layer* (per `insight-trajectory` Documents #4-5 = 01KR3EZDWSTW7TPWBY7KXB0KB3):
+
+- *Arc-07's MCP-bridge widening*: one Unix socket; one `spyc --mcp` proxy; one peer-agnostic `discover_live_socket` walk reading `.spyc-context-<pid>.json` markers regardless of which peer is calling. PR #18 makes the marker file canonical via `context_path` parameter widening through every `Pane::spawn` site without breaking existing call shapes. PR #37's discovery walk consumes the marker file the prior PR canonicalized. The substrate generalizes from claude-only to peer-agnostic at low expansion cost. Arc-07 story-tail (= 01KR2JM67RTQHQYN0223GTKH1V): *"the substrate is genuinely shared: one Unix socket, one `spyc --mcp` proxy, one `McpConfigStatus` enum, one takeover prompt."*
+
+*Registration-layer parallel placement* (per `insight-trajectory` Document #2 = 01KR3ESJ42TT0ZGJHGHJ5CTNYC and Document #4):
+
+- *Arc-07's two `ensure_*` functions in `src/mcp.rs`*: `ensure_mcp_json` (claude) sits next to `ensure_codex_config_toml` (codex), with doc-comments naming each other as *"mirror"* — code-comments at the point-of-policy. No `trait MCPRegistrationFile` factoring. Two parsers, two CLI mechanics, two restore-spawn paths; zero parametric abstraction.
+- *Arc-06's parallel pickers*: `HarpoonMenu` (PR #8) and `QuickSelect` (PR #10) ship as standalone overlays with their own dispatch paths; neither extends a generalized `picker_items` field on `PagerView`. Both ship a picker shape; both refuse the catalogue's specific *"render through the pager"* pattern.
+- *§4 DIRECTION ALIGNMENT four-PR cluster*: PR #33 (visual-line-mode), PR #35 (D-opens-pager), PR #8 (harpoon), PR #10 (quickselect) — four PRs across two arcs, two families. The 2-2 split is structurally important per Document #2: *"two different families of 'the picker shape, but not as a pager mode.'"* The arc-05 half (PR #33, PR #35) honors the catalogue's substrate-direction (pager hosts the mode); the arc-06 half (PR #8, PR #10) refuses it (the picker stands alone). Both halves count as DIRECTION ALIGNMENT against §4's general framing; neither lands the specific `PagerView::picker_items: Vec<(Label, Action)>` field. Trajectory disposition per Document #2: DIRECTION ALIGNMENT BY FOUR PRs, SPECIFIC SHAPE NON-EXECUTED.
+
+**Strongest evidence.**
+
+Arc-07's substrate-vs-registration distinction (per arc-07 story-tail = 01KR2JM67RTQHQYN0223GTKH1V) is the cleanest single observation. In one arc, the same expansion (claude → claude+codex) widens at substrate (one socket, one discovery walk, one marker-file convention) and stays parallel at registration (two `ensure_*` files, two parsers, two restore-spawn paths). The two layers have demonstrably different expansion costs in the same diff family — the same arc 07 entries enumerate both halves. The story-tail names the property factually: *"spyc's identity-as-AI-bridge widens at the substrate to be peer-shape-agnostic while staying explicit at the registration layer."*
+
+The §4 four-PR cluster is the strongest cross-arc evidence at the registration layer. Four PRs across two arcs against a single catalogue recommendation, with zero exact executions and the 2-2 family split. The parallel-placement behavior recurs within a single feature territory (the picker shape) at two different surface families (pager-as-mode versus standalone-overlay).
+
+**Where the property would falsify.**
+
+A factored registration interface — `trait MCPRegistrationFile` with claude and codex implementations, or a `PagerView::picker_items: Vec<(Label, Action)>` field with harpoon-as-mode and quickselect-as-mode delegating to it — would refute the registration-layer half. Not present in the 22-day window.
+
+A substrate change requiring a breaking change to existing surface — e.g., codex support requiring `Pane::spawn`'s signature to break claude-side callers — would weaken the substrate-layer additive half. PR #18's `context_path` parameter widening was threaded *through* every spawn site without breaking existing call shapes (per arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ); the substrate-layer additive property holds.
+
+A consumer PR explicitly naming its establisher-PR as enabling its diff — e.g., PR #27's commit subject reading "extend `parse_porcelain_statuses` from PR #15 to a struct" — would partially weaken Pattern 6's implicit-chain framing. Across the three implicit-chain instances, no consumer-PR commit subject names its establisher; the implicit-chain shape holds.
+
+**Tier-5 forward prediction.**
+
+Citing arc-07's substrate-vs-registration distinction (Document #4) plus the §4 four-PR cluster (Document #2) plus Pattern 6's three implicit-chain instances: when a third MCP-speaking peer arrives, registration will land as a third parallel `ensure_*` function rather than a parametric refactor, while the substrate (`discover_live_socket` walk; marker-file convention; one Unix socket) will continue to serve the new peer unchanged. (Document #4 + Document #2 + Pattern 6.)
+
+Provenance:
+- `insight-recurrence` Pattern 6 (implicit-machinery-chain; three instances across three arc-affiliations) = 01KR3DC7E4B0JC1NN212PYVT56; closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- `insight-trajectory` Document #2 (catalogue §4 DIRECTION ALIGNMENT four-PR cluster; pager-as-mode-vs-standalone-overlay 2-2 split) = 01KR3ESJ42TT0ZGJHGHJ5CTNYC; Documents #4-5 (charter substrate-vs-registration distinction) = 01KR3EZDWSTW7TPWBY7KXB0KB3; closure = 01KR3F9EF9WF9Q34FRAR2XPSZS.
+- Arc-04 story-tail (the *"this enables that"* framing for Pattern 6 instance 1) = 01KR13CJ5XS5VREYA4741JHDSQ.
+- Arc-05 story-tail (Pattern 6 instance 2 — within-arc PagerView field-accretion; cross-arc PR #34 → PR #35 chain) = 01KR2ANRAEFWWR5W9FQP11A0DB.
+- Arc-07 story-tail (substrate-vs-registration "one socket, two registration files" framing; the "mirrors" doc-comment register) = 01KR2JM67RTQHQYN0223GTKH1V.
+- Arc-07 PR #18 entry (the `context_path` widening) = 01KR2J1R3HXNZPAHE9118BGBQJ.
+- Arc-07 PR #21 entry (the `ensure_codex_config_toml` mirror function) = 01KR2J81DHNG4K8NHFVN0XMD1M.
+- Arc-07 PR #37 entry (the peer-agnostic `discover_live_socket` walk) = 01KR2JCF7QEJHEG30TVMWY79CQ.
+- `onboarding-product-charter` entry 0 (charter "Claude" thesis source at `ROADMAP.md:3-23`) = 01KR0P18MCE1H57Q5ZTAGKAJNH.
+- `onboarding-architecture` entry 0 (substrate-shared-dispatch source; *"Two transports share dispatch... single MCP server backs both agents"*) = 01KR0P4W3ED1QZ8F44PFB2WPDZ.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HQCRV761KG6CVD6T11QNM -->
