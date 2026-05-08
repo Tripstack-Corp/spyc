@@ -497,3 +497,75 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3F1TDZQGAQNZYEYYMFAGCE -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:36:24.378331+00:00
+Role: scribe
+Type: Note
+Title: Document #7: the v1.41.x patch cadence — no stated plan to track; the trajectory thread declines to claim trajectory and names the absence factually
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** The v1.41.x patch cadence is not anchored in any stated plan. There is no spyc-internal SemVer policy document. The closest stated reference at `ROADMAP.md:451-453`:
+
+> *"Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of the PR that ships the change. The `CHANGELOG.md` entry lands in the same commit."*
+
+The CONTRIBUTING.md reference is a procedural rule (versions bump in the same PR that ships the change; CHANGELOG lands in the same commit) — not a policy on *when* a minor versus a patch is justified. Standard SemVer-conventions semantics apply by reference, but spyc does not author a project-level rule on minor-vs-patch granularity. The cadence is *unstated*.
+
+**Why this entry exists despite the absence-of-plan.** insight-recurrence Pattern 5 (= 01KR3D8RH5DNYC37WSGFVETXT3) catalogued the cadence as a *recurrence* observation. Insight-recurrence's closure (= 01KR3DFHA7FRV3BXEH2Z8SFJQN) flagged the cadence as *"correlated with the SemVer policy that exists nowhere as a stated plan but is observed everywhere as a working pattern"* and explicitly handed forward to this trajectory thread the question: *"was the post-v1.41.0 patch-only cadence anticipated, or did it emerge from the work itself?"* The brief named the question and recommended this thread *not* claim trajectory where there is no plan to track, and *name the absence-of-plan-to-track* explicitly.
+
+This entry executes that recommendation.
+
+**The cadence as recurrence-pattern, factually.** Verified at insight-recurrence Pattern 5 entry: 4 minor cuts (v1.38.0, v1.39.0, v1.40.0, v1.41.0) cluster across PRs 6, 8, 10, 13 — the first six wall-clock days of the window. After v1.41.0 lands, no further minor cuts occur. 24 consecutive v1.41.x patches land across PRs 14 through 37, distributed across arcs 03, 04, 05, 06, 07, and 08. The closing version is v1.41.24 at PR #37.
+
+These are *what shipped, observed factually*. The cadence's load-bearing properties:
+
+- 24 consecutive patches under one minor (the largest contiguous patch-only stretch in the window).
+- Four minor cuts cluster in the first 48 hours of the window.
+- No major bump within the 22-day window (v2.0 sits at the window's edge per this thread's document #6 entry = 01KR3F1TDZQGAQNZYEYYMFAGCE).
+- No spyc-internal SemVer policy document anchors any of the above as expected behavior.
+
+**Trajectory disposition: NO STATED PLAN TO TRACK.**
+
+The trajectory thread declines to claim trajectory against the cadence because no stated-plan document specifies the cadence as expected. The cadence is observable *in the post-PR Cargo.toml record*; it is not anchored in a stated *plan*. Reading the cadence as honoring SemVer's broad pre-1.0-or-post-1.0 conventions is plausible interpretation, but interpretation against an *implicit* convention is not the same kind of trajectory observation as interpretation against an explicit project-level policy.
+
+The framing entry's recommendation: *"name the cadence factually, name its load-bearing properties (24 consecutive patches; minor cuts cluster early; no major bump within the 22-day window), and *not* make a trajectory-tracks-plan claim where there's no plan to track."* This entry executes the recommendation.
+
+**The cadence-as-trajectory question (the boundary case).**
+
+A reader inclined to claim trajectory could argue two paths:
+
+- *Argument A: the cadence honors SemVer as imported policy.* `ROADMAP.md:451-453` invokes SemVer by reference; SemVer's conventions arguably anticipate the patch-cluster shape (capability additions are minor; refinements are patches; in a single-developer post-1.0 codebase, refinements tend to dominate). The cadence-as-trajectory reading would name *"SemVer-as-imported-policy was honored exactly: capability-introducing PRs cut minors (PR #6 zoom; PR #8 harpoon; PR #10 quickselect; PR #13 graveyard); refinement PRs cut patches"*. That reading is a real reading, and it is *interpretation*, not stated-trajectory.
+
+- *Argument B: the cadence reveals a project-shape pattern with no stated origin.* The 24-consecutive-patch stretch is the load-bearing recurrence; the unstated nature of the SemVer policy distinguishes it from a tracked-stated-plan. The cadence-as-pattern reading is what insight-recurrence Pattern 5 already does at tier-2.
+
+The trajectory thread *cannot adjudicate* between Arguments A and B without crossing into tier-4 territory (claiming the cadence reflects an emergent property of the working register, the SemVer-by-import discipline, etc.). This entry holds at the *named-the-absence-of-stated-policy* observation. The cadence is what shipped, not what was promised. The recurrence Pattern 5 entry counts the cadence; this entry confirms there is no stated plan to track at the trajectory grain; insight-emergent-properties (next thread) will name what kind of property the cadence reveals.
+
+**The cross-arc cadence distribution.**
+
+Per Pattern 5's verification: minor cuts land in three arcs (arc 03 once at PR #6; arc 06 twice at PR #8 and PR #10; arc 08 once at PR #13). Arcs 01, 02, 04, 05, 07 ship zero minors in the 22-day window. Arc 04 (git-integration) is notable for not getting a minor: the five arc-04 PRs ship at v1.37.1, v1.38.1, v1.41.2, v1.41.11, v1.41.14 — all patches. Arc 05 (pager-surface) is similarly all-patches across its eight PRs.
+
+Whether arc-affiliation correlates with minor-vs-patch disposition is *observable* at the recurrence grain (Pattern 5 named the count); the *interpretation* of why some arcs get minors and others don't is tier-4 (or tier-3 only if a stated plan binds arc-affiliation to release-cadence; verification: no stated plan does so).
+
+**Cross-thread cross-reference: insight-recurrence's closure observation.**
+
+Insight-recurrence's closure entry (= 01KR3DFHA7FRV3BXEH2Z8SFJQN) named Pattern 5's tier-3 disposition as *"correlated with the SemVer policy that exists nowhere as a stated plan but is observed everywhere as a working pattern."* This entry confirms the named-correlation factually: *"observed everywhere as a working pattern; nowhere as a stated plan; trajectory thread declines to claim trajectory."* The closure's observation and this entry's confirmation form the boundary rule for cadence-trajectory questions: *if the policy is unstated, name the absence; do not claim trajectory*.
+
+**Boundary with `insight-emergent-properties`.**
+
+The cadence's emergent-property reading is reserved for `insight-emergent-properties`. Possible property namings flagged by insight-recurrence Pattern 5 itself: *"capability-introductions cluster early; later-window work is refinement-and-correction"*; *"the maintainer's SemVer policy treats minor as capability-additions only"*; *"the post-v1.41.0 work is by-shape patches even when the diff weight is feature-comparable to earlier minors."* All three are candidate property names; this trajectory entry cannot select among them, and the property naming is `insight-emergent-properties`'s.
+
+The strongest tier-3-discipline test moment of this thread is at this entry: the temptation to interpret the cadence as honoring an implicit SemVer policy is high; the trajectory thread's discipline is to refuse the interpretation and *name the absence-of-stated-policy* instead.
+
+Provenance:
+- `ROADMAP.md:451-453` current state — Semver-by-reference framing quoted verbatim above; the closest stated SemVer-policy text in the project.
+- `Cargo.toml:3` window-trajectory — version-tag map verified per insight-recurrence Pattern 5 entry plus arc 02 PR #5 entry (v1.37.3 verification) plus arc 07 PR #37 entry (v1.41.24 terminus) plus arc 08 PR #31 entry (v1.41.18 trio bump).
+- `insight-recurrence` Pattern 5 entry = 01KR3D8RH5DNYC37WSGFVETXT3 (cadence-as-recurrence catalogue; minor-cut distribution across arcs; 24 consecutive patches).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN (closure's "correlated with the SemVer policy that exists nowhere as a stated plan" observation; cross-thread observation directly handed forward).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (full version-to-PR mapping; one source of truth for the version ladder).
+- `insight-trajectory` document #6 entry = 01KR3F1TDZQGAQNZYEYYMFAGCE (v2.0 framing not landed within window; cross-reference for parallelism with cadence).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A (recommendation to name the absence-of-stated-plan rather than claim trajectory).
+
+<!-- Entry-ID: 01KR3F3Y55NW2GAC0GY05FCYAD -->
