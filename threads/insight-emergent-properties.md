@@ -406,3 +406,68 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HSK97596MXH0V41K7TYM2 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:24:34.687511+00:00
+Role: scribe
+Type: Note
+Title: Property 6: BUGS.md as drained in-tree working-surface — the codebase carries an in-tree bug bucket whose SMALL/MAYBE entries open and FIXED entries close, drained by PRs as their territories are touched
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** The codebase carries an in-tree working-surface architecture for tracking small bugs and design questions: `BUGS.md` with three buckets (`### SMALL ###`, `### MAYBE ###`, `### FIXED ###`), where landing PRs convert SMALL/MAYBE entries to FIXED through a multi-channel pattern (SMALL/MAYBE deletion + FIXED block addition + CHANGELOG line). Reads as: spyc, as artifact, exhibits a buckets-as-queue working architecture — the bug surface lives *in the source tree*, drained by PRs whose diffs touch the bucket entries' territories rather than archived in an external tracker.
+
+This property is named at the in-tree-working-surface grain. The trajectory thread treated the BUGS.md harvesting *as a methodology* (per `insight-trajectory` Document #1 = 01KR3ENV1WP6R9SFRE1QME291S, the gap-analysis suspect resolutions); this property names the shape *the codebase exhibits as artifact* — what working-surface the source tree carries, not how the methodology was applied. Per `insight-recurrence`'s closure warning (= 01KR3DFHA7FRV3BXEH2Z8SFJQN: *"the emergent-properties thread should not collapse the property into the trajectory"*), the property and the trajectory are kept distinct.
+
+**Evidence enumeration.**
+
+Six BUGS.md SMALL/MAYBE-to-FIXED lift instances (per `insight-recurrence` Pattern 3 = 01KR3D2G1S7DXYSPDZDRXQBPDX):
+
+1. *Arc-02 PR #12 — genesis*: creates the SMALL / BIGGER / MAYBE bucket structure from PR #5's gap analysis. The harvest commit subject — *"chore: harvest lazygit notes into BUGS, drop notes/"* — is the explicit naming of the working-surface architecture being established. Arc-02 harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4.
+2. *Arc-05 PR #35* (v1.41.22): lifts the `D`-opens-pager SMALL to FIXED. Arc-05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM.
+3. *Arc-05 PR #36* (v1.41.23): lifts the `/` and `=` substring-match SMALL. Arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5.
+4. *Arc-07 PR #18 → PR #37* — the named-then-fixed bracket (per `insight-recurrence` Pattern 4 = 01KR3D5B59F5DX6BZZPB1VTQB3): PR #18 authors a 13-line MCP-attachment SMALL note with three weighted design fixes and marks option (b) *"most spyc-shaped"*; PR #37 implements exactly option (b), removes both PR #18's note and a pre-window 2-line entry, and adds a `(fixed, v1.41.24)` block whose closing line names the older entry: *"is also resolved by this change."* The full bracket — naming and resolution — runs through BUGS.md.
+5. *Arc-08 PR #28* (v1.41.15): lifts BUGS SMALL #4 (huge directory listings; 50,000-entry hard cap). Arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M.
+6. *Arc-08 PR #31* (v1.41.18): lifts MAYBE entries (mode 2026, OSC 8) plus PR #30's MAYBE block (the *"defer until clear afternoon"* deferral). Arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY.
+
+The window's net behavior: SMALL/MAYBE entries open (PR #12 genesis; PR #18 SMALL; PR #30 MAYBE deferral) and close (six FIXED conversions). The bucket nets toward drained.
+
+The trajectory thread's partial-trajectory observation (per `insight-trajectory` Document #1, gap-analysis suspect §1): suspect §1's behavioral fix at PR #29 closed the bug class; PR #29's diff *does not* remove the cursor-block-reverse-video text that PR #12's harvest had lifted from suspect §1 into BUGS.md SMALL. The text persists post-window. The behavior is fixed; the catalogued risk text outlives the underlying-bug-fix. The bucket is mostly drained; the drain is incomplete in this single instance — a single-instance partial-counter-evidence the property statement explicitly accommodates.
+
+**Strongest evidence.**
+
+The PR #18 → PR #37 bracket (per Pattern 4 instance 3) is the load-bearing single observation. The same in-tree-text layer that *opens* the bracket (the BUGS.md SMALL note authored by PR #18, with three weighted design options and an option-marked-most-spyc-shaped) is the layer that *closes* it (PR #37's diff removes the SMALL note and adds the `(fixed, v1.41.24)` FIXED block whose text references the older pre-window entry the same diff also closes). The bucket is the working-surface that carries both ends of the bracket; the close-side PR's diff explicitly walks the bucket-state transition.
+
+The two consecutive lift instances at arc-05's close (PR #35 then PR #36, v1.41.22 then v1.41.23) corroborate the bucket-as-queue shape: across two PRs in two days, two SMALL entries lift to FIXED. The pattern recurs across arcs (arc-02 genesis; arc-05 two consecutive lifts; arc-07 the bracket; arc-08 two lifts including the trio-bump MAYBE drain).
+
+**Where the property would falsify.**
+
+A BUGS.md SMALL bucket that grows monotonically without FIXED conversions would refute the drained-working-surface property. Within the window: SMALL entries open (PR #12 genesis; PR #18 SMALL; PR #30 MAYBE) and close (six FIXED conversions); the bucket nets toward drained.
+
+A FIXED bucket entry without a SMALL/MAYBE precursor would weaken the bucket-as-queue framing — the entry would be added to FIXED without having been queued in SMALL/MAYBE first. `insight-recurrence` Pattern 3's brief-candidate verification dropped one such case (arc-06 PR #25 adds a fresh FIXED entry without a SMALL precursor). One such case is observable but does not refute the property — five of the six instances *do* run through the queue, and the genesis-then-drain shape holds across the window.
+
+A SMALL entry that survived a PR explicitly closing its underlying behavior would weaken the drain-on-territory-touch property. Observed: suspect §1's cursor-block-residual text in BUGS.md SMALL persists post-PR #29 (per Document #1). One single-instance partial-counter; the bucket is mostly drained on territory-touch but not always.
+
+**Tier-5 forward prediction.**
+
+Citing Pattern 3's six lift instances and the arc-05 close-pattern: in-flight BUGS.md SMALL entries (e.g. the cursor-block residual surviving PR #29; the mode-2026 confirmation deferred to fast-scrolling diff usage) will close as their territories are touched, with the FIXED conversion landing in the same diff that closes the underlying behavior. (Pattern 3 = 01KR3D2G1S7DXYSPDZDRXQBPDX.)
+
+Provenance:
+- `insight-recurrence` Pattern 3 (six SMALL/MAYBE-to-FIXED lift instances; one brief-candidate dropped after verification) = 01KR3D2G1S7DXYSPDZDRXQBPDX; Pattern 4 (PR #18 → PR #37 named-then-fixed bracket; weighted-options open-side; the singular sub-shape) = 01KR3D5B59F5DX6BZZPB1VTQB3; closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- `insight-trajectory` Document #1 (gap-analysis suspect §1's RESOLVED-with-durable-record-incompleteness; the bucket-drain-on-territory-touch single-instance partial-counter) = 01KR3ENV1WP6R9SFRE1QME291S.
+- Arc-02 harvest entry (PR #12; the genesis of the SMALL / BIGGER / MAYBE bucket structure) = 01KR0Z11CKNJRYEZ3T38EAFSC4.
+- Arc-02 investigation entry (PR #5 gap analysis source for the bucket genesis) = 01KR0YXXZRQR24CSNAK4Q7808T.
+- Arc-05 PR #35 entry (`D` SMALL lifted) = 01KR2AD5PV989H58E49E5D18NM.
+- Arc-05 PR #36 entry (`/` and `=` SMALL lifted) = 01KR2AFHD42DHX6XQS7S6VK4M5.
+- Arc-05 closure (the lift-from-SMALL-to-FIXED pattern at arc 05's close in two consecutive PRs) = 01KR2AJVZA1E85YSKHF4FNRQQ3.
+- Arc-07 PR #18 entry (the 13-line BUGS.md SMALL note with three weighted design fixes; option (b) marked *"most spyc-shaped"*) = 01KR2J1R3HXNZPAHE9118BGBQJ.
+- Arc-07 PR #37 entry (the bracket-close; option (b) implementation; *"is also resolved by this change"* verbatim) = 01KR2JCF7QEJHEG30TVMWY79CQ.
+- Arc-07 story-tail (the PR #18 → PR #37 bracket as named-then-fixed at two-day grain) = 01KR2JM67RTQHQYN0223GTKH1V.
+- Arc-08 PR #28 entry (BUGS SMALL #4 lifted) = 01KR3903VA7DTNDJKQAFZ6DP8M.
+- Arc-08 PR #31 entry (MAYBE entries lifted; PR #30's MAYBE block drained) = 01KR397RTYNS34SAGM46YJJRBY.
+- Arc-03 PR #29 entry (the cursor-block residual that survives the behavioral fix; the single-instance partial-counter at Document #1's flagging) = 01KR10G02J2234D0WBMWMYC35M.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HW4T1GQKFFWNYSRT0639S -->
