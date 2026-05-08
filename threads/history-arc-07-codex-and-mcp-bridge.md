@@ -411,3 +411,58 @@ Provenance:
 - `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (precedent for high-signal policy doc-comments at load-bearing functions).
 
 <!-- Entry-ID: 01KR2JCF7QEJHEG30TVMWY79CQ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T01:15:49.331130+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 07 head entries published; thread left OPEN for tail and cross-arc references
+
+Spec: scribe
+
+tags: #history #arc-07
+
+Arc 07 head entries published — framing plus four per-PR entries. The arc is the seventh of eight in the spine; arc 08 (`history-arc-08-recoverability-and-deps`, PRs #13, #14, #28, #30, #31) is the only arc still pending after this session.
+
+**Done-definition self-check.**
+
+- ☑ `watercooler_health` reported Healthy against the spyc code_path at session open.
+- ☑ Required reads completed before any write — `history-overview` (6 entries), `onboarding-product-charter` entry 0, `onboarding-architecture` entry 0, `onboarding-security` entry 0, `history-arc-03-pane-behavior` PR #34 entry + seams-aside + story-tail (for cross-arc seam check), arc 04 / 05 / 06 story-tails for tail register reference, current-state AGENTS.md (post-rename file). Midpoint interim themes entry on `onboarding-spyc-rust-bitbucket` (watercooler-cloud namespace, entry 01KR2DYTPNCY5J5HPB99GT0J5M) was unreachable: federated_search returned `access_denied` for the `site` namespace from the spyc-side server. Arc 07 proceeded without that input; the framing entry flags this honestly.
+- ☑ Diagnosis stated in framing — pattern menu walked (8, 10, capability-accretion, capability-and-correction); shape committed to is **groundwork → expansion → closure** with the unusual property that the bug PR #37 fixes was named in BUGS.md by PR #18 itself with the design fix already weighted.
+- ☑ Cadence: plain option A. Four PRs is below the 6+ A' threshold; three-same-day-then-two-day-gap-then-closing-PR is the natural bracket without phase grouping.
+- ☑ Thread `history-arc-07-codex-and-mcp-bridge` exists with framing + PR #18 + PR #19 + PR #21 + PR #37 + this closure (5 entries; tails follow this entry).
+- ☑ PR #37 entry captures all three required findings: (1) cross-project attachment bug — quoted CHANGELOG verbatim and named the `$HOME`-unset cross-user case; (2) fall-back to read-only direct mode — quoted `discover_live_socket` doc-comment verbatim; (3) stale-socket cleanup tightening — quoted the `ConnectionRefused | NotFound` `matches!` block and the inline rationale verbatim.
+- ☑ Policy comments quoted verbatim — PR #37's 21-line `discover_live_socket` doc-comment in full; PR #18's BUGS.md SMALL entry in full; PR #19's `AgentKind` doc-comment, restore-branch comment, and asymmetry-naming comments verbatim; PR #21's startup-block comment and the test source-comment cross-citing v1.41.5 verbatim.
+- ☑ PR #18 rename + hygiene bundle handled — name of the rename source identified via `git show --stat` ("CLAUDE.md => AGENTS.md"); commit-body framing for the rename quoted ("cross-tool standard; recent Claude Code reads both names, behavior unchanged"); hygiene-half scope walked across `ensure_mcp_json` shape-safety, `Pane::spawn` `context_path`, and `term_title` env-race fix; the BUGS.md SMALL entry PR #18 adds is named as the third hidden-half that makes arc 07 *legible* as a bracketed structure.
+- ☑ PR #19 / PR #21 parity question answered: shared abstraction at the data-model layer (one `AgentKind` enum, two-field-rename-with-aliases); parallel implementation at the parsing/dispatch/registration layers (two `extract_*` parsers, two `command_without_*` strippers, two `is_*_command` checks, two `ensure_*` registration functions, two `detect_existing_spyc*` detectors). Single shared substrate at the socket level (one socket, one `spyc --mcp` proxy, one takeover prompt). Specific code structure cited by file:line throughout.
+- ☑ Each head entry follows head voice contract — third-person observational, present tense, hedge whitelist, no mindset attribution, verbatim commit-message and CHANGELOG quoting attributed by `(commit <sha>, <date>)`.
+- ☑ Provenance blocks on every entry, citing real SHAs and prior-thread entry IDs.
+- ☑ Tags `#history` and `#arc-07` carried on every entry. Tails (when written) will also carry `#tail`.
+- ☑ No insight-layer claims — recurrences (parallel-implementation pattern, policy-comment pattern, named-then-fixed pattern) are observed factually, never named as emergent properties or forward predictions.
+- ☑ Catalogue §4 question carried forward without resolution (arc 05's tail had already deferred it; arc 07 doesn't move the question).
+- ☐ Tails — pending after this closure (story-tail and possibly a separate seams-aside on the substrate-vs-registration distinction; tail-count decision pending the final read of the head entries above as a unit).
+- ☐ Thread left OPEN — confirmed at this closure; will remain OPEN after tails for arc-08 cross-references and the eventual insight layer.
+
+**What this arc adds to the cross-arc network.**
+
+- *Forward references already pulled into arc 07's head entries:* arc 03's PR #29 entry as the precedent for high-signal policy doc-comments (PR #37's 21-line doc-comment is the analogue at the discovery surface). Arc 03's PR #34 entry and arc 05's PR #35 entry as the spawn-call sites that inherited PR #18's `context_path` signature widening. Arc 04's story-tail and arc 06's story-tail as parallel-implementation precedents (parser-rule asymmetry; harpoon/quickselect parallel pickers). Arc 02's investigation entry as the precedent for stdout-as-protocol byte tolerance (PR #19's codex parser's color-reset tolerance is shape-related but not the same bug).
+- *Backward references arc 07 leaves to the insight layer:* the named-then-fixed pattern (PR #18's BUGS.md SMALL → PR #37's closure of that same entry); the substrate-shared / registration-parallel split that recurs at three layers (PR #19 data-model-shared / parsers-parallel; PR #21 socket-shared / `ensure_*`-parallel; PR #37 single-socket / two-detectors-OR'd); the `src/mcp.rs` file's 22% growth in one arc and whether that motivates a future split.
+- *Question carried forward without arc-07 resolution:* whether the substrate-shared / registration-parallel pattern is the *steady-state* shape (acceptable trade-off for two well-known peers with stable file formats) or a *staging-area* shape (parallel implementations now, abstracted to a `trait DiscoveryFileWriter` later if a third peer arrives). The diffs in arc 07 don't decide — and the codex-parity series itself names the pattern as "mirroring," which is descriptive rather than committed-to-permanent.
+
+**Phase 3 (insight layer) input from arc 07.** The arc 07 narration aims to leave for the eventual insight threads:
+
+- Drift catalogue: PR #18's `chore/` prefix carrying user-visible fixes (recurrence with PR #20 / arc 05's bundling pattern); PR #21's test-source v1.41.5 cross-citation as a rare cross-PR reference inside test code; PR #37's commit-body-as-release-note register as another rare register.
+- Recurrence catalogue: parallel-implementation pattern at three layers (data model, registration, transport-detection); high-signal policy doc-comment pattern at load-bearing functions (PR #29 from arc 03; PR #37 from arc 07); named-then-fixed pattern (singular for the 22-day window, structurally crisp).
+- Trajectory catalogue: substrate-vs-registration distinction crystallizes in arc 07; the substrate carries the peer-agnostic invariant (one socket, one proxy, one discovery walk), the registration layer stays peer-specific. Whether this is "AI-bridge becomes general-tenant" or "AI-bridge widens at the substrate level only" is the thesis-test result the tail will return to.
+- Emergence catalogue: the `.spyc-context-<pid>.json` marker file is a small artifact across two PRs with two roles — PR #18 makes it canonical for App's own use; PR #37 reads it for cross-instance discovery. The file is now load-bearing for two distinct architectural rules. Whether emergent-naming patterns recur in spyc's small-file artifacts (sock paths, harpoon hash-keyed TOML files, graveyard UUID pairs, session JSON spice-pair names) is insight-layer fuel.
+
+**Phase 2 (arc threads) status after arc 07.** Eight arcs proposed by the spine; seven written. The remaining arc 08 (`history-arc-08-recoverability-and-deps`, PRs #13, #14, #28, #30, #31) was named as paired-shape (file-undo half + runtime-survival half) in the segmentation entry; the panic-recovery → vt100-upgrade chain at PR #30 → PR #31 (49 minutes apart) is the segmentation entry's structural prediction worth verifying from the diffs when arc 08 is written. The drift finding "PR #5 gap-analysis suspect §3 (synchronized-output / mode-2026 tearing) might be incidentally closed by PR #31's vt100 0.16 upgrade" is also arc 08's to verify or deny.
+
+**This thread remains OPEN.** Arc 07 is published and the tail is the immediately-next work in this same session. Closure is intentionally deferred to allow cross-arc back-references from arc 08 and from the eventual insight layer.
+
+Provenance:
+- All four PR SHAs: bad8bfc (PR #18), d6d3088 (PR #19), 193f7ad (PR #21), a303251 (PR #37).
+- Prior arc-07 thread entries: framing 01KR2HYMMHAH316CA9KTWKWT6W; PR #18 01KR2J1R3HXNZPAHE9118BGBQJ; PR #19 01KR2J4M8BP0J3WKNED6EMSV1Y; PR #21 01KR2J81DHNG4K8NHFVN0XMD1M; PR #37 01KR2JCF7QEJHEG30TVMWY79CQ.
+- Spine pointer: `history-overview` segmentation entry index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (arc 07 row).
+
+<!-- Entry-ID: 01KR2JFB7DMP7828VVXA6KW13X -->

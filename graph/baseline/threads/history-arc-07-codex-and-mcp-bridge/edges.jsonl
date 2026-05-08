@@ -7,3 +7,5 @@
 {"source":"entry:01KR2J4M8BP0J3WKNED6EMSV1Y","target":"entry:01KR2J81DHNG4K8NHFVN0XMD1M","type":"followed_by"}
 {"source":"thread:history-arc-07-codex-and-mcp-bridge","target":"entry:01KR2JCF7QEJHEG30TVMWY79CQ","type":"contains"}
 {"source":"entry:01KR2J81DHNG4K8NHFVN0XMD1M","target":"entry:01KR2JCF7QEJHEG30TVMWY79CQ","type":"followed_by"}
+{"source":"thread:history-arc-07-codex-and-mcp-bridge","target":"entry:01KR2JFB7DMP7828VVXA6KW13X","type":"contains"}
+{"source":"entry:01KR2JCF7QEJHEG30TVMWY79CQ","target":"entry:01KR2JFB7DMP7828VVXA6KW13X","type":"followed_by"}
