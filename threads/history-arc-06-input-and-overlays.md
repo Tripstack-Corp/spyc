@@ -475,3 +475,118 @@ Provenance:
 - `history-arc-06-input-and-overlays` PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (bundle-pattern precedent within this arc; `gf`/`gF` fix under a `feat/` slug).
 
 <!-- Entry-ID: 01KR2GMSNX29CWFN154QBK6TJ3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T00:45:22.054388+00:00
+Role: scribe
+Type: Note
+Title: PR #32 (fix/chord-priority-over-user-keymap): single rule — when a chord prefix is pending, the next key resolves the chord; the g chord stays the deliberate exception
+
+Spec: scribe
+
+tags: #history #arc-06
+
+PR #32 closes phase β. Commit subject reads "fix: chord prefixes beat user keybindings on the second key (v1.41.19)" (commit a7867fb, 2026-05-06). Diff: 4 files, 145 insertions / 7 deletions. The bulk lands in `src/keymap/resolver.rs` (133 insertions, 2 deletions), with eight new test cases alongside the change.
+
+**The capability shipped, and the bug behind it.**
+
+The `### Fixed` CHANGELOG entry reads verbatim: "Built-in chord prefixes now beat user keybindings on the second key. A user reported `^a-n` / `^a-p` flashing the pending indicator and then doing nothing — they had `n` / `p` bound elsewhere in `.spycrc`, and the resolver was consulting user bindings *before* checking whether a chord was already in flight. Same root cause for `]g` / `[g` (anyone with `g` user-bound), `H1`..`H9`, `yp` / `yf` / etc., `ma`..`mz`, `'a`..`'z`, `Wl` / `Wn` / `Wd`. The fix flips the precedence: when an explicit chord prefix (`^a`, `[`, `]`, `H`, `W`, `m`, `'`, `y`) is pending, the next key resolves the chord. The `g` chord keeps its previous behavior — bare `g` is also a vi motion fragment users may want to remap (`gd` / `gf` / etc. remain user-overridable). Top-level user bindings are unaffected." (commit a7867fb, 2026-05-06).
+
+The CHANGELOG names eight chord families that the fix covers: `^a`, `[`, `]`, `H`, `W`, `m`, `'`, `y`. The `g` family is the deliberate exception. Top-level user bindings (where the resolver has no pending state) remain unaffected — user keymap consultation runs first at the top level, only the second-key-of-a-chord path changes.
+
+**The rule, named at one if-statement.**
+
+The pre-fix `feed` body opened with an unconditional user-keymap consultation:
+
+```
+// User bindings always win. We still reset any pending multi-key
+// state so `g` followed by a user-bound key doesn't trigger `gg`.
+if let Some(action) = user.find(&ev) {
+    self.reset();
+    return ResolverOutcome::User(action.clone());
+}
+```
+
+The post-fix body gates that consultation on `chord_locked`:
+
+```
+let chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G);
+if !chord_locked {
+    if let Some(action) = user.find(&ev) {
+        self.reset();
+        return ResolverOutcome::User(action.clone());
+    }
+}
+```
+
+The whole rule is one boolean and one match: chord-locked iff the pending state is anything other than `Normal` (top level) or `G` (the bare-`g` exception). When chord-locked, the user-keymap consultation is skipped and the rest of `feed` resolves the chord.
+
+The `g`-as-exception rationale lives in the comment: "`g` is the deliberate exception: bare `g` is also a vi motion fragment that users may want to remap (the `user_binding_resets_pending` test covers this), so chords built on `g` (`gd`, `gf`, …) remain user-overridable." The pre-existing `user_binding_resets_pending` test (visible in the file but not part of this PR's diff) covers the `g`-then-user-binding case explicitly; PR #32 adds a `g_chord_remains_user_overridable` test as a counter-test to the new rule.
+
+**The eight chord families, by their `PendingSeq` variants.**
+
+The pre-existing `PendingSeq` enum in `src/keymap/resolver.rs` is:
+
+```
+enum PendingSeq {
+    Normal,    // top level — no chord in flight
+    G,         // bare `g` — the deliberate exception
+    Bracket,   // `[` and `]`
+    W,         // `^a` chord prefix family
+    Mark,      // `m` (set mark) chord prefix
+    GotoMark,  // `'` (jump to mark) chord prefix
+    Worktree,  // `W` chord prefix
+    Yank,      // `y` chord prefix
+    Harpoon,   // `H` chord prefix (added by PR #8 — see below)
+}
+```
+
+PR #32's rule: `chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G)`. That covers seven variants — `Bracket`, `W`, `Mark`, `GotoMark`, `Worktree`, `Yank`, `Harpoon` — plus any future variant that doesn't explicitly opt out. The CHANGELOG's "eight chord prefixes" includes both `[` and `]` under `Bracket`; the diff treats them as one family because they share the resolver state.
+
+**The new tests, one per family.**
+
+PR #32 adds seven new test cases for the chord-precedence rule plus one counter-test for the `g`-exception:
+
+- `user_binding_for_n_does_not_preempt_ctrl_a_n`: `^a` then `n`, with `n` user-bound → `Action::PaneNextTab` (chord wins).
+- `user_binding_for_p_does_not_preempt_ctrl_a_p`: `^a` then `p`, with `p` user-bound → `Action::PanePrevTab` (chord wins).
+- `user_binding_for_g_does_not_preempt_bracket_g`: `]` then `g`, with `g` user-bound → `Action::JumpNextGitChange` (chord wins).
+- `user_binding_for_y_second_key_does_not_preempt_yank_chord`: `y` then `p`, with `p` user-bound → `Action::YankPrompt` (chord wins).
+- `user_binding_for_digit_does_not_preempt_harpoon_chord`: `H` then `1`, with `1` user-bound → `Action::HarpoonJump(1)` (chord wins).
+- `user_binding_for_letter_does_not_preempt_mark_chord`: `m` then `a`, with `a` user-bound → `Action::SetMark('a')` (chord wins).
+- `user_binding_for_letter_does_not_preempt_worktree_chord`: `W` then `l`, with `l` user-bound → `Action::WorktreeList` (chord wins).
+- `g_chord_remains_user_overridable`: `g` then `d`, with `d` user-bound → `ResolverOutcome::User(BoundAction::UnixCmd("custom-d"))` (user wins; the deliberate exception).
+
+Each chord family gets its own regression test. The `'` (GotoMark) family doesn't get a new test in this diff but is covered by the same `chord_locked` condition (`PendingSeq::GotoMark` is not in the exception list).
+
+**Connection to PR #8 — phase α set up the chord PR #32 corrects.**
+
+The `Harpoon` variant of `PendingSeq` was added by PR #8 (`feat/harpoon`, 62fc129, 2026-05-02; per arc 06's PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W). The `H1`..`H9` chord family is among the broken cases PR #32's CHANGELOG names verbatim. The `user_binding_for_digit_does_not_preempt_harpoon_chord` test in this PR's diff exercises the harpoon family explicitly.
+
+The reading the diffs support: the dispatch precedence bug was latent — the pre-fix `feed` consulted user bindings unconditionally, so any chord family with a user-bound second key would have been preempted. The bug existed before PR #8's `H` family was added; the `^a` and `]`/`[` and `y` and `m`/`'` and `W` families were already present and would have been preempted by user bindings on the same letters. The user report that triggered PR #32 names `^a-n` / `^a-p` specifically — `^a` is one of the older families. So PR #32 is a fix for a latent bug that *would* have surfaced eventually with any chord family the user happened to user-bind a letter into.
+
+What PR #8 contributes: a new chord family — `H` with second keys `1`..`9` — adds new combinations a user could user-bind into. The `user_binding_for_digit_does_not_preempt_harpoon_chord` test makes this explicit. Whether PR #8's introduction of the `H` family is what *prompted* the user report, or whether the report was triggered by `^a-n`/`^a-p` independently, is determinable only from outside the diffs. The commit message names `^a-n`/`^a-p` as the report; PR #8 adds the `H` family to the same precedence issue without being the trigger.
+
+The framing entry's "phase α set up phase β" hedge holds against the diff: the chord-precedence rule applies to all eight families, of which seven (`^a`, `[`, `]`, `W`, `m`, `'`, `y`) predate phase α. Phase α adds one more (`H`) to the list of families the fix protects. The connection is real but not exclusively causal — phase β fixes a bug that existed before phase α and would have surfaced eventually regardless. Phase α widened the surface PR #32 protects.
+
+**The single-rule shape.**
+
+PR #32 is the simplest entry in arc 06 by diff structure: one boolean expression, one if-statement gate, eight test cases. No new types, no new fields, no new files. The whole behavioral change fits in three lines of code (the `chord_locked` let, the `if !chord_locked` wrapper, and the comment). Compared to PR #25's two-cases-plus-diagnostic bundle or PR #8's 1,037-line feature drop, PR #32 is what a single-rule dispatch fix looks like at minimum diff size.
+
+**Drift findings flagged for the insight layer**:
+
+- The `g`-as-exception decision lives in a comment, not a separate enum variant. A future maintainer reading `PendingSeq` won't see "G is the user-overridable family" without reading the `feed` body. The seam is named in the doc-comment; whether it gets refactored into something type-level (e.g. a `bool user_overridable` per variant or an explicit `chord_locked()` method on `PendingSeq`) is the kind of seam arc 03's seams-aside (= 01KR11TME2KF5QFQ45GJYG8MC7) framed for `pane_focused`'s three meanings: a working flat-condition shape that holds until policy needs more axes than booleans support.
+- The chord-precedence rule reaches every chord family in spyc — present and future — through one if-statement. The reach-through-one-statement shape is structural infrastructure: any new `PendingSeq` variant inherits the rule for free unless the maintainer explicitly adds it to the exception match-arm. Captured for the eventual insight layer's structural-reach catalogue if relevant.
+- The bug was latent across at least seven chord families before PR #32, and the user report that surfaced it named one specific family (`^a` with `n`/`p`). Whether the report would have come anyway absent PR #8's new `H` family is a counterfactual the diffs can't answer; the PR-pair shape (phase α adds family, phase β fixes precedence) is what the data points show.
+
+Provenance:
+- a7867fb (PR #32 fix/chord-priority-over-user-keymap, 2026-05-06).
+- `git diff a7867fb^1..a7867fb^2 -- CHANGELOG.md`: `### Fixed` block quoted verbatim above.
+- `git diff a7867fb^1..a7867fb^2 -- src/keymap/resolver.rs`: `chord_locked` let-expression and `if !chord_locked` gate quoted in full above; `g`-exception comment quoted above; eight new test cases (seven chord-family tests plus the `g_chord_remains_user_overridable` counter-test).
+- `Cargo.toml:3` post-merge: `version = "1.41.19"`.
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (flat-condition-shape-holds-until-policy-needs-more-axes precedent; relevant for the `g`-as-exception comment-vs-type observation).
+- `history-arc-06-input-and-overlays` framing entry = 01KR2G8042HWE419X0ESWKN205.
+- `history-arc-06-input-and-overlays` PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W (`PendingSeq::Harpoon` variant origin; phase α's new chord family).
+- `history-arc-06-input-and-overlays` PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (sibling phase-α entry; quick-select rides the `^a` family that PR #32's rule protects, but doesn't itself add a `PendingSeq` variant).
+- `history-arc-06-input-and-overlays` PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (sibling phase-β entry; PR #25's `--key-trace` is the diagnostic infrastructure that would catch the next dispatch-precedence question if one arose).
+
+<!-- Entry-ID: 01KR2GQJSTRYZFKE58F395CEN2 -->
