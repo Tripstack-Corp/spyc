@@ -485,3 +485,37 @@ Provenance:
 - `insight-drift` closure entry = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4.
 
 <!-- Entry-ID: 01KR3BT6MNZMWRMHX14QMYZ86Y -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:39:34.072296+00:00
+Role: scribe
+Type: Note
+Title: Tail: what made the catalogue assemble — the arc-side drift-findings practice as the load-bearing infrastructure
+
+Spec: scribe
+
+tags: #insight #drift #tail
+
+This catalogue assembled because the eight arc threads each carried a *Drift findings flagged for the insight layer* section per PR. Without that practice, an analyst entering the network at this thread's cold start would face a different problem — read 36 diffs, read 36 commit messages, read every CHANGELOG entry, hold all of it in working context, and then notice the patterns. Sixteen instances across six patterns is a manageable catalogue when each instance is pre-flagged with its arc-entry citation. The same sixteen instances would be a substantial discovery exercise without the per-PR flagging.
+
+The arc voice contract did the load-bearing work. Each arc's per-PR entry was constrained to *describe-without-interpreting* — flag the drift, name the asymmetry, point to the diff evidence; do not name the pattern, do not claim the recurrence, do not synthesize across PRs. That constraint is what made the per-PR flags clean enough to be re-assembled. An arc author who interpreted *"the commit subject understates the diff because the maintainer treats commit subjects as conversational rather than authoritative"* would have written a flag the analyst register cannot use without endorsing the interpretation. An arc author who simply named *"the commit subject reads as pure CI work; the diff bundles 139 lines of src/* lint-fix code"* — observable, not interpretive — wrote a flag this catalogue could pick up unchanged.
+
+The strict separation between flagging-at-arc-grain and synthesizing-at-insight-grain is not just a cadence convenience. It is an honesty contract. The arc voice cannot promote one observation to a pattern claim, because at one PR's vantage one observation is just one observation. The insight voice cannot ignore observations the arc voice flagged, because flagged observations have arc-entry citations and the catalogue's verification step pins them. The two voices check each other: the arc voice cannot inflate; the insight voice cannot fabricate. Sixteen instances across six patterns is what survived the mutual check.
+
+What this thread did not have to do, given the arc-side practice: re-derive the instances from raw diffs, decide whether something flagged was actually drift, decide whether the arc author's flag was hedged appropriately, hunt for instances the arcs missed. The arc-side practice made all four of those into low-cost steps. Verification against the cited arc entries was the entire upstream burden; the rest of the work was assembly and counting-convention decisions and pattern-boundary calls.
+
+There is one place the practice surfaced visible cost. Pattern E's strict-vs-broad reading question would not have been a question at all if the arc-08 author had pre-decided whether PR #31's *"Smaller than I'd previously framed it"* counts as within-PR self-correction. The arc-08 entries flagged both PR #30's intra-diff retraction and PR #31's between-PR reframing factually, leaving the counting decision to this thread. That is the right hand-off — arc voice flags both surfaces, insight voice decides the convention — but it means the convention question is what gets exposed at the cumulative grain. The brief anticipated this by saying *"flag the choice in the entry."* The pattern entry did so; the closure entry did so again. The system worked.
+
+There is also one place the practice surfaced absence. Pattern F is the one drift the arcs could not catch alone, because the arc voice cannot flag a drift whose source is the spine that frames the arcs. Arc 04's closure made the closest move any single arc could make — *the arc-04 dates do not span 22 days; the framing entry's claim of the full 22-day window is overstatement* — but the structural reading (project-age vs. merge-window phrasing) needed cross-source synthesis. That synthesis is exactly what the analyst register is for. So the catalogue contains five patterns the arcs surfaced (A, B, C, D, E) and one pattern only the cumulative reading could surface (F). One out of six is a small but real contribution from the cumulative grain itself — not just assembly of arc-flagged work, but new naming the arcs structurally could not produce.
+
+That asymmetry is also worth naming. The insight layer is doing real work — it is not just summarizing the arcs. Five-sixths of this catalogue is assembly; one-sixth is new structural observation. Whether the other three insight threads (`insight-recurrence`, `insight-trajectory`, `insight-emergent-properties`) will run a similar five-sixths-assembly / one-sixth-cumulative-observation ratio is determinable only by writing them. The forecast this catalogue offers — observable but not interpretive — is that recurrence will run heavier on assembly (the arcs already flagged most of the recurring shapes) and that emergent-properties will run heavier on cumulative observation (the property-naming work is structurally upstream of any single arc, like Pattern F was). Trajectory may sit in between.
+
+The thread is left OPEN.
+
+Provenance:
+- All catalogue entries above (= 01KR3B7KW5QNRWHG6YTV9QSF07, 01KR3BA3CZWA6TZCDKNJZDPAGH, 01KR3BCQXGGB20V8C6Y6Z1Y944, 01KR3BEGGEYB9VKTJ32WJNDG93, 01KR3BGMAKS4AZNZE2QFXH10W4, 01KR3BK1VP3SZ5DM9VAQ01FFYX, 01KR3BN3N6YF60414FFVHAM50Y, 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4, 01KR3BT6MNZMWRMHX14QMYZ86Y).
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG (the spine entry that establishes the voice contract for arc threads; the *"Drift findings captured for the insight layer (commit-subject vs. diff content; observed without resolution)"* section pattern).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (the original arc-grain drift-findings flagging, modeled here at the spine level).
+- All eight arc threads' per-PR entries with their drift-findings sections are the load-bearing infrastructure this catalogue was built atop; the per-pattern entries above cite the specific arc-entry ULIDs.
+
+<!-- Entry-ID: 01KR3BVVYN37WDWJ5A3D8A5XWH -->
