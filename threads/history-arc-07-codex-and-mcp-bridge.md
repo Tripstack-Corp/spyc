@@ -284,3 +284,130 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (current-state surface description names "Two transports share dispatch — `spyc --mcp` stdio proxy ... and the in-process socket listener" — the shared substrate above which PR #21 sits).
 
 <!-- Entry-ID: 01KR2J81DHNG4K8NHFVN0XMD1M -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T01:14:15.159449+00:00
+Role: scribe
+Type: Note
+Title: PR #37 (fix/mcp-socket-project-scoped-discovery): the bracket closes — bug, fall-back, cleanup, and a 21-line policy comment
+
+Spec: scribe
+
+tags: #history #arc-07
+
+PR #37 is the closing move of arc 07 and the last merge in the entire 22-day window. Commit subject reads "fix: MCP socket discovery is now project-scoped (v1.41.24)" (commit 80797b8, 2026-05-06 20:35:08 -0400; merge a303251, 2026-05-07 00:54 UTC). Diff: 5 files, +246/-39, with `src/mcp.rs` carrying +229/-23 of that. The doc-comment block on the new `discover_live_socket(caller_cwd)` function is 21 lines. The function it replaces was 16 lines.
+
+PR #37 is also the only PR in arc 07 whose architectural significance is named *outside the arc*. The `onboarding-architecture` seed (entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ) cites it verbatim as "Recently-strengthened invariant (v1.41.24)" and walks the project-scoping rule and the read-only fall-back. The `onboarding-security` seed (entry 0 = 01KR0PKS884SXRAKZ8A790Q438) cites it as the hardening for the MCP socket-misuse threat row. Arc 07's per-PR entry narrates how the project arrived at that invariant; the seed entries narrate what the invariant *is* at current state. The two views complement; arc 07 is genesis-state, the seeds are post-state.
+
+**Three findings, walked against the diff in commit-body order.**
+
+**1. The bug fixed: cross-project (and cross-user) MCP attachment.** The pre-PR `discover_live_socket()` function (16 lines, no parameters) opened `~/.local/state/spyc/mcp-*.sock` (with a `/tmp` fallback when `$HOME` was unset), iterated `read_dir` matches, and returned the first one that connected. The CHANGELOG entry under `### Fixed` quotes the failure verbatim:
+
+> Previously, when `$SPYC_MCP_SOCK` wasn't set (claude launched outside spyc's pane, env didn't propagate, or enterprise managed-mcp.json suppressed the local `.mcp.json`), `discover_live_socket` scanned every `~/.local/state/spyc/mcp-*.sock` on the host and returned the first one that connected — a claude in project A could silently attach to a spyc running in project B (or, with `$HOME` unset, even another user's spyc on a shared host). Wrong-context tools and file paths flowed through, with no log line saying so.
+
+Three concrete failure paths for `$SPYC_MCP_SOCK` going missing are named: external-launch (`claude` started outside spyc's pane), env-propagation drop, enterprise managed-mcp suppression. The `$HOME` unset case widens the threat to cross-user-on-shared-host: with `unwrap_or_else(|_| "/tmp".into())`, a claude on a shared host with no `$HOME` would have walked `/tmp` and connected to *any* user's stale-but-live spyc socket. The `onboarding-security` seed names this as "MCP socket misuse — the per-PID Unix socket exposes tool calls to whatever process can read `~/.local/state/spyc/mcp-<pid>.sock`. FS perms gate it; an attacker who's already running as your user can talk to any of your spyc instances." Pre-PR-#37, the FS-perms gate was load-bearing; the discovery scan was the bypass. Post-PR-#37, project-scoping is the second-level gate: even an attacker with FS-perms access to all sockets can't trick a stdio proxy into connecting to a stranger's spyc by manipulating the *caller's* cwd, because no `.spyc-context-<pid>.json` ancestor walk will reach a stranger's spyc.
+
+**2. The fall-back path: read-only direct mode.** With no `.spyc-context-<pid>.json` match anywhere in the ancestor walk, `discover_live_socket` returns `None`, and the `run` function's call site falls through to `run_direct(project_root)`. The doc-comment in the file's top section names the order verbatim:
+
+```
+/// 1. `$SPYC_MCP_SOCK` (set in `.mcp.json`'s `env` block) — exact match
+/// 2. Project-scoped discovery: walk `caller_cwd` upward looking for
+///    `.spyc-context-<pid>.json` markers; map those PIDs to live
+///    sockets. Refuses cross-project attachment (a spyc running in
+///    a different project tree can no longer be picked up).
+/// 3. Falls back to read-only direct mode if nothing matches.
+```
+
+The `discover_live_socket` doc-comment names the user-visible policy verbatim:
+
+> If no match anywhere, return None. The stdio proxy falls through to read-only direct mode instead of attaching to the wrong host.
+
+The "instead of attaching to the wrong host" framing is the policy: silence-over-wrong-attachment. A claude that can't find its spyc gets read-only-direct (a degraded surface that reads context files but can't mutate the TUI) rather than getting a *different* spyc's full surface. The degradation is intentional — the doc-comment quotes the safety rule directly: "rules that out while keeping the 'just works' ergonomic — as long as it's launched somewhere inside the spyc instance's tree."
+
+**3. The stale-socket cleanup tightening.** Pre-PR, the cleanup was unconditional: any `UnixStream::connect` failure triggered `std::fs::remove_file(&sock)`. Post-PR, the deletion is gated on the IO error kind:
+
+```rust
+let stale = matches!(
+    e.kind(),
+    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound,
+);
+if stale {
+    let _ = std::fs::remove_file(&sock);
+}
+```
+
+The inline comment names the rationale verbatim:
+
+> Only delete on "no peer there" errors — connect can also fail under transient resource pressure (EAGAIN, EMFILE) where a live peer's socket would survive the next attempt. Pruning on those would race-delete a healthy peer.
+
+The CHANGELOG echoes: "Also tightened stale-socket cleanup: only delete on `ConnectionRefused` / `NotFound`, not on every connect error, so a transient `EAGAIN`/`EMFILE` doesn't race-delete a healthy peer's socket." The tightening reads as anticipatory rather than reactive — no commit in the 22-day window names a `EAGAIN`/`EMFILE` race-delete bug; the policy is named-and-baked-in pre-empt rather than fix-after-incident. The `mcp_log` line at the same site preserves diagnostic visibility: "stdio: discover skip {sock}: {error_kind} (stale={stale})" — the `stale=` boolean is observable at runtime, so a future incident has a log signal.
+
+**The 21-line policy doc-comment, quoted verbatim.** The `discover_live_socket(caller_cwd)` function's doc-comment is the load-bearing policy text and worth quoting in full because it's the analogue of arc 03's PR #29 cursor-block guard policy comment that arc 03's entry (= 01KR10G02J2234D0WBMWMYC35M) found high-signal:
+
+> /// Project-scoped discovery: walk `caller_cwd` upward looking for any
+> /// `.spyc-context-<pid>.json` markers (each is written by a running
+> /// spyc rooted at that directory — see `context::context_path`).
+> /// The first ancestor with at least one marker is the "project
+> /// boundary"; only those PIDs become candidates. We never aggregate
+> /// across levels: a parent-dir spyc shouldn't shadow a child-dir spyc
+> /// when both exist.
+> ///
+> /// Why this shape: prior to this fix, discovery scanned every socket
+> /// in `~/.local/state/spyc/` and returned the first connectable one,
+> /// happily attaching a claude in project A to a spyc running in
+> /// project B (or even another user's spyc, depending on `$HOME`
+> /// scoping). Project-scoped discovery rules that out while keeping
+> /// the "claude launched outside the pane just works" ergonomic — as
+> /// long as it's launched somewhere inside the spyc instance's tree.
+
+Two structural choices are named explicitly. *First*, "we never aggregate across levels" — a parent-dir spyc and a child-dir spyc can both exist, the caller in the child sees only the child, locality wins. The unit test `collect_pids_first_ancestor_with_match_wins` pins the rule with two spyc instances at `/proj` and `/proj/inner` and a caller in `/proj/inner` asserting it sees only PID 2 (the inner spyc). *Second*, "the 'just works' ergonomic" is preserved — claude can be launched outside spyc's pane and discovery still works *as long as* the launch dir is inside the spyc instance's project tree. The ergonomic preservation is what distinguishes option (b) from option (a) ("require explicit `$SPYC_MCP_SOCK`, no discovery fallback") in PR #18's BUGS.md note.
+
+**The arc-internal traceability — PR #18 names it, PR #37 closes it.** The unusual property of arc 07 is that the bug PR #37 fixes was named in a BUGS.md note PR #18 added, with three weighted design options, and PR #37 implements exactly the recommended option. The cross-PR traceability is visible in three places:
+
+- *PR #18 added the entry to BUGS.md `### SMALL ###`* (verified at PR #18 entry above; quoted verbatim there). The entry recommends design (b): "gate discovery on a per-project marker (e.g. only accept sockets whose context file's project_root matches the caller's cwd) ... Option (b) feels most spyc-shaped — keeps the 'just works' ergonomics while ruling out cross-instance attachment."
+- *PR #37's `discover_live_socket` implements design (b)* — gates discovery on a per-project marker. The PR's commit body opens "Replace the host-wide scan with a project-scoped walk" and the four numbered steps in the body match the function body line for line. The marker file is `.spyc-context-<pid>.json`; the *project_root* check is replaced with a *cwd-ancestor* check, which is structurally tighter (the marker file is at the spyc instance's root; the caller walks up to find it; no separate project_root field needed).
+- *PR #37 removes the BUGS.md entry PR #18 added* — the diff shows a 13-line `### SMALL ###` block deletion that removes exactly the text PR #18 added two days earlier. PR #37 also removes a 2-line older entry ("something funky is happening with our MCP support - we need to ensure that multiple running spyc's don't interfere with eachother") that predates the 22-day window. A new `(fixed, v1.41.24)` block is added to `### FIXED ###` whose closing line reads: "The 'something funky is happening with our MCP support — multiple running spyc's interfering with each other' entry below is also resolved by this change." Both entries marked-and-cleared in the same diff.
+
+The named-then-fixed pattern is the structural fact about arc 07. The framing entry (= 01KR2HYMMHAH316CA9KTWKWT6W) names it as "groundwork → expansion → closure"; this entry is where the closure half lives.
+
+**The mechanical link to PR #18's `Pane::spawn` change.** PR #18's `context_path` parameter on `Pane::spawn` ensured that App writes one canonical `<start_dir>/.spyc-context-<pid>.json` per spyc instance; PR #37's `read_context_pids_in_dir` parses that exact filename pattern to find PIDs in the ancestor walk. The function `read_context_pids_in_dir(dir)` reads `dir`, extracts entries whose names match `.spyc-context-<pid>.json`, parses the PID via `pid_str.parse::<u32>()`, and returns the PID list. The two parser rules — what PR #18 made canonical and what PR #37 reads — are textually paired. Neither PR's commit message names the dependency on the other; it lives in the file naming convention's role across two diffs.
+
+If PR #18 had not threaded `context_path` through every pane spawn, the markers PR #37 walks for would not reliably exist at the directory PR #37 walks from — a pane spawned outside `start_dir` would have written `.spyc-context-<pid>.json` to a different dir, and the ancestor walk from a caller in `<start_dir>` would not find it. The two diffs together form the single architectural rule "one spyc instance writes one marker at one canonical place, and discovery walks from the caller's cwd to find it"; neither diff completes the rule alone.
+
+**The eight unit tests.** The new test suite under `// ── Project-scoped discovery ──`:
+
+- `read_context_pids_finds_markers` — basic parser, including decoys (wrong prefix, malformed PID).
+- `read_context_pids_empty_dir` — empty input.
+- `collect_pids_finds_marker_in_caller_dir` — same-dir match.
+- `collect_pids_walks_up_to_ancestor_marker` — walk-up case (caller in `/proj/src/sub`, marker at `/proj`).
+- `collect_pids_first_ancestor_with_match_wins` — locality rule (`/proj` and `/proj/inner` both have markers; caller in `/proj/inner` sees only PID 2).
+- `collect_pids_returns_all_pids_at_same_dir` — multi-instance same-dir: two PIDs at `tmp.path()` both become candidates.
+- `collect_pids_no_match_returns_empty` — cross-project case (caller in `/a`, marker in `/b` only); the test source-comment notes "to make the test deterministic we anchor at project_a only" — the test is honest that the walk reaches `tmp.path()`'s ancestors (which CI machines may or may not have), so the assertion is `assert!(!pids.contains(&99))` rather than `assert!(pids.is_empty())`.
+- `discover_live_socket_returns_none_without_project_marker` — end-to-end: no `.spyc-context-*.json` anywhere → returns `None`, "the cross-project bug we're fixing."
+
+**The mcp.rs file's structural growth across arc 07.** Pre-arc-07, `src/mcp.rs` was 2154 lines (per the architecture seed). After PR #18: roughly +20 net (shape-check ladder). After PR #21: +246 (codex side). After PR #37: +206 (replace 16-line scan with the project-scoped walk + 8 tests). The post-arc-07 file is roughly 2625 lines — nearly 22% growth in one arc. The architecture seed names the file as "MCP server (`ARCHITECTURE.md:135-155`, `src/mcp.rs`, 2154 lines)"; the seed's line count is pre-arc-07. Whether the file size will eventually motivate splitting registration-file-writing or discovery into sub-modules is not narratable from the diffs in arc 07; flagged for the insight layer.
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `fix/mcp-socket-project-scoped-discovery`; the commit subject reads `fix:`; CHANGELOG buckets under `### Fixed`. Three-way alignment.
+- The PR is co-authored: "Co-Authored-By: Claude <noreply@anthropic.com>". This is the only PR in the 22-day window the framing register has noted with a co-author trailer. Whether other PRs in the window carry one is determinable from a `git log --format=%(trailers)` scan; arc 07 names this trailer here without resolution.
+- The 21-line doc-comment on `discover_live_socket` is structurally analogous to PR #29's three-condition cursor-block guard comment that arc 03 (= 01KR10G02J2234D0WBMWMYC35M) found high-signal. PR #29's comment names a specific list of alt-screen TUIs ("nvim, vim, less, htop, lazygit, claude in TUI mode"); PR #37's comment names a specific list of failure modes ("claude launched outside spyc's pane, env didn't propagate, or enterprise managed-mcp.json suppressed the local `.mcp.json`"). Both are policy-explaining doc-comments at the load-bearing function site. Recurrence-reading material for the insight layer.
+- The commit body reads as a deliberate teaching-of-the-fix: numbered steps for the discovery walk, named bug-vs-fall-back-vs-cleanup structure, a closes-X line at the end. The shape is closer to a release-note than a commit message. Whether `fix:` PRs in the window typically carry this register or this is the exceptional one is determinable from a sweep of other window PRs; arc 07 names the register here without resolution.
+- The CHANGELOG entry duplicates the commit body almost verbatim — the commit-body and CHANGELOG-entry pair is the only place in the 22-day window where the same explanatory paragraph is preserved at two surfaces. Other PRs typically have a terser CHANGELOG that summarizes the commit body. Captured for the insight layer's "high-load-bearing-PRs duplicate explanation" reading.
+
+Provenance:
+- a303251 (merge PR #37 fix/mcp-socket-project-scoped-discovery, 2026-05-07 00:54 UTC) — full PR; HEAD of `main` at the close of the 22-day window.
+- 80797b8 (source commit, 2026-05-06 20:35:08 -0400) — commit body source; co-author trailer.
+- `git show --stat a303251` — 5 files changed, +246/-39; src/mcp.rs +229/-23.
+- `git diff a303251^1..a303251^2 -- src/mcp.rs` — `discover_live_socket(caller_cwd)`, `collect_project_pids`, `read_context_pids_in_dir`, doc-comments quoted above, 8 new tests.
+- `git diff a303251^1..a303251^2 -- BUGS.md` — 13-line SMALL deletion (the entry PR #18 added on 2026-05-04 is removed); 2-line older SMALL deletion ("something funky"); 11-line `### FIXED ###` block added under `(fixed, v1.41.24)`.
+- `git diff a303251^1..a303251^2 -- CHANGELOG.md` — 25-line `### Fixed` entry that duplicates the commit body's explanatory paragraph.
+- `history-arc-07-codex-and-mcp-bridge` framing entry = 01KR2HYMMHAH316CA9KTWKWT6W (groundwork → expansion → closure framing).
+- `history-arc-07-codex-and-mcp-bridge` PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (BUGS.md SMALL entry; `Pane::spawn` `context_path` parameter; the marker-file canonicalization).
+- `history-arc-07-codex-and-mcp-bridge` PR #19 entry = 01KR2J4M8BP0J3WKNED6EMSV1Y.
+- `history-arc-07-codex-and-mcp-bridge` PR #21 entry = 01KR2J81DHNG4K8NHFVN0XMD1M (codex-side registration; PR #37's discovery walk is peer-agnostic but the codex side widens the surface PR #37 hardens).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — names PR #37 verbatim as "Recently-strengthened invariant (v1.41.24)"; arc 07's narration is the genesis-side of that current-state framing.
+- `onboarding-security` entry 0 = 01KR0PKS884SXRAKZ8A790Q438 — names PR #37 as the hardening for the MCP socket-misuse threat row.
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (precedent for high-signal policy doc-comments at load-bearing functions).
+
+<!-- Entry-ID: 01KR2JCF7QEJHEG30TVMWY79CQ -->
