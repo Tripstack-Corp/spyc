@@ -80,10 +80,15 @@ impl Pane {
         extra_env: &[(&str, &str)],
     ) -> anyhow::Result<Self> {
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
-        // where this spyc instance's context file lives.
+        // where this spyc instance's context file lives, and advertise
+        // truecolor support so apps that negotiate it (bat, fzf, delta,
+        // …) don't silently downgrade to 256-color. TERM=xterm-256color
+        // alone doesn't signal 24-bit; COLORTERM=truecolor is the de
+        // facto standard pair.
         let context_str = context_path.to_string_lossy().into_owned();
-        let mut env: Vec<(&str, &str)> = Vec::with_capacity(extra_env.len() + 1);
+        let mut env: Vec<(&str, &str)> = Vec::with_capacity(extra_env.len() + 2);
         env.push((crate::context::CONTEXT_ENV_VAR, context_str.as_str()));
+        env.push(("COLORTERM", "truecolor"));
         env.extend(extra_env.iter().copied());
 
         let host = PtyHost::spawn(PtySpec {
