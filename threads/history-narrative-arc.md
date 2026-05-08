@@ -212,3 +212,44 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (cites PR #37 as "Recently-strengthened invariant (v1.41.24)").
 
 <!-- Entry-ID: 01KR4CQ8PP53V6QFDYVYAQD37A -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:15:06.596508+00:00
+Role: scribe
+Type: Note
+Title: Forty-nine minutes: defensive-then-corrected
+
+Spec: scribe
+
+tags: #narrative #final
+
+This one is short because the diffs are short. It is one of the network's tightest single observations.
+
+PR #30 (`fix/vt100-panic-recovery`, commit e39f462, 2026-05-06 18:27 UTC) ships defensive recovery against a panic the user hit. The commit body opens with the failure mode verbatim: *"User report: closing nvim inside a zsh tab crashed the whole spyc process with `panicked at vt100/src/screen.rs:934: Option::unwrap() on a None value`. vt100 0.15 is unmaintained and has known `unwrap()` edge cases on certain valid escape sequences — this specific one fires while parsing the exit-from-alt-screen byte stream after a particular scroll/cursor state."* (commit e39f462, 2026-05-06.)
+
+Three load-bearing things land. A new `process_bytes_safe` method wraps `parser.process` in `std::panic::catch_unwind` with `AssertUnwindSafe`, replaces the panicked parser with a fresh instance at cached `(rows, cols)`, and survives. The `[profile.release]` block in `Cargo.toml` flips `panic = "abort"` to `panic = "unwind"` because, as the new doc-comment names verbatim, *"`catch_unwind` is a no-op under `abort`, so the recovery path only worked in dev/test builds before. With `abort` a single panicking byte stream took down the entire spyc process, dropping every other pane along with it. Slightly larger binary + minor codegen change is a fine trade for not crashing the user's session. Worth keeping as a safety net even after a vt100 upgrade."* (commit e39f462, 2026-05-06.) And a BUGS.md MAYBE block lands arguing for the upgrade-as-deferred: *"Should evaluate API churn vs. the wins in one go... Defer until someone has a clear afternoon — touches every place that holds a `vt100::Screen` reference."* (commit e39f462, 2026-05-06.)
+
+Forty-nine minutes later, PR #31 (`chore/vt100-and-ratatui-upgrade`, commit 105db8d, 2026-05-06 19:16 UTC) ships the upgrade. The commit body opens *"The vt100 bump is the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17). Smaller than I'd previously framed it: vt100 0.16 needs `unicode-width ≥0.2.1`, but ratatui 0.29 pins it to `=0.2.0` — so the upgrade was a coordinated trio with ansi-to-tui 7 → 8, which already supported ratatui 0.30."* (commit fc1789d, 2026-05-06.) The actual code change is six call-site adjustments in `pane/mod.rs` (routing through `parser.screen_mut()` for `set_size` and `set_scrollback`), plus one `&` dropped in `widget.rs` because `Cell::contents` returns `&str` directly in 0.16. Five lines of source change. Eight hundred and thirty-nine lines of `Cargo.lock` churn from the trio's transitive deps. PR #30's BUGS.md MAYBE block is deleted in the same diff that ships the upgrade.
+
+Three things to notice.
+
+First, PR #30's diff carries an internal disagreement. The commit body says vt100 0.15 is *"unmaintained."* The same diff's BUGS.md MAYBE block says the framing was wrong: *"active, not unmaintained — earlier notes saying 'the unmaintained 0.15' were inaccurate, corrected here."* (commit e39f462, 2026-05-06.) The commit body is the residual of an earlier internal framing; the BUGS.md correction is the revised one; PR #31's commit body inherits the corrected framing. Three text channels (commit body, BUGS.md, CHANGELOG) carry three slightly different framings within the same diff. `insight-drift` Pattern E catalogued this as the only intra-diff self-correction in the window.
+
+Second, the arc-02 author had projected this pair as "the diff shape across the 49-minute gap points toward the panic-recovery as the safety net that buys budget for the major-version dep bump." The arc-08 framing-tail caught what actually landed: that projection is partly true and partly refuted. The catch_unwind safety net does survive into PR #31 unchanged, so PR #30 buys persistent value — version-agnostic recovery for any third-party parser edge case. But PR #31's *"Smaller than I'd previously framed it"* says explicitly that the budget purchase wasn't the deciding factor. The deciding factor was looking at the upgrade and finding it tractable. PR #30's contribution moves from "the only feasible 49-minute response" to "permanent belt-and-suspenders for a bug-class that survives the specific 0.15 fix." Two related-but-independent fixes whose diffs happen to meet at the same hour because the framing changed inside that hour, not because one had to ship before the other could.
+
+Third, the supersession register here is the *explicit-reframing* cell of the 3×3 grain × register matrix. PR #31's commit body names PR #30's framing and walks it back. The five words *"Smaller than I'd previously framed it"* are the cleanest single example in the network of the artifact's commit-history layer carrying a register the cursor-block lineage at the prior entry did not carry. Same code surface (`src/pane/mod.rs`, the parser code path), same maintainer, same general region of work, different acknowledgement register from the silent register the cursor-block supersessions carried. The variance between silent and explicit is what makes Property 3 visible at all — the register varies by the kind of supersession the diff performs, not by elapsed time, not by code surface, not by which arc the work belongs to.
+
+The "clear afternoon" framing PR #30 authored at 13:48 -04 was retired by PR #31's diff at 15:00 -04 — the same afternoon. Within-diff to within-arc to within-72-minutes. The brackets close fast in this region of the work.
+
+Provenance:
+- e39f462 (PR #30 fix/vt100-panic-recovery, 2026-05-06 18:27 UTC) — commit body verbatim above; profile flip; BUGS.md MAYBE block.
+- 105db8d / fc1789d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06 19:16 UTC) — "Smaller than I'd previously framed it" verbatim; trio-bump rationale.
+- arc-08 PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 (intra-diff self-correction; "active, not unmaintained" text source).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (49-minute reframing; trio-bump dep-graph constraint chain).
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 ("safety-net-bought-budget reading is too clean for the diff's actual shape").
+- `insight-drift` Pattern E entry = 01KR3BK1VP3SZ5DM9VAQ01FFYX (intra-diff self-correction catalogue).
+- `insight-recurrence` Pattern 2 = 01KR3CZEM22Y5BRT1F2VQZ6EKZ (the explicit-reframing cell at 49 minutes).
+- `insight-emergent-properties` Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z (register-correlates-with-kind property).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (names the panic-unwind invariant; PR #30 created it).
+
+<!-- Entry-ID: 01KR4CSPR2PAWT8WMJQRKE68AB -->
