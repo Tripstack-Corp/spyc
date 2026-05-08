@@ -317,3 +317,53 @@ Provenance:
 - `insight-drift` Pattern D entry = 01KR3BGMAKS4AZNZE2QFXH10W4 (Pattern D vs. Pattern E distinction explicit).
 
 <!-- Entry-ID: 01KR3BK1VP3SZ5DM9VAQ01FFYX -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:35:52.702283+00:00
+Role: scribe
+Type: Note
+Title: Pattern F: Span-phrasing inconsistency — "22-day window" is project-age, not merge-window; the spine introduced it, arc 04's closure walked it back
+
+Spec: scribe
+
+tags: #insight #drift
+
+**Pattern statement.** The spine and most arcs use *"22-day window"* language. The actual PR-merge window is shorter: first merge 2026-04-30 (PR #2 / PR #1; depending on which is counted as the wall-clock-first), last merge 2026-05-07 (PR #37). That is approximately 7-8 calendar days of merges, not 22 days. The 22-day phrasing reflects *project age* — initial commit to HEAD at the time the spine was authored — not *merge window*. The drift is at the framing layer: the unit of measurement the spine names (*"22 days of merged work"*) does not match the actual time-span across which the merges occur.
+
+This pattern is structurally *upstream* of the eight arcs because it inherits from the spine. Naming it clearly is one of `insight-drift`'s contributions to the network — none of the individual arc entries can name a drift whose source is the spine that frames them all.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **Spine introduces *"22 days of merged work"* at the framing entry.** `history-overview` framing entry (= 01KR0TRFWT9W6WMFHC49YSW0BG) opens: *"open the spine for a two-layer reconstruction of spyc's first 22 days of merged work — commits d9b9360 (PR #2, 2026-04-30) through a303251 (PR #37, 2026-05-07), 36 PRs total."* The phrasing collapses two distinct measurements into one: (a) the project-age framing (initial commit to HEAD = ~22 days), and (b) the merge-window framing (2026-04-30 through 2026-05-07 = 7-8 calendar days). The spine reads as item (a) but cites the SHAs and dates of item (b). Arcs that quote the spine's framing inherit the conflation.
+
+2. **Arc 04 closure self-corrects against the framing.** The arc-04 closure entry (= 01KR137J5GESFYP7CN6KCD7MAS) walks back the framing in a verbatim parenthetical: *"(* Day 21 by date arithmetic from 2026-04-30 to 2026-05-21? — correction: 2026-05-06 is Day 6. The arc spans Day 0 to Day 6 inclusive, not Day 21. The framing entry's claim of 'the full 22-day window' reflects the *positional* placement of the first and last arc-04 PRs in a window that ends with PR #37 on Day 7 (2026-05-07). PR #27 is not the last PR of the window — PR #28 through PR #37 land after it on Day 6 and Day 7. The framing entry's 'longest span of any arc' is correct in the relative sense: arc 04 spans Day 0 to Day 6 (inclusive), seven calendar days, longest of any arc per the segmentation entry's own date-anchors. The 'full 22-day window' phrase is an overstatement of the *absolute* span and is corrected here for the durable record; the relative observation — longest arc span — stands.)"*
+
+   This is the only arc closure in the eight-arc record that walks back the spine's *"22 days"* framing. The other seven arc closures and tails inherit the framing without comment. The walk-back is at the closure-entry level, which is structurally durable — closure entries are the network's official summaries of each arc.
+
+**Instance count: one drift instance with two surfaces.** The instance is the *"22-day window"* phrasing's mismatch against the merge-window's actual ~7-8-day span. The two surfaces are:
+- *Surface 1*: the spine's framing entry introduces and asserts the framing.
+- *Surface 2*: the arc-04 closure walks back the framing.
+
+Counting these as one instance (the framing has two surfaces — a creation surface and a correction surface, both within the network) is faithful to the structural shape: this is *one drift, observed at two thread locations*, not two independent drifts. Counting them as two would over-state Pattern F's frequency.
+
+**Notes on counting convention and pattern boundary.**
+
+- *Why this is structurally upstream of the arcs.* The seven other arcs inherit *"22-day window"* phrasing from the spine without comment. Arc 04's closure is the only one to walk it back. The other arcs neither inherit-and-reaffirm nor inherit-and-correct — they inherit silently, presumably because the framing was load-bearing-enough to use and not load-bearing-enough to question. The drift is therefore at the spine level: it is the spine's framing choice that all eight arcs receive, with one arc closure issuing an explicit correction. A future reader of the network reads the spine and seven arcs as if the merge-window were 22 days, and reads the eighth arc's closure as the one place where the merge-window is named correctly.
+
+- *Why this is not a Pattern A instance.* Pattern A is at the commit-subject level: the slug names a narrower scope than the diff. Pattern F is at the framing-narrative level: the unit of measurement in the project's own narration does not match the merge events the narration describes. Pattern A's drifts are at the diff/commit boundary; Pattern F's drift is at the spine/arc-thread boundary. Different surfaces; different patterns.
+
+- *Why this matters for the insight layer.* If the cumulative reading of the eight arcs is built atop a 22-day frame and the merge window is actually ~7-8 days, then *intensity-per-day* observations (e.g., *"how many PRs per calendar day did spyc see in this window?"*) get compressed by ~3× when computed against the wrong denominator. Pattern F flags this so that `insight-trajectory` (the next-after-this insight thread, which considers trajectory-against-stated-plan) and `insight-emergent-properties` (the fourth insight thread) compute their per-time-unit observations against the right denominator. The spine's 36 PRs over 7-8 calendar days is approximately 4.5-5 PRs per calendar day; the framing entry's 36 PRs over *"22 days"* would compute ~1.6 PRs per calendar day. The factor of ~3 is large enough to matter for downstream insight reading.
+
+- *Possibly more instances.* Arc 04's closure flagged the inconsistency for the *durable record*; this catalogue verified one inheritance-without-correction (arc 04 framing) and one correction (arc 04 closure). The other six arc framings or closures may also use *"22-day"* language without comment; spot-checking the arc-08 framing (= 01KR38QZ1XQ6EP2A4QC94DRD80) shows it does not directly use *"22-day"* phrasing for its own scope (arc 08 spans 2026-05-03 to 2026-05-06). Other arc framings may inherit the spine's phrasing through quotation or paraphrase. The catalogue counts one instance with two surfaces (creation at spine; correction at arc-04 closure) and notes that additional arc-side inheritances of the *"22-day"* phrasing are likely but were not exhaustively verified — Pattern F's identity is the spine-level drift, not the per-arc inheritance.
+
+- *Why naming this is `insight-drift`'s contribution.* The arcs themselves cannot name a drift whose source is the spine that frames them. Arc 04's closure made the closest observation any single arc could make: the arc-04 dates do not span 22 days. But the structural reading — *the 22-day phrasing is project-age, not merge-window, and that is the drift* — requires reading the spine's framing entry alongside the merge-date evidence and noticing the conflation. That cross-source reading is exactly what the analyst register is for. The arcs surfaced the symptom (date arithmetic disagreeing with the framing); this thread names the cause (project-age phrasing applied to a merge-window measurement).
+
+Provenance:
+- `history-overview` framing entry = 01KR0TRFWT9W6WMFHC49YSW0BG (the spine's introduction of *"22 days of merged work"* phrasing; SHA-and-date evidence supplies the merge-window measurement).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (per-arc date anchors; arc 04's *"2026-04-30 to 2026-05-06; longest span"* phrasing inherited).
+- arc-04 framing entry = 01KR12T4DHGDH3B9YYXM0F093A (inherits the *"longest span"* relative phrasing).
+- arc-04 closure entry = 01KR137J5GESFYP7CN6KCD7MAS (the explicit walk-back; quoted verbatim above).
+- arc-08 framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80 (sample of an arc framing that does not use *"22-day"* phrasing for its own scope).
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07 (Pattern F's structurally-upstream-of-arcs framing declared).
+
+<!-- Entry-ID: 01KR3BN3N6YF60414FFVHAM50Y -->
