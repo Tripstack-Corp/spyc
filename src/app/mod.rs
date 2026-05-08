@@ -2450,10 +2450,21 @@ impl App {
         // bottom pane (claude / zsh) keeps running visibly below.
         // The pager's own title bar provides the visual identity;
         // status / prompt rows aren't drawn behind it.
-        let top_pager = self
+        // While the pager-help overlay is open, the underlying
+        // pager (stashed for restore on dismiss) still owns its
+        // slot — peek into the stash so the user doesn't see the
+        // pane "jump" back to live-pty / file-list rendering for
+        // the lifetime of the help overlay.
+        let in_help = self
             .pager
             .as_ref()
-            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
+            .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE);
+        let top_pager = if in_help {
+            self.pager_help_stash.as_ref()
+        } else {
+            self.pager.as_ref()
+        }
+        .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
         if top_pager {
             let top_area = ratatui::layout::Rect {
                 x: layout.status.x,
@@ -2461,7 +2472,12 @@ impl App {
                 width: layout.status.width,
                 height: layout.status.height + layout.list.height + layout.prompt.height,
             };
-            if let Some(view) = self.pager.as_ref() {
+            let underlying = if in_help {
+                self.pager_help_stash.as_ref()
+            } else {
+                self.pager.as_ref()
+            };
+            if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.theme);
             }
             // Divider + bottom pane render normally below.
@@ -2481,6 +2497,16 @@ impl App {
                 tabs.active_mut().output_dirty = false;
                 if self.state.pane_focused {
                     place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
+                }
+            }
+            // The TopPane branch returns early — if the pager-help
+            // overlay is up over a TopPane pager, render it here on
+            // top of the just-drawn slot before returning. The
+            // standard branch's centered-overlay tail (further down)
+            // never runs in this path.
+            if in_help {
+                if let Some(help) = self.pager.as_ref() {
+                    crate::ui::pager::render(frame, frame.area(), help, &self.theme);
                 }
             }
             return;
@@ -2631,10 +2657,16 @@ impl App {
         // through the pager. The standard centered-overlay pager
         // path further down is skipped for `LowerPane`-mounted
         // views (rect dispatch happens here instead).
-        let bottom_is_pager = self
-            .pager
-            .as_ref()
-            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
+        // Same `underlying` logic as the TopPane branch above:
+        // while the help overlay is open, peek into the stash so
+        // the LowerPane scrollback view stays drawn underneath
+        // instead of flickering back to the live pty.
+        let bottom_is_pager = if in_help {
+            self.pager_help_stash.as_ref()
+        } else {
+            self.pager.as_ref()
+        }
+        .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
             if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
@@ -2648,14 +2680,23 @@ impl App {
                     // `pending_scroll_to_bottom` and the renderer here
                     // — which now knows the actual rect — does the
                     // snap before drawing, so the user never sees a
-                    // jump frame.
-                    if let Some(view) = self.pager.as_mut() {
-                        if view.pending_scroll_to_bottom.get() {
-                            view.scroll_to_bottom(rect.height);
-                            view.pending_scroll_to_bottom.set(false);
+                    // jump frame. Skipped while the help overlay is
+                    // up: the stash's `pending_scroll_to_bottom` was
+                    // already cleared on the original first frame.
+                    if !in_help {
+                        if let Some(view) = self.pager.as_mut() {
+                            if view.pending_scroll_to_bottom.get() {
+                                view.scroll_to_bottom(rect.height);
+                                view.pending_scroll_to_bottom.set(false);
+                            }
                         }
                     }
-                    if let Some(view) = self.pager.as_ref() {
+                    let underlying = if in_help {
+                        self.pager_help_stash.as_ref()
+                    } else {
+                        self.pager.as_ref()
+                    };
+                    if let Some(view) = underlying {
                         crate::ui::pager::render(frame, rect, view, &self.theme);
                     }
                 } else {
