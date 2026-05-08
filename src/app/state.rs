@@ -1296,6 +1296,10 @@ impl AppState {
             || input.starts_with("fg ")
             || input == "task"
             || input.starts_with("task ")
+            || input == "task-to-pane"
+            || input.starts_with("task-to-pane ")
+            || input == "pane-to-task"
+            || input.starts_with("pane-to-task ")
             || input == "grep"
             || input.starts_with("grep ")
             || input == "pause"
@@ -1304,6 +1308,7 @@ impl AppState {
             || input.starts_with("resume ")
             || input == "undo"
             || input == "graveyard"
+            || input == "date"
         {
             return CommandResult::NotHandled;
         }
