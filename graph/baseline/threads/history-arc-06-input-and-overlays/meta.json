@@ -5,7 +5,7 @@
   "title": "history arc 06 input and overlays",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T00:45:22.057223+00:00",
+  "last_updated": "2026-05-08T00:46:42.817469+00:00",
   "summary": "The development thread focuses on improving the picker overlays and dispatch correctness in the history arc 06, with key decisions including the introduction of a per-project pinned working set, a new H chord prefix family, and an =h filter. These changes enhance the picker's functionality and usability, particularly in managing complex calendar splits and pattern matching. The outcomes include improved dispatch accuracy and a more intuitive user experience through the implementation of labeled overlays and parallel patterns.",
-  "entry_count": 5
+  "entry_count": 6
 }

@@ -590,3 +590,70 @@ Provenance:
 - `history-arc-06-input-and-overlays` PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (sibling phase-β entry; PR #25's `--key-trace` is the diagnostic infrastructure that would catch the next dispatch-precedence question if one arose).
 
 <!-- Entry-ID: 01KR2GQJSTRYZFKE58F395CEN2 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T00:46:42.814621+00:00
+Role: scribe
+Type: Note
+Title: Closure: arc 06 baseline complete; cadence-A-at-4-PRs results; arc 07 (codex-and-mcp-bridge) follows
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Arc 06 baseline written. Six head entries: framing → 4 per-PR entries → this closure. Tail entries follow.
+
+**Per-PR entries written, in arc order:**
+- Framing = 01KR2G8042HWE419X0ESWKN205 (cadence option A; 2+2 phase split named; capability-accretion-with-corrective-second-half register).
+- PR #8 (feat/harpoon, 62fc129, 2026-05-02) = 01KR2GCH3Q8DR9DATBBC802Q8W. Phase α. PARALLEL PATTERN with catalogue §4.
+- PR #10 (feat/quickselect, 9043547, 2026-05-02) = 01KR2GH1D9QCGDPZEMWW09R898. Phase α. PARALLEL PATTERN with catalogue §4. §1 numbered-panels: refuted (alphabetic labels, not numeric).
+- PR #25 (fix/input-dispatch-hardening, bfc4a18, 2026-05-06) = 01KR2GMSNX29CWFN154QBK6TJ3. Phase β. Two enumerated cases under one symptom + a `--key-trace` diagnostic for the next report.
+- PR #32 (fix/chord-priority-over-user-keymap, a7867fb, 2026-05-06) = 01KR2GQJSTRYZFKE58F395CEN2. Phase β. Single-rule fix; eight chord families covered; the `g` chord stays the deliberate exception.
+
+**Cadence-A-at-4-PRs result.**
+
+Arc 05 at 8 PRs needed option A' (per-PR plus phase-grouping in framing) because the closure couldn't carry summarization for 8 PRs. Arc 06 at 4 PRs sat below that threshold; option A with light phase-language in the framing read cleanly. The 2+2 calendar split made the phase shape self-evident — both phase-α PRs landed on 2026-05-02, both phase-β PRs on 2026-05-06 — so the framing didn't need to do heavy structural work to surface it. The verdict for future arcs at this PR count: plain A is sufficient when the calendar gives you the phase split for free; A' is the right refinement only when the PR count alone makes closure-summarization break down.
+
+**Catalogue §4 reading after arc 06.**
+
+Arc 06 adds two PRs (PR #8, PR #10) to the cumulative four-PR §4-alignment family that arc 05's closure (= 01KR2AJVZA1E85YSKHF4FNRQQ3) and story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) named. After arc 06, the count holds: four PRs across two arcs hold §4 alignment, zero execute the `PagerView::picker_items: Vec<(Label, Action)>` shape. PR #33 and PR #35 (arc 05) hold DIRECTION ALIGNMENT from the pager-as-mode side; PR #8 and PR #10 (arc 06) hold PARALLEL PATTERN from the standalone-overlay side.
+
+The framing arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) named the catalogue §4 disposition for arc 06's PRs as "parallel-but-different." Arc 06's per-PR entries reconfirm that against the diffs: PR #8's `HarpoonMenu` is a standalone modal `Block` overlay with closed bindings, not a `PagerView` extension; PR #10's `QuickSelect` lives in `src/pane/quick_select.rs` with case-as-intent dispatch over an alphabetic label space, not Enter-to-fire over a generic `Action` substrate. Both honor the catalogue's *intent* — surface picker-shaped UX for fast surfacing — without instantiating §4's specific structural shape.
+
+The deferral question continues: whether the four parallel-and-direction-aligned PRs make `PagerView::picker_items` unnecessary, or whether the picker pattern is structurally still ahead. Per arc 05's story-tail, that question goes to the insight layer; arc 06 does not resolve it.
+
+**The phase-α-to-phase-β connection, reconfirmed against the PR #8 ↔ PR #32 diffs.**
+
+PR #8 introduced the `H` chord prefix family (new `PendingSeq::Harpoon` variant). PR #32 fixed a chord-precedence bug whose CHANGELOG names `H1`..`H9` explicitly among the broken cases. Phase α widened the surface phase β protects.
+
+The connection is real but not exclusively causal. The chord-precedence bug was latent across at least seven chord families before PR #8 (`^a`, `[`, `]`, `W`, `m`, `'`, `y`); the user report that surfaced the bug names `^a-n`/`^a-p` specifically, not the new `H` family. PR #32 fixes a latent bug; PR #8 adds one more chord family to the seven-deep list of families the fix protects. Whether PR #8's introduction of `H` is what prompted the user report or whether the report would have come anyway is a counterfactual the diffs cannot answer. The reading the diffs *do* support: phase α widened the chord-prefix tree, phase β fixed how the resolver treats the second key of any chord — and the work landed in dependency order, not just temporal order.
+
+**Drift findings handed forward to the insight layer:**
+- Bundle-pattern recurrence within and across arcs (PR #10's `### Fixed` half under a `feat/` slug; PR #25's hardening + diagnostic; arc 04's PR #15 precedent). Captured at the per-PR entries.
+- The `--key-trace` infrastructure ships with no immediate consumer beyond PR #25's defensive fix. Future-proofing-without-a-current-need shape; whether it gets used in a future report is determinable only outside the 22-day window.
+- The chord-precedence rule's structural reach: one if-statement gates eight chord families (and any future variant that doesn't opt out). Reach-through-one-statement shape; PR #32 entry flagged.
+- The `g`-as-exception decision lives in a comment, not a type-level structure. Same shape arc 03's seams-aside (= 01KR11TME2KF5QFQ45GJYG8MC7) named for `pane_focused`'s three meanings.
+- PR #10's "labels go stale on scroll" close-on-pane-growth design choice has alternatives (re-scan, freeze, scroll-lock) the eventual insight layer can revisit if recurrence shows up.
+- The hash-keyed harpoon persistence (`<basename>.<hash>.toml` with `DefaultHasher`) trades portability for collision avoidance with a known caveat (not Rust-version-stable). Captured at PR #8 entry.
+
+**Next session: arc 07 — `codex-and-mcp-bridge`.** Member PRs per `history-overview` segmentation entry (= 01KR0TWHTC1MPK4KJ08Y9SPE6P): PR #18 (`chore/agents-md-and-mcp-hygiene`), PR #19 (`feat/codex-resume`), PR #21 (`feat/codex-mcp-config`), PR #37 (`fix/mcp-socket-project-scoped-discovery`). Date span: 2026-05-05 to 2026-05-07. The arc executes against the load-bearing thesis at `ROADMAP.md:3-23`; arc 07's PR #37 is the most architecturally consequential and is already cited by `onboarding-architecture` (entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ) as the "recently-strengthened invariant (v1.41.24)."
+
+After arc 07, only arc 08 (`recoverability-and-deps`) remains; Phase 3 (insight layer) blocks on all eight arc threads existing.
+
+This thread (`history-arc-06-input-and-overlays`) remains OPEN for cross-arc references and the eventual Phase 3 insight layer.
+
+Provenance:
+- 62fc129 (PR #8 feat/harpoon, 2026-05-02).
+- 9043547 (PR #10 feat/quickselect, 2026-05-02).
+- bfc4a18 (PR #25 fix/input-dispatch-hardening, 2026-05-06).
+- a7867fb (PR #32 fix/chord-priority-over-user-keymap, 2026-05-06).
+- All prior thread entries: 01KR2G8042HWE419X0ESWKN205 (framing), 01KR2GCH3Q8DR9DATBBC802Q8W (PR #8), 01KR2GH1D9QCGDPZEMWW09R898 (PR #10), 01KR2GMSNX29CWFN154QBK6TJ3 (PR #25), 01KR2GQJSTRYZFKE58F395CEN2 (PR #32).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (arc 07 member-PR list).
+- `history-overview` PR #5 special-handling entry = 01KR0TYF5F11DA8P5HNPA20DBK (back-reference contract honored at arc 06's PR #8 / PR #10 entries).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (catalogue §4 source; back-reference hub).
+- `history-arc-05-pager-surface` closure = 01KR2AJVZA1E85YSKHF4FNRQQ3 (cumulative §4 reading after arc 05; arc 06 carries it forward without resolving).
+- `history-arc-05-pager-surface` story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (deferred §4 question to insight layer).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (PR #37 already cited there as recently-strengthened invariant).
+- `onboarding-overview` entry 0 = 01KR0NZNJ3KM6BJY09Q4P9D0NE (front door).
+
+<!-- Entry-ID: 01KR2GT1P722663B8ZK06C50WQ -->
