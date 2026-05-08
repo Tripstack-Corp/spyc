@@ -88,3 +88,76 @@ Provenance:
 - `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (the §2 honored-as-non-goal disposition source; non-goals at `ROADMAP.md:445-447`).
 
 <!-- Entry-ID: 01KR4CHQ6XEXYC4FCC9AYKDB5V -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T18:12:04.373848+00:00
+Role: scribe
+Type: Note
+Title: The cursor-block lineage: PR #5 to PR #29, six days, three guards, two silent supersessions
+
+Spec: scribe
+
+tags: #narrative #final
+
+The gap analysis named the cursor-block case in suspect §1; PR #5's seven-line fix shipped a guard against the explicit-hide-cursor path that lazygit triggers. Six days later, PR #29 arrived at a three-condition guard that catches the broader class. Between the two, on the same calendar day as PR #29, PR #26 added a per-cell DIM modifier on unfocused panes. The three diffs together produce the lineage worth tracing because none of the three commits acknowledges the prior two.
+
+Look at the code, post-PR-#5, post-PR-#26, pre-PR-#29:
+
+```rust
+if !self.screen.hide_cursor() {
+    let (cy, cx) = self.screen.cursor_position();
+    if cy < draw_rows && cx < draw_cols {
+        let mut s = cell_ref.style().add_modifier(Modifier::REVERSED);
+        if !self.focused {
+            s = s.add_modifier(Modifier::DIM);
+        }
+        cell_ref.set_style(s);
+    }
+}
+```
+
+PR #5 gave us the outer `if !self.screen.hide_cursor()`. PR #26 (`feat/dim-unfocused-pane`, commit 20fba00, 2026-05-06 14:16 UTC) added the inner `if !self.focused` dim branch as part of a broader per-cell DIM treatment. Then post-PR-#29:
+
+```rust
+let want_block_cursor =
+    self.focused && !self.screen.alternate_screen() && !self.screen.hide_cursor();
+if want_block_cursor {
+    let (cy, cx) = self.screen.cursor_position();
+    if cy < draw_rows && cx < draw_cols {
+        let s = cell_ref.style().add_modifier(Modifier::REVERSED);
+        cell_ref.set_style(s);
+    }
+}
+```
+
+Three things happened at once. The guard generalized from one condition to three. PR #26's dim branch became unreachable code under the new guard and was removed. The policy comment landed as a verbatim three-numbered rationale block: *"1. Pane is focused. Otherwise the user's eye isn't here and a block in an unfocused pane is just visual clutter / a pseudo-second-cursor that competes with the real input target above (the file list). 2. Child hasn't switched to the alternate screen. Full-screen TUIs (nvim, vim, less, htop, lazygit, claude in TUI mode) paint their own cursor in their own shape — beam in nvim insert mode, e.g. — and our hard-coded block clobbers it with the wrong shape and color. 3. Child hasn't explicitly hidden the cursor (DEC ?25l). Net effect: a plain shell / REPL on the main screen still gets the visibility cue (where the next char will land); alt-screen TUIs and unfocused panes show their natural state."* (commit bdb8d87, 2026-05-06.)
+
+Two supersessions live in this diff. One is cross-arc: PR #29 generalizes PR #5's narrow lazygit-shaped guard from six calendar days back, and the new guard's policy comment lists the broader class verbatim ("nvim, vim, less, htop, lazygit, claude in TUI mode") without naming PR #5 as predecessor. The other is within-arc, 3.5 hours: PR #29's diff edits code PR #26's diff added the same morning, dropping the dim branch PR #26 had introduced, again without naming PR #26 as predecessor. The CHANGELOG entry talks about nvim's beam in insert mode being clobbered. It does not say "this generalizes v1.37.3's narrow fix." It does not say "this drops the dim branch v1.41.13 added."
+
+What `insight-recurrence` named at Pattern 2 and `insight-emergent-properties` named at Property 3 is that the silence here is not generic carelessness. Both supersessions are the same *kind* of supersession — guard-policy generalization — and both carry the same register, silent, regardless of whether the time grain is six calendar days or 3.5 hours. The kind correlates with the register more strongly than elapsed time correlates with it.
+
+Compare to two other supersession instances in the network and the matrix becomes legible. PR #14 (`fix/undo-command`, commit c7419c1, 2026-05-03) ships 25 minutes after PR #13's graveyard subsystem. PR #14's CHANGELOG describes the bug behavior accurately and verbatim — *"`:undo` and `:graveyard` returned 'unknown command'. State's command dispatcher routes a fixed list of names to App's terminal-touching arms; `undo` and `graveyard` weren't on it, so they hit the unknown-command fallthrough before App's handler could see them. Added both to the punt list."* (commit c7419c1, 2026-05-03.) PR #14 names the bug, names the routing-vs-handler split, does not name PR #13. The register is behavior-described; the supersession-kind is missing-wire fix.
+
+PR #31 ships 49 minutes after PR #30. Its commit body opens *"The vt100 bump is the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17). Smaller than I'd previously framed it"* (commit fc1789d, 2026-05-06). Five words doing the explicit reframing: the predecessor PR's framing is named and walked back in the artifact's commit-history layer. Register: explicit-reframing; kind: design-framing revision.
+
+Three within-day instances populating distinct cells of a 3×3 grain × register matrix; one fourth long-grain instance reusing the silent register at six days for a structurally similar (guard-policy generalization) supersession-kind. `insight-recurrence` Pattern 2 makes the matrix factual. `insight-emergent-properties` Property 3 names the property at artifact grain: the codebase's commit-history layer carries register variation that aligns with what the diff performs more closely than with elapsed time alone.
+
+That property is one of the things the catalogue can name and the commit log alone cannot. A reader of `git log` sees the four supersessions as four unrelated events. A reader of `git log` plus the per-PR diffs sees four supersessions as four moments where one PR superseded another at varying grains. A reader of the catalogue sees the four as one matrix populated by kind. The matrix is not in any single commit's record; it is in the cumulative reading of all four together at the artifact-grain.
+
+There is one more honesty note worth surfacing here. The arc-02 harvest entry had projected that PR #29 would "fully extinguish" the BUGS.md cursor-block residual PR #12 had lifted from the gap analysis. The arc-03 PR #29 entry caught what actually landed: PR #29 removes a different SMALL line (a user's nvim-beam report), behaviorally addresses the case PR #12's text describes, and leaves the original residual in BUGS.md SMALL post-merge. The cursor-block reverse-video text PR #12 placed — *"pane widget always paints a reverse-video cursor block at `screen.cursor_position()` even when the child has set `DEC ?25l`..."* — is still there post-PR-#29. The behavior is closed; the durable record is not. Whether the residual class is genuinely still latent under the three-condition guard, or whether the BUGS.md text was simply not re-checked against the new policy, is not narratable from any diff. The catalogue records the mismatch and stops there.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — narrow `if !self.screen.hide_cursor()` guard.
+- 20fba00 (PR #26 feat/dim-unfocused-pane, 2026-05-06 14:16 UTC) — per-cell DIM treatment; cursor-block dim branch.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06 17:54 UTC) — three-condition guard; policy comment verbatim above.
+- c7419c1 (PR #14 fix/undo-command, 2026-05-03) — behavior-described supersession at 25 minutes; CHANGELOG verbatim above.
+- fc1789d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — explicit-reframing supersession at 49 minutes; "Smaller than I'd previously framed it" verbatim.
+- arc-03 PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (the supersession-ladder narration; durable-record-incompleteness note).
+- arc-03 story-tail = 01KR11S8RG29J98QKN1H0VAA6W ("nothing in either commit says 'this supersedes PR #5'" framing).
+- arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN (behavior-described supersession; "Repro: type `:undo` → flash 'unknown command: undo'" verbatim).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (explicit-reframing supersession).
+- arc-08 story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 (the three-grain × three-register matrix's first cumulative-grain naming).
+- `insight-recurrence` Pattern 2 = 01KR3CZEM22Y5BRT1F2VQZ6EKZ (the four-instance matrix verified).
+- `insight-emergent-properties` Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z (artifact-grain property named).
+
+<!-- Entry-ID: 01KR4CM50GPNZ5JEK5J94SA8Z1 -->

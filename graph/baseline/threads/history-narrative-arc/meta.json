@@ -5,7 +5,7 @@
   "title": "history narrative arc",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T18:10:44.947553+00:00",
-  "summary": "The thread explores a narrative arc involving two parallel histories of a project, focusing on code and decision-making processes. Key decisions include a gap analysis identifying three suspects for rendering issues, and an outcome that highlights the complexity of reconciling different historical perspectives.",
-  "entry_count": 2
+  "last_updated": "2026-05-08T18:12:04.375088+00:00",
+  "summary": "The development thread explores a narrative arc involving two parallel histories of a project, focusing on code and decision-making processes. Key decisions include a gap analysis identifying three suspects for rendering issues, and a cursor-block lineage tracing six PRs with three guards and two silent supersessions. The outcomes highlight the complexity of managing code changes and maintaining consistency in development.",
+  "entry_count": 3
 }
