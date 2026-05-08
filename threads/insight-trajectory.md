@@ -97,3 +97,86 @@ Provenance:
 - `watercooler_health` against the spyc code_path reports Healthy at session start (server v0.4.6.dev0; threads-repo URL `git@github.com:calebjacksonhoward/spyc.git`; branch parity clean).
 
 <!-- Entry-ID: 01KR3EJ0RWZXEBMYHY9EEZQX4A -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:28:42.420940+00:00
+Role: scribe
+Type: Note
+Title: Document #1: PR #5's gap-analysis Top Suspects — three for three on suspect-resolution-or-deferral, the longest single trajectory in the network
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** PR #5 (commit 0691666, 2026-04-30) added `notes/lazygit-gap-analysis.md` (111 lines, since relocated to `BUGS.md` by PR #12 on 2026-05-03). The body comprises a 16-row gap table per terminal feature, an initialization-fingerprint section, and a "Top suspects" section with three numbered candidates for the user-reported "rendering / conflict issues" — verbatim, in descending probability:
+
+> **§1 — Spurious cursor block from `widget.rs`.** "spyc unconditionally reverse-videoes the cell at `screen.cursor_position()`, even when the child has set DEC ?25l (cursor hidden). vt100 already exposes `screen.hide_cursor()`, but `src/pane/widget.rs:43–55` never reads it. lazygit hides the cursor and draws its own selection highlight, so a stray reverse-video square sits on some panel — visually reads exactly as 'rendering glitch'."
+
+> **§2 — No mouse, anywhere.** "Mouse capture is not enabled on the host terminal (`src/main.rs::setup_terminal` has no `EnableMouseCapture`), and `src/pane/input.rs` has no encoder for `Event::Mouse`. lazygit defaults `MouseEvents: true` and binds click/scroll on every panel — to a daily user this manifests as 'clicks and scroll-wheel don't work in lazygit', easily called a 'conflict issue'."
+
+> **§3 — Synchronized-output (mode 2026) tearing.** "tcell wraps every redraw in `\x1b[?2026h … \x1b[?2026l`. vt100 0.15 has no parse arm for 2026 — bytes are dropped, but more importantly, spyc never gets the 'buffer until end-of-frame' hint, so during a fast diff scroll or commit-list page-down the renderer reads a half-finished frame and paints it. Looks like flicker / a sliver of stale text under the new content for one frame."
+
+The document also closes with a "What we'd need to actually run to confirm" methodology section, naming three concrete empirical-verification steps for suspect §1 and §2: *"run lazygit in the lower pane against this worktree, with `SPYC_PTY_DEBUG=1`; click a panel and verify nothing reaches the pty (`SPYC_PTY_DEBUG` writer-side); compare bare-terminal lazygit (truecolor diff palette) against in-pane lazygit screenshot to confirm truecolor downgrade or rule it out."*
+
+**Per-suspect trajectory.**
+
+**§1 — RESOLVED. Closed by arc 03's PR #29 (= 01KR10G02J2234D0WBMWMYC35M).** PR #5 itself shipped the narrow `if !self.screen.hide_cursor()` guard (a 7-line `src/pane/widget.rs` fix); arc 03's PR #29 (commit bdb8d87, 2026-05-06) generalized to a three-condition guard `focused && !alternate_screen() && !hide_cursor()` and dropped the focused/unfocused dim branch entirely. The PR #29 entry quotes the policy comment verbatim, naming the broader class — "(nvim, vim, less, htop, lazygit, claude in TUI mode) paint their own cursor in their own shape." PR #29's commit subject reads "fix: skip pane cursor block for unfocused / alt-screen panes (v1.41.16)"; the back-reference to PR #5's gap-analysis suspect §1 is implicit at the commit subject level (no `lazygit` mention) but explicit at the policy-comment level (the alt-screen TUI list names lazygit).
+
+The trajectory observation: PR #5 specified the bug class via the suspect §1 text and shipped a narrow fix that addressed exactly the lazygit-named case (hide_cursor); PR #29 generalized to the broader bug class six calendar days later. The specification covered the lazygit case; the execution covered both the lazygit case (PR #5) and the broader class (PR #29). The gap-analysis suspect §1 is fully resolved at the eight-arc terminus.
+
+A *durable-record* incompleteness flagged by arc 03's PR #29 entry: PR #29's diff does not remove the cursor-block-reverse-video text PR #12's harvest had lifted from suspect §1 into BUGS.md `### SMALL ###`. Verification against current-state `BUGS.md:4-13` confirms the entry persists post-window. The behavior is fixed; the catalogued risk text survives in the durable record. The trajectory disposition is RESOLVED at code/behavior; INCOMPLETE at durable-record cleanup. Arc 03's PR #29 entry already named this; the trajectory thread carries it forward as a partial-trajectory note rather than re-litigating.
+
+**§2 — DEFERRED-AS-NON-GOAL. Non-executed across the 22-day window; aligns with charter non-goal at `ROADMAP.md:445-447`.** Verified at current-state `ROADMAP.md:445-447`: *"Mouse support beyond what already exists. Old roadmap mentions it; deprioritize indefinitely. The tool is keyboard-first by thesis."* No PR in the 22-day window enables mouse capture in `src/main.rs::setup_terminal`, and no PR in the 22-day window adds a `KeyCode::Mouse(_)` arm to `src/pane/input.rs`. Verified by grep across the eight per-PR entries: arc 06 PR #10 (= 01KR2GH1D9QCGDPZEMWW09R898) explicitly refutes any mouse alignment for quickselect (the labeled-overlay picker is keyboard-only with alphabetic labels; case-as-intent dispatch).
+
+PR #12's harvest (= arc 02 harvest entry, cited by arc 02 investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T) lifted suspect §2 into `BUGS.md ### BIGGER ###` rather than `### SMALL ###`, with the framing "Worth designing carefully because spyc itself doesn't want mouse events outside the pane — the right shape is 'forward to pane only when pane is focused.'" Verified at current-state `BUGS.md:54-69`: the entry persists in BIGGER post-window. Two separate stated documents converge on the same disposition: the gap analysis names the gap; the charter names the deferral; the harvest catalogues both.
+
+The trajectory observation: suspect §2 is the cleanest case of stated-plan-trajectory honoring stated-plan-deferral. Two surfaces of the maintainer-authored plan agreed (the gap analysis flagged a class; the charter named the class as non-goal); execution honored the deferral. The trajectory is non-execution-as-honored, not non-execution-as-omitted.
+
+**§3 — RESOLVED. Closed by arc 08's PR #31 (= 01KR397RTYNS34SAGM46YJJRBY).** PR #31 (commit fc1789d / merge 105db8d, 2026-05-06) bumped vt100 0.15 → 0.16 (forced by ratatui 0.29 → 0.30, forced by ansi-to-tui 7 → 8 — the dep-graph trio whose forcing function is `unicode-width ≥0.2.1` from vt100 0.16 vs `=0.2.0` from ratatui 0.29). The PR #31 entry quotes three stated-plan resolutions on the §3 question:
+
+- *Commit body verbatim*: "Also retires the two MAYBE entries from BUGS.md about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks) — both should now parse correctly under 0.16."
+- *BUGS.md diff*: removes both MAYBE entries (the upgrade-motivation entry PR #30 added; the mode-2026 entry PR #12 lifted from `notes/lazygit-gap-analysis.md`); adds a `(fixed, v1.41.18)` block whose closing line repeats the assertion verbatim.
+- *CHANGELOG entry under `### Changed`*: names the trio bump and the panic fix; does not name mode 2026 by name.
+
+The trajectory observation: arc 02's investigation entry deferred §3's resolution explicitly to arc 08 — *"Whether arc 08's PR #31 (`chore/vt100-and-ratatui-upgrade`, vt100 0.15 → 0.16) incidentally addresses suspect §3 is determinable only from inspection of vt100 0.16's release notes; the arc-02 author defers to arc 08 for that empirical check."* PR #31's diff supplies that inspection at the BUGS.md durable-record level (the maintainer's commit body and BUGS.md text both assert resolution); the upstream vt100 0.16 source is not vendored in the diff, so the authoritative resolution is the maintainer's claim plus the upgrade actually shipping. The arc 08 → arc 02 cross-thread closes at PR #31; this is the trajectory's terminus for §3.
+
+A *test-coverage* note flagged by arc 08's PR #31 entry: no test in PR #31 exercises the specific mode-2026 escape sequence the upgrade is claimed to fix. The test-coverage and the trajectory-resolution do not align at the unit-test grain. Captured factually; the trajectory disposition is RESOLVED at the durable-record-and-dep-graph level; verification at the test grain is not narratable from the diff.
+
+**The methodology, folded in (#9 in the framing's enumeration).**
+
+PR #5's "What we'd need to actually run to confirm" section named a specific empirical-verification methodology for suspect §1 — *run lazygit in the lower pane with `SPYC_PTY_DEBUG=1`; click a panel and verify nothing reaches the pty*. The trajectory: the methodology was named in the gap analysis; the empirical run is not narratable from any commit-message or per-PR entry in the 22-day window. Arc 03's PR #29 entry confirms PR #29 generalized to the three-condition class-shape guard *without* citing the methodology — PR #29's policy comment names the alt-screen TUI list (the broader class) as the empirical answer to the gap analysis's question, not the `SPYC_PTY_DEBUG=1` run as the verification.
+
+Trajectory disposition for the methodology: **NAMED-NOT-CITED**. The specific empirical methodology PR #5 named is not visibly executed in the per-PR entries; the underlying class-shape question the methodology was meant to verify is answered via a different path (the alt-screen TUI enumeration in PR #29's policy comment). The naming-without-execution is the kind of stated-plan-vs-trajectory observation that's cleanest to flag without interpretation: the gap-analysis methodology was specified; the path actually taken to suspect §1's broader class was different.
+
+**Cross-thread cross-reference: insight-recurrence Pattern 4 (named-then-fixed bracket) reads at this trajectory.**
+
+`insight-recurrence` Pattern 4 (closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN) named three named-then-fixed bracket instances at three time grains. The gap-analysis-suspects bracket is *not* one of those three (Pattern 4 treated PR #18 → PR #37 at the two-day grain; PR #28 reading PR #12's harvest at the one-PR cross-arc grain; the 49-minute pair). The gap-analysis-suspects bracket is a *cross-arc* trajectory at *eight calendar days* across *two arcs* (arc 02 → arc 03 for §1; arc 02 → arc 08 for §3), substantially longer than Pattern 4's largest grain. Where Pattern 4 named the *recurrence* of the bracket shape (three instances at three grains), this trajectory entry names the *trajectory longevity* of the gap-analysis-suspects shape. The two readings do not duplicate; Pattern 4 counted recurrence-of-shape; this entry counts trajectory-of-stated-suspect.
+
+**The cumulative reading.**
+
+Three suspects; three dispositions:
+- §1: RESOLVED (with durable-record incompleteness) by arc 03's PR #29 (Day 6 of the window).
+- §2: DEFERRED-AS-NON-GOAL across the window; aligns with charter non-goal.
+- §3: RESOLVED (with test-coverage gap) by arc 08's PR #31 (Day 6).
+
+Three for three on suspect-resolution-or-deferral. The trajectory longevity from PR #5 (Day 0) to PR #29 (Day 6) plus PR #31 (Day 6) is six and seven calendar days respectively; from PR #5's gap-analysis catalogue to the eight-arc record's terminus, the suspects all close. The methodology PR #5 named for verification is named-not-cited; the underlying questions are answered via different paths.
+
+**The longest single trajectory in the network.** Three stated-plan items in one document; eight calendar days from specification to terminal disposition; two arcs touched for resolution (arc 03 for §1; arc 08 for §3); one arc for non-execution-as-honored (the entire 22-day window, against the charter non-goal at #5). The framing entry named this as the longest-single-trajectory hypothesis; this entry verifies it factually.
+
+The catalogue's seven-section trajectory (the next per-document entry, against the UX catalogue) carries a different load-bearing observation — *not* longevity, but the asymmetry between skip-honored-exactly and adapt-all-modified.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — full PR.
+- `notes/lazygit-gap-analysis.md` "Top suspects" §1, §2, §3 verbatim, verified at `git show 0691666:notes/lazygit-gap-analysis.md`. Methodology section verbatim, verified at the same source.
+- bdb8d87 (PR #29 fix/skip-pane-cursor-block-when-uninvited, 2026-05-06) — §1 resolution; three-condition guard at `src/pane/widget.rs`; policy-comment alt-screen TUI list.
+- fc1789d / 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — §3 resolution; trio-bump dep-graph chain; BUGS.md MAYBE retirement; commit-body assertion verbatim.
+- `ROADMAP.md:445-447` current state — mouse non-goal verbatim, source for §2's deferral disposition.
+- `BUGS.md:4-13` current state — cursor-block-reverse-video text from PR #12's harvest, surviving post-PR-#29 (durable-record incompleteness).
+- `BUGS.md:54-69` current state — mouse §2 entry in BIGGER bucket, surviving post-window.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (gap-analysis source; deferral language for §3 to arc 08).
+- `history-arc-03-pane-behavior` PR #29 entry = 01KR10G02J2234D0WBMWMYC35M (§1 resolution; alt-screen TUI list; durable-record-incompleteness flag).
+- `history-arc-08-recoverability-and-deps` PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (§3 resolution; trio-bump structure; arc 02 → arc 08 cross-thread terminus).
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3 (named-then-fixed bracket recurrence reading; non-overlap with this trajectory entry's longevity reading).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3ENV1WP6R9SFRE1QME291S -->
