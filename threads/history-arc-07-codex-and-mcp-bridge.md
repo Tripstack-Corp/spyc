@@ -122,3 +122,68 @@ Provenance:
 - `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (current-state cites `.spyc-context-<pid>.json` as the marker discovery walks for; PR #18 made the marker canonical).
 
 <!-- Entry-ID: 01KR2J1R3HXNZPAHE9118BGBQJ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T01:09:58.241939+00:00
+Role: scribe
+Type: Note
+Title: PR #19 (feat/codex-resume): a shared data model, parallel parsers, and the asymmetries the CLIs force
+
+Spec: scribe
+
+tags: #history #arc-07
+
+PR #19 is the second move in arc 07 and the first to introduce codex as a peer of claude in the session-resume surface. Commit subject reads "feat: codex session save/restore parity with claude (v1.41.6)" (commit 3cbcd3f, 2026-05-04 20:53:15 -0400; merge d6d3088, 2026-05-05 01:07 UTC — twenty-six minutes after PR #18 merged). The commit body opens with "PR-A of a 3-PR codex parity pass." Diff: 8 files, +335/-61. The two source files carrying weight are `src/state/sessions.rs` (+179/-26) and `src/app/mod.rs` (+176/-26).
+
+The PR is the right vantage to answer the brief's parity question — *shared abstraction or parallel implementation?* — because session-resume is the surface where the data model is authored fresh on this PR, the parsers branch by agent, and the restore-spawn paths use different mechanics for fundamental CLI reasons. The diff contains both shapes: shared at one layer, parallel at the next.
+
+**The shared layer — a peer-agnostic data model.** Pre-PR, `SavedTab` carried `claude_session_id: Option<String>` and `claude_session_name: Option<String>` — claude-shaped fields with the agent baked into the name. PR #19 introduces a new `AgentKind` enum (`Claude / Codex / Other`) with `serde(rename_all = "lowercase")` for stable on-disk strings, derives `Default` to `Other`, and renames the two fields to `agent_session_id` / `agent_session_name`. The renames carry serde aliases (`alias = "claude_session_id"`, `alias = "claude_session_name"`) so older saves deserialize without migration. A new `SavedTab::effective_kind()` const-method infers `Claude` for legacy saves that have `agent_session_id` set but no `agent_kind` field — the only resume case before codex support. Two unit tests pin the back-compat: `effective_kind_infers_claude_for_legacy_saves` constructs the JSON shape an older save would produce and asserts `tab.agent_kind == AgentKind::Other && tab.effective_kind() == AgentKind::Claude`; `effective_kind_passes_through_explicit_value` asserts the explicit-Codex case round-trips.
+
+The data-model decision — naming the field `agent_*` rather than introducing a sibling `codex_*` pair — is the shared-substrate move. The doc-comment on `AgentKind` names the two CLIs' resume mechanics in the same breath: "Drives session-save and resume-on-restore behavior — claude uses a UUID-or-name token plus `/resume` over stdin (CLI flag is regression-prone), codex uses `codex resume <UUID>` directly." The enum carries the policy, not the implementation.
+
+**The parallel layer — two parsers, two strippers, two restore paths.** Above the shared `AgentKind`, the parsing and command-handling functions are mirrored side-by-side rather than abstracted. Five concrete examples:
+
+1. *Two banner parsers in `src/state/sessions.rs`*. The pre-PR `extract_resume_token` becomes `extract_claude_resume_token` (rename). A new `extract_codex_resume_token` is added directly below it. Both scan `lines.iter().rev()` for a banner and return `Option<String>`; the bodies do different things — claude's parser accepts UUIDs *or* thread-name tokens (`claude --resume saffron-cumin`), codex's parser requires the result to pass `is_uuid()` (`codex_extractor_requires_uuid` test asserts the guard). The doc-comment on the codex parser names the asymmetry: "Returns just the UUID — codex doesn't have thread-name resume tokens."
+
+2. *Two command-strippers in `src/app/mod.rs`*. The pre-PR `command_without_resume(cmd)` strips claude's `--resume <token>` from a saved command. A new `command_without_codex_resume(cmd)` is added directly below it; it strips codex's `resume [args]` subcommand and any of its flags (`--last`, `--all`, `--include-non-interactive`). The doc-comment names the parallel: "Mirrors `command_without_resume` for claude. The id we'll resume to is stored separately in `agent_session_id`." Two functions, one shared rationale.
+
+3. *Two restore mechanics, branched at the spawn site.* The post-PR restore loop matches on `(kind, tab.agent_session_id.as_deref())`:
+   - `(Claude, _) => (command_without_resume(&tab.command), None)` — spawns fresh, then queues a `pending_resume_send` typed-stdin send.
+   - `(Codex, Some(sid)) => (format!("{base} resume {sid}"), Some(sid.to_string()))` — spawns `codex resume <UUID>` directly.
+   - `(Codex, None) => (format!("{base} resume --last"), None)` — falls back to codex's own most-recent picker.
+   - `(Other, _) => (tab.command.clone(), None)`.
+   The inline comment on the branch names the asymmetry verbatim: "Codex restores by spawning `codex resume <UUID>` directly — the CLI flag works, no `/resume` stdin dance needed. Claude has a regression on the CLI flag (crashes at mount with non-empty initialMessages), so we always spawn fresh and type `/resume <sid>` once it has settled."
+
+4. *Two dispatch helpers* — `is_codex_command(cmd)` is added next to the existing `is_claude_command(cmd)`; both check the first whitespace-separated token against a fixed string and a path-suffix. A single `detect_agent_kind(cmd)` umbrella branches between them: `if Self::is_claude_command(cmd) { Claude } else if Self::is_codex_command(cmd) { Codex } else { Other }`. The umbrella-over-pair shape is the smallest unit of shared substrate above the parallel implementations.
+
+5. *Picker tooltip grouping*. The session-picker's per-tab tooltip line, pre-PR, was a flat `claude: name (1234abcd), other-claude-name (5678abcd)` string. Post-PR, the tooltips group by kind: `claude:foo (12345678), codex:abcdef12`. The format-by-kind branch is per-tab in the iterator (`AgentKind::Claude => match &t.agent_session_name { ... }; AgentKind::Codex => format!("codex:{short_id}"); AgentKind::Other => return None`), not abstracted into a per-kind formatter trait.
+
+**The asymmetries the CLIs themselves force.** Three are quoted verbatim from inline comments in the diff and worth pulling out as a list because they're the seams a future maintainer hits when wiring a *third* peer (whether or not that ever happens):
+
+- *UUID-only vs UUID-or-name*: "Codex doesn't expose a display name; UUID is what `codex resume <UUID>` consumes."
+- *CLI-flag-works vs CLI-flag-regression*: "Claude has a regression on the CLI flag (crashes at mount with non-empty initialMessages), so we always spawn fresh and type `/resume <sid>` once it has settled. Codex doesn't [have that regression]."
+- *No-id fallback*: codex has `codex resume --last` to pick the most-recent session for the cwd; claude has no documented equivalent in the diff. The `(Codex, None)` arm uses `--last`; the `(Claude, ?, None)` arm doesn't exist as a discrete fallback because the resolver runs before save.
+
+**The parity question, answered for PR #19.** The data model layer is genuinely shared (one enum, one effective-kind method, two-fields-renamed-not-duplicated). The parsing and dispatch layers are parallel (two extractors, two strippers, two `is_*_command` checks, branched-by-kind restore). The shared substrate emerges naturally where the *shape* is the same (a session has one resume-id and one optional name; the kind is metadata); the parallel pattern emerges where the *mechanics* are different (the banner format, the CLI verb, the resume mechanism). What the PR doesn't do — and the doc-comments don't hide — is abstract the parsers behind a `trait AgentBannerParser` or the dispatch behind `trait AgentRestore`. Two functions side-by-side, one doc-comment naming each as "mirroring" the other, is the shape.
+
+**Cross-arc trace — codex's exit-banner pattern**. The codex parser's tolerance loop is worth a beat for a future maintainer reading the surface. The `extract_codex_resume_token` function does *not* `strip_prefix("codex resume ")` after a fixed phrase; it does `if let Some(idx) = trimmed.find("codex resume ")` anywhere on the line, then `rest.split_whitespace().next()?.trim()` on what follows. The doc-comment names why: "Look for `codex resume <token>` anywhere on the line so we tolerate the leading 'To continue this session, run ' prefix and any trailing color-reset bytes the TUI may have left on the same render line." The TUI color-reset tolerance is the same shape as PR #5's gap-analysis suspect §3 (synchronized-output / mode-2026 tearing) — neither is the same bug, but both are TUI-byte-tolerance moves at the parse boundary. The pattern of "expect garbage from a TUI's stdout, find the marker substring rather than match the full line" is what the codex extractor inherits from the shape of stdout-as-protocol that arc 02 catalogued.
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `feat/codex-resume`; the commit subject reads `feat:`; CHANGELOG buckets under `### Added`. Three-way alignment. Positive-control row.
+- The commit body explicitly numbers the PR ("PR-A of a 3-PR codex parity pass") and the close PR (#21) confirms ("PR-C (final)"). The intervening PR-B is not in arc 07 — the segmentation entry filed it in arc 05 (PR #20, `feat/scroll-altscreen-hint`, with `[pane] default_command` as the codex-parity-relevant half bundled under an alt-screen-hint headline). Cross-arc structural reach noted in arc 07's framing.
+- The legacy field renames (`claude_session_id` → `agent_session_id`) carry serde aliases. The aliases are still in the diff after PR #21 and unchanged through PR #37 (verified at HEAD). The "rename + alias for back-compat" pattern is recurring for fields the maintainer expects on disk (sessions JSON files survive across versions); whether the aliases ever get retired is determinable only from a future version's deletion.
+- The umbrella-over-pair shape (`detect_agent_kind` over `is_claude_command` + `is_codex_command`) is the smallest parametric abstraction the diff introduces. It does not extend through to the parsers or restore paths. A reader expecting parametric MCP-peer-as-trait machinery from a "codex parity pass" doesn't find it; the parity is policy-level (`AgentKind` enum), not interface-level (no trait).
+
+Provenance:
+- d6d3088 (merge PR #19 feat/codex-resume, 2026-05-05 01:07 UTC) — full PR.
+- 3cbcd3f (source commit, 2026-05-04 20:53:15 -0400) — commit body source ("PR-A of a 3-PR codex parity pass").
+- `git show --stat d6d3088` — 8 files changed, +335/-61.
+- `git diff d6d3088^1..d6d3088^2 -- src/state/sessions.rs` — `AgentKind` enum, field renames with `serde alias`, `effective_kind()` const-method, `extract_codex_resume_token`, 5 new tests.
+- `git diff d6d3088^1..d6d3088^2 -- src/app/mod.rs` — `is_codex_command`, `detect_agent_kind`, `command_without_codex_resume`, branched restore loop.
+- Inline doc-comments quoted above are from the post-merge state of `src/state/sessions.rs` and `src/app/mod.rs` at this commit.
+- `history-arc-07-codex-and-mcp-bridge` framing entry = 01KR2HYMMHAH316CA9KTWKWT6W.
+- `history-arc-07-codex-and-mcp-bridge` PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (`agent` field-rename rationale aligns with the rename-to-cross-tool-naming move PR #18 makes for the docs file).
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (PR #5's gap-analysis suspect §3, mode-2026 tearing — pattern reference for stdout-as-protocol byte tolerance).
+
+<!-- Entry-ID: 01KR2J4M8BP0J3WKNED6EMSV1Y -->
