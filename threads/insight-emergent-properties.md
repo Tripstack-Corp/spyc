@@ -557,3 +557,58 @@ Provenance:
 - `history-overview` framing = 01KR0TRFWT9W6WMFHC49YSW0BG; segmentation = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
 
 <!-- Entry-ID: 01KR3HZNC62XT11V4CW2GZ5V0S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:27:32.471985+00:00
+Role: scribe
+Type: Note
+Title: Tail: the four-tier ladder — what the network now holds that no single tier could hold, and the assembly-vs-cumulative ratio inverting across the ladder
+
+Spec: scribe
+
+tags: #insight #emergent-properties #tail
+
+Looking back at the four insight threads as a sequenced ladder, the structural fact worth saying out loud is that each thread needed the prior thread's output not just for cross-references but as the *upstream* that made its grain of work feasible. Each thread built its catalogue by drawing on what the prior thread's catalogue had sized down to.
+
+`insight-drift` had a per-PR upstream — the arc threads' drift-findings sections at every per-PR entry. That upstream was already present when the catalogue assembled; per its infrastructure tail (= 01KR3BVVYN37WDWJ5A3D8A5XWH), five-sixths of the catalogue was assembly-from-already-present-flags, one-sixth was new structural observation (Pattern F, which no single arc could see because Pattern F's source is the *spine* that frames every arc).
+
+`insight-recurrence` had a different upstream: the arc story-tails. Per its closing tail (= 01KR3DM9DBRV6MBA4D516KRR12), five of six recurrence patterns traced their primary cumulative-grain observation to a story-tail that summed across PRs at the arc-grain. The arc-08 story-tail's three-instance grain × register matrix (= 01KR3A23E11K8F7VNVSM5XY6M2) is the load-bearing example — that sentence *was* the structure of Pattern 2, written at the arc-grain. The recurrence work was assembly atop story-tails plus cumulative-grain refinement (cross-product matrices, sub-shape distributions). Two-thirds assembly, one-third cumulative-grain refinement.
+
+`insight-trajectory` had a two-layered upstream per its infrastructure tail (= 01KR3FC6D4NH972M9MF4NYDYC6): the maintainer-authored stated-plan documents themselves (lazygit corpus, charter, advisory ignores) plus the per-PR entries' back-reference architecture. Trajectory work distributed unevenly — the lazygit-corpus documents (#1-3) ran at roughly two-thirds back-reference assembly; the charter / non-goals / advisory documents (#4-#8) ran at one-third assembly, two-thirds cumulative-grain synthesis. Roughly half-and-half across the catalogue.
+
+This thread's upstream is what `insight-drift`'s tail forecast: cumulative-grain observation runs heavier still, assembly runs thinner. The six properties draw across all three prior threads simultaneously; assembly-grain observations are *ingredients* now, not the patterns themselves. The patterns are at the property grain — *what kind of artifact this is*, not *what shape recurs in this artifact*. The ratio of cumulative-grain to assembly is roughly five-to-one in favor of cumulative-grain — the inverse of `insight-drift`'s ratio at the ladder's start.
+
+The four-tier ladder's accumulating ratio:
+
+- *insight-drift*: five-sixths assembly. The work is *sum the per-PR drift flags into patterns*.
+- *insight-recurrence*: two-thirds assembly. The work is *sum the story-tails' arc-grain observations into cross-arc recurrence patterns*.
+- *insight-trajectory*: roughly half assembly. The work is *track stated-plan documents against the per-PR back-reference network*.
+- *insight-emergent-properties*: roughly one-sixth assembly. The work is *interpret the inherited counts as artifact-grain properties*.
+
+The ratio inverts across the ladder. Each tier is upstream-bound to the prior tier, and each tier's work is incrementally less assembly and incrementally more cumulative-grain synthesis. By the time emergent-properties runs, the assembly is mostly done by the prior tiers; the property work is interpretive synthesis on inherited data.
+
+What the ladder enables that no single thread holds:
+
+A reader walking only `insight-drift` sees 16 misnamings across 6 patterns, dominantly at description-layer. The reader knows what *happened* at the description-layer.
+
+A reader walking only `insight-recurrence` sees 6 patterns of event-shape recurrence with cross-product matrices and sub-shape distributions. The reader knows what *recurs* in the work.
+
+A reader walking only `insight-trajectory` sees 8 stated-plan documents with their dispositions, the fifteen-and-zero asymmetry, the substrate-vs-registration distinction. The reader knows what *was promised vs. what landed*.
+
+A reader walking only this thread sees six properties of the artifact. The reader knows *what kind of artifact spyc is at the eight-arc terminus*.
+
+A reader walking the four threads in order sees the ratio invert. The walker starts at description-layer counts and ends at artifact-grain properties, with each tier's evidence reduced to its load-bearing instances at the next tier. Either direction is legible because the citation graph is bidirectional but the upstream graph is unidirectional — the property entries cite trajectory documents which cite recurrence patterns which cite drift instances which cite per-PR entries which cite arc-segmentation entries which cite the spine. The chain is reversible by following ULIDs; the reasoning is one-way.
+
+What this leaves for the final narrative: a network that holds its own weight as a record. The four insight threads plus the eight arc threads plus the spine carry enough cumulative-grain observation that a final narrative does not have to *re-do* any of the prior work. The narrative's job is what no single tier in the ladder can do — read the network *as a story* rather than as a catalogue. From here, the artifact's record carries its own weight; the narrative's job is to read it.
+
+The thread is left OPEN — like the prior three.
+
+Provenance:
+- `insight-drift` Tail 2 (infrastructure tail; the *five-sixths assembly / one-sixth cumulative observation* forecast) = 01KR3BVVYN37WDWJ5A3D8A5XWH.
+- `insight-recurrence` Tail 2 (story-tails-as-upstream; the *two-thirds story-tail-assembly, one-third cumulative-grain refinement* observation) = 01KR3DM9DBRV6MBA4D516KRR12.
+- `insight-trajectory` Tail 1 (infrastructure tail; the two-layered upstream and uneven distribution observations) = 01KR3FC6D4NH972M9MF4NYDYC6.
+- All six property entries (this thread): 01KR3HG2GEBH1W8BKGT3CW6S9P, 01KR3HJ9ZVA966149ME2TBTB5B, 01KR3HMF3F7A5EBXBQYEWHYR3Z, 01KR3HQCRV761KG6CVD6T11QNM, 01KR3HSK97596MXH0V41K7TYM2, 01KR3HW4T1GQKFFWNYSRT0639S.
+- This thread's framing = 01KR3HDVVQ5TS04SKHKWZKCXPY; closure = 01KR3HZNC62XT11V4CW2GZ5V0S.
+- Arc-08 story-tail (the cumulative-grain naming that became Pattern 2's structure) = 01KR3A23E11K8F7VNVSM5XY6M2.
+
+<!-- Entry-ID: 01KR3J1JKR98RY75JBYA8EKC1X -->
