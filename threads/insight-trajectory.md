@@ -259,3 +259,67 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3ESJ42TT0ZGJHGHJ5CTNYC -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:32:07.112635+00:00
+Role: scribe
+Type: Note
+Title: Document #3: PR #5's three ROADMAP additions — three entries verbatim-imported, zero exactly-as-specified executions, one partial, two deferred
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+**Stated-plan content.** PR #5 (commit 0691666, 2026-04-30) added 26 lines to `ROADMAP.md` per arc 02 investigation entry's diff inspection (`git diff 1f41b4b..3949983 -- ROADMAP.md`). Three new entries land verbatim from the catalogue's "Top 3 to consider first" ranking. Verified at current-state `ROADMAP.md:559-581` (post-PR-#37, the eight-arc record's terminus):
+
+> 1. **"Generalized pager picker"** (`ROADMAP.md:559-566`): "Adapt lazygit's `Menu` popup pattern into spyc's existing `pager.picker_cursor` machinery so any list-of-options surface (project chooser, `W l` worktree picker, branch checkout) is a pager mode rather than a fifth overlay. Stays inside DESIGN.md's 'render *into* the pager' rule. Highest-leverage of the lazygit borrows because the scoped-help item below builds on it."
+
+> 2. **"Context-sensitive prompt-row hint"** (`ROADMAP.md:567-575`): "Paint the most-relevant keys for the active overlay or mode into the prompt row using the DIM modifier — only when keys differ from list-mode (pager `?/n/s/:N`, finder, `!?` history editor, picker). DESIGN.md is explicit that a third status row is forbidden, so the prompt row is the only legal transient surface for this. Directly addresses the 'I know it exists but forgot the key' failure mode without a help-overlay context switch."
+
+> 3. **"Scoped `?` help"** (`ROADMAP.md:576-581`): "Restructure the existing `src/ui/help.rs` dump to lead with the active surface's keys, then a collapsed 'global / other surfaces' tail. Content reorganization, not a new feature; cost is near-zero once the generalized pager picker lands and `?` can render its scoped section as a picker."
+
+The three entries are tagged `(lazygit-inspired)` and survive intact post-PR-#37. PR #12's harvest (2026-05-03) deleted the `notes/...` cross-references that originally accompanied the entries (since the notes themselves were removed by the harvest), but the three entries' bodies remain at the same lines, with the same internal cross-reference structure (#1's "highest-leverage"; #1's reference forward to #3; #3's reference back to #1's machinery).
+
+**Per-entry trajectory.**
+
+**Entry #1 — Generalized pager picker.** Identical trajectory disposition to catalogue §4 (covered at this thread's document-#2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC). The ROADMAP entry is a verbatim re-statement of catalogue §4's recommendation, including the same load-bearing structural fragment (`pager.picker_cursor` machinery; the picker-as-pager-mode framing). Trajectory disposition: **DIRECTION ALIGNMENT BY FOUR PRs; SPECIFIC SHAPE NON-EXECUTED**. The four PRs (arc 05 PR #33 = 01KR2AAX12XSNRNZPTXJT2TXJA; arc 05 PR #35 = 01KR2AD5PV989H58E49E5D18NM; arc 06 PR #8 = 01KR2GCH3Q8DR9DATBBC802Q8W; arc 06 PR #10 = 01KR2GH1D9QCGDPZEMWW09R898) hold the same alignment against the ROADMAP entry as against the catalogue §4 source.
+
+A note specific to the ROADMAP-entry-vs-catalogue framing: the ROADMAP entry includes verbatim the parenthetical *"(project chooser, `W l` worktree picker, branch checkout)"* — three concrete uses the picker would enable. None of those three uses landed in the 22-day window as a `pager.picker_cursor` mode. Project chooser is not narratable in the per-PR entries; `W l` worktree picker exists but predates the window; branch checkout is not landed at all. The ROADMAP entry's enumerated use-cases all sit at NON-EXECUTED post-window.
+
+**Entry #2 — Context-sensitive prompt-row hint.** Identical trajectory disposition to catalogue §2. Trajectory disposition: **PARTIAL EXECUTION** by arc 05's PR #20 (= 01KR2A6TT516XA5FEGVBXYPWD7), narrowed to alt-screen detection. The ROADMAP entry's enumerated overlays-or-modes worth context-hinting — pager `?/n/s/:N`, finder, `!?` history editor, picker — none of these surfaces gain a per-overlay context-hint accessor. The alt-screen scroll-mode flash that PR #20 ships is a single hardcoded variant in one `Action` arm; the architectural shape the ROADMAP entry specifies (per-overlay `context_hints()` accessor; DIM at prompt row when otherwise idle) does not land.
+
+The trajectory observation: the ROADMAP entry's specified shape is wider than what landed. The ROADMAP entry frames the hint as a per-overlay capability; PR #20 shipped a context-aware variant of one specific flash. The mechanism PR #20 ships is one-off and not extensible to the other overlays the ROADMAP entry names. The catalogue's `context_hints()` accessor would be that mechanism; PR #20 did not introduce it.
+
+**Entry #3 — Scoped `?` help.** Identical trajectory disposition to catalogue §5. Trajectory disposition: **NON-EXECUTED**, consistent with the entry's own conditional-on-#1 framing (*"cost is near-zero once the generalized pager picker lands and `?` can render its scoped section as a picker"*). Since #1 has not landed in its specific shape, #3's near-zero cost has not materialized. The conditional clause is what makes the trajectory disposition consistent rather than divergent: the ROADMAP entry itself names the dependency, and the dependency is unresolved at window's terminus.
+
+**The cumulative reading.**
+
+Three ROADMAP entries; one partial execution; two deferred (one direction-aligned-not-executed; one non-executed-against-conditional). Zero entries that the maintainer authored as committed forward work landed in their specified shape across the 22-day window.
+
+The ROADMAP-trajectory observation is structurally adjacent to the catalogue-trajectory observation but differs in framing. The catalogue (this thread's document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC) has seven sections of which four are skip and four are adapt; the skip-vs-adapt asymmetry was the load-bearing observation. The ROADMAP entries are a pure-positive-recommendation set: all three are adapt-imports from the catalogue's positive recommendations. There is no skip-half to honor exactly. The asymmetry-vs-symmetry difference is structural: the catalogue admits skip recommendations as one half of its trajectory disposition (and the skip-half all honored exactly); the ROADMAP entries are positive-only, and the trajectory has no negative-recommendation honor-disposition to balance against. The ROADMAP-trajectory's observation is purely *"three positive-recommendation entries; zero exactly-as-specified executions"*.
+
+**Cross-thread reading: the trajectory plus insight-recurrence Pattern 4.**
+
+`insight-recurrence` Pattern 4 (= 01KR3D5B59F5DX6BZZPB1VTQB3) named one named-then-fixed bracket instance with weighted design options at the open-side: PR #18 → PR #37 (two-day grain). PR #18's BUGS.md SMALL note authored three weighted design options; PR #37 implemented exactly the marked option. That bracket *closed* in the window.
+
+The three ROADMAP entries here read as bracket-open-at-window-terminus instances at the multi-week grain — the entries' open-sides (the catalogue PR #5 imports) are stated; the close-sides (the specific-shape executions) have not landed. The brackets are open. Pattern 4's recurrence reading observed three closed brackets at three time grains; this trajectory entry observes three open brackets at the same multi-week grain at window's terminus.
+
+The cross-thread cross-reference: the named-then-fixed bracket *recurrence* that closes is observable in the per-arc record; the named-then-fixed bracket *trajectory* that stays open across the window is observable here. Both readings are tier-2/tier-3 respectively; neither is tier-4 (whether the open brackets eventually close beyond-window is tier-5 and forbidden here). The ROADMAP entries' bracket-states are *open* at window's terminus; the trajectory thread states this factually.
+
+**Boundary with `insight-emergent-properties`.**
+
+The strongest tier-4 temptation in this entry is the question *why* three positive-recommendation ROADMAP entries import verbatim from the catalogue's "Top 3" but none execute exactly. The trajectory thread states the count; the *why* (planning-vs-execution dynamic, working-style under capacity, surface-specificity question, etc.) is forbidden here and belongs to `insight-emergent-properties`. This entry sits at the most acute tier-3-discipline test moment of the trajectory thread: the temptation to interpret the three-zero ratio as evidence of a property is high. Held to tier-3.
+
+Provenance:
+- 0691666 (PR #5 investigate/lazygit-support, 2026-04-30) — full PR.
+- `git diff 1f41b4b..3949983 -- ROADMAP.md` (per arc 02 investigation entry's verification): 26 lines added at the feature-tracks tail; three entries each tagged `(lazygit-inspired)` with `notes/lazygit-ux-catalogue.md §N` cross-references at original-author state.
+- `ROADMAP.md:559-581` current state — three entries verbatim, surviving post-PR-#37; cross-reference structure intact (#1's "highest-leverage" / forward to #3; #3's "near-zero once... #1 lands" / back to #1).
+- ee07307 (PR #20 feat/scroll-altscreen-hint, 2026-05-05) — Entry #2 PARTIAL EXECUTION; verified at arc 05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7.
+- cf9e8ff (PR #33), c243549 (PR #35), 62fc129 (PR #8), 9043547 (PR #10) — Entry #1 DIRECTION ALIGNMENT four-PR set (cross-arc); verified at arc 05 PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA, arc 05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM, arc 06 PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W, arc 06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (ROADMAP additions verbatim quoted; verbatim-import provenance).
+- `history-arc-05-pager-surface` closure entry = 01KR2AJVZA1E85YSKHF4FNRQQ3 (cumulative §4-and-#1 reading).
+- `insight-recurrence` Pattern 4 entry = 01KR3D5B59F5DX6BZZPB1VTQB3 (named-then-fixed bracket; cross-reference for bracket-open-at-window-terminus reading).
+- `insight-trajectory` document #2 entry (UX catalogue) = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (catalogue §-disposition shared with ROADMAP entries).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3EW3166JZ59TDR8PYMGN4T -->
