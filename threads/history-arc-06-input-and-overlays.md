@@ -698,3 +698,30 @@ Provenance:
 - `notes/lazygit-ux-catalogue.md` §1 (numbered-panels SKIP recommendation; refuted as not-applicable to PR #10's alphabetic labels).
 
 <!-- Entry-ID: 01KR2GYQPQRX08SV980SPHHZ80 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T00:50:07.140552+00:00
+Role: scribe
+Type: Note
+Title: Two seams the story-tail walks past: --key-trace shipping ahead of a consumer, and the chord-precedence rule's flat exception
+
+Spec: scribe
+
+tags: #history #arc-06 #tail
+
+A pair of specific seams worth pulling out separate from the story-tail above, because they're the kind of thing a reader hitting the head entries can verify in five minutes and easily miss in the broader narrative.
+
+PR #25's `--key-trace` infrastructure ships ahead of any consumer. The diagnostic doesn't fire from any test, doesn't surface in any UX, doesn't get pulled into any analytics. It exists for a future bug report — a user types "input doesn't work when done too quickly," flips the flag, reproduces, and ships the log. The infrastructure shape is *ship the diagnostic with the defensive fix so the next report is reproducible*, and that shape is forward-pointing in a way the ~205-line PR doesn't surface. The `--key-trace` CLI flag, the `SPYC_KEY_TRACE` env-var equivalence, the new `src/key_trace.rs` module's `init`/`is_enabled`/`log` API, the four trace points in `handle_key` and the resolver and the paste path and the bounce-suppression swallow — none of them have a current consumer beyond the immediate one (PR #25's own defensive bundle). Whether the next "input doesn't work" report ever comes, and whether `--key-trace` is what surfaces its root cause, is determinable only outside the 22-day window. The seam to watch: if a future input bug surfaces and ships its cause via a `key-trace` log, the bundle pattern (defensive fix + diagnostic for next time) shifts from speculative to validated. If three such bugs come and `--key-trace` plays no role, the pattern is the kind of forward-proofing that costs upkeep without paying for itself. PR #25 doesn't bet on either reading; the seam is where the bet plays out.
+
+The second seam is smaller and almost the inverse. PR #32's chord-precedence rule lives at one if-statement: `let chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G); if !chord_locked { /* consult user keymap */ }`. Eight chord families inherit the rule from one boolean expression. Any new `PendingSeq` variant added by a future PR inherits the rule for free unless its author explicitly extends the exception match-arm to include it. That reach-through-one-statement structural shape is what makes the rule cheap to add and powerful to maintain — but it carries the same kind of seam arc 03's seams-aside (= 01KR11TME2KF5QFQ45GJYG8MC7) named for `pane_focused`'s three meanings and the cursor-block guard's flat conjunction: working flat-condition logic that holds until policy needs more axes than the boolean supports. The `g`-as-exception decision lives in a comment, not a type — `PendingSeq::G` doesn't carry any field saying "user-overridable"; the `feed` body's match-arm is the only place the policy is named. If a second exception ever lands ("the `H` chord should be user-overridable when the user has bound `H1` to something specific"), the maintainer choosing between extending the match-arm and refactoring `PendingSeq` to carry a `chord_locked: bool` per variant is the moment the seam opens. Until then the flat condition is the right shape, and the seam is just a note for whoever lands next on this surface.
+
+Both observations are forward-pointing in the way the story-tail isn't, but neither is a prediction. They're notes about where the next dispatch-related question is most likely to land, given what the diffs in arc 06 actually shaped — small gifts to whoever lands next on this surface.
+
+Provenance:
+- No new commit references; this entry reflects on the head entries which carry full SHA provenance.
+- `history-arc-06-input-and-overlays` PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (full `src/key_trace.rs` API and trace-point listing).
+- `history-arc-06-input-and-overlays` PR #32 entry = 01KR2GQJSTRYZFKE58F395CEN2 (the `chord_locked` let-expression and `g`-as-exception comment quoted verbatim there).
+- `history-arc-06-input-and-overlays` story-tail above = 01KR2GYQPQRX08SV980SPHHZ80.
+- `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (precedent for the flat-condition-shape-holds-until-policy-needs-more-axes seam observation; this entry's second seam echoes that one across a different surface).
+
+<!-- Entry-ID: 01KR2H094DPBVASNG884XXFEJH -->
