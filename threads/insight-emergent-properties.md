@@ -212,3 +212,65 @@ Provenance:
 - `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
 
 <!-- Entry-ID: 01KR3HJ9ZVA966149ME2TBTB5B -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:20:23.061155+00:00
+Role: scribe
+Type: Note
+Title: Property 3: Acknowledgement-register-correlates-with-supersession-kind — the artifact's commit-history layer carries register variation aligned to what the diff performs, not to elapsed time alone
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** The codebase's commit-history layer carries supersession-acknowledgement at three distinct registers (silent / behavior-described / explicit-reframing), and the register variation aligns with the *kind* of supersession the diff performs more closely than with elapsed time alone. Guard-policy generalizations carry silent register at both within-arc and cross-arc grains; missing-wire fixes carry behavior-described at the tightest grain; design-framing revisions carry explicit-reframing at intermediate grain. Reads as: spyc, as artifact, exhibits a commit-history layer where different *categories* of supersession correlate with different *categories* of acknowledgement, with elapsed time as a secondary correlate.
+
+This is the property requiring the sharpest work-vs-worker discipline. The framing is *the artifact's commit-history exhibits the correlation* — the diff's nature is the subject, the register is what the artifact carries. Not *the maintainer chooses register based on what they did*. The work, not the worker.
+
+**Evidence enumeration.**
+
+The four-instance grain × register matrix per `insight-recurrence` Pattern 2 (= 01KR3CZEM22Y5BRT1F2VQZ6EKZ):
+
+| Time grain | Register | Supersession-kind | Instance |
+|---|---|---|---|
+| 25 minutes (within-arc 08) | behavior-described | missing-wire fix | PR #13 → PR #14: `:undo` shipped under `### Added` without punt-list wiring; PR #14's commit body verbatim *"Repro: type `:undo` → flash 'unknown command: undo'"* names the bug behavior accurately and does not cite PR #13. |
+| 49 minutes (within-arc 08) | explicit-reframing | design-framing revision | PR #30 → PR #31: PR #30's BUGS.md MAYBE block argued for deferral *"until someone has a clear afternoon"*; PR #31's commit body *"Smaller than I'd previously framed it"* (five words) reframes PR #30's framing in the artifact's commit-history. |
+| 3.5 hours (within-arc 03) | silent | guard-policy generalization | PR #26 → PR #29: PR #29's three-condition guard (focused, not-alt-screen, not-hide-cursor) drops PR #26's dim branch unannounced; nothing in PR #29's commit subject, commit body, or CHANGELOG references PR #26. |
+| 6 calendar days (cross-arc 02 → 03) | silent | guard-policy generalization (broader class) | PR #5 → PR #29: PR #29 generalizes PR #5's narrow `if !hide_cursor()` lazygit-specific guard to the alt-screen-TUI class; PR #29's commit subject and CHANGELOG describe the new policy without naming PR #5 as predecessor. |
+
+The structural pattern: *the kind of supersession aligns with the register*. Both guard-policy generalizations carry silent register at two different time grains (3.5 hours and 6 days). The missing-wire fix carries behavior-described at the tightest grain (25 minutes). The design-framing revision carries explicit-reframing at intermediate grain (49 minutes). Each register matches the *category* of supersession the diff performs.
+
+The three within-1-day instances each populate distinct cells; the fourth long-grain instance reuses the silent register at distant grain for a structurally similar (guard-policy generalization) supersession-kind.
+
+**Strongest evidence.**
+
+PR #31's *"Smaller than I'd previously framed it"* is the cleanest single observation. Five words in a commit body — a piece of the artifact, observable at any time in `git log` — perform the explicit-reframing register on a design-framing revision. The diff at PR #31 walks back PR #30's framing in those five words; the supersession is visible in the artifact, not via inference about who-said-what-when. The 25-minute and 3.5-hour and six-day instances each carry their register *in the artifact's commit-history layer*; the registers are observables.
+
+The kind-vs-time-grain reading per arc-08 story-tail (= 01KR3A23E11K8F7VNVSM5XY6M2): *"They differ in their acknowledgement shapes in a way that reads as worth flagging."* The arc-08 story-tail observed the kind-aligned register variance factually without interpretation; this property names the observation at artifact grain.
+
+The two-silent-instances corroboration: PR #29 is the successor in both the 3.5-hour within-arc and 6-day cross-arc supersessions, both silent, both guard-policy generalizations. The same diff carries two silent supersessions at two grains because both supersessions are the *same category* (guard-policy generalization) — the register aligns with the kind regardless of grain.
+
+**Where the property would falsify.**
+
+A 25-minute supersession carrying explicit-reframing register on a missing-wire fix, or a 49-minute supersession carrying silent register on a design-framing revision, would weaken the kind-correlation. None observed in the 22-day window.
+
+A guard-policy-generalization supersession carrying explicit-reframing register, or a design-framing-revision supersession carrying silent register, would directly refute the kind-correlation. None observed.
+
+The property is supported but the evidence base is thin: four instances total, with the silent register at two grains (one supersession-kind: guard-policy generalization) and the other two registers each at one instance (one kind each). A larger sample would strengthen or refute. The property is named factually with explicit acknowledgement of evidence-thinness.
+
+**Tier-5 forward prediction.**
+
+Citing Pattern 2's four-instance kind × register correlation: post-window supersessions over guard-policy generalizations will trend silent regardless of grain; supersessions over design-framing revisions will trend explicit-reframing; supersessions over missing-wire fixes will trend behavior-described. (Pattern 2 = 01KR3CZEM22Y5BRT1F2VQZ6EKZ.)
+
+Provenance:
+- `insight-recurrence` framing = 01KR3CSQ2YHQ2TD8EAE6DJCTS3; Pattern 2 (the four-instance grain × register matrix; the "Maintainer-experience axis declined" paragraph) = 01KR3CZEM22Y5BRT1F2VQZ6EKZ; closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- `insight-drift` Pattern D (PR #13 → PR #14 from the documented-vs-wired drift reading) = 01KR3BGMAKS4AZNZE2QFXH10W4; Pattern E (PR #30's intra-diff self-correction; PR #30 → PR #31 between-PR reframing flagged at pattern-boundary) = 01KR3BK1VP3SZ5DM9VAQ01FFYX.
+- Arc-03 story-tail (the within-arc PR #26 → PR #29 silent supersession; the cross-arc PR #5 → PR #29 silent supersession; *"PR #29's diff edits code PR #26's diff added that morning"* and *"What makes the supersession diagnostic isn't the guard-broadening per se — it's that nothing in either commit says 'this supersedes PR #5'"*) = 01KR11S8RG29J98QKN1H0VAA6W.
+- Arc-08 story-tail (the three-instance matrix's first cumulative-grain naming; *"three such instances at three time grains... with three different acknowledgement registers"*) = 01KR3A23E11K8F7VNVSM5XY6M2.
+- Arc-03 PR #29 entry (cursor-block policy comment listing alt-screen TUIs without citing PR #5; the within-arc supersession diff that drops PR #26's dim branch) = 01KR10G02J2234D0WBMWMYC35M.
+- Arc-08 PR #14 entry (the *"Repro: type `:undo` → flash 'unknown command: undo'"* commit body verbatim) = 01KR38XPJ07ZFQHH1TG6X461WN.
+- Arc-08 PR #31 entry (the *"Smaller than I'd previously framed it"* commit body verbatim) = 01KR397RTYNS34SAGM46YJJRBY.
+- Arc-08 PR #30 entry (the BUGS.md MAYBE block; the *"defer until someone has a clear afternoon"* deferral) = 01KR393P15VTJSZ1WGYGZ8ZS01.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HMF3F7A5EBXBQYEWHYR3Z -->

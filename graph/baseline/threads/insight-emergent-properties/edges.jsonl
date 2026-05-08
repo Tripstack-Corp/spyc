@@ -3,3 +3,5 @@
 {"source":"entry:01KR3HDVVQ5TS04SKHKWZKCXPY","target":"entry:01KR3HG2GEBH1W8BKGT3CW6S9P","type":"followed_by"}
 {"source":"thread:insight-emergent-properties","target":"entry:01KR3HJ9ZVA966149ME2TBTB5B","type":"contains"}
 {"source":"entry:01KR3HG2GEBH1W8BKGT3CW6S9P","target":"entry:01KR3HJ9ZVA966149ME2TBTB5B","type":"followed_by"}
+{"source":"thread:insight-emergent-properties","target":"entry:01KR3HMF3F7A5EBXBQYEWHYR3Z","type":"contains"}
+{"source":"entry:01KR3HJ9ZVA966149ME2TBTB5B","target":"entry:01KR3HMF3F7A5EBXBQYEWHYR3Z","type":"followed_by"}
