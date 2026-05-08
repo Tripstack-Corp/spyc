@@ -267,6 +267,31 @@ impl PaneTabs {
         true
     }
 
+    /// Take the active `TabEntry` out of the container *without*
+    /// shutting down its pty. Used by v1.5 Phase 6c demotion
+    /// (`:pane-to-task`): the pty keeps running, the entry just
+    /// stops being a tab and becomes a `BackgroundTask`. Returns
+    /// `None` when there are no tabs.
+    ///
+    /// The active index is fixed up the same way `remove_at` does
+    /// for closed tabs (slide left when removed-idx < active;
+    /// clamp to last otherwise).
+    pub fn take_active(&mut self) -> Option<TabEntry> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        let idx = self.active;
+        let entry = self.tabs.remove(idx);
+        if !self.tabs.is_empty() {
+            if idx < self.active {
+                self.active -= 1;
+            } else if self.active >= self.tabs.len() {
+                self.active = self.tabs.len() - 1;
+            }
+        }
+        Some(entry)
+    }
+
     /// Slice of all tab entries (for rendering the tab bar).
     pub fn tabs_mut(&mut self) -> &mut [TabEntry] {
         &mut self.tabs

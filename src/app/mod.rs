@@ -4136,6 +4136,16 @@ impl App {
             return PostAction::None;
         }
 
+        // :pane-to-task — demote the active pane tab to a
+        // background task (v1.5 Phase 6c). Inverse of
+        // `:task-to-pane`. The pty keeps running; we just stop
+        // displaying it, and the user can return to it via `:fg`
+        // or `:task-to-pane`.
+        if input == "pane-to-task" {
+            self.demote_pane_to_task();
+            return PostAction::None;
+        }
+
         // :grep <pattern> — project-wide content search. Walks
         // PROJECT_HOME (or the current listing dir if unset),
         // gitignore-aware, results stream into a pager as
@@ -5237,6 +5247,58 @@ impl App {
         }
         self.needs_full_repaint = true;
         self.state.flash_info(format!("task #{id} → tab '{label}'"));
+    }
+
+    /// `:pane-to-task` — demote the active pane tab to a
+    /// background task. v1.5 Phase 6c. Inverse of
+    /// `:task-to-pane`: same `PtyHost` moves between containers,
+    /// the pty keeps running through the transition.
+    ///
+    /// Buffer recovery is the open design call — vim's `^z` to
+    /// background loses visual context, and we follow the same
+    /// rule: the new task buffer starts empty, fresh output
+    /// accumulates from the demote point. We don't seed from
+    /// `screen.contents()` because the task buffer is ANSI bytes
+    /// (so rebuild via `ansi-to-tui` works) and `screen.contents()`
+    /// is plain text — seeding would erase color. Acceptable;
+    /// can revisit if users hit it.
+    fn demote_pane_to_task(&mut self) {
+        let Some(tabs) = self.pane_tabs.as_mut() else {
+            self.state.flash_error("no pane to demote");
+            return;
+        };
+        let Some(entry) = tabs.take_active() else {
+            self.state.flash_error("no pane to demote");
+            return;
+        };
+        let TabEntry { pane, info, .. } = entry;
+        // If we just took the last tab, drop the container so
+        // layout / status / focus revert to "no pane open" state.
+        if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
+            self.pane_tabs = None;
+            self.state.pane_focused = false;
+        }
+
+        let id = self.background_tasks.allocate_id();
+        let label = info.label.clone();
+        let task = BackgroundTask {
+            id,
+            title: label.clone(),
+            cmd_display: info.command,
+            host: pane.host,
+            buffer: Vec::new(),
+            status: TaskStatus::Running,
+            started: info.spawn_at,
+            finished_at: None,
+            has_unread_output: false,
+            viewed_in_task_viewer: false,
+            paused: false,
+        };
+        self.background_tasks.tasks.push(task);
+        self.needs_full_repaint = true;
+        self.state.flash_info(format!(
+            "tab '{label}' → task #{id} (:fg or :task-to-pane to bring back)"
+        ));
     }
 
     fn foreground_task(&mut self, target: Option<u32>) {
