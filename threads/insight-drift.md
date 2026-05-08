@@ -172,3 +172,44 @@ Provenance:
 - `insight-drift` Pattern A entry = 01KR3BA3CZWA6TZCDKNJZDPAGH (cross-mention of PRs #18 and #31).
 
 <!-- Entry-ID: 01KR3BCQXGGB20V8C6Y6Z1Y944 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:32:16.439246+00:00
+Role: scribe
+Type: Note
+Title: Pattern C: Bucket-vs-content asymmetry — three instances, with an arc-08-internal inverse-asymmetry pair
+
+Spec: scribe
+
+tags: #insight #drift
+
+**Pattern statement.** The CHANGELOG bucket category (`### Added`, `### Changed`, `### Fixed`, `### Removed`, `### Security`, `### CI / Tooling`) does not match the diff shape. A diff that adds public API surface lands under `### Fixed`. A dep upgrade that resolves a panic lands under `### Changed` rather than `### Fixed`. A change whose commit subject reads `fix:` lands under `### Changed` while the BUGS.md entry it closes lifts to FIXED. The drift is at the classification-surface level: the bucket choice and the content the bucket holds carry different framings of what the change is.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **PR #28 (arc 08) — `### Fixed` for additive defensive work.** Commit subject reads *"fix: cap directory listings at 50k entries to avoid hangs (v1.41.15)"* (commit 306b43f, 2026-05-06). The CHANGELOG places the change under `### Fixed`. By the diff-shape measure this is `### Added` work: a constant (`MAX_ENTRIES: usize = 50_000`), a public field (`Listing::truncated`), an extracted public function (`pub fn read_capped(dir, cap)`), and three unit tests. The bucket choice reads as honoring the user-reported origin (BUGS SMALL #4: a fix to a regression-from-good-experience) rather than the diff shape (additive). *Cite: arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M (drift-findings block: "PR #28's CHANGELOG bucket is `### Fixed`, not `### Added`. The diff adds a constant, a field, an extracted public function, and three tests — by feature-add measure this is `### Added` work").*
+
+2. **PR #31 (arc 08) — `### Changed` for a fix-shaped dep bump.** Commit subject reads *"chore: upgrade vt100 0.15 → 0.16, ratatui 0.29 → 0.30 (v1.41.18)"* (commit 105db8d, 2026-05-06). The CHANGELOG places the change under `### Changed`. The commit body names the bump as *"the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17)"* — explicitly fix-framed. The bucket choice does not match the commit-body framing. *Cite: arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (drift-findings block: "The CHANGELOG bucket is `### Changed`, not `### Fixed`, even though the bump is 'the proper fix for the screen.rs:934.unwrap() panic'").*
+
+3. **PR #36 (arc 05) — four-way classification asymmetry.** Commit subject reads *"fix: / and = match by substring, not anchored prefix (v1.41.23)"* (commit f505ee5, 2026-05-07). Four surfaces classify the same change four different ways: commit subject `fix:`; CHANGELOG `### Changed` (deliberate semantic shift); BUGS.md SMALL entry lifted to FIXED with `(fixed, v1.41.23)` tag; doc-comment characterizes the prior behavior as *"consistently surprising"* (regression-repair framing). The diff is structurally a behavior change in matcher semantics — anchored prefix replaced with substring; existing tests had to be rewritten because their data assumed the old semantics. The arc-05 PR #36 entry resolves the disposition: *"behavior change, framed and shipped as fix because the prior behavior was registered in BUGS.md SMALL as a user-reported bug,"* and the framing is *"internally consistent within the project's own classifications"* — but the four surfaces still classify differently. *Cite: arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5 (drift-findings block: "The `fix/` slug + `fix:` subject + `### Changed` CHANGELOG section + BUGS.md FIXED entry classification asymmetry is the genuine drift").*
+
+**Instance count: three.** All three candidate instances pre-collected by the brief verified against arc-entry citations. No revisions to the count.
+
+**Notes on counting convention and pattern boundary.**
+
+- *The arc-08-internal inverse-asymmetry pair.* PR #28 and PR #31 sit one calendar day apart in arc 08 and are the catalogue's two cleanest inverse-polarity instances of Pattern C. PR #28 over-claims-as-fix (additive content sitting under `### Fixed`); PR #31 under-claims-as-changed (fix content sitting under `### Changed`). The two PRs have opposite asymmetries: PR #28's diff is structurally an addition that the bucket frames as a fix; PR #31's diff is structurally a fix that the bucket frames as a change. That both occur in arc 08 within one day is observable; whether they read as a coherent classification policy (the maintainer treats user-report-origin as outweighing diff shape for `### Fixed` placement) or as two independent classification choices is for `insight-emergent-properties` to consider, not this thread.
+
+- *PR #36 as the broadest-surface instance.* PR #28 and PR #31 each show one bucket-vs-content asymmetry per PR (one CHANGELOG bucket disagreeing with one diff shape). PR #36 shows four-way asymmetry across four surfaces (subject + CHANGELOG + BUGS.md + doc-comment). The three instances span single-axis to four-axis classification drift; the pattern's amplitude varies but its identity (bucket-or-classification choice does not match diff shape or framing-of-content) is consistent.
+
+- *Cross-mention with Pattern A.* Pattern A's PR #31 instance and Pattern C's PR #31 instance describe the same PR through two different drift lenses: A is *commit-subject names two crates; diff names three*; C is *CHANGELOG bucket is `### Changed`; the bump is fix-framed*. These are two separate observable drifts at the same PR; the catalogue counts each in its own pattern.
+
+- *Pattern's stated direction is bidirectional.* Pattern A is unidirectional (subject *understates* diff). Pattern C is bidirectional (bucket *over-* or *under-claims* relative to content). The PR #28 / PR #31 inverse pair makes the bidirectional reading explicit. The pattern's identity is *misalignment*, not *direction-of-misalignment*.
+
+Provenance:
+- arc-08 PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M (drift-findings block; user-report-origin framing for the `### Fixed` placement choice).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (drift-findings block; recurring asymmetry across arc 08 noted).
+- arc-05 PR #36 entry = 01KR2AFHD42DHX6XQS7S6VK4M5 (drift-findings block; four-way asymmetry).
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
+- `insight-drift` Pattern A entry = 01KR3BA3CZWA6TZCDKNJZDPAGH (cross-mention of PR #31 in Pattern A's catalogue).
+
+<!-- Entry-ID: 01KR3BEGGEYB9VKTJ32WJNDG93 -->

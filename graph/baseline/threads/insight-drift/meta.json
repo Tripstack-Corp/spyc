@@ -5,7 +5,7 @@
   "title": "insight drift",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T08:31:18.931138+00:00",
+  "last_updated": "2026-05-08T08:32:16.441355+00:00",
   "summary": "The development thread focuses on \"insight drift,\" a phenomenon where observed patterns across multiple arcs are aggregated to identify common trends. Key decisions include the identification of five patterns, such as Commit-subject vs. diff-scope understatement and Bundle-as-shape, with the latter being the densest drift pattern. The outcomes highlight how these patterns reveal underlying trends in code changes and their implications for software development practices.",
-  "entry_count": 3
+  "entry_count": 4
 }
