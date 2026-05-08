@@ -93,3 +93,61 @@ Provenance:
 - All eight arc threads existing at the time of this thread's authorship (`history-arc-01-foundation-hygiene` through `history-arc-08-recoverability-and-deps`), with story-tails at arc 03 (= 01KR11S8RG29J98QKN1H0VAA6W), arc 04 (= 01KR13CJ5XS5VREYA4741JHDSQ), arc 05 (= 01KR2ANRAEFWWR5W9FQP11A0DB), arc 07 (= 01KR2JM67RTQHQYN0223GTKH1V), and arc 08 (= 01KR3A23E11K8F7VNVSM5XY6M2).
 
 <!-- Entry-ID: 01KR3HDVVQ5TS04SKHKWZKCXPY -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T10:17:59.463839+00:00
+Role: scribe
+Type: Note
+Title: Property 1: Description-layer permissiveness vs. functional reliability — the work-talked-about layer carries 16 drift instances; the work-itself layer carries 1
+
+Spec: scribe
+
+tags: #insight #emergent-properties
+
+**Property statement.** The codebase exhibits a strong asymmetry between *how the work is described* and *whether the work works*. The description-layer (commit subjects, CHANGELOG entries, BUGS.md naming, span-phrasing of the network's own framing) carries the dominant share of misnaming and bundling at moment of merge; the functional layer (does the documented capability work as documented) carries near-zero drift across the same 36 PRs. Reads as: spyc, as artifact, places its honesty surface at the running code, not at the messages around the code.
+
+**Evidence enumeration.**
+
+Description-layer drift, per `insight-drift`'s six pattern entries:
+
+- *Pattern A — Commit-subject vs. diff-scope understatement*: 5 instances (PR #2, PR #4, PR #5, PR #18, PR #31). Entry = 01KR3BA3CZWA6TZCDKNJZDPAGH.
+- *Pattern B — Bundle-as-shape*: 6 instances (PR #15, PR #20, PR #10, PR #25, PR #18, PR #14), the densest pattern. Entry = 01KR3BCQXGGB20V8C6Y6Z1Y944.
+- *Pattern C — Bucket-vs-content asymmetry*: 3 instances (PR #28, PR #31, PR #36), with arc-08 inverse-asymmetry pair. Entry = 01KR3BEGGEYB9VKTJ32WJNDG93.
+- *Pattern E — Within-PR self-correction*: 1 strict intra-diff instance (PR #30) plus 1 between-PR reframing (PR #31 reframing PR #30 at 49 minutes). Entry = 01KR3BK1VP3SZ5DM9VAQ01FFYX.
+- *Pattern F — Span-phrasing inconsistency*: 1 instance with two surfaces (the spine introduces "22-day window"; arc-04 closure walks it back). Entry = 01KR3BN3N6YF60414FFVHAM50Y.
+
+Total description-layer drift instances: **16 across 5 patterns** (per closure = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4: *"sixteen instances across six patterns"* — the count includes Pattern D as a sixth pattern; the breakdown above counts Pattern D separately at the functional layer for this property's accounting).
+
+Functional drift, per `insight-drift` Pattern D entry (= 01KR3BGMAKS4AZNZE2QFXH10W4):
+
+- *Pattern D — Documented-vs-wired drift at moment of merge*: 1 instance (PR #13 → PR #14, `:undo` shipped under `### Added` but not wired in `AppState::dispatch_command`'s punt list, closed in 25 minutes by PR #14's two-line punt-list addition).
+
+Total functional drift instances across 36 PRs: **1**, closed in 25 minutes.
+
+The negative-space tail (`insight-drift` Tail 1 = 01KR3BT6MNZMWRMHX14QMYZ86Y) names the categorical absences: no stub-then-fill-in drift; no test-asserts-wrong-thing drift; no config-vs-code-default drift; no renamed-but-not-everywhere drift; no phantom-feature drift; no commit-body / CHANGELOG / BUGS.md disagreement outside Pattern E's PR #30 instance. Every category of drift that *would* break the running spyc for a user is structurally absent. The 16 description-layer instances all sit at the talking-about-the-work layer; the 1 functional instance sits at the running-of-the-work layer and was repaired before the user's next session.
+
+**Strongest evidence.**
+
+`insight-drift` Tail 1's enumeration of negative-space is the most load-bearing single observation. The window produces zero stub-and-fill-in instances; zero test-vs-feature divergences; zero config-vs-default mismatches; zero phantom features. The categorical absence at the functional layer is structurally what makes the asymmetry a property rather than a count: if any one of those functional-drift categories had appeared, the property would weaken. None did.
+
+The 16-vs-1 count ratio across 36 PRs is the second-strongest evidence. The artifact's user-facing surface (CHANGELOG → command → behavior) is honest in 35 of 36 PRs; the artifact's reader-facing surface (commit subjects, slug bundling, BUGS.md naming, span-phrasing) is less precise in 16 of 36 PRs.
+
+The seed-channel naming corroborates at observer grain: `onboarding-risk-register` entry 0 (= 01KR0P9JC8Z3DF6FQ1GJPF3VKA) catalogues the bug class for Pattern D *"Bitten on `:undo` (v1.41.1) and `:limit` historically"* with PR #14's release tag verbatim. The single functional drift gets the most observer-side attention; the 16 description-layer drifts surface only via the arcs' drift-findings practice. Two channels protect against two reading failures.
+
+**Where the property would falsify.**
+
+A counter-instance would be a PR shipping with accurate description-layer naming and a functional bug — the inverse asymmetry. Pattern D's PR #13 → PR #14 is the closest the window comes; one instance, closed in 25 minutes. The property requires the description-layer drift count to dominate the functional drift count by a wide margin; within the 22-day window, the count is 16 vs. 1, a 16× margin with categorical absence on the functional side at every other category Tail 1 enumerated. No observation in the window refutes; the asymmetry holds.
+
+A future PR landing with a functional drift in any of Tail 1's negatively-named categories (stub, test, config, rename, phantom, three-channel-disagreement) would weaken the property by introducing a second functional-drift instance and a non-empty negative-space cell.
+
+**Tier-5 forward prediction.**
+
+Citing Pattern A through Pattern F's 16 description-layer instances + Pattern D's single functional instance + Tail 1's categorical-absence enumeration: post-window PRs will continue to produce description-layer drift at higher cadence than functional drift, with most functional drift closed within hours of merge. (Patterns A-F + Pattern D + Tail 1.)
+
+Provenance:
+- `insight-drift` framing = 01KR3B7KW5QNRWHG6YTV9QSF07; Pattern A = 01KR3BA3CZWA6TZCDKNJZDPAGH; Pattern B = 01KR3BCQXGGB20V8C6Y6Z1Y944; Pattern C = 01KR3BEGGEYB9VKTJ32WJNDG93; Pattern D (Pattern D — the sole functional-layer instance) = 01KR3BGMAKS4AZNZE2QFXH10W4; Pattern E = 01KR3BK1VP3SZ5DM9VAQ01FFYX; Pattern F = 01KR3BN3N6YF60414FFVHAM50Y; closure = 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4; Tail 1 (negative-space asymmetry) = 01KR3BT6MNZMWRMHX14QMYZ86Y.
+- Arc-08 PR #14 entry (Pattern D's close-side; "Repro: type `:undo` → flash 'unknown command: undo'" verbatim) = 01KR38XPJ07ZFQHH1TG6X461WN.
+- `onboarding-risk-register` entry 0 (the seed-channel naming of the `:undo` / `:limit` bug class) = 01KR0P9JC8Z3DF6FQ1GJPF3VKA.
+- `insight-emergent-properties` framing = 01KR3HDVVQ5TS04SKHKWZKCXPY.
+
+<!-- Entry-ID: 01KR3HG2GEBH1W8BKGT3CW6S9P -->
