@@ -187,3 +187,100 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (PR #5's gap-analysis suspect §3, mode-2026 tearing — pattern reference for stdout-as-protocol byte tolerance).
 
 <!-- Entry-ID: 01KR2J4M8BP0J3WKNED6EMSV1Y -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T01:11:50.009988+00:00
+Role: scribe
+Type: Note
+Title: PR #21 (feat/codex-mcp-config): two ensure_ functions, one socket — the parity question, answered at the registration layer
+
+Spec: scribe
+
+tags: #history #arc-07
+
+PR #21 closes the codex-parity series. Commit subject reads "feat: codex MCP discovery via .codex/config.toml (v1.41.8)" (commit 162fd81, 2026-05-04 21:28:22 -0400; merge 193f7ad, 2026-05-05 01:53 UTC — forty-six minutes after PR #19 merged, two hours and thirteen minutes after PR #18). The commit body opens "PR-C (final) of the codex parity series." Diff: 10 files, +324/-19. The substantial source change is concentrated in one file: `src/mcp.rs` gains 246 lines.
+
+PR #21 is the right vantage to answer the brief's parity question at the *registration layer* — the layer where each AI peer's discovery file gets written. PR #19 answered the question at the data-model layer (shared `AgentKind`, parallel parsers/strippers). PR #21 answers it at the file-format layer.
+
+**The single new top-level function: `ensure_codex_config_toml(dir, takeover_allowed)`.** The doc-comment opens by naming the parallel verbatim: "Codex's equivalent of `ensure_mcp_json`. Writes a stdio MCP entry for spyc into `<dir>/.codex/config.toml` so the codex CLI discovers us automatically, the same way claude does via `.mcp.json`." The function lives directly below `ensure_mcp_json` in `src/mcp.rs`. The two functions are siblings in source-order; nothing factored out.
+
+The structural mirror is exact at the body level. The internal closure pattern is the same: a `build_entry()` closure builds the spyc-specific TOML table; a `fresh()` closure produces the whole-file fallback when the existing file is malformed; a `match std::fs::read_to_string → match toml::from_str → top.as_table_mut → entry.as_table_mut` shape-check ladder maps directly onto PR #18's `serde_json::from_str → top.as_object_mut → entry.as_object_mut` ladder. The shape-safety pattern PR #18 *retrofitted* into `ensure_mcp_json` (the pre-existing function) is the pattern PR #21 *ships pre-baked* into `ensure_codex_config_toml` (the new function). Two days, two formats, one shape-safety rule applied symmetrically.
+
+**The TOML schema verbatim from the doc-comment.** The codex side writes `<project>/.codex/config.toml` with this shape:
+
+```toml
+[mcp_servers.spyc]
+command = "spyc"
+args = ["--mcp"]
+
+[mcp_servers.spyc.env]
+SPYC_MCP_SOCK = "/Users/x/.local/state/spyc/mcp-12345.sock"
+```
+
+The doc-comment names the JSON-vs-TOML mapping: codex's TOML schema is `[mcp_servers.<name>]` with `command`, `args`, and `env` keys for stdio servers, "parallel to claude's `.mcp.json` shape." Claude's `.mcp.json` shape (visible from the existing `ensure_mcp_json`) is `mcpServers.spyc` with the same three keys. Same shape, two serializations.
+
+**The shared substrate sits below both `ensure_*` functions.** Both registration files carry `SPYC_MCP_SOCK` in their `env` block (claude's `.mcp.json`'s `mcpServers.spyc.env.SPYC_MCP_SOCK`; codex's `.codex/config.toml`'s `[mcp_servers.spyc.env].SPYC_MCP_SOCK`). Both `command` keys re-exec `spyc --mcp`. The `spyc --mcp` stdio proxy connects to a single Unix socket per spyc instance — the same socket regardless of which agent's registration file directed the proxy. The commit body names the property explicitly: "The registration re-execs `spyc --mcp` and forwards through to the same Unix socket as the claude side, so a single MCP server backs both agents."
+
+This is the substrate layer the registration parallelism sits on top of. Two registration files, one socket, one server. The `--mcp` re-exec is the parametric layer that *makes* the substrate single-server: whichever file the agent reads, the proxy converges on the same socket.
+
+**The takeover-prompt seam — `detect_existing_spyc_codex` and a one-line OR.** A second new function in `src/mcp.rs` mirrors `detect_existing_spyc` for the codex side: `detect_existing_spyc_codex(dir)` reads `<dir>/.codex/config.toml`, extracts `mcp_servers.spyc.env.SPYC_MCP_SOCK`, returns the PID-from-sock-path if the socket connects and isn't our own. It's the codex-parser version of the claude-parser detection. The doc-comment names the role: "Mirrors `detect_existing_spyc` for the codex side; used by startup so a single takeover prompt covers both claude and codex."
+
+Inside `src/main.rs`, the takeover-prompt entry-point gains a one-line OR:
+
+```rust
+let Some(old_pid) =
+    mcp::detect_existing_spyc(&cwd).or_else(|| mcp::detect_existing_spyc_codex(&cwd))
+else {
+    return true;
+};
+```
+
+The inline comment above the change names the seam: "Either claude's `.mcp.json` or codex's `.codex/config.toml` can hold a stale-by-PID spyc entry; check both so the takeover prompt fires regardless of which agent the prior instance had configured." A single startup prompt now covers both peers; the per-peer detectors are the parallel pair, the prompt is the shared substrate.
+
+**Inside `src/app/mod.rs` — the wiring at startup.** A 22-line block is added directly below the existing `ensure_mcp_json` call. The new block calls `ensure_codex_config_toml(&self.state.listing.dir, takeover_allowed)`, matches on the same `McpConfigStatus` enum (`TookOver { old_pid }`, `SkippedTakeover { old_pid }`, etc.), and flashes informational messages prefixed `codex MCP:` instead of plain `MCP:`. The two calls share `takeover_allowed` from a single startup prompt, so the user is never prompted twice.
+
+The block's inline comment names two of the three asymmetries-versus-claude PR #21 carries:
+
+> Codex equivalent: write `.codex/config.toml` so the codex CLI discovers spyc's MCP server the same way claude does. Both agents share the same socket; the writer just registers a stdio entry that re-execs `spyc --mcp` to proxy. Failures here flash but don't gate startup — codex isn't required. Enterprise-flavored statuses are claude-specific; codex shouldn't return them, but if it ever does we treat them as a no-op.
+
+The "codex isn't required" framing is the policy choice that makes the codex-side `Err` arm fall through to a flash-and-continue rather than gating startup. Compare claude's: claude side similarly flashes errors. The two sides are symmetric on error-handling but the comment makes clear the *gating* asymmetry — codex isn't required for startup.
+
+**The asymmetries the registration files force.** Three are visible in the code or doc-comments and worth pulling out for the parity catalogue:
+
+1. *User-scope file is read but not written.* The doc-comment names this directly: "Codex reads both `~/.codex/config.toml` (user-scope) and `<cwd>/.codex/config.toml` (project-scope); we only ever write the project file to mirror claude's project-scoped behavior and avoid touching the user's main config." Claude's `.mcp.json` is project-scope only by convention (`<cwd>/.mcp.json`); codex has both scopes, and spyc respects the user-scope file as read-only.
+
+2. *Enterprise hooks are claude-only.* From the commit body: "Enterprise policies are claude-specific; codex has no equivalent `managed-mcp.json` hook so those branches don't apply." `ensure_mcp_json` honors `deniedMcpServers` / `allowedMcpServers` from `managed-settings.json` and suppresses the `.mcp.json` write if a Jamf-deployed `managed-mcp.json` already names a `spyc` server. `ensure_codex_config_toml` carries no equivalent branches because codex has no equivalent enterprise config surface.
+
+3. *Parent-directory creation.* `ensure_codex_config_toml` does `if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }` because `.codex/` is a subdirectory and may not exist. `ensure_mcp_json` writes `.mcp.json` directly into `dir`, no parent-creation step needed. A small implementation asymmetry that follows from the file-layout decision.
+
+**The four new tests** live in the same `tests` module as the JSON-side tests. They mirror the JSON tests' shape-safety assertions point-by-point: `codex_config_writes_fresh_when_missing` (parallel to a JSON `mcp_json_writes_fresh_when_missing` if it existed), `codex_config_preserves_other_servers` (asserts a pre-existing `[mcp_servers.other]` from another tool survives the splice), `codex_config_fresh_rewrite_on_malformed_input` (asserts a top-level non-table `not_a_section = 1` falls back to a clean rewrite), `codex_config_rewrites_completely_invalid_toml` (asserts `}}}}{{{ this is not toml` doesn't crash). The malformed-input test's source-comment names the rule: "Top-level array (not a table) must not panic — mirror the mcp.json shape-check fix from v1.41.5." The cross-PR reference to v1.41.5 — PR #18's MCP hygiene half — is verbatim in test source.
+
+**The parity question, answered for PR #21.** Registration is parallel: two `ensure_*` functions, two parsers, two file formats, two test sets, side-by-side in `src/mcp.rs`. Substrate is shared: one socket, one `spyc --mcp` proxy, one `McpConfigStatus` enum, one takeover prompt that ORs both detectors. The doc-comments name this distinction directly — "implementation mirrors `ensure_mcp_json`" at the function level; "single MCP server backs every supported agent" at the substrate level (verbatim from current AGENTS.md, post-PR-#21).
+
+What the PR doesn't do, and the doc-comments don't hide, is factor a `trait DiscoveryFileWriter` or generic-over-format machinery. The TOML and JSON paths share no traits; the shape-check ladder is repeated; the build-entry closures are duplicated with format-specific construction. Two functions side-by-side, one doc-comment naming each as the other's mirror, is the shape arc 06's tail (= 01KR2GYQPQRX08SV980SPHHZ80) named for harpoon and quickselect ("two parallel-shaped pickers ... different surface, different dispatch, different action set"); arc 04's tail (= 01KR13CJ5XS5VREYA4741JHDSQ) named for the parser-rule asymmetry in `parse_porcelain_statuses`. PR #21 ships the pattern at the registration layer.
+
+**Drift findings flagged for the insight layer.**
+
+- The branch is `feat/codex-mcp-config`; the commit subject reads `feat:`; CHANGELOG buckets under `### Added`. Three-way alignment.
+- The codex-side test `codex_config_fresh_rewrite_on_malformed_input` source-comment cross-cites the JSON-side fix PR #18 retrofitted ("mirror the mcp.json shape-check fix from v1.41.5"). The cross-PR reference *inside test source* is unusual for the 22-day window — the only other case the framing register has seen is PR #14's routing-fix immediately following PR #13's graveyard-undo (arc 08). PR #14 referenced PR #13 in commit message; PR #21's reference lives in test code-comment. Two recurrences across the 22-day window of "the next PR cites the prior PR's mechanic by version number."
+- `FEATURES.md` rewrites the MCP-server section to name both peers in the heading: pre-PR "MCP server (Claude integration)" → post-PR "MCP server (Claude + Codex integration)." The change is one line in the H2; the section body grows from one paragraph to a structured list with bullets for each peer's file. The framing register has now seen FEATURES.md grow this way three times in arcs 04, 05, 06; arc 07's pattern is the same.
+- The PR-C closure of the 3-PR codex-parity series adds 246 lines to `src/mcp.rs` (the file at `src/mcp.rs:1` was 2154 lines per the architecture seed; post-PR it's roughly 2400). The 9087-line `src/app/mod.rs` is well-known as "the big file" (AGENTS.md:38); `src/mcp.rs` at 2400+ post-arc-07 is the second-largest source file in the project. Whether the codex-parity work will eventually motivate factoring registration-file-writing into a sub-module is not narratable from the diffs in arc 07.
+
+Provenance:
+- 193f7ad (merge PR #21 feat/codex-mcp-config, 2026-05-05 01:53 UTC) — full PR.
+- 162fd81 (source commit, 2026-05-04 21:28:22 -0400) — commit body source ("PR-C (final) of the codex parity series").
+- `git show --stat 193f7ad` — 10 files changed, +324/-19; src/mcp.rs +246/-0.
+- `git diff 193f7ad^1..193f7ad^2 -- src/mcp.rs` — `ensure_codex_config_toml`, `detect_existing_spyc_codex`, doc-comments quoted above, 4 new tests.
+- `git diff 193f7ad^1..193f7ad^2 -- src/main.rs` — `detect_existing_spyc(&cwd).or_else(|| detect_existing_spyc_codex(&cwd))` — quoted above.
+- `git diff 193f7ad^1..193f7ad^2 -- src/app/mod.rs` — 22-line block calling `ensure_codex_config_toml`; inline comment quoted above.
+- `git diff 193f7ad^1..193f7ad^2 -- FEATURES.md` — H2 change; structured list of two peers with file paths.
+- `git diff 193f7ad^1..193f7ad^2 -- CHANGELOG.md` — `### Added` entry quoted from the file.
+- AGENTS.md (post-PR, line 9 references both peers; line 23 references "spice-themed name" for codex resume too).
+- `history-arc-07-codex-and-mcp-bridge` framing entry = 01KR2HYMMHAH316CA9KTWKWT6W.
+- `history-arc-07-codex-and-mcp-bridge` PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (shape-safety ladder PR #18 retrofit; PR #21's test cross-cites v1.41.5).
+- `history-arc-07-codex-and-mcp-bridge` PR #19 entry = 01KR2J4M8BP0J3WKNED6EMSV1Y (parallel-vs-shared at data-model layer).
+- `history-arc-04-git-integration` story-tail = 01KR13CJ5XS5VREYA4741JHDSQ (parser-rule asymmetry as a parallel-implementation precedent).
+- `history-arc-06-input-and-overlays` story-tail = 01KR2GYQPQRX08SV980SPHHZ80 (parallel-shaped pickers as a precedent for the parallel-at-registration pattern).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (current-state surface description names "Two transports share dispatch — `spyc --mcp` stdio proxy ... and the in-process socket listener" — the shared substrate above which PR #21 sits).
+
+<!-- Entry-ID: 01KR2J81DHNG4K8NHFVN0XMD1M -->
