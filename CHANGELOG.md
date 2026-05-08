@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`^a-v` scroll now keeps the bottom of the snapshot reachable.**
+  Reported: pressing `k` after entering scrollback view collapsed
+  the HUD off-screen and the view jumped; `gg` then `G` left the
+  HUD missing. Root cause: `handle_pager_key` computed the
+  viewport from `term_h * 92 / 100 - 2`, which is correct for the
+  centered overlay but wrong for `Mount::LowerPane` (the lower
+  pane slot is ~40 % of terminal height, not 92 %). The
+  inflated viewport made `scroll_by`'s `scroll_max` clamp return
+  a value smaller than the real maximum, so the pager refused
+  to scroll into the snapshot's last lines (where the HUD lives).
+  Fix: prefer the renderer's cached `last_viewport_h` — it's the
+  real body-area row count from the most recent frame and is
+  correct for every mount. Falls back to the heuristic only on
+  the very first key event before the renderer has run.
+
 - **`^a-v` snapshot now mirrors the live screen geometry.**
   Reported: opening pane scrollback via `^a-v` made text "jump"
   vertically and the latest pty output (e.g. claude HUD plugin

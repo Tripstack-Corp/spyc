@@ -1,11 +1,12 @@
 ### SMALL ###
+- our pager is now quite a competitor for less and should be the default for D
+  too
+- tab completion for : commands e.g. pa<tab> -> pane-to-tab
 - we should investigate the markdown viewer glow and steal features if it makes
   sense
 - when resuming with multiple claude / codex sessions - it seems that the
   individual sessions are not recalled; they all get brought into the same
   session recovery
-- our pager is now quite a competitor for less and should be the default for D
-  too
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
