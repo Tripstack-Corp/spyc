@@ -330,6 +330,12 @@ to lock you out of spyc.
   tab inherits the task's TERM (`dumb`, set when the `!` capture
   spawned), so plain shells and SGR-color output work fine but
   alt-screen TUIs won't suddenly start working in the new tab.
+- **`:pane-to-task`** is the symmetric inverse — moves the active
+  pane tab into the background-task list without killing the
+  child. Same `PtyHost` migrates between containers; same child
+  PID round-trips. The new task buffer starts empty (vim's `^z`
+  parity — visual context isn't recovered through the demote
+  boundary). Bring it back via `:fg` or `:task-to-pane`.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
   alongside pane-tab processes.
 

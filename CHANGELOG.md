@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`:pane-to-task` — demote the active pane tab to a background
+  task.** v1.5 Phase 6c, the symmetric inverse of `:task-to-pane`.
+  Same `PtyHost` moves between containers, the pty keeps running,
+  no quit-and-respawn. Useful when a tab you opened is fine to
+  let run quietly — push it to the background list with
+  `:pane-to-task`, bring it back later via `:fg` or
+  `:task-to-pane`. Round-trips with Phase 6b: same child PID
+  through both transitions.
+  - **Buffer recovery is empty start.** vim's `^z` parity:
+    fresh output accumulates from the demote point, prior
+    visual context is gone. Seeding the task buffer from the
+    vt100 grid would erase color (grid is cells; task buffer
+    is ANSI bytes). Acceptable — most uses are "I don't need
+    to look at this for a while" not "I need a screenshot."
+  - In-app `?` help row added under "Background tasks";
+    FEATURES.md mention added.
+
 - **`:task-to-pane [N]` — promote a backgrounded `!` task to a
   new pane tab.** v1.5 Phase 6b. Useful when an `!` task you
   started turns out to need persistent attention (a long-running

@@ -364,34 +364,52 @@ mod tests {
         }
     }
 
+    /// Drain test that doesn't fork a subprocess. We feed the
+    /// reader-thread function a `std::io::Cursor` over a known
+    /// byte buffer, then verify the pumped chunks come back out
+    /// of the channel in order, followed by a `Closed` on EOF —
+    /// exactly the contract every consumer (Pane,
+    /// PendingCapture, BackgroundTask) depends on. No
+    /// `user_shell_invocation`, no rc files, no parallel-load
+    /// timing variance.
+    ///
+    /// This replaced an earlier `spawn_and_drain_echo` test that
+    /// spawned a real `echo` and waited for it to exit. That
+    /// test was flaky because PtyHost spawns through
+    /// `$SHELL -i -c <cmd>` (interactive — pulls in the user's
+    /// full rc-file load). Even on machines that pass it
+    /// reliably, the deadline depends on the developer's shell
+    /// config, which is the wrong shape for a unit test.
     #[test]
-    fn spawn_and_drain_echo() {
-        let mut host = PtyHost::spawn(echo_spec()).expect("spawn echo");
-        let mut collected: Vec<u8> = Vec::new();
-        // Loop until we observe close. `echo` is a one-shot command,
-        // but under parallel-test load (cargo test default) the
-        // spawn → exec → write → exit chain can take a noticeable
-        // moment. 10s is generous; in practice we usually see the
-        // close in ~50 ms.
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !host.closed && std::time::Instant::now() < deadline {
-            host.drain(|bytes| collected.extend_from_slice(bytes));
-            std::thread::sleep(Duration::from_millis(20));
+    fn reader_loop_pumps_bytes_then_signals_close() {
+        let payload: Vec<u8> = b"alpha\nbeta\n".to_vec();
+        let reader =
+            Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>;
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pending_cl = std::sync::Arc::clone(&pending);
+
+        let thread = std::thread::spawn(move || super::reader_loop(reader, &tx, &pending_cl));
+
+        // Collect events until we observe Closed. The reader
+        // pumps in 8 KB chunks, then sees EOF (Cursor read
+        // returns Ok(0)) and emits Closed.
+        let mut got_bytes: Vec<u8> = Vec::new();
+        let mut got_close = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !got_close && std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(PtyEvent::Bytes(b)) => got_bytes.extend_from_slice(&b),
+                Ok(PtyEvent::Closed) => got_close = true,
+                Err(_) => {}
+            }
         }
-        // One more drain to harvest anything posted right before
-        // close (race: reader thread queues bytes and Closed in
-        // quick succession, drain only sees the bytes the first
-        // time around).
-        host.drain(|bytes| collected.extend_from_slice(bytes));
+        thread.join().unwrap();
+        assert!(got_close, "reader_loop must emit Closed on EOF");
+        assert_eq!(got_bytes, payload, "byte stream must round-trip in order");
         assert!(
-            host.closed,
-            "echo should have exited within deadline; collected so far: {:?}",
-            String::from_utf8_lossy(&collected)
-        );
-        let text = String::from_utf8_lossy(&collected);
-        assert!(
-            text.contains("hello"),
-            "expected 'hello' in echo output, got: {text:?}"
+            pending.load(std::sync::atomic::Ordering::Relaxed),
+            "pending flag must be set when bytes arrive"
         );
     }
 
