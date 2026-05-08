@@ -112,3 +112,63 @@ Provenance:
 - `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07 (analyst register and methodology declared).
 
 <!-- Entry-ID: 01KR3BA3CZWA6TZCDKNJZDPAGH -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:31:18.928920+00:00
+Role: scribe
+Type: Note
+Title: Pattern B: Bundle-as-shape — six instances across five arcs, the densest drift pattern in the network
+
+Spec: scribe
+
+tags: #insight #drift
+
+**Pattern statement.** A single PR carries multiple thematically-distinct concerns under one slug. The concerns do not share a root cause, do not necessarily share files, and would be individually shippable. The PR ships them as one because they were noticed-while-shipping, because they share infrastructure introduced for one of the concerns, or because the maintainer's framing at moment-of-merge collapsed them into a single unit. The drift is at the slug level: one slug names one concern (or one prefix-marked kind of change), and the diff carries more.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **PR #15 (arc 04) — basename-collision (87L) + ^C-route guard (5L).** Commit subject reads *"fix: ^C → pane child + git markers don't leak across same-name files (v1.41.2)"* (commit 5999261, 2026-05-04). Two halves: a 75-line refactor extracting `parse_porcelain_statuses` from `git_file_statuses` plus 5 new unit tests in `src/sysinfo.rs` (the basename-collision fix); a 5-line guard tightening on the `^C` footgun in `src/app/mod.rs::App::handle_key` (the pane-control fix). The two halves do not share a root cause and do not share files. The commit subject's left-to-right order is the *inverse* of the diff weight — title leads with the smaller half. *Cite: arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (drift-findings block: "The two halves do not share a root cause. They share a PR.").*
+
+2. **PR #20 (arc 05) — alt-screen scroll hint + `[pane] default_command` + `gd`-vs-HEAD.** Commit subject reads *"feat: alt-screen scroll hint + [pane] default_command + gd-vs-HEAD (v1.41.7)"* (commit ee07307, 2026-05-05). Three concerns named explicitly in the subject; only one is the user-visible headline (the alt-screen hint). The three halves do not share a code path. The bundling itself is the drift, not any individual half. The arc-05 PR #20 entry confirms the disposition against the diff: *"Each half is a clean, individually shippable change; the bundling itself is the drift."* *Cite: arc-05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7 (drift-findings block); also flagged at history-overview segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P.*
+
+3. **PR #10 (arc 06) — quickselect feature + `gf`/`gF` scroll-mode `### Fixed` half.** Commit subject reads *"quick select: ^a u labeled-overlay picker for pane output (v1.40.0)"* (commit 9043547, 2026-05-02). The PR ships under a `feat/` slug, but the CHANGELOG carries both an `### Added` block (the quickselect feature) and a `### Fixed` block (`gf`/`gF` honoring scroll mode via the new `pickable_text` helper). The fix shares infrastructure with the new feature — `pickable_text` is the contract introduced for quickselect, with `gf`/`gF` becoming the second consumer — but the `### Fixed` half is a separately-noticeable bug whose existence is independent of quickselect. *Cite: arc-06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (drift-findings block: "The `feat/quickselect` PR ships a `### Fixed` half … bundled under the feature slug").*
+
+4. **PR #25 (arc 06) — input-dispatch hardening + `--key-trace` diagnostic infrastructure.** Commit subject reads *"fix: input dispatch hardening + --key-trace diagnostic switch (v1.41.12)"* (commit bfc4a18, 2026-05-06). Two concerns named at the subject. The hardening half itself contains two distinct guards (post-chord bounce-suppression on `Action::PaneFocusDown`/`PaneFocusUp`; stranded-paste flash on `Event::Paste` fall-through) under one bug-report symptom. The diagnostic half is a 64-line new module (`src/key_trace.rs`) plus a CLI argument plus a startup banner — infrastructure shipped *with* the defensive fix specifically so the next user-report comes with a reproduction log. The infrastructure has no immediate consumer beyond the bug PR #25 already addresses. *Cite: arc-06 PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (drift-findings block; bundle-pattern recurrence within arc 06 noted at this entry against PR #10 and arc-04 PR #15).*
+
+5. **PR #18 (arc 07) — AGENTS.md rename + MCP hygiene fixes + a deferred-design BUGS.md note.** Commit subject reads *"chore: AGENTS.md rename + MCP hygiene fixes (v1.41.5)"* (commit bad8bfc, 2026-05-05). The slug names two halves; the diff carries effectively three (the rename, the MCP hygiene bundle of `ensure_mcp_json` panic-fix + `Pane::spawn` `context_path` parameter widening + `term_title::wrap_*_tmux` test lock, and a 13-line BUGS.md `### SMALL ###` entry that pre-names a design issue with three solution options). The BUGS.md note is the third half whose load-bearing role becomes legible only at PR #37 two days later — the note frames the design issue, ranks the options (*"Option (b) feels most spyc-shaped"*), and PR #37 implements exactly option (b) and removes the note. *Cite: arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (drift-findings block: "The PR title weights the rename and the MCP hygiene as equal halves … the diff weights the MCP hygiene at 80+% of the substantive changes"; the BUGS.md note as a third bundled half).*
+
+6. **PR #14 (arc 08) — routing fix (2L) + `.gitignore` (2L) + `CLAUDE.md` (1L).** Commit subject reads *"fix: route :undo / :graveyard to App's handler (v1.41.1)"* (commit c7419c1, 2026-05-03). The load-bearing change is two lines added to `AppState::dispatch_command`'s punt list; the same diff also adds 2 lines to `.gitignore` and 1 line to `CLAUDE.md` (still that filename pre-PR-#18's rename). The arc-08 PR #14 entry names the bundling as *"tangential; not load-bearing for the supersession reading,"* which is honest — the bundling is small-scale, the load-bearing change is the routing fix, and the `.gitignore`/`CLAUDE.md` additions ride along. The drift instance is real but lower-amplitude than the others. *Cite: arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN (drift-findings block: "PR #14 also adds two lines to `.gitignore` … The diff's content for `.gitignore` is not the load-bearing part of the PR but is bundled in").*
+
+**Instance count: six.** All six candidate instances pre-collected by the brief verified against arc-entry citations. No revisions to the count.
+
+**Notes on counting convention and pattern boundary.**
+
+- *Density across arcs.* Pattern B has six instances spread across five arcs (arc 04, arc 05, arc 06 ×2, arc 07, arc 08). The arc with two instances is arc 06 — the only arc to surface Pattern B twice in its own four-PR span. Whether arc 06 has two instances *because* it has only four PRs (a smaller denominator inflates the visible rate) or because the arc's subject matter (input + overlays) lends itself to bundle-as-shape (the diff that introduces a picker contract naturally invites secondary consumers under the same slug) is a question the analyst register should decline. Captured factually.
+
+- *Smallest vs. largest instance.* PR #20 is the densest (three concerns named in the subject); PR #14 is the smallest (the load-bearing change is two lines; the bundled additions are five lines total). Pattern B holds across an order-of-magnitude variation in instance amplitude. The pattern's identity is structural (subject names one concern, diff carries multiple) rather than diff-size-based.
+
+- *Cross-mention with Pattern A.* PRs #18 and #31 surface in Pattern A's catalogue too. The drift in those PRs is dual: the diff bundles concerns the slug doesn't fully name (B), *and* the slug's prefix understates the user-visible weight of the bundled concerns (A). The catalogue does not double-count. PR #15 and PR #20 are B-only because the subjects accurately enumerate the concerns the diff carries — the drift is the *bundle's existence*, not a description-level mismatch on what's bundled.
+
+- *Cross-reference for `insight-recurrence`.* Bundle-as-shape is observable as drift (this thread, where the unit is the *misnaming-at-moment-of-merge*) and as recurrence (where the unit would be *bundling happens N times across the project*). Both threads should treat it. The closure entry to this thread carries the canonical placement recommendation for the next session's author.
+
+**Sub-shapes within Pattern B (not warranting separate patterns).**
+
+- *Bundle-of-noticed-while-shipping* (PRs #15, #14): two unrelated fixes ride one PR because both were spotted in proximity. No shared infrastructure.
+- *Bundle-of-shared-infrastructure* (PRs #10, #25): a feature half and a fix or diagnostic half ride one PR because both consume a contract introduced for the feature.
+- *Bundle-of-equal-weight-concerns* (PR #20): three concerns each independently shippable and roughly comparable in size, all under one `feat/` slug.
+- *Bundle-of-rename-plus-groundwork-plus-deferred-design-note* (PR #18): a rename half + a hygiene half + a BUGS.md design note that brackets future work; the PR is doing three different kinds of structural move at once.
+
+These are sub-shapes, not separate patterns. The unifying observation: across six PRs in five arcs, a single slug carries multiple concerns the diff treats as separable. The bundling pattern is the densest of the six drift patterns in the network.
+
+Provenance:
+- arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ.
+- arc-05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7.
+- arc-06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898.
+- arc-06 PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3.
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ.
+- arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN.
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (PR #20 three-concern bundle drift flag at original source).
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
+- `insight-drift` Pattern A entry = 01KR3BA3CZWA6TZCDKNJZDPAGH (cross-mention of PRs #18 and #31).
+
+<!-- Entry-ID: 01KR3BCQXGGB20V8C6Y6Z1Y944 -->
