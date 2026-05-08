@@ -5,7 +5,7 @@
   "title": "insight recurrence",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T08:55:52.136370+00:00",
-  "summary": "The development thread focuses on identifying recurring event-shape patterns in PRs, with a particular emphasis on insight-recurrence. Key decisions include the declaration of a tier-2 register and the restatement of a boundary rule regarding insight-drift. The outcome is the establishment of a framework for analyzing recurring patterns in PRs.",
-  "entry_count": 1
+  "last_updated": "2026-05-08T08:57:10.507476+00:00",
+  "summary": "The development thread focuses on insight-recurrence, identifying recurring event-shape patterns across multiple PRs. Pattern 1, Bundle-as-shape, highlights six PRs across five arcs where multiple concerns are bundled, reflecting a structured approach to understanding recurring issues. The outcome is a framework for analyzing insight-drift through these patterns, enhancing the ability to detect and address recurring problems in software development.",
+  "entry_count": 2
 }

@@ -77,3 +77,64 @@ Provenance:
 - Federated search to watercooler-cloud's `onboarding-spyc-rust-bitbucket` namespace not attempted at this entry; the brief permits writing the insight thread from spyc-side arc entries alone, and the catalogue is well-sourced from the eight arcs' drift-findings, story-tails, and `insight-drift`'s established cross-references without external sourcing.
 
 <!-- Entry-ID: 01KR3CSQ2YHQ2TD8EAE6DJCTS3 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:57:10.505470+00:00
+Role: scribe
+Type: Note
+Title: Pattern 1: Bundle-as-shape (recurrence reading) — six instances across five arcs, the project-shape behind insight-drift's densest pattern
+
+Spec: scribe
+
+tags: #insight #recurrence
+
+**Pattern statement (recurrence framing).** Bundling-of-multiple-concerns-under-one-PR is a recurring shape across the 22-day window. Six instances span five arcs. The recurrence reading asks: *across the project, how often does a single PR carry multiple thematically-distinct concerns, and what kinds of bundling shapes appear at the project grain?* The drift reading (insight-drift's Pattern B = 01KR3BCQXGGB20V8C6Y6Z1Y944) asks the same six instances a different question: *at moment of merge, does the slug accurately describe what the diff carries?* Both questions resolve to the same six PRs. This entry takes the project-grain reading and refuses to re-litigate the descriptive-accuracy reading; the cross-reference does the work.
+
+**Instance enumeration — cross-referenced to insight-drift Pattern B for descriptive verification, claimed here for the recurrence shape.**
+
+The six instances are catalogued at insight-drift's Pattern B entry (= 01KR3BCQXGGB20V8C6Y6Z1Y944) with full per-PR detail:
+
+1. **PR #15 (arc 04)** — basename-collision parser-extraction (87L) + ^C-route guard (5L). *Arc-entry citation: 01KR130775Q4PKYEN6FE1743DJ.*
+2. **PR #20 (arc 05)** — alt-screen scroll hint + `[pane] default_command` + `gd`-vs-HEAD. *Arc-entry citation: 01KR2A6TT516XA5FEGVBXYPWD7.*
+3. **PR #10 (arc 06)** — quickselect feature + `gf`/`gF` scroll-mode `### Fixed` half. *Arc-entry citation: 01KR2GH1D9QCGDPZEMWW09R898.*
+4. **PR #25 (arc 06)** — input-dispatch hardening (two enumerated cases) + `--key-trace` diagnostic infrastructure. *Arc-entry citation: 01KR2GMSNX29CWFN154QBK6TJ3.*
+5. **PR #18 (arc 07)** — AGENTS.md rename + MCP hygiene fixes + a deferred-design BUGS.md note that brackets future work. *Arc-entry citation: 01KR2J1R3HXNZPAHE9118BGBQJ.*
+6. **PR #14 (arc 08)** — routing fix (2L) + `.gitignore` (2L) + `CLAUDE.md` (1L). *Arc-entry citation: 01KR38XPJ07ZFQHH1TG6X461WN.*
+
+**Instance count: six.** The count matches insight-drift's Pattern B verification. No revisions. The recurrence reading does not need to re-do the per-PR diff-weight arithmetic; insight-drift's Pattern B carries that work and this thread cites it.
+
+**The recurrence reading the drift framing did not have an angle for: what kinds of bundling shapes recur?**
+
+Insight-drift's Pattern B catalogued four sub-shapes within the six instances (bundle-of-noticed-while-shipping; bundle-of-shared-infrastructure; bundle-of-equal-weight-concerns; bundle-of-rename-plus-groundwork-plus-deferred-design-note). Those sub-shapes are the load-bearing observation for the recurrence reading too — the recurrence is not generic-bundling; it is a small set of legible bundling-shapes that recur with their own internal structure. The six instances distribute across the four sub-shapes:
+
+- **Bundle-of-noticed-while-shipping** (two instances): PR #15 and PR #14. Two unrelated fixes ride one PR because both were spotted in proximity. No shared infrastructure, no shared call chain, no shared root cause. The smallest amplitude (PR #14: 2 + 2 + 1 = 5 lines bundled around the load-bearing 2-line routing fix). The recurrence reading: this sub-shape is the cheapest kind of bundle — the cost of opening a separate PR for a 2-line `.gitignore` addition exceeds the cost of bundling it with the routing fix.
+
+- **Bundle-of-shared-infrastructure** (two instances): PR #10 and PR #25. A feature half and a fix-or-diagnostic half ride one PR because both consume a contract introduced for the feature. PR #10's `pickable_text` helper is consumed by quickselect (the feature) and by `gf`/`gF` (the fix); PR #25's `--key-trace` infrastructure is consumed by the defensive guards and by future bug reports. The recurrence reading: this sub-shape is the sub-shape where the bundle is *load-bearing for shipping the feature itself* — the new contract is the connection.
+
+- **Bundle-of-equal-weight-concerns** (one instance): PR #20. Three concerns each independently shippable and roughly comparable in size, all under one `feat/` slug. The densest single instance. Recurrence reading: a one-instance sub-shape; the catalogue does not promote it.
+
+- **Bundle-of-rename-plus-groundwork-plus-deferred-design-note** (one instance): PR #18. A rename half + a hygiene half + a BUGS.md design note that brackets future work; the PR is doing three different *kinds* of structural move at once. Recurrence reading: a one-instance sub-shape; the catalogue does not promote it. PR #18's BUGS.md note is the named-half that PR #37 closes two days later — the *named-then-fixed bracket* recurrence at Pattern 4's two-day grain originates here.
+
+**Notes on bundling distribution and pattern boundary.**
+
+- *Density across arcs.* The six instances spread across five arcs (arc 04, arc 05, arc 06 ×2, arc 07, arc 08). Arc 06 is the only arc with two instances in its four-PR span. Insight-drift's Pattern B made this observation factually and declined to interpret; this thread carries the same factual observation and the same decline. The recurrence reading adds a small refinement: arc 06's two instances are *both* bundle-of-shared-infrastructure shape, the only two such shape instances in the catalogue. Arc 06 contributes 2/2 of that sub-shape; whether that means the picker-overlay-introducing PRs structurally invite consumer-ride-along bundles is a question for `insight-emergent-properties`. Captured factually here.
+
+- *Sub-shape distribution as recurrence evidence.* Two-of-six is the noticed-while-shipping sub-shape; two-of-six is the shared-infrastructure sub-shape; one-of-six each for the equal-weight and rename-plus-groundwork sub-shapes. The 2-2-1-1 distribution is small enough that *recurrence* is the right word for the noticed-while-shipping and shared-infrastructure sub-shapes; *single instance with a name* is the right word for the equal-weight and rename-plus-groundwork sub-shapes. The catalogue does not promote 1-instance sub-shapes to "the sub-shape recurs."
+
+- *Cross-reference for the drift reading.* The drift reading's question — *does the slug accurately describe the diff?* — is what insight-drift's Pattern B answered. The six diffs answer *no, with varying amplitude*: PR #15's slug names the smaller half first; PR #20's slug names all three concerns explicitly; PR #14's slug names only the load-bearing concern; PR #18's slug names two of three halves; PR #10's slug is `feat/quickselect` and the CHANGELOG carries `### Fixed` content; PR #25's slug names both halves. The drift amplitude varies; the bundling itself recurs. *Recurrence and drift are different lenses on the same six PRs.*
+
+- *Boundary with the named-then-fixed bracket pattern.* PR #18's BUGS.md design note is part of PR #18's bundle (this entry's instance 5 / sub-shape 4); the same note is the open-side of the named-then-fixed bracket at Pattern 4's two-day grain (PR #18 → PR #37). The catalogue does not double-count: PR #18 is a bundle instance here; the *PR #18 → PR #37 bracket* is a separate observation in Pattern 4. Same diff, two distinct shapes.
+
+- *No additional instances.* Verification did not reveal a seventh bundle instance in the eight arcs. The brief's six is the instance count.
+
+Provenance:
+- `insight-drift` Pattern B entry = 01KR3BCQXGGB20V8C6Y6Z1Y944 (six-instance enumeration with per-PR diff weights, sub-shape taxonomy, drift framing).
+- arc-04 PR #15 entry = 01KR130775Q4PKYEN6FE1743DJ (bundle instance 1).
+- arc-05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7 (bundle instance 2).
+- arc-06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898 (bundle instance 3).
+- arc-06 PR #25 entry = 01KR2GMSNX29CWFN154QBK6TJ3 (bundle instance 4).
+- arc-07 PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (bundle instance 5; also Pattern 4 named-then-fixed bracket open-side).
+- arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN (bundle instance 6).
+- `insight-recurrence` framing entry = 01KR3CSQ2YHQ2TD8EAE6DJCTS3.
+
+<!-- Entry-ID: 01KR3CW3DBHPTB6K8R8047TBCP -->
