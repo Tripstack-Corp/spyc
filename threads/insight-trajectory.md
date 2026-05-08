@@ -323,3 +323,107 @@ Provenance:
 - `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
 
 <!-- Entry-ID: 01KR3EW3166JZ59TDR8PYMGN4T -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:33:56.723338+00:00
+Role: scribe
+Type: Note
+Title: Documents #4 and #5: the product charter and its non-goals — substrate-level widening with registration-level peer-specificity; five non-goals all honored across the window
+
+Spec: scribe
+
+tags: #insight #trajectory
+
+The product charter and its non-goals read as one entry because the non-goals trajectory is the charter trajectory's complement. The charter names what spyc *is* in positive form; the non-goals name what spyc explicitly *isn't*. Both surfaces are maintainer-authored at `ROADMAP.md`, both are sourced at the `onboarding-product-charter` seed (entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH), and both reads against the eight-arc record carry their own load-bearing observation.
+
+---
+
+**Document #4 — the product charter at `ROADMAP.md:3-23`.**
+
+Stated-plan content, verified at current-state `ROADMAP.md:3-23`:
+
+> *"spyc is a vi-keyboard-driven file commander that exposes itself to an AI coding agent as a queryable context source. The target user is a developer who already thinks in vi motions and wants Claude Code living in the same workspace -- not one window over, not in a browser tab, in the same session, sharing context.*
+>
+> *The MCP server (M14) shifted the tool's nature: spyc isn't just 'a file manager with Claude in a pane.' It's a file manager that Claude can query -- current directory, cursor, picks, inventory, filter, git branch -- via a standard protocol. That bidirectional awareness is the positioning that differentiates spyc from `tmux` + `claude`.*
+>
+> *Every other feature -- picks, inventory, pager, status bar, sessions -- is supporting infrastructure that makes the split-pane workflow fast and comfortable. The roadmap is organized accordingly: the pane-and-agent integration is the defining work track, not the trailing milestone."*
+
+The charter's load-bearing word is "Claude" — singular. The thesis sentences ("an AI coding agent"; "Claude Code"; "Claude can query"; "differentiates spyc from `tmux` + `claude`") frame spyc as a tool whose *defining* differentiating bet is bidirectional awareness with one specific AI peer.
+
+**Trajectory observation: the charter's "Claude" widens at substrate-level; stays peer-specific at registration-level.** Arc 07 (= 01KR2HYMMHAH316CA9KTWKWT6W framing; PR #21 = 01KR2J81DHNG4K8NHFVN0XMD1M; PR #37 = 01KR2JCF7QEJHEG30TVMWY79CQ) executes the codex-as-second-peer addition across three PRs:
+
+- *PR #18* (2026-05-05) — chore/AGENTS.md rename plus MCP hygiene. Threads `context_path` through `Pane::spawn`; introduces the `.spyc-context-<pid>.json` marker file convention.
+- *PR #19* (2026-05-05) — codex session save/restore parity with claude.
+- *PR #21* (2026-05-05) — codex MCP discovery via `.codex/config.toml`; the second `ensure_*` registration file lands.
+- *PR #37* (2026-05-07) — MCP socket discovery is now project-scoped; the function `discover_live_socket(caller_cwd)` is *peer-agnostic* (walks `.spyc-context-<pid>.json` markers regardless of which peer is calling).
+
+The arc 07 PR #37 entry is explicit on the substrate-vs-registration distinction (consistent with arc 07's story-tail = 01KR2JM67RTQHQYN0223GTKH1V): *"The function `read_context_pids_in_dir(dir)` reads `dir`, extracts entries whose names match `.spyc-context-<pid>.json`, parses the PID via `pid_str.parse::<u32>()`, and returns the PID list."* The discovery walk is peer-agnostic; one socket, peer-agnostic discovery.
+
+But the registration files are peer-specific: `.mcp.json` for claude, `.codex/config.toml` for codex. Two `ensure_*` registration files side-by-side in `src/mcp.rs`; each peer-specific. The substrate (the marker-walk discovery) is generalized; the registration is not.
+
+**The trajectory disposition for the charter's "Claude" word.** At substrate-level, the charter's word *widens to "the AI peer"* — discovery, the marker-file convention, and `Pane::spawn`'s `context_path` parameter all treat "the queryable context source" as peer-agnostic. At registration-level, the charter's word *stays peer-specific* — claude and codex have their own registration paths, neither a generalization. The charter's sentence "*It's a file manager that Claude can query*" is *slightly modifiable* to "*It's a file manager that the AI peer can query*" without breaking against the substrate-level execution; the registration-level reads as continuing peer-specificity by intent (codex shipped as a parallel peer, not as a parameterized peer).
+
+The charter is not *fully generalized* in the parametric sense (no peer-generic registration; each new peer gets its own `ensure_*` file). The trajectory is partial-widening at substrate-level; non-widening at registration-level. The charter sentence's "Claude" is therefore not exactly-honored, not exactly-broken — it has shifted at one architectural layer and stayed at another. That asymmetry is the trajectory observation.
+
+---
+
+**Document #5 — the product charter's non-goals at `ROADMAP.md:426-447`.**
+
+Stated-plan content, verified at current-state `ROADMAP.md:426-447`:
+
+> *"Native Windows support. WSL is the supported story... Plugin system. A decade of maintenance debt for a feature 3% of users will touch... Localization. English only. The target audience reads English docs. Telemetry. Not even anonymized opt-in... SLSA L3 / supply-chain theatre. Minisign signatures + SBOM + a reproducible build job are proportionate. Full SLSA attestation infrastructure is not. Mouse support beyond what already exists. Old roadmap mentions it; deprioritize indefinitely. The tool is keyboard-first by thesis."*
+
+Six non-goals enumerated. Trajectory disposition for each across the 22-day window:
+
+- **Native Windows support.** HONORED. Verified by absence and by CI matrix: `bitbucket-pipelines.yml` matrix (per arc 01 entries / `onboarding-test-surface` references) targets macOS / Linux only; no `windows-latest` job. No PR in the 22-day window adds Windows-specific paths or compilation guards. `portable-pty` is in the dep graph (technically Windows-capable), but no commit narrates a Windows test pass or platform-specific arm.
+
+- **Plugin system.** HONORED. No PR in the 22-day window adds a plugin-loading surface, dynamic-library hook, or extension-point registry. The customization surfaces that exist (`.spycrc.toml`, the keymap layer) stay as they were; none gain plugin-system shape.
+
+- **Localization.** HONORED. No PR in the 22-day window adds an `i18n/` directory, gettext-style infrastructure, or per-language string table. Verified at `onboarding-risk-register` entry 0's drift-finding #4: *"No `i18n/` directory, no localized README. `ROADMAP.md:434-436` lists localization as an explicit non-goal."*
+
+- **Telemetry.** HONORED. No PR in the 22-day window adds outbound network calls, anonymous-usage-data emission, or opt-in telemetry plumbing. The MCP socket and stdio-proxy paths are local-only; the `:fg` / `:task` viewers are intra-process; no per-PR entry narrates a telemetry surface.
+
+- **Full SLSA L3 / supply-chain theatre.** HONORED. The proportionate-not-exhaustive supply-chain controls land per arc 01: `cargo-deny` ignores at `deny.toml:72-94` (five long-lived advisory ignores per `onboarding-risk-register`); SECURITY.md authored at PR #3; `cargo-deny` in CI per `bitbucket-pipelines.yml`. SLSA attestation infrastructure is not introduced. Five advisory ignores survive the trio bump (per this thread's document #8 entry below).
+
+- **Mouse support beyond what already exists.** HONORED. Verified at this thread's document #1 entry (gap-analysis suspect §2 = NON-EXECUTED-AS-NON-GOAL). No PR in the 22-day window enables mouse capture in `src/main.rs::setup_terminal` or adds a `KeyCode::Mouse(_)` arm to `src/pane/input.rs`. PR #6 (zoom) does not invoke mouse; PR #10 (quickselect) is keyboard-only labeled-overlay with alphabetic labels. The non-goal-honoring is observable both negatively (no execution) and positively (charter's non-goal explicitly named at `ROADMAP.md:445-447`).
+
+**Six non-goals; six honored across the window. The cleanest non-trajectory in the network.**
+
+The non-trajectory framing is the load-bearing observation: where stated-plan documents anchor *positive* recommendations to track (gap-analysis suspects §1-§3; catalogue §1-§7; ROADMAP additions #1-#3; charter's "Claude"), the trajectory has shape (resolved / partial / deferred / non-executed; with various asymmetries). Where stated-plan documents anchor *negative* recommendations (the six non-goals), the trajectory has uniform honor across the window. The charter's non-goals are the cleanest stated-plan-vs-execution match in the network: zero divergences across six items.
+
+A pattern observation worth flagging at trajectory-grain: the catalogue's *negative* recommendations (the four skip items at §1, §3-log-half, §6, §7) were *also* honored exactly across the window (per this thread's document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC). The 22-day window's stated-plan-vs-execution shape carries the *same* asymmetry across two surfaces:
+- Negative recommendations (charter non-goals; catalogue skips): all honored exactly, all negative-trajectory cleanest.
+- Positive recommendations (catalogue adapts; ROADMAP additions; charter's "Claude" word; gap-analysis suspect §1): trajectory has shape (partial / direction-aligned / deferred / resolved), none cleanly exactly-honored except non-execution-as-aligned (suspect §2).
+
+The negative-vs-positive asymmetry is a tier-3 *count* observation; whether it reflects an emergent property is forbidden here. The trajectory thread states the count.
+
+**The charter as a positive-and-negative pair, summarized.**
+
+The charter's positive framing ("Claude... bidirectional awareness... split-pane workflow") sees substrate-level widening (peer-agnostic discovery; one marker-file convention) and registration-level stay-as-is (two peer-specific `ensure_*` files). Partial widening; the charter's sentence is shift-able without breaking but not fully generalized.
+
+The charter's non-goals (six items) sees uniform honor across the window. Zero divergences.
+
+The pair shape: positive-framing has shape; negative-framing has uniform honor. The trajectory observation is the asymmetry of these two halves of the same charter document.
+
+**Cross-thread cross-reference.** insight-recurrence's closure (= 01KR3DFHA7FRV3BXEH2Z8SFJQN) flagged that *"Pattern 1 (bundle-as-shape) is uncorrelated with stated plans... no ROADMAP entry or charter section addresses bundling-discipline."* That observation is structurally adjacent to this entry's positive-vs-negative framing: the charter's positive framing speaks to the bidirectional-awareness bet; the non-goals speak to capabilities-not-pursued. Bundling-discipline (insight-recurrence's Pattern 1) is at neither register and therefore uncorrelated with stated plans, as insight-recurrence's closure named factually.
+
+**Boundary with `insight-emergent-properties`.** The cleanness of the non-goals trajectory is the most acute tier-4 temptation in this entry: the temptation to name *what kind of project* produces uniform-honor on six negative recommendations and partial-shape on positive recommendations is high. The trajectory thread states the count (six honored; the positive-framing's substrate-vs-registration asymmetry); the property name is `insight-emergent-properties`'s.
+
+Provenance:
+- `ROADMAP.md:3-23` current state — charter sentences quoted verbatim above.
+- `ROADMAP.md:426-447` current state — six non-goals quoted verbatim above.
+- `bitbucket-pipelines.yml` — macOS / Linux matrix only (per `onboarding-test-surface` references); no `windows-latest` job.
+- `deny.toml:72-94` — five long-lived advisory ignores; non-goal-aligned with proportionate-supply-chain framing.
+- `onboarding-product-charter` entry 0 = 01KR0P18MCE1H57Q5ZTAGKAJNH (charter source; non-goals enumeration; SLSA-and-mouse non-goals named).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (drift-finding #4 confirms localization non-execution; advisory-ignore catalogue informs SLSA non-goal honoring).
+- `history-arc-07-codex-and-mcp-bridge` framing entry = 01KR2HYMMHAH316CA9KTWKWT6W (groundwork → expansion → closure framing).
+- `history-arc-07-codex-and-mcp-bridge` PR #18 entry = 01KR2J1R3HXNZPAHE9118BGBQJ (`Pane::spawn` `context_path` parameter; marker-file convention).
+- `history-arc-07-codex-and-mcp-bridge` PR #21 entry = 01KR2J81DHNG4K8NHFVN0XMD1M (codex MCP discovery; second `ensure_*` registration file).
+- `history-arc-07-codex-and-mcp-bridge` PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ (peer-agnostic discovery walk; substrate-level widening).
+- `history-arc-07-codex-and-mcp-bridge` story-tail entry = 01KR2JM67RTQHQYN0223GTKH1V (substrate-vs-registration observation source).
+- `insight-trajectory` document #1 entry = 01KR3ENV1WP6R9SFRE1QME291S (gap-analysis suspect §2 non-goal-honored).
+- `insight-trajectory` document #2 entry = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (catalogue skip-vs-adapt asymmetry; complementary observation).
+- `insight-recurrence` closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN (Pattern 1 uncorrelated-with-stated-plans observation; cross-reference).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+
+<!-- Entry-ID: 01KR3EZDWSTW7TPWBY7KXB0KB3 -->
