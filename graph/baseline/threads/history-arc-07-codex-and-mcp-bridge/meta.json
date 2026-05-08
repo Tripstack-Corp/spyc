@@ -5,7 +5,7 @@
   "title": "history arc 07 codex and mcp bridge",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-08T01:15:49.334110+00:00",
+  "last_updated": "2026-05-08T01:18:28.020835+00:00",
   "summary": "The development thread focuses on improvements to the MCP transport and Codex, with key decisions including the renaming of `CLAUDE.md` to `AGENTS` and the introduction of a shared data model and parallel parsers for session-resume. These changes enhance interoperability and functionality, marking a progression from groundwork to closure in the Arc 07 history.",
-  "entry_count": 6
+  "entry_count": 7
 }
