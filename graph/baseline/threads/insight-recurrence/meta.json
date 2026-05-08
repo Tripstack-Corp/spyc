@@ -1,0 +1,11 @@
+{
+  "id": "thread:insight-recurrence",
+  "type": "thread",
+  "topic": "insight-recurrence",
+  "title": "insight recurrence",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-08T08:55:52.136370+00:00",
+  "summary": "The development thread focuses on identifying recurring event-shape patterns in PRs, with a particular emphasis on insight-recurrence. Key decisions include the declaration of a tier-2 register and the restatement of a boundary rule regarding insight-drift. The outcome is the establishment of a framework for analyzing recurring patterns in PRs.",
+  "entry_count": 1
+}
