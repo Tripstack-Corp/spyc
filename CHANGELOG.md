@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Opening `?` no longer flickers the underlying pane back to
+  live-pty / file-list rendering.** Reported as the polish
+  follow-up to v1.50.1: the help overlay opens correctly and
+  dismisses correctly, but for the lifetime of the help the
+  underlying TopPane / LowerPane pager would visibly redraw
+  with the *non-pager* content (live pty in the lower slot,
+  file list in the top slot). The user saw text "jump" while
+  help was up, even though dismissing landed back in the right
+  place. Cause: `top_pager` / `bottom_is_pager` checks read
+  `self.pager.mount`, which is `Mount::Overlay` while help is
+  active — so the slots reverted to default rendering for those
+  frames. Fix: when help is open, peek into `pager_help_stash`
+  for the slot mount so the underlying pager keeps drawing in
+  its slot, and the centered help overlay paints on top.
+
 - **`?` from a non-Overlay pager now dismisses back to the same
   pager.** Reported: `D` opens a file in the top pane → `?` opens
   pager help → dismissing help dropped the user into a stale
