@@ -5,6 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`?` from a non-Overlay pager now dismisses back to the same
+  pager.** Reported: `D` opens a file in the top pane → `?` opens
+  pager help → dismissing help dropped the user into a stale
+  file-viewer overlay (or nothing), not back into the TopPane
+  pager. Same root-cause regression for `^a-v` lower-pane
+  scrollback. The `?` handler was pushing the pre-help pager
+  onto `pager_history`, which silently filters out
+  `no_history=true` views — and both v1.5 mounts set that flag
+  intentionally (so `[b`/`]b` doesn't surface them). Fix: a
+  dedicated `pager_help_stash` slot, exempt from the
+  `no_history` filter, restores the pre-help pager verbatim
+  (same content, same mount, same `pane_scroll` flag).
+
 ## [1.50.0] - 2026-05-08
 
 The pager / task-viewer unification. The pager grew from "overlay
