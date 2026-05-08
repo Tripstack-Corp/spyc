@@ -734,3 +734,55 @@ Provenance:
 - All eight arc threads' per-PR entries (cited at the relevant per-document entries) are the load-bearing infrastructure this catalogue was built atop.
 
 <!-- Entry-ID: 01KR3F9EF9WF9Q34FRAR2XPSZS -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T09:40:54.747571+00:00
+Role: scribe
+Type: Note
+Title: Tail: trajectory's upstream is the maintainer-authored stated-plan documents themselves — and the per-PR entries' back-reference architecture made cross-document reading legible
+
+Spec: scribe
+
+tags: #insight #trajectory #tail
+
+insight-recurrence's story-tail (= 01KR3DM9DBRV6MBA4D516KRR12) named that *the arc story-tails — the cumulative-grain entries at the arc layer — were that thread's upstream*, in contrast to insight-drift's per-PR drift-findings practice. The asymmetry was structural: drift is per-PR observation; recurrence requires cumulative grain.
+
+This thread's upstream is different again, and the asymmetry is again structural.
+
+The trajectory thread's upstream runs in two layers, and both layers are *outside the per-arc record* in different senses.
+
+**Layer 1 — the maintainer-authored stated-plan documents themselves.** PR #5's two notes files plus the three ROADMAP additions plus the charter at `ROADMAP.md:3-23` plus the non-goals at `:426-447` plus the v2.0 framing at `:472-476` plus the cadence reference at `:451-453` plus the seed entry 0 of `onboarding-risk-register` (the advisory-ignore catalogue). Eight stated-plan documents, all maintainer-authored, all available *outside the network's narration of execution*. None of these documents are arc entries. They are the *inputs to the trajectory thread*, not derivatives of the per-PR entries.
+
+That is what makes trajectory tier-3 work distinctively. The trajectory question is *what does the network of arcs look like against the maintainer's own forward-statements?* — and the maintainer's forward-statements are not at the arc layer. They live in `ROADMAP.md`, `notes/...` (relocated to `BUGS.md`), the charter sentences, the v2.0 paragraph, and the supply-chain config files. The trajectory thread reads *across* the per-PR record, holding the stated-plan documents as the constant register that the arcs execute against. This is structurally upstream of any single arc — like Pattern F (insight-drift's = 01KR3BN3N6YF60414FFVHAM50Y) was for the spine-level framing, the entire trajectory catalogue is upstream of the arcs.
+
+But the per-PR entries are still what made the trajectory readable — that's Layer 2.
+
+**Layer 2 — the per-PR entries' back-reference architecture.** The arc 02 investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) is the most load-bearing single piece of infrastructure in the trajectory catalogue. It quotes the gap analysis verbatim, names the catalogue §-disposition assignments, names PRs #20 / #33 / #35 / #8 / #10 as the §2 / §4 alignment partners, and defers §3 explicitly to arc 08. The investigation entry is the *single authoritative reading* the arc record provided of PR #5's two notes files — and almost every per-document entry in this trajectory catalogue cited it.
+
+The investigation entry was not the only critical upstream node. Arc 03's PR #29 entry verifies §1 resolution at code level. Arc 05's PR #20 entry verifies §2 partial. Arc 05's PR #33 entry plus PR #35 entry verify §4 DIRECTION ALIGNMENT (pager-as-mode side). Arc 06's PR #8 entry plus PR #10 entry verify §4 PARALLEL PATTERN (standalone-overlay side). Arc 07's PR #37 entry verifies the substrate-level widening of the charter's "Claude" word. Arc 08's PR #31 entry verifies §3 resolution plus advisory-ignore stability. The arc 05 closure (= 01KR2AJVZA1E85YSKHF4FNRQQ3) and arc 05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) carry the cumulative §4 reading at arc-grain. The arc 07 framing entry plus story-tail carry the substrate-vs-registration distinction.
+
+The structure was deliberate per the arc 02 framing entry's mandatory back-reference contract (cited from `history-overview` PR #5 special-handling entry): downstream PRs that execute against PR #5's stated-plan content *must* back-reference arc 02. PR #20, PR #33, PR #35, PR #8, PR #10, PR #29, PR #31 all do. The trajectory thread did not need to derive each per-PR's relationship to PR #5 from diff inspection; the arc record had already done so, and the per-PR entries cited the arc 02 investigation entry as the canonical source.
+
+**The asymmetry between this thread's upstream and insight-recurrence's.** Insight-recurrence's tail named the upstream as the *story-tails* — the cumulative-grain entries at the arc layer. This thread's upstream is two-layered: the *stated-plan documents* (outside the per-arc record entirely) plus the *per-PR back-references* (at the arc layer but with their cumulative-grain implications resolved at the arc 02 investigation entry plus arc 05 / arc 07 closure entries). The story-tails were *secondarily* upstream — the arc 04 story-tail (= 01KR13CJ5XS5VREYA4741JHDSQ) at machinery-chains; the arc 07 story-tail at substrate-vs-registration; the arc 08 story-tail at the eight-arc cumulative reading — but the *primary* upstream was the per-PR entries' back-reference architecture against the stated-plan documents.
+
+This is what makes trajectory work uneven across documents. Documents #1, #2, #3 (the lazygit corpus) had the densest per-PR back-reference architecture — six PRs across four arcs with mandatory back-references to PR #5's gap analysis or catalogue. Reading the corpus's trajectory was almost entirely a matter of assembling the back-references the per-PR entries had already laid down. Documents #4-#5 (the charter and non-goals) had a thinner back-reference architecture — the charter's "Claude" word is not directly back-referenced by arc 07's PRs; the substrate-vs-registration reading lives at arc 07's story-tail rather than at any PR-level diff comment. Reading the charter's trajectory required cross-source synthesis that the per-PR entries did not pre-stage. Document #6 (v2.0) had no back-reference architecture — no PR back-references the v2.0 framing at all. The trajectory had to be derived from the absence-of-execution against the v2.0 gate items plus the pre-staging-visibility plus the within-window observation. Document #7 (cadence) is *the* case where the absence-of-plan demanded the absence-of-trajectory-claim. Document #8 (advisory ignores) had a single per-PR back-reference (arc 08 PR #31's empty `deny.toml` diff verification).
+
+The trajectory work distributes unevenly across the catalogue: the lazygit-corpus documents are roughly two-thirds-back-reference-assembly, one-third trajectory-grain refinement; documents #4-#8 are roughly one-third-back-reference-assembly, two-thirds cumulative-grain synthesis. The estimate is rough; the asymmetry is real.
+
+**What this means for `insight-emergent-properties`.** That thread's upstream will run heavier still on cumulative-grain synthesis, because emergent properties are tier-4 and structurally upstream of any single arc. The trajectory observations this catalogue produces are themselves upstream material for the emergent-properties thread — the asymmetries (skip-honored-exactly versus adapt-all-modified; non-goals uniform-honor versus charter-positive partial-widening; gap-analysis-suspects three-for-three versus catalogue §4 four-PR DIRECTION ALIGNMENT) are *what insight-emergent-properties has data on*. Where this thread had the stated-plan documents to anchor against, that thread has *this thread's six per-document entries* as a primary anchor. The chain of upstream relationships across the four insight threads — drift relies on per-PR drift-findings; recurrence relies on arc story-tails; trajectory relies on per-PR back-references plus stated-plan documents; emergent-properties will rely on the trajectory catalogue plus the recurrence catalogue plus the drift catalogue — is not coincidence. The four insight threads are sequenced *because each thread's primary upstream is the prior thread's output*, structurally.
+
+The infrastructure-tail forecast at insight-drift (= 01KR3BVVYN37WDWJ5A3D8A5XWH) named the per-PR drift-findings practice as the upstream that made the drift catalogue legible. The recurrence-tail forecast at insight-recurrence (= 01KR3DM9DBRV6MBA4D516KRR12) named the story-tails as the upstream. This trajectory-tail names the per-PR back-reference architecture *plus the stated-plan documents* as this thread's upstream. The emergent-properties tail will run heavier still on cumulative reading; the tail-prediction stack now reads consistently across three threads.
+
+The thread is left OPEN.
+
+Provenance:
+- `insight-drift` infrastructure tail = 01KR3BVVYN37WDWJ5A3D8A5XWH (the upstream-naming pattern this tail re-uses with the trajectory upstream).
+- `insight-recurrence` story-tail = 01KR3DM9DBRV6MBA4D516KRR12 (story-tails-as-upstream observation; cross-reference for the asymmetry-of-upstreams reading).
+- arc 02 investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T (the single most load-bearing piece of infrastructure in this trajectory catalogue).
+- arc 03 PR #29 entry = 01KR10G02J2234D0WBMWMYC35M; arc 05 PR #20 entry = 01KR2A6TT516XA5FEGVBXYPWD7; arc 05 PR #33 entry = 01KR2AAX12XSNRNZPTXJT2TXJA; arc 05 PR #35 entry = 01KR2AD5PV989H58E49E5D18NM; arc 06 PR #8 entry = 01KR2GCH3Q8DR9DATBBC802Q8W; arc 06 PR #10 entry = 01KR2GH1D9QCGDPZEMWW09R898; arc 07 PR #37 entry = 01KR2JCF7QEJHEG30TVMWY79CQ; arc 08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (per-PR back-reference architecture).
+- `history-arc-05-pager-surface` closure = 01KR2AJVZA1E85YSKHF4FNRQQ3; `history-arc-05-pager-surface` story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB (cumulative §4 reading at arc-grain).
+- `history-arc-07-codex-and-mcp-bridge` story-tail = 01KR2JM67RTQHQYN0223GTKH1V (substrate-vs-registration distinction's arc-grain source).
+- `insight-trajectory` framing entry = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+- `insight-trajectory` closure entry = 01KR3F9EF9WF9Q34FRAR2XPSZS.
+
+<!-- Entry-ID: 01KR3FC6D4NH972M9MF4NYDYC6 -->
