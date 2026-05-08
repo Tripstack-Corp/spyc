@@ -399,3 +399,116 @@ Provenance:
 - `history-arc-08-recoverability-and-deps` PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M.
 
 <!-- Entry-ID: 01KR393P15VTJSZ1WGYGZ8ZS01 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T07:53:38.390562+00:00
+Role: scribe
+Type: Note
+Title: PR #31 (chore/vt100-and-ratatui-upgrade): the trio bump, six call-site adjustments, "smaller than I'd previously framed it" — and arc 02's suspect §3 closes here
+
+Spec: scribe
+
+tags: #history #arc-08
+
+PR #31 is the fifth and last move in arc 08 and the proper-fix-to-PR-30's-defended-against-bug move. The diff is wide-but-shallow at source level (5 source lines changed across `src/pane/mod.rs` and `src/pane/widget.rs`) and deep at lockfile level (`Cargo.lock` carries 839 lines of transitive-dep churn from the trio bump). Commit subject reads "chore: upgrade vt100 0.15 → 0.16, ratatui 0.29 → 0.30 (v1.41.18)" (commit fc1789d, 2026-05-06 15:00 -04 / merged 2026-05-06 19:16 UTC) — 49 minutes after PR #30's merge. PR #31 closes arc 08; the next PR after it on `main` is arc 06's PR #32 (chord-priority fix), which lands 53 minutes later and belongs to a different arc.
+
+The entry captures three things this single PR does at once: (a) the trio dep bump (vt100 + ratatui + ansi-to-tui, with the unicode-width transitive pin as the forcing function); (b) the six call-site adjustments the bump required at source level; (c) the closure of arc 02's gap-analysis suspect §3 (mode 2026 / synchronized output) — the longest single back-reference trace in the eight-arc network.
+
+**The trio: not just vt100.**
+
+The commit subject names two upgrades; the diff and commit body name three. The third is `ansi-to-tui 7 → 8`, named verbatim in the commit body and in the CHANGELOG: "**Upgraded vt100 0.15 → 0.16, ratatui 0.29 → 0.30, ansi-to-tui 7 → 8.**" The forcing function for the trio is named verbatim in the commit body:
+
+> "Smaller than I'd previously framed it: vt100 0.16 needs `unicode-width ≥0.2.1`, but ratatui 0.29 pins it to `=0.2.0` — so the upgrade was a coordinated trio with ansi-to-tui 7 → 8, which already supported ratatui 0.30."
+
+The dep-graph constraint (`unicode-width ≥0.2.1` from vt100 0.16, vs `=0.2.0` from ratatui 0.29) is the structural driver: the vt100 bump alone is impossible without bumping ratatui to a release whose unicode-width pin is loose enough; ratatui's major bump (0.29 → 0.30) then forces the ansi-to-tui major bump (7 → 8) because ansi-to-tui 7 was pinned to ratatui 0.29. The trio is not three independent decisions — it is one decision whose cost is three crate-major-version bumps because the dep graph constraints are interleaved.
+
+The CHANGELOG names the same constraint chain verbatim: "The transitive `unicode-width` pin forced the ratatui major bump along with it; ansi-to-tui needed to follow to a ratatui-0.30-compatible release." The framing reads as the dep-graph being legible-but-coupled — the maintainer can do the arithmetic on which crates need to move together; the cost is that "vt100 upgrade" is a misnomer for what ships.
+
+**The reframing of "smaller than I'd previously framed it."**
+
+Arc 08's framing entry quotes this fragment as the explicit reframing of PR #30's "right-but-bigger fix" framing. The verbatim reframing in PR #31's commit body:
+
+> "The vt100 bump is the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17). Smaller than I'd previously framed it..."
+
+Arc 08's framing reads this as PR #31 self-correcting the prior framing within 49 minutes. The reframing is also visible at the BUGS.md level: PR #30's MAYBE block (added the same morning) had said "Should evaluate API churn vs. the wins in one go... Defer until someone has a clear afternoon — touches every place that holds a `vt100::Screen` reference." PR #31 deletes that MAYBE block in the same diff that ships the upgrade. The "defer until someone has a clear afternoon" framing was authored by PR #30's diff at 13:48 -04 and retired by PR #31's diff at 15:00 -04 — a 72-minute span across the two commits. The "clear afternoon" arrived as the same afternoon the deferral was authored.
+
+**The six source-level call-site adjustments.**
+
+The actual code change is small. `src/pane/mod.rs` has four call sites (and four hunks); `src/pane/widget.rs` has one. The commit body names the two API changes verbatim:
+
+> "vt100 0.16 moved `Parser::set_size` and `Parser::set_scrollback` to `Screen`; six call sites in pane/mod.rs now go through `parser.screen_mut()`. vt100 0.16 `Cell::contents` returns `&str` directly (was `String`-ish in 0.15), so widget.rs drops the `&` borrow that clippy flags."
+
+The four `pane/mod.rs` hunks change `self.parser.set_size(rows, cols)` → `self.parser.screen_mut().set_size(rows, cols)` and `self.parser.set_scrollback(...)` → `self.parser.screen_mut().set_scrollback(...)` (the latter at three call sites; total six hunks claimed in the commit body, four visible in the source diff). The discrepancy between the commit-body's "six call sites" and the four visible hunks is verifiable: two of the four hunks are in `apply_scroll`-style methods that could plausibly be counted as multiple call sites depending on counting convention. The discrepancy is small and not load-bearing for the PR's correctness.
+
+The `widget.rs` change is one character: `&contents` → `contents`. The diff:
+
+```rust
+-                let ch: &str = if contents.is_empty() { " " } else { &contents };
++                let ch: &str = if contents.is_empty() { " " } else { contents };
+```
+
+Pre-PR-#31, `contents` was a `String`-ish type that needed a `&` to coerce to `&str`; post-PR-#31, `Cell::contents` returns `&str` directly, and the borrow is redundant (clippy flags it). The diff drops the `&`. This is the smallest source-level change in arc 08 and the entire reason `widget.rs` shows up in the file list at all.
+
+**The catch_unwind retention.**
+
+PR #31's commit body confirms PR #30's safety net persists verbatim: "The catch_unwind safety net from v1.41.17 stays — costs nothing on the happy path, and any third-party parser can hit edge cases on some obscure escape sequence." The CHANGELOG repeats the framing: "The `catch_unwind` safety net from v1.41.17 stays — any third-party parser can hit edge cases on rare escape sequences, and the cost is zero on the happy path."
+
+Arc 08's framing reads the safety-net-bought-budget question (raised in arc 02's investigation entry and inherited by arc 08) as **partly true, partly refuted**:
+
+- *Partly true*: PR #30's recovery-as-shipped continues to operate under PR #31. Without PR #30's `panic = "unwind"` profile flip, the recovery wouldn't fire in release builds; PR #31 inherits that flip and does not revert it.
+- *Partly refuted*: The reframing is explicit in PR #31's commit body. PR #30 was framed as the only feasible response in the next 49 minutes because the upgrade was "right-but-bigger." PR #31 reframes — the upgrade was actually six call-site adjustments and one borrow-drop. The "safety net bought budget" reading positions PR #30 as preconditional infrastructure; the reframing positions PR #30 as belt-and-suspenders for a bug-class that survives the specific 0.15 fix. The catch_unwind exists for reasons beyond vt100 0.15; PR #30's value is permanent, not provisional, and not strictly necessary for PR #31 to ship.
+
+The structural fact PR #31 records: defensive-then-corrected at 49-minute grain, where the corrected-fix is small and the defensive-fix is permanent. This shape is distinct from the hot-fix shape of PR #14 (where the defensive-fix was cited via a behavior description; the corrected-fix did not happen because PR #14 *was* the corrected fix) and distinct from arc 03's silent supersession.
+
+**The mode-2026 / OSC 8 closure of arc 02's suspect §3.**
+
+The longest cross-thread trace in the eight-arc network closes at PR #31. Arc 02's investigation entry (= 01KR0YXXZRQR24CSNAK4Q7808T) catalogued suspect §3 verbatim from `notes/lazygit-gap-analysis.md`: "tcell wraps every redraw in `\x1b[?2026h … \x1b[?2026l`. vt100 0.15 has no parse arm for 2026 — bytes are dropped, but more importantly, spyc never gets the 'buffer until end-of-frame' hint, so during a fast diff scroll or commit-list page-down the renderer reads a half-finished frame and paints it." The arc-02 author deferred verification to arc 08: "Whether arc 08's PR #31 (`chore/vt100-and-ratatui-upgrade`, vt100 0.15 → 0.16) incidentally addresses suspect §3 is determinable only from inspection of vt100 0.16's release notes; the arc-02 author defers to arc 08 for that empirical check."
+
+The empirical check, against PR #31's diff:
+
+- **Option (a) — diff or commit body explicitly names mode-2026 / synchronized output.** ANSWERED YES at three independent surfaces:
+  - Commit body (commit fc1789d, 2026-05-06): "Also retires the two MAYBE entries from BUGS.md about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks) — both should now parse correctly under 0.16."
+  - CHANGELOG block (under `### Changed`): names the trio bump and the panic fix; does not name mode 2026 by name. Neutral on §3.
+  - BUGS.md diff: removes both MAYBE entries (the upgrade-motivation entry PR #30 had added; the mode-2026 entry PR #12 had lifted from `notes/lazygit-gap-analysis.md`) and adds a `(fixed, v1.41.18)` block whose closing line reads verbatim: "Also retires the two MAYBE entries about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks) — both should now parse correctly."
+
+The verification is option (a). PR #31's diff explicitly names mode 2026 / synchronized output as resolved. The maintainer's claim "should now parse correctly under 0.16" is the load-bearing assertion; the actual upstream verification of vt100 0.16's parse arms is not in the diff (no vendored vt100 source landed; the `vt100 = "0.16"` line in `Cargo.toml` is the only artifact). The arc-08 author treats the maintainer's claim as the authoritative resolution because (i) the arc-02 author's deferral named "inspection of vt100 0.16's release notes" as the path to resolution and the maintainer's commit body / BUGS.md write-up presents itself as that inspection's output, and (ii) the upgrade actually shipped, with the trio's transitive-dep coordination intact, so the underlying claim is testable in the running spyc.
+
+The arc 02 → arc 08 cross-thread closes as **resolution**, not deferral. Per the arc-08 framing, three for three on suspect-resolution-or-deferral:
+
+- §1 (cursor-block) — answered in arc 03 by PR #29.
+- §2 (mouse) — non-executed across the whole window; aligns with charter non-goal.
+- §3 (mode 2026) — answered here.
+
+Arc 08's framing entry already records this as factual handoff. The PR #31 entry confirms it at code-and-text level.
+
+**The advisory-ignore reduction: zero.**
+
+`git diff 105db8d^1..105db8d^2 -- deny.toml` is empty. The five long-lived `cargo-deny` advisory ignores from the `onboarding-risk-register` seed entry 0 catalogue all survive: RUSTSEC-2026-0009 (time via syntect→plist), RUSTSEC-2024-0320 (yaml-rust via syntect), RUSTSEC-2025-0141 (bincode via syntect), RUSTSEC-2024-0436 (paste via ratatui), RUSTSEC-2017-0008 (serial via portable-pty). The `paste` ignore is specifically transit-via-ratatui per the seed's `reason` field; the ratatui 0.29 → 0.30 bump did not eliminate the `paste` dependency. Captured factually; the per-PR entry does not relitigate the framing's catalogue.
+
+**Drift findings flagged for the insight layer.**
+
+- The commit subject names two crates ("vt100 0.15 → 0.16, ratatui 0.29 → 0.30"); the diff and commit body name three (adding `ansi-to-tui 7 → 8`). The third crate is the dep-graph cost of the second — not a separable decision — but the commit subject's two-name framing understates the change's footprint. A reader scanning the commit log without arc threads sees a two-crate `chore`; the diff is a three-crate trio with one hidden coupling (the `unicode-width` transitive pin). Arc 01's segmentation entry's drift catalogue named PR #20 as "packages three unrelated concerns under a single `feat/` slug; only one of the three appears as the title headline." PR #31's shape is different (the three concerns are dep-graph-coupled, not unrelated) but the commit-subject-understates-the-diff drift is recurring.
+- The CHANGELOG bucket is `### Changed`, not `### Fixed`, even though the bump is "the proper fix for the `screen.rs:934.unwrap()` panic." The bucket-as-described-by-the-bucket vs. bucket-as-described-by-the-content is asymmetric here. PR #28 chose `### Fixed` for additive defensive work; PR #31 chooses `### Changed` for a fix-shaped dep bump. Recurring asymmetry across arc 08; observed factually.
+- vt100 0.16 is the "proper fix" for the panic per the commit body, but no test in PR #31 exercises the specific `screen.rs:934.unwrap()` byte stream that PR #30 defended against. The verification that the upgrade actually fixes the panic is implicit in upgrading-and-not-seeing-the-panic-anymore. PR #30's `process_bytes_safe` remains on the call path because it costs nothing on the happy path; if vt100 0.16 still has an edge-case panic on the same byte stream, the recovery would catch it and the test environment would never know. Captured factually; the failure-mode-coverage and the test-coverage do not align here.
+- The arc 02 → arc 08 cross-thread closure is the longest single trace in the eight-arc network. Arc 02's investigation entry → PR #12 harvest entry → arc 08's framing entry → PR #31 entry. Five PRs, four entries, two arcs, eight calendar days. Arc 02's framing positioned the investigation entry as "the citable target — dense enough to hub the network, no denser than the 399 lines of source warrant"; arc 08's PR #31 entry is the trace's terminus. Whether the eight-day, five-PR span reads as long or short for a §3-class question is for the insight layer.
+- The framing-entry observation that "three for three on suspect-resolution-or-deferral" is now grounded in three traces that all close. Whether this reads as a property of the gap-analysis-as-method (the suspects were good enough to track to disposition over an 8-day window) or a property of the arcs-as-narrative (the arcs created the cross-thread structure that made tracing possible) is for the insight layer.
+
+Provenance:
+- 105db8d (PR #31 chore/vt100-and-ratatui-upgrade, 2026-05-06) — full PR.
+- fc1789d — PR #31's feature-branch commit; commit body verbatim quoted throughout this entry, including "Smaller than I'd previously framed it" (load-bearing reframing) and "The catch_unwind safety net from v1.41.17 stays" and "Also retires the two MAYBE entries from BUGS.md about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks) — both should now parse correctly under 0.16."
+- e39f462 → fc1789d — parent and tip SHAs for the diff inspection.
+- `git diff e39f462..fc1789d -- Cargo.toml`: `version = "1.41.17"` → `version = "1.41.18"`; `ratatui = "0.29"` → `"0.30"`; `vt100 = "0.15"` → `"0.16"`; `ansi-to-tui = "7"` → `"8"`.
+- `git diff e39f462..fc1789d -- Cargo.lock`: 839 lines of transitive-dep churn (unicode-width pin resolution + ratatui 0.30 dep tree + ansi-to-tui 8 dep tree).
+- `git diff e39f462..fc1789d -- src/pane/mod.rs`: four hunks rewriting `self.parser.set_size(...)` → `self.parser.screen_mut().set_size(...)` and `self.parser.set_scrollback(...)` → `self.parser.screen_mut().set_scrollback(...)`.
+- `git diff e39f462..fc1789d -- src/pane/widget.rs`: one hunk; `&contents` → `contents`.
+- `git diff e39f462..fc1789d -- BUGS.md`: -24 lines (MAYBE upgrade entry + MAYBE mode-2026 entry + MAYBE OSC 8 entry, all removed); +6 (FIXED v1.41.18 block with the "retires the two MAYBE entries about mode 2026 (synchronized output) and OSC 8 (terminal hyperlinks)" sentence).
+- `git diff e39f462..fc1789d -- CHANGELOG.md`: 15 lines added under `[Unreleased]` `### Changed`; the trio-bump rationale and forcing-function chain quoted verbatim above.
+- `git diff e39f462..fc1789d -- deny.toml`: empty.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T — gap-analysis suspect §3 verbatim; deferral language verbatim; arc-02-to-arc-08 cross-thread closes here.
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 — BUGS.md MAYBE mode-2026 lift; "defer until someone notices" framing; PR #31's diff retires the entry.
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA — five `cargo-deny` advisory ignores; PR #31 resolves zero.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — current-state pane PTY ownership; PR #31's six call-site adjustments touch the surface.
+- `history-arc-08-recoverability-and-deps` framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80.
+- `history-arc-08-recoverability-and-deps` PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 — the diff PR #31 reframes within 49 minutes.
+
+<!-- Entry-ID: 01KR397RTYNS34SAGM46YJJRBY -->
