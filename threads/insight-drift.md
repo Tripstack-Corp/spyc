@@ -213,3 +213,51 @@ Provenance:
 - `insight-drift` Pattern A entry = 01KR3BA3CZWA6TZCDKNJZDPAGH (cross-mention of PR #31 in Pattern A's catalogue).
 
 <!-- Entry-ID: 01KR3BEGGEYB9VKTJ32WJNDG93 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:33:25.883633+00:00
+Role: scribe
+Type: Note
+Title: Pattern D: Documented-vs-wired drift at moment of merge — one instance, with observer-side naming at seed level
+
+Spec: scribe
+
+tags: #insight #drift
+
+**Pattern statement.** A capability documented in CHANGELOG, help text, FEATURES.md, README, or other reader-facing surface is not actually wired in code at moment-of-merge. The user who reads the documentation and types the documented incantation receives a non-feature: an unknown-command flash, a no-op, a panic, or silent absence. The drift is at the moment of merge: between the diff that ships the documentation and the diff that wires the capability, the CHANGELOG temporarily lies. The pattern is most legible when the wire-up arrives in a separately-scoped follow-up PR — the gap between the two PRs is the period during which the lie is on `main`.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **PR #13 (arc 08) — `:undo` shipped under `### Added`, not wired in `AppState::dispatch_command`'s punt list; closed by PR #14 25 minutes later.** PR #13's commit subject reads *"graveyard: R-undo + per-entry tar.zst + system trash cascade (v1.41.0)"* (commit 6b2be36, 2026-05-03). The CHANGELOG `### Added` block names `:undo` as a capability the user can invoke. PR #13's App-side handler exists; the routing does not. `AppState::dispatch_command` returns `CommandResult::NotHandled` for command names whose handler lives on App's terminal-touching half via a fixed punt list; `undo` and `graveyard` are not on the list. The user who reads the CHANGELOG and types `:undo` receives *"unknown command: undo"* — verbatim from PR #14's commit body (commit 24c49a0, 2026-05-03): *"Repro: type `:undo` → flash 'unknown command: undo'."*
+
+   PR #14 ships 25 minutes later (merge 03:06 UTC, vs PR #13's merge at 02:41 UTC) with two lines added to the punt list. The bug existed on `main` for 25 minutes. *Cite: arc-08 PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1 (drift-findings block: "The CHANGELOG's `### Added` bucket for the graveyard contains the `:undo` reference; the same `:undo` is broken at merge time because `AppState::dispatch_command`'s punt list does not include it. The drift between 'documented capability' and 'wired capability' is the seed `onboarding-risk-register` entry 0 names"). Cite: arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN (the wire-up that closes the drift).*
+
+**Instance count: one.** The single candidate instance pre-collected by the brief verified against arc-entry citations. No revisions to the count.
+
+**Observer-side naming at seed level.**
+
+The `onboarding-risk-register` seed entry 0 (= 01KR0P9JC8Z3DF6FQ1GJPF3VKA, dated 2026-05-07T07:44:05) catalogues this exact bug class with PR #14's release tag verbatim: *"Bitten on `:undo` (v1.41.1) and `:limit` historically."* The seed predates arc 08 (the arc-thread author) by hours; the maintainer-or-onboarding-author had named the bug class with the v1.41.1 release tag at risk-register level before arc 08 narrated the per-PR shape. The seed's *"and `:limit` historically"* fragment names a prior occurrence of the same bug class outside the 22-day window — the dual-`:command`-dispatch foot-gun has been hit before with `:limit`, and was hit again with `:undo`.
+
+This is what observer-side naming of a Pattern-D instance looks like: the bug class is documented at risk-register level with the specific release tag of the most recent occurrence; the per-PR commit messages do not cite each other (PR #14's CHANGELOG describes the bug accurately and does not name PR #13 — the supersession is silent at commit-message level, explicit at seed level).
+
+**Notes on counting convention and pattern boundary.**
+
+- *Why one instance is worth flagging.* The brief framed Pattern D as *"the cleanest case where the CHANGELOG temporarily lied,"* which the verification confirms. Single-instance patterns risk being promoted to "the pattern is recurring" by analyst over-reach; the catalogue holds the count at one and notes that the dual-dispatch foot-gun *as a class* has prior occurrence (the seed's `:limit` reference) outside the verified window. *As an instance of the documented-vs-wired drift pattern at moment of merge during the 22-day window, the count is one.*
+
+- *What distinguishes Pattern D from Pattern A.* Pattern A is at the subject-line / version-tag / classification-prefix level: the slug *describes* the diff inaccurately. Pattern D is at the documented-vs-wired level: the CHANGELOG / help text / FEATURES.md *promises a capability* that is not actually present in code. Pattern A's drifts are descriptive; Pattern D's drift is functional. A user affected by Pattern A might fail to find the right PR when grepping commit history; a user affected by Pattern D types the documented command and the application doesn't do the documented thing.
+
+- *Why this is not Pattern E.* Pattern E (within-PR self-correction) is when a single PR's own diff retracts or reframes its own framing in the same diff. Pattern D's PR #13 → PR #14 pair is a *between-PR* correction, not a within-PR one. PR #13's CHANGELOG is not retracted by PR #13's own diff; it is closed by PR #14's two-line punt-list addition 25 minutes later. The catalogue places this instance in Pattern D and not Pattern E because the supersession is between two PRs, not intra-diff.
+
+- *Why this is not pure Pattern B (bundle).* PR #13 is a feature-add that bundles four primitives (graveyard archive schema, viewer keymap, `:undo` one-shot, system-trash cascade) plus an R-prompt blast-radius surfacing. The bundling itself is observable but not inherently drift — the four primitives genuinely belong together as one capability. The Pattern-D drift is specifically the punt-list omission: of the four bundled primitives, two (`:undo` and `:graveyard`) are wired-in-handler-but-not-in-router; the other two are wired in both places. The drift is local to the routing surface, not the bundling shape.
+
+- *Cadence consideration for the maintainer-experience axis (observation only).* The 25-minute gap between PR #13 and PR #14 is the second-shortest within-arc gap in the eight-arc record (arc 03 has a similar near-supersession; arc 08 has both this 25-minute pair and the 49-minute PR #30 → PR #31 pair). That the documented-vs-wired drift was caught and closed within 25 minutes is observable; the catalogue declines to evaluate whether 25 minutes is fast or slow. The seed records the bug class; the per-PR thread records the close.
+
+Provenance:
+- arc-08 PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1 (drift-findings block; CHANGELOG-vs-routing observation).
+- arc-08 PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN (the close; commit body verbatim *"Repro: type `:undo` → flash 'unknown command: undo'"*; supersession-silent-at-commit-message-level observation).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA (seed-level naming verbatim *"Bitten on `:undo` (v1.41.1)"*; dual-dispatch foot-gun cataloguing).
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ (the dual-dispatch architecture: `AppState::apply` returns `ApplyResult` with no terminal access; the routing/handler split is the surface where Pattern D landed).
+- arc-08 framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80 (within-arc twin-pair count: this 25-min pair and the 49-min PR #30 → PR #31 pair).
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
+
+<!-- Entry-ID: 01KR3BGMAKS4AZNZE2QFXH10W4 -->
