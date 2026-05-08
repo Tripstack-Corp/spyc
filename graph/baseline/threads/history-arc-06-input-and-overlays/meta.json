@@ -1,0 +1,11 @@
+{
+  "id": "thread:history-arc-06-input-and-overlays",
+  "type": "thread",
+  "topic": "history-arc-06-input-and-overlays",
+  "title": "history arc 06 input and overlays",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-08T00:36:51.423108+00:00",
+  "summary": "The development focused on implementing picker overlays and ensuring dispatch correctness in a 2+2 calendar split for arc 06, with key decisions including the implementation of overlays and verification of dispatch logic. The outcome was improved accuracy and consistency in scheduling across the calendar split.",
+  "entry_count": 1
+}
