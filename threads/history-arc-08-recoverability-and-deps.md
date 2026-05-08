@@ -311,3 +311,91 @@ Provenance:
 - `history-arc-08-recoverability-and-deps` PR #14 entry = 01KR38XPJ07ZFQHH1TG6X461WN.
 
 <!-- Entry-ID: 01KR3903VA7DTNDJKQAFZ6DP8M -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T07:51:24.374728+00:00
+Role: scribe
+Type: Note
+Title: PR #30 (fix/vt100-panic-recovery): catch_unwind around `parser.process`, the `panic = "abort"` → `unwind` profile flip, and the BUGS.md MAYBE block that immediately self-corrects
+
+Spec: scribe
+
+tags: #history #arc-08
+
+PR #30 is the fourth move in arc 08 and the runtime-parser failure-mode-hardening move. The diff is moderate (5 files, +96/-10; the load-bearing changes are 38 lines added to `src/pane/mod.rs` introducing `process_bytes_safe`, an 11-line doc-comment on the `Cargo.toml` profile change, a 21-line CHANGELOG block, and 31 lines of BUGS.md churn that does its own self-correction in the same diff). Commit subject reads "fix: catch vt100 parser panics so spyc survives bad escape sequences (v1.41.17)" (commit bbdc415, 2026-05-06 13:48 -04 / merged 2026-05-06 18:27 UTC). PR #30 is the second of the three runtime-survival PRs landing on 2026-05-06; PR #31 follows 49 minutes later with the proper underlying fix.
+
+**The user report.**
+
+The commit body opens with the failure mode verbatim: "User report: closing nvim inside a zsh tab crashed the whole spyc process with `panicked at vt100/src/screen.rs:934: Option::unwrap() on a None value`. vt100 0.15 is unmaintained and has known `unwrap()` edge cases on certain valid escape sequences — this specific one fires while parsing the exit-from-alt-screen byte stream after a particular scroll/cursor state."
+
+The "vt100 0.15 is unmaintained" framing in PR #30's commit body is **superseded by PR #30's own BUGS.md MAYBE block**, in the same diff. See "The MAYBE block that self-corrects" below.
+
+**The recovery mechanism: catch_unwind + parser respawn at the same dimensions.**
+
+`src/pane/mod.rs` introduces `process_bytes_safe`, a 38-line method with a 13-line doc-comment. The mechanism reads as four sub-decisions, each defended in source comments against the alternative:
+
+1. **Wrap `parser.process`, not the entire pane loop.** The catch is at the narrowest possible boundary — the call into vt100 itself. Surrounding code (the byte read, the scroll-offset accounting, the resize coalescing) is not inside the `catch_unwind`. The choice keeps the recovery surgical: only the vt100 parser state is suspect after a panic; the rest of the pane state is trusted.
+
+2. **Use `AssertUnwindSafe`.** The closure captures `&mut self.parser`, which is not `UnwindSafe` by default in Rust because mutable references to types holding interior state can be left in inconsistent states across an unwind. The diff uses `std::panic::AssertUnwindSafe(|| { self.parser.process(bytes); })`, an explicit assertion that the consequences of an inconsistent post-unwind state are handled by the immediate parser-replacement that follows. The `AssertUnwindSafe` is the load-bearing safety claim: replacing the parser with a fresh instance is the cleanup that makes the assertion valid.
+
+3. **Cache `(rows, cols)` from `self.last_size`, don't read `self.parser.screen()` post-unwind.** The diff doc-comment names this verbatim: "Capture the grid size before the parse; even reading `parser.screen()` after a panic isn't safe, so we use the cached `last_size` we already maintain for resize coalescing." The pane already maintained `last_size` for an unrelated purpose (resize coalescing, per the `onboarding-architecture` seed entry 0); the recovery path repurposes the cached value because reading the panicked parser's state is itself unsafe.
+
+4. **Respawn the parser at the same dimensions and 10,000-line scrollback cap.** `vt100::Parser::new(rows, cols, 10_000)` is the constructor. The 10,000 cap is the spyc-wide convention (also used in PR #31's call sites and the pane's normal `set_scrollback` paths); not a recovery-specific value. The user-visible cost: "The user loses the in-pane screen state at the moment of recovery — the next render from the child repaints anyway — but spyc and every other pane stay alive" (commit body verbatim).
+
+**The release-profile flip.**
+
+`Cargo.toml`'s `[profile.release]` block changes `panic = "abort"` to `panic = "unwind"`. The 11-line doc-comment justifies the flip verbatim:
+
+> "`unwind` instead of `abort` so `std::panic::catch_unwind` actually catches panics — used in `pane::Pane::process_bytes_safe` to recover from vt100 0.15's known unwrap-on-edge-case panic (hits `Option::unwrap` deep in screen.rs for some valid escape sequences, e.g. nvim's exit-from-alt-screen after specific scroll state). With `abort` a single panicking byte stream took down the entire spyc process, dropping every other pane along with it. Slightly larger binary + minor codegen change is a fine trade for not crashing the user's session. Worth keeping as a safety net even after a vt100 upgrade."
+
+The flip is load-bearing for PR #30's correctness — `catch_unwind` is a no-op under `panic = "abort"`, so the recovery path only worked in dev/test builds before. The commit body confirms: "`catch_unwind` is a no-op under `abort`, so the recovery path only worked in dev/test builds before." This is the kind of footgun where the recovery-code-shipped-before-release-profile-flipped would have had zero effect in production binaries; the same diff ships both halves so the recovery is real.
+
+The doc-comment also names the choice's persistence: "Worth keeping as a safety net even after a vt100 upgrade." This is the explicit forward-look: PR #30 is staged to survive PR #31 (which lands 49 minutes later) because the safety net is framed as version-agnostic-good-practice, not 0.15-specific. Arc 08's framing reads PR #31's commit body as confirming the persistence ("The catch_unwind safety net from v1.41.17 stays — costs nothing on the happy path, and any third-party parser can hit edge cases on some obscure escape sequence").
+
+The `onboarding-risk-register` seed entry 0 names the panic-unwind invariant verbatim: "Crash recovery posture: `Cargo.toml:60-70` keeps `panic = "unwind"` in the release profile because `pane::Pane::process_bytes_safe` uses `std::panic::catch_unwind` to recover from `vt100` 0.15's known unwrap-on-edge-case panic. Switching to `panic = "abort"` would re-introduce the 'one panicking byte stream takes down spyc' failure mode. Worth knowing before 'optimizing' the release profile." The seed is dated 2026-05-07T07:44:05; PR #30 ships the configuration the seed catalogues. The seed-records-the-invariant-PR-30-creates relationship is observable factually.
+
+**The MAYBE block that self-corrects.**
+
+PR #30's `BUGS.md` diff is the most internally-asymmetric part of the PR. The diff adds an 11-line `### MAYBE` entry describing the vt100 upgrade option:
+
+> "upgrade vt100 0.15 → 0.16. We're pinned at 0.15.2; upstream is at 0.16.2 (active, not unmaintained — earlier notes saying 'the unmaintained 0.15' were inaccurate, corrected here). The motivating cases are the panic in `screen.rs:934` (caught defensively in v1.41.17 but the real fix is upstream), mode 2026 (synchronized output) which 0.15 doesn't parse — see entry below — and OSC 8 (hyperlinks) — also below. Should evaluate API churn vs. the wins in one go; alternative is `vt100-ctt 0.17.1` (community fork) or alacritty's `vte` parser. Defer until someone has a clear afternoon — touches every place that holds a `vt100::Screen` reference."
+
+The verbatim fragment "active, not unmaintained — earlier notes saying 'the unmaintained 0.15' were inaccurate, corrected here" inside this same diff reverses the framing PR #30's own commit body opened with ("vt100 0.15 is unmaintained"). The diff therefore contains both framings simultaneously: the commit body says vt100 0.15 is unmaintained, the BUGS.md MAYBE block (added in the same diff) says vt100 0.15 was inaccurately called unmaintained and is in fact active. The commit body and the diff disagree.
+
+The reconciling read the diff supports: the commit body fragment is residual from an earlier internal framing; the BUGS.md correction is the corrected one; PR #31 ships 49 minutes later with the corrected framing intact ("The vt100 bump is the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17). Smaller than I'd previously framed it"). PR #30's BUGS.md MAYBE block is the *first* place the corrected framing lands; the commit body is the *last* place the older framing survives.
+
+The CHANGELOG entry is the third channel and aligns with the corrected framing: "We're on vt100 0.15.2 (upstream is at 0.16.2 — an upgrade may resolve this and is worth doing separately), and 0.15 has a known `unwrap()` deep in `screen.rs` for certain valid escape sequences." The CHANGELOG names neither "unmaintained" nor "active"; it stays neutral on the maintenance-status question and treats the upgrade as a follow-on.
+
+So PR #30's three text channels (commit body, BUGS.md MAYBE, CHANGELOG) carry three slightly different framings. The diff is internally inconsistent on whether vt100 0.15 is unmaintained; PR #31 resolves the inconsistency by reframing in the next PR.
+
+**The §3 / OSC 8 mention as the link to PR #31.**
+
+The same MAYBE block PR #30 adds also names mode 2026 ("see entry below") and OSC 8 ("also below") as motivating cases for the upgrade. Mode 2026 is arc 02's gap-analysis suspect §3 (= 01KR0YXXZRQR24CSNAK4Q7808T verbatim). PR #30's diff therefore re-surfaces the suspect-§3 reference at the BUGS.md MAYBE level, alongside the panic the diff itself defends against, for the first time in the 22-day window since PR #12 lifted the entry from `notes/lazygit-gap-analysis.md`. PR #30 does not address §3 — its catch_unwind does nothing for synchronized-output tearing — but it pairs the §3-mention with the upgrade-motivation block, staging the upgrade as a multi-issue resolution. PR #31 (next entry) acts on the staging within the hour and resolves §3.
+
+**Drift findings flagged for the insight layer.**
+
+- The diff's three text channels (commit body, BUGS.md, CHANGELOG) carry three different framings of vt100 0.15's maintenance status. The disagreement is intra-diff. PR #31's commit body resolves it. Captured here as a within-PR drift instance — not a between-PR drift.
+- The `process_bytes_safe` doc-comment names the safety net as version-agnostic ("Useful safety net regardless of vt100 version"). The release-profile doc-comment also names this ("Worth keeping as a safety net even after a vt100 upgrade"). Both pre-empt PR #31 and frame the recovery as permanent rather than provisional. Whether the framing reads as foresight (the upgrade was already on the maintainer's plan) or hedging (the recovery should outlive any specific parser bug) is not narratable from the diff. Both readings are consistent with the diff. Captured factually.
+- `vt100::Parser::new` takes `(rows, cols, max_scrollback_size)`. The diff hardcodes 10,000 for max_scrollback_size in the recovery path. The pane's normal scrollback budget is `max_scrollback()` (a separate accessor) — the recovery uses a different number. Whether 10,000 matches `self.max_scrollback()` is verifiable but not guaranteed. The user's recovered pane may have a different scrollback ceiling than the user's normal pane. Captured factually; not load-bearing for the panic-recovery correctness.
+- `AssertUnwindSafe` is the load-bearing claim for the catch's correctness. The Rust documentation for `AssertUnwindSafe` warns: "Mostly intended to be used with mutable references to types holding interior state." The diff's use is exactly that case (a mutable reference to `vt100::Parser`, which holds the interior cell-grid state). The assertion is justified by the immediate parser-replacement, but the justification is implicit in the diff's structure rather than named at the assertion site. A reader inspecting `process_bytes_safe` in isolation would not see the justification without grepping the surrounding flow. Captured for the insight layer's design-decision-implicit-vs-explicit catalogue.
+- The user-loss-on-recovery is named in the doc-comment ("the user loses this pane's screen state at the moment of recovery") and the commit body ("The user loses the in-pane screen state at the moment of recovery — the next render from the child repaints anyway"). The "next render from the child repaints anyway" claim is conditional on the child *making* a next render — for a pane whose child has produced its final byte and exited, the recovery leaves the pane blank with no repaint coming. The diff doesn't address this edge case. Whether it matters in practice (do users panic-recover a pane whose child has already exited?) is not narratable.
+
+Provenance:
+- e39f462 (PR #30 fix/vt100-panic-recovery, 2026-05-06) — full PR.
+- bbdc415 — PR #30's feature-branch commit; commit body verbatim quoted throughout this entry.
+- bdb8d87 → bbdc415 — parent and tip SHAs for the diff inspection.
+- `git diff bdb8d87..bbdc415 -- src/pane/mod.rs`: +38 net; `process_bytes_safe` method + 13-line doc-comment + `last_size`-derived `(rows, cols)` capture + `vt100::Parser::new(rows, cols, 10_000)` respawn.
+- `git diff bdb8d87..bbdc415 -- Cargo.toml`: `version = "1.41.16"` → `version = "1.41.17"`; `panic = "abort"` → `panic = "unwind"`; 11-line doc-comment on the profile change.
+- `git diff bdb8d87..bbdc415 -- CHANGELOG.md`: 21 lines added under `[Unreleased]` `### Fixed`; nvim/zsh user report quoted verbatim above.
+- `git diff bdb8d87..bbdc415 -- BUGS.md`: 31-line churn; +11 (MAYBE upgrade entry); +/-5 (mode-2026 MAYBE rewrite to "Resolved by the vt100 upgrade above"); +/-3 (OSC 8 MAYBE rewrite); +10 FIXED block with `(defensive, v1.41.17)` tag.
+- BUGS.md MAYBE verbatim: "active, not unmaintained — earlier notes saying 'the unmaintained 0.15' were inaccurate, corrected here."
+- Commit body verbatim: "vt100 0.15 is unmaintained and has known `unwrap()` edge cases on certain valid escape sequences."
+- The two framings disagree intra-diff; reconciliation is at PR #31's commit body level (= the next entry).
+- `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA — names the panic-unwind invariant verbatim; PR #30 is the diff that creates the invariant.
+- `onboarding-architecture` entry 0 = 01KR0P4W3ED1QZ8F44PFB2WPDZ — names `last_size` resize-coalescing maintenance; PR #30 repurposes the cached value for the recovery path.
+- `history-arc-02-lazygit-investigation-and-harvest` investigation entry = 01KR0YXXZRQR24CSNAK4Q7808T — gap-analysis suspect §3 verbatim; PR #30's BUGS.md MAYBE block re-surfaces the suspect alongside the upgrade motivation.
+- `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 — the BUGS.md MAYBE block PR #12 created and PR #30 expands.
+- `history-arc-08-recoverability-and-deps` framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80.
+- `history-arc-08-recoverability-and-deps` PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M.
+
+<!-- Entry-ID: 01KR393P15VTJSZ1WGYGZ8ZS01 -->
