@@ -7,3 +7,5 @@
 {"source":"entry:01KR3BCQXGGB20V8C6Y6Z1Y944","target":"entry:01KR3BEGGEYB9VKTJ32WJNDG93","type":"followed_by"}
 {"source":"thread:insight-drift","target":"entry:01KR3BGMAKS4AZNZE2QFXH10W4","type":"contains"}
 {"source":"entry:01KR3BEGGEYB9VKTJ32WJNDG93","target":"entry:01KR3BGMAKS4AZNZE2QFXH10W4","type":"followed_by"}
+{"source":"thread:insight-drift","target":"entry:01KR3BK1VP3SZ5DM9VAQ01FFYX","type":"contains"}
+{"source":"entry:01KR3BGMAKS4AZNZE2QFXH10W4","target":"entry:01KR3BK1VP3SZ5DM9VAQ01FFYX","type":"followed_by"}

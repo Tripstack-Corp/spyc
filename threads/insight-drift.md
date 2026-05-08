@@ -261,3 +261,59 @@ Provenance:
 - `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
 
 <!-- Entry-ID: 01KR3BGMAKS4AZNZE2QFXH10W4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-08T08:34:45.367560+00:00
+Role: scribe
+Type: Note
+Title: Pattern E: Within-PR self-correction — one true intra-diff instance plus one between-PR reframing in the 49-minute pair
+
+Spec: scribe
+
+tags: #insight #drift
+
+**Pattern statement.** A PR's own diff retracts or reframes its own framing. The retraction is not a planned correction across PRs; it lives inside the same diff (or, in the boundary-of-pattern case, inside the next PR by the same author within the hour) where the original framing first surfaced. The drift is at the framing layer, not the code layer: the diff ships its own self-edit on the *story* the PR tells about its own work.
+
+This pattern is the smallest of the six in the catalogue. The brief flagged a counting-convention question and noted that the disposition depends on the convention. This entry walks the convention question explicitly and resolves it.
+
+**Instance enumeration with arc-entry citations.**
+
+1. **PR #30 (arc 08) — BUGS.md MAYBE block in the same diff retracts the commit body's *"vt100 0.15 is unmaintained"* framing.** Commit body (commit bbdc415, 2026-05-06) opens: *"User report: closing nvim inside a zsh tab crashed the whole spyc process… vt100 0.15 is unmaintained and has known `unwrap()` edge cases on certain valid escape sequences."* The same diff adds an 11-line `### MAYBE` block to BUGS.md with the verbatim line: *"upstream is at 0.16.2 (active, not unmaintained — earlier notes saying 'the unmaintained 0.15' were inaccurate, corrected here)."*
+
+   The diff therefore contains both framings simultaneously: the commit body says vt100 0.15 is unmaintained; the BUGS.md MAYBE block (added in the same diff) says vt100 0.15 was inaccurately called unmaintained and is in fact active. The two text channels disagree intra-diff. The CHANGELOG is the third channel and stays neutral on the maintenance question (*"upstream is at 0.16.2 — an upgrade may resolve this and is worth doing separately"*) — three text surfaces, three slightly different framings, one diff. *Cite: arc-08 PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 (the "MAYBE block that self-corrects" section; drift-findings block: "The diff's three text channels (commit body, BUGS.md, CHANGELOG) carry three different framings of vt100 0.15's maintenance status. The disagreement is intra-diff").*
+
+   This is the **true within-PR self-correction**: a single diff retracting its own framing in another text surface inside that same diff.
+
+2. **PR #31 (arc 08) — *"Smaller than I'd previously framed it"* reframes PR #30's framing in PR #31's own commit body.** Commit body (commit fc1789d, 2026-05-06): *"The vt100 bump is the proper fix for the `screen.rs:934.unwrap()` panic (caught defensively in v1.41.17). Smaller than I'd previously framed it: vt100 0.16 needs `unicode-width ≥0.2.1`, but ratatui 0.29 pins it to `=0.2.0` — so the upgrade was a coordinated trio with ansi-to-tui 7 → 8…"* PR #31 ships 49 minutes after PR #30. The reframing is also visible at the BUGS.md level: PR #30's MAYBE block (*"defer until someone has a clear afternoon — touches every place that holds a `vt100::Screen` reference"*) is deleted by PR #31's diff. The *"clear afternoon"* arrived as the same afternoon the deferral was authored.
+
+   This is a **between-PR reframing** by the same author within an hour, not strictly a within-PR self-correction. The PR-31 diff does not retract anything PR #31's *own* commit body or own diff text says; it retracts what *PR #30* said. *Cite: arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (commit body verbatim "Smaller than I'd previously framed it" quoted; BUGS.md MAYBE-deletion described; arc-08 closure entry = 01KR39Y00VB3N7AEEAFX54DF03 and story-tail = 01KR3A23E11K8F7VNVSM5XY6M2 narrate the reframing's diagnostic value).*
+
+**Instance count: one true within-PR plus one between-PR reframing under the same authorship-hour, treated under one entry.** The counting convention this entry adopts:
+
+- *Strict-reading*: Pattern E is *intra-diff* only — a single diff retracting its own framing inside that same diff. Strict-reading count: one (PR #30).
+- *Broad-reading*: Pattern E is *self-correction-by-the-same-author within a tight time grain*, regardless of whether the retraction lives in one diff or spills into the next-merged PR. Broad-reading count: two (PR #30 plus PR #31's reframing of PR #30).
+
+The **catalogue adopts the strict reading for the count** (Pattern E has one verified instance), and **flags the PR #31 between-PR reframing as a related-but-distinct phenomenon** that lives in the same 49-minute pair as the intra-diff instance. Treating the two as one phenomenon would over-state intra-diff drift; treating them as two would mis-classify the between-PR reframing as intra-diff.
+
+**Notes on counting convention and pattern boundary.**
+
+- *Why the strict reading.* The brief explicitly flagged: *"Whether this is a single-occurrence-with-two-surfaces or two distinct instances depends on counting convention — flag the choice in the entry."* The strict reading is the conservative one — Pattern E's identity is *the diff retracts itself*, and that is precisely what PR #30's BUGS.md MAYBE block does to PR #30's own commit body. PR #31's *"Smaller than I'd previously framed it"* is a different phenomenon — reframing-the-prior-PR-by-the-same-author within an hour. That phenomenon is real and observable and lives in the same 49-minute span; it is not, by the strict reading, a within-PR self-correction.
+
+- *Why this matters for `insight-recurrence`.* The between-PR reframing in PR #31 is a candidate for *recurrence* if a similar reframing-the-prior-PR shape recurs elsewhere in the eight-arc record. It is not a candidate for *drift* in the sense Pattern E names. The insight-recurrence author should consider whether the silent-supersession shape arc 03 named on PR #29 (whose policy comment lists the alt-screen TUIs the new guard accommodates without naming PR #5 as the predecessor it generalizes from), the 25-minute PR #13 → PR #14 supersession at Pattern D's site (whose commit message describes the bug accurately and does not cite PR #13), and PR #31's 49-minute reframing of PR #30 are three instances of one "supersession-acknowledgement" recurrence with three different acknowledgement registers. Arc 08's story-tail (= 01KR3A23E11K8F7VNVSM5XY6M2) makes exactly this observation factually: *"three such instances at three time grains (3.5 hours, 49 minutes, 25 minutes) with three different acknowledgement registers (silent in arc 03; behavior-described in PR #14; explicit reframing in PR #31) is enough material for the recurrence reading to be substantive rather than anecdotal."*
+
+- *Why arc 08 holds both Pattern E surfaces.* Both the strict-reading intra-diff instance (PR #30) and the broad-reading between-PR reframing (PR #31) live in arc 08, in the same 49-minute pair. Whether arc 08's failure-mode-hardening register lends itself to within-PR-or-near-PR self-correction (the diffs are explicitly about *what failure modes the maintainer knows are out there*; the framing of those failure modes is more open to revision than the code that defends against them) or whether the cluster is coincidence is a question for `insight-emergent-properties`. This catalogue notes the clustering factually.
+
+- *Pattern E vs. Pattern D distinction.* Pattern D is *documented-vs-wired*: the CHANGELOG promises a capability the code doesn't deliver, and the wire-up arrives in a separate PR. Pattern E is *the framing retracts itself* (strict) or *the framing is reframed by the same author within an hour* (broad). Pattern D is at the capability-vs-implementation level; Pattern E is at the description-of-the-work level. PR #13 → PR #14 is Pattern D (`:undo` is documented but unwired); PR #30 → PR #31 is Pattern E (vt100 0.15 is described as unmaintained then re-described as active; the upgrade is described as too big then re-described as smaller-than-previously-framed).
+
+Provenance:
+- arc-08 PR #30 entry = 01KR393P15VTJSZ1WGYGZ8ZS01 ("MAYBE block that self-corrects" section; drift-findings block on the three-text-channel disagreement).
+- arc-08 PR #31 entry = 01KR397RTYNS34SAGM46YJJRBY (verbatim *"Smaller than I'd previously framed it"*; BUGS.md MAYBE-deletion).
+- arc-08 framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80 (49-minute pair flagged; PR #30 → PR #31 supersession shape).
+- arc-08 closure entry = 01KR39Y00VB3N7AEEAFX54DF03 (eight-arc structural reading of the supersession-acknowledgement registers).
+- arc-08 story-tail entry = 01KR3A23E11K8F7VNVSM5XY6M2 (three-grain / three-register supersession-acknowledgement summary; explicit recurrence-shape statement).
+- arc-03 story-tail entry = 01KR11S8RG29J98QKN1H0VAA6W (silent-supersession precedent for the recurrence-shape cross-reference).
+- `history-overview` segmentation entry = 01KR0TWHTC1MPK4KJ08Y9SPE6P (PR #30 → PR #31 49-minute panic-recovery-then-upgrade pair flagged at original drift-findings source).
+- `insight-drift` framing entry = 01KR3B7KW5QNRWHG6YTV9QSF07.
+- `insight-drift` Pattern D entry = 01KR3BGMAKS4AZNZE2QFXH10W4 (Pattern D vs. Pattern E distinction explicit).
+
+<!-- Entry-ID: 01KR3BK1VP3SZ5DM9VAQ01FFYX -->
