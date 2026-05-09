@@ -1,9 +1,8 @@
 ### SMALL ###
-- our pager is now quite a competitor for less and should be the default for D
-  too
-- tab completion for : commands e.g. pa<tab> -> pane-to-tab
 - we should investigate the markdown viewer glow and steal features if it makes
   sense
+- support drag and drop features - give multiple options to the user e.g. send
+  to lower pane as image, create new file (auto type detect), etc.
 - when resuming with multiple claude / codex sessions - it seems that the
   individual sessions are not recalled; they all get brought into the same
   session recovery
@@ -112,6 +111,12 @@
   accumulates rendering artifacts from Claude CLI's progress bars, spinners, and
   cursor repositioning. ^L redraws the visible screen but can't fix corrupted
   scrollback. Solution t.b.d.
+- terminal-background auto-detect (the one piece worth borrowing from
+  `glow`). Send OSC 11 (`\e]11;?\e\\`) at startup, parse the reply's
+  RGB to decide light vs. dark, pick the matching theme preset
+  automatically instead of needing the manual `C` toggle. ~30 lines.
+  Nice-to-have for users who switch between light shells during the
+  day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
 - (fixed, v1.41.32) Pane scrollback view (`^a-v`) opens
