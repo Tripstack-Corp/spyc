@@ -6,6 +6,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **Property tests added for three core invariants.** New
+  `proptest` dev-dep + one `proptest!` block per site, narrowly
+  scoped:
+  - `shell::expand::shell_quote` — round-trip property: parsing
+    the output back through a small POSIX single-quoted-string
+    decoder always returns the original input. Includes the
+    decoder as test-only code so the property is real (not a
+    tautology against the encoder itself).
+  - `state::ignore::Mask` — `Mask::matches(name)` is the union
+    over the patterns: a multi-pattern `Mask` matches iff any
+    single-pattern `Mask` matches. Plus a literal-self-match
+    invariant for names without glob meta-chars.
+  - `keymap::resolver::Resolver` — feeding N digits then a motion
+    produces the action with `count == parsed integer`, and the
+    count is consumed (next motion defaults to 1). Plus a
+    leading-zero invariant: any number of bare `0`s is ignored
+    and leaves no pending state. Bounded to 1-4 digits so values
+    stay well below `u32::MAX` (the underlying multiply isn't
+    checked; out of scope for this test).
+
+  Closes the v1.5-era "[S] Property tests (narrow)" TODO. All
+  five properties pass with `proptest`'s default 256 cases per
+  property.
+
 - **Pipeline now caches `$RUSTUP_HOME` too.** Follow-up to v1.50.6:
   `rustup component add rustfmt clippy` (quality step) and
   `rustup component add llvm-tools-preview` (coverage step) were

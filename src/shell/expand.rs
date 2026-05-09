@@ -111,4 +111,54 @@ mod tests {
     fn no_percent_passes_through() {
         assert_eq!(expand_percent("date", &[]), "date");
     }
+
+    // ── property tests ────────────────────────────────────────────
+    //
+    // Round-trip: for any input string `s`, parsing the output of
+    // `shell_quote(s)` back through a small POSIX single-quoted-string
+    // parser must yield `s` exactly. This is the property a shell
+    // would observe when invoked with the quoted form.
+
+    /// Parse a string produced by `shell_quote` back into the original
+    /// content. Returns `None` for malformed input — `shell_quote`'s
+    /// output should never trigger that path. POSIX single-quoted-string
+    /// rules: outer `'…'`, no escape inside *except* the four-char
+    /// sequence `'\''` which encodes a literal single quote
+    /// (close-quote, backslash, quote, reopen-quote).
+    fn parse_shell_quoted(encoded: &str) -> Option<String> {
+        let chars: Vec<char> = encoded.chars().collect();
+        if chars.first() != Some(&'\'') || chars.last() != Some(&'\'') || chars.len() < 2 {
+            return None;
+        }
+        let mut out = String::new();
+        let mut i = 1;
+        let end = chars.len() - 1;
+        while i < end {
+            if chars[i] == '\'' {
+                // Must be the start of `'\''` — close, escaped, reopen.
+                if chars.get(i + 1) == Some(&'\\')
+                    && chars.get(i + 2) == Some(&'\'')
+                    && chars.get(i + 3) == Some(&'\'')
+                {
+                    out.push('\'');
+                    i += 4;
+                    continue;
+                }
+                // Bare `'` inside the body is malformed for shell_quote output.
+                return None;
+            }
+            out.push(chars[i]);
+            i += 1;
+        }
+        Some(out)
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn shell_quote_round_trips(s in proptest::string::string_regex(".{0,40}").unwrap()) {
+            let encoded = shell_quote(&s);
+            let decoded = parse_shell_quoted(&encoded);
+            proptest::prop_assert_eq!(decoded.as_deref(), Some(s.as_str()));
+        }
+    }
 }
