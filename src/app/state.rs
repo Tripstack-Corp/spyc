@@ -73,6 +73,42 @@ pub enum PagerLines {
     Plain(Vec<String>),
 }
 
+/// Canonical list of `:` command base names, used by the prompt's
+/// Tab-completion path. Keep in sync with the matchers in
+/// `dispatch_command` here and in `App::dispatch_command`. Sorted for
+/// deterministic completion output.
+///
+/// Special prefixes (`!`, `;`) that take free-form shell arguments
+/// are intentionally omitted — they're typed as one keystroke each
+/// and don't benefit from name-completion.
+pub const SPYC_COMMANDS: &[&str] = &[
+    "bnext",
+    "bprev",
+    "cd",
+    "date",
+    "dump-scrollback",
+    "fg",
+    "graveyard",
+    "grep",
+    "limit",
+    "marks",
+    "name",
+    "pane-to-task",
+    "pause",
+    "project",
+    "q",
+    "quit",
+    "resume",
+    "set",
+    "sort",
+    "startdir",
+    "task",
+    "task-to-pane",
+    "undo",
+    "version",
+    "whoami",
+];
+
 pub struct AppState {
     pub listing: Listing,
     pub picks: Picks,
@@ -1085,6 +1121,9 @@ impl AppState {
 
     /// Handle the pure-domain arms of `:` commands.
     ///
+    /// (See `SPYC_COMMANDS` for the canonical list of base names —
+    /// kept right next to the dispatcher so the two stay in sync.)
+    ///
     /// Returns `CommandResult::Handled` when the command was fully processed,
     /// `CommandResult::OpenPager` when the caller should open the pager with
     /// the supplied lines, or `CommandResult::NotHandled` when the caller
@@ -1262,6 +1301,10 @@ impl AppState {
         }
 
         // :set key=value
+        if input == "set" {
+            self.flash_error("usage: :set key=value");
+            return CommandResult::Handled;
+        }
         if let Some(assignment) = input.strip_prefix("set ") {
             let assignment = assignment.trim();
             if let Some((key, value)) = assignment.split_once('=') {
@@ -2673,5 +2716,48 @@ mod tests {
         s.cursor.index = 10; // out of bounds
         s.apply(&Action::Noop); // any handled action should clamp
         assert_eq!(s.cursor.index, 1); // clamped to last valid
+    }
+
+    // ── SPYC_COMMANDS sanity ──────────────────────────────────────
+
+    #[test]
+    fn spyc_commands_is_sorted_and_unique() {
+        let mut sorted = super::SPYC_COMMANDS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.as_slice(),
+            super::SPYC_COMMANDS,
+            "SPYC_COMMANDS must be sorted and free of duplicates so \
+             tab-completion produces deterministic output",
+        );
+    }
+
+    #[test]
+    fn spyc_commands_covers_every_arm_of_dispatch() {
+        // Every literal we list as a `:` command must be reachable
+        // through one of the dispatch_command arms (here in state.rs
+        // or in App::dispatch_command). This test guards against
+        // drift: if you add a new `:foo` command and forget to list
+        // it here, completion silently won't offer it.
+        let mut s = state_with_rows(&[]);
+        for cmd in super::SPYC_COMMANDS {
+            // Bare-word dispatch shouldn't flash "unknown command:" —
+            // it should either be Handled by AppState (no-arg form) or
+            // NotHandled (passes through to App for terminal-owning
+            // commands like :grep, :task-to-pane, …). The "unknown"
+            // flash only fires from the catch-all at the bottom of
+            // state.rs::dispatch_command.
+            s.flash = None;
+            s.dispatch_command(cmd);
+            if let Some(ref f) = s.flash {
+                assert!(
+                    !f.text.starts_with("unknown command:"),
+                    "SPYC_COMMANDS lists `{cmd}` but dispatch_command \
+                     reports it as unknown — either add the arm, or \
+                     drop the entry from SPYC_COMMANDS",
+                );
+            }
+        }
     }
 }

@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`:` command tab-completion.** Hit Tab while typing the spyc
+  command name (`pa<Tab>` → cycle through `pane-to-task` /
+  `pause`, `lim<Tab>` → `limit `, `ver<Tab>` → `version`) and the
+  prompt fills in from the canonical `SPYC_COMMANDS` list. Single
+  match completes with a trailing space; common prefix advances
+  and shows the candidates with "— Tab to cycle"; ambiguous
+  prefix stages a cycle through the matching names.
+
+  Once the buffer contains whitespace (`cd <Tab>`, `grep foo<Tab>`)
+  Tab falls through to the existing filesystem completion. No
+  change to the `J`/`!` prompts.
+
+  Two unit tests guard the contract: `SPYC_COMMANDS` must be
+  sorted + deduped, and every entry must round-trip through
+  `dispatch_command` without falling into the "unknown command"
+  branch (so adding a new `:foo` to the list without wiring up
+  the dispatch arm fails CI). One drive-by fix: bare `:set` now
+  flashes `usage: :set key=value` instead of "unknown command".
+
 ### Internal
 - **CI: relaxed `target` cache key + dropped the `-slim` image.**
   Two more cuts on top of v1.50.6 / v1.50.7. (1) The `target` cache

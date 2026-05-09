@@ -3835,7 +3835,7 @@ impl App {
     /// prompts, completes just the last whitespace-delimited word.
     fn tab_complete_path(&mut self) {
         // Extract data from prompt without holding the borrow.
-        let (is_shell, is_jump, buffer) = {
+        let (is_shell, is_jump, is_command, buffer) = {
             let Mode::Prompting(ref prompt) = self.state.mode else {
                 return;
             };
@@ -3844,7 +3844,8 @@ impl App {
                 PromptKind::ShellCmd | PromptKind::ShellCmdCaptured | PromptKind::Command
             );
             let is_jump = matches!(prompt.kind, PromptKind::Jump);
-            (is_shell, is_jump, prompt.buffer.clone())
+            let is_command = matches!(prompt.kind, PromptKind::Command);
+            (is_shell, is_jump, is_command, prompt.buffer.clone())
         };
 
         // Repeated Tab with active cycle state: cycle through matches
@@ -3866,6 +3867,15 @@ impl App {
                 }
                 return;
             }
+        }
+
+        // `:` prompt with no whitespace yet — complete the spyc command
+        // name from `SPYC_COMMANDS` rather than falling through to
+        // filesystem completion (which would try to match a file
+        // starting with "pa" in cwd, almost never useful here).
+        if is_command && !buffer.contains(char::is_whitespace) {
+            self.tab_complete_spyc_command(&buffer);
+            return;
         }
 
         // For shell prompts, extract just the last word for completion.
@@ -4005,6 +4015,91 @@ impl App {
         } else {
             self.tab_state = None;
         }
+    }
+
+    /// Tab-complete a `:` command base name from `SPYC_COMMANDS`.
+    /// Single match: fill the name plus a trailing space (so the user
+    /// can keep typing args, or hit Enter for the no-arg form —
+    /// `dispatch_command` trims). Common-prefix advance: fill the
+    /// shared prefix and flash a count. Otherwise show all matches and
+    /// stage cycle state for repeated Tab.
+    fn tab_complete_spyc_command(&mut self, prefix: &str) {
+        let matches: Vec<String> = crate::app::state::SPYC_COMMANDS
+            .iter()
+            .filter(|c| c.starts_with(prefix))
+            .map(|s| (*s).to_string())
+            .collect();
+        if matches.is_empty() {
+            return;
+        }
+
+        if matches.len() == 1 {
+            let buffer = format!("{} ", matches[0]);
+            let Mode::Prompting(ref mut prompt) = self.state.mode else {
+                return;
+            };
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&buffer);
+            }
+            prompt.buffer = buffer;
+            self.tab_state = None;
+            return;
+        }
+
+        let common = common_prefix(&matches);
+        if common.len() > prefix.len() {
+            // Filled some chars but more matches remain — stage cycle
+            // state so a follow-up Tab on the same buffer can rotate.
+            let display: Vec<&str> = matches.iter().map(String::as_str).collect();
+            let shown = if display.len() > 12 {
+                format!(
+                    "{}  (+{} more)",
+                    display[..12].join("  "),
+                    display.len() - 12
+                )
+            } else {
+                display.join("  ")
+            };
+            self.state.flash_info(format!("{shown}  — Tab to cycle"));
+            let Mode::Prompting(ref mut prompt) = self.state.mode else {
+                return;
+            };
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&common);
+            }
+            prompt.buffer = common;
+            self.tab_state = Some(TabState {
+                original_buf: prompt.buffer.clone(),
+                buf_prefix: String::new(),
+                word_base: String::new(),
+                matches,
+                cycle_index: 0,
+            });
+            return;
+        }
+
+        // No textual progress — leave the buffer alone, show all
+        // matches, and stage cycle state. The cycle path on the next
+        // Tab will compare `original_buf == buffer` (true since we
+        // didn't change the buffer) and rotate.
+        let display: Vec<&str> = matches.iter().map(String::as_str).collect();
+        let shown = if display.len() > 12 {
+            format!(
+                "{}  (+{} more)",
+                display[..12].join("  "),
+                display.len() - 12
+            )
+        } else {
+            display.join("  ")
+        };
+        self.state.flash_info(format!("{shown}  — Tab to cycle"));
+        self.tab_state = Some(TabState {
+            original_buf: prefix.to_string(),
+            buf_prefix: String::new(),
+            word_base: String::new(),
+            matches,
+            cycle_index: 0,
+        });
     }
 
     /// Frecency fallback for the J prompt: when filesystem completion finds
