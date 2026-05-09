@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **Coverage step gets its own `target-cov/` cache.** The Quality
+  and Coverage steps were sharing the `target` cache and racing
+  each other: Quality writes un-instrumented artifacts, Coverage
+  writes coverage-instrumented ones (`-C instrument-coverage`
+  RUSTFLAGS), and whichever step uploaded last clobbered the
+  cache for the next run — so the loser pulled down artifacts it
+  couldn't reuse and rebuilt the whole graph (~18s+ in the
+  v1.50.11 PR run). Fix: a separate `target-cov` cache (same
+  key, separate path) plus `--target-dir target-cov` on the
+  `cargo llvm-cov` invocation. Each step now owns its cache and
+  warms incrementally across runs.
+
 ### Added
 - **`:` command tab-completion.** Hit Tab while typing the spyc
   command name (`pa<Tab>` → cycle through `pane-to-task` /
