@@ -1682,4 +1682,54 @@ mod tests {
             ResolverOutcome::Ignored
         );
     }
+
+    // ── property tests ────────────────────────────────────────────
+    //
+    // Count machinery invariants. Bounded to 1-4 leading-non-zero
+    // digits so values stay well below u32::MAX (the underlying
+    // multiply isn't checked; that's a separate concern).
+
+    proptest::proptest! {
+        /// Feeding N digits (first non-zero) followed by a motion key
+        /// produces the motion action with count == the parsed integer.
+        #[test]
+        fn count_digits_compose_to_parsed_integer(
+            first in 1u32..=9,
+            rest in proptest::collection::vec(0u32..=9, 0..=3),
+        ) {
+            let mut digits = String::new();
+            digits.push(char::from_digit(first, 10).unwrap());
+            let mut value: u32 = first;
+            for d in rest {
+                digits.push(char::from_digit(d, 10).unwrap());
+                value = value * 10 + d;
+            }
+            let mut r = Resolver::new();
+            for c in digits.chars() {
+                feed(&mut r, key(c));
+            }
+            let out = feed(&mut r, key('j'));
+            proptest::prop_assert_eq!(out, ResolverOutcome::Action(Action::Down(value as usize)));
+            // And the count is consumed: a follow-up motion is count-1.
+            let next = feed(&mut r, key('j'));
+            proptest::prop_assert_eq!(next, ResolverOutcome::Action(Action::Down(1)));
+        }
+
+        /// Bare `0` is ignored and leaves no pending state, regardless
+        /// of how many leading zeros the user types.
+        #[test]
+        fn leading_zeros_are_ignored(zeros in 1usize..=5) {
+            let mut r = Resolver::new();
+            for _ in 0..zeros {
+                let out = feed(&mut r, key('0'));
+                proptest::prop_assert_eq!(out, ResolverOutcome::Ignored);
+            }
+            proptest::prop_assert!(!r.is_pending());
+            // A motion right after must still default to count 1.
+            proptest::prop_assert_eq!(
+                feed(&mut r, key('j')),
+                ResolverOutcome::Action(Action::Down(1))
+            );
+        }
+    }
 }

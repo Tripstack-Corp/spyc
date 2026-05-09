@@ -80,10 +80,13 @@ rest of the dispatch testing.
   bytes, parse `vt100::Screen`, assert rendered output.
   `#[cfg(unix)]`. One test, not a suite.
 
-- [ ] **[S] Property tests (narrow).**
-  `proptest!` blocks for: shell-arg quoting round-trip
-  (`shell/expand.rs`); limit-filter glob matching; resolver count
-  invariants. One block per site.
+- [x] **[S] Property tests (narrow).**
+  `proptest` dev-dep + 5 properties across 3 sites:
+  shell-arg quoting round-trip (`shell/expand.rs`); `Mask` union
+  + literal self-match (`state/ignore.rs` — picked over
+  `state.rs:1329` because the wrapper has actual invariants on
+  top of the glob crate); resolver count parsing + leading-zero
+  rejection (`keymap/resolver.rs`).
 
 ### Release hygiene
 

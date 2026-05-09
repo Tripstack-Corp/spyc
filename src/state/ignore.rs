@@ -223,4 +223,40 @@ mod tests {
         assert!(masks.hides(".git"));
         assert!(masks.hides("foo.o"));
     }
+
+    // ── property tests ────────────────────────────────────────────
+    //
+    // The Mask wrapper has two invariants on top of the underlying
+    // glob crate: a multi-pattern Mask is the union of single-pattern
+    // Masks, and a literal name (no glob meta-chars) used as a
+    // pattern always matches itself.
+
+    /// Filename-safe characters that are *not* glob meta. `*?[]\` are
+    /// excluded so the produced strings parse as literal globs and
+    /// match themselves verbatim.
+    const PROP_NAME_REGEX: &str = "[a-zA-Z0-9._-]{1,16}";
+
+    proptest::proptest! {
+        /// `Mask::matches` is the union over the patterns: if any
+        /// single-pattern Mask matches, the multi-pattern Mask matches.
+        #[test]
+        fn mask_is_union_of_single_pattern_masks(
+            patterns in proptest::collection::vec(PROP_NAME_REGEX, 0..5),
+            name in PROP_NAME_REGEX,
+        ) {
+            let pat_refs: Vec<&str> = patterns.iter().map(String::as_str).collect();
+            let combined = Mask::new(&pat_refs, true);
+            let any_singleton = patterns
+                .iter()
+                .any(|p| Mask::new(&[p.as_str()], true).matches(&name));
+            proptest::prop_assert_eq!(combined.matches(&name), any_singleton);
+        }
+
+        /// A literal pattern (no glob meta-chars) always matches itself.
+        #[test]
+        fn literal_pattern_self_matches(name in PROP_NAME_REGEX) {
+            let m = Mask::new(&[name.as_str()], true);
+            proptest::prop_assert!(m.matches(&name));
+        }
+    }
 }
