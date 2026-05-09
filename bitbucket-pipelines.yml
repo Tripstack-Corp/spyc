@@ -107,10 +107,12 @@ definitions:
         script:
           - rustup component add llvm-tools-preview
           - cargo install cargo-llvm-cov --locked
-          # `--target-dir target-cov` keeps the instrumented build
+          # `CARGO_TARGET_DIR=target-cov` keeps the instrumented build
           # out of the Quality step's `target/` cache. See the
           # `target-cov` cache definition above for the why.
-          - cargo llvm-cov --locked --all-targets --target-dir target-cov --fail-under-lines 35
+          # (`cargo llvm-cov` itself doesn't accept `--target-dir`;
+          # the env var is the documented escape hatch.)
+          - CARGO_TARGET_DIR=target-cov cargo llvm-cov --locked --all-targets --fail-under-lines 35
 
 pipelines:
   # No `default:` block. With both `default` and `pull-requests`
