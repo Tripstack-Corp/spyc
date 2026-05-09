@@ -75,10 +75,11 @@ rest of the dispatch testing.
   numbers, search highlight), `line_edit` via `prompt` (3: simple,
   insert mode, normal mode).
 
-- [ ] **[L] One pty integration test.**
-  `tests/pane_roundtrip.rs`. Spawn `cat` via `portable-pty`, write
-  bytes, parse `vt100::Screen`, assert rendered output.
-  `#[cfg(unix)]`. One test, not a suite.
+- [x] **[L] One pty integration test.**
+  `tests/pane_roundtrip.rs`. Spawns `cat` via `portable-pty`,
+  writes a line + `^D`, drains the master in a thread, parses
+  via `vt100::Parser`, asserts row 0 of the screen starts with
+  the input. `#[cfg(unix)]`, single test.
 
 - [x] **[S] Property tests (narrow).**
   `proptest` dev-dep + 5 properties across 3 sites:
