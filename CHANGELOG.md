@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **CI: relaxed `target` cache key + dropped the `-slim` image.**
+  Two more cuts on top of v1.50.6 / v1.50.7. (1) The `target` cache
+  was keyed on `Cargo.lock + rust-toolchain.toml`; that sounded
+  conservative but in practice meant every patch version bump
+  busted the cache and forced a ~3 min recompile of the whole dep
+  graph, even though `Cargo.lock` only changed because the
+  lockfile records `name = "spyc" version = ...`. The cache is now
+  keyed on `rust-toolchain.toml` only — cargo's per-crate
+  fingerprint hashes each crate's actual inputs (source,
+  build-script outputs, feature flags), so restoring a stale
+  target/ against a different lockfile is safe: changed deps
+  recompile fresh, unchanged deps reuse. (2) Switched base image
+  from `rust:1.85-slim` to `rust:1.85` (non-slim). Bakes in
+  `make`, `git`, `curl`, `ca-certificates`, `tar`, etc., so the
+  ~13s `apt-get install` step disappears. The image pull is
+  bigger but Bitbucket caches images per-runner.
+
 - **One pty roundtrip integration test.** New
   `tests/pane_roundtrip.rs` (`#[cfg(unix)]`, single test) spawns
   `cat` via `portable-pty`, writes a line plus `^D`, drains the

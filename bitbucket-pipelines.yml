@@ -5,7 +5,10 @@
 # --locked (directly or via the Makefile) so a Cargo.lock drift in CI
 # fails loudly instead of silently pulling fresh transitive deps.
 
-image: rust:1.85-slim
+# Non-slim image — bakes in `make`, `git`, `curl`, `ca-certificates`,
+# `tar`, etc., so we don't apt-install on every run (~13s saved). The
+# pull is bigger but Bitbucket caches the image per-runner.
+image: rust:1.85
 
 definitions:
   caches:
@@ -20,13 +23,19 @@ definitions:
         files:
           - rust-toolchain.toml
       path: $CARGO_HOME
-    # `target` is the compile-state cache and MUST track Cargo.lock —
-    # a lockfile drift implies a different dep graph and so different
-    # build artifacts. Keep it keyed tight.
+    # `target` keyed on toolchain only — same as `cargo`. cargo's
+    # per-crate fingerprint hashes each crate's actual inputs (source,
+    # build-script outputs, feature flags), so restoring a stale
+    # target/ against a different Cargo.lock is *safe*: changed deps
+    # recompile fresh, unchanged deps reuse from cache. Previously we
+    # keyed on Cargo.lock too, which sounded conservative but in
+    # practice meant every patch version bump (which rewrites the
+    # lockfile's `name = "spyc" version = ...` line) busted the cache
+    # and forced a ~3min recompile of the whole dep graph even though
+    # nothing in the graph actually changed.
     target:
       key:
         files:
-          - Cargo.lock
           - rust-toolchain.toml
       path: target
     # `rustup` covers $RUSTUP_HOME — toolchain binaries plus added
@@ -49,14 +58,11 @@ definitions:
           - target
           - rustup
         script:
-          # The slim image lacks dev tooling. We need `make` (canonical
-          # gate), `git` (cargo-deny clones the RustSec advisory DB),
-          # `curl` + `ca-certificates` (cargo-deny prebuilt download),
-          # rustfmt + clippy components, and cargo-deny itself.
-          # cargo-deny covers what cargo-audit used to (advisories)
-          # plus licenses, sources, and bans — ignores live in
-          # deny.toml with documented reasons.
-          - apt-get update && apt-get install -y --no-install-recommends make git curl ca-certificates
+          # `make`, `git`, `curl`, `ca-certificates` all come from the
+          # non-slim image. We add rustfmt + clippy components and
+          # cargo-deny. cargo-deny covers what cargo-audit used to
+          # (advisories) plus licenses, sources, and bans — ignores
+          # live in deny.toml with documented reasons.
           - rustup component add rustfmt clippy
           # cargo-deny: prebuilt binary from the upstream GitHub
           # release, verified against the project's own published
