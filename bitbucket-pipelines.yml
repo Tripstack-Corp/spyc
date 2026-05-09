@@ -38,6 +38,18 @@ definitions:
         files:
           - rust-toolchain.toml
       path: target
+    # Coverage-instrumented target dir. Quality and Coverage emit
+    # binary-incompatible artifacts (`cargo llvm-cov` injects
+    # `-C instrument-coverage` RUSTFLAGS), so they cannot share
+    # `target/`: whichever step's upload landed last clobbered the
+    # other and forced a from-scratch rebuild on the next run.
+    # Coverage now writes to `target-cov/` (via `--target-dir`) and
+    # caches it under its own key.
+    target-cov:
+      key:
+        files:
+          - rust-toolchain.toml
+      path: target-cov
     # `rustup` covers $RUSTUP_HOME — toolchain binaries plus added
     # components (rustfmt / clippy / llvm-tools-preview). `rustup
     # component add` is idempotent, so on a warm cache it's a no-op
@@ -90,12 +102,15 @@ definitions:
         name: Coverage (ratcheting floor)
         caches:
           - cargo
-          - target
+          - target-cov
           - rustup
         script:
           - rustup component add llvm-tools-preview
           - cargo install cargo-llvm-cov --locked
-          - cargo llvm-cov --locked --all-targets --fail-under-lines 35
+          # `--target-dir target-cov` keeps the instrumented build
+          # out of the Quality step's `target/` cache. See the
+          # `target-cov` cache definition above for the why.
+          - cargo llvm-cov --locked --all-targets --target-dir target-cov --fail-under-lines 35
 
 pipelines:
   # No `default:` block. With both `default` and `pull-requests`
