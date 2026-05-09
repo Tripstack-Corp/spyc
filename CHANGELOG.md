@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **`.ci-cache-version` for explicit cache busting.** New file at the
+  repo root, included in all four pipeline cache key file lists
+  (`cargo`, `target`, `target-cov`, `rustup`). Bitbucket caches are
+  immutable per key — `Skipping upload for existing cache` in the
+  logs means once populated they never auto-update for newly-added
+  crates or target artifacts. Result: caches were frozen at whatever
+  was in `$CARGO_HOME` / `target/` on the first cold run after a
+  key change, and proptest (added in v1.50.8) was being re-downloaded
+  every PR. Bumping the integer in `.ci-cache-version` changes the
+  derived key and forces a fresh upload on the next run. This
+  Unreleased entry triggers an initial bump (1) so v1.50.14's first
+  pipeline picks up everything currently in Cargo.lock.
+
 - **Coverage step: `CARGO_TARGET_DIR` instead of `--target-dir`.**
   Hot-fix for v1.50.12: `cargo llvm-cov` doesn't accept the
   `--target-dir` flag (it's a wrapper that doesn't pass that arg

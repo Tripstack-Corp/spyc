@@ -12,6 +12,16 @@ image: rust:1.85
 
 definitions:
   caches:
+    # All four caches include `.ci-cache-version` in their key files.
+    # Bitbucket caches are immutable per key — once a cache is uploaded
+    # for a given key, subsequent runs *never* upload over it
+    # ("Skipping upload for existing cache" in the logs), so newly-
+    # added crates and target artifacts never make it into the cache.
+    # Bumping the integer in `.ci-cache-version` changes the derived
+    # key, forcing Bitbucket to upload a fresh cache on the next run.
+    # Use sparingly — once after a major dep addition, or when the
+    # warm-cache build is still suspiciously slow.
+
     # `cargo` covers $CARGO_HOME — registry index, downloaded crates,
     # and installed binaries (cargo-deny / cargo-llvm-cov). Keyed on
     # the toolchain only so a Cargo.lock change (e.g. a patch version
@@ -22,6 +32,7 @@ definitions:
       key:
         files:
           - rust-toolchain.toml
+          - .ci-cache-version
       path: $CARGO_HOME
     # `target` keyed on toolchain only — same as `cargo`. cargo's
     # per-crate fingerprint hashes each crate's actual inputs (source,
@@ -37,6 +48,7 @@ definitions:
       key:
         files:
           - rust-toolchain.toml
+          - .ci-cache-version
       path: target
     # Coverage-instrumented target dir. Quality and Coverage emit
     # binary-incompatible artifacts (`cargo llvm-cov` injects
@@ -49,6 +61,7 @@ definitions:
       key:
         files:
           - rust-toolchain.toml
+          - .ci-cache-version
       path: target-cov
     # `rustup` covers $RUSTUP_HOME — toolchain binaries plus added
     # components (rustfmt / clippy / llvm-tools-preview). `rustup
@@ -60,6 +73,7 @@ definitions:
       key:
         files:
           - rust-toolchain.toml
+          - .ci-cache-version
       path: $RUSTUP_HOME
 
   steps:
