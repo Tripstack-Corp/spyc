@@ -1,0 +1,6 @@
+---
+source: src/ui/prompt.rs
+assertion_line: 150
+expression: out
+---
+[V] $ hello world

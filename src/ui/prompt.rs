@@ -83,3 +83,70 @@ impl PromptLine<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_prompt_to_string(prompt: &PromptLine<'_>, w: u16) -> String {
+        let backend = TestBackend::new(w, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = Rect::new(0, 0, w, 1);
+                prompt.render(f, area);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for x in 0..buf.area.width {
+            out.push_str(buf.cell((x, 0)).map_or(" ", |c| c.symbol()));
+        }
+        out.trim_end().to_string()
+    }
+
+    #[test]
+    fn snapshot_prompt_simple() {
+        // No vi mode, no cursor_pos — the legacy command prompt with a
+        // blinking underscore tail.
+        let theme = Theme::default();
+        let prompt = PromptLine {
+            prefix: ":",
+            buffer: "edit",
+            theme: &theme,
+            cursor_pos: None,
+            vi_mode: None,
+        };
+        let out = render_prompt_to_string(&prompt, 40);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_prompt_insert_mode() {
+        let theme = Theme::default();
+        let prompt = PromptLine {
+            prefix: "$ ",
+            buffer: "hello world",
+            theme: &theme,
+            cursor_pos: Some(5),
+            vi_mode: Some(ViMode::Insert),
+        };
+        let out = render_prompt_to_string(&prompt, 40);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_prompt_normal_mode() {
+        let theme = Theme::default();
+        let prompt = PromptLine {
+            prefix: "$ ",
+            buffer: "hello world",
+            theme: &theme,
+            cursor_pos: Some(0),
+            vi_mode: Some(ViMode::Normal),
+        };
+        let out = render_prompt_to_string(&prompt, 40);
+        insta::assert_snapshot!(out);
+    }
+}

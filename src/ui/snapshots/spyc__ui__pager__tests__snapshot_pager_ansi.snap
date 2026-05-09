@@ -1,0 +1,13 @@
+---
+source: src/ui/pager.rs
+assertion_line: 2428
+expression: out
+---
+1 red line
+2 bold green
+3 plain
+[EOF]
+~
+~
+~
+~

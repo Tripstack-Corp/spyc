@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **Widget snapshot test coverage extended.** Added 10 `insta`
+  snapshots (on top of the existing 4 status-bar snaps): `list_view`
+  (basic / picks-and-takes / empty), `pager` (ANSI input, hex dump,
+  line-number gutter widening from 1- to 2-digit, search highlight
+  bar), and the vi-mode prompt (simple / insert / normal). Glyph-
+  level only — same trade-off as the status-bar suite — but enough
+  to catch layout, gutter, and search-bar regressions before they
+  ship. Closes the v1.5-era "M: snapshot tests on widgets" TODO.
+
 ### Fixed
 - **Spawned panes now advertise `COLORTERM=truecolor`.** Reported by
   Gemini code review: `TERM=xterm-256color` alone doesn't tell apps

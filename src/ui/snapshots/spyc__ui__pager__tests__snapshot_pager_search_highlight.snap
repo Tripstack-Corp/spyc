@@ -1,0 +1,13 @@
+---
+source: src/ui/pager.rs
+assertion_line: 2479
+expression: out
+---
+1 alpha
+2 beta needle
+3 gamma
+4 delta needle
+5 epsilon
+[EOF]
+~
+/needle  1/2

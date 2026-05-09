@@ -1,0 +1,8 @@
+---
+source: src/ui/list_view.rs
+assertion_line: 525
+expression: out
+---
+* alpha.txt                   
++ beta.txt                    
+ ~gamma
