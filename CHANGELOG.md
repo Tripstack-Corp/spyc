@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **Coverage step: `CARGO_TARGET_DIR` instead of `--target-dir`.**
+  Hot-fix for v1.50.12: `cargo llvm-cov` doesn't accept the
+  `--target-dir` flag (it's a wrapper that doesn't pass that arg
+  through to the inner cargo invocation), so the v1.50.12 ship
+  failed on the Coverage step with `error: invalid option
+  '--target-dir'`. The repo doesn't gate merges on green builds
+  so it landed anyway and broke main's Coverage. Switched to the
+  documented escape hatch — set `CARGO_TARGET_DIR=target-cov`
+  inline on the cargo llvm-cov line. Same intent, working syntax.
+
 - **Coverage step gets its own `target-cov/` cache.** The Quality
   and Coverage steps were sharing the `target` cache and racing
   each other: Quality writes un-instrumented artifacts, Coverage
