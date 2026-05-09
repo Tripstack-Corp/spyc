@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **Bitbucket pipeline cache restructured + cargo-deny prebuilt.**
+  Two changes that together cut cold-cache CI from ~6 minutes
+  toward ~1.5: (1) the `cargo` cache (covering `$CARGO_HOME` —
+  registry, downloaded crates, installed bin tools) now keys on
+  `rust-toolchain.toml` only; previously a Cargo.lock change (which
+  every patch version bump triggers, since the lockfile carries
+  `name = "spyc"` + version) busted the whole cache and forced a
+  fresh registry fetch + cargo-deny rebuild every PR. The `target`
+  cache still keys on Cargo.lock since compile state must follow
+  the dep graph. (2) `cargo install cargo-deny --locked` (~3 min
+  on a cold cache) is replaced by a pinned prebuilt binary download
+  from the upstream EmbarkStudios GitHub release, verified against
+  the project's published `.sha256`. Pinned to 0.19.4; bump the
+  VERSION + SHA256 pair together at the same call-site.
+
 - **Widget snapshot test coverage extended.** Added 10 `insta`
   snapshots (on top of the existing 4 status-bar snaps): `list_view`
   (basic / picks-and-takes / empty), `pager` (ANSI input, hex dump,

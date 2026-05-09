@@ -9,12 +9,20 @@ image: rust:1.85-slim
 
 definitions:
   caches:
+    # `cargo` covers $CARGO_HOME — registry index, downloaded crates,
+    # and installed binaries (cargo-deny / cargo-llvm-cov). Keyed on
+    # the toolchain only so a Cargo.lock change (e.g. a patch version
+    # bump that rewrites the lockfile's `name = "spyc"` line) does
+    # NOT bust this cache. Stale registry entries are harmless;
+    # missing/outdated ones just trigger a re-fetch on demand.
     cargo:
       key:
         files:
-          - Cargo.lock
           - rust-toolchain.toml
       path: $CARGO_HOME
+    # `target` is the compile-state cache and MUST track Cargo.lock —
+    # a lockfile drift implies a different dep graph and so different
+    # build artifacts. Keep it keyed tight.
     target:
       key:
         files:
@@ -31,13 +39,30 @@ definitions:
         script:
           # The slim image lacks dev tooling. We need `make` (canonical
           # gate), `git` (cargo-deny clones the RustSec advisory DB),
+          # `curl` + `ca-certificates` (cargo-deny prebuilt download),
           # rustfmt + clippy components, and cargo-deny itself.
           # cargo-deny covers what cargo-audit used to (advisories)
           # plus licenses, sources, and bans — ignores live in
           # deny.toml with documented reasons.
-          - apt-get update && apt-get install -y --no-install-recommends make git
+          - apt-get update && apt-get install -y --no-install-recommends make git curl ca-certificates
           - rustup component add rustfmt clippy
-          - cargo install cargo-deny --locked
+          # cargo-deny: prebuilt binary from the upstream GitHub
+          # release, verified against the project's own published
+          # `.sha256`. Replaces `cargo install cargo-deny --locked`
+          # which spent ~3 min compiling from source on every cold
+          # cache. Bump the VERSION + SHA256 pair together when
+          # EmbarkStudios ships a new release; the sha file lives at
+          # the same release URL with `.sha256` appended.
+          - |
+            CARGO_DENY_VERSION=0.19.4
+            CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
+            CARGO_DENY_DIR=cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl
+            if ! "$CARGO_HOME/bin/cargo-deny" --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
+              curl -sSLo /tmp/cargo-deny.tar.gz "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${CARGO_DENY_DIR}.tar.gz"
+              echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+              tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+              install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$CARGO_HOME/bin/cargo-deny"
+            fi
           # `make check` = fmt-check + clippy + tests + deny. Tests
           # forced single-threaded by the Makefile (XDG_STATE_HOME race).
           # CI calls the Makefile so local and CI agree on the gate.
