@@ -103,9 +103,13 @@ rest of the dispatch testing.
   Wire the panic hook to dump `RUST_BACKTRACE=full` to the debug log.
   *Done:* `main.rs` does `Backtrace::force_capture()` → `debug_log::log()`.
 
-- [ ] **[S] `spyc --dump-default-config`.**
-  Prints the full default `.spycrc.toml` with comments. Self-doc
-  for the keymap DSL + user starting point.
+- [x] **[S] `spyc --print-config`.**
+  Prints the embedded `default.spycrc.toml` (fully commented) to
+  stdout and exits. Self-doc for the keymap DSL + user starting
+  point. Round-trip is unit-tested
+  (`config::mod.rs::default_template_parses_back`). The TODO
+  originally proposed `--dump-default-config`; the shorter
+  `--print-config` shipped instead.
 
 ### Hardening
 
