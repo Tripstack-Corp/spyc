@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **One pty roundtrip integration test.** New
+  `tests/pane_roundtrip.rs` (`#[cfg(unix)]`, single test) spawns
+  `cat` via `portable-pty`, writes a line plus `^D`, drains the
+  master in a thread, parses the bytes through `vt100`, and
+  asserts row 0 of the rendered screen contains the input. This
+  validates the integration contract spyc relies on
+  (`portable-pty` pty plumbing + `vt100` parser) without going
+  through any spyc-internal wiring; if a future portable-pty
+  release stops delivering CRLF-translated bytes, or `vt100`
+  changes how it lays out cells, this test trips. Closes the
+  v1.5-era "[L] One pty integration test" TODO.
+
 - **Property tests added for three core invariants.** New
   `proptest` dev-dep + one `proptest!` block per site, narrowly
   scoped:
