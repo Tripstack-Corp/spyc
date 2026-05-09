@@ -2374,4 +2374,107 @@ mod tests {
         let slot = Rect::new(0, 21, 100, 19);
         assert_eq!(pager_inner_area(slot, &view), slot);
     }
+
+    // ── snapshot tests (TestBackend) ──────────────────────────────
+    //
+    // Glyph-level snapshots of the pager's four interesting modes:
+    // ANSI input (color-tagged source), hex dump styling, line-number
+    // gutter, and search highlight. We capture symbols only (no
+    // styling) — same trade-off as `ui::status::tests`. A regression
+    // that breaks layout, gutter width, search-bar formatting, or
+    // hex-dump structure will diff visibly.
+
+    use crate::ui::theme::Theme;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_pager_to_string(view: &PagerView, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|f| {
+                let area = Rect::new(0, 0, w, h);
+                super::render(f, area, view, &theme);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf.cell((x, y)).map_or(" ", |c| c.symbol()));
+            }
+            out.push('\n');
+        }
+        // Trim trailing whitespace per line and drop trailing blank
+        // lines so the snapshot stays tight.
+        out.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn snapshot_pager_ansi() {
+        // ANSI escapes are parsed into styled spans; the snapshot
+        // captures glyphs, so this is mostly a layout/structure check
+        // that ANSI input doesn't bleed escape bytes into the buffer.
+        let bytes = b"\x1b[31mred line\x1b[0m\n\x1b[1;32mbold green\x1b[0m\nplain\n";
+        let mut view = PagerView::new_ansi("ansi.txt", bytes);
+        view.full_width = true;
+        let out = render_pager_to_string(&view, 60, 8);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_pager_hex() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bin");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"\x7fELF\x02\x01\x01\x00hello, spyc!").unwrap();
+        let lines = crate::fs::ops::hex_dump_lines(&path, &Theme::default()).unwrap();
+        let mut view = PagerView::new_styled("bin", lines);
+        view.full_width = true;
+        let out = render_pager_to_string(&view, 80, 6);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_pager_line_numbers() {
+        // 12 lines so the gutter is at least 2 digits wide, which is
+        // the case the renderer has to right-align.
+        let lines: Vec<String> = (1..=12).map(|i| format!("line {i}")).collect();
+        let mut view = PagerView::new_plain("notes.txt", lines);
+        view.full_width = true;
+        // show_line_numbers is on by default in new_plain; assert.
+        assert!(view.show_line_numbers);
+        let out = render_pager_to_string(&view, 40, 14);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_pager_search_highlight() {
+        let mut view = PagerView::new_plain(
+            "search.txt",
+            vec![
+                "alpha".to_string(),
+                "beta needle".to_string(),
+                "gamma".to_string(),
+                "delta needle".to_string(),
+                "epsilon".to_string(),
+            ],
+        );
+        view.full_width = true;
+        view.begin_search();
+        for c in "needle".chars() {
+            view.search_push_char(c);
+        }
+        // Viewport height matches what we'll render with.
+        let committed = view.commit_search(8);
+        assert!(committed, "search query should match");
+        let out = render_pager_to_string(&view, 50, 8);
+        insta::assert_snapshot!(out);
+    }
 }

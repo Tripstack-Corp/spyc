@@ -1,0 +1,6 @@
+---
+source: src/ui/prompt.rs
+assertion_line: 122
+expression: out
+---
+:edit_

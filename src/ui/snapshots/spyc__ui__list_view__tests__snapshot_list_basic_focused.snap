@@ -1,0 +1,8 @@
+---
+source: src/ui/list_view.rs
+assertion_line: 496
+expression: out
+---
+  README.md                   
+  Cargo.toml                  
+  src

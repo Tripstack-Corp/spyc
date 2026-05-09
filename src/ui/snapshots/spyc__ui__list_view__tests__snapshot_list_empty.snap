@@ -1,0 +1,6 @@
+---
+source: src/ui/list_view.rs
+assertion_line: 532
+expression: out
+---
+<Empty>

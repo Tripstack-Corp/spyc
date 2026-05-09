@@ -69,10 +69,11 @@ rest of the dispatch testing.
   `tests/filesystem.rs` (6 tests, tempdir trees) and
   `tests/keymap_roundtrip.rs` (5 TOML grammar contract tests).
 
-- [ ] **[M] Snapshot tests on widgets.**
-  ~~Add `insta` dev-dep.~~ Done. Status bar snapshots (4) done.
-  Remaining: `list_view`, `pager` (ANSI, hex, line numbers, search
-  highlight), `line_edit` modes.
+- [x] **[M] Snapshot tests on widgets.**
+  `insta` dev-dep + 14 snapshots: status bar (4), `list_view` (3:
+  basic, picks/takes/git, empty), pager (4: ANSI, hex, line
+  numbers, search highlight), `line_edit` via `prompt` (3: simple,
+  insert mode, normal mode).
 
 - [ ] **[L] One pty integration test.**
   `tests/pane_roundtrip.rs`. Spawn `cat` via `portable-pty`, write

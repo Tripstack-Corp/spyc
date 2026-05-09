@@ -1,0 +1,11 @@
+---
+source: src/ui/pager.rs
+assertion_line: 2442
+expression: out
+---
+1 0000:   7f 45 4c 46 02 01 01 00 68 65 6c 6c 6f 2c 20 73   .ELF....hello, s
+2 0010:   70 79 63 21                                       pyc!
+[EOF]
+~
+~
+~

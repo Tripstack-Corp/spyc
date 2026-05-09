@@ -450,4 +450,85 @@ mod tests {
         let g = grid_for(&["apple", "banana", "cherry"], 10, 10);
         assert_eq!(g.cols, 1);
     }
+
+    // ── snapshot tests (TestBackend) ──────────────────────────────
+    //
+    // These capture the rendered glyphs (no styling) for the file list
+    // at a fixed geometry. Mirrors the pattern in `ui::status::tests`:
+    // a regression that changes layout, marker prefixes, or row
+    // truncation will diff visibly.
+
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render_list_to_string(rows: &[Row], cursor: usize, focused: bool, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|f| {
+                let area = Rect::new(0, 0, w, h);
+                let lv = ListView {
+                    rows,
+                    cursor,
+                    view_top: 0,
+                    empty_marker: true,
+                    focused,
+                    theme: &theme,
+                };
+                f.render_widget(lv, area);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf.cell((x, y)).map_or(" ", |c| c.symbol()));
+            }
+            out.push('\n');
+        }
+        out.trim_end().to_string()
+    }
+
+    #[test]
+    fn snapshot_list_basic_focused() {
+        let rows = vec![row("README.md"), row("Cargo.toml"), row("src")];
+        let out = render_list_to_string(&rows, 0, true, 30, 4);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_list_picks_and_takes() {
+        let rows = vec![
+            Row {
+                display: "alpha.txt".into(),
+                kind: EntryKind::File,
+                picked: true,
+                taken: false,
+                git_status: GitFileStatus::clean(),
+            },
+            Row {
+                display: "beta.txt".into(),
+                kind: EntryKind::File,
+                picked: false,
+                taken: true,
+                git_status: GitFileStatus::clean(),
+            },
+            Row {
+                display: "gamma".into(),
+                kind: EntryKind::Dir,
+                picked: false,
+                taken: false,
+                git_status: GitFileStatus::unstaged(GitChange::Modified),
+            },
+        ];
+        let out = render_list_to_string(&rows, 1, true, 30, 4);
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_list_empty() {
+        let rows: Vec<Row> = Vec::new();
+        let out = render_list_to_string(&rows, 0, true, 30, 4);
+        insta::assert_snapshot!(out);
+    }
 }
