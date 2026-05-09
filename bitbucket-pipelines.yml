@@ -29,6 +29,17 @@ definitions:
           - Cargo.lock
           - rust-toolchain.toml
       path: target
+    # `rustup` covers $RUSTUP_HOME — toolchain binaries plus added
+    # components (rustfmt / clippy / llvm-tools-preview). `rustup
+    # component add` is idempotent, so on a warm cache it's a no-op
+    # instead of the ~44s download + extract. Keyed on
+    # rust-toolchain.toml since a toolchain bump is the only thing
+    # that can invalidate this directory.
+    rustup:
+      key:
+        files:
+          - rust-toolchain.toml
+      path: $RUSTUP_HOME
 
   steps:
     - step: &quality
@@ -36,6 +47,7 @@ definitions:
         caches:
           - cargo
           - target
+          - rustup
         script:
           # The slim image lacks dev tooling. We need `make` (canonical
           # gate), `git` (cargo-deny clones the RustSec advisory DB),
@@ -73,6 +85,7 @@ definitions:
         caches:
           - cargo
           - target
+          - rustup
         script:
           - rustup component add llvm-tools-preview
           - cargo install cargo-llvm-cov --locked

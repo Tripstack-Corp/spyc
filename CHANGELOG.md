@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **Pipeline now caches `$RUSTUP_HOME` too.** Follow-up to v1.50.6:
+  `rustup component add rustfmt clippy` (quality step) and
+  `rustup component add llvm-tools-preview` (coverage step) were
+  the next-largest CI cost after cargo-deny — about 44s combined
+  on a cold image because every run re-downloaded and re-extracted
+  the components. Added a third cache (`rustup` → `$RUSTUP_HOME`,
+  keyed on `rust-toolchain.toml` so a toolchain bump is the only
+  invalidator) and wired both steps to use it. `rustup component
+  add` is idempotent; on a warm cache the step becomes a near-no-op.
+
 - **Bitbucket pipeline cache restructured + cargo-deny prebuilt.**
   Two changes that together cut cold-cache CI from ~6 minutes
   toward ~1.5: (1) the `cargo` cache (covering `$CARGO_HOME` —
