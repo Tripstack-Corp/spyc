@@ -448,58 +448,29 @@ pub fn find_gemini_sessions(cwd: &std::path::Path) -> Vec<GeminiSessionInfo> {
     found
 }
 
-/// Parse a small subset of ISO-8601: `YYYY-MM-DDTHH:MM:SS` (with
-/// optional `.fff` fractional seconds and trailing `Z` UTC marker).
-/// Returns epoch seconds as `u64`. Used for Gemini's `startTime`
-/// strings; gives us a comparable timestamp without pulling in
-/// chrono / time as a runtime dep just for this.
+/// Parse Gemini's chat-metadata `startTime` (ISO-8601 / RFC 3339)
+/// to epoch seconds via `jiff`. Accepts both forms emitted in the
+/// wild — `2026-05-08T12:27:31.927Z` and `2026-05-08T12:27:31Z` —
+/// plus naive `2026-05-08T12:27:31` (no zone) by tagging UTC.
 fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
-    // Strip optional trailing 'Z' and optional fractional seconds.
-    let s = s.strip_suffix('Z').unwrap_or(s);
-    let s = match s.split_once('.') {
-        Some((head, _)) => head,
-        None => s,
-    };
-    // YYYY-MM-DDTHH:MM:SS
-    if s.len() != 19 {
+    // Try strict RFC 3339 first (handles fractional seconds + Z / offsets).
+    if let Ok(ts) = s.parse::<jiff::Timestamp>() {
+        let secs = ts.as_second();
+        if secs < 0 {
+            return None;
+        }
+        return Some(secs as u64);
+    }
+    // Fallback: zoneless `YYYY-MM-DDTHH:MM:SS` — assume UTC, since
+    // every Gemini chat we've observed writes `Z`. Defensive against
+    // upstream drift.
+    let civil: jiff::civil::DateTime = s.parse().ok()?;
+    let zoned = civil.to_zoned(jiff::tz::TimeZone::UTC).ok()?;
+    let secs = zoned.timestamp().as_second();
+    if secs < 0 {
         return None;
     }
-    let bytes = s.as_bytes();
-    // Verify the separator characters are exactly where ISO-8601 puts
-    // them — otherwise `2026/05/08 12:27:31` (same length, different
-    // shape) would parse silently and produce nonsense seconds.
-    if bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[10] != b'T'
-        || bytes[13] != b':'
-        || bytes[16] != b':'
-    {
-        return None;
-    }
-    let year: u32 = std::str::from_utf8(&bytes[0..4]).ok()?.parse().ok()?;
-    let month: u32 = std::str::from_utf8(&bytes[5..7]).ok()?.parse().ok()?;
-    let day: u32 = std::str::from_utf8(&bytes[8..10]).ok()?.parse().ok()?;
-    let hour: u64 = std::str::from_utf8(&bytes[11..13]).ok()?.parse().ok()?;
-    let minute: u64 = std::str::from_utf8(&bytes[14..16]).ok()?.parse().ok()?;
-    let second: u64 = std::str::from_utf8(&bytes[17..19]).ok()?.parse().ok()?;
-    if !(1970..=2200).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    // Days-from-civil-date algorithm (Howard Hinnant). Computes days
-    // since 1970-01-01 for any proleptic Gregorian date in O(1) without
-    // building a calendar table.
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = y / 400;
-    let yoe = y - era * 400;
-    let m = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = i64::from(era) * 146_097 + i64::from(doe) - 719_468;
-    if days < 0 {
-        return None;
-    }
-    let secs = days as u64 * 86_400 + hour * 3_600 + minute * 60 + second;
-    Some(secs)
+    Some(secs as u64)
 }
 
 /// Look up a Claude session's custom title from its conversation JSONL.
