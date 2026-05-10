@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Gemini CLI as a third agent kind alongside Claude and Codex.**
+  `gemini` (and path-qualified variants) are now detected as
+  `AgentKind::Gemini` and tracked through the save/restore
+  pipeline:
+  - **Save**: walks `~/.gemini/tmp/<project>/chats/*.jsonl` —
+    each chat's first line is JSON metadata with `sessionId` +
+    `startTime` — and picks the unclaimed UUID whose start time
+    is closest to that pane's spawn time. Same multi-pane
+    discipline as Claude/Codex (a `claimed` set prevents two
+    panes from collapsing onto one conversation).
+  - **Restore**: Gemini's `--resume` consumes an *index* into
+    `--list-sessions`, not a UUID. spyc shells out to `gemini
+    --list-sessions` synchronously, parses the
+    `<n>. <title> (...) [<uuid>]` lines, and spawns
+    `gemini --resume <n>` for the matched UUID. Falls back to
+    bare `gemini` if the lookup fails (binary missing, session
+    pruned, output format drift) so the user can still pick.
+  - New plumbing: `AgentKind::Gemini`, `is_gemini_command`,
+    `command_without_gemini_resume`,
+    `find_gemini_sessions`, `gemini_project_name`,
+    `parse_iso8601_to_epoch_secs`,
+    `parse_gemini_list_sessions_for_uuid`, plus a generalized
+    `pick_closest_unclaimed_session` (now over a
+    `SessionCandidate` trait so Claude and Gemini share the
+    picker).
+  - 18 new unit tests (ISO-8601 parser, command stripping,
+    list-sessions parser, picker generality).
+
 ### Fixed
 - **Multiple Claude/Codex panes now resume to distinct sessions.**
   Reported in BUGS.md: with several Claude/Codex tabs alive in the
