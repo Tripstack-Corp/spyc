@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Multiple Claude/Codex panes now resume to distinct sessions.**
+  Reported in BUGS.md: with several Claude/Codex tabs alive in the
+  same cwd at quit time, restoring the saved session pulled all of
+  them into a single conversation. Cause: `save_session`'s resolver
+  fell back to `most_recent_jsonl_for_cwd` when the pane hadn't yet
+  printed an exit banner (the common case — Claude is usually still
+  alive when the user quits spyc), and that fallback returned the
+  same JSONL for every pane in the cwd. Fix: `save_session` now
+  walks tabs in order tracking a `claimed` set of already-assigned
+  session IDs. The Claude resolver scans
+  `~/.claude/sessions/*.json`, picks the unclaimed record whose
+  `startedAt` is closest to *that* pane's spawn time (a new
+  `spawn_epoch_secs` on `TabInfo`), and verifies the JSONL exists
+  before saving. Codex's banner-derived ID is also gated on
+  `claimed`. Picker is a pure helper
+  (`pick_closest_unclaimed_session`) with five unit tests covering
+  the closest-match-with-claim-skip semantics.
+
 ### Internal
 - **`.ci-cache-version` for explicit cache busting.** New file at the
   repo root, included in all four pipeline cache key file lists

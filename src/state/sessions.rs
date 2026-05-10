@@ -161,20 +161,32 @@ fn prune_old(dir: &std::path::Path) {
     }
 }
 
-/// Claude session info returned by `find_claude_session`.
+/// Claude session info returned by `find_claude_sessions`.
 pub struct ClaudeSessionInfo {
     pub session_id: String,
     pub name: Option<String>,
+    /// Wall-clock start time in epoch SECONDS (Claude's `startedAt`
+    /// field is millis; converted on read so callers don't have to
+    /// remember the unit).
+    pub started_at_secs: u64,
 }
 
-/// Find the most recent Claude Code session for a given working directory.
-/// Scans `~/.claude/sessions/*.json` for entries whose `cwd` matches.
-pub fn find_claude_session(cwd: &std::path::Path) -> Option<ClaudeSessionInfo> {
-    let home = std::env::var_os("HOME")?;
+/// Find every Claude Code session record whose `cwd` matches the
+/// given path. Returned sorted by `startedAt` descending (most recent
+/// first). Useful when multiple Claude panes share a cwd and need to
+/// be matched 1:1 against their session records by spawn time —
+/// otherwise they all collapse onto the most-recent record.
+pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
     let dir = PathBuf::from(home).join(".claude/sessions");
-    let entries = std::fs::read_dir(&dir).ok()?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
 
-    let mut best: Option<(u64, String, Option<String>)> = None; // (startedAt, sessionId, name)
+    let cwd_str = cwd.to_string_lossy();
+    let mut found: Vec<(u64, String, Option<String>)> = Vec::new();
 
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
@@ -196,24 +208,47 @@ pub fn find_claude_session(cwd: &std::path::Path) -> Option<ClaudeSessionInfo> {
             continue;
         }
         // Match cwd (handle /private/tmp vs /tmp macOS symlink).
-        let cwd_str = cwd.to_string_lossy();
         let matches = session_cwd == cwd_str
             || session_cwd.strip_prefix("/private").unwrap_or(session_cwd) == cwd_str.as_ref();
 
-        if matches && best.as_ref().is_none_or(|(ts, _, _)| started_at > *ts) {
-            best = Some((started_at, session_id.to_string(), name));
+        if matches {
+            found.push((started_at, session_id.to_string(), name));
         }
     }
 
-    best.map(|(_, id, name)| {
-        // Session name may be in the conversation JSONL as a
-        // `custom-title` entry rather than in the session file.
-        let name = name.or_else(|| find_claude_session_name(&id));
-        ClaudeSessionInfo {
-            session_id: id,
-            name,
-        }
-    })
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found
+        .into_iter()
+        .map(|(started_at_ms, id, name)| {
+            // Session name may live in the conversation JSONL as a
+            // `custom-title` entry rather than in the session file.
+            let name = name.or_else(|| find_claude_session_name(&id));
+            ClaudeSessionInfo {
+                session_id: id,
+                name,
+                started_at_secs: started_at_ms / 1000,
+            }
+        })
+        .collect()
+}
+
+/// Pure helper: out of a list of session candidates (typically from
+/// `find_claude_sessions`), pick the one whose `started_at_secs` is
+/// closest to `pane_spawn_epoch_secs` AND whose `session_id` is not
+/// in `claimed`. Returns `None` if every candidate is already claimed
+/// or the list is empty. Stable: ties broken by input order.
+///
+/// Extracted so the multi-pane disambiguation has a unit test that
+/// doesn't depend on filesystem state under `~/.claude/`.
+pub fn pick_closest_unclaimed_session(
+    candidates: Vec<ClaudeSessionInfo>,
+    pane_spawn_epoch_secs: u64,
+    claimed: &std::collections::HashSet<String>,
+) -> Option<ClaudeSessionInfo> {
+    candidates
+        .into_iter()
+        .filter(|c| !claimed.contains(&c.session_id))
+        .min_by_key(|c| c.started_at_secs.abs_diff(pane_spawn_epoch_secs))
 }
 
 /// Public wrapper for `find_claude_session_name` used by save_session
@@ -624,6 +659,90 @@ mod tests {
         // A timestamp in the future — saturating_sub makes diff 0
         let s = format_relative_time(now_secs() + 1000);
         assert_eq!(s, "just now");
+    }
+
+    // ── pick_closest_unclaimed_session ────────────────────────────
+    //
+    // Multi-pane disambiguation: when several Claude tabs share a
+    // cwd, each pane's spawn time matches a different session
+    // record's startedAt. Without claim-tracking, the resolver's
+    // "most-recent JSONL" fallback collapsed every alive pane onto
+    // one conversation.
+
+    fn cs(id: &str, started_at_secs: u64) -> ClaudeSessionInfo {
+        ClaudeSessionInfo {
+            session_id: id.to_string(),
+            name: None,
+            started_at_secs,
+        }
+    }
+
+    #[test]
+    fn picker_returns_none_for_empty_candidates() {
+        let claimed = std::collections::HashSet::new();
+        assert!(pick_closest_unclaimed_session(vec![], 1000, &claimed).is_none());
+    }
+
+    #[test]
+    fn picker_picks_closest_started_at() {
+        let candidates = vec![cs("a", 1000), cs("b", 2000), cs("c", 3000)];
+        let claimed = std::collections::HashSet::new();
+        let pick = pick_closest_unclaimed_session(candidates, 2100, &claimed).unwrap();
+        assert_eq!(pick.session_id, "b");
+    }
+
+    #[test]
+    fn picker_skips_already_claimed_ids() {
+        // Without the claimed-skip, a pane spawned at 2100 would
+        // claim "b" — but "b" is already taken by an earlier pane.
+        // Picker should pick the next-closest unclaimed, here "a"
+        // (1000s away) over "c" (900s away)? No — "c" is closer.
+        let candidates = vec![cs("a", 1000), cs("b", 2000), cs("c", 3000)];
+        let mut claimed = std::collections::HashSet::new();
+        claimed.insert("b".to_string());
+        let pick = pick_closest_unclaimed_session(candidates, 2100, &claimed).unwrap();
+        assert_eq!(pick.session_id, "c");
+    }
+
+    #[test]
+    fn picker_returns_none_when_all_claimed() {
+        let candidates = vec![cs("a", 1000), cs("b", 2000)];
+        let mut claimed = std::collections::HashSet::new();
+        claimed.insert("a".to_string());
+        claimed.insert("b".to_string());
+        assert!(pick_closest_unclaimed_session(candidates, 1500, &claimed).is_none());
+    }
+
+    #[test]
+    fn three_panes_three_distinct_session_ids() {
+        // The bug: three Claude tabs spawned at t1 < t2 < t3 in the
+        // same cwd. Three session records exist, sorted by startedAt
+        // (closest match for each pane is the record at its own time).
+        // Sequential resolve_calls (each adding to `claimed`) must
+        // produce three distinct IDs.
+        let records = vec![cs("a", 1000), cs("b", 2000), cs("c", 3000)];
+        let pane_spawn_times = [1010_u64, 2010, 3010];
+
+        let mut claimed = std::collections::HashSet::new();
+        let mut assigned = Vec::new();
+        for spawn in pane_spawn_times {
+            let pick = pick_closest_unclaimed_session(records.clone(), spawn, &claimed)
+                .expect("a candidate should remain");
+            claimed.insert(pick.session_id.clone());
+            assigned.push(pick.session_id);
+        }
+
+        assert_eq!(assigned, vec!["a", "b", "c"]);
+    }
+
+    impl Clone for ClaudeSessionInfo {
+        fn clone(&self) -> Self {
+            Self {
+                session_id: self.session_id.clone(),
+                name: self.name.clone(),
+                started_at_secs: self.started_at_secs,
+            }
+        }
     }
 
     // Note: save/load/prune tests use the shared XDG_STATE_HOME env var.

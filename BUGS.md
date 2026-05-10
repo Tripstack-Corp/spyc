@@ -1,11 +1,6 @@
 ### SMALL ###
-- we should investigate the markdown viewer glow and steal features if it makes
-  sense
 - support drag and drop features - give multiple options to the user e.g. send
   to lower pane as image, create new file (auto type detect), etc.
-- when resuming with multiple claude / codex sessions - it seems that the
-  individual sessions are not recalled; they all get brought into the same
-  session recovery
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
