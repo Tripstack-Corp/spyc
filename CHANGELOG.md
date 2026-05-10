@@ -5,6 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **CI: `CARGO_INCREMENTAL=0` + cache bust.** Pipeline #380's
+  warm-cache run still showed cargo printing `Compiling X` for
+  ~30 dep crates per step. Cache restoration was working
+  correctly (target/ downloaded at 512MB), but cargo's per-crate
+  incremental metadata files include build paths and timestamps
+  that go stale across runners, so the fingerprint check
+  invalidated every artifact and forced re-verification (and
+  partial re-build for proc-macro / build-script crates).
+  Disabling incremental compilation in CI is the standard
+  big-Rust-shop fix — target/ becomes smaller and deterministic
+  across runs. Local dev keeps incremental on (the override is
+  inline on `make check` / `cargo llvm-cov`, not a Cargo config
+  change). Bumped `.ci-cache-version` to 2 so the next run
+  uploads a fresh, smaller target/ without the incremental
+  metadata.
+
 ### Added
 - **Gemini CLI as a third agent kind alongside Claude and Codex.**
   `gemini` (and path-qualified variants) are now detected as

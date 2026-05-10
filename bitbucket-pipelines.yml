@@ -110,7 +110,15 @@ definitions:
           # `make check` = fmt-check + clippy + tests + deny. Tests
           # forced single-threaded by the Makefile (XDG_STATE_HOME race).
           # CI calls the Makefile so local and CI agree on the gate.
-          - make check
+          #
+          # `CARGO_INCREMENTAL=0` disables cargo's per-crate incremental
+          # metadata. The metadata files include build paths and
+          # timestamps that go stale across runners, which makes warm-
+          # cache hits silently rebuild artifacts that should have been
+          # reusable. Disabling it shrinks target/ AND makes the cached
+          # dep graph deterministic across runs. Local dev keeps
+          # incremental on (this is a CI-only override).
+          - CARGO_INCREMENTAL=0 make check
 
     - step: &coverage
         name: Coverage (ratcheting floor)
@@ -126,7 +134,11 @@ definitions:
           # `target-cov` cache definition above for the why.
           # (`cargo llvm-cov` itself doesn't accept `--target-dir`;
           # the env var is the documented escape hatch.)
-          - CARGO_TARGET_DIR=target-cov cargo llvm-cov --locked --all-targets --fail-under-lines 35
+          #
+          # `CARGO_INCREMENTAL=0` mirrors the Quality step — disables
+          # the stale-across-runners incremental metadata so warm
+          # cache hits actually reuse compiled artifacts.
+          - CARGO_TARGET_DIR=target-cov CARGO_INCREMENTAL=0 cargo llvm-cov --locked --all-targets --fail-under-lines 35
 
 pipelines:
   # No `default:` block. With both `default` and `pull-requests`
