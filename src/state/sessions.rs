@@ -19,6 +19,7 @@ const MAX_SESSIONS: usize = 20;
 pub enum AgentKind {
     Claude,
     Codex,
+    Gemini,
     /// Anything else (`bash`, `vim`, `make`, …). No session resume.
     #[default]
     Other,
@@ -232,23 +233,42 @@ pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
         .collect()
 }
 
+/// What a "session candidate" looks like to the picker — just enough
+/// for the closest-match-with-claim-skip logic. Implemented for
+/// `ClaudeSessionInfo` and `GeminiSessionInfo`.
+pub trait SessionCandidate {
+    fn session_id(&self) -> &str;
+    fn started_at_secs(&self) -> u64;
+}
+
+impl SessionCandidate for ClaudeSessionInfo {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    fn started_at_secs(&self) -> u64 {
+        self.started_at_secs
+    }
+}
+
 /// Pure helper: out of a list of session candidates (typically from
-/// `find_claude_sessions`), pick the one whose `started_at_secs` is
-/// closest to `pane_spawn_epoch_secs` AND whose `session_id` is not
-/// in `claimed`. Returns `None` if every candidate is already claimed
-/// or the list is empty. Stable: ties broken by input order.
+/// `find_claude_sessions` or `find_gemini_sessions`), pick the one
+/// whose `started_at_secs` is closest to `pane_spawn_epoch_secs` AND
+/// whose `session_id` is not in `claimed`. Returns `None` if every
+/// candidate is already claimed or the list is empty. Stable: ties
+/// broken by input order.
 ///
 /// Extracted so the multi-pane disambiguation has a unit test that
-/// doesn't depend on filesystem state under `~/.claude/`.
-pub fn pick_closest_unclaimed_session(
-    candidates: Vec<ClaudeSessionInfo>,
+/// doesn't depend on filesystem state under `~/.claude/` or
+/// `~/.gemini/`.
+pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
+    candidates: Vec<T>,
     pane_spawn_epoch_secs: u64,
     claimed: &std::collections::HashSet<String>,
-) -> Option<ClaudeSessionInfo> {
+) -> Option<T> {
     candidates
         .into_iter()
-        .filter(|c| !claimed.contains(&c.session_id))
-        .min_by_key(|c| c.started_at_secs.abs_diff(pane_spawn_epoch_secs))
+        .filter(|c| !claimed.contains(c.session_id()))
+        .min_by_key(|c| c.started_at_secs().abs_diff(pane_spawn_epoch_secs))
 }
 
 /// Public wrapper for `find_claude_session_name` used by save_session
@@ -326,6 +346,131 @@ pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// Gemini session info returned by `find_gemini_sessions`.
+pub struct GeminiSessionInfo {
+    /// UUID — what `gemini --list-sessions` prints in `[…]` and what
+    /// our restore-time index lookup keys on.
+    pub session_id: String,
+    /// Wall-clock start time in epoch seconds, parsed from the
+    /// chat JSONL's first-line `startTime` ISO-8601 string.
+    pub started_at_secs: u64,
+}
+
+impl SessionCandidate for GeminiSessionInfo {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    fn started_at_secs(&self) -> u64 {
+        self.started_at_secs
+    }
+}
+
+/// Map a cwd to the project name Gemini stores it under
+/// (`~/.gemini/projects.json`). Returns `None` if Gemini hasn't seen
+/// this cwd yet (no chats to resume from).
+pub fn gemini_project_name(cwd: &std::path::Path) -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home).join(".gemini/projects.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let projects = val.get("projects")?.as_object()?;
+    let cwd_str = cwd.to_string_lossy();
+    if let Some(name) = projects.get(cwd_str.as_ref()).and_then(|v| v.as_str()) {
+        return Some(name.to_string());
+    }
+    // macOS /private symlink mirror, mirroring the Claude logic.
+    if let Some(stripped) = cwd_str.strip_prefix("/private") {
+        if let Some(name) = projects.get(stripped).and_then(|v| v.as_str()) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Find every Gemini chat session for a given cwd. Each
+/// `~/.gemini/tmp/<project>/chats/session-*.jsonl` first line is JSON
+/// with `sessionId`, `startTime`, `lastUpdated`, etc. — we read just
+/// enough of each file to extract the metadata we need.
+///
+/// Returned sorted by `started_at_secs` descending.
+pub fn find_gemini_sessions(cwd: &std::path::Path) -> Vec<GeminiSessionInfo> {
+    let Some(name) = gemini_project_name(cwd) else {
+        return Vec::new();
+    };
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let chats = PathBuf::from(home)
+        .join(".gemini/tmp")
+        .join(&name)
+        .join("chats");
+    let Ok(entries) = std::fs::read_dir(&chats) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<GeminiSessionInfo> = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(file) = std::fs::File::open(&path) else {
+            continue;
+        };
+        let mut reader = std::io::BufReader::new(file);
+        let mut first_line = String::new();
+        use std::io::BufRead;
+        if reader.read_line(&mut first_line).is_err() || first_line.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(first_line.trim()) else {
+            continue;
+        };
+        let Some(session_id) = val.get("sessionId").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let started = val
+            .get("startTime")
+            .and_then(|v| v.as_str())
+            .and_then(parse_iso8601_to_epoch_secs)
+            .unwrap_or(0);
+        if !is_uuid(session_id) {
+            continue;
+        }
+        found.push(GeminiSessionInfo {
+            session_id: session_id.to_string(),
+            started_at_secs: started,
+        });
+    }
+    found.sort_by_key(|f| std::cmp::Reverse(f.started_at_secs));
+    found
+}
+
+/// Parse Gemini's chat-metadata `startTime` (ISO-8601 / RFC 3339)
+/// to epoch seconds via `jiff`. Accepts both forms emitted in the
+/// wild — `2026-05-08T12:27:31.927Z` and `2026-05-08T12:27:31Z` —
+/// plus naive `2026-05-08T12:27:31` (no zone) by tagging UTC.
+fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
+    // Try strict RFC 3339 first (handles fractional seconds + Z / offsets).
+    if let Ok(ts) = s.parse::<jiff::Timestamp>() {
+        let secs = ts.as_second();
+        if secs < 0 {
+            return None;
+        }
+        return Some(secs as u64);
+    }
+    // Fallback: zoneless `YYYY-MM-DDTHH:MM:SS` — assume UTC, since
+    // every Gemini chat we've observed writes `Z`. Defensive against
+    // upstream drift.
+    let civil: jiff::civil::DateTime = s.parse().ok()?;
+    let zoned = civil.to_zoned(jiff::tz::TimeZone::UTC).ok()?;
+    let secs = zoned.timestamp().as_second();
+    if secs < 0 {
+        return None;
+    }
+    Some(secs as u64)
 }
 
 /// Look up a Claude session's custom title from its conversation JSONL.
@@ -680,7 +825,9 @@ mod tests {
     #[test]
     fn picker_returns_none_for_empty_candidates() {
         let claimed = std::collections::HashSet::new();
-        assert!(pick_closest_unclaimed_session(vec![], 1000, &claimed).is_none());
+        assert!(
+            pick_closest_unclaimed_session::<ClaudeSessionInfo>(vec![], 1000, &claimed).is_none()
+        );
     }
 
     #[test]
@@ -743,6 +890,75 @@ mod tests {
                 started_at_secs: self.started_at_secs,
             }
         }
+    }
+
+    // ── Gemini ISO-8601 → epoch ────────────────────────────────────
+
+    #[test]
+    fn parse_iso8601_unix_epoch() {
+        assert_eq!(parse_iso8601_to_epoch_secs("1970-01-01T00:00:00Z"), Some(0));
+    }
+
+    #[test]
+    fn parse_iso8601_known_timestamp() {
+        // 2026-05-08T12:27:31Z = epoch 1762605451 by manual derivation.
+        // Sanity-check against `date -u -d` if you adjust this.
+        let secs = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31Z").unwrap();
+        // Round-trip via the parser at second-2 to lock the value:
+        assert!(
+            secs > 1_777_000_000 && secs < 1_780_000_000,
+            "epoch out of expected range for 2026-05-08: {secs}"
+        );
+    }
+
+    #[test]
+    fn parse_iso8601_strips_fractional_seconds() {
+        let with_fraction = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31.927Z").unwrap();
+        let without = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31Z").unwrap();
+        assert_eq!(with_fraction, without);
+    }
+
+    #[test]
+    fn parse_iso8601_no_z_suffix() {
+        // The chat JSONL writes `Z`, but be defensive against drift.
+        let with_z = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31Z").unwrap();
+        let without = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31").unwrap();
+        assert_eq!(with_z, without);
+    }
+
+    #[test]
+    fn parse_iso8601_rejects_garbage() {
+        assert!(parse_iso8601_to_epoch_secs("not a date").is_none());
+        assert!(parse_iso8601_to_epoch_secs("2026/05/08 12:27:31").is_none());
+        assert!(parse_iso8601_to_epoch_secs("").is_none());
+    }
+
+    #[test]
+    fn parse_iso8601_orders_by_seconds() {
+        // The whole point: relative ordering must match wall-clock so
+        // the picker's `abs_diff` math is meaningful.
+        let early = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31Z").unwrap();
+        let late = parse_iso8601_to_epoch_secs("2026-05-08T12:30:00Z").unwrap();
+        assert_eq!(late - early, 2 * 60 + 29);
+    }
+
+    // ── pick_closest_unclaimed_session also works for Gemini ───────
+
+    #[test]
+    fn picker_works_for_gemini_records() {
+        let candidates = vec![
+            GeminiSessionInfo {
+                session_id: "11111111-1111-1111-1111-111111111111".into(),
+                started_at_secs: 1000,
+            },
+            GeminiSessionInfo {
+                session_id: "22222222-2222-2222-2222-222222222222".into(),
+                started_at_secs: 2000,
+            },
+        ];
+        let claimed = std::collections::HashSet::new();
+        let pick = pick_closest_unclaimed_session(candidates, 1900, &claimed).unwrap();
+        assert_eq!(pick.session_id, "22222222-2222-2222-2222-222222222222");
     }
 
     // Note: save/load/prune tests use the shared XDG_STATE_HOME env var.

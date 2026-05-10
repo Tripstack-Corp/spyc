@@ -5165,12 +5165,25 @@ impl App {
         first == "codex" || first.ends_with("/codex")
     }
 
+    /// Does this command look like it's launching the Google Gemini
+    /// CLI (`gemini` / path-qualified `/usr/local/bin/gemini`)? `gemini`
+    /// has subcommands (`mcp`, `extensions`, …) plus its default
+    /// interactive launch — we treat all forms as Gemini for resume
+    /// purposes; subcommands like `gemini mcp` will simply have no
+    /// session record to match against and resolve to no resume id.
+    fn is_gemini_command(cmd: &str) -> bool {
+        let first = cmd.split_whitespace().next().unwrap_or("");
+        first == "gemini" || first.ends_with("/gemini")
+    }
+
     /// Classify a command for session-resume purposes.
     fn detect_agent_kind(cmd: &str) -> AgentKind {
         if Self::is_claude_command(cmd) {
             AgentKind::Claude
         } else if Self::is_codex_command(cmd) {
             AgentKind::Codex
+        } else if Self::is_gemini_command(cmd) {
+            AgentKind::Gemini
         } else {
             AgentKind::Other
         }
@@ -5838,6 +5851,80 @@ fn command_without_codex_resume(cmd: &str) -> String {
     }
 }
 
+/// Parse `gemini --list-sessions` stdout for the line whose
+/// bracketed UUID matches `uuid`, returning the leading `<n>.`
+/// index. The expected format is:
+///
+/// ```text
+/// Available sessions for this project (2):
+///   1. let's do a code review of this app (1 day ago) [76422c62-...-d149]
+///   2. Analyze project for bugs and provide recommendations. (...) [4a7cd126-...-7544]
+/// ```
+///
+/// Pure helper so the parser has unit tests; the IO side
+/// (`gemini_resume_index_for`) just spawns the process and feeds
+/// stdout in.
+fn parse_gemini_list_sessions_for_uuid(text: &str, uuid: &str) -> Option<u32> {
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let Some((idx_str, rest)) = trimmed.split_once('.') else {
+            continue;
+        };
+        let Ok(idx) = idx_str.trim().parse::<u32>() else {
+            continue;
+        };
+        let Some(open) = rest.rfind('[') else {
+            continue;
+        };
+        let Some(close) = rest.rfind(']') else {
+            continue;
+        };
+        if open >= close {
+            continue;
+        }
+        if rest[open + 1..close].eq_ignore_ascii_case(uuid) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// Strip Gemini's `--resume <id>` (or `-r <id>`) and `--session-id
+/// <UUID>` flags from a command line, leaving a clean baseline that
+/// session restore can re-decorate. The resume index is unstable
+/// across runs (it's just a position in `--list-sessions` output) so
+/// we always recompute it at restore time from the saved UUID; baking
+/// the old index into the saved command would silently resume the
+/// wrong conversation.
+fn command_without_gemini_resume(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
+    let mut skip_next = false;
+    for p in parts {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if p == "--resume" || p == "-r" || p == "--session-id" {
+            skip_next = true;
+            continue;
+        }
+        if let Some(_value) = p.strip_prefix("--resume=") {
+            continue;
+        }
+        if let Some(_value) = p.strip_prefix("--session-id=") {
+            continue;
+        }
+        out.push(p);
+    }
+    let stripped = out.join(" ");
+    if stripped.is_empty() {
+        "gemini".to_string()
+    } else {
+        stripped
+    }
+}
+
 impl App {
     /// Resolve the `claude --resume <token>` target to use on session save.
     ///
@@ -5921,6 +6008,49 @@ impl App {
             }
         }
         resolved
+    }
+
+    /// Resolve the Gemini resume target to save for a pane.
+    ///
+    /// Gemini's CLI doesn't print an exit banner with a resume token,
+    /// so we pull the candidate set from
+    /// `~/.gemini/tmp/<project>/chats/*.jsonl` (each file's first line
+    /// is JSON metadata with `sessionId` and `startTime`) and pick the
+    /// unclaimed record whose start time is closest to this pane's
+    /// `spawn_epoch_secs`. Multi-pane safety: the `claimed` set
+    /// prevents two panes in the same project from collapsing onto
+    /// one conversation. Returns the UUID; Gemini doesn't expose a
+    /// human-readable session name from the CLI, so the second slot
+    /// is always `None`.
+    fn resolve_gemini_resume_target(
+        cwd: &std::path::Path,
+        pane_spawn_epoch_secs: u64,
+        claimed: &std::collections::HashSet<String>,
+    ) -> (Option<String>, Option<String>) {
+        use crate::state::sessions as s;
+        let candidates = s::find_gemini_sessions(cwd);
+        s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
+            .map_or((None, None), |c| (Some(c.session_id), None))
+    }
+
+    /// At restore time, translate a saved Gemini session UUID into
+    /// the index `gemini --resume <N>` consumes. Runs `gemini
+    /// --list-sessions` synchronously in `cwd` and delegates parsing
+    /// to `parse_gemini_list_sessions_for_uuid`. Returns `None` when
+    /// the binary errors, the UUID isn't in the listing, or the
+    /// output format drifts. Failure is recoverable: the caller falls
+    /// back to spawning `gemini` bare and lets the user pick.
+    fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32> {
+        let out = std::process::Command::new("gemini")
+            .arg("--list-sessions")
+            .current_dir(cwd)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = std::str::from_utf8(&out.stdout).ok()?;
+        parse_gemini_list_sessions_for_uuid(text, uuid)
     }
 
     /// yp — yank visible pane output to the system clipboard.
@@ -7486,6 +7616,11 @@ impl App {
                                 // is what `codex resume <UUID>` consumes.
                                 (id, None)
                             }
+                            AgentKind::Gemini => Self::resolve_gemini_resume_target(
+                                &t.info.cwd,
+                                t.info.spawn_epoch_secs,
+                                &claimed,
+                            ),
                             AgentKind::Other => (None, None),
                         };
                         if let Some(ref id) = agent_session_id {
@@ -7497,6 +7632,7 @@ impl App {
                         let saved_command = match kind {
                             AgentKind::Claude => command_without_resume(&t.info.command),
                             AgentKind::Codex => command_without_codex_resume(&t.info.command),
+                            AgentKind::Gemini => command_without_gemini_resume(&t.info.command),
                             AgentKind::Other => t.info.command.clone(),
                         };
                         SavedTab {
@@ -7589,6 +7725,7 @@ impl App {
                                 None => format!("claude:{short_id}"),
                             },
                             AgentKind::Codex => format!("codex:{short_id}"),
+                            AgentKind::Gemini => format!("gemini:{short_id}"),
                             AgentKind::Other => return None,
                         };
                         Some(label)
@@ -7774,6 +7911,23 @@ impl App {
                         // most-recent picker for this cwd.
                         let base = command_without_codex_resume(&tab.command);
                         (format!("{base} resume --last"), None)
+                    }
+                    (AgentKind::Gemini, Some(uuid)) => {
+                        // Gemini's `--resume` consumes an *index* into
+                        // `--list-sessions`, not a UUID. Run the lookup
+                        // synchronously and fall back to the bare
+                        // command if the binary isn't on PATH or the
+                        // UUID isn't in the listing (session pruned,
+                        // output format drift, …) — the user can pick
+                        // manually inside Gemini.
+                        let base = command_without_gemini_resume(&tab.command);
+                        match Self::gemini_resume_index_for(cwd, uuid) {
+                            Some(idx) => (format!("{base} --resume {idx}"), None),
+                            None => (base, None),
+                        }
+                    }
+                    (AgentKind::Gemini, None) => {
+                        (command_without_gemini_resume(&tab.command), None)
                     }
                     (AgentKind::Other, _) => (tab.command.clone(), None),
                 };
@@ -9937,5 +10091,110 @@ mod strip_crlf_tests {
         // \t, \n, and \x1b (ESC for ANSI) survive pass 3.
         let input = b"a\tb\nc\x1b[31md";
         assert_eq!(strip_crlf(input), b"a\tb\nc\x1b[31md");
+    }
+}
+
+#[cfg(test)]
+mod gemini_helpers_tests {
+    use super::{command_without_gemini_resume, parse_gemini_list_sessions_for_uuid};
+
+    // ── command_without_gemini_resume ─────────────────────────────
+
+    #[test]
+    fn strips_long_resume_with_value() {
+        assert_eq!(command_without_gemini_resume("gemini --resume 5"), "gemini");
+    }
+
+    #[test]
+    fn strips_short_resume_with_value() {
+        assert_eq!(command_without_gemini_resume("gemini -r latest"), "gemini");
+    }
+
+    #[test]
+    fn strips_resume_with_equals_form() {
+        assert_eq!(command_without_gemini_resume("gemini --resume=3"), "gemini");
+    }
+
+    #[test]
+    fn strips_session_id_flag() {
+        assert_eq!(
+            command_without_gemini_resume(
+                "gemini --session-id 11111111-1111-1111-1111-111111111111"
+            ),
+            "gemini"
+        );
+    }
+
+    #[test]
+    fn preserves_unrelated_flags() {
+        assert_eq!(
+            command_without_gemini_resume("gemini -y --model flash --resume 2"),
+            "gemini -y --model flash"
+        );
+    }
+
+    #[test]
+    fn empty_input_falls_back_to_gemini() {
+        assert_eq!(command_without_gemini_resume(""), "gemini");
+    }
+
+    // ── parse_gemini_list_sessions_for_uuid ────────────────────────
+
+    #[test]
+    fn parses_real_world_listing() {
+        let stdout = "Available sessions for this project (2):
+  1. let's do a code review of this app (1 day ago) [76422c62-ea2f-4334-8e3d-45fba862d149]
+  2. Analyze project for bugs and provide recommendations. (1 day ago) [4a7cd126-f849-47c2-8035-80a07c807544]
+The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
+";
+        assert_eq!(
+            parse_gemini_list_sessions_for_uuid(stdout, "76422c62-ea2f-4334-8e3d-45fba862d149"),
+            Some(1)
+        );
+        assert_eq!(
+            parse_gemini_list_sessions_for_uuid(stdout, "4a7cd126-f849-47c2-8035-80a07c807544"),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn returns_none_for_unknown_uuid() {
+        let stdout = "  1. only session [11111111-1111-1111-1111-111111111111]\n";
+        assert!(
+            parse_gemini_list_sessions_for_uuid(stdout, "22222222-2222-2222-2222-222222222222")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn matches_uuid_case_insensitively() {
+        // Defensive: gemini emits lowercase but match either way.
+        let stdout = "  3. example [76422C62-EA2F-4334-8E3D-45FBA862D149]\n";
+        assert_eq!(
+            parse_gemini_list_sessions_for_uuid(stdout, "76422c62-ea2f-4334-8e3d-45fba862d149"),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn skips_lines_without_brackets_or_index() {
+        // The header / trailing deprecation warning must not derail
+        // the per-line parse.
+        let stdout = "Available sessions for this project (1):\n  1. example (1 day ago) [11111111-1111-1111-1111-111111111111]\nThe 'metricReader' option is deprecated.\n";
+        assert_eq!(
+            parse_gemini_list_sessions_for_uuid(stdout, "11111111-1111-1111-1111-111111111111"),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_index() {
+        // If the leading token can't parse as a number we just skip
+        // the line, never returning the wrong index.
+        let stdout = "  X. malformed [11111111-1111-1111-1111-111111111111]\n";
+        assert!(
+            parse_gemini_list_sessions_for_uuid(stdout, "11111111-1111-1111-1111-111111111111")
+                .is_none()
+        );
     }
 }
