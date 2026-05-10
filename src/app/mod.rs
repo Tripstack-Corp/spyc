@@ -5841,26 +5841,32 @@ fn command_without_codex_resume(cmd: &str) -> String {
 impl App {
     /// Resolve the `claude --resume <token>` target to use on session save.
     ///
-    /// Strategy, in order:
-    /// 1. Read the exit-banner token from pane scrollback. If it's a UUID,
-    ///    verify a JSONL exists for it under `~/.claude/projects/<slug>/`.
-    ///    Claude sometimes prints the banner with a session ID it never
-    ///    persisted (e.g. user `/clear`'d or `/resume`'d to a different
-    ///    session before exit), so trusting the banner unconditionally
-    ///    leads to "No conversation found with session ID …" on restore.
-    /// 2. Fall back to the most-recently-modified JSONL in the project
-    ///    slug — that's what the no-arg `claude --resume` picker picks.
-    /// 3. Last-ditch: scan `~/.claude/sessions/` (PID-scoped, often stale).
+    /// Multi-pane safety: when several Claude tabs share a cwd, we
+    /// can't blindly use "most-recent JSONL for this cwd" — they'd
+    /// all save the same ID and collapse onto a single conversation
+    /// at restore. The caller threads `pane_spawn_epoch_secs` and a
+    /// `claimed` set; the resolver picks a unique session record per
+    /// pane by matching `startedAt` to the pane's spawn time.
     ///
-    /// Final guard: any UUID we'd return is verified to have a JSONL on
-    /// disk before returning. The PID-scoped index in step 3 lists session
-    /// IDs as soon as `claude` starts, but the JSONL is only created on
-    /// the first turn — quitting before that produces a ghost ID that
-    /// passes step 3 but fails on `claude --resume`. Rather than save a
-    /// known-broken ID, return None so restore opens a fresh `claude`.
+    /// Strategy, in order:
+    /// 1. Read the exit-banner token from pane scrollback. If it's a
+    ///    UUID, verify a JSONL exists for it under
+    ///    `~/.claude/projects/<slug>/`. Claude sometimes prints the
+    ///    banner with a session ID it never persisted (e.g. user
+    ///    `/clear`'d or `/resume`'d before exit), so an unconditional
+    ///    trust leads to "No conversation found …" on restore. The
+    ///    banner is unambiguously this pane, so it bypasses `claimed`.
+    /// 2. Walk `~/.claude/sessions/` records matching the cwd, skip
+    ///    any already in `claimed`, pick the one whose `startedAt` is
+    ///    closest to this pane's spawn time, verify JSONL on disk.
+    /// 3. Last-ditch: most-recently-modified JSONL in the project
+    ///    slug, but only if it isn't already in `claimed`. Without
+    ///    the claimed-check this is what was producing the bug.
     fn resolve_claude_resume_target(
         pane: &mut crate::pane::Pane,
         cwd: &std::path::Path,
+        pane_spawn_epoch_secs: u64,
+        claimed: &std::collections::HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         use crate::state::sessions as s;
 
@@ -5872,22 +5878,36 @@ impl App {
                         let name = s::find_claude_session_name_public(&tok);
                         return (Some(tok), name);
                     }
-                    // Banner UUID has no JSONL — fall through to most-recent.
+                    // Banner UUID has no JSONL — fall through.
                 } else {
                     // Named sessions: claude resolves names itself, trust it.
                     return (Some(tok.clone()), Some(tok));
                 }
             }
 
-            if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
-                let name = s::find_claude_session_name_public(&id);
-                return (Some(id), name);
+            // Step 2: pick the per-pane match by spawn-time proximity.
+            // Filter to JSONL-on-disk first so the picker only sees
+            // resumable candidates.
+            let candidates: Vec<_> = s::find_claude_sessions(cwd)
+                .into_iter()
+                .filter(|c| s::claude_jsonl_exists(cwd, &c.session_id))
+                .collect();
+            if let Some(c) =
+                s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
+            {
+                return (Some(c.session_id), c.name);
             }
 
-            match s::find_claude_session(cwd) {
-                Some(info) => (Some(info.session_id), info.name),
-                None => (None, None),
+            // Step 3: final fallback. Most-recent JSONL — but only if
+            // unclaimed; otherwise leave this pane unresumable rather
+            // than collapse it onto another pane's conversation.
+            if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
+                if !claimed.contains(&id) {
+                    let name = s::find_claude_session_name_public(&id);
+                    return (Some(id), name);
+                }
             }
+            (None, None)
         })();
 
         if let (Some(id), _) = &resolved {
@@ -7436,6 +7456,13 @@ impl App {
         // single spyc instance and human-glanceable in the picker.
         let id = (crate::sysinfo::epoch_nanos() / 1_000_000) as u64;
 
+        // Track session IDs already assigned to earlier tabs so each
+        // Claude/Codex pane gets a distinct `agent_session_id` even
+        // when several tabs share a cwd. Without this, the resolver's
+        // "most-recent JSONL for cwd" fallback handed every Claude
+        // pane the same ID and they all collapsed onto one
+        // conversation at restore.
+        let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
         let tabs: Vec<SavedTab> = self
             .pane_tabs
             .as_mut()
@@ -7445,18 +7472,25 @@ impl App {
                     .map(|t| {
                         let kind = Self::detect_agent_kind(&t.info.command);
                         let (agent_session_id, agent_session_name) = match kind {
-                            AgentKind::Claude => {
-                                Self::resolve_claude_resume_target(&mut t.pane, &t.info.cwd)
-                            }
+                            AgentKind::Claude => Self::resolve_claude_resume_target(
+                                &mut t.pane,
+                                &t.info.cwd,
+                                t.info.spawn_epoch_secs,
+                                &claimed,
+                            ),
                             AgentKind::Codex => {
                                 let lines = t.pane.recent_lines(200);
-                                let id = crate::state::sessions::extract_codex_resume_token(&lines);
+                                let id = crate::state::sessions::extract_codex_resume_token(&lines)
+                                    .filter(|tok| !claimed.contains(tok));
                                 // Codex doesn't expose a display name; UUID
                                 // is what `codex resume <UUID>` consumes.
                                 (id, None)
                             }
                             AgentKind::Other => (None, None),
                         };
+                        if let Some(ref id) = agent_session_id {
+                            claimed.insert(id.clone());
+                        }
                         // The sid lives in agent_session_id; baking
                         // --resume / `resume` into `command` would survive
                         // past a resolver miss and pollute the next restore.

@@ -33,6 +33,13 @@ pub struct TabInfo {
     /// restore-fallback window so a real user-driven exit much later
     /// doesn't trigger an automatic respawn.
     pub spawn_at: std::time::Instant,
+    /// Wall-clock spawn time, in epoch seconds. Used at session-save
+    /// time to disambiguate which `~/.claude/sessions/*.json` record
+    /// belongs to *this* pane when multiple Claude tabs share a cwd
+    /// — the matching session record's `startedAt` is closest to
+    /// this value. `Instant::now()` (above) is monotonic and can't
+    /// be compared against wall-clock data, so we record both.
+    pub spawn_epoch_secs: u64,
 }
 
 impl TabInfo {
@@ -52,6 +59,7 @@ impl TabInfo {
             restore_fallback: None,
             pending_resume_send: None,
             spawn_at: std::time::Instant::now(),
+            spawn_epoch_secs: crate::sysinfo::epoch_secs(),
         }
     }
 }
