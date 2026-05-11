@@ -5,13 +5,12 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  A vi-keyboard-driven file commander that runs Claude Code in a split pane<br>
-  and exposes itself to Claude as an MCP server.<br>
-  When Claude asks "what files are you looking at?" -- it queries spyc directly.
+  A Rust TUI file commander where the AI agent in the side pane<br>
+  can query the file commander itself.
 </p>
 
 <p align="center">
-  macOS and Linux · v1.21.1 · actively developed
+  macOS and Linux · actively developed
 </p>
 
 <p align="center">
@@ -22,26 +21,37 @@
 
 ## Why spyc?
 
-spyc is a terminal file manager built around the AI agent being a
-**peer in the workflow**, not a separate tab.
+Most "AI in your terminal" tools give the agent a chat window and let
+you copy-paste paths back and forth. spyc puts a local MCP socket next
+to the file view, so the agent can ask spyc *what is the cursor on,
+what is staged, what is pinned, what is in this directory* — and
+answer questions about your working tree without you describing it.
 
-When you pick three files and ask Claude a question in the bottom pane,
-Claude can call `get_spyc_context` and see your cwd, cursor file, picks,
-inventory, active filter, and git branch -- without you copying or
-pasting anything. When Claude mentions a file path in its response,
-press `gf` to jump straight to it. The context flows both ways.
+The file commander is the noun the agent operates on, not the chrome
+around it.
 
-This is possible because spyc runs an **MCP server** on a PID-scoped
-Unix domain socket. Claude discovers it automatically via `.mcp.json`
--- no flags needed. Multiple spyc instances coexist safely, and the
-context stays current as you navigate. We don't know another TUI file
-manager that exposes itself to an AI agent this way.
+## What it is
 
-Everything else -- vi motions, marks, picks, inventory, pager, shell
-integration -- is what you'd expect from a keyboard-driven file manager.
-But the MCP bridge is what makes spyc different from Yazi, Broot,
-Ranger, or anything else in the space. See
-[How the MCP bridge works](#how-the-mcp-bridge-works) for the mechanism.
+A two-pane terminal program.
+
+- The **top pane** is a keyboard-driven, vim-flavoured file commander
+  with git-aware listings.
+- The **bottom pane** is a child process — by default Claude Code or
+  codex (both first-class; Gemini also supported), but in practice any
+  program.
+
+The two panes share focus through a chord-prefix system (`^a` /
+screen-style), and the file commander exposes a local Unix-domain
+MCP socket the bottom-pane agent connects to. When you pick three
+files and ask the agent a question, it can call `get_spyc_context`
+and see your cwd, cursor file, picks, inventory, active filter, and
+git branch — no copy-paste. When the agent mentions a path in its
+response, press `gf` to jump straight to it. Context flows both ways.
+
+Everything else — vi motions, marks, picks, inventory, pager, shell
+integration — is what you'd expect from a keyboard-driven file
+manager. The MCP bridge is the part that distinguishes spyc from
+Yazi, Broot, Ranger, or the rest of the space.
 
 The name: **spy** (inspired by SideFX's in-house file manager) +
 **c**laude = **spyc**.
@@ -68,7 +78,8 @@ make install          # builds release + copies to ~/.local/bin (no sudo)
 
 ```sh
 spyc            # opens in the current directory
-spyc -r         # resume a previous session (restores Claude conversation)
+spyc -r         # resume a previous session (restores each pane to its own
+                # Claude / Codex / Gemini conversation, identified per-tab)
 ```
 
 spyc opens with your cwd in a multi-column listing. Move with `hjkl`,
