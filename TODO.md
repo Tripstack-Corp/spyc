@@ -111,6 +111,35 @@ rest of the dispatch testing.
   originally proposed `--dump-default-config`; the shorter
   `--print-config` shipped instead.
 
+### Tooling
+
+- [ ] **[M] `sccache` for CI compile-caching.**
+  After v1.50.17 (`CARGO_INCREMENTAL=0` + cache restructure) the
+  warm-cache `make check` is ~2m 13s (was ~3m). The remainder is
+  proc-macro and build-script crates re-verifying through cargo's
+  fingerprint — they produce native host binaries that cargo
+  doesn't trust across runners even with a warm `target/`.
+  `sccache` caches at the `rustc` invocation level (hashed by
+  inputs) so it survives target/ resets and re-uses the actual
+  compilation outputs.
+
+  Backend: GCS in the Tripstack GCP project (sccache has
+  first-class `SCCACHE_GCS_BUCKET` support). Wiring:
+  1. Provision a bucket (e.g. `tripstack-spyc-sccache`) and a
+     service account with `roles/storage.objectAdmin` scoped to
+     just that bucket. JSON key stored as a Bitbucket repo
+     variable (`GCS_SA_KEY`, masked).
+  2. In `bitbucket-pipelines.yml`: download the prebuilt sccache
+     binary, write the SA key to a file, export
+     `RUSTC_WRAPPER=sccache` + `SCCACHE_GCS_KEY_PATH=...` +
+     `SCCACHE_GCS_BUCKET=...` for both quality and coverage steps.
+  3. Optional: migrate to Bitbucket OIDC → GCP Workload Identity
+     Federation later so we don't have a static JSON key.
+
+  Worth doing once we feel friction on subsequent PRs; for now
+  v1.50.17's caching is "good enough" and adding GCP infra has a
+  cost.
+
 ### Hardening
 
 - [ ] **[S] Startup health check on state directory.**
