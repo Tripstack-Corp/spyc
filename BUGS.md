@@ -1,4 +1,10 @@
 ### SMALL ###
+- procs in panes that end should not disappear before I have a chance to ^a-R
+  (restart)
+- warn on ^a-^c
+- when PAGER is open in top pane (D) ^(a|w)-j is swallowed so you can't switch
+  to the lower pane while this is opened
+- should be able to reorder tabs
 - support drag and drop features - give multiple options to the user e.g. send
   to lower pane as image, create new file (auto type detect), etc.
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -

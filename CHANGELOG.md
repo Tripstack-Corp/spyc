@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Paste into a `V`-opened top-overlay editor stays in the editor.**
+  Reported in BUGS.md: with `V` open (editor running as a top
+  overlay) and a bottom pane visible (e.g. claude), pasting text
+  routed the paste to the bottom pane *and* yanked focus to the
+  bottom pane — losing both the paste and the editor session.
+  Cause: `Event::Paste`'s router had three branches (prompt /
+  `pane_tabs` / ignored) but no `top_overlay` arm, so the
+  `pane_tabs.is_some()` branch fired indiscriminately. Fix: a new
+  arm before the `pane_tabs` one routes paste to `top_overlay`
+  when it exists, *unless* the user has explicitly focused the
+  bottom pane (`^a-j`) — in which case the bottom-pane arm still
+  wins. No focus-stealing in the overlay arm (you're typing into
+  the editor, not signalling intent to switch).
+
 ### Documentation
 - **Presentation deck refreshed.** `docs/presentation.html` was
   written around M14 (HTTP MCP era) and had drifted: slide 1

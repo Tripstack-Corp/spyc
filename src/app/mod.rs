@@ -1645,6 +1645,27 @@ impl App {
                                 // no cursor concept, append.
                                 p.buffer.push_str(&clean);
                             }
+                        } else if let Some(overlay) = self
+                            .top_overlay
+                            .as_mut()
+                            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused))
+                        {
+                            // `V`/`D` top-overlay is the foreground
+                            // subprocess (editor or pager). Route the
+                            // paste to it rather than the bottom pane.
+                            // Bottom pane only wins when the user has
+                            // explicitly focused it (`^a-j`); without
+                            // this guard, pasting into `V`-launched
+                            // $EDITOR sent the text to claude in the
+                            // bottom pane *and* yanked focus there
+                            // — losing the paste *and* the editor
+                            // session. Do not steal focus here:
+                            // they're typing into the editor.
+                            let mut buf = Vec::with_capacity(text.len() + 12);
+                            buf.extend_from_slice(b"\x1b[200~");
+                            buf.extend_from_slice(text.as_bytes());
+                            buf.extend_from_slice(b"\x1b[201~");
+                            overlay.send_bytes(&buf)?;
                         } else if self.pane_tabs.is_some() {
                             // Switch focus to the pane — the user clearly
                             // intends to interact with it if they're pasting.
