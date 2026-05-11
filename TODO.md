@@ -152,9 +152,15 @@ the tool exists), then distribution.
   User-defined macros that send pre-composed prompts to the pane
   with picks/inventory substituted. Extends existing keymap DSL.
 
-- [ ] **[S] Status bar agent segment.**
-  Indicator when the pane is running Claude: session identity,
-  token usage if surfaced by the CLI.
+- [x] **[S] Status bar agent segment.**
+  Active pane's agent identity in the status bar between the git
+  and suffix segments. Renders `claude:<8-hex>` / `gemini:<8-hex>`
+  / bare `codex` (codex stores its UUID in the rollout filename;
+  parsing that is a future follow-up). Short-id is resolved at
+  status-render time from the agent's own session records using
+  the pane's `spawn_epoch_secs` to pick the right entry. Hidden
+  for non-agent panes and when no pane is open. Token usage skipped
+  for now — none of the three CLIs surface it natively.
 
 ### Distribution
 

@@ -5,7 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Status bar agent segment.** Active pane's agent identity now
+  appears as its own status-bar segment between the git and suffix
+  bands: `claude:<8-hex>` / `gemini:<8-hex>` / bare `codex`.
+  Short-id resolves at render time from each agent's on-disk
+  session records (`~/.claude/sessions/`,
+  `~/.gemini/tmp/<proj>/chats/`) using the pane's `spawn_epoch_secs`
+  to pick the matching entry; the matching is the same
+  closest-by-startTime logic save_session uses. Codex's UUID lives
+  in its rollout filename (`rollout-<TS>-<UUID>.jsonl`); parsing
+  that is a future follow-up — Codex panes currently show just
+  `codex` in the segment. Hidden when no pane is open or the
+  active pane isn't a known agent. Token usage from each CLI is
+  skipped — none of the three surface it natively.
+
 ### Internal
+- **V1.5 plan archived to `docs/V1_5_PLAN.md`.** Six-phase plan
+  for the v1.5 pager/task-viewer unification; long since shipped
+  (closed at v1.50.0). Keeping the historical doc but out of the
+  repo root.
+
 - **CI: `CARGO_INCREMENTAL=0` + cache bust.** Pipeline #380's
   warm-cache run still showed cargo printing `Compiling X` for
   ~30 dep crates per step. Cache restoration was working
