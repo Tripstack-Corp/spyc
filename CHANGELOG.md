@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Documentation
+- **README rewrite leading with the MCP-from-the-pane thesis.**
+  Replaced the lede + "Why spyc?" with a tighter framing surfaced
+  by an external review of the project's catalogue: spyc as the
+  *noun the agent operates on*, not a file manager that happens
+  to host a chat window. Added an explicit "What it is" section
+  with the two-pane / chord-prefix / Unix-domain-MCP-socket
+  one-pager, called out Codex + Gemini as first-class (matching
+  the actual agent support), and dropped a stale v1.21.1 footer.
+  Body of the doc (keybindings, configuration, etc.) is
+  unchanged.
+
 ### Added
 - **Status bar agent segment.** Active pane's agent identity now
   appears as its own status-bar segment between the git and suffix
