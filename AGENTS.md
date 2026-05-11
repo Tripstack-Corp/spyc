@@ -76,6 +76,37 @@ per-module navigation index.
   Do not batch doc updates as a follow-up — include them in the same commit as the code change.
 - **Bump version**: Always bump the version in `Cargo.toml` when shipping user-visible changes. Patch for fixes, minor for features. See `CONTRIBUTING.md` for SemVer policy.
 
+### Commits, merges, and CHANGELOG
+
+External catalogue review (the *watercooler* analysis platform) caught
+three recurring patterns worth correcting going forward. These aren't
+human-author rules — they're observations about how *agents* working
+on this repo tend to drift.
+
+- **Commit subject = actual scope, not its caption.** If a commit
+  touches both a feature and a `Cargo.toml` version bump, the subject
+  should mention both: `feat: gemini agent + bump cargo-deny` rather
+  than `feat: gemini agent`. Bare-feature subjects systematically
+  understate diff scope (watercooler's `insight drift` — pattern:
+  *commit-subject vs diff-scope understatement*). The body of the
+  message can still hold the long form.
+
+- **Squash on merge.** Use `bkt pr merge <N> --strategy squash`
+  rather than `merge_commit`. `main`'s `git log` becomes one commit
+  per shipped "shape" instead of the current three-entry shape (the
+  feature commit, a merge commit, and the deletion of the feature
+  branch). Future forensic readers — including watercooler-style
+  retrospective passes — get a cleaner story per change.
+
+- **CHANGELOG bucket = user-observable nature, not file location.**
+  A version bump shipped alongside a feature still belongs under
+  `Added`. A CI tweak that happens to touch `Cargo.lock` still belongs
+  under `Internal`. Don't pick the bucket by which directory the diff
+  landed in (watercooler's *bucket-vs-content asymmetry*). When a PR
+  legitimately spans multiple user-observable categories — e.g. a
+  feature plus a doc rewrite — split into multiple entries under the
+  correct headers rather than dropping everything in one bucket.
+
 ## Building
 
 ```sh

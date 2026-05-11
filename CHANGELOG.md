@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Documentation
+- **AGENTS.md: new "Commits, merges, and CHANGELOG" sub-section.**
+  Three guidelines for future agents working on the repo, derived
+  from watercooler's catalogue review of the project's commit
+  history: (1) commit subjects state actual scope rather than just
+  the headline feature; (2) merge with `--strategy squash` so
+  `main`'s log is one commit per shipped shape; (3) CHANGELOG bucket
+  follows the user-observable nature of a change, not where the
+  diff landed in the tree. No code change.
+
 - **README rewrite leading with the MCP-from-the-pane thesis.**
   Replaced the lede + "Why spyc?" with a tighter framing surfaced
   by an external review of the project's catalogue: spyc as the
