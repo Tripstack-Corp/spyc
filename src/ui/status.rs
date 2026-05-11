@@ -18,6 +18,12 @@ pub struct StatusBar<'a> {
     pub suffix: &'a str,
     /// Git branch + dirty flag, e.g. `"main*"` or `None` if not in a repo.
     pub git_info: Option<&'a str>,
+    /// Active pane's agent identity (e.g. `"claude:76422c62"` /
+    /// `"gemini:4c130f82"` / `"codex"`). `None` when no pane is open
+    /// or its command isn't a known agent. Rendered as its own
+    /// segment between `git` and `suffix` so it sits in roughly the
+    /// same visual band as related state.
+    pub agent_info: Option<&'a str>,
     pub theme: &'a Theme,
 }
 
@@ -57,6 +63,12 @@ impl StatusBar<'_> {
         let git_bg = Color::Rgb(0x2a, 0x2e, 0x45); // slightly lighter than suffix
         let git_fg = self.theme.exec; // soft green
 
+        // Agent segment sits between git and suffix. Uses the pick
+        // accent so it visually distinguishes from the
+        // git/file-state band.
+        let agent_bg = Color::Rgb(0x32, 0x36, 0x52);
+        let agent_fg = self.theme.pick;
+
         let suffix_bg = Color::Rgb(0x24, 0x28, 0x3b); // darker
         let suffix_fg = self.theme.status_suffix;
 
@@ -70,16 +82,18 @@ impl StatusBar<'_> {
         let project_text = self.project_home.map(|p| format!(" {p} "));
         let session_text = self.session_name.map(|n| format!(" {n} "));
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} "));
+        let agent_text = self.agent_info.map(|a| format!(" \u{f120} {a} ")); // 󰰠 terminal-shell-like glyph
         let suffix_text = (!self.suffix.is_empty()).then(|| format!(" {} ", self.suffix));
 
         let width_of = |t: &Option<String>| t.as_deref().map_or(0, |s| dw(s) + 1);
         let project_w = width_of(&project_text);
         let session_w = width_of(&session_text);
         let git_w = width_of(&git_text);
+        let agent_w = width_of(&agent_text);
         let suffix_w = width_of(&suffix_text);
 
         // path_budget = avail − (emoji + optional segments + path-sep).
-        let fixed = emoji_w + project_w + session_w + git_w + suffix_w + 1;
+        let fixed = emoji_w + project_w + session_w + git_w + agent_w + suffix_w + 1;
         let path_budget = avail.saturating_sub(fixed);
         let path_text = format!(
             " {} ",
@@ -88,6 +102,8 @@ impl StatusBar<'_> {
 
         let path_next_bg = if git_text.is_some() {
             git_bg
+        } else if agent_text.is_some() {
+            agent_bg
         } else if suffix_text.is_some() {
             suffix_bg
         } else {
@@ -122,15 +138,26 @@ impl StatusBar<'_> {
         ));
 
         if let Some(ref text) = git_text {
-            let next_bg = suffix_text.as_ref().map_or(term_bg, |_| suffix_bg);
+            let next_bg = if agent_text.is_some() {
+                agent_bg
+            } else if suffix_text.is_some() {
+                suffix_bg
+            } else {
+                term_bg
+            };
             push_segment(&mut spans, text, git_fg, git_bg, next_bg);
+        }
+        if let Some(ref text) = agent_text {
+            let next_bg = suffix_text.as_ref().map_or(term_bg, |_| suffix_bg);
+            push_segment(&mut spans, text, agent_fg, agent_bg, next_bg);
         }
         if let Some(ref text) = suffix_text {
             push_segment(&mut spans, text, suffix_fg, suffix_bg, term_bg);
         }
 
         // Fill remaining width.
-        let used: usize = emoji_w + project_w + session_w + dw(&path_text) + 1 + git_w + suffix_w;
+        let used: usize =
+            emoji_w + project_w + session_w + dw(&path_text) + 1 + git_w + agent_w + suffix_w;
         if used < avail {
             spans.push(Span::styled(
                 " ".repeat(avail - used),
@@ -261,6 +288,7 @@ mod tests {
         path: &str,
         suffix: &str,
         git_info: Option<&str>,
+        agent_info: Option<&str>,
         mono: bool,
         width: u16,
     ) -> String {
@@ -283,6 +311,7 @@ mod tests {
                     path,
                     suffix,
                     git_info,
+                    agent_info,
                     theme: &theme,
                 };
                 bar.render(f, area);
@@ -298,7 +327,16 @@ mod tests {
 
     #[test]
     fn snapshot_status_mono_basic() {
-        let out = render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, true, 60);
+        let out = render_status_to_string(
+            None,
+            Some("SAFFRON_CUMIN"),
+            "/tmp",
+            "",
+            None,
+            None,
+            true,
+            60,
+        );
         insta::assert_snapshot!(out);
     }
 
@@ -310,6 +348,7 @@ mod tests {
             "/home/derek/src",
             "[picks:2 m1:on]",
             None,
+            None,
             true,
             60,
         );
@@ -318,7 +357,16 @@ mod tests {
 
     #[test]
     fn snapshot_status_powerline_basic() {
-        let out = render_status_to_string(None, Some("SAFFRON_CUMIN"), "/tmp", "", None, false, 80);
+        let out = render_status_to_string(
+            None,
+            Some("SAFFRON_CUMIN"),
+            "/tmp",
+            "",
+            None,
+            None,
+            false,
+            80,
+        );
         insta::assert_snapshot!(out);
     }
 
@@ -330,8 +378,26 @@ mod tests {
             "/home/src",
             "[picks:1]",
             Some("main*"),
+            None,
             false,
             80,
+        );
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn snapshot_status_powerline_with_agent() {
+        // New segment: agent identity (claude/codex/gemini with short
+        // session-id when known) renders between `git` and `suffix`.
+        let out = render_status_to_string(
+            Some("spyc"),
+            Some("SAFFRON_CUMIN"),
+            "/home/src",
+            "[picks:1]",
+            Some("main*"),
+            Some("claude:76422c62"),
+            false,
+            96,
         );
         insta::assert_snapshot!(out);
     }

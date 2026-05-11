@@ -2518,12 +2518,14 @@ impl App {
             .project_home
             .as_deref()
             .map(path_basename_display);
+        let agent_info = self.active_agent_status();
         StatusBar {
             project_home: project_label.as_deref(),
             session_name: self.state.session_name.as_deref(),
             path: &path,
             suffix: &suffix,
             git_info: self.state.git_info.as_deref(),
+            agent_info: agent_info.as_deref(),
             theme: &self.theme,
         }
         .render(frame, layout.status);
@@ -2842,6 +2844,36 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Status-bar agent segment text for the active pane, or `None`
+    /// when no pane is open or the pane isn't a known agent.
+    ///
+    /// Renders as `claude:<8-hex>` / `gemini:<8-hex>` / `codex` (the
+    /// short-id resolution for codex is a follow-up — its rollout
+    /// filenames encode the UUID but we don't parse them yet).
+    fn active_agent_status(&self) -> Option<String> {
+        let tabs = self.pane_tabs.as_ref()?;
+        let active = tabs.active_info();
+        let kind = Self::detect_agent_kind(&active.command);
+        if kind == AgentKind::Other {
+            return None;
+        }
+        let label = match kind {
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+            AgentKind::Gemini => "gemini",
+            AgentKind::Other => unreachable!(),
+        };
+        let short_id = crate::state::sessions::resolve_active_session_short_id(
+            kind,
+            &active.cwd,
+            active.spawn_epoch_secs,
+        );
+        Some(match short_id {
+            Some(id) => format!("{label}:{id}"),
+            None => label.to_string(),
+        })
     }
 
     fn header_parts(&self) -> (String, String) {
