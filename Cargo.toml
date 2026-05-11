@@ -1,8 +1,8 @@
 [package]
 name = "spyc"
-version = "1.50.20"
+version = "1.50.21"
 edition = "2024"
-description = "A vi-keyboard-driven file commander that pairs with Claude Code, inspired by SideFX's spy"
+description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
 repository = "https://bitbucket.org/tripstack/spyc"
 rust-version = "1.85"

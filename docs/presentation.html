@@ -245,15 +245,15 @@
       <p class="subtitle">Tripstack Tech Demo</p>
       <h1>spyc 🌶️</h1>
       <p style="font-size:1.5em; font-weight:400; color:var(--airspace); margin-top:12px;">
-        A vi-keyboard-driven file commander<br>
-        that shares context with Claude Code via MCP
+        A Rust TUI file commander where the AI agent<br>
+        in the side pane can query the file commander itself.
       </p>
       <p style="font-size:1.1em; color:var(--airspace); margin-top:16px; opacity:0.7;">
-        Browse files above. Talk to Claude below. They see the same thing.
+        The file commander is the noun the agent operates on, not the chrome around it.
       </p>
       <div style="margin-top:48px; display:flex; gap:32px; align-items:center;">
         <span style="font-size:1.1em; color:var(--orange); font-weight:600;">Derek Marshall</span>
-        <span style="color:var(--airspace);">April 2026</span>
+        <span style="color:var(--airspace);">May 2026</span>
       </div>
     </div>
   </div>
@@ -263,26 +263,27 @@
 <div class="slide light" id="s2">
   <h2>What is <span class="accent">spyc</span>?</h2>
   <p style="font-size:1.3em; margin-bottom:32px;">
-    A terminal file manager inspired by SideFX's <code>spy</code>, rebuilt for modern
-    developer workflows — specifically designed to pair with AI coding assistants.
+    A two-pane terminal program inspired by SideFX's <code>spy</code>: vim-flavoured file commander on top,
+    a child process below (Claude Code, codex, gemini — all first-class). They share focus and the file
+    commander exposes a local MCP socket the agent connects to.
   </p>
   <div class="two-col">
     <div>
       <h3>🔴 The Problem</h3>
       <ul>
-        <li>Terminal workflows are fragmented: ls, cd, vim, git, tmux</li>
-        <li>AI coding assistants run in a separate window</li>
-        <li>Context switching kills flow</li>
-        <li>The AI can't see what you're looking at</li>
+        <li>"AI in your terminal" tools give the agent a chat window and copy-pasted paths</li>
+        <li>Agent has no view of what the user is looking at</li>
+        <li>"Which file?" gets asked every other turn</li>
+        <li>Context switching between file browser and agent kills flow</li>
       </ul>
     </div>
     <div>
       <h3>🟢 The Solution</h3>
       <ul>
-        <li>File list + Claude pane in one terminal session</li>
-        <li>MCP bridge: Claude queries your cwd, cursor, picks, git branch</li>
-        <li>Bidirectional: <code>gf</code> jumps from Claude output to the file list</li>
-        <li>Session restore resumes the exact Claude conversation</li>
+        <li>File list + agent pane in one terminal session</li>
+        <li>MCP socket lets the agent ask: <em>what is the cursor on, what is staged, what is picked</em></li>
+        <li>Bidirectional: <code>gf</code> jumps from agent output to the file list</li>
+        <li>Session restore resumes each pane to its own agent conversation</li>
       </ul>
     </div>
   </div>
@@ -298,11 +299,12 @@
     <div>
       <h3>How It Works</h3>
       <ul>
-        <li>spyc starts an HTTP MCP server on a background thread</li>
-        <li>OS-assigned port — multiple instances coexist safely</li>
-        <li>Claude connects via <code>--mcp-config</code> at spawn</li>
+        <li>spyc starts an MCP server on a PID-scoped Unix domain socket</li>
+        <li>Agents auto-discover via <code>.mcp.json</code> (Claude) / <code>.codex/config.toml</code> (codex) / <code>settings.json</code> (gemini) — no flags needed</li>
+        <li>Both registrations re-exec <code>spyc --mcp</code> as a stdio proxy that forwards to the same socket</li>
+        <li>Multiple instances coexist; takeover is explicitly prompted on stderr (<em>PID N already owns MCP here. Take over?</em>)</li>
         <li>Context file updated every event loop tick</li>
-        <li>Zero external crates — hand-rolled JSON-RPC 2.0</li>
+        <li>Hand-rolled JSON-RPC 2.0 — no async runtime</li>
       </ul>
     </div>
     <div>
@@ -365,25 +367,25 @@
   <h2>📊 By the Numbers</h2>
   <div class="stat-row">
     <div class="stat">
-      <div class="stat-number">19,000+</div>
+      <div class="stat-number">35,000+</div>
       <div class="stat-label">Lines of Rust</div>
     </div>
     <div class="stat">
-      <div class="stat-number">44</div>
+      <div class="stat-number">60</div>
       <div class="stat-label">Source Files</div>
     </div>
     <div class="stat">
-      <div class="stat-number">14</div>
-      <div class="stat-label">Milestones Shipped</div>
+      <div class="stat-number">14 + v1.5</div>
+      <div class="stat-label">Milestones / Phases Shipped</div>
     </div>
     <div class="stat">
-      <div class="stat-number">358</div>
+      <div class="stat-number">638</div>
       <div class="stat-label">Tests Passing</div>
     </div>
   </div>
   <div class="stat-row" style="margin-top:16px;">
     <div class="stat">
-      <div class="stat-number">121</div>
+      <div class="stat-number">397</div>
       <div class="stat-label">Commits</div>
     </div>
     <div class="stat">
@@ -413,7 +415,7 @@
     <div class="arch-row"><span class="arch-file">src/app/</span> <span class="arch-desc">Event loop, layout, key dispatch, state management</span></div>
     <div class="arch-row"><span class="arch-file">src/keymap/</span> <span class="arch-desc">Action enum (full verb vocabulary), resolver, user keymap DSL</span></div>
     <div class="arch-row"><span class="arch-file">src/pane/</span> <span class="arch-desc">Pty subprocess, multi-tab, vt100 rendering, ANSI key encoding</span></div>
-    <div class="arch-row"><span class="arch-file">src/mcp.rs</span> <span class="arch-desc">HTTP + stdio MCP server, JSON-RPC 2.0 dispatch</span></div>
+    <div class="arch-row"><span class="arch-file">src/mcp.rs</span> <span class="arch-desc">Unix-socket MCP server + stdio proxy for agent auto-discovery, JSON-RPC 2.0 dispatch</span></div>
     <div class="arch-row"><span class="arch-file">src/context.rs</span> <span class="arch-desc">Context snapshot (cwd, cursor, picks, git) written every tick</span></div>
     <div class="arch-row"><span class="arch-file">src/ui/</span> <span class="arch-desc">List view, pager, status bar, prompt, line editor, theme</span></div>
     <div class="arch-row"><span class="arch-file">src/state/</span> <span class="arch-desc">Cursor, marks, picks, inventory (file cache), sessions, history</span></div>
@@ -446,7 +448,7 @@
   <div class="three-col" style="margin-top:24px;">
     <div class="card">
       <h3>MCP Context + Commands</h3>
-      <p>Read: atomic JSON snapshot, throttled 1/sec. Write: command channel (mpsc) from HTTP threads to event loop with one-shot reply channels. 5s timeout.</p>
+      <p>Read: atomic JSON snapshot, throttled 1/sec. Write: command channel (mpsc) from MCP socket threads to event loop with one-shot reply channels. 5s timeout.</p>
     </div>
     <div class="card">
       <h3>Vi Everywhere</h3>
@@ -551,7 +553,11 @@
       </div>
       <div class="timeline-item">
         <div class="timeline-label">M14 — MCP Context Bridge</div>
-        <div class="timeline-desc">HTTP MCP server, Claude sees spyc state</div>
+        <div class="timeline-desc">Unix-socket MCP server with auto-discovery; Claude / codex / gemini all see spyc state</div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-label">v1.5 — Pager / Task Unification</div>
+        <div class="timeline-desc">Pager mountable into Overlay / TopPane / LowerPane slots; task viewer + background tasks promoted to first-class</div>
       </div>
       <div class="timeline-item">
         <div class="timeline-label">v2.0 🎯</div>
@@ -582,10 +588,10 @@
     <div>
       <h3>What's Interesting</h3>
       <ul>
-        <li>19K lines of idiomatic Rust (clippy pedantic + nursery, zero warnings)</li>
+        <li>35K+ lines of idiomatic Rust (clippy pedantic + nursery, zero warnings)</li>
         <li>Complex terminal state: pty mux, vt100 parsing, cursor management</li>
-        <li>Hand-rolled MCP server with bidirectional command channel — no async runtime</li>
-        <li>358 tests including snapshot tests (insta) and state machine tests</li>
+        <li>Hand-rolled Unix-socket MCP server with bidirectional command channel — no async runtime</li>
+        <li>638 tests including snapshot tests (insta), property tests (proptest), and a pty roundtrip</li>
       </ul>
     </div>
   </div>
@@ -600,23 +606,23 @@
   <div class="three-col">
     <div class="card">
       <h3>🔧 Foundations</h3>
-      <p style="margin-bottom:12px;">~85% complete</p>
+      <p style="margin-bottom:12px;">~95% complete</p>
       <ul>
-        <li>✅ 358 tests, 38% coverage</li>
+        <li>✅ 638 tests (snapshot + property + pty roundtrip)</li>
         <li>✅ Startup health check (state dir validation)</li>
         <li>✅ Performance refactor (~2.5% idle CPU)</li>
+        <li>✅ Expanded snapshot tests (status / list / pager / prompt)</li>
+        <li>✅ <code>--print-config</code></li>
         <li>⬜ Elm Architecture refactor (app/mod.rs)</li>
-        <li>⬜ Expand snapshot tests</li>
-        <li>⬜ --dump-default-config</li>
       </ul>
     </div>
     <div class="card">
       <h3>🧠 Thesis</h3>
-      <p style="margin-bottom:12px;">Core + writable MCP shipped</p>
+      <p style="margin-bottom:12px;">Multi-agent + writable MCP shipped</p>
       <ul>
-        <li>✅ MCP read + write actions (6 tools)</li>
+        <li>✅ MCP read + write actions (10 tools)</li>
         <li>✅ Bidirectional path refs (M13)</li>
-        <li>✅ Session restore with Claude resume</li>
+        <li>✅ Per-pane resume for Claude / codex / gemini</li>
         <li>⬜ Context enrichment (diffs, errors)</li>
         <li>⬜ Session forking (branch conversations)</li>
         <li>⬜ Prompt templates in .spycrc</li>

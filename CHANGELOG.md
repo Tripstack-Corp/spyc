@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Documentation
+- **Presentation deck refreshed.** `docs/presentation.html` was
+  written around M14 (HTTP MCP era) and had drifted: slide 1
+  tagline now matches the README's MCP-from-the-pane framing;
+  slide 3 corrects HTTP → PID-scoped Unix domain socket with
+  agent auto-discovery via `.mcp.json` / `.codex/config.toml` /
+  `settings.json`; slide 6's `src/mcp.rs` row drops the HTTP
+  label; slide 7's MCP design pattern says "MCP socket threads"
+  instead of "HTTP threads"; slide 9's M14 timeline entry
+  reflects the multi-agent reach; added a v1.5 phase entry;
+  slide 5 / 10 / 11 stats bumped (19K → 35K LOC, 358 → 638
+  tests, 121 → 397 commits, 44 → 60 source files, 6 → 10 MCP
+  tools); roadmap flips `--print-config` and "expanded snapshot
+  tests" to shipped. Slide 1 date moved April → May. Cargo.toml's
+  `description` field also updated to the new framing — it had
+  drifted to "pairs with Claude Code" wording that pre-dated
+  codex/gemini support and the MCP-as-the-thesis positioning.
+
 - **AGENTS.md: new "Commits, merges, and CHANGELOG" sub-section.**
   Three guidelines for future agents working on the repo, derived
   from watercooler's catalogue review of the project's commit
