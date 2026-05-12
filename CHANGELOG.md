@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-j` / `^w-j` reach the resolver from a `D`-opened pager.**
+  Reported in BUGS.md: with `D` (in-app pager mounted in the top
+  pane) open and a bottom agent pane visible, pressing the
+  pane-focus chord while the pager has focus did nothing — the
+  pager's key handler swallowed it. Cause: same shape as the V
+  paste bug and the original `top_overlay` key bug — the routing
+  guard in front of `handle_pager_key` checked focus ownership
+  but not "is this a meta chord regardless of focus." Fix:
+  when the pager coexists with a bottom pane, meta chords
+  (`^a` / `^w` / `^\` / F10) ALWAYS fall through to the
+  resolver, regardless of which side currently has focus. The
+  rest of the existing behavior (non-meta keys go to the pager
+  if the pager has focus, to the bottom pane if it has focus)
+  is unchanged.
+
 ### Documentation
 - **v1.60 plan rewritten — siblings + mirror, not recursion.**
   Design discussion with the user reframed the architecture: each

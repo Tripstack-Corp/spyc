@@ -3161,15 +3161,30 @@ impl App {
 
         // Pager eats all keys until dismissed — except a `TopPane`-
         // mounted pager (v1.5 `D`) coexists with a focusable bottom
-        // pane. When the bottom pane has focus and the key isn't a
-        // spyc meta chord (^a / ^w / ^\ / F10), let it fall through
-        // to the pane-focused forwarding path below so the user can
-        // type into claude while the doc stays visible above.
+        // pane. When the pager coexists with a bottom pane, two
+        // classes of key fall through to the resolver / pane-forward
+        // paths below:
+        //
+        // 1. **Spyc meta chords (^a / ^w / ^\ / F10).** The chord
+        //    must reach the resolver so the user can switch focus
+        //    between the pager and the bottom pane regardless of
+        //    which side currently has focus. Without this, pressing
+        //    `^a-j` from inside a `D`-opened pager went into
+        //    `handle_pager_key`, which has no chord handling, and
+        //    the keypress was silently dropped.
+        //
+        // 2. **Non-meta keys while the bottom pane has focus.**
+        //    Typed text flows to claude / codex / gemini below, as
+        //    documented.
+        //
+        // Overlay-mounted pagers (the default) always eat keys —
+        // there's no bottom pane to coexist with.
         if let Some(view) = self.pager.as_ref() {
             let top_pane_pager = matches!(view.mount, crate::ui::pager::Mount::TopPane);
-            let bottom_owns = top_pane_pager && self.pane_tabs.is_some() && self.state.pane_focused;
+            let coexists_with_pane = top_pane_pager && self.pane_tabs.is_some();
             let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
-            if !bottom_owns || is_meta {
+            let fall_through = coexists_with_pane && (is_meta || self.state.pane_focused);
+            if !fall_through {
                 let post = self.handle_pager_key(key);
                 return Ok(post);
             }

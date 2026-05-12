@@ -111,6 +111,21 @@ rest of the dispatch testing.
   originally proposed `--dump-default-config`; the shorter
   `--print-config` shipped instead.
 
+- [ ] **[M] Centralize event routing.**
+  Three sites have surfaced the same bug shape in a single week:
+  the V paste bug (`#75`), the original V key-event bug, and the
+  D pager meta-chord bug (`#78`). Each handler reinvents
+  "route by (overlay-active, focus-owner, key-type)" and the
+  rules drift between sites. Refactor: a single
+  `route_event(state, event) -> Destination` function with arms
+  for Prompt, Resolver, PagerKey, OverlayPty, BottomPane,
+  FileList — each event handler (`handle_key`, `Event::Paste`,
+  etc.) consults the router and dispatches by destination.
+  Slots cleanly into v1.60's input-forwarding (the hub becomes
+  a new `RemotePeer(socket)` destination); doing this before
+  v1.60 Phase 3 avoids touching the router in the middle of
+  phase work.
+
 ### Tooling
 
 - [ ] **[M] `sccache` for CI compile-caching.**
