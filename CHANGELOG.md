@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Documentation
+- **v1.60 plan filed.** New `docs/V1_60_PLAN.md` lays out a
+  six-phase plan for **CounterTop** — a hub view above any one spyc
+  instance, with discovery so peer spycs find each other, a HUD
+  aggregating per-workspace agent state, and a `--hub` startup
+  mode for "launch one spyc on terminal open, run every project
+  from there." Mirrors `V1_5_PLAN.md`'s shape. Kitchen vocabulary
+  for UI surfaces: CounterTop (the hub view), Burner (an active
+  workspace), Pass (workspaces ready for the user), Spice drawer
+  (saved workspace bundles). Architectural decision recorded:
+  recursive composition (each workspace = a child spyc process in
+  a pane tab of the master, introspected via the MCP socket the
+  child already exposes) chosen over a monolith refactor that
+  lifts App state into a `Vec<Workspace>`. ROADMAP.md cross-links
+  the plan as a pre-v2.0 release.
+
 ### Fixed
 - **Paste into a `V`-opened top-overlay editor stays in the editor.**
   Reported in BUGS.md: with `V` open (editor running as a top

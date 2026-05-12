@@ -461,6 +461,12 @@ same commit.
   exit summary, startup health check, README rewrite.
 - **v1.9** -- Distribution track. Release automation, macOS
   notarization, Homebrew tap, asciinema demo.
+- **v1.60 -- CounterTop.** A hub view above any one spyc instance.
+  Discovery surface so peer spycs find each other, a HUD that
+  aggregates per-workspace agent state, `--hub` mode for "launch one
+  spyc on terminal open and run every project from there." Kitchen
+  vocabulary for the UI surfaces (CounterTop, Burner, Pass, Spice
+  Drawer). Six-phase plan in [`docs/V1_60_PLAN.md`](docs/V1_60_PLAN.md).
 - **v2.0** -- Public distribution launch. Gated on: thesis-track items
   #1-#2 shipped (session forking, prompt templates), remaining
   Distribution track complete. External announcement: TripStack
