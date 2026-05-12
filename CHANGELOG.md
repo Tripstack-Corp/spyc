@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Documentation
+- **v1.60 plan: Compatibility section + Phase 0 details.** Two
+  questions surfaced during plan review: (1) what happens when a
+  hub talks to a peer running an older spyc version, and (2) how
+  exactly does the hub discover peers and keep its list fresh?
+  Added a `Compatibility` section to `docs/V1_60_PLAN.md` with
+  the per-capability behavior matrix — older peers are always
+  visible in CounterTop with metadata from their discovery file,
+  but features (frame mirror, input forwarding) are gated on
+  capability advertisement. Discovery file shape grew
+  `schema_version` / `spyc_version` / `capabilities` / `mode`
+  fields. Phase 0 is now more precise: peers publish atomically
+  (write `.tmp` + rename), the hub watches the directory with
+  `notify` (already a runtime dep) for live updates, and stale
+  entries are detected via `kill(pid, 0)` on a ~5s tick.
+  Phases 1, 2, 3 each note which capability they add to a fresh
+  spyc's advertised set when the phase ships. Principle stated
+  in plain English: *an older peer is visible but degraded,
+  never invisible.*
+
 ### Fixed
 - **`^a-j` / `^w-j` reach the resolver from a `D`-opened pager.**
   Reported in BUGS.md: with `D` (in-app pager mounted in the top

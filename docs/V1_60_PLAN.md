@@ -81,36 +81,116 @@ Three routes were considered during planning:
    and forwards keystrokes back through the socket. Same widget shape
    as a pty pane (vt100 + cell grid), different source.
 
+## Compatibility
+
+Spycs running on the same machine won't all be the same version —
+the user updates spyc periodically and any number of older instances
+can be alive when a newer hub launches. Two layers handle this:
+
+- **`spyc_version`** (semver string) — informational. Shown in the
+  CounterTop row so the user can tell what's running where.
+- **`capabilities`** (flat string array) — the negotiation layer.
+  The hub only invokes operations whose capability the peer
+  advertises. New capability names are added as new features land;
+  removed names are reserved.
+
+The minimum capability set for v1.60 is:
+
+| Capability      | Means                                                          |
+| --------------- | -------------------------------------------------------------- |
+| `status`        | Peer responds to `get_workspace_status` (Phase 1).             |
+| `frame_mirror`  | Peer responds to `subscribe_frames` (Phase 2).                 |
+| `input_forward` | Peer responds to `send_input` (Phase 3).                       |
+
+CounterTop behavior is **always-visible, gracefully-degraded** for
+older peers:
+
+| Peer caps                                    | Hub behavior                                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------------------- |
+| Discovery file only (pre-1.60, no `status`)  | Row shows name + version + `pre-1.60 · status unavailable`. No live state.    |
+| Has `status`, no `frame_mirror`              | Live state visible. Peek shows a last-known-text snapshot (cheap fallback).   |
+| Has `frame_mirror`, no `input_forward`       | Mirror works; attach is read-only; status bar shows `👁 read-only`.          |
+| Full set                                     | Full UX.                                                                      |
+| Hub older than peer                          | Hub treats unknown capabilities as missing; never tries to call them.         |
+
+Principle: **an older peer is visible but degraded, never invisible.**
+Mid-rollout, "I can see all my work" still holds even if some
+workspaces only show their project home + session name.
+
+A `schema_version` field on the discovery file itself is the escape
+valve for backwards-incompatible file-format changes. The hub
+silently skips entries whose `schema_version` it doesn't understand.
+
 ## Phases
 
-Each phase is one PR, one version bump (v1.50.24-ish during
+Each phase is one PR, one version bump (v1.50.26-ish during
 development, then a v1.60.0 marker once shipped + dogfooded).
 
 ### Phase 0 — Discovery surface
 
-**Goal:** every running spyc registers itself in a well-known location
-so the hub (and external tools) can enumerate.
+**Goal:** every running spyc publishes its presence in a well-known
+location so the hub (and external tools) can enumerate, and changes
+become visible quickly without polling.
 
-**Files:**
-- `~/.local/state/spyc/instances/<pid>.json` — per-instance discovery
-  record. Written on startup, unlinked on clean exit, stale entries
-  pruned at next launch. Includes:
-  ```json
-  {
-    "pid": 12345,
-    "project_home": "/Users/derek/src/spyc",
-    "session_name": "SAFFRON_CUMIN",
-    "mcp_socket": "/Users/derek/.local/state/spyc/mcp-12345.sock",
-    "started_at_secs": 1762605451,
-    "label": "spyc",
-    "headless": false
-  }
-  ```
-- New `src/state/instances.rs` — write/remove/enumerate/prune.
+**File shape** (`~/.local/state/spyc/instances/<pid>.json`):
+
+```json
+{
+  "schema_version": 1,
+  "pid": 12345,
+  "spyc_version": "1.60.0",
+  "capabilities": ["status", "frame_mirror", "input_forward"],
+  "project_home": "/Users/derek/src/spyc",
+  "session_name": "SAFFRON_CUMIN",
+  "mcp_socket": "/Users/derek/.local/state/spyc/mcp-12345.sock",
+  "started_at_secs": 1762605451,
+  "label": "spyc",
+  "mode": "regular"
+}
+```
+
+- `schema_version` — bumped only when the file shape itself
+  changes incompatibly. Hub silently skips entries whose
+  `schema_version` it doesn't understand.
+- `capabilities` — the negotiation surface (see Compatibility).
+- `mode` — one of `"regular"` / `"headless"` / `"hub"`.
+
+**Publish (peer side):**
+- Written atomically on startup: write to `<pid>.json.tmp`, then
+  `rename`. POSIX guarantees rename is atomic, so readers either
+  see the old file or the new file, never a half-written one.
+- Re-written atomically on any durable state change worth
+  surfacing — `:project` updates `project_home`, `:name` updates
+  `session_name`, etc.
+- Unlinked on clean quit. Wrapped in the same panic handler that
+  restores the terminal so a panic still tries to clean up.
+
+**Discover (hub side):**
+- On launch, scan `instances/*.json`; deserialize each; skip
+  unparseable or unknown-`schema_version` entries.
+- Continuously, watch the directory with `notify` (already a
+  runtime dep — same crate used for `.spycrc.toml` live reload):
+  - `Create` event → read the new file, add a row.
+  - `Modify` event → re-read, update the row.
+  - `Remove` event → drop the row immediately.
+- New peer changes appear in the hub within tens of ms, no
+  polling on either side.
+
+**Stale detection:**
+- Background tick every ~5s: for each known peer, `kill(pid, 0)`.
+  `ESRCH` → unlink the orphan file and drop the row.
+- Faster path: any MCP RPC returning `ECONNREFUSED` immediately
+  marks the peer stale and triggers cleanup.
+
+**Files (code):**
+- New `src/state/instances.rs` — write/remove/enumerate/prune,
+  the notify watcher, the kill(pid, 0) sweeper.
 
 **Exit:** `ls ~/.local/state/spyc/instances/` shows one file per
 running spyc; orphans from killed processes are cleaned up at next
-launch.
+launch *or* within ~5s of the next sweep, whichever comes first.
+`:project /new/path` in one peer updates its row in another peer's
+hub within ~tens of ms.
 
 ### Phase 1 — CounterTop view (read-only)
 
@@ -126,7 +206,14 @@ control — informational.
   ∙ platform-tests  ~/src/platform-tes…  bash             idle      28m
   ✓ release-train   ~/src/spyc           gemini:4c130f82  done      14m
   ✻ scratch         ~/Desktop/scratch    claude:1b22f0a3  working   45s
+  · old-checkout    ~/src/legacy         (1.59.0)         pre-1.60  3h
 ```
+
+The last row above is what an older peer looks like: rendered from
+the discovery file alone (no MCP `status` capability), with a quiet
+`·` indicator and a `pre-1.60` tag. Project home and session name
+still visible. See [Compatibility](#compatibility) for the full
+behavior matrix.
 
 **Files:**
 - `src/ui/counter_top.rs` — render the table.
@@ -134,13 +221,16 @@ control — informational.
   `get_spyc_context`). Returns project_home, session_name, active
   agent + short session id, agent activity state derived from
   `~/.claude/jobs/<id>/state.json` and the codex / gemini analogues.
+  Add `status` to every fresh spyc's advertised capabilities.
 - `src/app/mod.rs` — `Action::OpenCounterTop`, keymap binding.
 - `src/keymap/action.rs` — new variant.
 - `src/ui/help.rs` — new entry.
 
 **Exit:** `:counter` from any spyc opens the HUD with rows for every
 running spyc; state indicator updates within ~2s of an agent state
-change in any peer.
+change in any peer. A peer with no `status` capability still renders
+as a row with the metadata from its discovery file plus a quiet
+`pre-1.60` tag.
 
 ### Phase 2 — Frame mirroring
 
@@ -163,6 +253,7 @@ subscribers via MCP. The hub renders the stream.
 **Files:**
 - `src/ui/tee_backend.rs` — new ratatui backend wrapper.
 - `src/mcp.rs` — `subscribe_frames` method + subscriber tracking.
+  Add `frame_mirror` to every fresh spyc's advertised capabilities.
 - `src/ui/status.rs` — observer-badge segment.
 - `src/app/mod.rs` — wire TeeBackend at startup; expose subscriber
   count to the status bar.
@@ -193,7 +284,8 @@ locally.
   at a time.
 
 **Files:**
-- `src/mcp.rs` — `send_input` method.
+- `src/mcp.rs` — `send_input` method. Add `input_forward` to every
+  fresh spyc's advertised capabilities.
 - `src/pane/input.rs` — extend if needed to ferry remote keys into
   the dispatch.
 - `src/app/mod.rs` — attach / detach state, key forwarding wire-up.
