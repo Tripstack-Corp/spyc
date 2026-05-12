@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Documentation
+- **v1.60 plan rewritten — siblings + mirror, not recursion.**
+  Design discussion with the user reframed the architecture: each
+  spyc instance lives in its own terminal and owns its own pty;
+  the hub is a peer client that discovers and connects to siblings
+  via the MCP socket each spyc already exposes. "Take control" =
+  mirror the remote's render stream and forward keystrokes back,
+  with both terminals (original + hub) showing the same frames
+  because they're both clients of the same render state. The
+  recursive-composition route from yesterday's plan is recorded as
+  considered-and-rejected. Six phases revised: Discovery →
+  CounterTop read-only → Frame mirroring (new TeeBackend, new
+  `subscribe_frames` MCP method, `👁 N` observer badge) → Input
+  forwarding (new `send_input` MCP method, last-keystroke-wins
+  semantics gated by OS single-focus) → Headless dispatch
+  (`spyc --detached /path`) → Agent View bridge + Spice drawer +
+  Pass polish.
+
 - **v1.60 plan filed.** New `docs/V1_60_PLAN.md` lays out a
   six-phase plan for **CounterTop** — a hub view above any one spyc
   instance, with discovery so peer spycs find each other, a HUD

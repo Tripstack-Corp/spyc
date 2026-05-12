@@ -6,78 +6,95 @@ unification, shipped at v1.50.0).
 
 ## Thesis
 
-A single spyc instance is one *project home*. Across a workday, the user
-opens several — `tripstack/spyc`, `tripstack/platform`, a worktree, a
-scratch repo. Today each lives in its own terminal window, and the user
-loses track of which agent is running where, which one is blocked on
-input, and which one finished an hour ago.
+A single spyc instance is one *project home*. Across a workday, the
+user opens several — `tripstack/spyc`, `tripstack/platform`, a
+worktree, a scratch repo, each in its own terminal window. Today the
+user loses track of which agent is running where, which one is blocked
+on input, and which one finished an hour ago.
 
-v1.60 introduces **CounterTop**: a hub view that sits above any one
-spyc instance and aggregates state across every running spyc the user
-has open, plus background agents tracked by Claude Code's `claude
-agents` supervisor. One spyc to launch on terminal open, every
-workspace and every agent visible from one place.
+v1.60 introduces **CounterTop**: a hub view that connects to every
+running spyc the user has open and aggregates their state. It can also
+spawn new headless spyc instances and "take control" of any peer —
+forwarding your keystrokes to it and mirroring its screen.
 
-The thesis is recursive composition: spyc panes already host any
-program; spyc happens to be a program; therefore spyc panes already
-host spyc. The only missing pieces are a discovery surface so
-instances can find each other, and a HUD that aggregates their state.
+The architectural choice is **siblings + mirror**, not recursive
+composition. Each spyc owns its own pty and lives in its own terminal
+window (or runs headless under the hub). They don't have parent/child
+relationships. The hub is a peer that happens to be a client of every
+other peer's MCP socket. The "cursor moves in two places" effect when
+you take control is a deliberate property of having two clients
+attached to the same render state.
+
+A keyboard can only focus one terminal window at a time anyway, so the
+risk of "both sides typing at once" is structural — the OS already
+serializes intent. Last-keystroke-wins is the right semantic.
 
 ## Kitchen vocabulary
 
-Naming the surfaces in keeping with spyc's existing spice + pepper
-motif:
-
 | Term         | Refers to                                                       |
 | ------------ | --------------------------------------------------------------- |
-| CounterTop   | The master / hub view. Where the user sees every workspace.     |
-| Burner       | An active workspace. One is "on the heat" if it has an agent currently working. |
-| Pass         | Workspace state "ready for the user" — agent is blocked on input, task is finished, PR is mergeable. The kitchen pass is where finished plates wait for the runner to take them. |
-| Spice drawer | Persisted bundles of workspaces. "Today's stack" / "platform + spyc" / "release-train cleanup". Restored via a picker. |
-| Ticket       | A dispatched agent prompt (`claude --bg`-style). Lives at the workspace level, not in CounterTop. |
+| CounterTop   | The hub view — where the user sees every running spyc.          |
+| Burner       | An active spyc instance. One is "on the heat" if its active pane has an agent currently working. |
+| Pass         | Aggregate "ready for you" state — agent blocked on input, task finished, PR mergeable. Where finished plates wait for the runner. |
+| Spice drawer | Saved bundles of spyc-instance configurations. Restoring a drawer entry spawns the right detached spycs at the right project homes. |
+| Ticket       | A dispatched agent prompt inside a spyc instance (`claude --bg`-style). Lives at the workspace level, surfaced by CounterTop but managed inside each spyc. |
+| 👁 badge     | Status-bar indicator on a spyc instance showing N clients are currently mirroring its frames. |
 
-These are public surface names. Code structs may keep neutral names
-(`Workspace`, `WorkspaceSet`); the kitchen vocabulary is for UI labels,
-help text, and command names.
+UI labels use the kitchen vocabulary. Code structs keep neutral names
+(`Workspace`, `MirrorClient`, etc.).
 
 ## Architectural choice (decided)
 
-Two routes were considered:
+Three routes were considered during planning:
 
-- **Monolith**: lift App-level state into `Vec<Workspace>` with an
-  active index. One spyc process, many workspaces.
-- **Recursive (chosen)**: each workspace is a child spyc process
-  running in a pane tab of the master. Discovery + introspection via
-  the MCP socket each child already exposes.
+- **Monolith refactor**: lift App state into `Vec<Workspace>` with an
+  active index. One spyc process, many workspaces. Rejected — too much
+  state to lift, complicates persistence and process model.
+- **Recursive composition**: each workspace is a child spyc running in
+  a pane tab of the master. Considered first; rejected after design
+  discussion. The user model is "I open spycs in real terminals, then
+  optionally bring up a hub" — not "I start a hub and launch
+  everything from it."
+- **Siblings + mirror (chosen)**: every spyc runs independently. The
+  hub discovers and connects to them as peer clients. Frame mirroring
+  and input forwarding ride over the MCP socket the spyc already
+  exposes.
 
-The recursive route wins on three axes:
+### Why siblings + mirror
 
-1. **No state lift.** App / AppState / pane_tabs stay where they are.
-   The new code is a discovery layer + a HUD pager that reads it.
-2. **Composable.** A workspace can have nested workspaces if a user
-   really wants. Bounded by terminal size, not by code.
-3. **Uses what's there.** Each spyc already writes a context file and
-   listens on a PID-scoped MCP socket. The master can query those
-   sockets with the same JSON-RPC vocabulary the agents use.
-
-The cost: more processes. A user with five workspaces has six spyc
-processes (master + five). Memory is negligible (each ~10 MB
-resident), and the OS keeps them cheap.
+1. **Spycs are launched the way you launch them today.** No change to
+   the standalone-launch workflow. `spyc` in a terminal still opens a
+   spyc; the hub is purely additive.
+2. **Hub lifecycle is independent.** Quit the hub → every spyc keeps
+   running in its own terminal. Launch the hub later → it rediscovers
+   everything.
+3. **Reuses the MCP socket.** Each spyc already listens on a
+   PID-scoped Unix socket and speaks JSON-RPC. We extend the
+   vocabulary with `subscribe_frames` + `send_input`. No new daemon,
+   no new transport.
+4. **Two clients = two viewers of the same render state.** When the
+   hub attaches, the original terminal AND the hub both show the same
+   frames. The OS guarantees single-focus, so input is naturally
+   serialized — whichever window has keyboard focus gets to type.
+5. **"Take control" is just "mirror + forward input."** A remote spyc
+   in the hub becomes a widget that renders the published frame stream
+   and forwards keystrokes back through the socket. Same widget shape
+   as a pty pane (vt100 + cell grid), different source.
 
 ## Phases
 
-Each phase is one PR, one version bump (v1.50.23 → v1.50.28-ish during
-development, then a v1.60.0 release marker once the set is shipped and
-dogfooded).
+Each phase is one PR, one version bump (v1.50.24-ish during
+development, then a v1.60.0 marker once shipped + dogfooded).
 
 ### Phase 0 — Discovery surface
 
 **Goal:** every running spyc registers itself in a well-known location
-so peer instances (and external tools) can enumerate them.
+so the hub (and external tools) can enumerate.
 
 **Files:**
 - `~/.local/state/spyc/instances/<pid>.json` — per-instance discovery
-  record. Written on startup, unlinked on clean exit. Includes:
+  record. Written on startup, unlinked on clean exit, stale entries
+  pruned at next launch. Includes:
   ```json
   {
     "pid": 12345,
@@ -85,23 +102,23 @@ so peer instances (and external tools) can enumerate them.
     "session_name": "SAFFRON_CUMIN",
     "mcp_socket": "/Users/derek/.local/state/spyc/mcp-12345.sock",
     "started_at_secs": 1762605451,
-    "label": "spyc"
+    "label": "spyc",
+    "headless": false
   }
   ```
-- New module: `src/state/instances.rs` — write/remove on
-  startup/shutdown, enumerate, prune stale entries (PID not alive).
+- New `src/state/instances.rs` — write/remove/enumerate/prune.
 
 **Exit:** `ls ~/.local/state/spyc/instances/` shows one file per
 running spyc; orphans from killed processes are cleaned up at next
 launch.
 
-### Phase 1 — CounterTop pager (read-only)
+### Phase 1 — CounterTop view (read-only)
 
-**Goal:** new `^a-W` (or `:counter`) opens the CounterTop view. A
-pager-mount pulling discovery records + reading each instance's
-context file. Read-only — informational.
+**Goal:** a new pager-mounted view that lists every running spyc with
+metadata pulled from each peer's MCP socket. No mirror yet, no
+control — informational.
 
-**Surface:**
+**Surface (sketch):**
 ```
 🍳 CounterTop                                              5 burners
   ✻ spyc            ~/src/spyc           claude:76422c62  working   2m
@@ -112,148 +129,194 @@ context file. Read-only — informational.
 ```
 
 **Files:**
-- `src/ui/counter_top.rs` — render the table as a pager.
-- `src/app/mod.rs` — wire `Action::OpenCounterTop`, keymap binding
-  (`^a-W` chord — repurpose; `W` chord today is worktrees, so use
-  `^a-O` or `:counter`).
-- `src/keymap/action.rs` — new variant.
-- `src/ui/help.rs` — new entry.
-
-**Exit:** open two spycs in different cwds, hit `:counter` in one,
-see both rows. State indicator updates within 2s of an agent state
-change.
-
-### Phase 2 — `--hub` startup mode
-
-**Goal:** `spyc --hub` launches with no project, no listing — just
-the CounterTop maximized. Panes opened from hub spawn child spyc
-processes, not bash / claude.
-
-**Files:**
-- `src/main.rs` — `--hub` flag.
-- `src/app/mod.rs` — `AppMode::Hub` (existing modes plus this one).
-  Hub mode suppresses the file list and centers the CounterTop.
-  `^a-c` (new tab) defaults to `spyc` instead of the user's default
-  pane command.
-- README + docs/presentation.html — short mention.
-
-**Exit:** `spyc --hub` opens an empty hub. `^a-c` spawns `spyc`,
-which registers in discovery, which appears in the CounterTop. User
-arrows down to it, `Enter` attaches to that child spyc (focuses its
-pane tab).
-
-### Phase 3 — Cross-workspace MCP introspection
-
-**Goal:** the CounterTop's per-row state is live, pulled by querying
-each child's MCP socket from the master.
-
-**Files:**
+- `src/ui/counter_top.rs` — render the table.
 - `src/mcp.rs` — new tool `get_workspace_status` (sibling of
   `get_spyc_context`). Returns project_home, session_name, active
   agent + short session id, agent activity state derived from
   `~/.claude/jobs/<id>/state.json` and the codex / gemini analogues.
-- `src/ui/counter_top.rs` — per-tick query of each peer's socket. A
-  short timeout (250 ms) per call; failed sockets render dimmed and
-  drop after three failures.
+- `src/app/mod.rs` — `Action::OpenCounterTop`, keymap binding.
+- `src/keymap/action.rs` — new variant.
+- `src/ui/help.rs` — new entry.
 
-**Exit:** a Claude pane in a child spyc enters "needs input" state →
-the master's row shows ⚠ within ~2s. Killing the child process →
-the row disappears after the stale check kicks in.
+**Exit:** `:counter` from any spyc opens the HUD with rows for every
+running spyc; state indicator updates within ~2s of an agent state
+change in any peer.
 
-### Phase 4 — Agent View bridge
+### Phase 2 — Frame mirroring
 
-**Goal:** surface Claude Code's background sessions (`claude --bg`,
-`/bg`-detached, things visible in `claude agents`) inside CounterTop
-alongside spyc workspaces. The user sees one HUD covering both
-spyc-managed and supervisor-managed work.
+**Goal:** the hub can *see* what a remote spyc is rendering. New tee
+ratatui backend in every spyc publishes its current frame to
+subscribers via MCP. The hub renders the stream.
+
+**Mechanism:**
+- New `TeeBackend` wraps the standard `CrosstermBackend`. On each
+  flush it computes the encoded ANSI delta and pushes it onto a
+  publish channel (a small ring buffer + condvar).
+- New MCP method `subscribe_frames` — returns a streaming subscription.
+  Subscribers get full snapshot on attach + deltas on each render.
+  When no subscribers, the tee is a passthrough (zero cost).
+- Hub uses the existing `vt100::Parser` + the same `widget.rs` that
+  renders ptys to render the mirrored stream.
+- **Observer badge** lit on the remote spyc's status bar
+  (`👁 N`) when subscriber count > 0.
 
 **Files:**
-- `src/state/agent_view.rs` — reader for
-  `~/.claude/daemon/roster.json` + `~/.claude/jobs/<id>/state.json`.
+- `src/ui/tee_backend.rs` — new ratatui backend wrapper.
+- `src/mcp.rs` — `subscribe_frames` method + subscriber tracking.
+- `src/ui/status.rs` — observer-badge segment.
+- `src/app/mod.rs` — wire TeeBackend at startup; expose subscriber
+  count to the status bar.
+
+**Exit:** open two spyc instances. From one, `:counter` then `Space`
+on the other's row → a peek panel renders the other's full screen
+(scrolling, mode changes, etc.). The other spyc shows `👁 1` in its
+status bar.
+
+### Phase 3 — Input forwarding ("take control")
+
+**Goal:** keystrokes from the hub reach the remote spyc as if typed
+locally.
+
+**Mechanism:**
+- New MCP method `send_input(key_event)` — accepts a serialized
+  crossterm `KeyEvent`. Pushed into the remote spyc's event loop
+  through a new internal channel so the dispatch path treats it
+  identically to local input.
+- When the hub attaches to a row (e.g. `^a-1`), CounterTop replaces
+  its UI with the mirrored peer view, and local key events are routed
+  to `send_input` against that peer's socket instead of being
+  consumed by the hub itself.
+- Detach with `^a-h` returns to CounterTop. The remote spyc keeps
+  running.
+- Multi-client: last-keystroke-wins, no lock. The OS's single-focus
+  guarantee means in practice only one keyboard is producing events
+  at a time.
+
+**Files:**
+- `src/mcp.rs` — `send_input` method.
+- `src/pane/input.rs` — extend if needed to ferry remote keys into
+  the dispatch.
+- `src/app/mod.rs` — attach / detach state, key forwarding wire-up.
+
+**Exit:** from the hub, attach to a remote spyc, type `:q` — the
+remote spyc quits, and its row disappears from CounterTop.
+
+### Phase 4 — Headless dispatch (`--detached`)
+
+**Goal:** the hub can launch new spyc instances that have no local
+terminal — they exist purely as discoverable peers visible through
+the hub mirror.
+
+**Mechanism:**
+- New flag `spyc --detached /path` — spawn a spyc with a pseudo-pty
+  backing its terminal output, no foreground terminal attached.
+  Registers in discovery with `headless: true`.
+- Hub `^a-c` (new dispatch) opens a prompt: `path: <enter>`. Launches
+  `spyc --detached <path>` as a child of the hub (or via a tiny
+  supervisor) and immediately subscribes to its frames.
+- Headless spycs auto-quit when their hub-side mirror disconnects
+  AND no other client is subscribed AND no active pane subprocess
+  is running — same idle-cleanup shape Agent View uses for its
+  supervisor.
+
+**Files:**
+- `src/main.rs` — `--detached` flag handling.
+- `src/app/mod.rs` — headless mode (skip claiming the host terminal,
+  render to a fixed-size virtual viewport).
+- `src/ui/counter_top.rs` — dispatch prompt UX.
+
+**Exit:** `^a-c spyc /tmp/foo` from the hub creates a new row, opens
+its mirror, lets you work in it; close the hub → spyc keeps running
+detached; reopen the hub → row reappears.
+
+### Phase 5 — Agent View bridge
+
+**Goal:** surface Claude Code's background sessions
+(`claude --bg`, `/bg`-detached) inside CounterTop alongside spyc
+peers. One HUD covering both spyc-managed and supervisor-managed
+work.
+
+**Files:**
+- `src/state/agent_view.rs` — reader for `~/.claude/daemon/roster.json`
+  and `~/.claude/jobs/<id>/state.json`.
 - `src/ui/counter_top.rs` — render a second section labelled
-  `── background ──` below the spyc workspaces, listing supervisor
+  `── background ──` below the spyc peers, listing supervisor
   sessions with the same shape (working / needs input / done).
 
 **Exit:** `claude --bg "investigate X"` from any shell → that
-session shows in CounterTop's background section. Pressing `Enter` on
-that row spawns a new pane tab running `claude attach <id>` (i.e.
-adopts the background session into a workspace under spyc).
+session shows in CounterTop's background section. Pressing `Enter`
+on the row spawns a new detached spyc that opens a pane running
+`claude attach <id>`, adopting the background session into a
+workspace under spyc.
 
-### Phase 5 — Spice drawer
+### Phase 6 — Spice drawer + Pass polish
 
-**Goal:** save and restore bundles of workspaces ("today's stack").
-Session save is already per-workspace; this is a layer above —
-"start these three spyc instances at these three cwds with these
-saved sessions."
+**Goal:** persistence + at-a-glance aggregate.
 
-**Files:**
-- `src/state/spice_drawer.rs` — read / write
-  `~/.local/state/spyc/spice_drawer/<name>.json`. Each entry: a list
-  of project_home + session_id pairs.
-- `src/app/mod.rs` — `:drawer save <name>`, `:drawer open <name>`,
-  `:drawer list`. From hub mode, `^a-D` opens a picker.
+**Spice drawer:**
+- `src/state/spice_drawer.rs` — save / restore named bundles of
+  `(project_home, session_id_or_none, headless_flag)` triples to
+  `~/.local/state/spyc/spice_drawer/<name>.json`.
+- `:drawer save morning`, `:drawer open morning`, `:drawer list`.
+- `spyc --hub --drawer morning` spawns all entries on launch
+  (as `--detached` or `--bg` depending on the entry).
 
-**Exit:** running 3 workspaces, `:drawer save morning` →
-`spyc --hub --drawer morning` (or `:drawer open morning` from inside
-hub) spawns the same 3 workspaces with their saved sessions.
-
-### Phase 6 — Pass + polish
-
-**Goal:** make the HUD scannable at a glance. "Pass" is a derived
-aggregate: how many workspaces / sessions are blocked on the user.
-
-**Files:**
-- `src/ui/status.rs` — when running with multiple peers visible, add
-  a `pass: 2` segment showing the count of rows in the "needs input"
-  / "done" buckets.
-- `src/ui/counter_top.rs` — group rows: `Burners` (working), `Pass`
-  (needs input / done), `Idle`. Match Agent View's grouping ergonomics
-  without copying its keys.
+**Pass:**
+- `src/ui/status.rs` — add a `pass: N` segment counting peers in
+  "needs input" / "done" state. Visible in the hub's status bar AND
+  optionally in standalone-spyc status bars when more than one peer
+  is running (configurable).
 - Term-title integration: `🌶️ CounterTop · 3 burners · 1 on the pass`.
 
-**Exit:** opening spyc in the morning, glancing at the title bar of
-the terminal alone tells you which workspace wants you.
+**Exit:** glance at the terminal title bar alone → know how many
+peers are working and how many want you.
 
 ## Out of scope (v1.60)
 
-- **No re-implementing `claude agents`.** Agent View runs in its own
-  pty if you want it; CounterTop only *reads* its state files.
-- **No master-controls-children writes.** The master can't (yet) send
-  commands to children beyond opening their MCP tools. Bidirectional
-  control is a v1.61+ question.
-- **No nested CounterTops.** A child spyc opening its own hub is
-  technically allowed (recursive composition), but the master doesn't
-  flatten the tree. Mental model: leaves of the tree are agents,
-  branches are workspaces, root is the hub the user launches.
-- **No automatic background-on-quit.** If you quit a workspace its
-  agents stop (modulo claude's existing supervisor behaviour). v1.60
-  doesn't reach into `/bg` semantics.
+- **No re-implementing `claude agents`.** Agent View runs as itself
+  if you want it. CounterTop only *reads* its state files.
+- **No process supervisor.** Headless spycs are owned by whoever
+  spawned them (hub or shell), not by a separate daemon. If the
+  hub spawns a detached spyc and the hub crashes, the detached
+  spyc keeps running until it idles out or the user kills it.
+- **No cross-machine.** Discovery is per-user local state. Two
+  machines = two CounterTops.
+- **No write-locking on input.** Last-keystroke-wins is the chosen
+  semantic; the OS does the gating in practice.
 
 ## Open questions
 
-- **Where does `:counter` live in the resolver?** `^a-W` collides
-  with the worktree chord (`W l/n/d`). Candidates: `^a-O` (overview),
-  `:counter`, `^a-^a` (double prefix). Decide in Phase 1.
-- **Does the master inherit the spice-pair session name?** Or is the
-  hub itself nameless? Lean nameless — its identity is the set of
-  burners.
-- **Per-socket query budget.** A user with 10 workspaces means 10
-  MCP roundtrips per CounterTop render. Plan: cache state per peer
-  with a 2s TTL; render on whatever's cached.
-- **What does session save look like in hub mode?** The hub itself
-  is stateless; quitting it shouldn't kill children unless the user
-  asks. Probably `:q` becomes a no-op in hub mode and `:Q` is the
-  "stop everything" command.
+- **Resolver chord for CounterTop.** `^a-W` collides with worktree
+  (`W l/n/d`). Candidates: `^a-O` (overview), `:counter`, `^a-^a`.
+  Decide in Phase 1.
+- **Frame encoding bandwidth.** A full 200×60 buffer is ~12000 cells
+  × ~16 bytes serialized ≈ 200 KB. At even 10 fps that's 2 MB/s
+  per subscriber. Mitigation: tee already writes encoded ANSI deltas,
+  not full buffers — delta sizes are usually tiny. If this becomes a
+  problem, add a "snapshot every N seconds + delta in between"
+  protocol.
+- **Hub identity / session name.** Does the hub get a spice-pair
+  name like other spycs? Lean **no** — the hub's identity is the
+  set of peers, not a project home. Status bar shows
+  `🍳 CounterTop · 3 burners`, no session name segment.
+- **Reattach after hub quits mid-control.** If the hub crashes while
+  attached to a peer, the peer keeps running but loses the badge
+  count one tick late. Plan: subscribers send a heartbeat every 2s;
+  remote spyc drops stale subscribers after 5s of silence.
+- **`--hub` mode quit semantics.** `:q` in the hub should not quit
+  any peers — only close the hub. `:Q` reserved for "tell every
+  peer to quit too" (rare).
 
-## Naming reference
+## Naming reference (code ↔ UI)
 
-This document uses kitchen vocabulary for UI surfaces but neutral
-names in code. Map for future cross-reference:
-
-| UI surface      | Code              | What it is                                       |
-| --------------- | ----------------- | ------------------------------------------------ |
-| CounterTop      | `CounterTopView`  | The master HUD pager / hub-mode main view.       |
-| Burner          | `Workspace` row   | One row in CounterTop = one workspace.           |
-| Pass            | (derived state)   | Aggregate "ready for you" count.                 |
-| Spice drawer    | `SpiceDrawer`     | Saved-workspace-bundle store.                    |
-| Ticket          | (no struct)       | UI-side label for a dispatched agent prompt.     |
+| UI surface     | Code                | What it is                                           |
+| -------------- | ------------------- | ---------------------------------------------------- |
+| CounterTop     | `CounterTopView`    | The hub HUD pager / hub-mode main view.              |
+| Burner         | row in CounterTop   | One row = one peer spyc instance.                    |
+| Pass           | (derived state)     | Aggregate "ready for you" count.                     |
+| Spice drawer   | `SpiceDrawer`       | Saved-bundle store.                                  |
+| Ticket         | (no struct)         | UI label for a dispatched agent prompt.              |
+| 👁 badge       | `MirrorClientCount` | Status-bar subscriber count on the remote spyc.      |
+| TeeBackend     | `TeeBackend`        | ratatui backend wrapper that publishes frames.       |
+| Subscribe      | `subscribe_frames`  | MCP method to receive a peer's render stream.        |
+| Forward input  | `send_input`        | MCP method to inject a key event into a peer.        |
