@@ -36,9 +36,6 @@
   already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
   updated; need to try and reproduce
-- a pane that has ended should not be so easy to dismiss with ESC; it should
-  require ^a-x so that the user purposefully says they are done with it e.g. I
-  may still way to try and restart it
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - we should be able to send control signals to running processes e.g. ^t

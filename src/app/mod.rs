@@ -3209,17 +3209,22 @@ impl App {
                 return Ok(self.handle_pane_scroll_key(key));
             }
         }
-        // When the active tab's subprocess has exited, any key closes
-        // the tab (so the user can read the error output, then dismiss).
+        // When the active tab's subprocess has exited, ordinary keys
+        // are eaten with a hint — only meta chords reach the resolver
+        // so the user can explicitly `^a-R` (restart), `^a-x` (close),
+        // `^a-j` / `^a-k` (focus-switch), etc. Pre-v1.50.28 the
+        // first non-meta keypress closed the tab silently, which
+        // raced the user's own `^a-R` chord: pressing `^a` itself
+        // dropped the tab before `R` could land.
         if let Some(tabs) = self.pane_tabs.as_mut() {
             if self.state.pane_focused && tabs.active().is_closed() {
-                if !tabs.close_active() {
-                    self.pane_tabs = None;
-                    self.state.pane_focused = false;
-                    self.needs_full_repaint = true;
-                    self.state.flash_info("pane: last tab closed");
+                let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
+                if !is_meta {
+                    self.state
+                        .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
+                    return Ok(PostAction::None);
                 }
-                return Ok(PostAction::None);
+                // Meta key: fall through to the resolver below.
             }
         }
         // When the pane is open *and focused*, forward keys to the

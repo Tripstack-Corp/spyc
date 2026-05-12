@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Exited tabs only dismiss on explicit `^a-x` (or `^a-R` to
+  restart).** Reported: pressing `^a-R` to restart an exited
+  pane tab raced the dismiss — the bare `^a` keystroke fired
+  the old "any key closes the exited tab" branch, dropping the
+  tab before `R` could land. Equally surprising as the BUGS.md
+  entry that flagged "ESC dismisses too eagerly." Fix: on an
+  exited focused tab, non-meta keys flash a hint (`pane exited
+  — \`^a-R\` to restart, \`^a-x\` to close`) and do nothing.
+  Meta chords (`^a` / `^w` / `^\` / F10, plus any
+  resolver-pending continuation) fall through to the resolver
+  so `^a-R`, `^a-x`, `^a-j`, etc. all work as documented.
+
 - **`^a-k` / `^w-k` reach the resolver from a `^a-v` scroll pager.**
   Same routing-shape bug as v1.50.25, different mount. The
   earlier fix covered `Mount::TopPane` (the `D` in-app pager)
