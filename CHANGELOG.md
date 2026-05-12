@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Internal
+- **Centralized key-event routing into `route_key`.** Closes the
+  routing-refactor TODO filed in v1.50.25 after five inline-routing
+  bugs in a week (#75 paste leak, #78 TopPane pager chord, #80
+  LowerPane pager chord, #81 exited-tab race, plus the original
+  V-overlay key bug). The five inline guards in `handle_key`
+  collapse into a single `match` on a `KeyDestination` enum;
+  decision logic lives in a pure function `route::route_key(snap,
+  key) -> KeyDestination` over a small `RouteSnapshot`.
+  Behavior preserved (657 tests, including 19 new unit tests in
+  `src/app/route.rs` — one per known regression case plus happy
+  paths). The route function takes no `&self` and does no I/O, so
+  every routing decision is unit-testable without instantiating
+  the TUI; future routing bugs land as a failing test row rather
+  than a sixth inline patch. Sets up v1.60 Phase 3 (input
+  forwarding) to add a `RemotePeer(socket)` destination without
+  touching the rest of `handle_key`.
+
 ### Fixed
 - **Exited tabs only dismiss on explicit `^a-x` (or `^a-R` to
   restart).** Reported: pressing `^a-R` to restart an exited

@@ -181,6 +181,7 @@ pub enum PostAction {
     },
 }
 
+mod route;
 pub mod state;
 
 /// Which collection the user is looking at.
@@ -2986,6 +2987,27 @@ impl App {
 
     // --- Input handling ---------------------------------------------------
 
+    /// Build the routing snapshot used by `route::route_key`.
+    /// Pure read of the fields the router cares about.
+    fn route_snapshot(&self) -> route::RouteSnapshot {
+        route::RouteSnapshot {
+            is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
+            has_top_overlay: self.top_overlay.is_some(),
+            pager_mount: self.pager.as_ref().map(|v| v.mount),
+            has_pane_tabs: self.pane_tabs.is_some(),
+            pane_focused: self.state.pane_focused,
+            pane_scrolling: self
+                .pane_tabs
+                .as_ref()
+                .is_some_and(|t| t.active().is_scrolling()),
+            pane_closed: self
+                .pane_tabs
+                .as_ref()
+                .is_some_and(|t| t.active().is_closed()),
+            resolver_pending: self.state.resolver.is_pending(),
+        }
+    }
+
     fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
         // Captures the input as it arrives so a user reproducing an
@@ -3125,28 +3147,6 @@ impl App {
             return Ok(PostAction::None);
         }
 
-        // Top overlay (interactive `;` command). Used to be an
-        // unconditional takeover ("the user exits by quitting the
-        // subprocess itself"), which was fine when only the overlay
-        // existed -- but if the user has a bottom pane too (e.g.
-        // claude open), they couldn't pop down to it without quitting
-        // the overlay first. So now spyc meta keys (^a, ^w, ^\, F10)
-        // and bottom-pane-focused keys fall through to the regular
-        // chord / pane-forwarding paths, letting the user `^a-j` into
-        // claude while keeping `;less docs/foo.md` visible above.
-        if let Some(overlay) = self.top_overlay.as_mut() {
-            let has_bottom = self.pane_tabs.is_some();
-            let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
-            let bottom_owns = has_bottom && self.state.pane_focused;
-            if !is_meta && !bottom_owns {
-                let _ = overlay.send_key(key);
-                return Ok(PostAction::None);
-            }
-            // Fall through: meta key reaches the resolver below;
-            // bottom-pane-focused keys reach the pane-focused
-            // forwarding block further down.
-        }
-
         // Quick Select picker eats all keys until dismissed.
         // Earlier than the harpoon menu so it'll never collide
         // with chord state.
@@ -3159,110 +3159,68 @@ impl App {
             return Ok(self.handle_harpoon_menu_key(key));
         }
 
-        // Pager eats all keys until dismissed — except slot-mounted
-        // pagers (`Mount::TopPane`, the v1.5 `D` overlay; or
-        // `Mount::LowerPane`, the `^a-v` scrollback view) coexist
-        // with another visible surface (bottom pty pane or top file
-        // list respectively). Two classes of key fall through to the
-        // resolver / pane-forward paths below when a slot-mounted
-        // pager is up:
-        //
-        // 1. **Spyc meta chords (^a / ^w / ^\ / F10).** The chord
-        //    must always reach the resolver so the user can switch
-        //    focus regardless of which side currently has focus.
-        //    Without this, `^a-j` from a `D` pager and `^a-k` from
-        //    a `^a-v` scrollback pager were both silently dropped
-        //    by `handle_pager_key` (which has no chord handling).
-        //
-        // 2. **Non-meta keys while the bottom pane has focus** —
-        //    typed text flows to claude / codex / gemini. Only
-        //    meaningful for `Mount::TopPane`; the `LowerPane`
-        //    mount visually replaces the bottom pane, so there's
-        //    no separate pty to type into.
-        //
-        // Overlay-mounted pagers (the default) always eat keys —
-        // there's no other slot to coexist with.
-        if let Some(view) = self.pager.as_ref() {
-            use crate::ui::pager::Mount;
-            let coexists_with_other_slot = matches!(view.mount, Mount::TopPane | Mount::LowerPane);
-            let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
-            let escape_meta = coexists_with_other_slot && is_meta;
-            let bottom_owns_typing = matches!(view.mount, Mount::TopPane)
-                && self.pane_tabs.is_some()
-                && self.state.pane_focused
-                && !is_meta;
-            if !(escape_meta || bottom_owns_typing) {
-                let post = self.handle_pager_key(key);
-                return Ok(post);
+        // Key routing. The destination decision lives in
+        // `route::route_key` — a pure function over a small state
+        // snapshot. Five separate routing-shape bugs shipped within
+        // a week (#75, #78, #80, #81, plus the original V-key bug)
+        // because every routing site reinvented the (focus, mount,
+        // key-type) decision. The router collapses those guards into
+        // one place; each destination here is a thin dispatch arm.
+        // See `src/app/route.rs` for the routing rules and the test
+        // matrix encoding the five regression cases.
+        let snap = self.route_snapshot();
+        match route::route_key(snap, key) {
+            route::KeyDestination::OverlayPty => {
+                if let Some(overlay) = self.top_overlay.as_mut() {
+                    let _ = overlay.send_key(key);
+                }
+                return Ok(PostAction::None);
             }
-        }
-        // When the pane is in scroll mode, navigation keys are handled
-        // here instead of being forwarded to the child subprocess.
-        // Let spyc meta keys (^W prefix, ^\\, F10) fall through so
-        // pane commands still work from scroll mode.
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            let pane = tabs.active_mut();
-            if pane.is_scrolling()
-                && self.state.pane_focused
-                && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
-            {
+            route::KeyDestination::PagerKey => {
+                return Ok(self.handle_pager_key(key));
+            }
+            route::KeyDestination::PaneScroll => {
                 return Ok(self.handle_pane_scroll_key(key));
             }
-        }
-        // When the active tab's subprocess has exited, ordinary keys
-        // are eaten with a hint — only meta chords reach the resolver
-        // so the user can explicitly `^a-R` (restart), `^a-x` (close),
-        // `^a-j` / `^a-k` (focus-switch), etc. Pre-v1.50.28 the
-        // first non-meta keypress closed the tab silently, which
-        // raced the user's own `^a-R` chord: pressing `^a` itself
-        // dropped the tab before `R` could land.
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            if self.state.pane_focused && tabs.active().is_closed() {
-                let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
-                if !is_meta {
-                    self.state
-                        .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
-                    return Ok(PostAction::None);
-                }
-                // Meta key: fall through to the resolver below.
+            route::KeyDestination::PaneExitedFlash => {
+                self.state
+                    .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
+                return Ok(PostAction::None);
             }
-        }
-        // When the pane is open *and focused*, forward keys to the
-        // subprocess — except spyc meta keys, which are always caught
-        // by spyc so the user can toggle / resize / focus-switch / send
-        // selection from inside the pane.
-        if self.pane_tabs.is_some()
-            && self.state.pane_focused
-            && !matches!(self.state.mode, Mode::Prompting(_))
-            && !is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending())
-        {
-            // Track what the user types so yP can yank the last prompt.
-            match key.code {
-                KeyCode::Enter => {
-                    let trimmed = strip_ansi_escapes(&self.pane_prompt_buf);
-                    if !trimmed.is_empty() {
-                        self.last_pane_prompt = Some(trimmed);
+            route::KeyDestination::BottomPane => {
+                // Track what the user types so `yP` can yank the
+                // last prompt.
+                match key.code {
+                    KeyCode::Enter => {
+                        let trimmed = strip_ansi_escapes(&self.pane_prompt_buf);
+                        if !trimmed.is_empty() {
+                            self.last_pane_prompt = Some(trimmed);
+                        }
+                        self.pane_prompt_buf.clear();
                     }
-                    self.pane_prompt_buf.clear();
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.pane_prompt_buf.clear();
+                    }
+                    KeyCode::Backspace => {
+                        self.pane_prompt_buf.pop();
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.pane_prompt_buf.push(c);
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.pane_prompt_buf.clear();
+                if let Some(tabs) = self.pane_tabs.as_mut() {
+                    let _ = tabs.active_mut().send_key(key);
                 }
-                KeyCode::Backspace => {
-                    self.pane_prompt_buf.pop();
-                }
-                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.pane_prompt_buf.push(c);
-                }
-                _ => {}
+                return Ok(PostAction::None);
             }
-            if let Some(tabs) = self.pane_tabs.as_mut() {
-                let _ = tabs.active_mut().send_key(key);
+            route::KeyDestination::Prompt => {
+                return Ok(self.handle_prompt_key(key));
             }
-            return Ok(PostAction::None);
-        }
-        if matches!(self.state.mode, Mode::Prompting(_)) {
-            return Ok(self.handle_prompt_key(key));
+            route::KeyDestination::Resolver => {
+                // Fall through to the inventory/graveyard view
+                // special cases and the resolver invocation below.
+            }
         }
         // Inventory view: special key handling.
         if self.state.view == View::Inventory {

@@ -1,0 +1,406 @@
+//! Pure key-event routing. Where does an incoming `KeyEvent` go?
+//!
+//! Before this module, every dispatch decision lived as an inline
+//! guard inside `App::handle_key`. Five separate routing-shape bugs
+//! shipped within a week (paste leak in `top_overlay` (#75); chord
+//! swallowed in TopPane pager (#78); chord swallowed in LowerPane
+//! pager (#80); exited-tab dropped on `^a` (#81); plus the original
+//! V-key bug that motivated the `top_overlay` meta-escape in the
+//! first place). The TODO filed in v1.50.25 calls for centralizing
+//! these into one place — this is that place.
+//!
+//! The routing is a **pure function** of a small `RouteSnapshot` —
+//! no `&App`, no side effects. That lets us unit-test every routing
+//! decision without spinning up a TUI, and lets the test file double
+//! as the regression matrix for the bugs we've already seen.
+//!
+//! `App::handle_key` builds a snapshot, calls `route_key`, and
+//! dispatches by destination. The inline guards collapse into a
+//! single `match`.
+
+use crossterm::event::KeyEvent;
+
+use crate::ui::pager::Mount;
+
+/// Where an incoming key event should be dispatched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeyDestination {
+    /// In-app prompt is active (`Mode::Prompting`); the key feeds
+    /// the prompt's line editor.
+    Prompt,
+    /// File-list normal mode; the key drives the chord resolver
+    /// (motions, marks, picks, `:`, etc.).
+    Resolver,
+    /// In-app pager has focus; the key drives scroll / search /
+    /// pager-specific bindings.
+    PagerKey,
+    /// `V` (top-overlay editor) or `;` (top-overlay foreground
+    /// command) pty owns the keystroke — encode and forward.
+    OverlayPty,
+    /// Bottom pty pane has keyboard focus; encode and forward to
+    /// the subprocess (claude / codex / gemini / shell / …).
+    BottomPane,
+    /// Pane is in scrollback mode and a non-meta key drives the
+    /// pane-scroll handler (j/k/G/etc.).
+    PaneScroll,
+    /// Exited pane tab — flash a hint, discard the key.
+    PaneExitedFlash,
+}
+
+/// Pure snapshot of the App state bits the router needs. Built
+/// from `&App` at call time. `Copy` so tests can construct one
+/// directly without instantiating the whole App and can mutate
+/// fields in update-syntax (`RouteSnapshot { foo: true, ..idle() }`).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RouteSnapshot {
+    /// `state.mode` is `Mode::Prompting(_)`.
+    pub is_prompting: bool,
+    /// `App::top_overlay.is_some()` — `V`/`;` overlay pty alive.
+    pub has_top_overlay: bool,
+    /// `App::pager`'s `Mount`, if any.
+    pub pager_mount: Option<Mount>,
+    /// `App::pane_tabs.is_some()`.
+    pub has_pane_tabs: bool,
+    /// `state.pane_focused`.
+    pub pane_focused: bool,
+    /// Active pane is in scrollback (vt100 reverse-mode) mode.
+    pub pane_scrolling: bool,
+    /// Active pane's subprocess has exited.
+    pub pane_closed: bool,
+    /// Chord resolver is mid-sequence (`^a` seen, waiting on
+    /// second key — likewise for `m{a-z}`, `'{a-z}`, etc.).
+    pub resolver_pending: bool,
+}
+
+/// Decide where a key goes. **Pure**, no mutation, no I/O.
+pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestination {
+    let is_meta = super::is_spyc_meta_when_pane_focused(key, snap.resolver_pending);
+    let bottom_owns = snap.has_pane_tabs && snap.pane_focused;
+
+    // 1. Top-overlay pty (V editor, ; command). Meta chords and
+    //    bottom-pane-focused keys fall through so the user can
+    //    `^a-j` into claude while the editor stays visible above.
+    if snap.has_top_overlay && !is_meta && !bottom_owns {
+        return KeyDestination::OverlayPty;
+    }
+
+    // 2. In-app pager. Overlay mounts always win; slot-mounts
+    //    (TopPane / LowerPane) coexist with another surface and
+    //    let two classes of key fall through:
+    //      - Meta chords always reach the resolver.
+    //      - Non-meta keys flow to the bottom pane when the bottom
+    //        pane has focus (only meaningful for TopPane; LowerPane
+    //        visually replaces the bottom pty).
+    if let Some(mount) = snap.pager_mount {
+        let coexists_with_other_slot = matches!(mount, Mount::TopPane | Mount::LowerPane);
+        let escape_meta = coexists_with_other_slot && is_meta;
+        let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
+        if !(escape_meta || bottom_typing) {
+            return KeyDestination::PagerKey;
+        }
+        // else fall through to the resolver / bottom-pane arms.
+    }
+
+    // 3. Pane scrollback mode. Non-meta keys with the pane focused
+    //    drive the scroll handler; meta keys escape to the resolver
+    //    so pane commands (`^a-x`, focus switch) still work.
+    if snap.has_pane_tabs && snap.pane_scrolling && snap.pane_focused && !is_meta {
+        return KeyDestination::PaneScroll;
+    }
+
+    // 4. Exited pane tab. Non-meta keys flash a hint and are
+    //    discarded; only meta chords (`^a-R`, `^a-x`, …) reach the
+    //    resolver. Closes the v1.50.28 race where `^a` itself
+    //    silently dropped the tab.
+    if snap.has_pane_tabs && snap.pane_focused && snap.pane_closed && !is_meta {
+        return KeyDestination::PaneExitedFlash;
+    }
+
+    // 5. Bottom pane forward — pty has focus, non-meta, and we're
+    //    not in a prompt (typed prompt text doesn't leak into the
+    //    pane).
+    if bottom_owns && !is_meta && !snap.is_prompting {
+        return KeyDestination::BottomPane;
+    }
+
+    // 6. Prompt — file-list area is the active region; a prompt is
+    //    up so feed the line editor.
+    if snap.is_prompting {
+        return KeyDestination::Prompt;
+    }
+
+    // 7. Default: chord resolver / file-list navigation.
+    KeyDestination::Resolver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// Snapshot with every flag at its quiescent default.
+    fn idle() -> RouteSnapshot {
+        RouteSnapshot {
+            is_prompting: false,
+            has_top_overlay: false,
+            pager_mount: None,
+            has_pane_tabs: false,
+            pane_focused: false,
+            pane_scrolling: false,
+            pane_closed: false,
+            resolver_pending: false,
+        }
+    }
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    // ── happy paths ───────────────────────────────────────────────
+
+    #[test]
+    fn default_routes_to_resolver() {
+        assert_eq!(route_key(idle(), key('j')), KeyDestination::Resolver);
+    }
+
+    #[test]
+    fn prompting_routes_to_prompt() {
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('a')), KeyDestination::Prompt);
+    }
+
+    #[test]
+    fn focused_pane_routes_to_bottom_pane() {
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+    }
+
+    #[test]
+    fn focused_pane_meta_routes_to_resolver_for_chord() {
+        // ^a is the chord prefix; even though the pane is focused,
+        // it must reach the resolver to start the chord.
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    #[test]
+    fn resolver_pending_continuation_treated_as_meta() {
+        // After `^a`, `j` arrives — must reach the resolver to
+        // complete the chord, not be forwarded to the pane.
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            resolver_pending: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::Resolver);
+    }
+
+    // ── pager: overlay mount eats everything ──────────────────────
+
+    #[test]
+    fn overlay_pager_eats_all_keys() {
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::PagerKey);
+    }
+
+    // ── regression: TopPane pager + meta chord (#78) ──────────────
+
+    #[test]
+    fn top_pane_pager_meta_escapes_to_resolver() {
+        // D opens an in-app pager in the top slot with a bottom pane
+        // visible. `^a` must reach the resolver so `^a-j` works.
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            has_pane_tabs: true,
+            pane_focused: false, // pager has focus
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    #[test]
+    fn top_pane_pager_non_meta_with_pager_focus_goes_to_pager() {
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            has_pane_tabs: true,
+            pane_focused: false,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
+    }
+
+    #[test]
+    fn top_pane_pager_with_bottom_focus_routes_typing_to_pane() {
+        // D pager up, but the user has focused claude with `^a-j`.
+        // Non-meta keys should flow to claude, not the pager.
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+        // And `^a-k` still works to switch focus back.
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    // ── regression: LowerPane pager + meta chord (#80) ────────────
+
+    #[test]
+    fn lower_pane_pager_meta_escapes_to_resolver() {
+        // ^a-v opens the pane-scrollback pager in the lower slot.
+        // `^a-k` must reach the resolver so the user can focus the
+        // file list.
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::LowerPane),
+            has_pane_tabs: true,
+            pane_focused: true,   // pane is the underlying owner
+            pane_scrolling: true, // entered scroll mode
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    #[test]
+    fn lower_pane_pager_non_meta_always_goes_to_pager() {
+        // LowerPane visually replaces the bottom pty; non-meta keys
+        // (scroll, search, etc.) belong to the pager regardless of
+        // focus state.
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::LowerPane),
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, key('/')), KeyDestination::PagerKey);
+    }
+
+    // ── regression: V/D top_overlay + paste / chord (#75 + V) ─────
+
+    #[test]
+    fn top_overlay_keeps_non_meta_when_bottom_not_focused() {
+        // V editor is open; user types into it (j key, no chord).
+        // Goes to the overlay pty, NOT the bottom pane.
+        let snap = RouteSnapshot {
+            has_top_overlay: true,
+            has_pane_tabs: true,
+            pane_focused: false,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::OverlayPty);
+    }
+
+    #[test]
+    fn top_overlay_meta_chord_escapes_to_resolver() {
+        // V editor is open; user wants to focus claude with `^a-j`.
+        let snap = RouteSnapshot {
+            has_top_overlay: true,
+            has_pane_tabs: true,
+            pane_focused: false,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    #[test]
+    fn top_overlay_with_bottom_focus_routes_typing_to_pane() {
+        // V editor up, but user focused claude. Typing goes to claude.
+        let snap = RouteSnapshot {
+            has_top_overlay: true,
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+    }
+
+    // ── regression: exited tab + non-meta key (#81) ───────────────
+
+    #[test]
+    fn exited_pane_non_meta_flashes() {
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            pane_closed: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PaneExitedFlash);
+        assert_eq!(
+            route_key(snap, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            KeyDestination::PaneExitedFlash,
+        );
+    }
+
+    #[test]
+    fn exited_pane_meta_chord_reaches_resolver() {
+        // `^a-R` and `^a-x` must work on an exited tab.
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            pane_closed: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    // ── pane scroll mode ──────────────────────────────────────────
+
+    #[test]
+    fn pane_scroll_eats_non_meta_keys() {
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            pane_scrolling: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PaneScroll);
+        assert_eq!(route_key(snap, key('G')), KeyDestination::PaneScroll);
+    }
+
+    #[test]
+    fn pane_scroll_meta_chord_escapes() {
+        let snap = RouteSnapshot {
+            has_pane_tabs: true,
+            pane_focused: true,
+            pane_scrolling: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    // ── prompts win over panes ────────────────────────────────────
+
+    #[test]
+    fn prompt_wins_over_focused_pane() {
+        // User opened `:` while in the pane. Pane should NOT receive
+        // keys — they go to the prompt.
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), KeyDestination::Prompt);
+    }
+}

@@ -111,20 +111,20 @@ rest of the dispatch testing.
   originally proposed `--dump-default-config`; the shorter
   `--print-config` shipped instead.
 
-- [ ] **[M] Centralize event routing.**
-  Three sites have surfaced the same bug shape in a single week:
-  the V paste bug (`#75`), the original V key-event bug, and the
-  D pager meta-chord bug (`#78`). Each handler reinvents
-  "route by (overlay-active, focus-owner, key-type)" and the
-  rules drift between sites. Refactor: a single
-  `route_event(state, event) -> Destination` function with arms
-  for Prompt, Resolver, PagerKey, OverlayPty, BottomPane,
-  FileList — each event handler (`handle_key`, `Event::Paste`,
-  etc.) consults the router and dispatches by destination.
-  Slots cleanly into v1.60's input-forwarding (the hub becomes
-  a new `RemotePeer(socket)` destination); doing this before
-  v1.60 Phase 3 avoids touching the router in the middle of
-  phase work.
+- [x] **[M] Centralize key-event routing.**
+  Five inline-routing bugs in a week (`#75` paste leak, `#78`
+  TopPane pager chord, `#80` LowerPane pager chord, `#81`
+  exited-tab race, plus the original V-overlay key bug). Shipped
+  in v1.50.29: pure `route::route_key(snap, key) -> KeyDestination`
+  with seven arms (Prompt, Resolver, PagerKey, OverlayPty,
+  BottomPane, PaneScroll, PaneExitedFlash). `handle_key`'s five
+  inline guards collapsed to a single `match`. 19 unit tests
+  (one per known regression case plus happy paths) double as the
+  router's regression matrix. v1.60 Phase 3 (input forwarding)
+  will add a `RemotePeer(socket)` destination without touching
+  the rest of `handle_key`. `Event::Paste` still has its own
+  ad-hoc routing — a paste companion `route_paste` is a
+  follow-up if/when paste grows a new destination.
 
 ### Tooling
 
