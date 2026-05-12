@@ -3159,32 +3159,39 @@ impl App {
             return Ok(self.handle_harpoon_menu_key(key));
         }
 
-        // Pager eats all keys until dismissed — except a `TopPane`-
-        // mounted pager (v1.5 `D`) coexists with a focusable bottom
-        // pane. When the pager coexists with a bottom pane, two
-        // classes of key fall through to the resolver / pane-forward
-        // paths below:
+        // Pager eats all keys until dismissed — except slot-mounted
+        // pagers (`Mount::TopPane`, the v1.5 `D` overlay; or
+        // `Mount::LowerPane`, the `^a-v` scrollback view) coexist
+        // with another visible surface (bottom pty pane or top file
+        // list respectively). Two classes of key fall through to the
+        // resolver / pane-forward paths below when a slot-mounted
+        // pager is up:
         //
         // 1. **Spyc meta chords (^a / ^w / ^\ / F10).** The chord
-        //    must reach the resolver so the user can switch focus
-        //    between the pager and the bottom pane regardless of
-        //    which side currently has focus. Without this, pressing
-        //    `^a-j` from inside a `D`-opened pager went into
-        //    `handle_pager_key`, which has no chord handling, and
-        //    the keypress was silently dropped.
+        //    must always reach the resolver so the user can switch
+        //    focus regardless of which side currently has focus.
+        //    Without this, `^a-j` from a `D` pager and `^a-k` from
+        //    a `^a-v` scrollback pager were both silently dropped
+        //    by `handle_pager_key` (which has no chord handling).
         //
-        // 2. **Non-meta keys while the bottom pane has focus.**
-        //    Typed text flows to claude / codex / gemini below, as
-        //    documented.
+        // 2. **Non-meta keys while the bottom pane has focus** —
+        //    typed text flows to claude / codex / gemini. Only
+        //    meaningful for `Mount::TopPane`; the `LowerPane`
+        //    mount visually replaces the bottom pane, so there's
+        //    no separate pty to type into.
         //
         // Overlay-mounted pagers (the default) always eat keys —
-        // there's no bottom pane to coexist with.
+        // there's no other slot to coexist with.
         if let Some(view) = self.pager.as_ref() {
-            let top_pane_pager = matches!(view.mount, crate::ui::pager::Mount::TopPane);
-            let coexists_with_pane = top_pane_pager && self.pane_tabs.is_some();
+            use crate::ui::pager::Mount;
+            let coexists_with_other_slot = matches!(view.mount, Mount::TopPane | Mount::LowerPane);
             let is_meta = is_spyc_meta_when_pane_focused(key, self.state.resolver.is_pending());
-            let fall_through = coexists_with_pane && (is_meta || self.state.pane_focused);
-            if !fall_through {
+            let escape_meta = coexists_with_other_slot && is_meta;
+            let bottom_owns_typing = matches!(view.mount, Mount::TopPane)
+                && self.pane_tabs.is_some()
+                && self.state.pane_focused
+                && !is_meta;
+            if !(escape_meta || bottom_owns_typing) {
                 let post = self.handle_pager_key(key);
                 return Ok(post);
             }

@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-k` / `^w-k` reach the resolver from a `^a-v` scroll pager.**
+  Same routing-shape bug as v1.50.25, different mount. The
+  earlier fix covered `Mount::TopPane` (the `D` in-app pager)
+  but not `Mount::LowerPane` (the `^a-v` pane-scrollback pager).
+  Meta chords from inside the lower pager were swallowed by
+  `handle_pager_key`. Generalized the routing guard: any
+  slot-mounted pager (TopPane *or* LowerPane) falls through to
+  the resolver on meta chords regardless of focus.
+  Non-meta-when-bottom-focused fall-through stays scoped to
+  `TopPane` only, since `LowerPane` visually *replaces* the
+  bottom pty (no separate slot to type into). Documents the
+  fourth instance of the same pattern in the routing-refactor
+  TODO; the refactor still wants to happen before v1.60 Phase 3
+  so input forwarding doesn't thread through this ad-hoc shape.
+
 ### Documentation
 - **v1.60 plan: Compatibility section + Phase 0 details.** Two
   questions surfaced during plan review: (1) what happens when a
