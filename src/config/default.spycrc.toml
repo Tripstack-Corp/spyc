@@ -24,6 +24,16 @@
 [pane]
 # default_command = "claude"
 
+# ── yank ──────────────────────────────────────────────────────────────
+# Pager yank (`y` / `Y` / visual-mode `y`) behavior.
+# `include_pager_title` (default true) prepends a short header to the
+# yanked text identifying the source — the pager's title, e.g.
+# `!cargo build`, `task #3: cargo test`, or the filename. Useful when
+# pasting captured output into chat / notes so the "what was running"
+# context goes with it. Set to false to yank just the content.
+[yank]
+# include_pager_title = true
+
 # ── colors ────────────────────────────────────────────────────────────
 # Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you
 # don't set falls back to the built-in palette.

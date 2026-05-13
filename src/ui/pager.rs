@@ -421,8 +421,12 @@ impl PagerView {
     /// Markdown views this is always the underlying markdown text,
     /// even when the pager is showing the rendered view -- POLA for
     /// "I want to paste this README into a chat."
-    pub fn yank_to_clipboard(&self) -> std::io::Result<()> {
-        pbcopy(&self.source_text())
+    ///
+    /// When `include_title` is true, prepend the pager's title as a
+    /// `# {title}` header (with one blank line of separation) so the
+    /// pasted content keeps its source context.
+    pub fn yank_to_clipboard(&self, include_title: bool) -> std::io::Result<()> {
+        pbcopy(&self.with_title_header(self.source_text(), include_title))
     }
 
     /// Yank the *visible* content to the system clipboard. For
@@ -431,14 +435,25 @@ impl PagerView {
     /// wrapped at 80 cols); in source mode it's identical to
     /// `yank_to_clipboard`. Useful when the rendered version is
     /// what you want to paste.
-    pub fn yank_visible_to_clipboard(&self) -> std::io::Result<()> {
+    pub fn yank_visible_to_clipboard(&self, include_title: bool) -> std::io::Result<()> {
         let text = self
             .lines
             .iter()
             .map(line_plain_text)
             .collect::<Vec<_>>()
             .join("\n");
-        pbcopy(&text)
+        pbcopy(&self.with_title_header(text, include_title))
+    }
+
+    /// Build the optional header + body string handed to `pbcopy`.
+    /// Empty title or `include_title == false` ⇒ body returned as-is.
+    /// Header format: `# {title}` then one blank line, so a paste
+    /// into code/chat reads as a comment line followed by content.
+    fn with_title_header(&self, body: String, include_title: bool) -> String {
+        if !include_title || self.title.is_empty() {
+            return body;
+        }
+        format!("# {}\n\n{body}", self.title)
     }
 
     pub const fn toggle_line_numbers(&mut self) {
@@ -564,8 +579,10 @@ impl PagerView {
     /// row contributes `line[lo_col..=hi_col]` (character indices,
     /// not display columns) — rows shorter than the range
     /// contribute their available chars and stop. Returns the
-    /// number of rows yanked.
-    pub fn yank_visual_to_clipboard(&mut self) -> std::io::Result<usize> {
+    /// number of rows yanked. The header rule is the same as the
+    /// full-buffer yank — when partial-range, the source context
+    /// is *more* useful, not less.
+    pub fn yank_visual_to_clipboard(&mut self, include_title: bool) -> std::io::Result<usize> {
         let Some(sel) = self.visual else {
             return Ok(0);
         };
@@ -593,7 +610,7 @@ impl PagerView {
                     .join("\n")
             }
         };
-        pbcopy(&text)?;
+        pbcopy(&self.with_title_header(text, include_title))?;
         let count = hi - lo + 1;
         self.visual = None;
         Ok(count)
@@ -2476,5 +2493,31 @@ mod tests {
         assert!(committed, "search query should match");
         let out = render_pager_to_string(&view, 50, 8);
         insta::assert_snapshot!(out);
+    }
+
+    // ── yank title header ─────────────────────────────────────────
+
+    #[test]
+    fn title_header_prepended_when_include_true() {
+        let view = PagerView::new_plain("!cargo build", vec!["hello".into(), "world".into()]);
+        let out = view.with_title_header(view.source_text(), true);
+        assert_eq!(out, "# !cargo build\n\nhello\nworld");
+    }
+
+    #[test]
+    fn title_header_skipped_when_include_false() {
+        let view = PagerView::new_plain("!cargo build", vec!["hello".into()]);
+        let out = view.with_title_header(view.source_text(), false);
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn title_header_skipped_when_title_empty() {
+        // Empty title (rare but possible) ⇒ no header even with
+        // include_title = true — pasting "# \n\n..." is uglier than
+        // pasting just the content.
+        let view = PagerView::new_plain("", vec!["hello".into()]);
+        let out = view.with_title_header(view.source_text(), true);
+        assert_eq!(out, "hello");
     }
 }

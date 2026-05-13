@@ -36,6 +36,9 @@ pub struct Config {
     /// Pane / pty defaults.
     pub pane: PaneConfig,
 
+    /// Yank / clipboard behavior knobs.
+    pub yank: YankConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -99,6 +102,34 @@ struct FilePane {
     default_command: Option<String>,
 }
 
+/// Yank / clipboard knobs.
+#[derive(Debug, Clone)]
+pub struct YankConfig {
+    /// When true, pager yanks (`y` / `Y` / visual-mode `y`) prepend a
+    /// short header that identifies the source — the pager's title
+    /// (e.g. `!cargo build`, `task #3: cargo test`, or the filename).
+    /// Pasting the captured output elsewhere keeps the "what was
+    /// running" context with the content. Default true.
+    pub include_pager_title: bool,
+}
+
+impl Default for YankConfig {
+    fn default() -> Self {
+        Self {
+            include_pager_title: true,
+        }
+    }
+}
+
+/// On-disk shape of `[yank]`. `Option` for the same "didn't set"
+/// distinguishability as the other tables.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileYank {
+    #[serde(default)]
+    include_pager_title: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColorOverrides {
@@ -145,6 +176,8 @@ struct FileConfig {
     layout: FileLayout,
     #[serde(default)]
     pane: FilePane,
+    #[serde(default)]
+    yank: FileYank,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -233,6 +266,11 @@ impl Config {
             self.pane.default_command = Some(cmd);
         }
 
+        // Yank: per-field merge.
+        if let Some(b) = file.yank.include_pager_title {
+            self.yank.include_pager_title = b;
+        }
+
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
 
@@ -297,6 +335,32 @@ mod tests {
         assert!(file.ignore_masks.is_empty());
         assert!(file.layout.status_position.is_none());
         assert!(file.pane.default_command.is_none());
+        assert!(file.yank.include_pager_title.is_none());
+    }
+
+    #[test]
+    fn yank_include_pager_title_defaults_to_true() {
+        assert!(Config::default().yank.include_pager_title);
+    }
+
+    #[test]
+    fn parses_yank_include_pager_title_false() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[yank]\ninclude_pager_title = false\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(!cfg.yank.include_pager_title);
+    }
+
+    #[test]
+    fn project_without_yank_does_not_clobber_user_yank() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[yank]\ninclude_pager_title = false\n").unwrap();
+        std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert!(!cfg.yank.include_pager_title);
     }
 
     #[test]

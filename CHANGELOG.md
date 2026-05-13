@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Pager yanks prepend a `# <title>` header by default.** `y` / `Y`
+  (full and visible) and visual-mode `y` (line + block) now include
+  the pager's title — `!cargo build`, `task #3: cargo test`, the
+  filename, etc. — as a single comment-style line followed by a
+  blank separator, then the content. The point: when you paste a
+  capture into chat / a code review / a note, the "what command was
+  this from" context goes with it. Empty titles still skip the
+  header (no `# \n\n` noise). Toggle off in `.spycrc.toml`:
+  ```toml
+  [yank]
+  include_pager_title = false
+  ```
+  Default `true` — covered by config round-trip tests and a unit
+  test on the header helper itself.
+
 ### Internal
 - **`unsafe` reduction: 36 → 2 sites.** Remaining unsafe: the
   `:setenv` prompt command (user-driven, intentional) and the

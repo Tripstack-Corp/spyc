@@ -8758,7 +8758,8 @@ impl App {
             }
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
-                    match view.yank_visual_to_clipboard() {
+                    let include_title = self.state.config.yank.include_pager_title;
+                    match view.yank_visual_to_clipboard(include_title) {
                         Ok(n) => {
                             let unit = if in_block { "row" } else { "line" };
                             view.flash = Some(format!(
@@ -8950,14 +8951,20 @@ impl App {
                 view.flash = Some("not a markdown file".into());
             }
             KeyCode::Char('f') => view.toggle_full_width(),
-            KeyCode::Char('y') => match view.yank_to_clipboard() {
-                Ok(()) => view.flash = Some("yanked source to clipboard".into()),
-                Err(e) => view.flash = Some(format!("yank failed: {e}")),
-            },
-            KeyCode::Char('Y') => match view.yank_visible_to_clipboard() {
-                Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
-                Err(e) => view.flash = Some(format!("yank failed: {e}")),
-            },
+            KeyCode::Char('y') => {
+                let include_title = self.state.config.yank.include_pager_title;
+                match view.yank_to_clipboard(include_title) {
+                    Ok(()) => view.flash = Some("yanked source to clipboard".into()),
+                    Err(e) => view.flash = Some(format!("yank failed: {e}")),
+                }
+            }
+            KeyCode::Char('Y') => {
+                let include_title = self.state.config.yank.include_pager_title;
+                match view.yank_visible_to_clipboard(include_title) {
+                    Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
+                    Err(e) => view.flash = Some(format!("yank failed: {e}")),
+                }
+            }
             KeyCode::Char('V') => {
                 // Enter visual line mode -- anchor at the top visible
                 // line, then j/k/G/etc. extend the selection and `y`
