@@ -42,11 +42,7 @@ fn inventory_dir() -> Option<PathBuf> {
 }
 
 fn state_base() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        Some(PathBuf::from(xdg).join("spyc"))
-    } else {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
-    }
+    crate::state::state_root()
 }
 
 fn now_secs() -> u64 {
@@ -342,133 +338,125 @@ fn load_items(dir: &Path) -> BTreeMap<String, CachedItem> {
 mod tests {
     use super::*;
 
-    fn setup_inv() -> (tempfile::TempDir, Inventory) {
-        let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        (tmp, Inventory::new())
-    }
-
     fn make_test_file(dir: &Path, name: &str, content: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, content).unwrap();
         path
     }
 
-    // All tests are combined into one to avoid env var races
-    // (XDG_STATE_HOME is process-global). Same pattern as
-    // sessions::tests::save_load_prune_and_dedup. The shared lock
-    // also serializes us against graveyard / harpoon / marks / sessions
-    // tests that touch the same env var.
+    // All sub-cases share one tempdir/Inventory to keep state contiguous.
+    // Per-thread `with_state_root` isolates this test from siblings without
+    // touching process-global env vars.
     #[test]
     fn cached_inventory_operations() {
-        let _lock = crate::state::env_test_lock();
-        let (tmp, mut inv) = setup_inv();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut inv = Inventory::new();
 
-        // --- yank and contains ---
-        let file = make_test_file(tmp.path(), "test.txt", "hello");
-        inv.yank(&file).unwrap();
-        assert!(inv.contains(&file));
-        assert_eq!(inv.len(), 1);
-        inv.clear();
+            // --- yank and contains ---
+            let file = make_test_file(tmp.path(), "test.txt", "hello");
+            inv.yank(&file).unwrap();
+            assert!(inv.contains(&file));
+            assert_eq!(inv.len(), 1);
+            inv.clear();
 
-        // --- yank rejects directory ---
-        let subdir = tmp.path().join("subdir");
-        std::fs::create_dir(&subdir).unwrap();
-        let err = inv.yank(&subdir).unwrap_err();
-        assert!(err.contains("not a regular file"));
+            // --- yank rejects directory ---
+            let subdir = tmp.path().join("subdir");
+            std::fs::create_dir(&subdir).unwrap();
+            let err = inv.yank(&subdir).unwrap_err();
+            assert!(err.contains("not a regular file"));
 
-        // --- yank deduplicates ---
-        let dedup = make_test_file(tmp.path(), "dedup.txt", "dup");
-        inv.yank(&dedup).unwrap();
-        inv.yank(&dedup).unwrap(); // no error, just skips
-        assert_eq!(inv.len(), 1);
-        inv.clear();
+            // --- yank deduplicates ---
+            let dedup = make_test_file(tmp.path(), "dedup.txt", "dup");
+            inv.yank(&dedup).unwrap();
+            inv.yank(&dedup).unwrap(); // no error, just skips
+            assert_eq!(inv.len(), 1);
+            inv.clear();
 
-        // --- put copies to dest ---
-        let file = make_test_file(tmp.path(), "src.txt", "content");
-        inv.yank(&file).unwrap();
-        let dest = tmp.path().join("dest");
-        std::fs::create_dir(&dest).unwrap();
-        let (count, removed, err) = inv.put_to(&dest);
-        assert_eq!(count, 1);
-        assert!(err.is_none());
-        assert!(!removed.is_empty());
-        assert!(dest.join("src.txt").exists());
-        assert_eq!(
-            std::fs::read_to_string(dest.join("src.txt")).unwrap(),
-            "content"
-        );
-        assert!(inv.is_empty()); // removed after put
+            // --- put copies to dest ---
+            let file = make_test_file(tmp.path(), "src.txt", "content");
+            inv.yank(&file).unwrap();
+            let dest = tmp.path().join("dest");
+            std::fs::create_dir(&dest).unwrap();
+            let (count, removed, err) = inv.put_to(&dest);
+            assert_eq!(count, 1);
+            assert!(err.is_none());
+            assert!(!removed.is_empty());
+            assert!(dest.join("src.txt").exists());
+            assert_eq!(
+                std::fs::read_to_string(dest.join("src.txt")).unwrap(),
+                "content"
+            );
+            assert!(inv.is_empty()); // removed after put
 
-        // --- put refuses overwrite ---
-        let clash = make_test_file(tmp.path(), "clash.txt", "original");
-        inv.yank(&clash).unwrap();
-        let dest2 = tmp.path().join("dest2");
-        std::fs::create_dir(&dest2).unwrap();
-        std::fs::write(dest2.join("clash.txt"), "existing").unwrap();
-        let (count, _, err) = inv.put_to(&dest2);
-        assert_eq!(count, 0);
-        assert!(err.unwrap().contains("already exists"));
-        assert_eq!(inv.len(), 1); // stays
-        inv.clear(); // clean up
+            // --- put refuses overwrite ---
+            let clash = make_test_file(tmp.path(), "clash.txt", "original");
+            inv.yank(&clash).unwrap();
+            let dest2 = tmp.path().join("dest2");
+            std::fs::create_dir(&dest2).unwrap();
+            std::fs::write(dest2.join("clash.txt"), "existing").unwrap();
+            let (count, _, err) = inv.put_to(&dest2);
+            assert_eq!(count, 0);
+            assert!(err.unwrap().contains("already exists"));
+            assert_eq!(inv.len(), 1); // stays
+            inv.clear(); // clean up
 
-        // --- remove moves to graveyard ---
-        let rm_file = make_test_file(tmp.path(), "rm.txt", "bye");
-        inv.yank(&rm_file).unwrap();
-        assert_eq!(inv.len(), 1);
-        inv.remove_at(0);
-        assert!(inv.is_empty());
-        let gy = tmp.path().join("spyc/graveyard");
-        let gy_files: Vec<_> = std::fs::read_dir(&gy)
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect();
-        assert!(gy_files.len() >= 2); // .json + .dat (may have more from clear above)
+            // --- remove moves to graveyard ---
+            let rm_file = make_test_file(tmp.path(), "rm.txt", "bye");
+            inv.yank(&rm_file).unwrap();
+            assert_eq!(inv.len(), 1);
+            inv.remove_at(0);
+            assert!(inv.is_empty());
+            let gy = tmp.path().join("graveyard");
+            let gy_files: Vec<_> = std::fs::read_dir(&gy)
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect();
+            assert!(gy_files.len() >= 2); // .json + .dat (may have more from clear above)
 
-        // --- clear moves all to graveyard ---
-        let f1 = make_test_file(tmp.path(), "c1.txt", "c1");
-        let f2 = make_test_file(tmp.path(), "c2.txt", "c2");
-        inv.yank(&f1).unwrap();
-        inv.yank(&f2).unwrap();
-        inv.clear();
-        assert!(inv.is_empty());
+            // --- clear moves all to graveyard ---
+            let f1 = make_test_file(tmp.path(), "c1.txt", "c1");
+            let f2 = make_test_file(tmp.path(), "c2.txt", "c2");
+            inv.yank(&f1).unwrap();
+            inv.yank(&f2).unwrap();
+            inv.clear();
+            assert!(inv.is_empty());
 
-        // --- toggle pick ---
-        let p1 = make_test_file(tmp.path(), "p1.txt", "p1");
-        let p2 = make_test_file(tmp.path(), "p2.txt", "p2");
-        inv.yank(&p1).unwrap();
-        inv.yank(&p2).unwrap();
-        inv.toggle_pick(0);
-        assert!(inv.is_picked(0));
-        assert!(!inv.is_picked(1));
-        inv.toggle_pick(0);
-        assert!(!inv.is_picked(0));
+            // --- toggle pick ---
+            let p1 = make_test_file(tmp.path(), "p1.txt", "p1");
+            let p2 = make_test_file(tmp.path(), "p2.txt", "p2");
+            inv.yank(&p1).unwrap();
+            inv.yank(&p2).unwrap();
+            inv.toggle_pick(0);
+            assert!(inv.is_picked(0));
+            assert!(!inv.is_picked(1));
+            inv.toggle_pick(0);
+            assert!(!inv.is_picked(0));
 
-        // --- partial put ---
-        inv.toggle_pick(0); // pick only first
-        let out = tmp.path().join("out");
-        std::fs::create_dir(&out).unwrap();
-        let (count, _, _) = inv.put_to(&out);
-        assert_eq!(count, 1);
-        assert_eq!(inv.len(), 1); // only unpicked remains
-        inv.clear();
+            // --- partial put ---
+            inv.toggle_pick(0); // pick only first
+            let out = tmp.path().join("out");
+            std::fs::create_dir(&out).unwrap();
+            let (count, _, _) = inv.put_to(&out);
+            assert_eq!(count, 1);
+            assert_eq!(inv.len(), 1); // only unpicked remains
+            inv.clear();
 
-        // --- load round trip ---
-        let persist = make_test_file(tmp.path(), "persist.txt", "data");
-        inv.yank(&persist).unwrap();
-        assert_eq!(inv.len(), 1);
-        let dir = tmp.path().join("spyc/inventory");
-        let loaded = super::load_items(&dir);
-        assert_eq!(loaded.len(), 1);
-        assert!(loaded.values().any(|i| i.orig_path == persist));
-        inv.clear();
+            // --- load round trip ---
+            let persist = make_test_file(tmp.path(), "persist.txt", "data");
+            inv.yank(&persist).unwrap();
+            assert_eq!(inv.len(), 1);
+            let dir = tmp.path().join("inventory");
+            let loaded = super::load_items(&dir);
+            assert_eq!(loaded.len(), 1);
+            assert!(loaded.values().any(|i| i.orig_path == persist));
+            inv.clear();
 
-        // --- paths iterates orig paths ---
-        let x = make_test_file(tmp.path(), "x.txt", "x");
-        inv.yank(&x).unwrap();
-        let paths: Vec<_> = inv.paths().collect();
-        assert_eq!(paths, vec![&x]);
+            // --- paths iterates orig paths ---
+            let x = make_test_file(tmp.path(), "x.txt", "x");
+            inv.yank(&x).unwrap();
+            let paths: Vec<_> = inv.paths().collect();
+            assert_eq!(paths, vec![&x]);
+        });
     }
 }

@@ -69,11 +69,7 @@ impl Marks {
 }
 
 fn state_dir() -> Option<PathBuf> {
-    // XDG first, then the conventional fallback.
-    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join("spyc"));
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+    crate::state::state_root()
 }
 
 #[cfg(test)]
@@ -111,13 +107,11 @@ mod tests {
 
     #[test]
     fn load_returns_empty_on_missing_file() {
-        // Point XDG_STATE_HOME at an empty tempdir; no file there yet.
-        let _lock = crate::state::env_test_lock();
+        // Point state_root at an empty tempdir; no file there yet.
         let tmp = tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let m = Marks::load();
-        assert!(m.entries.is_empty());
+        crate::state::with_state_root(tmp.path(), || {
+            let m = Marks::load();
+            assert!(m.entries.is_empty());
+        });
     }
 }

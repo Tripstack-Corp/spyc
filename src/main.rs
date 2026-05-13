@@ -262,7 +262,8 @@ impl crossterm::Command for DisableAlternateScroll {
 extern "C" fn signal_noop(_: libc::c_int) {}
 
 /// Install no-op handlers for SIGINT and SIGQUIT so spyc never dies
-/// from a Ctrl+C / Ctrl+\ that wasn't intended for it.
+/// from a Ctrl+C / Ctrl+\ that wasn't intended for it, plus SIG_IGN
+/// for SIGTTOU so the post-child `tcsetpgrp` restore succeeds.
 ///
 /// **The bug this fixes:** spyc runs in raw mode, where the kernel's
 /// tty signal generation (`ISIG`) is disabled and `^C` arrives as a
@@ -286,7 +287,26 @@ extern "C" fn signal_noop(_: libc::c_int) {}
 /// `SIG_DFL` in the child, so the child receives the signal with
 /// normal disposition and handles it correctly. (Pure `SIG_IGN`
 /// would inherit across exec, breaking the child's signal handling.)
+///
+/// SIGTTOU is raised on a process not in the FG process group when
+/// it calls `tcsetpgrp()`. We use `tcsetpgrp` to hand tty foreground
+/// to/from children for `p` / `v` / `;` takeovers — the *restore*
+/// call after the child exits comes from a process that's no longer
+/// the FG group. POSIX `tcsetpgrp(3)` succeeds in that situation
+/// only if SIGTTOU is **blocked or ignored**. A custom Rust handler
+/// (signal-hook style) does NOT satisfy this: the kernel still
+/// delivers SIGTTOU, the syscall returns `EINTR`, and the FG group
+/// stays pointed at the dead child's group — leaving spyc unable to
+/// read stdin without first being SIGTTIN'd. So we use raw `SIG_IGN`
+/// here, accepting that SIGTTOU's ignore disposition inherits across
+/// exec. No well-behaved child process in the foreground triggers
+/// SIGTTOU anyway (it's a background-write signal), so the inherit
+/// is harmless.
 fn install_signal_handlers() {
+    // The whole block is one well-isolated unsafe at startup. Signal
+    // handler installation is not exposed safely through `rustix` /
+    // `signal-hook` for our exact need (SIG_IGN inheritance for
+    // SIGTTOU) — see the function-level doc above.
     unsafe {
         // libc::signal returns the previous handler; we don't care
         // about it. SIG_ERR ⇒ failure, but on a sane Unix this
@@ -294,15 +314,6 @@ fn install_signal_handlers() {
         let h = signal_noop as *const () as libc::sighandler_t;
         libc::signal(libc::SIGINT, h);
         libc::signal(libc::SIGQUIT, h);
-        // SIGTTOU is raised on a process not in the FG process group
-        // when it calls `tcsetpgrp()`. We use `tcsetpgrp` to hand tty
-        // foreground to/from children for `p` / `v` / `;` takeovers
-        // -- the *restore* call after the child exits comes from a
-        // process that's no longer the FG group, so without ignoring
-        // SIGTTOU spyc would suspend itself. Ignored permanently:
-        // ignored signals inherit across exec, but no well-behaved
-        // child process running in the foreground triggers SIGTTOU
-        // anyway (it's a background-write signal).
         libc::signal(libc::SIGTTOU, libc::SIG_IGN);
     }
 }

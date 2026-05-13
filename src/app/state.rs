@@ -2041,45 +2041,39 @@ mod tests {
 
     #[test]
     fn take_cursor_item_to_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
-        s.take();
-        assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
+            s.take();
+            assert_eq!(s.inventory.len(), 1);
+            assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        });
     }
 
     #[test]
     fn take_picks_to_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
-        s.picks.toggle(&tmp.path().join("a.txt"));
-        s.picks.toggle(&tmp.path().join("b.txt"));
-        s.take();
-        assert_eq!(s.inventory.len(), 2);
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
+            s.picks.toggle(&tmp.path().join("a.txt"));
+            s.picks.toggle(&tmp.path().join("b.txt"));
+            s.take();
+            assert_eq!(s.inventory.len(), 2);
+        });
     }
 
     #[test]
     fn drop_removes_from_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank it first
-        assert_eq!(s.inventory.len(), 1);
-        // Switch to inventory view to drop
-        s.toggle_inventory_view();
-        s.drop_cursor();
-        assert!(s.inventory.is_empty());
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+            s.take(); // yank it first
+            assert_eq!(s.inventory.len(), 1);
+            // Switch to inventory view to drop
+            s.toggle_inventory_view();
+            s.drop_cursor();
+            assert!(s.inventory.is_empty());
+        });
     }
 
     // ── toggle_inventory_view ─────────────────────────────────────
@@ -2500,29 +2494,25 @@ mod tests {
 
     #[test]
     fn apply_take_adds_to_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.apply(&Action::Take);
-        assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+            s.apply(&Action::Take);
+            assert_eq!(s.inventory.len(), 1);
+            assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        });
     }
 
     #[test]
     fn apply_drop_removes_from_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank first
-        s.toggle_inventory_view();
-        s.apply(&Action::Drop);
-        assert!(s.inventory.is_empty());
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+            s.take(); // yank first
+            s.toggle_inventory_view();
+            s.apply(&Action::Drop);
+            assert!(s.inventory.is_empty());
+        });
     }
 
     #[test]
@@ -2536,16 +2526,14 @@ mod tests {
 
     #[test]
     fn apply_empty_inventory() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank first
-        assert_eq!(s.inventory.len(), 1);
-        s.apply(&Action::EmptyInventory);
-        assert!(s.inventory.is_empty());
+        crate::state::with_state_root(tmp.path(), || {
+            let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
+            s.take(); // yank first
+            assert_eq!(s.inventory.len(), 1);
+            s.apply(&Action::EmptyInventory);
+            assert!(s.inventory.is_empty());
+        });
     }
 
     #[test]

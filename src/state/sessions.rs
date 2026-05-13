@@ -89,12 +89,7 @@ pub struct Session {
 }
 
 fn sessions_dir() -> Option<PathBuf> {
-    let base = if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        PathBuf::from(xdg).join("spyc")
-    } else {
-        PathBuf::from(std::env::var_os("HOME")?).join(".local/state/spyc")
-    };
-    Some(base.join("sessions"))
+    crate::state::state_root().map(|r| r.join("sessions"))
 }
 
 pub fn save_session(session: &Session) -> std::io::Result<()> {
@@ -998,92 +993,23 @@ mod tests {
         assert_eq!(pick.session_id, "22222222-2222-2222-2222-222222222222");
     }
 
-    // Note: save/load/prune tests use the shared XDG_STATE_HOME env var.
-    // The lock from `crate::state::env_test_lock()` serializes us
-    // against the other state-module tests that mutate the same env
-    // var (graveyard / harpoon / inventory / marks).
+    // Sub-cases share one tempdir/state-root for sequencing; per-thread
+    // `with_state_root` isolates this test from siblings.
 
     #[test]
     fn save_load_prune_and_dedup() {
-        let _lock = crate::state::env_test_lock();
         let tmp = tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-
-        // --- roundtrip ---
-        let session = Session {
-            id: 12345,
-            saved_at: "2025-01-01 12:00".to_string(),
-            epoch_secs: 1_700_000_000,
-            cwd: PathBuf::from("/tmp/test"),
-            tabs: vec![SavedTab {
-                command: "bash".to_string(),
-                label: "shell".to_string(),
+        crate::state::with_state_root(tmp.path(), || {
+            // --- roundtrip ---
+            let session = Session {
+                id: 12345,
+                saved_at: "2025-01-01 12:00".to_string(),
+                epoch_secs: 1_700_000_000,
                 cwd: PathBuf::from("/tmp/test"),
-                agent_kind: crate::state::sessions::AgentKind::Other,
-                agent_session_id: None,
-                agent_session_name: None,
-            }],
-            active_tab: 0,
-            pane_height_pct: 30,
-            pane_focused: false,
-            name: "SAFFRON_CUMIN".to_string(),
-            project_home: None,
-        };
-        save_session(&session).unwrap();
-        let loaded = load_sessions();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].id, 12345);
-        assert_eq!(loaded[0].tabs.len(), 1);
-        assert_eq!(loaded[0].tabs[0].command, "bash");
-
-        // --- clean up for next sub-test ---
-        let dir = tmp.path().join("spyc/sessions");
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).unwrap();
-        }
-
-        // --- prune ---
-        for i in 0..25_u32 {
-            let s = Session {
-                id: u64::from(i),
-                saved_at: format!("2025-01-{i:02}"),
-                epoch_secs: 1_700_000_000 + u64::from(i),
-                cwd: PathBuf::from(format!("/tmp/dir{i}")),
-                tabs: vec![SavedTab {
-                    command: format!("cmd{i}"),
-                    label: format!("tab{i}"),
-                    cwd: PathBuf::from(format!("/tmp/dir{i}")),
-                    agent_kind: crate::state::sessions::AgentKind::Other,
-                    agent_session_id: None,
-                    agent_session_name: None,
-                }],
-                active_tab: 0,
-                pane_height_pct: 30,
-                pane_focused: false,
-                name: String::new(),
-                project_home: None,
-            };
-            save_session(&s).unwrap();
-        }
-        let loaded = load_sessions();
-        assert!(loaded.len() <= MAX_SESSIONS);
-
-        // --- clean up for dedup test ---
-        std::fs::remove_dir_all(&dir).unwrap();
-
-        // --- dedup ---
-        for id in [100_u64, 200] {
-            let s = Session {
-                id,
-                saved_at: "2025-01-01".to_string(),
-                epoch_secs: 1_700_000_000 + id,
-                cwd: PathBuf::from("/same/dir"),
                 tabs: vec![SavedTab {
                     command: "bash".to_string(),
                     label: "shell".to_string(),
-                    cwd: PathBuf::from("/same/dir"),
+                    cwd: PathBuf::from("/tmp/test"),
                     agent_kind: crate::state::sessions::AgentKind::Other,
                     agent_session_id: None,
                     agent_session_name: None,
@@ -1091,14 +1017,78 @@ mod tests {
                 active_tab: 0,
                 pane_height_pct: 30,
                 pane_focused: false,
-                name: String::new(),
+                name: "SAFFRON_CUMIN".to_string(),
                 project_home: None,
             };
-            save_session(&s).unwrap();
-        }
-        let loaded = load_sessions();
-        assert_eq!(loaded.len(), 1);
-        // Most recent (id=200) wins
-        assert_eq!(loaded[0].id, 200);
+            save_session(&session).unwrap();
+            let loaded = load_sessions();
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].id, 12345);
+            assert_eq!(loaded[0].tabs.len(), 1);
+            assert_eq!(loaded[0].tabs[0].command, "bash");
+
+            // --- clean up for next sub-test ---
+            let dir = tmp.path().join("sessions");
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir).unwrap();
+            }
+
+            // --- prune ---
+            for i in 0..25_u32 {
+                let s = Session {
+                    id: u64::from(i),
+                    saved_at: format!("2025-01-{i:02}"),
+                    epoch_secs: 1_700_000_000 + u64::from(i),
+                    cwd: PathBuf::from(format!("/tmp/dir{i}")),
+                    tabs: vec![SavedTab {
+                        command: format!("cmd{i}"),
+                        label: format!("tab{i}"),
+                        cwd: PathBuf::from(format!("/tmp/dir{i}")),
+                        agent_kind: crate::state::sessions::AgentKind::Other,
+                        agent_session_id: None,
+                        agent_session_name: None,
+                    }],
+                    active_tab: 0,
+                    pane_height_pct: 30,
+                    pane_focused: false,
+                    name: String::new(),
+                    project_home: None,
+                };
+                save_session(&s).unwrap();
+            }
+            let loaded = load_sessions();
+            assert!(loaded.len() <= MAX_SESSIONS);
+
+            // --- clean up for dedup test ---
+            std::fs::remove_dir_all(&dir).unwrap();
+
+            // --- dedup ---
+            for id in [100_u64, 200] {
+                let s = Session {
+                    id,
+                    saved_at: "2025-01-01".to_string(),
+                    epoch_secs: 1_700_000_000 + id,
+                    cwd: PathBuf::from("/same/dir"),
+                    tabs: vec![SavedTab {
+                        command: "bash".to_string(),
+                        label: "shell".to_string(),
+                        cwd: PathBuf::from("/same/dir"),
+                        agent_kind: crate::state::sessions::AgentKind::Other,
+                        agent_session_id: None,
+                        agent_session_name: None,
+                    }],
+                    active_tab: 0,
+                    pane_height_pct: 30,
+                    pane_focused: false,
+                    name: String::new(),
+                    project_home: None,
+                };
+                save_session(&s).unwrap();
+            }
+            let loaded = load_sessions();
+            assert_eq!(loaded.len(), 1);
+            // Most recent (id=200) wins
+            assert_eq!(loaded[0].id, 200);
+        });
     }
 }

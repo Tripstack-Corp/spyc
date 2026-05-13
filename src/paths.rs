@@ -14,8 +14,21 @@ use std::path::PathBuf;
 /// - `$VAR` and `${VAR}` expand to the corresponding environment value;
 ///   unset vars are left as-is so the user sees what they typed.
 pub fn expand(input: &str) -> PathBuf {
-    let tilde_done = expand_tilde(input);
-    PathBuf::from(expand_env_vars(&tilde_done))
+    let home = std::env::var_os("HOME");
+    let home = home.as_ref().map(|h| h.to_string_lossy());
+    expand_with(input, home.as_deref(), |name| std::env::var(name).ok())
+}
+
+/// Pure variant of `expand` that takes the HOME value and an env
+/// lookup function as parameters. Tests use this directly so they
+/// don't need to mutate the process-global env.
+fn expand_with(
+    input: &str,
+    home: Option<&str>,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> PathBuf {
+    let tilde_done = expand_tilde(input, home);
+    PathBuf::from(expand_env_vars(&tilde_done, lookup))
 }
 
 /// Inverse of `expand_tilde` for *display*: if `path` starts with `$HOME`,
@@ -44,11 +57,11 @@ pub fn display_tilde(path: &std::path::Path) -> String {
     s.into_owned()
 }
 
-fn expand_tilde(s: &str) -> String {
+fn expand_tilde(s: &str, home: Option<&str>) -> String {
     let Some(rest) = s.strip_prefix('~') else {
         return s.to_string();
     };
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = home else {
         return s.to_string();
     };
     let mut out = PathBuf::from(home);
@@ -61,7 +74,7 @@ fn expand_tilde(s: &str) -> String {
     out.to_string_lossy().into_owned()
 }
 
-fn expand_env_vars(input: &str) -> String {
+fn expand_env_vars(input: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -84,7 +97,7 @@ fn expand_env_vars(input: &str) -> String {
                 chars.next();
             }
             if closed {
-                if let Ok(val) = std::env::var(&name) {
+                if let Some(val) = lookup(&name) {
                     out.push_str(&val);
                 } else {
                     // Unset — keep the literal so the user sees the typo.
@@ -110,7 +123,7 @@ fn expand_env_vars(input: &str) -> String {
                     break;
                 }
             }
-            if let Ok(val) = std::env::var(&name) {
+            if let Some(val) = lookup(&name) {
                 out.push_str(&val);
             } else {
                 out.push('$');
@@ -182,37 +195,34 @@ mod tests {
 
     #[test]
     fn env_var_brace_form() {
-        // SAFETY: scoped to this test thread; single-threaded test run avoids
-        // interference with other tests that read env.
-        unsafe {
-            std::env::set_var("SPYC_TEST_BRACE", "/tmp/spyc-brace");
-        }
+        let lookup = |name: &str| -> Option<String> {
+            (name == "BRACE").then(|| "/tmp/spyc-brace".to_string())
+        };
         assert_eq!(
-            expand("${SPYC_TEST_BRACE}/sub"),
+            expand_with("${BRACE}/sub", None, lookup),
             PathBuf::from("/tmp/spyc-brace/sub")
         );
     }
 
     #[test]
     fn env_var_bare_form() {
-        unsafe {
-            std::env::set_var("SPYC_TEST_BARE", "/tmp/spyc-bare");
-        }
+        let lookup = |name: &str| -> Option<String> {
+            (name == "BARE").then(|| "/tmp/spyc-bare".to_string())
+        };
         assert_eq!(
-            expand("$SPYC_TEST_BARE/x"),
+            expand_with("$BARE/x", None, lookup),
             PathBuf::from("/tmp/spyc-bare/x")
         );
     }
 
     #[test]
     fn unset_var_passes_through() {
-        // Ensure the var really isn't set.
-        unsafe {
-            std::env::remove_var("SPYC_NEVER_SET_PROBABLY");
-        }
+        // Lookup returns None for every name — the literal `$VAR` form
+        // must survive verbatim.
+        let lookup = |_: &str| -> Option<String> { None };
         assert_eq!(
-            expand("/prefix/$SPYC_NEVER_SET_PROBABLY/suffix"),
-            PathBuf::from("/prefix/$SPYC_NEVER_SET_PROBABLY/suffix")
+            expand_with("/prefix/$NEVER_SET/suffix", None, lookup),
+            PathBuf::from("/prefix/$NEVER_SET/suffix")
         );
     }
 

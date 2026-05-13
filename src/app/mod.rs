@@ -5322,14 +5322,16 @@ impl App {
         // Negative pid → process group. SIGSTOP is uncatchable, so the
         // child can't refuse; reader thread keeps blocking on read
         // until SIGCONT.
-        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGSTOP) };
-        if r == 0 {
-            task.paused = true;
-            self.state
-                .flash_info(format!("task #{id} paused — :resume to continue"));
-        } else {
-            self.state
-                .flash_error(format!("task #{id}: SIGSTOP failed"));
+        match kill_pg(pid, rustix::process::Signal::STOP) {
+            Ok(()) => {
+                task.paused = true;
+                self.state
+                    .flash_info(format!("task #{id} paused — :resume to continue"));
+            }
+            Err(_) => {
+                self.state
+                    .flash_error(format!("task #{id}: SIGSTOP failed"));
+            }
         }
     }
 
@@ -5360,12 +5362,9 @@ impl App {
         // pause_task / resume_task. SIGINT lets the child clean up
         // (matches a real ^C); use ^\ in the live capture path for a
         // hard kill.
-        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGINT) };
-        if r == 0 {
-            Ok(format!("task #{id}: sent SIGINT"))
-        } else {
-            Err(format!("task #{id}: SIGINT failed"))
-        }
+        kill_pg(pid, rustix::process::Signal::INT)
+            .map(|()| format!("task #{id}: sent SIGINT"))
+            .map_err(|_| format!("task #{id}: SIGINT failed"))
     }
 
     /// Resume a paused task with SIGCONT to its process group.
@@ -5386,13 +5385,15 @@ impl App {
             self.state.flash_error(format!("task #{id}: no process id"));
             return;
         };
-        let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGCONT) };
-        if r == 0 {
-            task.paused = false;
-            self.state.flash_info(format!("task #{id} resumed"));
-        } else {
-            self.state
-                .flash_error(format!("task #{id}: SIGCONT failed"));
+        match kill_pg(pid, rustix::process::Signal::CONT) {
+            Ok(()) => {
+                task.paused = false;
+                self.state.flash_info(format!("task #{id} resumed"));
+            }
+            Err(_) => {
+                self.state
+                    .flash_error(format!("task #{id}: SIGCONT failed"));
+            }
         }
     }
 
@@ -5459,9 +5460,7 @@ impl App {
         if task.paused {
             if let Some(pid) = task.host.process_id() {
                 #[cfg(unix)]
-                unsafe {
-                    libc::kill(-(pid as libc::pid_t), libc::SIGCONT);
-                }
+                let _ = kill_pg(pid, rustix::process::Signal::CONT);
             }
         }
 
@@ -5572,9 +5571,7 @@ impl App {
         // capture but the child would stay frozen.
         if task.paused {
             if let Some(pid) = task.host.process_id() {
-                unsafe {
-                    libc::kill(-(pid as libc::pid_t), libc::SIGCONT);
-                }
+                let _ = kill_pg(pid, rustix::process::Signal::CONT);
             }
         }
 
@@ -9800,10 +9797,13 @@ fn run_child_in_foreground(
     // `install_signal_handlers`) so the restore call below doesn't
     // suspend us.
     #[cfg(unix)]
-    let saved_pgid: libc::pid_t = unsafe {
-        let our_pgid = libc::getpgrp();
-        let child_pid = child.id() as libc::pid_t;
-        libc::tcsetpgrp(libc::STDIN_FILENO, child_pid);
+    let saved_pgid = {
+        use std::os::fd::AsFd;
+        let our_pgid = rustix::process::getpgrp();
+        if let Some(child_pid) = rustix::process::Pid::from_raw(child.id() as i32) {
+            let stdin = std::io::stdin();
+            let _ = rustix::termios::tcsetpgrp(stdin.as_fd(), child_pid);
+        }
         our_pgid
     };
 
@@ -9815,8 +9815,10 @@ fn run_child_in_foreground(
     // tty input would still be delivered to the child's (now-dead)
     // group and the kernel would EIO subsequent reads.
     #[cfg(unix)]
-    unsafe {
-        libc::tcsetpgrp(libc::STDIN_FILENO, saved_pgid);
+    {
+        use std::os::fd::AsFd;
+        let stdin = std::io::stdin();
+        let _ = rustix::termios::tcsetpgrp(stdin.as_fd(), saved_pgid);
     }
 
     if pause_after {
@@ -9838,6 +9840,24 @@ pub fn row_from_entry(e: &Entry) -> RowData {
         path: e.path.clone(),
         display: e.display_name(),
         kind: e.kind,
+    }
+}
+
+/// `kill(-pid, sig)` — signal the process group leadered by `pid`.
+/// portable-pty calls `setsid` on spawn, so the child IS the group
+/// leader; negative-pid targets reach grandchildren too. Returns the
+/// underlying syscall result so background-task callers can flash
+/// the user-facing success/failure message.
+///
+/// `Pid::from_raw` rejects zero (which would mean "current process
+/// group" — a footgun if the child id was somehow 0); on that path
+/// we synthesize an `ESRCH` so the caller flashes the same "failed"
+/// branch as a real kill failure.
+#[cfg(unix)]
+fn kill_pg(pid: u32, sig: rustix::process::Signal) -> rustix::io::Result<()> {
+    match rustix::process::Pid::from_raw(pid as i32) {
+        Some(rpid) => rustix::process::kill_process_group(rpid, sig),
+        None => Err(rustix::io::Errno::SRCH),
     }
 }
 

@@ -59,10 +59,17 @@ fn split_command(raw: &str) -> Vec<String> {
 /// (and dash warns about it), so we only set `-i` for shells that
 /// actually source a startup file interactively.
 pub fn user_shell_invocation(cmd: &str) -> (String, Vec<String>) {
-    let shell = std::env::var("SHELL")
-        .ok()
+    let shell = std::env::var("SHELL").ok();
+    user_shell_invocation_for(shell.as_deref(), cmd)
+}
+
+/// Pure version of `user_shell_invocation` that takes the SHELL value
+/// as an argument. Tests call this directly so they don't need to
+/// mutate the process-global env var.
+fn user_shell_invocation_for(shell: Option<&str>, cmd: &str) -> (String, Vec<String>) {
+    let shell = shell
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/bin/sh".to_string());
+        .map_or_else(|| "/bin/sh".to_string(), ToString::to_string);
     let basename = Path::new(&shell)
         .file_name()
         .and_then(|n| n.to_str())
@@ -94,80 +101,43 @@ pub fn looks_like_text(path: &Path) -> bool {
 mod tests {
     use super::*;
 
-    /// Helper: scope-set $SHELL for a single call. Tests in this
-    /// module mutate the process-global env var. The shared
-    /// `crate::state::env_test_lock()` mutex serializes us against
-    /// each other AND against the state-module tests that mutate
-    /// other env vars (XDG_STATE_HOME), so the whole test suite can
-    /// run with the default parallel runner without env-var races.
-    fn with_shell<R>(value: Option<&str>, f: impl FnOnce() -> R) -> R {
-        let _lock = crate::state::env_test_lock();
-        let prev = std::env::var_os("SHELL");
-        unsafe {
-            match value {
-                Some(v) => std::env::set_var("SHELL", v),
-                None => std::env::remove_var("SHELL"),
-            }
-        }
-        let r = f();
-        unsafe {
-            match prev {
-                Some(p) => std::env::set_var("SHELL", p),
-                None => std::env::remove_var("SHELL"),
-            }
-        }
-        r
-    }
-
     #[test]
     fn user_shell_zsh_gets_interactive_flag() {
-        with_shell(Some("/bin/zsh"), || {
-            let (sh, args) = user_shell_invocation("echo hi");
-            assert_eq!(sh, "/bin/zsh");
-            assert_eq!(args, vec!["-i", "-c", "echo hi"]);
-        });
+        let (sh, args) = user_shell_invocation_for(Some("/bin/zsh"), "echo hi");
+        assert_eq!(sh, "/bin/zsh");
+        assert_eq!(args, vec!["-i", "-c", "echo hi"]);
     }
 
     #[test]
     fn user_shell_bash_gets_interactive_flag() {
-        with_shell(Some("/usr/local/bin/bash"), || {
-            let (sh, args) = user_shell_invocation("ls");
-            assert_eq!(sh, "/usr/local/bin/bash");
-            assert_eq!(args, vec!["-i", "-c", "ls"]);
-        });
+        let (sh, args) = user_shell_invocation_for(Some("/usr/local/bin/bash"), "ls");
+        assert_eq!(sh, "/usr/local/bin/bash");
+        assert_eq!(args, vec!["-i", "-c", "ls"]);
     }
 
     #[test]
     fn user_shell_posix_sh_skips_interactive() {
-        with_shell(Some("/bin/sh"), || {
-            let (sh, args) = user_shell_invocation("ls");
-            assert_eq!(sh, "/bin/sh");
-            assert_eq!(args, vec!["-c", "ls"]);
-        });
+        let (sh, args) = user_shell_invocation_for(Some("/bin/sh"), "ls");
+        assert_eq!(sh, "/bin/sh");
+        assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_dash_skips_interactive() {
-        with_shell(Some("/bin/dash"), || {
-            let (_, args) = user_shell_invocation("ls");
-            assert_eq!(args, vec!["-c", "ls"]);
-        });
+        let (_, args) = user_shell_invocation_for(Some("/bin/dash"), "ls");
+        assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_unset_falls_back_to_sh() {
-        with_shell(None, || {
-            let (sh, args) = user_shell_invocation("ls");
-            assert_eq!(sh, "/bin/sh");
-            assert_eq!(args, vec!["-c", "ls"]);
-        });
+        let (sh, args) = user_shell_invocation_for(None, "ls");
+        assert_eq!(sh, "/bin/sh");
+        assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_empty_falls_back_to_sh() {
-        with_shell(Some(""), || {
-            let (sh, _) = user_shell_invocation("ls");
-            assert_eq!(sh, "/bin/sh");
-        });
+        let (sh, _) = user_shell_invocation_for(Some(""), "ls");
+        assert_eq!(sh, "/bin/sh");
     }
 }

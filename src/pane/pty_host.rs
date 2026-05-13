@@ -272,9 +272,7 @@ impl PtyHost {
         };
 
         #[cfg(unix)]
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGTERM);
-        }
+        kill_group(pid, rustix::process::Signal::TERM);
         let deadline = std::time::Instant::now() + grace;
         while std::time::Instant::now() < deadline {
             match self.child.try_wait() {
@@ -288,9 +286,7 @@ impl PtyHost {
             }
         }
         #[cfg(unix)]
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-        }
+        kill_group(pid, rustix::process::Signal::KILL);
         if let Ok(status) = self.child.wait() {
             self.exit_status = Some(status);
         }
@@ -305,14 +301,24 @@ impl Drop for PtyHost {
         }
         if let Some(pid) = self.child.process_id() {
             #[cfg(unix)]
-            unsafe {
-                libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-            }
+            kill_group(pid, rustix::process::Signal::KILL);
         } else {
             let _ = self.child.kill();
         }
         // Non-blocking reap; kernel handles it if already gone.
         let _ = self.child.try_wait();
+    }
+}
+
+/// `kill(-pid, sig)` — send a signal to the process group leadered by
+/// `pid`. portable-pty calls `setsid` on spawn, so child PID == group
+/// leader; sending to `-pid` reaches grandchildren too. Errors are
+/// swallowed (matches the old `libc::kill` call which dropped the
+/// return value); failure modes are "already-gone" and we don't care.
+#[cfg(unix)]
+fn kill_group(pid: u32, sig: rustix::process::Signal) {
+    if let Some(rpid) = rustix::process::Pid::from_raw(pid as i32) {
+        let _ = rustix::process::kill_process_group(rpid, sig);
     }
 }
 

@@ -303,12 +303,7 @@ impl Graveyard {
 }
 
 fn graveyard_dir() -> Option<PathBuf> {
-    let base = if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        PathBuf::from(xdg).join("spyc")
-    } else {
-        PathBuf::from(std::env::var_os("HOME")?).join(".local/state/spyc")
-    };
-    Some(base.join("graveyard"))
+    crate::state::state_root().map(|r| r.join("graveyard"))
 }
 
 fn read_entries(dir: &Path) -> Vec<Entry> {
@@ -379,164 +374,166 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
-    fn fresh_xdg() -> tempfile::TempDir {
-        let tmp = tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        tmp
+    fn fresh_root() -> tempfile::TempDir {
+        tempdir().unwrap()
     }
 
     #[test]
     fn write_and_restore_single_file_roundtrips_with_perms() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let work = tempdir().unwrap();
-        let src = work.path().join("hello.sh");
-        {
-            let mut f = std::fs::File::create(&src).unwrap();
-            writeln!(f, "#!/bin/sh\necho hi").unwrap();
-        }
-        // Mark executable so we can verify mode-bit preservation.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let src = work.path().join("hello.sh");
+            {
+                let mut f = std::fs::File::create(&src).unwrap();
+                writeln!(f, "#!/bin/sh\necho hi").unwrap();
+            }
+            // Mark executable so we can verify mode-bit preservation.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
 
-        let entry = Graveyard::write_entry(&src).unwrap();
-        assert_eq!(entry.kind, EntryKind::File);
-        assert_eq!(entry.file_count, 1);
-        assert!(entry.uncompressed_size > 0);
-        assert!(entry.compressed_size > 0);
-        assert_eq!(entry.filename, "hello.sh");
+            let entry = Graveyard::write_entry(&src).unwrap();
+            assert_eq!(entry.kind, EntryKind::File);
+            assert_eq!(entry.file_count, 1);
+            assert!(entry.uncompressed_size > 0);
+            assert!(entry.compressed_size > 0);
+            assert_eq!(entry.filename, "hello.sh");
 
-        // Restore into a fresh dir and check the file's there with
-        // the right content and mode.
-        let dest = tempdir().unwrap();
-        Graveyard::restore(&entry, dest.path()).unwrap();
-        let restored = dest.path().join("hello.sh");
-        let body = std::fs::read_to_string(&restored).unwrap();
-        assert!(body.starts_with("#!/bin/sh"));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&restored).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o755, "exec bits not preserved");
-        }
+            // Restore into a fresh dir and check the file's there with
+            // the right content and mode.
+            let dest = tempdir().unwrap();
+            Graveyard::restore(&entry, dest.path()).unwrap();
+            let restored = dest.path().join("hello.sh");
+            let body = std::fs::read_to_string(&restored).unwrap();
+            assert!(body.starts_with("#!/bin/sh"));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&restored).unwrap().permissions().mode();
+                assert_eq!(mode & 0o777, 0o755, "exec bits not preserved");
+            }
+        });
     }
 
     #[test]
     fn write_and_restore_directory_tree() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let work = tempdir().unwrap();
-        let root = work.path().join("proj");
-        std::fs::create_dir(&root).unwrap();
-        std::fs::write(root.join("a.txt"), "alpha").unwrap();
-        std::fs::create_dir(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub/b.txt"), "beta").unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let tree_root = work.path().join("proj");
+            std::fs::create_dir(&tree_root).unwrap();
+            std::fs::write(tree_root.join("a.txt"), "alpha").unwrap();
+            std::fs::create_dir(tree_root.join("sub")).unwrap();
+            std::fs::write(tree_root.join("sub/b.txt"), "beta").unwrap();
 
-        let entry = Graveyard::write_entry(&root).unwrap();
-        assert_eq!(entry.kind, EntryKind::Dir);
-        assert_eq!(entry.file_count, 2, "expected 2 files in tree");
+            let entry = Graveyard::write_entry(&tree_root).unwrap();
+            assert_eq!(entry.kind, EntryKind::Dir);
+            assert_eq!(entry.file_count, 2, "expected 2 files in tree");
 
-        let dest = tempdir().unwrap();
-        Graveyard::restore(&entry, dest.path()).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(dest.path().join("proj/a.txt")).unwrap(),
-            "alpha"
-        );
-        assert_eq!(
-            std::fs::read_to_string(dest.path().join("proj/sub/b.txt")).unwrap(),
-            "beta"
-        );
+            let dest = tempdir().unwrap();
+            Graveyard::restore(&entry, dest.path()).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(dest.path().join("proj/a.txt")).unwrap(),
+                "alpha"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dest.path().join("proj/sub/b.txt")).unwrap(),
+                "beta"
+            );
+        });
     }
 
     #[test]
     fn restore_refuses_to_overwrite() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let work = tempdir().unwrap();
-        let src = work.path().join("important.txt");
-        std::fs::write(&src, "original").unwrap();
-        let entry = Graveyard::write_entry(&src).unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let src = work.path().join("important.txt");
+            std::fs::write(&src, "original").unwrap();
+            let entry = Graveyard::write_entry(&src).unwrap();
 
-        let dest = tempdir().unwrap();
-        let conflict = dest.path().join("important.txt");
-        std::fs::write(&conflict, "DO NOT OVERWRITE").unwrap();
+            let dest = tempdir().unwrap();
+            let conflict = dest.path().join("important.txt");
+            std::fs::write(&conflict, "DO NOT OVERWRITE").unwrap();
 
-        let err =
-            Graveyard::restore(&entry, dest.path()).expect_err("expected an overwrite refusal");
-        let _ = err; // exact kind varies across tar versions
-        assert_eq!(
-            std::fs::read_to_string(&conflict).unwrap(),
-            "DO NOT OVERWRITE",
-            "existing file was clobbered"
-        );
+            let err =
+                Graveyard::restore(&entry, dest.path()).expect_err("expected an overwrite refusal");
+            let _ = err; // exact kind varies across tar versions
+            assert_eq!(
+                std::fs::read_to_string(&conflict).unwrap(),
+                "DO NOT OVERWRITE",
+                "existing file was clobbered"
+            );
+        });
     }
 
     #[test]
     fn load_returns_newest_first() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let work = tempdir().unwrap();
-        let a = work.path().join("a.txt");
-        let b = work.path().join("b.txt");
-        std::fs::write(&a, "a").unwrap();
-        std::fs::write(&b, "b").unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let a = work.path().join("a.txt");
+            let b = work.path().join("b.txt");
+            std::fs::write(&a, "a").unwrap();
+            std::fs::write(&b, "b").unwrap();
 
-        let mut e1 = Graveyard::write_entry(&a).unwrap();
-        e1.timestamp = 1000;
-        let mut e2 = Graveyard::write_entry(&b).unwrap();
-        e2.timestamp = 2000;
-        // Persist the doctored timestamps so the loader sees them.
-        let dir = graveyard_dir().unwrap();
-        std::fs::write(
-            dir.join(format!("{}.json", e1.id)),
-            serde_json::to_string(&e1).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join(format!("{}.json", e2.id)),
-            serde_json::to_string(&e2).unwrap(),
-        )
-        .unwrap();
+            let mut e1 = Graveyard::write_entry(&a).unwrap();
+            e1.timestamp = 1000;
+            let mut e2 = Graveyard::write_entry(&b).unwrap();
+            e2.timestamp = 2000;
+            // Persist the doctored timestamps so the loader sees them.
+            let dir = graveyard_dir().unwrap();
+            std::fs::write(
+                dir.join(format!("{}.json", e1.id)),
+                serde_json::to_string(&e1).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join(format!("{}.json", e2.id)),
+                serde_json::to_string(&e2).unwrap(),
+            )
+            .unwrap();
 
-        let g = Graveyard::load();
-        assert_eq!(g.entries.len(), 2);
-        assert_eq!(g.entries[0].timestamp, 2000, "newest should be first");
-        assert_eq!(g.entries[1].timestamp, 1000);
+            let g = Graveyard::load();
+            assert_eq!(g.entries.len(), 2);
+            assert_eq!(g.entries[0].timestamp, 2000, "newest should be first");
+            assert_eq!(g.entries[1].timestamp, 1000);
+        });
     }
 
     #[test]
     fn delete_entry_removes_pair() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let work = tempdir().unwrap();
-        let src = work.path().join("x.txt");
-        std::fs::write(&src, "hi").unwrap();
-        let entry = Graveyard::write_entry(&src).unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let src = work.path().join("x.txt");
+            std::fs::write(&src, "hi").unwrap();
+            let entry = Graveyard::write_entry(&src).unwrap();
 
-        let dir = graveyard_dir().unwrap();
-        assert!(dir.join(format!("{}.json", entry.id)).exists());
-        assert!(dir.join(format!("{}.tar.zst", entry.id)).exists());
+            let dir = graveyard_dir().unwrap();
+            assert!(dir.join(format!("{}.json", entry.id)).exists());
+            assert!(dir.join(format!("{}.tar.zst", entry.id)).exists());
 
-        Graveyard::delete_entry(&entry);
-        assert!(!dir.join(format!("{}.json", entry.id)).exists());
-        assert!(!dir.join(format!("{}.tar.zst", entry.id)).exists());
+            Graveyard::delete_entry(&entry);
+            assert!(!dir.join(format!("{}.json", entry.id)).exists());
+            assert!(!dir.join(format!("{}.tar.zst", entry.id)).exists());
+        });
     }
 
     #[test]
     fn orphan_tarball_without_json_is_ignored() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let dir = graveyard_dir().unwrap();
-        std::fs::create_dir_all(&dir).unwrap();
-        // Stray tarball with no metadata — load should skip it
-        // gracefully (the next health pass cleans it up).
-        std::fs::write(dir.join("orphan.tar.zst"), b"not really a tar").unwrap();
-        let g = Graveyard::load();
-        assert!(g.entries.is_empty());
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let dir = graveyard_dir().unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            // Stray tarball with no metadata — load should skip it
+            // gracefully (the next health pass cleans it up).
+            std::fs::write(dir.join("orphan.tar.zst"), b"not really a tar").unwrap();
+            let g = Graveyard::load();
+            assert!(g.entries.is_empty());
+        });
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.50.29"
+version = "1.50.30"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -48,6 +48,7 @@ trash = "5"
 # graveyard's cascade-to-trash and legacy-migration paths stage
 # files into a TempDir before handing them to the system trash.
 tempfile = "3"
+rustix = { version = "1.1.4", features = ["process", "termios", "fs"] }
 
 [dev-dependencies]
 insta = "1"

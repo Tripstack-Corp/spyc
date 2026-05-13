@@ -204,10 +204,7 @@ pub enum AppendResult {
 }
 
 fn state_dir() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join("spyc"));
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+    crate::state::state_root()
 }
 
 /// Replace filesystem-unsafe characters in the basename component
@@ -230,12 +227,11 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn fresh_xdg() -> tempfile::TempDir {
-        let tmp = tempdir().unwrap();
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", tmp.path());
-        }
-        tmp
+    /// Returns a tempdir that callers pass to `with_state_root` to
+    /// isolate persistence to a per-test directory. The tempdir's
+    /// path becomes `state_root()` for the closure body.
+    fn fresh_root() -> tempfile::TempDir {
+        tempdir().unwrap()
     }
 
     #[test]
@@ -317,28 +313,30 @@ mod tests {
 
     #[test]
     fn roundtrip_persistence() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let project = PathBuf::from("/tmp/myproj");
-        let mut h = Harpoon::load(&project);
-        h.append(PathBuf::from("/tmp/myproj/src/main.rs"));
-        h.append(PathBuf::from("/tmp/myproj/Cargo.toml"));
-        h.save().unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let project = PathBuf::from("/tmp/myproj");
+            let mut h = Harpoon::load(&project);
+            h.append(PathBuf::from("/tmp/myproj/src/main.rs"));
+            h.append(PathBuf::from("/tmp/myproj/Cargo.toml"));
+            h.save().unwrap();
 
-        let loaded = Harpoon::load(&project);
-        assert_eq!(loaded.slots, h.slots);
-        assert_eq!(loaded.project, project);
-        // Ancestor cache rebuilt on load.
-        assert!(loaded.ancestor_set().contains(Path::new("/tmp/myproj/src")));
+            let loaded = Harpoon::load(&project);
+            assert_eq!(loaded.slots, h.slots);
+            assert_eq!(loaded.project, project);
+            // Ancestor cache rebuilt on load.
+            assert!(loaded.ancestor_set().contains(Path::new("/tmp/myproj/src")));
+        });
     }
 
     #[test]
     fn load_missing_file_yields_empty() {
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let h = Harpoon::load(Path::new("/tmp/never-saved"));
-        assert!(h.slots.is_empty());
-        assert_eq!(h.project, Path::new("/tmp/never-saved"));
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let h = Harpoon::load(Path::new("/tmp/never-saved"));
+            assert!(h.slots.is_empty());
+            assert_eq!(h.project, Path::new("/tmp/never-saved"));
+        });
     }
 
     #[test]
@@ -352,19 +350,20 @@ mod tests {
     fn project_mismatch_yields_empty() {
         // Pre-write a file claiming a different project; load should
         // discard it rather than serve someone else's slots.
-        let _lock = crate::state::env_test_lock();
-        let _xdg = fresh_xdg();
-        let real = PathBuf::from("/tmp/realproj");
-        let mut wrong = Harpoon::load(&real);
-        wrong.append(PathBuf::from("/tmp/realproj/foo"));
-        // Save under real's path but mutate `project` field to lie.
-        wrong.project = PathBuf::from("/tmp/imposter");
-        let path = Harpoon::disk_path(&real).unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, toml::to_string(&wrong).unwrap()).unwrap();
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let real = PathBuf::from("/tmp/realproj");
+            let mut wrong = Harpoon::load(&real);
+            wrong.append(PathBuf::from("/tmp/realproj/foo"));
+            // Save under real's path but mutate `project` field to lie.
+            wrong.project = PathBuf::from("/tmp/imposter");
+            let path = Harpoon::disk_path(&real).unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, toml::to_string(&wrong).unwrap()).unwrap();
 
-        let loaded = Harpoon::load(&real);
-        assert!(loaded.slots.is_empty(), "imposter slots were applied");
-        assert_eq!(loaded.project, real);
+            let loaded = Harpoon::load(&real);
+            assert!(loaded.slots.is_empty(), "imposter slots were applied");
+            assert_eq!(loaded.project, real);
+        });
     }
 }

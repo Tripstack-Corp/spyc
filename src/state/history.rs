@@ -150,10 +150,7 @@ impl History {
 }
 
 fn disk_path(filename: &str) -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join(format!("spyc/{filename}")));
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(format!(".local/state/spyc/{filename}")))
+    crate::state::state_root().map(|r| r.join(filename))
 }
 
 #[cfg(test)]

@@ -17,10 +17,12 @@ fn in_tmux() -> bool {
     std::env::var_os("TMUX").is_some()
 }
 
-/// Wrap a raw escape sequence in tmux's DCS passthrough when running
-/// inside tmux. Inner ESCs must be doubled.
-fn wrap(inner: &str) -> String {
-    if in_tmux() {
+/// Wrap a raw escape sequence in tmux's DCS passthrough when
+/// `in_tmux` is true. Inner ESCs must be doubled in the wrapped form.
+/// The caller decides the tmux-ness so tests can exercise both modes
+/// without touching the process-global `TMUX` env var.
+fn wrap(inner: &str, in_tmux: bool) -> String {
+    if in_tmux {
         let doubled = inner.replace('\x1b', "\x1b\x1b");
         format!("\x1bPtmux;{doubled}\x1b\\")
     } else {
@@ -37,19 +39,19 @@ fn emit(bytes: &str) -> io::Result<()> {
 /// xterm CSI 22;0t — push current title onto the terminal's title
 /// stack. Supported by iTerm2, xterm, kitty, alacritty, wezterm.
 pub fn push() -> io::Result<()> {
-    emit(&wrap("\x1b[22;0t"))
+    emit(&wrap("\x1b[22;0t", in_tmux()))
 }
 
 /// xterm CSI 23;0t — pop the previously-pushed title.
 pub fn pop() -> io::Result<()> {
-    emit(&wrap("\x1b[23;0t"))
+    emit(&wrap("\x1b[23;0t", in_tmux()))
 }
 
 /// OSC 2 — set the *window* title only. We deliberately avoid OSC 0
 /// (which also sets the icon name) so the macOS Dock label and the
 /// iTerm2 tab icon name aren't churned on every state change.
 pub fn set(title: &str) -> io::Result<()> {
-    emit(&wrap(&format!("\x1b]2;{title}\x07")))
+    emit(&wrap(&format!("\x1b]2;{title}\x07"), in_tmux()))
 }
 
 /// Compose the title from project + session info.
@@ -103,35 +105,13 @@ mod tests {
 
     #[test]
     fn wrap_is_identity_outside_tmux() {
-        // TMUX is process-global; the shared env_test_lock serializes us
-        // against the sibling `wrap_doubles_esc_inside_tmux` test (which
-        // sets TMUX) so we don't race and read each other's value mid-call.
-        let _lock = crate::state::env_test_lock();
-        let prev = std::env::var_os("TMUX");
-        unsafe {
-            std::env::remove_var("TMUX");
-        }
-        let w = wrap("\x1b]2;hi\x07");
+        let w = wrap("\x1b]2;hi\x07", false);
         assert_eq!(w, "\x1b]2;hi\x07");
-        if let Some(p) = prev {
-            unsafe {
-                std::env::set_var("TMUX", p);
-            }
-        }
     }
 
     #[test]
     fn wrap_doubles_esc_inside_tmux() {
-        let _lock = crate::state::env_test_lock();
-        let prev = std::env::var_os("TMUX");
-        unsafe {
-            std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0");
-        }
-        let w = wrap("\x1b]2;hi\x07");
+        let w = wrap("\x1b]2;hi\x07", true);
         assert_eq!(w, "\x1bPtmux;\x1b\x1b]2;hi\x07\x1b\\");
-        match prev {
-            Some(p) => unsafe { std::env::set_var("TMUX", p) },
-            None => unsafe { std::env::remove_var("TMUX") },
-        }
     }
 }

@@ -172,10 +172,7 @@ fn check_frecency(path: &Path, warnings: &mut Vec<String>) {
 
 /// Resolve the state directory path, consistent with other state modules.
 pub fn state_dir() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(xdg).join("spyc"));
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+    crate::state::state_root()
 }
 
 #[cfg(test)]

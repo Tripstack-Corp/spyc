@@ -6,6 +6,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Internal
+- **`unsafe` reduction: 36 → 2 sites.** Remaining unsafe: the
+  `:setenv` prompt command (user-driven, intentional) and the
+  `install_signal_handlers` block at startup (one isolated call —
+  see below). Four changes got us there. (1) Test-time
+  `XDG_STATE_HOME` mutation replaced by a per-thread
+  `with_state_root` override on a new `crate::state::state_root()`
+  helper; every state module (`harpoon`, `marks`, `inventory`,
+  `sessions`, `graveyard`, `history`, `frecency`, `health`) now
+  delegates to it, and the `env_test_lock` mutex is gone. (2)
+  `libc::kill(-pid, sig)`, `libc::tcsetpgrp`, `libc::getpgrp`,
+  `libc::umask` migrated to `rustix` safe wrappers
+  (`process::kill_process_group`, `termios::tcsetpgrp`,
+  `process::getpgrp`, `process::umask`); the `tcsetpgrp` fd comes
+  from `std::io::stdin().as_fd()` so no hand-built `BorrowedFd`.
+  (3) `SHELL` and `TMUX` reads in `shell` and `term_title` accept
+  their values as parameters, so tests pass them directly (no env
+  mutation, no shared lock). (4) `paths::expand` factored into
+  `expand_with(input, home, lookup)` so substitution tests pass a
+  hashmap-like closure instead of mutating the process env.
+  Net: 36 `unsafe` blocks across 11 files → 2, 669 tests still
+  green, one new dep (`rustix`, already in our transitive tree).
+
+  **Signal handlers stay on raw `libc`.** An experimental migration
+  to `signal-hook` for SIGINT/SIGQUIT/SIGTTOU broke the
+  `tcsetpgrp` restore path after `v` / `p` / `;` foreground
+  commands: with SIGTTOU set to a custom Rust handler instead of
+  kernel-level `SIG_IGN`, POSIX `tcsetpgrp` from outside the FG
+  group returns `EINTR` rather than succeeding (the kernel checks
+  for "ignored" specifically, not "handled"). Symptom: spyc would
+  exit (status 146 / SIGTSTP, via the host PTY reaping a stopped
+  child as exit) the first time the user closed an editor /
+  pager. Reverted that piece — the one remaining `unsafe` block
+  in `install_signal_handlers` is well-isolated to startup and
+  the function doc spells out why no safe wrapper substitutes for
+  `SIG_IGN` inherit-across-exec semantics on SIGTTOU.
+
 - **Centralized key-event routing into `route_key`.** Closes the
   routing-refactor TODO filed in v1.50.25 after five inline-routing
   bugs in a week (#75 paste leak, #78 TopPane pager chord, #80

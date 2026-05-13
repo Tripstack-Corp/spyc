@@ -403,9 +403,9 @@ pub fn start_socket_server(
 
     // Restrict socket permissions to owner-only (0o700) so other users
     // on a shared machine cannot connect and read files or mutate the TUI.
-    let old_umask = unsafe { libc::umask(0o077) };
+    let old_umask = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o077));
     let bind_result = UnixListener::bind(&sock);
-    unsafe { libc::umask(old_umask) };
+    rustix::process::umask(old_umask);
     let listener = bind_result?;
     let ctx_path = Arc::new(ctx_path);
     let cmd_tx = Arc::new(cmd_tx);

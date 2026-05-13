@@ -1,5 +1,8 @@
 //! Transient and persistent UI state (cursor, picks, inventory, masks, marks).
 
+use std::cell::RefCell;
+use std::path::PathBuf;
+
 pub mod cursor;
 pub mod frecency;
 pub mod graveyard;
@@ -23,19 +26,46 @@ pub use inventory::Inventory;
 pub use marks::{Mark, Marks};
 pub use picks::Picks;
 
-/// Test-only mutex guarding tests that mutate process-global env vars
-/// (`XDG_STATE_HOME` for state modules; `SHELL` for the shell module).
-/// `std::env::set_var` is process-global, so when these tests ran in
-/// parallel they raced — one test's `set_var` would replace another
-/// test's value mid-call, surfacing as `NotFound` deep inside a
-/// graveyard restore or as a wrong shell path in `user_shell_*`
-/// assertions. Each affected test holds this lock for its full body
-/// so the env stays stable. Poisoning is recovered (a panicking test
-/// still releases the lock). One shared lock keeps the helper trivial;
-/// the cost of serializing these ~15 tests is negligible.
+thread_local! {
+    static STATE_ROOT_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Resolve the spyc state-root directory (the equivalent of
+/// `$XDG_STATE_HOME/spyc`). Every persistent state module appends its
+/// own subdirectory (`harpoon`, `sessions`, `graveyard`, …) under
+/// this root.
+///
+/// Resolution order:
+/// 1. Per-thread test override (see `with_state_root`).
+/// 2. `$XDG_STATE_HOME/spyc`.
+/// 3. `$HOME/.local/state/spyc`.
+/// 4. `None` on exotic systems with neither.
+///
+/// The thread-local override lets parallel tests isolate from each
+/// other without mutating process-global env vars — every previous
+/// test pattern (`unsafe { set_var("XDG_STATE_HOME", …) }`) collapses
+/// into a scoped `with_state_root` call.
+pub fn state_root() -> Option<PathBuf> {
+    if let Some(p) = STATE_ROOT_OVERRIDE.with(|c| c.borrow().clone()) {
+        return Some(p);
+    }
+    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
+        return Some(PathBuf::from(xdg).join("spyc"));
+    }
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+}
+
+/// Test-only: run `body` with `state_root()` pinned to `root`. The
+/// override is unwound when `body` returns *or panics* (RAII guard).
 #[cfg(test)]
-pub fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    use std::sync::{Mutex, PoisonError};
-    static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = Some(root.to_path_buf()));
+    let _g = Guard;
+    body()
 }
