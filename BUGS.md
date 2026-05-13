@@ -1,6 +1,4 @@
 ### SMALL ###
-- feature to allow spyc to approve certain Claude CLI actions automatically and
-  keep a log
 - procs in panes that end should not disappear before I have a chance to ^a-R
   (restart)
 - warn on ^a-^c

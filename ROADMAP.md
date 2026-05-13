@@ -461,6 +461,13 @@ same commit.
   exit summary, startup health check, README rewrite.
 - **v1.9** -- Distribution track. Release automation, macOS
   notarization, Homebrew tap, asciinema demo.
+- **v1.51 -- Auto-approval & action log.** Per-agent rule curation
+  (claude `.claude/settings.json`, codex `.codex/config.toml`,
+  gemini TBD) plus a `:approvals` pager view aggregating tool
+  invocations across all three agents with auto/manual tags.
+  Architecture: curate each agent's native permission system, no
+  pty-level interception. Six-phase plan in
+  [`docs/AUTO_APPROVAL_PLAN.md`](docs/AUTO_APPROVAL_PLAN.md).
 - **v1.60 -- CounterTop.** A hub view above any one spyc instance.
   Discovery surface so peer spycs find each other, a HUD that
   aggregates per-workspace agent state, `--hub` mode for "launch one
