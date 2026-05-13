@@ -34,6 +34,15 @@
 [yank]
 # include_pager_title = true
 
+# ── markdown ──────────────────────────────────────────────────────────
+# Default view for `.md` / `.markdown` files in the pager.
+# `open_as_rendered` (default true) opens them in the rendered view;
+# `m` toggles to source. Set to false to open in source view by
+# default (still `m`-toggleable). Either way, per-side scroll memory
+# preserves your reading position across toggles.
+[markdown]
+# open_as_rendered = true
+
 # ── colors ────────────────────────────────────────────────────────────
 # Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you
 # don't set falls back to the built-in palette.

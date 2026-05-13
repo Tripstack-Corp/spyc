@@ -39,6 +39,9 @@ pub struct Config {
     /// Yank / clipboard behavior knobs.
     pub yank: YankConfig,
 
+    /// Markdown viewer behavior knobs.
+    pub markdown: MarkdownConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -130,6 +133,32 @@ struct FileYank {
     include_pager_title: Option<bool>,
 }
 
+/// Markdown viewer knobs.
+#[derive(Debug, Clone)]
+pub struct MarkdownConfig {
+    /// When true (default), opening a `.md` / `.markdown` file via the
+    /// pager lands in the *rendered* view; `m` toggles to source.
+    /// When false, the pager opens in source view and `m` toggles to
+    /// rendered. Per-side scroll memory works the same either way.
+    pub open_as_rendered: bool,
+}
+
+impl Default for MarkdownConfig {
+    fn default() -> Self {
+        Self {
+            open_as_rendered: true,
+        }
+    }
+}
+
+/// On-disk shape of `[markdown]`. `Option` for "didn't set" disambig.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileMarkdown {
+    #[serde(default)]
+    open_as_rendered: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColorOverrides {
@@ -178,6 +207,8 @@ struct FileConfig {
     pane: FilePane,
     #[serde(default)]
     yank: FileYank,
+    #[serde(default)]
+    markdown: FileMarkdown,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -271,6 +302,11 @@ impl Config {
             self.yank.include_pager_title = b;
         }
 
+        // Markdown: per-field merge.
+        if let Some(b) = file.markdown.open_as_rendered {
+            self.markdown.open_as_rendered = b;
+        }
+
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
 
@@ -336,6 +372,32 @@ mod tests {
         assert!(file.layout.status_position.is_none());
         assert!(file.pane.default_command.is_none());
         assert!(file.yank.include_pager_title.is_none());
+        assert!(file.markdown.open_as_rendered.is_none());
+    }
+
+    #[test]
+    fn markdown_open_as_rendered_defaults_to_true() {
+        assert!(Config::default().markdown.open_as_rendered);
+    }
+
+    #[test]
+    fn parses_markdown_open_as_rendered_false() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[markdown]\nopen_as_rendered = false\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(!cfg.markdown.open_as_rendered);
+    }
+
+    #[test]
+    fn project_without_markdown_does_not_clobber_user_markdown() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[markdown]\nopen_as_rendered = false\n").unwrap();
+        std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert!(!cfg.markdown.open_as_rendered);
     }
 
     #[test]

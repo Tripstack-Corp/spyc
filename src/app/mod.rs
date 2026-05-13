@@ -5097,16 +5097,28 @@ impl App {
                 })
             };
             let mut view = if is_md && !truncated {
-                // Pre-compute both views; default to rendered. `m`
-                // toggles. Yank/save always hit the source via
-                // `source_text()`. Skipped for truncated files since
-                // markdown rendering of half a doc looks weird
-                // (broken refs, half-closed code fences).
+                // Pre-compute both views; `m` toggles. Yank/save
+                // always hit the source via `source_text()`. Which
+                // view shows first is configurable via
+                // `[markdown] open_as_rendered`. Skipped for
+                // truncated files since markdown rendering of half a
+                // doc looks weird (broken refs, half-closed code
+                // fences).
                 let rendered = crate::ui::markdown::render(&content, &self.theme);
-                let mut v = PagerView::new_styled(name, rendered);
-                v.alt_lines = Some(source_lines);
-                v.markdown_rendered = true;
-                v
+                if self.state.config.markdown.open_as_rendered {
+                    let mut v = PagerView::new_styled(name, rendered);
+                    v.alt_lines = Some(source_lines);
+                    v.markdown_rendered = true;
+                    v
+                } else {
+                    // Source first: `lines` holds source, `alt_lines`
+                    // holds the rendered view, `markdown_rendered`
+                    // is false. `m` swap is symmetric.
+                    let mut v = PagerView::new_styled(name, source_lines);
+                    v.alt_lines = Some(rendered);
+                    v.markdown_rendered = false;
+                    v
+                }
             } else {
                 let display_name = if truncated {
                     format!(

@@ -6,6 +6,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`[markdown] open_as_rendered` preference.** New `.spycrc.toml`
+  knob controlling which view a `.md` / `.markdown` file lands in
+  when first opened in the pager. Default `true` (rendered first,
+  `m` toggles to source — current behavior). Set to `false` to
+  open in source view (`m` then toggles to rendered). Pairs
+  naturally with the scroll-preservation fix below — whichever
+  side you start on, per-side memory keeps your place across
+  toggles.
+
+### Fixed
+- **`m` (Markdown toggle) preserves scroll position.** Pre-fix
+  behavior was a hard reset to line 0 every time — the comment
+  said "preserving an absolute index would land somewhere
+  arbitrary" because the rendered and source views have different
+  line counts. Replaced with per-side memory: each side's scroll
+  is stashed in a `saved_alt_scroll` slot on toggle, and restored
+  when the user comes back. First-ever visit to a side has no
+  memory yet, so we fall back to a proportional projection
+  (`old_scroll * (new_total - 1) / (old_total - 1)`) which lands
+  in the right neighborhood. Round-tripping rendered ↔ source ↔
+  rendered now restores the original position exactly; checking
+  the source for a specific section and bouncing back is the
+  motivating use case. Four new unit tests pin the rule
+  (proportional first-time, exact round-trip, clamp to new
+  bounds, no-alt no-op).
+
+### Added
 - **Pager yanks prepend a `# <title>` header by default.** `y` / `Y`
   (full and visible) and visual-mode `y` (line + block) now include
   the pager's title — `!cargo build`, `task #3: cargo test`, the

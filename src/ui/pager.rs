@@ -189,6 +189,14 @@ pub struct PagerView {
     /// True when `lines` currently holds the rendered Markdown view
     /// and `alt_lines` holds the source. Flipped by `toggle_markdown`.
     pub markdown_rendered: bool,
+    /// Scroll position remembered for the *other* side of the
+    /// Markdown toggle. `m` saves the just-departed side's scroll
+    /// here and restores it next time the user comes back to that
+    /// side, so round-tripping rendered ↔ source preserves the
+    /// reading position. `None` until the first toggle (we fall
+    /// back to a proportional projection of the departing scroll
+    /// in that case — better than always resetting to the top).
+    saved_alt_scroll: Option<u16>,
     /// Lower bound for the line-number gutter width. Streaming views
     /// use this to lock the gutter at the expected final size so it
     /// doesn't widen mid-scan as `ilog10(lines.len())` grows -- which
@@ -271,6 +279,7 @@ impl PagerView {
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
+            saved_alt_scroll: None,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -305,6 +314,7 @@ impl PagerView {
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
+            saved_alt_scroll: None,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -343,6 +353,7 @@ impl PagerView {
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
+            saved_alt_scroll: None,
             line_count_hint: None,
             jump_buf: None,
             flash: None,
@@ -641,17 +652,44 @@ impl PagerView {
 
     /// Toggle Markdown rendered ↔ source view. No-op (returns false)
     /// if this view doesn't have an alternate buffer (i.e. wasn't
-    /// opened on a `.md`/`.markdown` file). Resets scroll to the top
-    /// because line counts differ between the two views and
-    /// preserving an absolute index would land somewhere arbitrary.
+    /// opened on a `.md`/`.markdown` file).
+    ///
+    /// **Scroll preservation:** the two views have different line
+    /// counts (one rendered line ≠ one source line) so a literal
+    /// scroll-index carryover would land arbitrarily. Instead we
+    /// remember each side's last scroll position in `saved_alt_scroll`
+    /// and restore it when the user comes back. The first time a
+    /// view is visited there's no memory yet, so we fall back to a
+    /// proportional projection of the departing scroll — close to
+    /// the right neighborhood, never worse than the old "always
+    /// reset to top" behavior.
     pub fn toggle_markdown(&mut self) -> bool {
         let Some(alt) = self.alt_lines.take() else {
             return false;
         };
+        let old_scroll = self.scroll;
+        let old_total = self.lines.len();
+        let new_total = alt.len();
         let current = std::mem::replace(&mut self.lines, alt);
         self.alt_lines = Some(current);
         self.markdown_rendered = !self.markdown_rendered;
-        self.scroll = 0;
+
+        let restored = self.saved_alt_scroll.take().unwrap_or_else(|| {
+            // First visit: project proportionally so a user halfway
+            // down the source lands halfway down the rendered view
+            // (and vice versa). Bottom of one side maps to bottom of
+            // the other.
+            if old_total <= 1 || new_total == 0 {
+                0
+            } else {
+                let num = u32::from(old_scroll) * (new_total - 1) as u32;
+                let denom = (old_total - 1) as u32;
+                u16::try_from(num / denom).unwrap_or(u16::MAX)
+            }
+        });
+        let max_index = u16::try_from(new_total.saturating_sub(1)).unwrap_or(u16::MAX);
+        self.scroll = restored.min(max_index);
+        self.saved_alt_scroll = Some(old_scroll);
         true
     }
 
@@ -2519,5 +2557,76 @@ mod tests {
         let view = PagerView::new_plain("", vec!["hello".into()]);
         let out = view.with_title_header(view.source_text(), true);
         assert_eq!(out, "hello");
+    }
+
+    // ── markdown toggle scroll preservation ───────────────────────
+
+    /// Build a markdown-enabled pager: `lines` is the rendered side
+    /// (10 entries), `alt_lines` is the source side (5 entries).
+    /// The two sides have intentionally different sizes — that's the
+    /// whole reason the old "reset to 0" rule existed.
+    fn md_view() -> PagerView {
+        let rendered: Vec<Line<'static>> = (0..10)
+            .map(|i| Line::from(format!("rendered{i}")))
+            .collect();
+        let source: Vec<Line<'static>> = (0..5).map(|i| Line::from(format!("source{i}"))).collect();
+        let mut v = PagerView::new_styled("README.md", rendered);
+        v.alt_lines = Some(source);
+        v
+    }
+
+    #[test]
+    fn toggle_markdown_first_time_projects_proportionally() {
+        let mut v = md_view();
+        // 10 rendered lines, currently at line 8 (≈ 89% down).
+        v.scroll = 8;
+        assert!(v.toggle_markdown());
+        // Source side has 5 lines (max scroll = 4). 8/9 * 4 ≈ 3.55 → 3.
+        assert_eq!(v.scroll, 3);
+    }
+
+    #[test]
+    fn toggle_markdown_round_trip_restores_exact_position() {
+        let mut v = md_view();
+        v.scroll = 7;
+        // rendered → source (proportional projection)
+        v.toggle_markdown();
+        let source_landing = v.scroll;
+        // user reads source, scrolls a bit
+        v.scroll = 1;
+        // source → rendered (must restore the user's *original* 7, not
+        // the proportional projection of 1)
+        v.toggle_markdown();
+        assert_eq!(v.scroll, 7, "rendered side should restore prior position");
+        // rendered → source again (must restore the 1 we left at)
+        v.toggle_markdown();
+        assert_eq!(
+            v.scroll, 1,
+            "source side should restore the position we left it at"
+        );
+        // sanity: source_landing wasn't already 1 (otherwise the test
+        // would falsely pass even with broken memory).
+        assert_ne!(source_landing, 1);
+    }
+
+    #[test]
+    fn toggle_markdown_clamps_restored_scroll_to_new_bounds() {
+        // If the saved value is past the end of the new buffer (can
+        // happen if a buffer gets shorter between visits — not common
+        // for markdown but the clamp is cheap insurance), we should
+        // land at the last valid index, not panic or sit past EOF.
+        let mut v = md_view();
+        v.saved_alt_scroll = Some(99);
+        v.scroll = 0;
+        v.toggle_markdown();
+        // Source side has 5 lines → max scroll index 4.
+        assert_eq!(v.scroll, 4);
+    }
+
+    #[test]
+    fn toggle_markdown_no_alt_returns_false() {
+        let mut v = PagerView::new_plain("plain.txt", vec!["hi".into()]);
+        assert!(!v.toggle_markdown());
+        assert_eq!(v.scroll, 0);
     }
 }
