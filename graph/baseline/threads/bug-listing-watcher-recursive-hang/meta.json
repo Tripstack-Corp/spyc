@@ -5,7 +5,7 @@
   "title": "bug listing watcher recursive hang",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-14T08:17:06.496749+00:00",
-  "summary": "The bug involves a recursive hang in the Spyc application when the Home key is pressed, causing the application to become unresponsive. The issue was diagnosed and a fix design was proposed to address the recursion. The fix was implemented, and the outcome was that the recursive hang was resolved, improving the application's stability.",
-  "entry_count": 1
+  "last_updated": "2026-05-14T09:16:09.722452+00:00",
+  "summary": "The bug listing watcher in Spyc experiences a recursive hang when the Home key is pressed, with a proposed fix involving validation and code changes. The fix was reviewed and implemented, resulting in a resolved issue.",
+  "entry_count": 2
 }

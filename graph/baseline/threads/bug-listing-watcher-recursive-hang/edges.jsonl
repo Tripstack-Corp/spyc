@@ -1,1 +1,3 @@
 {"source":"thread:bug-listing-watcher-recursive-hang","target":"entry:01KRJRYZKF9HJB6CHBAZEE8CQ4","type":"contains"}
+{"source":"thread:bug-listing-watcher-recursive-hang","target":"entry:01KRJWB3ZC1DVGC346WDKE0H3D","type":"contains"}
+{"source":"entry:01KRJRYZKF9HJB6CHBAZEE8CQ4","target":"entry:01KRJWB3ZC1DVGC346WDKE0H3D","type":"followed_by"}

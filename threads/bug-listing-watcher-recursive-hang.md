@@ -124,3 +124,113 @@ Provenance:
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
 <!-- Entry-ID: 01KRJRYZKF9HJB6CHBAZEE8CQ4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T09:16:09.720386+00:00
+Role: tester
+Type: Decision
+Title: Second entry — validation green, review changes applied, two commits on the branch
+
+Spec: tester
+
+tags: #testing #validation #fix
+
+# What changed since the design entry
+
+The fix designed in entry 0 was implemented on `fix/recursive-watch-cap-on-large-trees` (branched from `bf58312`) as two commits:
+
+- `9cd6e65` — **fix: cap recursive listing watcher to avoid blocking on huge trees**
+  - `MAX_RECURSIVE_WATCH_DIRS = 256` (private, module-scoped)
+  - `count_subdirs_capped(root, cap) -> usize` — stack-bounded DFS, returns as soon as count exceeds cap
+  - `pick_recursive_mode(new_dir) -> notify::RecursiveMode` — `#[cfg(target_os = "linux")]` consults the cap; non-Linux returns `Recursive` unconditionally
+  - `sync_listing_watch` swaps the literal `RecursiveMode::Recursive` for `pick_recursive_mode(new_dir)`
+  - `spyc_debug!` line emitted when the downgrade fires
+  - 5 unit tests: empty, under-cap, nested-descent, over-cap-early-stop, no-symlink-follow
+- `1c508ed` — **feat: expose togglepane in the keymap DSL**
+  - Bundled in this PR after a side-discovery that the DSL parser had no name for `Action::TogglePane`. The user's terminal grabs the built-in `^\` and `F10`; without this addition the only escape was the chord prefixes `^a \` / `^w \`. `keymap = ["map ^p togglepane"]` now works.
+  - One-line addition to `src/config/dsl.rs:parse_action` + module-doc entry + one parse test.
+
+# Review pass applied between the design entry and the commit
+
+The PR was reviewer-walked before push. Substantive changes from the review:
+
+- **Visibility tightened.** `MAX_RECURSIVE_WATCH_DIRS` and `count_subdirs_capped` were initially `pub`. Neither is used cross-module, so both are now plain (no visibility modifier). The nested `#[cfg(test)] mod listing_watch_tests` still reads them via `super::` — child modules see private siblings.
+- **Docstring honest about the 256.** Added a paragraph acknowledging the cap is empirical, not derived, with the comparison points it was picked against (spyc tree / typical project repos under, `$HOME` with package managers over). The constant docs now read as a tuning knob with a documented range, not a magic number.
+- **Spelling alignment.** Two "behaviour" instances replaced with "behavior" — the rest of the codebase uses American spelling, no "behaviour" elsewhere.
+
+Three review concerns were noted but deliberately not addressed in this PR:
+
+- **No direct test for `pick_recursive_mode`.** The helper is tested; the chooser-with-OS-gate isn't. Reasonable follow-up if the wiring grows; for v1 the helper test + the in-the-wild downgrade log is sufficient.
+- **Silent fallback.** The downgrade emits only a `spyc_debug!` line, not a user-visible flash. PR #28's precedent does flash, but a one-time "your parent rows refresh on 1 Hz instead of instantly" message likely confuses more users than it informs. Reconsider if regression reports come in.
+- **`read_dir` / `file_type` errors silently skipped.** Same skip behavior as `notify` itself would have done; OK for an "is-this-tree-bigger-than-256" decision. A `spyc_debug!` on the error path could be added later if diagnosis demand appears.
+
+# Validation results
+
+**`make check` against `1c508ed`:**
+
+- `fmt-check` ✓
+- `lint` (clippy with pedantic + nursery) ✓
+- `test` ✓ — **688 tests passed**, 0 failed (676 unit + 6 filesystem + 5 keymap_roundtrip + 1 pane_roundtrip). New tests breakdown:
+  - `app::listing_watch_tests::empty_dir_counts_zero` ✓
+  - `app::listing_watch_tests::count_under_cap_returns_total` ✓
+  - `app::listing_watch_tests::count_descends_into_nested_subdirs` ✓
+  - `app::listing_watch_tests::count_stops_early_when_cap_exceeded` ✓
+  - `app::listing_watch_tests::count_does_not_follow_symlinks_to_dirs` ✓
+  - `config::dsl::tests::parses_togglepane` ✓
+- `deny` — advisories ok, bans ok, licenses ok, sources ok.
+
+**Manual repro re-run (user environment, `--debug`):**
+
+- Pre-fix: `target/debug/spyc 1.50.32` from `bf58312` hangs when jumping to `~` (89.3% CPU, main thread in `futex_` wait, no further log output after `apply Home:` / `grid settled`). Captured in `/tmp/spyc-debug-1778747084.log`.
+- Post-fix: `target/debug/spyc` built from `9cd6e65`, same `--debug` flag, same `~` jump. **TUI stays responsive.** Debug log captures the downgrade firing exactly as designed:
+
+  ```
+  watcher: /home/caleb has > 256 subdirs, using non-recursive watch (parent-row dirty refresh falls back to 1 Hz git poll)
+  ```
+
+  Followed by normal navigation: `apply TogglePane`, `apply PaneFocusDown`, `apply PaneFocusUp`, `apply CommandPrompt`. No futex wait, no spinning.
+
+- `^a \` (chord prefix + backslash) is the working escape hatch confirmed against the post-fix binary, since the user's terminal grabs `^\` and `F10` directly. Once `1c508ed` ships, `map ^p togglepane` in `.spycrc.toml` is the durable rebind path.
+
+# Side observation — same shape of feedback loop in `$HOME`, separable
+
+The post-fix debug log shows a fresh instance of the same feedback-loop pattern that was noted in entry 0 (`.git/index.lock` flapping). In `$HOME`, **Claude Code's own atomic-write dance** on `~/.claude.json` generates a steady stream:
+
+```
+watcher event: /home/caleb/.claude.json.lock (Create(Folder))
+watcher event: /home/caleb/.claude.json.lock (Modify(Metadata(Any)))
+watcher event: /home/caleb/.claude.json.lock (Remove(Folder))
+watcher event: /home/caleb/.claude.json.tmp.388779.2a434de69929 (Create(File))
+watcher event: /home/caleb/.claude.json.tmp.388779.2a434de69929 (Modify(Data(Any)))
+watcher event: /home/caleb/.claude.json.tmp.388779.2a434de69929 (Modify(Name(From)))
+watcher event: /home/caleb/.claude.json (Modify(Name(To)))
+```
+
+Same shape as `git status`'s `.git/index.lock` dance — a co-located tool doing atomic writes whose intermediate states leak into spyc's watcher consumer, costing `git status` invocations and CPU. Doesn't hang anything (the non-recursive watch is bounded), but it's churn worth a separate fix. The right shape is event coalescing / debounce on the watcher consumer (e.g. ignore `.tmp.*` and `.lock` filename patterns at the consumer, or window events into a 100 ms refresh tick). **Follow-up worth filing as its own bug thread.**
+
+# Status
+
+- Branch `fix/recursive-watch-cap-on-large-trees` pushed to **both** `bitbucket` (Derek's review surface) and `origin`/github (watercooler-mirror) at HEAD `1c508ed`.
+- Bitbucket PR-open URL emitted in the push response: `https://bitbucket.org/tripstack/spyc/pull-requests/new?source=fix/recursive-watch-cap-on-large-trees&t=1` — Derek can click that to open the review.
+- GitHub PR URL (mirror, not the review surface): `https://github.com/calebjacksonhoward/spyc/pull/new/fix/recursive-watch-cap-on-large-trees`.
+- Local `main` is unchanged at `bf58312`. The fix is on the feature branch, not merged.
+
+# What this thread tracks from here
+
+This thread stays OPEN until the PR merges. Subsequent entries would record:
+- Reviewer feedback from Derek and any consequent changes
+- Merge + closure
+- A back-reference if the `.claude.json.lock` / `.git/index.lock` follow-up gets filed
+
+Provenance:
+- Branch base: `bf58312` (PR #86, head of `main` before the fix).
+- Commit 1: `9cd6e65` — hang fix (`src/app/mod.rs`, +187/-11).
+- Commit 2: `1c508ed` — togglepane DSL (`src/config/dsl.rs`, +15/-0).
+- Test counts before / after the PR: 681 / 688 (6 new tests on the branch).
+- Manual repro logs: `/tmp/spyc-debug-1778747084.log` (pre-fix, hang); `/tmp/spyc-debug-1778749267.log` (post-fix, no hang, downgrade visible).
+- Reviewer-pass changes recorded in the entry above (visibility tightened, docstring honest, spelling aligned).
+- Three pre-existing test files relevant to this fix: `tests/keymap_roundtrip.rs` (DSL surface integration), `src/fs/listing.rs:69-77` (`MAX_ENTRIES` precedent), `src/debug_log.rs:55-60` (`spyc_debug!` macro definition).
+- Prior thread entries: bug-listing-watcher-recursive-hang entry 0 = `01KRJRYZKF9HJB6CHBAZEE8CQ4` (design).
+- Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
+
+<!-- Entry-ID: 01KRJWB3ZC1DVGC346WDKE0H3D -->
