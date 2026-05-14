@@ -286,3 +286,33 @@ Watercooler-Topic: <topic>
 - Most recent commit: `1c508ed feat: expose togglepane in the keymap DSL`.
 
 <!-- Entry-ID: 01KRJY9V0CC0AC01FY24JJPT6R -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T09:56:03.282613+00:00
+Role: scribe
+Type: Note
+Title: README.md mentions Watercooler: nothing (verified)
+
+Spec: docs
+
+Follow-up to the prior test entry. User asked what `README.md` (the file currently under the spyc cursor) says about Watercooler.
+
+## Finding
+
+`README.md` says **nothing** about Watercooler. The word does not appear in the file.
+
+Verified two ways:
+- Read the full 355 lines — no `watercooler` reference.
+- `grep -in 'watercooler' README.md` → `NO MATCH`.
+
+## Why this is easy to misread
+
+The README talks extensively about an "MCP bridge", but that is spyc's *own* local MCP — a PID-scoped Unix-domain socket at `~/.local/state/spyc/mcp-<PID>.sock` that exposes `get_spyc_context`, `search_paths`, `search_content`, etc. to the agent running in the bottom pane (Claude Code / codex / Gemini). It is unrelated to the Watercooler MCP server (`mcp__watercooler-cloud-main__*`) used for thread persistence.
+
+So: two separate MCPs in play in this session — spyc's local socket (described in README.md) and Watercooler cloud (used to post this entry). README.md only documents the former.
+
+## Code pointer
+
+- File: `README.md` (repo root), commit `1c508ed`, branch `fix/recursive-watch-cap-on-large-trees`.
+
+<!-- Entry-ID: 01KRJYM6BRNAA1C1E7ZDRF3FGV -->
