@@ -1,12 +1,14 @@
-# spyc testing
-
-Topic: spyc-testing
+# spyc-testing — Thread
 Status: OPEN
-Ball: Dashboard
+Ball: Claude Code (caleb)
+Topic: spyc-testing
+Created: 2026-05-11T21:41:22.655452+00:00
 
 ---
-
-Entry: Claude Code (caleb) (tester) [Note] - First entry — local build + full gate at v1.41.24 on 2026-05-11 @ 2026-05-11T21:41:22.655452+00:00
+Entry: Claude Code (caleb) 2026-05-11T21:41:22.655452+00:00
+Role: tester
+Type: Note
+Title: First entry — local build + full gate at v1.41.24 on 2026-05-11
 
 Spec: tester
 
@@ -72,9 +74,13 @@ Provenance:
 - `insight-drift` Pattern D (single-functional-drift baseline that frames why a green gate is the expected outcome).
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
----
+<!-- Entry-ID: 01KRCFSJ6ZQAWN1XVJ7F3V6G9H -->
 
-Entry: Dashboard (implementer) [Note] - how-to - discerned form auto-generated threads @ 2026-05-11T21:43:18Z
+---
+Entry: Dashboard 2026-05-11T21:43:18Z
+Role: implementer
+Type: Note
+Title: how-to - discerned form auto-generated threads
 
 Spec: tester
 
@@ -175,5 +181,49 @@ Spec: tester
 
 ✻ Cogitated for 2m 6s
 
+<!-- Entry-ID: 01KRCFX5KV0JD0RRWDYP8HTBWD -->
 
 ---
+Entry: Claude Code (caleb) 2026-05-14T07:49:43.944036+00:00
+Role: tester
+Type: Note
+Title: Second entry — rebuild against v1.50.32 head bf58312 after fast-forward from bitbucket
+
+Spec: tester
+
+tags: #testing #build
+
+# Context: remote shuffle on 2026-05-14
+
+The github mirror of this repo had fallen behind the bitbucket origin by ~89 commits since the catalogue was written. Today the local clone added `bitbucket` as a second remote, fast-forwarded `main` from `a303251` to `bf58312`, pushed that to `origin` (github), and pushed the `v1.50.0` tag to github as well. The orphan `watercooler/threads` branch was not touched at any step and remains at `9dd8d80` on both clone-local and github.
+
+After the pull, `Cargo.toml` reports `1.50.32` (~16 commits past the `v1.50.19` README-rewrite cut, ~50 commits past the `v1.41.24` catalogue snapshot). PR window now `#2..#86` per `git log --grep='Merged in' --reverse`.
+
+# This entry: `make build` against new head
+
+**Commit under test:** `bf58312` (PR #86 `docs/auto-approval-plan`).
+**Tag closest below:** `v1.50.0` (PR #51, commit `4f59994`).
+**Binary version reported:** `spyc 1.50.32`.
+
+**Outcome.** `make build` completed in **1m 00s** with **exit 0**, no compiler errors, no warnings surfaced in the tail. Binary at `target/debug/spyc`, ~120 MB (debug + unstripped, normal). Build time roughly doubled from the prior entry's 32.10s — consistent with the ~8k-line, 60-file diff brought in by the pull (notably `src/app/route.rs`, `src/pane/pty_host.rs`, `src/ui/scrollback.rs` as new top-level modules, and a `src/ui/snapshots/` snapshot-test directory).
+
+# What was NOT rerun this session
+
+- **`make check` (full gate)** — only `make build` ran this time. `fmt-check`, `lint`, `test`, and `deny` are currently unverified against `bf58312`. Last green gate was against `a303251` on 2026-05-11 (prior entry).
+- **Test count drift unknown.** Prior entry recorded 577 tests (566 + 6 + 5). The pull added at least three new integration-test surfaces — `tests/pane_roundtrip.rs`, property tests (PR #59, per the merge log), and widget snapshot tests (PR #56, with a `src/ui/snapshots/` directory now present) — so the count almost certainly increased, but the actual figure awaits a rerun.
+- **Stale `deny.toml:89` ignore status.** Prior entry flagged `RUSTSEC-2024-0436` as advisory-not-detected. Whether the same is still true against the new dependency tree (the pull bumped `Cargo.lock` non-trivially) is unverified.
+
+# Side observations
+
+- **`README.md:14` version typo from prior entry is now resolved.** PR #72 (`docs/readme-rewrite`, commit `7c568f9`, "rewrite README with MCP-from-the-pane framing (v1.50.19)") was a full README rewrite. Whether the rewrite happens to no longer contain a static version string at all, or simply carries an accurate one, was not checked in this session but the prior typo cannot have survived a rewrite of that scope.
+- **The catalogue (history-* and insight-* threads) is now a snapshot, not current state.** Its 22-day window ended at PR #37; ~49 PRs have landed since, including a `v1.5` series (`feat/v1.5-phase-*`, PRs #40–#48) that refactored the pager/scrollback boundary, a Gemini-as-third-agent addition (PR #68), property and PTY-roundtrip test additions (PRs #59, #60), and a full doc rewrite cluster (PRs #72–#79). Nothing in the catalogue is invalidated — its claims are dated and bounded — but any new analytic thread covering the post-`a303251` window would be a new arc (`history-arc-09-*` and forward), not an amendment.
+
+Provenance:
+- Head under test: `bf58312` (PR #86 `docs/auto-approval-plan`).
+- Closest below-head tag: `v1.50.0` at `4f59994` (PR #51 `release/v1.50.0`).
+- New top-level source modules brought in by the pull: `src/app/route.rs`, `src/pane/pty_host.rs`, `src/ui/scrollback.rs`.
+- Prior entry: `spyc-testing` entry 0 = `01KRCFSJ6ZQAWN1XVJ7F3V6G9H` (v1.41.24 ledger; full gate green).
+- Remote-shuffle plan that produced this state was a `dual-remote refinement` — `git remote add bitbucket …` then `git pull --ff-only bitbucket main` then `git push origin main` then `git push origin v1.50.0`. No `origin` URL was ever rewritten; the orphan `watercooler/threads` branch was preserved end-to-end.
+- Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
+
+<!-- Entry-ID: 01KRJQCTPDV0A0K0EV9KRRCY1B -->

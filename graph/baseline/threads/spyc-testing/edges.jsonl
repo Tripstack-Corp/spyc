@@ -1,3 +1,3 @@
 {"source":"thread:spyc-testing","target":"entry:01KRCFSJ6ZQAWN1XVJ7F3V6G9H","type":"contains"}
-{"id":"follows:entry:01KRCFSJ6ZQAWN1XVJ7F3V6G9H:entry:01KRCFX5KV0JD0RRWDYP8HTBWD","type":"FOLLOWS","source_id":"entry:01KRCFSJ6ZQAWN1XVJ7F3V6G9H","target_id":"entry:01KRCFX5KV0JD0RRWDYP8HTBWD","created":"2026-05-11T21:43:18Z"}
-{"id":"contains:thread:spyc-testing:entry:01KRCFX5KV0JD0RRWDYP8HTBWD","type":"CONTAINS","source_id":"thread:spyc-testing","target_id":"entry:01KRCFX5KV0JD0RRWDYP8HTBWD","created":"2026-05-11T21:43:18Z"}
+{"source":"thread:spyc-testing","target":"entry:01KRJQCTPDV0A0K0EV9KRRCY1B","type":"contains"}
+{"source":"entry:01KRCFX5KV0JD0RRWDYP8HTBWD","target":"entry:01KRJQCTPDV0A0K0EV9KRRCY1B","type":"followed_by"}
