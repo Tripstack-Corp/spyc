@@ -32,6 +32,8 @@
 //! - ignoretoggle =N
 //! - patternpick =PATTERN
 //! - jump =PATH
+//! - togglepane (rebind the pane toggle if `^\` / `F10` are
+//!   intercepted by the host terminal / window manager)
 
 use crate::keymap::action::Action;
 use crate::keymap::user::{BoundAction, KeyChord, NamedKey, UserBinding};
@@ -202,6 +204,10 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
 
         "panescroll" => Ok(BoundAction::Plain(Action::PaneScrollEnter)),
         "panesave" => Ok(BoundAction::Plain(Action::PaneScrollSave)),
+        // Lets a user rebind the pane toggle when a host terminal /
+        // window manager has grabbed the built-in `^\` and `F10`.
+        // Example: `map ^p togglepane`.
+        "togglepane" => Ok(BoundAction::Plain(Action::TogglePane)),
 
         other => Err(format!("unknown action `{other}`")),
     }
@@ -278,5 +284,14 @@ mod tests {
     fn rejects_unknown_action() {
         let err = parse("map f banana").unwrap_err();
         assert!(err.contains("unknown action"), "got: {err}");
+    }
+
+    #[test]
+    fn parses_togglepane() {
+        // Escape hatch for users whose terminal grabs the built-in
+        // pane-toggle keys (`^\` / `F10`).
+        let b = parse("map ^p togglepane").unwrap().unwrap();
+        assert_eq!(b.chord, KeyChord::Ctrl('p'));
+        assert!(matches!(b.action, BoundAction::Plain(Action::TogglePane)));
     }
 }

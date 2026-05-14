@@ -9600,6 +9600,110 @@ const fn is_spyc_meta_when_pane_focused(
         && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
 }
 
+/// Hard cap on subdirs we will walk when deciding whether to use
+/// `RecursiveMode::Recursive` for the listing watcher.
+///
+/// On Linux, `notify`'s recursive mode is not OS-native — it walks
+/// the subtree and calls `inotify_add_watch` per directory,
+/// synchronously, on the calling thread. In a tree like `$HOME`
+/// with `anaconda3/` and similar deep package directories, that walk
+/// runs for many seconds while the main event loop is blocked,
+/// hanging the TUI. Same shape as the `MAX_ENTRIES` cap added in
+/// PR #28 for `Listing::read`.
+///
+/// When the listing dir's subtree exceeds this cap (counted with
+/// early termination, see `count_subdirs_capped`), we fall back to a
+/// non-recursive watch. The 1 Hz git poll declared at the top of
+/// `App::run` covers parent-row dirty-flag refresh independently of
+/// the watcher, so the only feature regression is up to one second
+/// of lag on "child modified → parent row dirties" — visible only
+/// on the largest trees, where instant updates aren't reliable in
+/// practice anyway.
+///
+/// macOS FSEvents is OS-level (no per-subdir walk) and is unaffected
+/// by this cap: `pick_recursive_mode` returns `Recursive`
+/// unconditionally on non-Linux platforms.
+///
+/// The chosen value is empirical, not derived: 256 is comfortably
+/// above the subdir count of typical project repos (the spyc tree
+/// itself, ratatui, cargo, …) and below `$HOME`-shaped trees with
+/// package managers in residence (`anaconda3/`, multiple
+/// `node_modules/`, `.cache/`, etc.). If real-world reports show a
+/// project that ends up over the cap or a giant tree that ends up
+/// under it, this is the constant to revisit.
+///
+/// Trades the old worst case of "blocks the event loop forever on
+/// `inotify_add_watch`" for a new worst case of "walks at most
+/// `MAX_RECURSIVE_WATCH_DIRS + 1` `read_dir` calls per chdir" —
+/// hot-cache typical chdirs are sub-millisecond; cold-cache giant
+/// trees bail at the budget in ~50 ms.
+#[cfg(target_os = "linux")]
+const MAX_RECURSIVE_WATCH_DIRS: usize = 256;
+
+/// Count subdirs under `root`, terminating as soon as the running
+/// count exceeds `cap`. Used by `pick_recursive_mode` on Linux to
+/// gate `RecursiveMode::Recursive` watch registration; see
+/// `MAX_RECURSIVE_WATCH_DIRS` for the rationale.
+///
+/// Traversal is DFS (via `Vec::pop`), which differs from `notify`'s
+/// internal BFS. For an "is the count over `cap`" decision the order
+/// doesn't matter; the DFS form keeps stack memory bounded by `cap`
+/// (we stop pushing immediately on overflow).
+///
+/// Does not follow symlinks: `DirEntry::file_type()` is `lstat`-based
+/// on Unix, so a symlink-to-dir reports as a symlink (not a dir) and
+/// is not pushed onto the walk stack. This matches `notify`'s default
+/// behavior — its recursive walker does not chase symlinks either, so
+/// the count we produce here tracks what `notify` would have walked.
+#[cfg(target_os = "linux")]
+fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.filter_map(Result::ok) {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                count += 1;
+                if count > cap {
+                    return count;
+                }
+                stack.push(entry.path());
+            }
+        }
+    }
+    count
+}
+
+/// Choose `Recursive` vs `NonRecursive` for the listing watcher.
+///
+/// Linux gates `Recursive` behind the `MAX_RECURSIVE_WATCH_DIRS` cap
+/// to avoid blocking the main thread on `inotify_add_watch` walks
+/// through `$HOME`-shaped trees. On other platforms (macOS FSEvents,
+/// Windows ReadDirectoryChangesW), recursive watches are OS-level
+/// and cheap, so `Recursive` is returned unconditionally.
+#[cfg(target_os = "linux")]
+fn pick_recursive_mode(new_dir: &Path) -> notify::RecursiveMode {
+    use notify::RecursiveMode;
+    if count_subdirs_capped(new_dir, MAX_RECURSIVE_WATCH_DIRS) > MAX_RECURSIVE_WATCH_DIRS {
+        crate::spyc_debug!(
+            "watcher: {} has > {} subdirs, using non-recursive watch (parent-row dirty refresh falls back to 1 Hz git poll)",
+            new_dir.display(),
+            MAX_RECURSIVE_WATCH_DIRS,
+        );
+        RecursiveMode::NonRecursive
+    } else {
+        RecursiveMode::Recursive
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn pick_recursive_mode(_new_dir: &Path) -> notify::RecursiveMode {
+    notify::RecursiveMode::Recursive
+}
+
 fn sync_listing_watch(
     fs_watcher: Option<&mut notify::RecommendedWatcher>,
     active: &mut Option<PathBuf>,
@@ -9614,17 +9718,24 @@ fn sync_listing_watch(
         if let Some(old) = active.as_ref() {
             let _ = w.unwatch(old);
         }
-        // Recursive: catches changes anywhere below the listing dir so
-        // git status markers update on the parent directory row when a
-        // file is added/modified in a subdirectory (e.g. touching
-        // `docs/foo.md` while sitting at the repo root). Events under
-        // `.git/` are filtered to specific files (`index`, `HEAD`) by
-        // `is_listing_path` to avoid `.git/objects` / pack / lockfile
-        // churn cascading into needless `git status` calls. macOS
-        // FSEvents handles recursive watches at OS level (cheap);
-        // Linux inotify needs a watch per subdir, which can hit
-        // `fs.inotify.max_user_watches` on enormous monorepos.
-        if w.watch(new_dir, RecursiveMode::Recursive).is_ok() {
+        // Recursive (when feasible): catches changes anywhere below
+        // the listing dir so git status markers update on the parent
+        // directory row when a file is added/modified in a
+        // subdirectory (e.g. touching `docs/foo.md` while sitting at
+        // the repo root). Events under `.git/` are filtered to
+        // specific files (`index`, `HEAD`) by `is_listing_path` to
+        // avoid `.git/objects` / pack / lockfile churn cascading into
+        // needless `git status` calls.
+        //
+        // On Linux, `pick_recursive_mode` downgrades to non-recursive
+        // when the subtree exceeds `MAX_RECURSIVE_WATCH_DIRS` —
+        // otherwise `notify`'s synchronous per-subdir
+        // `inotify_add_watch` walk blocks the main thread (the
+        // `$HOME`-with-anaconda3 case). The 1 Hz git poll declared
+        // at the top of `App::run` covers parent-row dirty-flag
+        // refresh in that case with at most one second of lag.
+        // macOS FSEvents is OS-level and unaffected.
+        if w.watch(new_dir, pick_recursive_mode(new_dir)).is_ok() {
             *active = Some(new_dir.to_path_buf());
         } else {
             *active = None;
@@ -10273,5 +10384,72 @@ The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
             parse_gemini_list_sessions_for_uuid(stdout, "11111111-1111-1111-1111-111111111111")
                 .is_none()
         );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod listing_watch_tests {
+    use super::count_subdirs_capped;
+    use std::fs;
+
+    #[test]
+    fn empty_dir_counts_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(count_subdirs_capped(tmp.path(), 10), 0);
+    }
+
+    #[test]
+    fn count_under_cap_returns_total() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            fs::create_dir(tmp.path().join(format!("sub{i}"))).unwrap();
+        }
+        assert_eq!(count_subdirs_capped(tmp.path(), 10), 5);
+    }
+
+    #[test]
+    fn count_descends_into_nested_subdirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir(&a).unwrap();
+        let b = a.join("b");
+        fs::create_dir(&b).unwrap();
+        fs::create_dir(b.join("c")).unwrap();
+        // a, a/b, a/b/c = 3 dirs.
+        assert_eq!(count_subdirs_capped(tmp.path(), 10), 3);
+    }
+
+    #[test]
+    fn count_stops_early_when_cap_exceeded() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 20 sibling dirs, cap=5 → return as soon as we step past cap.
+        for i in 0..20 {
+            fs::create_dir(tmp.path().join(format!("sub{i}"))).unwrap();
+        }
+        let count = count_subdirs_capped(tmp.path(), 5);
+        assert!(
+            count > 5,
+            "expected count to exceed cap on overflow, got {count}"
+        );
+        // Early termination: we return as soon as count > cap (i.e. at
+        // cap + 1), not after walking everything.
+        assert_eq!(count, 6, "should return cap + 1, not walk further");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_does_not_follow_symlinks_to_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        let link_parent = tmp.path().join("link_parent");
+        fs::create_dir(&real).unwrap();
+        fs::create_dir(real.join("inside")).unwrap();
+        fs::create_dir(&link_parent).unwrap();
+        std::os::unix::fs::symlink(&real, link_parent.join("link_to_real")).unwrap();
+        // Walked: real, real/inside, link_parent. The symlink under
+        // link_parent reports as a symlink (not a dir) via lstat-based
+        // file_type(), so we don't recurse through it — same behavior
+        // as notify's default recursive walker.
+        assert_eq!(count_subdirs_capped(tmp.path(), 10), 3);
     }
 }
