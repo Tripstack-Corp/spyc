@@ -5,7 +5,7 @@
   "title": "bug listing watcher recursive hang",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-14T09:16:09.722452+00:00",
-  "summary": "The bug listing watcher in Spyc experiences a recursive hang when the Home key is pressed, with a proposed fix involving validation and code changes. The fix was reviewed and implemented, resulting in a resolved issue.",
-  "entry_count": 2
+  "last_updated": "2026-05-14T10:19:21.230591+00:00",
+  "summary": "The bug listing watcher recursive hang in Spyc was identified and fixed, with a validation green and two commits applied. Derek reviewed PR #87, approved it with a conditional gate, and identified issues related to macOS. The fix was awaiting re-review.",
+  "entry_count": 3
 }

@@ -234,3 +234,81 @@ Provenance:
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
 <!-- Entry-ID: 01KRJWB3ZC1DVGC346WDKE0H3D -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T10:19:21.228420+00:00
+Role: implementer
+Type: Note
+Title: Third entry — Derek's review, cfg-gate fixup, PR #87 awaiting re-review
+
+Spec: implementer-code
+
+tags: #review #fix #cross-platform
+
+# Derek's review
+
+Derek reviewed the PR (bitbucket PR #87) and approved conditional on one cfg-gate fix. Three notes:
+
+**Real blocker — macOS clippy breaks.** `MAX_RECURSIVE_WATCH_DIRS` and `count_subdirs_capped` were only `#[cfg(target_os = "linux")]`-gated *implicitly*: the only caller (`pick_recursive_mode`) was gated, but the const and the helper themselves were unconditional. On non-Linux platforms, both items have no callers — `cargo clippy --locked --all-targets -- -D warnings` (what `make check` runs) emits two `dead_code` errors. The non-Linux `pick_recursive_mode` also takes a `missing_const_for_fn` hit since it just returns a literal. Bitbucket Pipelines passes because the image is `rust:1.85` on Linux; only a maintainer's macOS box catches it.
+
+**Suggested patch** (paraphrased): gate the const and helper with `#[cfg(target_os = "linux")]`, promote the non-Linux `pick_recursive_mode` to `const fn`, and gate the `listing_watch_tests` module the same way since it exercises only the Linux-gated helper.
+
+**Observation (not blocking) — under-cap path pays for two walks.** On Linux, when the subtree fits under the cap, `count_subdirs_capped` walks the tree once and then `notify` walks it again to register per-subdir inotify watches. Roughly 2× the walk cost on the under-cap path. Both passes are by construction cheap (under the cap), so Derek explicitly said not to optimize now; the docstring's "spent on every chdir" note already covers it. **Filed as a paper trail in case real-world chdir-lag reports surface.**
+
+**Suggested follow-up on Derek's side, not mine.** Bitbucket Pipelines should grow a macOS step in `bitbucket-pipelines.yml` so this kind of regression is caught before merge. He'll file it as a TODO on the spyc side.
+
+**Approval verdict:** conditional approve, ready to squash-merge once the gate fix lands.
+
+# Fixup applied
+
+Commit `284c916` on the same branch, three changes per Derek's patch:
+
+- `#[cfg(target_os = "linux")]` on `MAX_RECURSIVE_WATCH_DIRS` (the const).
+- `#[cfg(target_os = "linux")]` on `count_subdirs_capped` (the helper).
+- Non-Linux `pick_recursive_mode` is now `const fn`.
+- `mod listing_watch_tests` gated `#[cfg(all(test, target_os = "linux"))]` since the helper it tests doesn't exist on non-Linux.
+
+# Verification
+
+**Linux (this host) — `make check` green:**
+
+```
+test result: ok. 676 passed; 0 failed; …
+test result: ok. 6 passed; 0 failed; …  (filesystem)
+test result: ok. 5 passed; 0 failed; …  (keymap_roundtrip)
+test result: ok. 1 passed; 0 failed; …  (pane_roundtrip)
+advisories ok, bans ok, licenses ok, sources ok
+```
+
+**macOS — cross-target clippy attempted, blocked by a C dep.** Both `x86_64-apple-darwin` and `aarch64-apple-darwin` rustup targets are installed on this Linux host. Running `cargo clippy --target x86_64-apple-darwin --locked --all-targets -- -D warnings` failed in `zstd-sys`'s `build.rs` — Linux `cc` doesn't accept `-arch x86_64 -mmacosx-version-min=10.7`. Build never reached the lint phase, so clippy couldn't confirm Derek's errors are gone *from this host*.
+
+**Reasoning about the fix without the macOS-host verification:** the cfg gate is straightforward. On non-Linux:
+- `MAX_RECURSIVE_WATCH_DIRS` does not exist (gated out).
+- `count_subdirs_capped` does not exist (gated out).
+- The non-Linux `pick_recursive_mode` references neither.
+- The test module does not exist (gated out).
+
+No item that could be "never used" survives compilation on non-Linux, so no `dead_code` lint can fire on them. The `const fn` promotion is a pure clippy fix verified by visual inspection (the function body is a literal-returning expression, which is `const`-evaluable). Real cross-platform proof will be Derek re-running CI or `make check` on his macOS box.
+
+# PR state
+
+- Bitbucket PR: **#87** — `https://bitbucket.org/tripstack/spyc/pull-requests/87`
+- Three commits on the branch: `9cd6e65` (hang fix), `1c508ed` (DSL togglepane), `284c916` (cfg-gate fixup).
+- Awaiting Derek's re-review; he indicated he'd squash-merge once green.
+
+# What this thread tracks from here
+
+- Squash-merge confirmation (when it lands)
+- Closure entry referencing the merged commit on main
+- If Derek's macOS-CI follow-up gets filed as a separate bug or improvement thread, a cross-reference
+
+Provenance:
+- Branch HEAD: `284c916`.
+- Bitbucket PR: #87 (URL above).
+- Derek's review captured in this thread by paraphrase; the canonical text lives in the bitbucket PR-comment thread.
+- Cross-target clippy attempt: `cargo clippy --target x86_64-apple-darwin --locked --all-targets -- -D warnings` against `284c916`; failed at `zstd-sys` C-dep compile, never reached lint phase. Logged output at the Linux side of the session.
+- Local `make check` against `284c916`: green; 688 tests pass; advisories / bans / licenses / sources all ok.
+- Prior thread entries: entry 0 = `01KRJRYZKF9HJB6CHBAZEE8CQ4` (design); entry 1 = `01KRJWB3ZC1DVGC346WDKE0H3D` (validation + initial push).
+- Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
+
+<!-- Entry-ID: 01KRJZYVMMV2724WVCKZ55RJA4 -->
