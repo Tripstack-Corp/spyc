@@ -1,0 +1,11 @@
+{
+  "id": "thread:bug-listing-watcher-recursive-hang",
+  "type": "thread",
+  "topic": "bug-listing-watcher-recursive-hang",
+  "title": "bug listing watcher recursive hang",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-14T08:17:06.496749+00:00",
+  "summary": "The bug involves a recursive hang in the Spyc application when the Home key is pressed, causing the application to become unresponsive. The issue was diagnosed and a fix design was proposed to address the recursion. The fix was implemented, and the outcome was that the recursive hang was resolved, improving the application's stability.",
+  "entry_count": 1
+}
