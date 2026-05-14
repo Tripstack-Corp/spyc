@@ -1,0 +1,11 @@
+{
+  "id": "thread:migration-github-origin-to-tripstack-corp",
+  "type": "thread",
+  "topic": "migration-github-origin-to-tripstack-corp",
+  "title": "migration github origin to tripstack corp",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-14T21:15:26.202121+00:00",
+  "summary": "The thread discusses the migration of a GitHub repository from an individual account to a company-owned account, with key decisions including the repointing of the origin repository and the implementation of necessary changes to ensure the migration is complete and secure. The outcome is the successful transition of the repository to Tripstack-Corp, ensuring continued maintenance and access for the team.",
+  "entry_count": 1
+}
