@@ -1,9 +1,20 @@
-# spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage.
+# spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage,
+# plus a scheduled dependency-drift report.
 #
 # We build against the pinned rust-toolchain.toml so a new stable Rust
 # release cannot silently tighten lints. All cargo invocations use
 # --locked (directly or via the Makefile) so a Cargo.lock drift in CI
 # fails loudly instead of silently pulling fresh transitive deps.
+#
+# The `weekly-deps` custom pipeline runs `cargo deny check advisories`
+# (fresh RUSTSEC DB) + `cargo outdated` + `cargo tree --duplicates`. It
+# does NOT run on push — it's wired to a Bitbucket *schedule*. The
+# schedule itself is configured in the repo UI (Repository settings →
+# Pipelines → Schedules), pointing at `Custom: weekly-deps` on `main`.
+# Bitbucket Cloud doesn't expose schedules in YAML; the pipeline name
+# and the UI schedule are the contract. Failures from this pipeline
+# light up the existing Bitbucket → Slack integration the same way a
+# branch-build failure does.
 
 # Non-slim image — bakes in `make`, `git`, `curl`, `ca-certificates`,
 # `tar`, etc., so we don't apt-install on every run (~13s saved). The
@@ -120,6 +131,45 @@ definitions:
           # incremental on (this is a CI-only override).
           - CARGO_INCREMENTAL=0 make check
 
+    - step: &deps-status
+        name: Dependency drift report
+        caches:
+          - cargo
+          - target
+          - rustup
+        script:
+          # Same cargo-deny install dance as the Quality step. Pinned
+          # binary, verified by sha256. Bump VERSION + SHA256 together
+          # when EmbarkStudios ships a new release.
+          - |
+            CARGO_DENY_VERSION=0.19.4
+            CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
+            CARGO_DENY_DIR=cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl
+            if ! "$CARGO_HOME/bin/cargo-deny" --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
+              curl -sSLo /tmp/cargo-deny.tar.gz "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${CARGO_DENY_DIR}.tar.gz"
+              echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+              tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+              install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$CARGO_HOME/bin/cargo-deny"
+            fi
+          # cargo-outdated installs from source the first run (~1 min);
+          # subsequent runs hit the cargo cache and the binary in
+          # $CARGO_HOME/bin is reused. --locked keeps it deterministic.
+          - cargo install cargo-outdated --locked
+          # Hard fail on security advisories. cargo-deny re-fetches the
+          # RUSTSEC DB on every run so this picks up new advisories
+          # against existing deps even on weeks where we shipped no
+          # commits. Quality-gate runs on PRs cover the push path;
+          # this run covers the gap.
+          - cargo deny check advisories
+          # Soft signal — outdated direct deps. `|| true` keeps the
+          # build green: we want the report visible in the log
+          # (forwarded to Slack via the existing build notification),
+          # not a red build that trains us to ignore it.
+          - cargo outdated --root-deps-only || true
+          # Same shape — diamond dependencies often indicate transitive
+          # crates drifting independently. Informational.
+          - cargo tree --duplicates || true
+
     - step: &coverage
         name: Coverage (ratcheting floor)
         caches:
@@ -161,3 +211,12 @@ pipelines:
       - parallel:
           - step: *quality
           - step: *coverage
+
+  custom:
+    # Triggered by the Bitbucket UI schedule "Weekly deps drift" on
+    # `main` (configured at Repository settings → Pipelines → Schedules).
+    # Surfaces RUSTSEC advisories that landed between commits, plus a
+    # `cargo outdated` report on direct deps. See the file header for
+    # the full why.
+    weekly-deps:
+      - step: *deps-status

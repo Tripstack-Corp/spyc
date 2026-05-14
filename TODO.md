@@ -128,6 +128,57 @@ rest of the dispatch testing.
 
 ### Tooling
 
+- [ ] **[S] macOS step in Bitbucket Pipelines.**
+  CI currently runs on `rust:1.85` (Linux) only. Surfaced by PR #87
+  (Caleb's recursive-watch cap fix): three dead-code / missing-const
+  clippy errors that fire on macOS when `#[cfg(target_os = "linux")]`-
+  gated code goes unreferenced were invisible to the runner. Local
+  `make check` on macOS catches them, but only after the PR already
+  green-lit in Bitbucket — confusing for an external contributor and a
+  real cross-platform robustness gap.
+
+  Bitbucket Cloud supports macOS runners via *self-hosted* runners or
+  the *macOS Pipelines* image (paid tier). Cheapest defensible path:
+  add a parallel `macos-quality` step running `make check` on
+  `atlassian/default-image:macos-3` (or self-hosted), gated to run on
+  main + PRs. Acceptable to skip on the weekly-deps schedule.
+
+  Worth deferring until after the OSS launch when CI minutes become a
+  bigger question (Bitbucket Pipelines minutes are scarcer for public
+  repos and macOS minutes cost more) — until then, the agreed
+  workaround is: contributors with cross-platform changes are asked in
+  the PR template to confirm `make check` passes on their local platform.
+
+- [ ] **[S] Renovate Bot for dependency PRs (post-OSS launch).**
+  Today (v1.50.x) we run a weekly `cargo deny check advisories` +
+  `cargo outdated` via Bitbucket Pipelines schedule (`weekly-deps`
+  custom pipeline) and rely on the existing Slack notification to
+  surface drift. That covers security advisories and gives a visible
+  "behind-by-N" signal, but doesn't auto-open PRs.
+
+  Renovate (mend.io hosted) supports Bitbucket Cloud natively and is
+  free for open-source repos. Once we ship the OSS launch, wire it up
+  with `renovate.json`:
+  ```json
+  {
+    "extends": ["config:recommended"],
+    "rangeStrategy": "bump",
+    "packageRules": [
+      { "matchUpdateTypes": ["patch"], "automerge": true },
+      { "matchUpdateTypes": ["minor"], "groupName": "minor updates" },
+      { "matchUpdateTypes": ["major"], "labels": ["needs-review"] }
+    ]
+  }
+  ```
+  Decision (May 2026): auto-merge patch bumps when CI passes — the
+  test suite gives us enough confidence and the noise reduction is
+  worth more than the rare bad-patch risk. Minor bumps grouped into
+  one weekly PR. Major bumps individual, labeled `needs-review`.
+
+  Cannot enable today: Renovate's free OSS tier requires the repo to
+  be publicly accessible. Tracked here as the natural next step once
+  the v2.0 distribution work makes the repo public.
+
 - [ ] **[M] `sccache` for CI compile-caching.**
   After v1.50.17 (`CARGO_INCREMENTAL=0` + cache restructure) the
   warm-cache `make check` is ~2m 13s (was ~3m). The remainder is

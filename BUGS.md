@@ -1,8 +1,5 @@
 ### SMALL ###
-- procs in panes that end should not disappear before I have a chance to ^a-R
-  (restart)
-- warn on ^a-^c
-- should be able to reorder tabs
+- should be able to reorder tabs?
 - support drag and drop features - give multiple options to the user e.g. send
   to lower pane as image, create new file (auto type detect), etc.
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
@@ -10,7 +7,6 @@
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
 - commands that have stopped running in task runner (!) should show EOF
-- how do we keep up with updates to crates we depend on?
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
   (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`;
