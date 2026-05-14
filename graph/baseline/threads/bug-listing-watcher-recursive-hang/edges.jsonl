@@ -3,3 +3,5 @@
 {"source":"entry:01KRJRYZKF9HJB6CHBAZEE8CQ4","target":"entry:01KRJWB3ZC1DVGC346WDKE0H3D","type":"followed_by"}
 {"source":"thread:bug-listing-watcher-recursive-hang","target":"entry:01KRJZYVMMV2724WVCKZ55RJA4","type":"contains"}
 {"source":"entry:01KRJWB3ZC1DVGC346WDKE0H3D","target":"entry:01KRJZYVMMV2724WVCKZ55RJA4","type":"followed_by"}
+{"source":"thread:bug-listing-watcher-recursive-hang","target":"entry:01KRK0QY4WZM031V58TYAZG4XV","type":"contains"}
+{"source":"entry:01KRJZYVMMV2724WVCKZ55RJA4","target":"entry:01KRK0QY4WZM031V58TYAZG4XV","type":"followed_by"}

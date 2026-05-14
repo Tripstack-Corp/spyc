@@ -312,3 +312,60 @@ Provenance:
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
 <!-- Entry-ID: 01KRJZYVMMV2724WVCKZ55RJA4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T10:33:03.598338+00:00
+Role: implementer
+Type: Closure
+Title: Closure — PR #87 squash-merged to main as f06201f
+
+Spec: implementer-code
+
+tags: #closure #merged
+
+# Merge landed
+
+Derek verified `284c916` on macOS — clippy clean, `make check` green (683 tests on macOS where the 5 `listing_watch_tests` correctly skip via `#[cfg(all(test, target_os = "linux"))]`; matches our 688 on Linux), `cargo-deny` ok — and squash-merged PR #87.
+
+- **Squashed commit on `main`:** `f06201f` "Merged in fix/recursive-watch-cap-on-large-trees (pull request #87)"
+- **Diff summary:** `src/app/mod.rs` +200, `src/config/dsl.rs` +15, **two files / 204 insertions total**.
+- **Feature branch:** auto-deleted on bitbucket; the github mirror's copy was removed locally to match. Both remotes are clean.
+- **`main` alignment across remotes:** local, `bitbucket/main`, and `origin/main` (github) all at `f06201fcfcd7e5d41004577f2aad84fdd4b3cac3`.
+
+# Cross-reference — PR #88 ci/weekly-deps-drift
+
+Derek's response also noted he'd filed the macOS-CI follow-up he mentioned. Pull from bitbucket main brought PR #88 (`b806df1`, merged 2026-05-13, branch `ci/weekly-deps-drift`) alongside ours. That PR added a 51-line `TODO.md` entry plus 61 lines to `bitbucket-pipelines.yml` covering the macOS-step deferral rationale (paid Pipelines minutes is the constraint). Derek said he'd tag this thread's author when cutting the macOS-CI PR; **out of scope here, separate arc when it lands.**
+
+# What this fix changed in the artefact
+
+- `MAX_RECURSIVE_WATCH_DIRS = 256` on Linux, `count_subdirs_capped` helper, `pick_recursive_mode` chooser (`#[cfg(target_os = "linux")]`-gated everywhere it must be).
+- Non-Linux `pick_recursive_mode` is a `const fn` returning `RecursiveMode::Recursive` (FSEvents and ReadDirectoryChangesW are OS-level and unaffected).
+- Bundled: `togglepane` DSL action name in `src/config/dsl.rs:parse_action`, plus module-doc list entry and one parse test. `keymap = ["map ^p togglepane"]` is now a supported escape hatch when the host terminal grabs `^\` and `F10`.
+- 6 new tests, all gated correctly: 5 in `app::listing_watch_tests` (Linux-only), 1 in `config::dsl::tests::parses_togglepane` (cross-platform).
+
+# Catalogue cross-references
+
+- `insight-emergent-properties` Property 1 ("description-layer permissiveness vs. functional reliability") — this bug was the second instance in the catalogue history of a *functional* drift on Linux specifically. Closing it at this scope preserves the property's shape: rare functional drift, fast resolution.
+- `insight-recurrence` Pattern 2 (supersession-acknowledgement matrix) — Derek's review→fixup→re-review→merge arc is *explicit-reframing* register at the medium time grain (hours), comparable shape to the PR #30 → PR #31 "Smaller than I'd previously framed it" pattern in the original catalogue.
+
+# Follow-up worth filing separately (still open)
+
+- **Watcher-event coalescing / debounce for atomic-write feedback loops** (`.git/index.lock`, `~/.claude.json.lock`). Surfaced twice in this thread's debug logs. Doesn't hang post-fix, but it's churn — `git_status` invocations cascading from a co-located tool's own atomic-rename dance. Different surface; new thread when filed.
+- **macOS step in `bitbucket-pipelines.yml`** — Derek's TODO in PR #88; he'll tag when cutting.
+
+# Thread status
+
+OPEN → effectively done. Leaving `Status: OPEN` per the catalogue convention (other threads have stayed open after their deliverable landed; closure is *what the entry says*, not the `Status:` field, which is for "needs attention").
+
+Provenance:
+- Merged commit: `f06201f` (PR #87 squash, 2026-05-14).
+- Bitbucket PR: #87 (closed/merged) — `https://bitbucket.org/tripstack/spyc/pull-requests/87`.
+- Cross-reference: PR #88 `b806df1` `ci/weekly-deps-drift` (Derek's TODO for macOS CI; touched `TODO.md` +51 and `bitbucket-pipelines.yml` +61).
+- Pre-merge HEAD: `bf58312` (PR #86); post-merge HEAD: `f06201f`. Local `main`, `bitbucket/main`, `origin/main` all consistent at `f06201f`.
+- Feature branch lifecycle: created from `bf58312` → three commits `9cd6e65` / `1c508ed` / `284c916` → squash-merged as `f06201f` → auto-deleted on bitbucket → manually deleted on github mirror and locally.
+- Tests after merge: 683 on macOS (Linux-only tests skip via cfg gate) / 688 on Linux. cargo-deny: advisories / bans / licenses / sources all ok on both platforms.
+- Derek's macOS verification record lives in the bitbucket PR-comment thread (PR #87, by paraphrase here).
+- Prior thread entries: 0 = `01KRJRYZKF9HJB6CHBAZEE8CQ4` (design); 1 = `01KRJWB3ZC1DVGC346WDKE0H3D` (validation); 2 = `01KRJZYVMMV2724WVCKZ55RJA4` (review pass).
+- Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
+
+<!-- Entry-ID: 01KRK0QY4WZM031V58TYAZG4XV -->

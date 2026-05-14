@@ -5,7 +5,7 @@
   "title": "bug listing watcher recursive hang",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-14T10:19:21.230591+00:00",
-  "summary": "The bug listing watcher recursive hang in Spyc was identified and fixed, with a validation green and two commits applied. Derek reviewed PR #87, approved it with a conditional gate, and identified issues related to macOS. The fix was awaiting re-review.",
-  "entry_count": 3
+  "last_updated": "2026-05-14T10:33:03.600545+00:00",
+  "summary": "The bug listing watcher recursive hang issue was identified and fixed in Spyc, with a validation green and two commits applied. Derek reviewed and approved the PR, addressing macOS-related issues, and the fix was merged into main as f06201f.",
+  "entry_count": 4
 }
