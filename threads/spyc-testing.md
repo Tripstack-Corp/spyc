@@ -227,3 +227,62 @@ Provenance:
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
 <!-- Entry-ID: 01KRJQCTPDV0A0K0EV9KRRCY1B -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T09:50:25.157759+00:00
+Role: scribe
+Type: Note
+Title: Test entry: summary of CLAUDE.md watercooler protocol
+
+Spec: docs
+
+Test entry posted at the user's request to exercise the MCP `say` path against the `spyc-testing` thread. Body summarizes what the user's global `~/.claude/CLAUDE.md` says about Watercooler.
+
+## What CLAUDE.md says about Watercooler
+
+**MCP-only thread operations (critical rule)**
+- Never directly edit thread entry `.md` files on the orphan branch.
+- Always use `mcp__watercooler-cloud__*` tools for thread work: read, list, say, ack, handoff, set_status, set_ball.
+- If MCP fails, the operation has FAILED — report the error and stop. No git/file fallbacks, no hidden errors.
+
+**Orphan branch architecture**
+- Threads live on a single `watercooler/threads` orphan branch per repo (not separate `-threads` repos).
+- It is a data branch — no app code, no build.
+- `code_branch` is a tag on entries, not a storage dimension.
+- Infrastructure files on the orphan branch (e.g. `vercel.json`) are fine to manage directly.
+- MCP handles entry commits, pushes, and rebase+retry sync.
+
+**Why MCP for thread content**
+- MCP generates commit footers (Code-Repo, Code-Branch, Code-Commit, Entry-ID).
+- Direct manipulation of entry content breaks the protocol and corrupts thread history.
+
+**Identity**
+- Before any write (say/ack/handoff/set_status), call `watercooler_v1_set_agent(base="Claude", spec="<specialization>")`.
+- Specializations: pm, planner-architecture, implementer-code, tester, security-audit, docs, ops, general-purpose.
+- Verify with `watercooler_v1_whoami`.
+- Fallback if the identity tool isn't available: align the entry Role to the specialization and include a visible `Spec: <value>` line in the body. (This entry uses that fallback — `whoami` resolved to "Agent (caleb)" because no `set_agent` tool was exposed in this session. Role is set to `scribe` since `docs` is not in the valid set: critic, implementer, planner, pm, scribe, tester.)
+
+**Commit footer convention (orphan branch)**
+```
+Code-Repo: <org>/<repo>
+Code-Branch: <branch>
+Code-Commit: <short-sha>
+Watercooler-Entry-ID: <ULID>
+Watercooler-Topic: <topic>
+```
+
+**Authoring rules**
+- Topic slugs are flat (e.g. `feature-auth-refactor`).
+- Entries include `Spec: <value>` and a Role aligned to the specialization.
+- Include code pointers (branch, commit, PR) when helpful.
+
+**Closure**
+- On code PR merge: post a Closure entry referencing the merged PR.
+
+## Session context
+
+- Repo: `spyc` (Derek Marshall / tripstack workspace).
+- Branch at time of writing: `fix/recursive-watch-cap-on-large-trees`.
+- Most recent commit: `1c508ed feat: expose togglepane in the keymap DSL`.
+
+<!-- Entry-ID: 01KRJY9V0CC0AC01FY24JJPT6R -->
