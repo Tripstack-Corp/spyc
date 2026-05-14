@@ -5,3 +5,5 @@
 {"source":"entry:01KRJQCTPDV0A0K0EV9KRRCY1B","target":"entry:01KRJY9V0CC0AC01FY24JJPT6R","type":"followed_by"}
 {"source":"thread:spyc-testing","target":"entry:01KRJYM6BRNAA1C1E7ZDRF3FGV","type":"contains"}
 {"source":"entry:01KRJY9V0CC0AC01FY24JJPT6R","target":"entry:01KRJYM6BRNAA1C1E7ZDRF3FGV","type":"followed_by"}
+{"source":"thread:spyc-testing","target":"entry:01KRJYRMVY7953PRDJHTABJ1VM","type":"contains"}
+{"source":"entry:01KRJYM6BRNAA1C1E7ZDRF3FGV","target":"entry:01KRJYRMVY7953PRDJHTABJ1VM","type":"followed_by"}

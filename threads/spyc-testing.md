@@ -316,3 +316,50 @@ So: two separate MCPs in play in this session — spyc's local socket (described
 - File: `README.md` (repo root), commit `1c508ed`, branch `fix/recursive-watch-cap-on-large-trees`.
 
 <!-- Entry-ID: 01KRJYM6BRNAA1C1E7ZDRF3FGV -->
+
+---
+Entry: Claude Code (caleb) 2026-05-14T09:58:29.371937+00:00
+Role: scribe
+Type: Note
+Title: README.md commit history: only 3d7afcb mentions Watercooler (as the rewrite trigger)
+
+Spec: docs
+
+Follow-up to the prior two test entries. User asked what the commit comments for recent edits to `README.md` say about Watercooler.
+
+## Finding
+
+Across all 23 commits that have touched `README.md`, **exactly one** mentions Watercooler: `3d7afcb docs: rewrite README with MCP-from-the-pane framing (v1.50.19)`. The mention is in the body, not the subject.
+
+Verified with:
+- `git log --oneline -- README.md` (23 commits, no subject hits)
+- `git log --all -G'watercooler' -- README.md` → only `3d7afcb`
+- Full-body grep across all README commits → only `3d7afcb`
+
+## What 3d7afcb says about Watercooler
+
+The relevant paragraph from the commit body:
+
+> External review of the catalogue (via the watercooler analysis platform) surfaced that the current README leads with "vi-keyboard-driven file commander" and buries the actual differentiator — the MCP socket the bottom-pane agent connects to so it can query the file commander directly.
+
+So Watercooler is named as the *trigger* for the rewrite: a review pass via the Watercooler analysis platform flagged that the README's lede buried spyc's real differentiator (the in-app MCP socket the bottom-pane agent uses).
+
+## What changed as a result of that Watercooler-driven review
+
+- New one-line tagline: *"A Rust TUI file commander where the AI agent in the side pane can query the file commander itself."*
+- Rewritten "Why spyc?" paragraph contrasting with chat-window-and-copy-paste tools; coined "the file commander is the noun the agent operates on, not the chrome around it."
+- New "What it is" section: explicit two-pane / chord-prefix / Unix-domain-MCP-socket framing, with Codex and Gemini called out as first-class agents (not just Claude Code).
+- Drive-by: clarified `spyc -r` per-pane conversation behavior (matching the v1.50.15 multi-pane fix); dropped a stale v1.21.1 footer.
+- Body of the doc (keybindings, configuration, recommended setup, "More docs") left unchanged.
+
+## Why this is worth recording
+
+The previous entry in this thread noted that `README.md` itself doesn't contain the word "watercooler". The commit history tells the other half of the story: even though the rendered README is Watercooler-silent, the *current shape* of the README's framing came from a Watercooler review pass. That provenance lives in commit `3d7afcb`'s body, not in any in-repo doc.
+
+## Code pointer
+
+- Commit: `3d7afcb docs: rewrite README with MCP-from-the-pane framing (v1.50.19)`
+- File: `README.md`
+- Branch at time of writing: `fix/recursive-watch-cap-on-large-trees`
+
+<!-- Entry-ID: 01KRJYRMVY7953PRDJHTABJ1VM -->
