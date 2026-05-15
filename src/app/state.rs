@@ -1469,6 +1469,19 @@ impl AppState {
                         self.flash_info(format!("created worktree: {}", path.display()));
                         if let Err(e) = self.chdir(&path) {
                             self.flash_error(format!("chdir: {e}"));
+                        } else {
+                            // Re-anchor PROJECT_HOME on the new
+                            // worktree — same reasoning as the
+                            // `W l` picker (see
+                            // `App::handle_pager_key`):
+                            // harpoon / grep / MCP context all
+                            // want the worktree root, not the
+                            // parent repo. App-side
+                            // `reconcile_harpoon` runs on the
+                            // next `apply`/`dispatch_prompt`
+                            // boundary and reloads the per-project
+                            // harpoon list.
+                            self.project_home = Some(self.listing.dir.clone());
                         }
                     }
                     Err(e) => self.flash_error(format!("worktree add: {e}")),
@@ -1481,12 +1494,32 @@ impl AppState {
                     return PromptResult::Handled;
                 }
                 let dir = self.listing.dir.clone();
+                // Capture the main repo path *before* removing — once the
+                // worktree's directory is gone we can't `git worktree
+                // list` from inside it anymore, and the chdir-to-parent
+                // below typically lands in a non-git directory
+                // (`~/src/spyc-worktrees/`) so PROJECT_HOME would have
+                // no home to reanchor on. The main worktree is always
+                // the first entry of `git worktree list --porcelain`.
+                let main_repo = crate::sysinfo::git_worktree_list(&dir)
+                    .and_then(|wts| wts.into_iter().next().map(|wt| wt.path));
                 match crate::sysinfo::git_worktree_remove(&dir) {
                     Ok(()) => {
                         self.flash_info(format!("removed worktree: {}", dir.display()));
                         if let Some(parent) = dir.parent() {
                             let _ = self.chdir(parent);
                         }
+                        // Re-anchor PROJECT_HOME on the main repo so
+                        // harpoon / MCP context / `gh` don't keep
+                        // pointing at the just-deleted directory. The
+                        // chdir target stays the parent (existing
+                        // behavior — the user might be browsing other
+                        // sibling worktrees there); listing.dir and
+                        // project_home can differ, that's normal.
+                        // App::dispatch_prompt's Handled arm reloads
+                        // harpoon for whatever project_home points
+                        // at after this returns.
+                        self.project_home = main_repo;
                     }
                     Err(e) => self.flash_error(format!("worktree remove: {e}")),
                 }

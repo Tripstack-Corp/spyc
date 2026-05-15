@@ -4520,7 +4520,18 @@ impl App {
 
         // Try the pure-domain handler first.
         match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
-            PromptResult::Handled => return PostAction::None,
+            PromptResult::Handled => {
+                // Some pure-domain prompts shift PROJECT_HOME (e.g.
+                // `WorktreeNewBranch` chdirs into the new worktree
+                // and re-anchors). `apply`'s post-action
+                // reconciliation only fires for `Action` dispatches,
+                // not prompt submissions — call directly so harpoon
+                // reloads on prompts that move us between project
+                // roots. The call is cheap when project_home is
+                // unchanged (compares paths and returns early).
+                self.reconcile_harpoon();
+                return PostAction::None;
+            }
             PromptResult::NotHandled => {}
         }
 
@@ -8525,7 +8536,8 @@ impl App {
             }
         }
 
-        // Worktree picker: 1-9 selects a worktree and chdirs.
+        // Worktree picker: 1-9 selects a worktree, chdirs, and
+        // re-anchors PROJECT_HOME on the worktree root.
         if let Some(ref worktrees) = self.state.pending_worktrees {
             if let KeyCode::Char(c @ '1'..='9') = key.code {
                 let idx = (c as u8 - b'1') as usize;
@@ -8535,7 +8547,32 @@ impl App {
                     self.needs_full_repaint = true;
                     if let Err(e) = self.state.chdir(&path) {
                         self.state.flash_error(format!("chdir: {e}"));
+                        return PostAction::None;
                     }
+                    // Worktrees are independent project roots — point
+                    // PROJECT_HOME at the worktree so harpoon, MCP
+                    // context (and therefore search_paths /
+                    // search_content / claude's grep), status bar,
+                    // and `gh` (jump-home) all anchor on the worktree
+                    // instead of the parent repo. The original
+                    // behavior left PROJECT_HOME pointing at the main
+                    // repo, so a user driving an agent inside a
+                    // worktree got search results from the wrong
+                    // tree (reported by a daily-driver after a
+                    // confusing afternoon).
+                    //
+                    // `listing.dir` is the canonical worktree path
+                    // after `state.chdir` (which canonicalizes
+                    // internally). `reconcile_harpoon` saves the
+                    // outgoing list and loads a fresh one keyed on
+                    // the new project root.
+                    let new_home = self.state.listing.dir.clone();
+                    self.state.project_home = Some(new_home.clone());
+                    self.reconcile_harpoon();
+                    self.state.flash_info(format!(
+                        "worktree: {} (PROJECT_HOME updated)",
+                        crate::paths::display_tilde(&new_home),
+                    ));
                     return PostAction::None;
                 }
             }

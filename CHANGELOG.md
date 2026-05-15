@@ -6,6 +6,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Worktree entry / exit re-anchors `PROJECT_HOME`.** Selecting
+  an existing worktree via `W l` → digit, creating one via `W n`,
+  or deleting one via `W d` now updates `state.project_home` to
+  the right anchor and triggers harpoon reload. Pre-fix behavior
+  left `PROJECT_HOME` pointing at the parent repo (entry) or at
+  the just-deleted dir (delete), so harpoon stayed bound to the
+  wrong project, MCP context (and therefore claude's `:grep` /
+  `search_paths` / `search_content`) searched the wrong tree,
+  and `gh` (jump-home) jumped out of the worktree. Reported by a
+  daily-driver after a confusing afternoon working out of a
+  worktree.
+
+  Mechanics:
+  - **`W l` picker**: sets `state.project_home = listing.dir`
+    after chdir and calls `reconcile_harpoon()` directly.
+  - **`W n` new worktree**: pure-domain handler sets
+    `state.project_home` after the chdir into the new worktree;
+    the App-side `dispatch_prompt` wrapper now always calls
+    `reconcile_harpoon` after `PromptResult::Handled` so the
+    harpoon list reloads whenever a prompt shifts the project
+    root.
+  - **`W d` delete worktree**: captures the main repo path
+    *before* the delete (it's the first entry of
+    `git worktree list --porcelain` — and unreachable after the
+    worktree's directory is gone), chdir's to parent as before,
+    sets `state.project_home` to the main repo. `listing.dir`
+    and `project_home` legitimately differ here — the user lands
+    in the parent so they can keep browsing sibling worktrees;
+    harpoon / MCP context bind to the main repo, which is the
+    sensible "home" after the just-used worktree is gone.
+
 - **Tab labels no longer carry a stale `[exited N]` suffix across
   session restore.** When a pane's child exited at any point during
   a session, `mark_exited` appended ` [exited N]` to the tab label
