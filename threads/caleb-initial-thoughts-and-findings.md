@@ -353,3 +353,101 @@ I'm proposing a small, low-risk feature whose scope is "wire `?` at empty J to t
 Identity fallback: no `set_agent` tool surfaced in this session; identity asserted via `agent_func`, Role and visible Spec line.
 
 <!-- Entry-ID: 01KRN4JCX7ECH6DCXSBMF2FT0S -->
+
+---
+Entry: Claude Code (caleb) 2026-05-15T06:19:37.105461+00:00
+Role: scribe
+Type: Note
+Title: Bottom-pane scrollback — is it actually scrollable? (yes, but only via ^a v)
+
+Spec: docs
+
+tags: #observations #pane #scrollback #discoverability
+
+# Frame
+
+Direct question from Caleb: "the lack of scroll back in the history of the claude pane is a serious problem. Is it in fact not scrollable? Is there any plan or comment on scrollability?"
+
+Short answer: **scrollable, yes — but only through a dedicated mode-switch chord, not naturally with the wheel or PgUp.** The "doesn't scroll" perception is real because every reflex you'd reach for first (mouse wheel, PgUp/PgDown in the live pane) hits a wall.
+
+# 1. What actually exists
+
+**A 10,000-line scrollback buffer per pane** — `src/pane/mod.rs:107` and `:210` both construct the vt100 emulator as `vt100::Parser::new(rows, cols, 10_000)`. That's not configurable, but 10k lines is a lot of Claude turns (a verbose Claude turn is maybe 80-120 lines including tool calls, so the buffer holds ~80-100 of them).
+
+**A dedicated scroll-mode pager** — `^a v` (`Action::PaneScrollEnter`, bound in `src/keymap/resolver.rs:201` and `:992`) is the user-facing entry point. The action handler is `open_pane_scroll_pager` at `src/app/mod.rs:6520-6580`. What it does:
+
+1. Drains pending pty bytes through the vt100 parser (with a brief 3×10ms sleep loop to catch in-flight HUD redraws — comment at :6534-6554 explains why; reported regression was "pager doesn't include all on-screen text, e.g. Claude HUD plugin").
+2. Snapshots the full vt100 buffer (scrollback + live screen) into styled lines via `crate::ui::scrollback::lines_from_scrollback` (`src/ui/scrollback.rs:50-96`), preserving colors and trimming right-edge cell padding.
+3. Mounts the resulting `PagerView` at `Mount::LowerPane` with `pane_scroll = true`, line-numbers off (toggle with `l`), wrap on (long log/diff lines fold instead of truncating — explicit rationale in the comment at :6572), parked at the bottom on first render.
+4. Sets `pane.is_scrolling()` so the status surfaces — divider re-color, `[SCROLL]` tag in status row (per `src/ui/help.rs:297`), active tab label uppercased — all signal you've changed modes.
+
+Inside scroll mode you have the full pager vocabulary:
+- `j`/`k`/`<Down>`/`<Up>`/`PgUp`/`PgDn`/`gg`/`G` — movement
+- `/` — search, `n`/`N` — next/prev match
+- `v` — visual-line mode, `y` — yank range to clipboard
+- `gf` / `gF` — jump to a path reference (with line) extracted from the scrollback into the file list (Phase 1 of bidirectional path refs, `TODO.md:228-232` marks this done)
+- `s` (`Action::PaneScrollSave`) — save the snapshot to a file
+- `q`/`<Esc>` — exit back to live pane
+
+**Two ancillary affordances** that bypass scroll-mode:
+- `y a` — `YankScrollback` (`src/keymap/action.rs:36`) — yank the entire pane scrollback to the clipboard in one chord, no mode-switch.
+- `:dump-scrollback` — writes the snapshot to a file (handler at `src/app/mod.rs:6485-6520`).
+
+# 2. Why the live pane *feels* unscrollable
+
+Three reasons, none of which are "the data isn't there":
+
+**(a) No mouse capture at all.** `BUGS.md:60-71` is explicit: "spyc never calls `EnableMouseCapture` on the host terminal; `src/pane/input.rs` has no encoder for `Event::Mouse(_)`. Apps that default to `MouseEvents: true` (lazygit, htop, broot in mouse mode) look half-broken — clicks on panel headers / commit list / footer keybindings, **scroll-wheel on diffs**, all silently no-op." Wheel events go to your terminal emulator, not spyc, not the pty child.
+
+What partially saves wheel-in-alt-screen-apps: `src/main.rs:227-252` enables DEC private mode 1007 ("alternate-screen scroll"), which tells the *outer* terminal to translate wheel events into `<Up>`/`<Down>` arrows while the child is in alt-screen. That's why the wheel sometimes seems to do something inside Claude — Claude is interpreting arrow keys, not seeing scroll events. It's not scrolling the *pane's* scrollback; it's scrolling whatever the alt-screen app does with arrow keys.
+
+**(b) PgUp/PgDn in the live pane go to the child, not spyc.** spyc forwards key events to the focused pty. The pane's vt100 buffer isn't a UI element you can move a cursor in — it's an emulator state. To "scroll back" you have to switch to spyc's interpretation of that buffer, which is what `^a v` does.
+
+**(c) The mode-switch chord is two keypresses (`^a v`) and lives behind a meta-key prefix.** No equivalent of a regular terminal's "press PgUp and you see history." From cold start: nothing in the live pane gives an immediate visual hint that there's an entire chord-prefix subsystem at `^a`. The `?` help overlay covers it, but a new user who's never typed `?` will miss it.
+
+# 3. Existing plans / comments on scrollability
+
+Several entries in the project docs already touch this; none are a full fix.
+
+- `BUGS.md:27` — **already filed** as a UX issue: *"it's very confusing still to remember you're in scroll mode in the bottom half — we need a stronger top line/bottom line marker for this."* Tracks the post-entry confusion; doesn't address discoverability of the entry point itself.
+- `BUGS.md:60-71` — mouse forwarding gap. Has a sketched two-layer fix ("enable mouse capture on the host terminal *and* add the `Event::Mouse` arm in `pane::input::encode_key` to encode SGR mouse reports"). Marked with the caveat "Worth designing carefully because spyc itself doesn't want mouse events outside the pane — the right shape is 'forward to pane only when pane is focused.'" Not started.
+- `BUGS.md:99-105` — separate scrollback corruption issue: Claude's progress bars / spinners can leave rendering artifacts in scrollback that `^L` doesn't clean. "Solution t.b.d."
+- `ROADMAP.md:158` — "Alt-screen scroll-mode hint + `[pane] default_command` config" — proposes a hint surface for scroll-mode entry.
+- `TODO.md:237-240` — "Session forking — `^W f`" (medium effort, gated behind two MCP items): *"Duplicate pane tab with scrollback replayed. Old roadmap item, more valuable after the two items above land."* Tangential — session-save-with-history, not pane scrollability per se.
+- `TODO.md:326` / `ROADMAP.md:518-521` — "Page scroll overlap in pager" (keep 2-3 lines of previous page visible). Refinement to the pager that scroll-mode uses; would improve `^a v` reading.
+- `TODO.md:327` / `ROADMAP.md:520` — "Auto-scroll reading mode." Refinement.
+
+So: the team has noticed the *post-entry* UX (the [SCROLL] indicator isn't loud enough) and the *pre-entry* gap (mouse forwarding entirely missing) — but the *thing in between* — a smooth, discoverable scroll affordance from the live pane — isn't on the open list.
+
+# 4. Minimal-effort fixes (not a feature plan, just observations)
+
+Stuff that could be cheap wins, if Caleb wants them:
+
+1. **Mouse-wheel → scroll-mode hand-off.** Capture mouse on the host terminal, forward most events to the child, but special-case wheel-while-focused: open `^a v` automatically and use the wheel delta to seed the initial scroll position. Bridges the muscle-memory gap without giving up the keyboard-driven scroll-mode story. Would need the two-layer mouse fix from `BUGS.md:60-71` first.
+2. **`PgUp` in live pane → auto-enter scroll mode.** Cheaper. Doesn't need mouse capture. If the pane is focused and the user presses `PgUp`/`PgDn`, intercept those before they go to the child and invoke `open_pane_scroll_pager`, then immediately apply a page move. Risk: alt-screen apps that legitimately use PgUp lose it — would need a guard like `!is_alternate_screen()` (the scroll-mode entry already checks this at `src/app/mod.rs:6529-6533` and bails for alt-screen panes, so the same gate applies).
+3. **Status-bar hint.** When the user lands on a pane the first time per session, flash `^a v scrolls history` for 2-3s. Pure discoverability, no behavior change.
+
+Worth flagging that option 2 would clash with Claude itself — Claude responds to PgUp / Ctrl-PgUp for its own message-history navigation. Probably needs a modifier guard (Shift-PgUp? Alt-PgUp?) to avoid stealing chord-space.
+
+# Summary
+
+- The Claude pane **is scrollable**, via `^a v` → in-app pager with j/k, search, visual yank, save.
+- 10,000 lines of vt100 scrollback per pane.
+- Two chord-bypass affordances: `ya` yanks all scrollback to clipboard; `:dump-scrollback` writes to file.
+- The "not scrollable" perception is correct *for naive scroll inputs* (mouse wheel, PgUp): spyc doesn't capture mouse, and PgUp goes to the child.
+- Already-filed concerns: scroll-mode-indicator weakness (`BUGS.md:27`), mouse forwarding entirely missing (`BUGS.md:60-71`).
+- No filed plan to bridge live-pane → scroll-mode with a single-key affordance. Three possible cheap wins enumerated above (PgUp-auto-enter being the smallest).
+
+Provenance:
+- `src/pane/mod.rs:107,210` — 10,000-line scrollback construction
+- `src/app/mod.rs:6520-6580` — `open_pane_scroll_pager` (the `^a v` payload)
+- `src/app/mod.rs:6485-6520` — `:dump-scrollback`
+- `src/keymap/resolver.rs:201,992` — `^a v` binding
+- `src/keymap/action.rs:36,110-111,210,242-243` — `YankScrollback`, `PaneScrollEnter`, `PaneScrollSave`
+- `src/ui/scrollback.rs:1-100` — scrollback adapter (vt100 → styled lines)
+- `src/main.rs:227-252` — DEC 1007 alt-screen-scroll translation
+- `BUGS.md:27` (scroll-mode marker), `:60-71` (mouse forwarding), `:99-105` (Claude scrollback corruption)
+- `ROADMAP.md:158` (alt-screen scroll-mode hint), `:518-521` (pager refinements)
+- `TODO.md:237-240` (session forking), `:326-327` (pager refinements)
+
+<!-- Entry-ID: 01KRN4MMPT5BCPEH62BC01ZHPA -->

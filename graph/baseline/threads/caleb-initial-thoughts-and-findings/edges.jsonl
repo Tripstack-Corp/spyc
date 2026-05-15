@@ -1,3 +1,5 @@
 {"source":"thread:caleb-initial-thoughts-and-findings","target":"entry:01KRN29MHY5FYWG59QTK0MQ3M1","type":"contains"}
 {"source":"thread:caleb-initial-thoughts-and-findings","target":"entry:01KRN4JCX7ECH6DCXSBMF2FT0S","type":"contains"}
 {"source":"entry:01KRN29MHY5FYWG59QTK0MQ3M1","target":"entry:01KRN4JCX7ECH6DCXSBMF2FT0S","type":"followed_by"}
+{"source":"thread:caleb-initial-thoughts-and-findings","target":"entry:01KRN4MMPT5BCPEH62BC01ZHPA","type":"contains"}
+{"source":"entry:01KRN4JCX7ECH6DCXSBMF2FT0S","target":"entry:01KRN4MMPT5BCPEH62BC01ZHPA","type":"followed_by"}
