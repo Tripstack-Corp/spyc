@@ -1,0 +1,11 @@
+{
+  "id": "thread:feature-jump-history-popup-trigger",
+  "type": "thread",
+  "topic": "feature-jump-history-popup-trigger",
+  "title": "feature jump history popup trigger",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-15T06:21:35.170070+00:00",
+  "summary": "The development thread proposes binding the `?` key to trigger a jump-history popup in the J prompt, enhancing spy-parity functionality. The key decision was to implement this binding, and the outcome is improved navigation and user experience in the J prompt.",
+  "entry_count": 1
+}
