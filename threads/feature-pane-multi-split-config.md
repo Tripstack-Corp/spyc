@@ -190,3 +190,100 @@ Companion thread: `feature-pane-state-general-recovery` covers the persistence q
 tags: #pane #layout #splits #configuration #planning
 
 <!-- Entry-ID: 01KRNAFZ8414WWQYC6PV9C58AR -->
+
+---
+Entry: Claude Code (caleb) 2026-05-15T08:10:41.941616+00:00
+Role: planner
+Type: Plan
+Title: Re-scope: configure startup tabs only, no splits
+
+Spec: planner-architecture
+
+## Re-scope (supersedes entry #0)
+
+Caleb clarified after reading the prior entry: he meant configuring the **existing interactive tab system** — multiple tabs in the single bottom-pane region — not new layout primitives. No splits, no tree, no grid. Just: let me declare in `~/.spycrc.toml` that on startup the bottom pane should open with N tabs, the same way `^a c` does interactively.
+
+Discarding the Option-1/2/3 split-layout planning from entry #0. The plan below is the much smaller correct shape.
+
+## Goal
+
+A spycrc knob that opens K tabs in the bottom pane at startup, instead of just one. Each tab gets a command and optional cwd, mirroring what `^a c` (`Action::PaneNewTab`) creates interactively (`src/app/mod.rs:4646-4676`).
+
+## Proposed config surface
+
+Compact array form for the common case:
+
+```toml
+[pane]
+default_command = "claude"   # existing — used as the single-tab fallback
+# tabs = ["claude", "bash", "codex"]   # NEW — opens 3 tabs at startup
+```
+
+Table form for cases that need per-tab cwd / label:
+
+```toml
+[[pane.tab]]
+command = "claude"
+
+[[pane.tab]]
+command = "bash"
+cwd = "~/scratch"
+label = "scratch"           # display name; falls back to command if omitted
+```
+
+The two forms coexist (toml-arrays-of-tables and plain arrays are distinguishable). Validation:
+- `tabs.len() ≤ 9` (matches `^W 1..9` jump reach — `Action::PaneTabByIndex(u8)`, `src/keymap/action.rs:114`).
+- Empty `tabs` / no `[[pane.tab]]` → today's behavior (single tab from `default_command`).
+- If both `tabs` and `[[pane.tab]]` are present: hard error at config load.
+
+## Internal changes
+
+`PaneConfig` (`src/config/mod.rs:91`) gains:
+
+```rust
+pub struct PaneConfig {
+    pub default_command: Option<String>,
+    pub tabs: Vec<PaneTabConfig>,        // NEW — empty == single-tab fallback
+}
+
+pub struct PaneTabConfig {
+    pub command: String,
+    pub cwd: Option<PathBuf>,            // resolves `~`, relative-to-cwd
+    pub label: Option<String>,
+}
+```
+
+Wire-up at startup: in `App::new` (around `src/app/mod.rs:875` where `show_session_picker` is conditionally called), after the session-picker branch, **iff** no session restore happened **and** `pane.tabs` is non-empty, loop and call `open_pane_tab_in(cmd, cwd)` per tab (`src/app/mod.rs:4657`). Set `active_tab` to the first tab. The existing single-tab fallback path stays for the empty case.
+
+Order of precedence:
+1. `spyc -r` session restore (if user picks a saved session) — wins, brings back the session's exact tab list.
+2. New `pane.tabs` config — opens declared tabs.
+3. Auto-open a single tab from `pane.default_command` (or `$SPYC_PANE_CMD`, or `"claude"`) — today's behavior. Note: today's auto-open is actually triggered by `TogglePane`, not at startup; need to confirm whether spyc opens a pane unprompted on launch or waits for `F10`. If it waits, the new `pane.tabs` should *also* defer to first toggle, only auto-opening on first user request. Better: introduce a single "open initial tabs" step that runs in either case.
+
+Let me check that startup behavior in a follow-up.
+
+## Things explicitly NOT in scope
+
+- No splits, no tree, no grid.
+- No focus-enum refactor — `pane_focused: bool` stays.
+- No `compute_layout` change — it stays returning one pane rect.
+- No new key bindings — `^W ]`, `^W [`, `^W 1..9`, `^W x`, etc. already handle multi-tab navigation.
+- No persistence schema change — `Session.tabs: Vec<SavedTab>` already round-trips multi-tab layouts. The new config knob is just an alternative *seed*.
+
+## File pointers
+
+- Config schema: `src/config/mod.rs:91` (`PaneConfig`), default template at `src/config/default.spycrc.toml:24-25`. The on-disk shape struct nearby (`src/config/mod.rs:99-105`) gains the new field.
+- Tab open: `src/app/mod.rs:4646` (`open_pane_tab`) and `:4657` (`open_pane_tab_in`).
+- Startup wiring: `src/app/mod.rs:875` (resume branch), and wherever the first-toggle fallback runs (`toggle_pane` at `:4632`).
+- Tab cap (9): `Action::PaneTabByIndex(u8)` at `src/keymap/action.rs:114`; tests likely in `src/keymap/resolver.rs` near `:930`.
+
+## Companion threads
+
+- `feature-pane-toggle-preserve-context` — hide-unhide context loss (different problem).
+- `feature-pane-state-general-recovery` — what gets persisted/restored for each tab kind (different problem).
+
+This thread's topic slug (`feature-pane-multi-split-config`) is now mildly misleading since we're not doing splits. Leaving the slug as-is to keep the history; future entries clarify the scope.
+
+tags: #pane #tabs #configuration #planning
+
+<!-- Entry-ID: 01KRNB010DF3JVVYEJ834VADP5 -->
