@@ -1,4 +1,8 @@
 ### SMALL ###
+- worktree should chroot the project home to the worktree temporarily so that
+  filesearch/grep, etc. work from the root of the worktree; harpoon should map
+  into the worktree, etc. - anything that works from project root should be
+  taken care of
 - should be able to reorder tabs?
 - support drag and drop features - give multiple options to the user e.g. send
   to lower pane as image, create new file (auto type detect), etc.

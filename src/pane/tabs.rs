@@ -87,6 +87,39 @@ pub struct TabEntry {
 /// to ~1 Hz.
 const LIVE_CWD_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// Strip the ` [exited <N>]` suffix that [`PaneTabs::mark_exited`]
+/// appends to dead-tab labels for display purposes. Returns the
+/// label unchanged if no suffix is present.
+///
+/// Why this exists: the exit-status display is *runtime UI state*,
+/// not persistent identity. Session save serializes
+/// `TabEntry::info.label`, so without stripping, a tab that exited
+/// at any point during the session ends up with a `[exited N]`
+/// suffix glued onto its name in the JSON. On `spyc -r` the tab
+/// respawns alive but the saved label is reapplied verbatim — the
+/// user sees their freshly-running `htop` tagged "exited 0" until
+/// they manually rename it (reported: "htop is actually still
+/// running - the status is stale from resuming the session").
+///
+/// Callers apply this at both save and restore boundaries: save
+/// strips so new sessions land clean; restore strips defensively
+/// so older session files heal automatically the next time they
+/// load.
+pub fn strip_exit_suffix(label: &str) -> String {
+    // mark_exited writes `format!("{} [exited {}]", label, code)`
+    // where `code` is either a decimal integer or `"?"`. The
+    // marker substring " [exited " is reserved (any user-set label
+    // containing it is recovering display behavior they likely
+    // didn't intend anyway), and the suffix is always at the *end*
+    // of the label.
+    if let Some((base, _)) = label.rsplit_once(" [exited ") {
+        if label.ends_with(']') {
+            return base.to_string();
+        }
+    }
+    label.to_string()
+}
+
 impl TabEntry {
     pub const fn new(pane: Pane, info: TabInfo) -> Self {
         Self {
@@ -235,6 +268,10 @@ impl PaneTabs {
 
     /// Mark exited tabs with their exit code. Returns `true` if any
     /// tab was newly marked (caller should trigger a redraw).
+    /// The suffix this appends is recognized by
+    /// [`strip_exit_suffix`] so callers serializing tab labels (e.g.
+    /// session save) can drop the runtime-only annotation before
+    /// writing to disk.
     pub fn mark_exited(&mut self) -> bool {
         let mut changed = false;
         for entry in &mut self.tabs {
@@ -324,5 +361,54 @@ impl PaneTabs {
 
     pub fn tabs(&self) -> &[TabEntry] {
         &self.tabs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_exit_suffix;
+
+    #[test]
+    fn strips_numeric_exit_code() {
+        assert_eq!(strip_exit_suffix("claude [exited 0]"), "claude");
+        assert_eq!(strip_exit_suffix("htop [exited 130]"), "htop");
+    }
+
+    #[test]
+    fn strips_question_mark_exit() {
+        // mark_exited writes "?" when exit_status() is None.
+        assert_eq!(strip_exit_suffix("zsh [exited ?]"), "zsh");
+    }
+
+    #[test]
+    fn passes_through_label_without_suffix() {
+        assert_eq!(strip_exit_suffix("claude"), "claude");
+        assert_eq!(strip_exit_suffix(""), "");
+        assert_eq!(strip_exit_suffix("npm run dev"), "npm run dev");
+    }
+
+    #[test]
+    fn only_strips_the_trailing_suffix() {
+        // A label that happens to contain "[exited" in the middle
+        // (weird but plausible if user named it) is unaffected.
+        assert_eq!(
+            strip_exit_suffix("note about [exited stuff] here"),
+            "note about [exited stuff] here"
+        );
+    }
+
+    #[test]
+    fn handles_nested_suffix_idempotently() {
+        // Double-call should be a no-op after the first strip.
+        let once = strip_exit_suffix("claude [exited 0]");
+        let twice = strip_exit_suffix(&once);
+        assert_eq!(once, "claude");
+        assert_eq!(twice, "claude");
+    }
+
+    #[test]
+    fn requires_terminating_bracket() {
+        // No closing `]` means it wasn't our suffix; leave alone.
+        assert_eq!(strip_exit_suffix("claude [exited 0"), "claude [exited 0");
     }
 }

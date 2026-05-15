@@ -6,6 +6,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Tab labels no longer carry a stale `[exited N]` suffix across
+  session restore.** When a pane's child exited at any point during
+  a session, `mark_exited` appended ` [exited N]` to the tab label
+  for display. Session save serialized the label verbatim; on
+  `spyc -r` the tab was respawned alive but the label was restored
+  with the dead-process suffix still glued on — the user saw their
+  freshly-running `htop` tagged "exited 0" until they manually
+  renamed it. New `pane::tabs::strip_exit_suffix` helper strips
+  the suffix; applied at both save time (so new session JSONs
+  land clean) and restore time (defensive, so older session files
+  heal automatically the next time they load). 6 new unit tests
+  cover numeric / `?` codes, no-suffix passthrough, idempotence,
+  the require-trailing-`]` guard, and the "middle of label" weird
+  case.
+
 - **`^a-v` scrollback pager now travels with the tab.** Previously
   the pager was App-level state: opening it on tab 1, then `^a-n`
   to tab 2, left the pager rendering tab 1's history while the

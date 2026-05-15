@@ -7732,7 +7732,14 @@ impl App {
                         };
                         SavedTab {
                             command: saved_command,
-                            label: t.info.label.clone(),
+                            // Strip any `[exited N]` suffix — that's
+                            // runtime display state for a tab whose
+                            // child has died, not persistent identity.
+                            // Without this, restoring a session that
+                            // saw a tab exit at any point shows the
+                            // freshly-respawned process tagged with
+                            // a stale "exited" suffix.
+                            label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
                             cwd: t.info.cwd.clone(),
                             agent_kind: kind,
                             agent_session_id,
@@ -8045,9 +8052,12 @@ impl App {
             // Restore active tab.
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 tabs.switch_to(session.active_tab);
-                // Restore custom labels.
+                // Restore custom labels. Defensive strip of any
+                // `[exited N]` suffix so older session files
+                // (saved before the save-side strip landed) heal
+                // automatically the first time they load.
                 for (entry, saved) in tabs.tabs_mut().iter_mut().zip(&session.tabs) {
-                    entry.info.label.clone_from(&saved.label);
+                    entry.info.label = crate::pane::tabs::strip_exit_suffix(&saved.label);
                 }
             }
             self.state.pane_focused = session.pane_focused;
