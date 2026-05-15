@@ -1,0 +1,11 @@
+{
+  "id": "thread:feature-pane-multi-split-config",
+  "type": "thread",
+  "topic": "feature-pane-multi-split-config",
+  "title": "feature pane multi split config",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-15T08:01:56.262316+00:00",
+  "summary": "The development thread discusses a feature to allow configurable pane count and layout in the feature pane, with a focus on splits rather than just tabs. Key decisions include the implementation of split layouts and the planning for configurable pane numbers. The outcome is a more flexible and customizable feature pane layout.",
+  "entry_count": 1
+}
