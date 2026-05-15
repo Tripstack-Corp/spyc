@@ -451,3 +451,299 @@ Provenance:
 - `TODO.md:237-240` (session forking), `:326-327` (pager refinements)
 
 <!-- Entry-ID: 01KRN4MMPT5BCPEH62BC01ZHPA -->
+
+---
+Entry: Claude Code (caleb) 2026-05-15T07:21:46.732112+00:00
+Role: scribe
+Type: Note
+Title: Configuration reference — every user-facing knob in spyc
+
+Spec: docs
+
+tags: #reference #configuration #spycrc #keymap #mcp #env
+
+# Frame
+
+Inventory pass: everything a user can configure in spyc, with source pointers. Verified against the tree at `repo/spyc` by reading `src/config/{mod,dsl,default.spycrc.toml}`, `src/main.rs`, `src/mcp.rs`, `src/state/*`, `src/pane/mod.rs`, `src/keymap/{action,resolver}.rs`, plus a `grep` pass over `std::env::var` / `env!` / `option_env!` across the whole crate. Where I cite a file but not a precise line, the surface was big enough that a single line wouldn't capture it.
+
+# 1. Config file discovery
+
+**Two TOML files, merged** (`src/config/mod.rs:1-5,241-243`):
+
+1. `$HOME/.spycrc.toml` — per-user defaults
+2. `<cwd>/.spycrc.toml` — per-project overrides (win over user)
+
+Both optional; missing files silently fall back to built-in defaults. Project file is resolved against `cwd` at startup (not PROJECT_HOME — confirmed by reading `Config::load_default`).
+
+**Live reload** — both files are watched via `notify` and reload on save without restart. `^R` / `Action::ReloadConfig` triggers a manual reload. (Watcher wired in `src/app/mod.rs` around the per-tick `tick_config_watcher` path.)
+
+**Bootstrapping** — `spyc --print-config` dumps a fully-commented `default.spycrc.toml` to stdout (`src/main.rs:71-73, 101-104`). The template is the very file at `src/config/default.spycrc.toml`, baked in via `include_str!` at `src/config/mod.rs:17`.
+
+# 2. `.spycrc.toml` sections — what each one controls
+
+The authoritative inventory is `src/config/default.spycrc.toml` (94 lines, fully commented). Sections, all read directly from that file:
+
+| Section | Key(s) | Default | What it does |
+|---|---|---|---|
+| `[layout]` | `status_position` | `"top"` | `"top"` (stock) or `"bottom"` (vim/tmux-style, prompt sits one row above status). |
+| `[pane]` | `default_command` | `"claude"` | Pre-fill for `^a c` (new pane tab) prompt. `$SPYC_PANE_CMD` env wins over this (precedence noted at `src/config/mod.rs:93` and ui/help.rs:219). |
+| `[yank]` | `include_pager_title` | `true` | Prepend a short header (pager title / filename / command) to yanked text. Set `false` to yank just content. |
+| `[markdown]` | `open_as_rendered` | `true` | Default view for `.md`/`.markdown` files in the pager. `m` toggles in either direction; per-side scroll memory preserved. |
+| `[colors]` | 13 keys (see below) | built-in palette | Hex (`"#aabbcc"`) or named colors. Anything unset falls back. |
+| `[[ignore_masks]]` | array-of-tables: `group`, `enabled`, `patterns` | (built-in dotfile + build-artifact set) | **Defining any mask REPLACES the built-ins wholesale** (per the comment at `default.spycrc.toml:65`). Group 1 toggled by `a`, group 2 by `o`. Globs match filename only. |
+| `keymap` | array of DSL strings | (empty — built-in bindings only) | Per-line `map <KEY> <ACTION>` (see §3). |
+
+**Color keys** (`src/config/default.spycrc.toml:46-62`):
+- File-type: `dir`, `exec`, `symlink`, `file`, `other`
+- Cursor: `cursor_bg`, `cursor_fg`
+- Selection: `pick`, `take`
+- Status bar: `status_user`, `status_path`, `status_suffix`
+- Prompt: `prompt_prefix`
+
+Merge logic at `src/config/mod.rs:265-285` (and beyond): per-color `merge_color` overlay — project overrides user, user overrides default, all per-key. Unset values inherit; you don't have to specify the whole palette.
+
+# 3. Keymap DSL
+
+Parser at `src/config/dsl.rs`. Two layers:
+
+**Key (left-hand side)** — `parse_key` (lines 76-94) and `parse_named` (lines 97-125):
+- Single printable char: `f`, `;`, `H`
+- Control: `^P`, `^W` (lowercased internally, stored as `Ctrl(char)`)
+- Named: `<Enter>`/`<Return>`/`<CR>`, `<Space>`/`<Sp>`, `<Tab>`, `<Backspace>`/`<Bs>`, `<Esc>`/`<Escape>`, `<Up>`/`<Down>`/`<Left>`/`<Right>`, `<Home>`/`<End>`, `<PageUp>`/`<Pgup>`, `<PageDown>`/`<Pgdn>`, function keys (per the agent's read of `parse_named`)
+
+(Chord prefixes like `g x` for `gx` work via the resolver, not the DSL — DSL binds the leaf keystroke.)
+
+**Action (right-hand side)** — `parse_action` (`src/config/dsl.rs:127-213`). Three argument shapes:
+
+| Shape | Example | Notes |
+|---|---|---|
+| Plain (no args) | `map f file` | One of the bareword actions below. |
+| `=ARG` suffix | `map H patternpick =*.hpp` | Used by `ignoretoggle =N`, `patternpick =GLOB`, `jump =PATH`. |
+| Trailing free text | `map ^P unix ps -ef` | Only `unix` — rest of line is the template; `%` expands to current selection at runtime. |
+
+**Bareword plain actions accepted by the DSL** (`src/config/dsl.rs:133-210`): `quit`, `redraw`, `help`/`keys`, `up`/`previous`, `down`/`nextfile`, `left`, `right`, `pageup`, `pagedown`, `home`, `climb`, `enter`/`edit`, `display`, `pick`, `unpick`, `take`, `drop`, `inventory`, `empty`, `search`, `next`, `startshell`, `unix_cmd`, `foreground_cmd`, `longlist`, `file`, `copy`, `move`, `remove`, `makedirs`, `panescroll`, `panesave`, `togglepane`.
+
+That is the **complete set of bindable actions via the DSL** — narrower than the full `Action` enum in `src/keymap/action.rs`. Things like `HarpoonAppend`, `SetMark(_)`, `JumpMark(_)`, `PaneTabByIndex(_)`, `Yank*`, `Goto{File,FileLine}`, `WorktreeList`, `GitDiff*` etc. exist as actions but currently have **no DSL spelling** — they're reachable only via the built-in bindings. Worth flagging if user keymap customization grows.
+
+**Special** — `unmap` is parsed but currently a no-op (`src/config/dsl.rs:53`: `"unmap" => Ok(None), // TODO: represent unbind.`). So you can override built-in bindings by re-mapping the key to a different action, but you can't *remove* a built-in binding cleanly.
+
+**Comments / blank lines** — `#`-prefixed and empty lines are skipped (per `parse` body and the `default.spycrc.toml` keymap example).
+
+# 4. Command-line flags
+
+`Cli` struct in `src/main.rs:42-73` (clap-derived):
+
+| Flag | Short | Effect |
+|---|---|---|
+| `--resume` | `-r` | Open the pane immediately with `claude --resume` at startup. |
+| `--debug` | `-d` | Write debug log to `/tmp/spyc-debug-<ts>.log` (equivalent to `SPYC_DEBUG=1`). |
+| `--key-trace` | — | Trace every key event + dispatch decision to `/tmp/spyc-key-trace-<ts>.log` (equivalent to `SPYC_KEY_TRACE=1`). Used to diagnose input-lag reports. |
+| `--mcp` | — | Run as stdio MCP server (JSON-RPC on stdin/stdout). Spyc-as-spawned-by-Claude. |
+| `--verbose` | — | With `--version`, print extended build info (git sha, build time, rustc version, TERM, COLORTERM, OS). |
+| `--print-config` | — | Dump fully-commented default `.spycrc.toml` template to stdout and exit. Standard bootstrap: `spyc --print-config > ~/.spycrc.toml`. |
+| `--version` / `--help` | `-V` / `-h` | Standard clap. |
+
+# 5. Environment variables — read at runtime
+
+Verified by `grep std::env::var src/` over the whole crate.
+
+**Spyc-specific**:
+
+| Var | Where read | Purpose |
+|---|---|---|
+| `SPYC_PANE_CMD` | `src/app/mod.rs:4642, 6390` | Default pane command — **wins over `[pane] default_command`** in `.spycrc.toml`. |
+| `SPYC_CONTEXT` | `src/context.rs:36` (constant), consumed by `src/mcp.rs:111` and set on every pane spawn (`src/pane/mod.rs:90`) | Path to the JSON context-snapshot file written by spyc for child processes (pane MCP server etc.). |
+| `SPYC_MCP_SOCK` | `src/mcp.rs:132` | Unix socket path the stdio MCP server connects to. Usually set in the project's `.mcp.json` so Claude finds the right spyc. |
+| `SPYC_DEBUG` | `src/debug_log.rs:32` | Same as `--debug`. Off if unset/empty/`0`/`false`. |
+| `SPYC_KEY_TRACE` | `src/key_trace.rs:28` | Same as `--key-trace`. Off if unset/empty/`0`/`false`. |
+| `SPYC_PTY_DEBUG` | `src/pane/mod.rs:105` | Enable PTY-layer kernel debug dump for spawned panes. Presence-only check (any value). |
+
+**Standard / POSIX**:
+
+| Var | Where read | Purpose |
+|---|---|---|
+| `HOME` | `src/paths.rs:17,41,…`, `src/state/sessions.rs:176`, `src/config/mod.rs:354`, `src/mcp.rs:49` | `~` expansion, config/state directory resolution. |
+| `XDG_STATE_HOME` | `src/state/mod.rs:52` | If set, becomes `…/spyc` for state files; else falls back to `$HOME/.local/state/spyc`. |
+| `EDITOR` / `VISUAL` | `src/shell/mod.rs:18-21` | `$VISUAL` first, then `$EDITOR`, then `vi`. Used by `v` and `EditInPane`. |
+| `PAGER` | `src/shell/mod.rs:32` | Used by `D` and `DisplayInPane`. Falls back to `less`. |
+| `SHELL` | `src/shell/mod.rs:62`, `src/app/state.rs:863` | Used by `$` (start shell), `!`-shell-out spawns. Falls back to `/bin/sh`. |
+| `TERM` | `src/main.rs:115` (display only); pane spawns hard-coded to `xterm-256color` | Read for `--verbose`; **not** read for behavior. |
+| `COLORTERM` | `src/main.rs:118` (display only); pane spawns force-set to `truecolor` (`src/pane/mod.rs:91`) | Read for `--verbose`; **not** read for behavior. |
+| `TMUX` | `src/term_title.rs:17` | Presence-only — affects terminal-title push/pop behavior when nested in tmux. |
+
+**Compile-time** (`env!()` in `src/main.rs:111-114`, `src/mcp.rs:29`): `CARGO_PKG_VERSION`, `SPYC_GIT_SHA`, `SPYC_BUILD_TIME`, `SPYC_RUSTC_VERSION`. Set by `build.rs`. Not user-settable at runtime.
+
+# 6. Pane / bottom-pane configuration
+
+Knobs the user controls:
+
+| Surface | Mechanism | Source |
+|---|---|---|
+| Default new-tab command | `[pane] default_command` in `.spycrc.toml` OR `$SPYC_PANE_CMD` (env wins) | `src/app/mod.rs:4642, 6390`; `default.spycrc.toml:20-25` |
+| Pane height % | `^W +` / `^W -` (resize), `^W z` (zoom) — runtime only | `src/keymap/action.rs` `PaneGrow`/`PaneShrink`/`TogglePaneZoom` |
+| Pane focus | `^W j` / `^W k` (also `^a j` / `^a k`) | `src/keymap/action.rs` `PaneFocus{Down,Up}` |
+| New tab / close / rename / restart | `^a c`, `^a K`/`^a x`, `^a r`, `^a R` | `Action::PaneNewTab`/`PaneCloseTab`/`PaneRenameTab`/`PaneRestartTab` |
+| Switch tabs | `^a 1`..`^a 9`, `^a n`/`^a p` | `Action::PaneTabByIndex(n)`, `PaneNextTab`/`PanePrevTab` |
+| Scroll mode | `^a v` (enter), `q`/`<Esc>` (exit), `s` (save while in scroll mode) | `Action::PaneScrollEnter`/`PaneScrollSave` |
+| Send selection / pipe content / pipe inventory | `^a s`, `^a P`, `^a i` | `Action::PaneSendSelection`/`PanePipeContent`/`PanePipeInventory` |
+
+**Hard-coded** (not user-configurable):
+- Scrollback depth: **10,000 lines** (`src/pane/mod.rs:107, 210` — `vt100::Parser::new(rows, cols, 10_000)`).
+- Pane `TERM`: `xterm-256color` (`src/pane/mod.rs`).
+- Pane `COLORTERM`: `truecolor` (`src/pane/mod.rs:91`).
+- Pane height % is persisted *into the session* but isn't an `.spycrc.toml` key — set by gesture, restored on session load.
+
+# 7. Masks / filters
+
+**Default behavior** (no user masks defined):
+- Group 1 (toggled by `a`): dotfiles (`.*`)
+- Group 2 (toggled by `o`): build artifacts (`*.o`, `target/`, `node_modules/`, `*.pyc` — verbatim from `default.spycrc.toml:74-77`)
+
+**User override** — `[[ignore_masks]]` array. Each entry:
+- `group: u8` — `1` or `2` (which toggle key)
+- `enabled: bool` — start hidden at launch
+- `patterns: [String]` — filename globs
+
+**Important semantic** (highlighted in the default config at line 65): "Defining any mask here REPLACES the built-ins wholesale." Not additive. If you want a custom group 1 *and* still hide dotfiles, you have to repeat the dotfile pattern.
+
+Mask source state lives in `src/state/ignore.rs` (module exists; not re-read here in detail).
+
+# 8. Colors / theme
+
+Configurable per §2 ([colors] table). No themes per se — just a flat 13-key palette overlay.
+
+**Not user-configurable**:
+- Line numbers in the pager (toggled at runtime with `l`).
+- Gutter style (two-character git-status markers — hard-coded format).
+- Status bar layout (sections, separators, what's displayed — hard-coded).
+- The pre-renderable `?` help overlay style.
+
+**Runtime palette flip** — `C` (`Action::ColorToggle`) flips between primary and inverted (light/dark-aware) palettes. Configurable colors apply to whichever variant is active.
+
+# 9. MCP server — what spyc exposes
+
+Two entry points (`src/mcp.rs`):
+
+1. **In-process socket server** — spyc itself listens on a Unix socket at `$XDG_STATE_HOME/spyc/mcp-<pid>.sock` while running.
+2. **Stdio MCP server** — `spyc --mcp` (`src/main.rs:106-109`) spawns a thin proxy that reads JSON-RPC from stdin and bridges to the socket. This is what Claude Code etc. actually launch.
+
+**Discovery** — the stdio bridge finds the right socket via `$SPYC_MCP_SOCK` (`src/mcp.rs:132`) or by walking project markers (`.spyc-context-<pid>.json`) in the project tree.
+
+**Resource exposed** (`src/mcp.rs:29, 921-936`):
+- URI: `spyc://context`
+- Content: JSON snapshot of spyc's live state (cwd, cursor file, picks, inventory, filter, git branch, project_home, session_name). Source-of-truth is the file at `$SPYC_CONTEXT`.
+
+**Tools exposed** (`src/mcp.rs:970-1120` — verified by direct read of the `"name":` keys):
+
+| Tool | Writes? | Behavior |
+|---|---|---|
+| `get_spyc_context` | no | Return the same JSON the `spyc://context` resource serves. |
+| `navigate_to` | **yes** | Jump file list to a path. Dir → chdir; file → parent + cursor. |
+| `set_filter` | **yes** | Set or clear the glob filter (`null` clears). |
+| `pick_files` | **yes** | Select files matching glob patterns (additive). |
+| `clear_picks` | **yes** | Clear all picks. |
+| `get_file_content` | no | Read file (size + text-only guarded). |
+| `search_paths` | no | Fuzzy filename search over PROJECT_HOME / cwd (gitignore-aware). |
+| `search_content` | no | Regex search across project content (ripgrep matcher, smart-case). |
+| `search_picks` | no | Regex search confined to current picks. |
+| `search_inventory` | no | Regex search confined to the persistent inventory. |
+
+**User-extensible?** No. Tools are hard-coded in `src/mcp.rs`. Read-only tools are handled inline; writable tools route through a `McpCommand` mpsc channel back to the main event loop (`src/mcp_cmd.rs`). To add a tool you'd need to ship a code change.
+
+**Lifecycle** — at startup spyc checks whether another spyc on this machine already owns MCP for this project; if so it prompts to take over (`src/main.rs:159-…` `prompt_mcp_takeover_if_needed`). Enterprise MCP setups skip both takeover and `.mcp.json` writing (`mcp::enterprise_defines_spyc()`).
+
+# 10. State files — every persistent surface spyc writes
+
+State root: `$XDG_STATE_HOME/spyc` or `$HOME/.local/state/spyc` (`src/state/mod.rs:52-56`).
+
+| File | Module | Format | Cap / lifecycle |
+|---|---|---|---|
+| `sessions/<id>.json` | `src/state/sessions.rs` | JSON | Max 20 retained, deduped by `(cwd, tab_commands)`, oldest pruned. Restored on startup via picker. |
+| `harpoon/<basename>.<hash>.toml` | `src/state/harpoon.rs` | TOML | Per project (keyed by `PROJECT_HOME` hash), 9 slots max, auto-saved on mutation. |
+| `marks.toml` | `src/state/marks.rs` | TOML | Global, letter-keyed (a-z), each entry stores dir + optional focus file. |
+| `history` | `src/state/history.rs` | plain text, one cmd/line | Shell `!`/`;` history, 1000 max, move-to-end dedup. |
+| `pane_history` | `src/state/history.rs` (via `load_file`) | plain text | New-pane-tab command history. Same shape as `history`. |
+| `jump_history` | `src/state/history.rs` (via `load_file`) | plain text | J-prompt destinations. 1000 max, move-to-end dedup. (Per the J-investigation entry earlier in this thread.) |
+| `command_history` | `src/state/history.rs` (via `load_file`) | plain text | `:` (vim-style) command history. Same shape. |
+| `frecency.json` | `src/state/frecency.rs` | JSON | 500 max, count × tiered-recency score. Recorded on every chdir; surfaced via Tab fallback at J. |
+| `graveyard/<uuid>.json` + `<uuid>.tar.zst` | `src/state/graveyard.rs` | JSON + zstd-tar | Soft-delete buffer. Cascades to system trash when total exceeds ~500 MB. |
+| `mcp-<pid>.sock` | `src/mcp.rs` | Unix socket | Live only while spyc is running. |
+
+# 11. Session persistence
+
+`Session` struct in `src/state/sessions.rs` captures, on save:
+
+- `cwd`, `start_dir`, `project_home`
+- Pane layout: `pane_height_pct`, `pane_focused`, `active_tab`, `tabs: Vec<SavedTab>`
+- Each `SavedTab`: command, label, cwd, agent kind (Claude/Codex/Gemini/Other), agent_session_id (resume token), spawn epoch
+- A spice-pair session name (e.g. `SAFFRON_PAPRIKA`) for human picker labels
+- Timestamps: `saved_at` (ISO), `epoch_secs`
+
+Restore is conversation-aware: Codex resumes via `codex resume <uuid>`; Claude resumes by spawning fresh then typing `/resume <sid>` (because the `--resume` flag has a current crash on non-empty initial messages — explicit comment at `src/app/mod.rs` around the restore path).
+
+# 12. Project context / PROJECT_HOME
+
+- **Auto-detected** at startup if `cwd/.git` exists → `project_home = cwd`. Otherwise unset.
+- **Manual** via `gP` (`Action::SetProjectHomeHere`) or `:project [.|<path>|clear]`.
+- **Jump to it** via `gh` (`Action::JumpProjectHome`).
+- **Persisted** in the session (`Session.project_home`).
+- **Distinct from** `start_dir` (target of backtick `` ` ``), which is settable separately via `gS` (`Action::SetStartDirHere`). Two separate one-slot pointers.
+
+PROJECT_HOME also scopes:
+- Harpoon file selection (one harpoon list per project).
+- MCP context disambiguation when multiple spyc instances run on overlapping trees.
+
+# 13. Auto-approval
+
+Mentioned in `docs/AUTO_APPROVAL_PLAN.md` (planning doc, not yet a runtime surface). When it lands, expect `.spycrc.toml` to grow a section for it — not present today.
+
+# 14. Diagnostic / observability surfaces
+
+| What | Toggle | Output |
+|---|---|---|
+| Debug log | `-d` / `SPYC_DEBUG=1` | `/tmp/spyc-debug-<ts>.log` |
+| Key trace | `--key-trace` / `SPYC_KEY_TRACE=1` | `/tmp/spyc-key-trace-<ts>.log` |
+| PTY debug | `SPYC_PTY_DEBUG=anything` | Pane debug dump for spawned subprocess |
+| In-app memory stats | `I` (`Action::ShowMemory`) | Pager with pid, rss, file/picks/inventory counts |
+| In-app health view | runtime — invoked from app/state | `src/state/health.rs` |
+
+No telemetry. No network reporting. Everything stays local.
+
+# 15. What is *not* user-configurable (compile-time)
+
+For the curious:
+
+- Scrollback per pane: 10,000 lines (`src/pane/mod.rs:107,210`)
+- Harpoon slots: 9 (`src/state/harpoon.rs:40` per agent investigation)
+- History caps: 1000 entries (`src/state/history.rs:9`)
+- Frecency cap: 500 entries (`src/state/frecency.rs:12`)
+- Sessions cap: 20 (`src/state/sessions.rs:11`)
+- Pane `TERM` / `COLORTERM` (hard-coded in `pane/mod.rs`)
+- Resolver chord shapes — `^a`, `^w`, `g`, `]`, `[`, `y`, `H`, `m`, `'`, `=` prefixes are baked into `src/keymap/resolver.rs`. Custom chord prefixes would need code changes.
+- The set of action *names* the DSL accepts (§3) — narrower than the full `Action` enum.
+
+# 16. The shortest "bootstrap your config" path
+
+```
+spyc --print-config > ~/.spycrc.toml
+# edit
+```
+
+Edits take effect the moment you save (watcher), or you can press `^R` to force a reload.
+
+# Provenance
+
+- `src/config/default.spycrc.toml` (full read, 94 lines)
+- `src/config/mod.rs` — discovery (`load_default`, `:241-243`), `DEFAULT_TEMPLATE` (`:17`), per-color merge (`:265-285`)
+- `src/config/dsl.rs` — full parser, key (`parse_key`, `parse_named`), action (`parse_action`, `:127-213`)
+- `src/main.rs` — `Cli` struct (`:42-73`), startup (`:99-148`)
+- `src/mcp.rs` — server name/version (`:29`), context resource (`:921-936`), tool definitions (`:970-1120`), socket discovery (`:111,132`)
+- `src/state/{mod,sessions,harpoon,marks,history,frecency,graveyard,ignore}.rs` — state files and caps
+- `src/pane/mod.rs` — pane spawn env (`:74-92`), scrollback (`:107,210`)
+- `src/app/mod.rs` — `SPYC_PANE_CMD` precedence (`:4642, 6390`)
+- `src/context.rs` — `CONTEXT_ENV_VAR` constant (`:36`)
+- `src/debug_log.rs:32`, `src/key_trace.rs:28`, `src/shell/mod.rs:18-62`, `src/term_title.rs:17`, `src/ui/help.rs:219`
+
+Identity fallback: no `set_agent` tool surfaced this session; identity asserted via `agent_func`, Role, and visible Spec line.
+
+<!-- Entry-ID: 01KRN86EDXWSEF18ZF9E7EPH1V -->
