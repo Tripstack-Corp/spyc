@@ -3,6 +3,7 @@ Status: OPEN
 Ball: Claude Code (caleb)
 Topic: caleb-initial-thoughts-and-findings
 Created: 2026-05-15T05:38:39.223205+00:00
+
 ---
 Entry: Claude Code (caleb) 2026-05-15T05:38:39.223205+00:00
 Role: scribe
@@ -241,3 +242,114 @@ Provenance:
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
 <!-- Entry-ID: 01KRN29MHY5FYWG59QTK0MQ3M1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-15T06:18:23.642973+00:00
+Role: scribe
+Type: Note
+Title: Jump (J) investigation + harpoon vs. marks vs. jump-history
+
+Spec: docs
+
+tags: #observations #jump #harpoon #marks #spy-parity #discoverability
+
+# Frame
+
+Two threads of investigation in one entry:
+
+1. **Spy parity gap?** — In spy, hitting `?` at the `J` prompt opens a scrollable directory history (newest at top, `j`/`k` to move, `<Enter>` to chdir). I'd assumed spyc had no equivalent. Verification was required.
+2. **Open follow-up #5 from the first entry** — "Harpoon: how does the slot semantics feel against marks?" Both exist; both jump-and-position. Where does each win? And once that's mapped, where does a recent-paths history fit alongside them?
+
+Code read end-to-end: `src/keymap/action.rs`, `src/state/{harpoon,marks,history,frecency,mod}.rs`, `src/app/mod.rs:560 :3700-3870 :7849-7880 :8392-8470 :9295-9320`, `src/pane/mod.rs:107 :210`, `src/ui/scrollback.rs`, `src/keymap/resolver.rs`, plus `TODO.md` / `BUGS.md` / `ROADMAP.md`.
+
+# 1. The J-history popup exists — but only `<Space>` reaches it
+
+Spyc *does* implement the scrollable jump history. The functionality is there. The affordance is what's missing.
+
+**Data model** — two separate stores, both live:
+
+| Store | File | Cap | Update | Lookup surface |
+|---|---|---|---|---|
+| `State::jump_history` (`src/state/history.rs`) | `$XDG_STATE_HOME/spyc/jump_history`, one line per path | 1000 | move-to-end dedup on `J <Enter>` *and* on popup-`<Enter>` chdir | `Up`/`Down` history nav inside the prompt; popup |
+| `State::frecency` (`src/state/frecency.rs`) | `$XDG_STATE_HOME/spyc/frecency.json` | 500 | every chdir; count × tiered-recency score (zoxide-style) | Tab-completion fallback when no fs match at J |
+
+**Popup** — `App::show_jump_history_popup` (`src/app/mod.rs:7854-7880`). Snapshots `jump_history.entries().rev()` into `pending_jump_history`, opens a `PagerView` titled `"jump history — j/k move, Enter cd, x delete, q close"`, parks the picker cursor at index 0. Key handling lives at `src/app/mod.rs:8398-8468`: `j/k` (or arrows) move; `<Enter>` chdirs to the selected path and re-pushes it to the top of the live history; `x` deletes the entry from both snapshot and live store; `q`/`<Esc>` close. The pager is full-pager: `PgUp`/`PgDown`/`/`/`gg`/`G` all work on it, so it's scrollable to the full 1000-entry depth.
+
+**Display ordering** — newest-first, numbered 1, 2, 3… (`format!("  {:>3}  {}", i + 1, p)` at `src/app/mod.rs:7867`). spy's ordering is also newest-on-top but the *number* is the highest (20: at top, 1: at bottom — chronological label, position-relative-to-now reading). Cosmetic difference; same information.
+
+**Trigger** — this is the gap.
+
+- spy: `J ?` — two keystrokes, second is the unmissable `?`.
+- spyc: `J <Esc> <Space>` — three keystrokes, depends on knowing the `J` prompt is a vi line-editor (it is, post-v1.33.0 per comment at `src/app/mod.rs:3365-3368`), knowing `<Esc>` enters Normal mode, knowing `<Space>` is the bigger-pager opener.
+
+The dispatch path: `handle_vi_prompt_key` (`src/app/mod.rs:3748-3768`) checks `<Space>` while the editor is in Normal mode and routes:
+
+```
+PromptKind::Jump  → show_jump_history_popup
+anything else    → show_history_popup   (the `!?` shell-history popup)
+```
+
+So at the `!` prompt you can also reach the popup with `<Esc><Space>` — but `!` *also* accepts `?` directly when the buffer is empty (`src/app/mod.rs:3719-3731`). The `?`-on-empty shortcut is wired for `ShellCmdCaptured` only, not `Jump`. Pure inconsistency: same payload, two prompt kinds, one fast affordance, the other discoverable only via source-read.
+
+**Stale comments** — worth flagging since they actively mislead:
+
+- `src/app/mod.rs:555-560` (field doc on `pending_jump_history`): "the popup opened by `Esc` on an empty `J` prompt." Wrong. Esc cancels (or, in the vi editor, enters Normal mode but does not open the popup). The opener is `<Space>` in Normal mode.
+- `src/app/mod.rs:7849-7853` (docstring on `show_jump_history_popup`): "Triggered by hitting Esc on an empty `J` prompt -- since there's nothing to throw away, the cancel turns into 'show me my jumps.'" Same error; aspirational or refactor-leftover.
+
+Both comments suggest the original design *was* Esc-on-empty (which would have been one shorter chord than the Space path), and the implementation drifted but the docs didn't follow. There's a real question whether the original design was better — `J <Esc>` (two keys, the second is the cancel-or-popup overload) feels cleaner than `J <Esc> <Space>`.
+
+# 2. Harpoon vs. marks — different scopes, different jobs
+
+Both surfaces exist and both look like "named places to jump to." They're not redundant once you read the modules. From `src/state/harpoon.rs` and `src/state/marks.rs`:
+
+| | Vi marks (`ma` / `'a`) | Harpoon (`Ha` / `H1`–`H9`) |
+|---|---|---|
+| Address space | 26 letters (`a-z`) | 9 numbered slots |
+| Scope | Global — single `$XDG_STATE_HOME/spyc/marks.toml` | **Per-project** — `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`, keyed by `PROJECT_HOME` |
+| Auto-swapped at chdir? | No — global, always available | Yes — file changes when `PROJECT_HOME` changes |
+| What's stored | `Mark { dir, focus: Option<PathBuf> }` — directory plus optional cursor file | `slots: Vec<PathBuf>` — absolute paths to files *or* directories |
+| Naming | Letter chosen by the user (semantic) | Position assigned by the system (chronological, append-only) |
+| Add | `m{a-z}` — explicit letter at set-time | `Ha` — auto-slot to next free index |
+| Recall | `'{a-z}` — explicit letter | `H{1..9}` — single-key chord by slot |
+| Reorder | Delete and re-set | `Hh` opens menu with reorder + dd |
+| Listing-filter integration | None | `=h` filters to slots + their ancestors (the cached `ancestor_set` on `Harpoon`) |
+| Cardinality philosophy | Big address space, low churn — "places I return to often" | Small, fast-cycling — "files I'm flipping between *right now*" |
+
+**Where marks win** — *cross-project landmarks*. The places I revisit from anywhere: `'h` for home, `'r` for resume dir, `'s` for `.ssh`, `'p` for current-project-home. The letter carries my mnemonic. They survive cd-out and cd-back into a completely different repo. Marks are the "named cities on the world map."
+
+**Where harpoon wins** — *this-project's-current-cycle*. The 3-5 files I'm flipping between in a single bug investigation. `H1` `H2` `H3` cost one chord each, no semantic naming required because order = "the order I noticed I'd care about them." Auto-swap at `PROJECT_HOME` change keeps the slots scoped to where they're meaningful. The bonus `=h` filter folds the list + ancestor dirs into a one-key listing reduction — that's not a primitive marks gives you. Harpoon is the "open-tabs-in-this-editor" pattern.
+
+**Neither covers** — *unstructured chronological recall*. The places I went yesterday or last week that I didn't bother to mark. "Where was that scratch dir from Tuesday?" "What was the path of that other repo I was poking at?" That's what spy's `?`-at-`J` solves and what spyc's jump-history popup solves: a no-act-of-consecration MRU.
+
+Three complementary surfaces, not redundant:
+
+```
+marks       — letters, global,    semantic naming, durable landmarks
+harpoon     — digits, per-project, positional, cycle-targets
+jump-history — implicit,  global,   chronological, "where have I been?"
+```
+
+# 3. Conclusion on the missing-functionality question
+
+**Not missing in feature; missing in affordance.** spyc has a strictly *richer* set of recall surfaces than spy (marks + harpoon + frecency + jump-history vs. spy's single `J`-history). What's missing is the one keystroke spy users have in their fingertips: `?` at the `J` prompt.
+
+A spy user lands at the `J` prompt, types `?`, and right now gets nothing visible (the `?` is just buffered as a literal character — Tab would then try to fs-complete it; nothing happens). The popup is reachable but you'd have to read the source or stumble onto the `<Space>` Easter-egg.
+
+I'm proposing a small, low-risk feature whose scope is "wire `?` at empty J to the existing popup, fix the stale docstrings, and decide on display-ordering convention." Design and plan in the sibling thread `feature-jump-history-popup-trigger`.
+
+# Provenance
+
+- `src/state/history.rs:1-150` — History struct, 1000-cap, move-to-end dedup, per-filename persistence
+- `src/state/frecency.rs:1-125` — separate Frecency struct, 500-cap, count×recency, JSON
+- `src/state/harpoon.rs:1-200` — per-project slots, ancestor cache, project-keyed filename hash
+- `src/state/marks.rs:1-70` — global marks.toml, dir + optional focus
+- `src/app/mod.rs:3700-3870` — vi-prompt key handler, `?` (capture-only) trigger, `<Space>` trigger
+- `src/app/mod.rs:7849-7880` — `show_jump_history_popup` (stale docstring noted)
+- `src/app/mod.rs:8398-8468` — popup key handling (j/k/Enter/x)
+- `src/app/mod.rs:555-560` — stale field doc on `pending_jump_history`
+- `src/keymap/action.rs:56,69-74,129-132` — JumpPrompt, JumpMark, JumpPrevDir, JumpStartDir, JumpProjectHome, HarpoonJump
+- `src/keymap/resolver.rs:201,992` — `^a v` / scroll-mode binding (not directly related; surfaces in the sibling scrollback entry)
+
+Identity fallback: no `set_agent` tool surfaced in this session; identity asserted via `agent_func`, Role and visible Spec line.
+
+<!-- Entry-ID: 01KRN4JCX7ECH6DCXSBMF2FT0S -->
