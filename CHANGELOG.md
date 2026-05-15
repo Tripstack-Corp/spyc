@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-v` scrollback pager now travels with the tab.** Previously
+  the pager was App-level state: opening it on tab 1, then `^a-n`
+  to tab 2, left the pager rendering tab 1's history while the
+  active-tab pointer was on tab 2 — a stale view of the wrong
+  tab's pty. Now each tab has its own `stashed_scrollback_pager`
+  slot. Tab-switch action handlers (`PaneNextTab`, `PanePrevTab`,
+  `PaneTabByIndex`) stash the current pager onto the just-departed
+  tab before flipping, then restore the destination tab's stashed
+  pager (if any) after. The pager visually disappears as you tab
+  away from a scrolled-back tab; it reappears, exactly as you left
+  it (scroll, search, selection), when you tab back.
+
+  No flash on swap — the visible appear / disappear is its own
+  signal. Esc / `q` close the pager normally as before; only
+  tab-switch triggers the stash. Content-bound pagers (Overlay
+  file viewer, TopPane Markdown) are App-level and persist
+  across tab switches unchanged — they're tied to content, not to
+  a tab.
+
 ### Added
 - **`[markdown] open_as_rendered` preference.** New `.spycrc.toml`
   knob controlling which view a `.md` / `.markdown` file lands in

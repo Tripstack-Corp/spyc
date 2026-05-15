@@ -72,6 +72,14 @@ pub struct TabEntry {
     /// per `LIVE_CWD_TTL`. `None` until first refresh succeeds, or if
     /// the platform / process refuses the lookup.
     live_cwd_cache: Option<(std::time::Instant, PathBuf)>,
+    /// Stashed `^a-v` scrollback pager. Holds the whole `PagerView`
+    /// (scroll position, search state, visual selection, line buffer
+    /// snapshot — everything) while the user is on another tab so a
+    /// round-trip "scroll back, tab away, tab back" lands the pager
+    /// exactly as the user left it. App-level `self.pager` carries
+    /// at most one pager at a time; tab-switch swaps this slot in
+    /// and out. `None` when the tab has no scrollback view stashed.
+    pub stashed_scrollback_pager: Option<crate::ui::pager::PagerView>,
 }
 
 /// How long a cached live-cwd lookup is reused before re-polling.
@@ -85,6 +93,7 @@ impl TabEntry {
             pane,
             info,
             live_cwd_cache: None,
+            stashed_scrollback_pager: None,
         }
     }
 
@@ -139,6 +148,14 @@ impl PaneTabs {
 
     pub fn active_info_mut(&mut self) -> &mut TabInfo {
         &mut self.tabs[self.active].info
+    }
+
+    /// Direct mutable access to the active `TabEntry` — for callers
+    /// that need to touch per-tab state outside the `Pane` and
+    /// `TabInfo` projections above (e.g. the scrollback-resume scroll
+    /// memory used by `^a-v` ↔ tab-switch).
+    pub fn active_entry_mut(&mut self) -> &mut TabEntry {
+        &mut self.tabs[self.active]
     }
 
     pub fn len(&self) -> usize {

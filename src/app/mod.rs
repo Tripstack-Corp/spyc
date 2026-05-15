@@ -6517,6 +6517,47 @@ impl App {
         }
     }
 
+    /// Stash the active scrollback pager (if any) onto the
+    /// currently-active tab's slot. Tab-switch handlers call this
+    /// **before** flipping the active-tab pointer; the companion
+    /// `restore_active_tab_scrollback_pager` runs **after** the flip
+    /// to surface the destination tab's stashed pager if it has one.
+    /// Together: scroll back on tab 1, `^a-n`, the pager visually
+    /// disappears (replaced by tab 2's live pty); `^a-p` back to
+    /// tab 1, the pager comes back at the same scroll / search /
+    /// selection state.
+    ///
+    /// Only acts on scrollback pagers (`pane_scroll == true`).
+    /// Content-bound pagers (Overlay file viewer, TopPane Markdown,
+    /// etc.) are App-level and persist across tab switches.
+    fn stash_scrollback_pager_to_active_tab(&mut self) {
+        if !self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+            return;
+        }
+        let view = self.pager.take();
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            tabs.active_entry_mut().stashed_scrollback_pager = view;
+        }
+    }
+
+    /// Restore the active tab's stashed scrollback pager into
+    /// `self.pager` if one is stashed AND no other pager is currently
+    /// displayed. A non-scrollback pager (Overlay file viewer, etc.)
+    /// up at the time of the tab switch is left alone; the stash
+    /// surfaces on the next switch back where no overlay is in the
+    /// way. See `stash_scrollback_pager_to_active_tab` for the
+    /// outgoing half of the pair.
+    fn restore_active_tab_scrollback_pager(&mut self) {
+        if self.pager.is_some() {
+            return;
+        }
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            if let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take() {
+                self.pager = Some(view);
+            }
+        }
+    }
+
     fn open_pane_scroll_pager(&mut self) {
         let Some(tabs) = self.pane_tabs.as_mut() else {
             return;
@@ -6584,6 +6625,13 @@ impl App {
         // App::render LowerPane branch sees the real rect, calls
         // scroll_to_bottom(rect.height), and clears the flag — so
         // the very first frame already shows the recent output.
+        //
+        // The "scroll back, tab away, tab back, see the same view"
+        // flow doesn't come through here at all — it goes through
+        // `swap_scrollback_pager_for_tab_switch`, which stashes the
+        // whole `PagerView` (with its `scroll`, search state, etc.)
+        // onto the source tab and restores it onto the destination
+        // tab without revisiting this function.
         view.pending_scroll_to_bottom.set(true);
         self.pager = Some(view);
         self.state.pane_focused = true;
@@ -9326,6 +9374,7 @@ impl App {
             Action::PaneNewTab => self.start_new_tab_prompt(),
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
+                self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
                     // Switching tabs implies "I want to interact
@@ -9336,18 +9385,26 @@ impl App {
                     // does this in `open_pane_tab_in`.
                     self.state.pane_focused = true;
                 }
+                self.restore_active_tab_scrollback_pager();
+                self.needs_full_repaint = true;
             }
             Action::PaneNextTab => {
+                self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.next();
                     self.state.pane_focused = true;
                 }
+                self.restore_active_tab_scrollback_pager();
+                self.needs_full_repaint = true;
             }
             Action::PanePrevTab => {
+                self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.prev();
                     self.state.pane_focused = true;
                 }
+                self.restore_active_tab_scrollback_pager();
+                self.needs_full_repaint = true;
             }
             Action::PaneRenameTab => {
                 if let Some(tabs) = self.pane_tabs.as_ref() {
