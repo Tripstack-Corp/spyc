@@ -747,3 +747,117 @@ Edits take effect the moment you save (watcher), or you can press `^R` to force 
 Identity fallback: no `set_agent` tool surfaced this session; identity asserted via `agent_func`, Role, and visible Spec line.
 
 <!-- Entry-ID: 01KRN86EDXWSEF18ZF9E7EPH1V -->
+
+---
+Entry: Claude Code (caleb) 2026-05-15T07:51:06.718747+00:00
+Role: implementer
+Type: Note
+Title: Pane-toggle context loss + pane/session config reference
+
+Spec: observer
+
+Caleb asked four things:
+1. When the lower pane is hidden via `F10` / `^a-\` and unhidden, is the claude session lost? Is there a config option / mechanism to retain it?
+2. Are lower-pane size and count configurable?
+3. Can different startup commands be set per pane?
+4. Is current session state persisted across restart?
+
+## 1) Pane-toggle kills the claude process. Yes, context is lost.
+
+`F10` and `^a \` both resolve to `Action::TogglePane` (`src/keymap/resolver.rs:144`, `src/keymap/resolver.rs:294`, `src/app/mod.rs:9595`). The handler is `App::toggle_pane` at `src/app/mod.rs:4632`:
+
+```rust
+fn toggle_pane(&mut self) {
+    if self.pane_tabs.is_some() {
+        self.pane_tabs = None;          // <-- drops every tab
+        self.state.pane_focused = false;
+        self.state.pane_zoomed = false;
+        ...
+        self.state.flash_info("pane closed");
+        return;
+    }
+    let cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
+    self.open_pane_tab(&cmd);           // <-- fresh spawn on re-toggle
+}
+```
+
+`pane_tabs = None` drops every `TabEntry`, which drops each `Pane`, which drops its `PtyHost`. `Drop for PtyHost` at `src/pane/pty_host.rs:297` sends **SIGKILL** to the child's process group via `kill_process_group(pid, Signal::KILL)` and reaps:
+
+```rust
+impl Drop for PtyHost {
+    fn drop(&mut self) {
+        if self.closed { return; }
+        if let Some(pid) = self.child.process_id() {
+            #[cfg(unix)]
+            kill_group(pid, rustix::process::Signal::KILL);
+        } ...
+    }
+}
+```
+
+Consequences for the toggle path:
+- Claude is killed mid-flight. It never prints its `Resume this session with: claude --resume <token>` exit banner, so even the scrollback-based capture in `extract_claude_resume_token` (`src/state/sessions.rs:504`) cannot recover the sid.
+- `toggle_pane` does **not** call `save_session` before nulling `pane_tabs`, so no `agent_session_id` is harvested.
+- On re-toggle, `open_pane_tab(&cmd)` spawns a bare `claude` (or `$SPYC_PANE_CMD`) — no resume.
+
+**There is no config option that changes this.** The toggle is unconditionally destructive. `pane.default_command` (`src/config/mod.rs:96`) only controls *which* command is spawned, not whether the prior tab is retained.
+
+The closest existing path is `F11` / `Action::ResumePane` (`src/keymap/action.rs:103`, `src/app/mod.rs:9304`), which calls `open_pane_tab("claude --resume")`. That uses claude's CLI `--resume` flag (the codebase has comments noting it is regression-prone with non-empty initialMessages — `src/app/mod.rs:1436`, `src/state/sessions.rs:15`). It surfaces claude's built-in picker for the cwd, not the specific sid that was running before the toggle.
+
+## 2) Lower-pane size: runtime-tweakable, NOT in spycrc
+
+- Stored as `state.pane_height_pct: u16` (`src/app/state.rs:166`), default `30`.
+- Runtime: `^a +` / `^a -` → `Action::PaneGrow` / `PaneShrink` → `resize_pane(±5)` (`src/app/mod.rs:9308-9309`, `src/keymap/action.rs:107-108`).
+- Zoom: `^a z` / `^w z` → `Action::TogglePaneZoom` → fullscreens (effective_pane_pct = 100). Doesn't kill — just resizes the existing pty (`src/app/mod.rs:6812`, line 6842 calls `entry.pane.resize(...)`).
+- Persisted: `Session.pane_height_pct` saved/restored (`src/state/sessions.rs:79`, `src/app/mod.rs:7705`, `src/app/mod.rs:7934`).
+- **Not exposed** in `~/.spycrc.toml` — `[pane]` only has `default_command`. To pin a startup size you'd have to add it.
+
+## 3) Pane count + per-pane startup commands
+
+- **Only one bottom-pane region.** No tmux-style horizontal/vertical splits. Stored as `pane_tabs: Option<PaneTabs>` (`src/app/mod.rs:528`).
+- **Multiple tabs** in that one region: `^a c` / `^W n` → `Action::PaneNewTab` (`src/keymap/action.rs:112`), `^W ]` / `^W [` switch, `^W 1..9` jump by index, `^W x` close, `^W r` rename, `^W R` restart. Each `TabEntry` carries its own command, cwd, label.
+- **At startup**, only one tab is opened — using `pane.default_command` from spycrc (or `$SPYC_PANE_CMD`, or `"claude"` fallback). The codebase doesn't read a `[[pane.tabs]]` array. The only way to start with multiple tabs is to launch with `spyc -r` and pick a saved session that had multiple tabs.
+
+So per-pane startup commands per *tab* are not directly configurable — they come from saved sessions, not config.
+
+## 4) Cross-restart session persistence: yes, fairly complete
+
+State root is `$XDG_STATE_HOME/spyc/` (or `~/.local/state/spyc/`) — `src/state/mod.rs:48`.
+
+Per-instance session snapshot (`src/state/sessions.rs`):
+- File: `$XDG_STATE_HOME/spyc/sessions/<epoch_ms>.json`, cap 20, deduped by `cwd|tab_cmds`.
+- Written on quit by `App::save_session` (`src/app/mod.rs:7629` → `src/app/mod.rs:9423`).
+- Restored by `App::restore_session` (`src/app/mod.rs:7913`) when the user picks one from `show_session_picker`, triggered by the `-r`/`--resume` CLI flag at `src/app/mod.rs:875`.
+- Fields: `cwd`, `tabs[]` (each: `command`, `label`, `cwd`, `agent_kind`, `agent_session_id`, `agent_session_name`), `active_tab`, `pane_height_pct`, `pane_focused`, `name` (spice-pair), `project_home`.
+- Claude tabs: sid is captured either by scanning recent scrollback for `claude --resume <token>` or by reading the most-recent matching `~/.claude/projects/<encoded-cwd>/*.jsonl`. On restore, the tab is spawned fresh and `entry.info.pending_resume_send = Some((sid, now))` queues `/resume <sid>\r` to be typed once the pty has settled (`src/app/mod.rs:7982-7990`, `src/app/mod.rs:5768`). The CLI `--resume` flag is *not* used for Claude precisely because of the regression.
+- Codex tabs: `codex resume <UUID>` baked into the spawn command directly.
+- Gemini tabs: best-effort `--resume <index>` after a `--list-sessions` lookup.
+
+Other persisted state (each module owns its own file under the state root):
+- `history` files — pane/jump/command/shell histories (`src/state/history.rs:3`).
+- `frecency.json` — chdir frecency (`src/state/frecency.rs:4`).
+- `harpoon/<basename>.<hash>.toml` — per-project harpoon list (`src/state/harpoon.rs:20`).
+- `marks` — global marks (`src/state/marks.rs:72`).
+- `graveyard/` — deletion history with pairs (`src/state/graveyard.rs:24`).
+- `inventory` (`src/state/inventory.rs:45`).
+- `health` (`src/state/health.rs:175`).
+
+These load lazily at use-site, so a fresh `spyc` launch (no `-r`) still recovers history/frecency/harpoon/marks/graveyard — only the *workspace layout* (which tabs were open, their cmds/cwds/sids) is gated behind the session picker.
+
+## TL;DR for caleb
+
+| Question | Answer |
+|---|---|
+| Is claude context lost on pane toggle? | Yes — SIGKILL via `Drop for PtyHost`. |
+| Config to retain it? | None today. |
+| Mechanism that exists? | Cross-restart resume via `save_session` / `restore_session` (sid → `/resume`), but not wired into the toggle path. |
+| Lower-pane size configurable? | Runtime (`^a +/-`), per-session, but no spycrc knob. |
+| Number of panes configurable? | Multi-tab in one region (no splits); startup is single-tab only via `pane.default_command`. |
+| Different startup commands per pane? | Not via config; only via saved sessions. |
+| Session state persisted across restart? | Yes — sessions JSON + history/frecency/harpoon/marks/graveyard files under `$XDG_STATE_HOME/spyc`. Workspace layout requires `spyc -r` to surface the picker. |
+
+Filed sibling plan thread `feature-pane-toggle-preserve-context` with options for fixing #1.
+
+tags: #observations #pane #toggle #pty #sessions #configuration #spy-parity
+
+<!-- Entry-ID: 01KRN9W52EZ60BTTXEP56YFHSN -->
