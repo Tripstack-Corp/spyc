@@ -314,3 +314,165 @@ Pointers (additions to the seed's list):
 - ROADMAP.md "Prompt templates" + "Generalized beam" (Thesis — Remaining) — parent items A1 and A6 collapse into
 
 <!-- Entry-ID: 01KRQYSQCX7AB6JDW3RRH5HNV1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-16T08:49:58.658230+00:00
+Role: planner
+Type: Note
+Title: Three zero-code workflows for spyc + Claude + Watercooler — and which to start with
+
+Spec: planner-architecture
+
+## Frame
+
+Constraint: **no new code in spyc, no new tools in WC.** Compose what's shipped today into an integrated workflow for the human-agent-team triangle the brief named:
+
+- **Navigator (spyc list)** = the human's input surface — keystrokes are intent, picks are scope, harpoon is "what I'm cycling between."
+- **In-pane Claude** = the driver — thinks aloud, calls MCP tools, mutates state when asked, captures decisions.
+- **Watercooler** = the shared, durable, branch-scoped, code-anchored memory the team (local + remote) collectively steers by.
+
+What's available without writing a line of new code:
+
+- Add WC MCP to the same in-pane Claude's `.mcp.json` (alongside spyc's MCP) so a single pane session has both writable tools. This is the load-bearing config change — everything below assumes it.
+- Spyc beam family: `^a s` (paths), `^a P` (file contents), `^a i` (inventory), `^a v` (mount pane scrollback in pager → visual yank). `gf`/`gF` jump back. `yp`/`yP` yank pane output / last typed prompt.
+- Spyc multi-tab pane: `^a c` new, `^a 1..9` switch — two Claude tabs is two agent personas, free.
+- Spyc state Claude can see (`get_spyc_context`) and mutate (`navigate_to`, `pick_files`, `set_filter`, `clear_picks`).
+- Spyc persistent surfaces Claude can lean on as memory: inventory (yank a prompt once, beam it many times), harpoon (per-project pinned set, 9 slots), marks, sessions (`-r` resume).
+- WC MCP from Claude: `list_threads`, `read_thread`, `search`, `smart_query`, `say`, `ack`, `handoff`, `set_status`, `annotate`, `find_similar`, plus `federated_search` for cross-namespace.
+- WC roles catalog (`planner`/`critic`/`implementer`/`tester`/`pm`/`scribe`) — set per-turn via `agent_func` string.
+- WC branch scoping is automatic: every entry already carries `Code-Repo`/`Code-Branch`/`Code-Commit` footers without anyone setting them.
+- Claude Code skills (`~/.claude/skills/*.md` or project-local) as the way to bind a workflow to a slash command.
+
+That's a fully-stocked kit. Three workflows below; my first pick at the bottom.
+
+---
+
+## Workflow 1 — Pickset → Thread (implicit scope capture)
+
+The clever move: **`^a s` becomes the implicit "start a thread"  gesture.** No new keystroke; the human's existing scope-declaration becomes the externalization trigger.
+
+**Human's loop:**
+
+1. Cursor around, multi-select 3–8 files with `t`/`T` (or restore a previous pickset from harpoon: `H1`–`H9`).
+2. `^a s` to beam the paths to the active Claude tab.
+3. Type the question/intent: *"thinking about how to refactor the listing watcher to handle deep recursion."*
+4. Return to navigating.
+
+**What Claude does** (because of a project-local `CLAUDE.md` or skill convention):
+
+- On first message of a session where paths were beamed, calls `get_spyc_context` to confirm the pickset and branch.
+- Derives a topic slug — `wip-<branch>-<3-word-summary>` — and `watercooler_say` with `entry_type=Plan`, body = the user's prompt + the pickset paths as a `Scope:` block + Claude's initial thinking.
+- On each meaningful turn after, posts a `Note` referencing the same topic, branch-scoped automatically.
+- On detected closure (PR merged, user types "ship it", or `:approvals` log shows a destructive action approved), posts a `Closure` entry.
+
+**Team layer:** Non-local teammates (or your own agents in another repo via federation) see new threads appear branch-scoped, each one anchored to the exact code commit and the exact file scope. They `ack` to indicate they've read; they `handoff` if they want to drive; they `set_status closed` when work resolves. Search across the team via `watercooler_federated_search "listing watcher"` — every conversation about that subsystem, across every contributor, surfaces.
+
+**Config cost (one-time):**
+
+- Add the WC MCP server to `.mcp.json` for the project (or to user-level `.claude/.mcp.json`).
+- Add ~10 lines to project `CLAUDE.md`: "When the user beams paths via spyc and follows with a substantive prompt, treat that as scope declaration: open or continue a WC thread, use `get_spyc_context` for scope, post `Plan` then `Note`s then `Closure`."
+- Optional: a `~/.claude/skills/scope-thread.md` skill that formalizes the same logic and gives the human a `/scope-thread` override.
+
+**Per-use cost:** zero. The human keeps the same `^a s`-and-talk rhythm; the artifact happens in the background.
+
+**Clever bit:** the pickset *is* the scope, and the scope was already going to happen — capturing it costs nothing.
+
+---
+
+## Workflow 2 — Morning Brief (ball-in-court inbox primed into the workspace)
+
+The clever move: **Claude reads the WC inbox and primes the navigator** — picks the right files, places the cursor, opens the relevant tab — so the human wakes into a workspace already organized around what needs attention.
+
+**Human's loop:**
+
+1. `spyc -r` to resume yesterday's session (or `spyc` fresh in the project).
+2. Type `/morning-brief` in the pane (or beam a yanked prompt from inventory — `i` → cursor to the saved prompt → `^a P`).
+3. Read Claude's one-paragraph summary.
+4. Either accept the staged workspace and dive in, or `clear_picks` and pick something else.
+
+**What Claude does:**
+
+- `watercooler_list_threads` with ball-mine filter.
+- For top 3 (by recency + my-was-the-last-ack pattern), `watercooler_read_thread summary_only=true`.
+- Cross-references the threads' referenced file paths with the project tree (`search_paths` or filesystem walk).
+- Picks the top-priority thread's files via `pick_files`; `navigate_to` the single most-relevant file; optionally `set_filter` to narrow the listing to the thread's neighborhood.
+- Writes a 3-sentence brief in the pane: *"3 threads waiting. Top: `bug-foo` (Derek handed off yesterday with a failing test in `src/walk.rs:142` — picked + cursor placed). Also: `feature-bar` (planner draft, needs your decision), `onboarding-x` (Codex finished, awaiting your ack)."*
+
+**Team layer:** This is the workflow that makes async handoffs *feel* synchronous. A remote teammate's `handoff` posted at 3am surfaces as the first thing you see at 9am, with your workspace already staged. Reciprocally — when you `handoff` to a remote agent or human, you know their morning will look the same.
+
+**Config cost (one-time):**
+
+- WC MCP in `.mcp.json` (same prereq as Workflow 1).
+- `~/.claude/skills/morning-brief.md` with the sequence above. ~30 lines.
+- Optional: yank a one-line invocation prompt into inventory so the human never has to type it (`yy` once; `^a P` daily).
+
+**Per-use cost:** one keystroke chord per morning. Time saved: 5–15 min of re-orientation per session boot.
+
+**Clever bit:** the navigator gets *primed*, not just *briefed*. The human re-enters their workflow with files already staged — the agent's read of the team's intent translates directly into spyc state.
+
+---
+
+## Workflow 3 — Planner / Critic per-tab pair (a team of two inside one pane)
+
+The clever move: **two Claude tabs in the same pane, with different agent_func identities, handing off to each other via WC instead of by copy-paste.** Simulates a team-of-two within a single human's session; produces the richest WC artifacts.
+
+**Human's loop:**
+
+1. `^a c` to ensure two pane tabs (tab 1 = planner, tab 2 = critic).
+2. In tab 1, prime with: *"You are the planner; agent_func `Claude Code:claude-opus-4-7:planner`. Draft a plan for X, post it to WC under topic `plan-x`, handoff to critic."*
+3. Switch to tab 2 with `^a 2`, prime with: *"You are the critic; agent_func `Claude Code:claude-opus-4-7:critic`. Read `plan-x` in WC and critique."*
+4. Critic posts critique, hands back to planner (or to the human via `set_ball`).
+5. Human reads both perspectives, makes the call, optionally posts a `Decision` entry themselves (via `:say` shorthand if it lands, or by asking either Claude to do so).
+
+Between tabs the human can beam pane scrollback (`^a v` → visual yank → switch tab → paste) but the *real* handoff lives in WC, so the conversation is durable and team-visible.
+
+**Team layer:** Every meaningful design decision in the project produces a thread with at least two perspectives recorded by name and role, plus the human's adjudication. Non-local teammates inherit not just "what was decided" but "what was the dissent." This is what WC's manifesto calls *"the thinking around code made durable."*
+
+**Config cost (one-time):**
+
+- WC MCP in `.mcp.json` (same prereq).
+- Two prompt yanks in inventory (planner-init, critic-init), or two skills `/planner-init` and `/critic-init`. ~10 lines each.
+- Optional: a `.spycrc.toml` keymap binding for "open second tab with critic prime" — `map <space>c2 …` — but plain `^a c` works.
+
+**Per-use cost:** one extra `^a 2` switch + one beamed prime per session per task. Saves the "I'll review this with fresh eyes tomorrow" overnight delay — the critic IS the fresh eyes, same session.
+
+**Clever bit:** WC is the medium of handoff between two AIs in the same pane, exactly as it would be between two humans on different machines. The fact that the "team" is one human + two personas of the same agent is irrelevant to the artifact's shape — which means the artifact is *already team-ready* the day a second human joins.
+
+---
+
+## Which first
+
+**Workflow 1 first.** Three reasons, in order of weight:
+
+1. **It's the substrate the other two need.** Workflow 2 has nothing useful to brief on if no one is writing meaningful threads. Workflow 3 produces rich artifacts but only sometimes, on designated tasks; Workflow 1 produces durable scope-tagged artifacts *on every meaningful interaction*. Adopt 1 first and 2/3 inherit a corpus to operate on.
+
+2. **The team-layer payoff kicks in immediately.** The instant the integration ships, every `^a s`-driven turn becomes a team artifact — without changing what the human types or how often. Non-local teammates start seeing branch-scoped, file-scoped, commit-anchored conversations the same day. Workflows 2 and 3 only help the *consumer* of those artifacts.
+
+3. **Per-use cost is zero, setup cost is the smallest.** The human's existing scope-declaration gesture (`^a s`) carries the externalization; the only behavior change is "the agent now also writes to WC." If the convention drifts (Claude forgets to post), the failure mode is "no new thread" — the work still happens. Compare to Workflow 3, which requires the human to remember the planner/critic ritual; if they forget, the artifact doesn't form.
+
+**Sequencing after that:** ship Workflow 1 → live with it for a week → use the now-rich thread corpus to add Workflow 2 (one skill file). Workflow 3 lands whenever a problem is meaty enough to want both perspectives. By the time all three are live, the human's loop is: navigator decides scope, pane drives the work, WC captures the team's collective intent — exactly the triangle the brief named.
+
+## Bootstrap shape for Workflow 1 (so this can graduate this week)
+
+Roughly three small artifacts, no code change to spyc:
+
+1. **`.mcp.json` addition** (in project root or `~/.claude/`): register the WC MCP server alongside spyc's existing entry. Two lines.
+2. **Project `CLAUDE.md` section** titled "Spyc + Watercooler integration" with the Workflow 1 convention spelled out (~15 lines). Includes the topic-naming pattern (`wip-<branch>-<slug>`), the three entry-type cues (Plan on first turn, Note on subsequent, Closure on resolution), and the explicit "do not write speculatively — only when paths are beamed AND the prompt is substantive."
+3. **`~/.claude/skills/scope-thread.md`** (optional but recommended): the same convention as a slash-command skill so the human can `/scope-thread` to force-trigger or override the auto-detection. Doubles as documentation of the convention.
+
+Test plan: one week of daily use; check `watercooler_list_threads` afterward; assess thread-per-meaningful-turn rate; adjust the trigger heuristic if too eager or too quiet.
+
+---
+
+**Pointers:**
+
+- `src/mcp.rs:914+` (spyc MCP tool registration)
+- WC `docs/MCP-CLIENTS.md` (how to add WC MCP to Claude Code's `.mcp.json`)
+- WC `docs/TOOLS-REFERENCE.md` (the say/ack/handoff/set_status surface this leans on)
+- spyc `README.md` "split pane" + "shell" sections (the `^a` family the human already uses)
+- spyc `ROADMAP.md` "Prompt templates" — *not needed* for any of the above; an inventory-yanked prompt + `^a P` substitutes today
+- WC `pulse_snapshot.py:293` — orthogonal; this workflow does not lean on the pulse daemon
+
+Ball flips to you for the graduation call. If Workflow 1 is the pick, I can draft the three bootstrap artifacts in a follow-up Plan thread anchored to a specific branch.
+
+<!-- Entry-ID: 01KRQZMNJWTH8S465E2EWDS5NZ -->
