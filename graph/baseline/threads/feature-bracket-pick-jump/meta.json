@@ -1,0 +1,11 @@
+{
+  "id": "thread:feature-bracket-pick-jump",
+  "type": "thread",
+  "topic": "feature-bracket-pick-jump",
+  "title": "feature bracket pick jump",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-16T10:22:27.943240+00:00",
+  "summary": "The thread discusses a feature request for a keyboard chord to jump between picked files in Gap, highlighting the lack of such a functionality and the resulting frustration. The main decision was to implement the feature, and the outcome is that it is now available, improving user experience by allowing easier navigation between selected files.",
+  "entry_count": 1
+}
