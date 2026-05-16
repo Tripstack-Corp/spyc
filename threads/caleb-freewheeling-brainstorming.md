@@ -476,3 +476,115 @@ Test plan: one week of daily use; check `watercooler_list_threads` afterward; as
 Ball flips to you for the graduation call. If Workflow 1 is the pick, I can draft the three bootstrap artifacts in a follow-up Plan thread anchored to a specific branch.
 
 <!-- Entry-ID: 01KRQZMNJWTH8S465E2EWDS5NZ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-16T09:56:25.522690+00:00
+Role: planner
+Type: Note
+Title: Reframe: spyc as the keyboard surface over Watercooler's collaborative substance
+
+Spec: planner-architecture
+
+## The thesis shift to honor
+
+Re-read the WC manifesto and the positioning threads — `positioning-context-not-coordination`, `watercooler-manifesto`, `reverse-centaur-risk-reduction-brainstorm`. The word that's moved is **surface**, not *layer* or *tool*.
+
+- The old framing: WC is a **layer** between code and conversation — a place where reasoning gets "stored alongside" the code. Passive, archival, write-mostly.
+- The current framing: WC is a **surface** the team *operates on* — the graph is "the central, searchable source of truth," daemons live and act on it, decisions emerge from it, federation extends it. Active, navigable, *substance you can move through*.
+
+That shift is more than vocabulary. "Layer" implies stratification — you put things into a layer and they sit there. "Surface" implies *interaction with* — you operate on a surface, you traverse it, you change it, you point at parts of it. WC has been quietly becoming a place agents and humans *act in*, not a place you *write down to*.
+
+Now look at `DESIGN.md` for spyc. The whole document is organized around the word **surface** — Layout components, Overlays, Transient surfaces, "One shape per job: pager / confirm / flash / prompt / overlay." The DESIGN philosophy is literally: *"If a feature feels like it needs a new surface, the answer is usually that an existing surface should be extended."*
+
+So spyc already speaks WC's new language. The seam between them isn't "integration." It's recognizing that **they're surfaces of the same shape**, and one (spyc) has a keyboard idiom optimized for fast jump-select-act traversal that the other (WC) hasn't grown yet.
+
+## The reframe
+
+> **spyc is the human's keyboard surface for jump-select-act over the collaborative substance. WC *is* that substance. The agent pane is one kind of action — the conversational kind — among many.**
+
+Three things move when you accept this:
+
+**1. The top pane is not just a file commander.** It's a *navigator* — and right now its rows happen to be files because that's the substance currently available. With WC MCP added to the in-pane Claude, the same vi idiom (`hjkl`, `t`/`T`, `gf`, `^a s`, `=`-filter, `F`, `:grep`, harpoon, marks, sessions) wants to extend cleanly over threads, entries, decisions, findings, facts. The dashboard's "tabs / sort / filter / expand entries" is *exactly* the spyc surface vocabulary. The dashboard exists because most teams don't have a keyboard surface for graph-shaped substance. Spyc already does — it just hasn't been pointed at the graph yet.
+
+**2. The "spy" half of the name acquires a second reading.** *Spy* isn't only a file commander reference; it's *observation, reporting, surveillance*. That's exactly what WC daemons do — silently watch, emit findings, never modify thread content unless explicitly tasked. The daemons are the **agent's spy-craft**; the top pane is the **human's spy-craft**. They meet at WC. The pane Claude isn't the only kind of agent in the loop — it's the conversational one. Daemons are the *quiet* ones. spyc as a surface should treat both as peers.
+
+**3. The agent pane stops being the headline.** Right now the README's positioning is "file commander that an agent can query." Under the reframe, the agent pane is *one action surface among several*. The substance is the collaborative graph; the human acts on it with keystrokes; the agent pane is the slow-conversation channel; daemons are the watcher channel; the dashboard is the visual channel. **spyc is the keyboard channel.** It's not less because of this — it's the *most agile* of the four, and the only one that lets the human move at vi speed across the whole substance.
+
+## What spyc's "spy" idiom would mean over the WC substance
+
+The three primitives — **jump**, **select**, **act** — applied beyond the filesystem.
+
+**Jump.** Today `gf`/`gF` jumps from a path in pane output to the file. `^a u` Quick Select picks URLs/paths/SHAs/IPs from pane output. Both already exist and both have an obvious extension: WC entry IDs and dashboard URLs are extractable strings; `^a u` *already* sees them today if the agent prints them. The only convention needed is "when Claude cites a WC entry, it prints the entry-ID inline." Then `^a u` → cursor onto entry ID → Enter does whatever the human bound it to (e.g. `read_thread` and dump into pager). **Jump from a thread mention to the thread is one keystroke from now.**
+
+**Select.** Today `t`/`T` multi-select files, picks are persisted per-directory, and `^a s` beams paths. The same shape applies to threads in a thread-list pager: visually-select rows, beam topic slugs to the agent as the next turn's context. *"Here are the three threads relevant to this decision — go critique."* No new state model; the pager already has `V` visual-line mode and `y` yank. The "rows are threads" view is one Claude skill (`/wc-list` returns a thread list into the pager) away.
+
+**Act.** Today `:cmd` runs spyc commands. With WC MCP, *any* command on the WC tool surface is one `:` away — by convention, not by code. The human types `:wc say <topic> "<title>"` and Claude executes it via MCP. The command line gains a *namespace* without spyc shipping a single new built-in. Same for `:wc ack`, `:wc hand`, `:wc set-status`, `:wc smart-query`. **The act dimension extends to the WC surface for free, mediated by the agent.**
+
+The pattern: every spyc primitive already has a generalization onto the WC substance that needs no new spyc code — just *agent-side conventions* and *one or two skill files*. The keyboard surface is forward-compatible with the substance; it's just been pointed at filesystems until now.
+
+## Five composed workflows that demonstrate the reframe (all zero-code)
+
+**W-A: The WC dashboard in your terminal.** A Claude skill `/wc-browse` calls `list_threads`, formats as a topic list with status / ball / age, beams into the pane; spyc's `^a v` mounts pane scrollback in the pager; `/` searches, `gf` jumps from any cited path to the file in spyc, `^a u` picks an entry ID, and another skill `/wc-open <id>` dumps the entry into the pager. This is the dashboard's "switch repos / sort / filter / expand" — but at vi-speed, anchored in the same window where the code lives. The dashboard becomes optional for terminal-resident teammates.
+
+**W-B: Daemons as ball-passers.** WC ships findings from `pulse_snapshot`, `decision_extractor`, JTB, DTE, project-pulse — all enableable now per `docs/DAEMONS.md`. A skill `/findings` calls `watercooler_daemon_findings`, lists them in the pane numbered, and the human triages by typing `1 ack 5 escalate 7 ignore`. Claude executes via `watercooler_acknowledge_finding` / promotes-to-thread / etc. The daemons become first-class non-human teammates whose findings flow through the same review surface as remote-teammate handoffs. **The team grows by N daemons without adding people.**
+
+**W-C: The collective-steering standup.** Stronger version of Workflow 2 from the prior entry. A skill `/standup` returns four buckets in one paragraph each: (1) daemon findings since I last looked, (2) ball-mine handoffs from teammates (local or remote, via `federated_search`), (3) decision candidates awaiting ratification (from decision-extractor), (4) stale threads I'm holding. The human triages from the keyboard; spyc state is primed for whichever thread is engaged first. **The "morning brief" becomes a true standup with the agent + daemons + remote teammates all represented in one paragraph.**
+
+**W-D: Search-as-navigation.** A skill `/wc-find "<query>"` runs `watercooler_search`; `/wc-think "<NL>"` runs `watercooler_smart_query`; `/wc-similar <entry-id>` runs `find_similar`. Results render into the pane with entry IDs inline. `^a u` extracts an ID, `/wc-open` reads it. The WC graph is now keyboard-traversable. Add `/wc-federate "<query>"` and the traversal crosses namespaces — the spyc repo, watercooler-cloud, watercooler-site — *the human navigates the team's collective graph as one substance.*
+
+**W-E: Federation as a workspace dimension.** The session knows its `PROJECT_HOME`. With `federated_search` configured, the human can expand-collapse the namespace constellation by passing a comma-separated `namespaces` arg via a skill `/wc-scope <namespaces>`. A status-bar suffix segment shows the current scope (`[wc:spyc+cloud+site]` vs `[wc:spyc]`). The same chord that today widens or narrows the file listing's `=`-filter now widens or narrows the *team substance* under consideration. **The federation dimension becomes a single keystroke.**
+
+## What this changes about the prior "Workflow 1 first" pick
+
+Workflow 1 (Pickset → Thread) still earns its place — but its role changes. It was framed as "the substrate the other workflows need." Under the reframe, it's better described as **the human's primary act-on-WC gesture** — `^a s` is no longer "send paths to Claude"; it's "declare scope on the collaborative surface." The pickset isn't input to a conversation; it's *a selection on the substance*. The thread that results is the *trace* of an action on the substance, not the *destination* of a conversation.
+
+A useful **Workflow 0** would precede it: **make the WC substance navigable from the keyboard at all** (= W-A, "dashboard in your terminal"). Without that, Workflow 1 produces threads no one navigates from spyc — and the team still goes to the browser to read them. With Workflow 0 in place, every thread Workflow 1 produces is immediately reachable via the same `^a u` / `/wc-open` / `gf` gestures the human already uses. The two compose; one is acting on the surface, the other is moving across it.
+
+Concretely, the bootstrap shape becomes:
+
+- **W-0 first** (read side): add WC MCP to `.mcp.json`, add three small skills — `/wc-browse`, `/wc-open <id>`, `/wc-find "<q>"` — and a convention that Claude renders entry IDs inline. **One day's work, no spyc code change.** This unlocks the keyboard-navigability of the substance.
+- **W-1 second** (write side): the Pickset → Thread convention from the prior entry. Now the threads it writes are immediately navigable from the keyboard, so the team payoff is bidirectional from day one.
+- **W-B, W-C, W-D, W-E** as elaborations on the navigation idiom now that the surface is keyboard-addressable.
+
+## How spyc's dynamism modulates this
+
+The "spy" half is dynamic — counts compose (`5j`), chords are short, marks/harpoon hold state, sessions persist, the limit filter (`=`) narrows on demand and clears with a single key. Modulating WC work through this dynamism:
+
+- **Counts**: `3<enter>` on a thread list opens three threads in three pager buffers; `[b`/`]b` walks them. Reading the team's overnight output is multi-buffer cycling, not modal context-switching.
+- **Harpoon**: pin five threads (`HW<a-e>`-style by convention) as the *current active set*; `=hW` filters the thread list to harpoon entries only. The human's working-set across threads becomes as durable as their working-set across files.
+- **Marks**: a mark on an entry ID is a bookmark into the team's reasoning — jump back to "what Derek decided about session-restore" with two keystrokes.
+- **Sessions** (`spyc -r`): session restore would resurrect not just the file tabs but the *active thread context* — the harpooned threads, the last-pager-state, the in-flight skill invocation. The team-context dimension of "what was I in the middle of" is recovered as cleanly as the file-context dimension.
+- **The limit filter**: spyc's `=` mechanic is the conceptual prototype for federation-scope toggling (W-E). One key narrows; one key clears. The substance contracts and expands under the human's hand at vi speed.
+
+This is where the reframe pays off most: WC's substance is the kind of thing that *wants* a vi-flavored navigator on top of it, and spyc already has every primitive needed. The dashboard is excellent for visual users; spyc is what keyboard-resident users have been missing. **They aren't competitors — they're two surfaces over the same substance, both first-class.**
+
+## The integrated worldview
+
+The collaborative substance lives in WC: a graph of code, decisions, reasoning, findings, facts, branch-scoped, multi-namespace, daemon-augmented. The human and agents act on it through different surfaces — visual (dashboard), conversational (pane Claude), automated (daemons), and **keyboard (spyc)**. The keyboard surface is the most agile and the most under-developed.
+
+spyc's top pane isn't a file commander with WC bolted on. It's the **keyboard surface for the entire substance**, and the filesystem happens to be one slice of that substance. The agent pane is the conversational surface, and Claude happens to be one (powerful) agent of many. The daemons are the silent surface. WC is what they all act on together.
+
+Under this framing, the things to do are no longer "add features to spyc that integrate with WC." They are:
+
+- **Extend the spyc keyboard idiom over WC's substance** (W-A through W-E, all zero-code today, all skill files).
+- **Treat daemons as team members** with the same review-and-act flow as remote humans (W-B).
+- **Use federation to make the team boundary fluid** (W-E) — peers across repos become as keyboard-reachable as files in the current project.
+- **Save the high-cost code-level work for things only spyc can do**: the subscriber socket, the proposal lane, the shadow picks, the spyc-side pulse — i.e. the ideas from the seed entry that *deepen* the surface, once the navigation idiom over the substance is established.
+
+The order of operations the prior entry implied — *integrate, then deepen* — is right; this entry just renames the integration. It's not "add WC to spyc"; it's **point spyc's existing surface at the substance WC has been building.**
+
+---
+
+**Pointers:**
+
+- WC `docs/DAEMONS.md` — the daemon catalog and finding tools that make W-B and W-C possible today.
+- WC `docs/FEDERATION.md` — `federated_search` and namespace mechanics for W-E.
+- WC `docs/TOOLS-REFERENCE.md` — `smart_query` / `find_similar` for W-D.
+- WC `docs/DASHBOARD.md` — the visual surface that spyc complements rather than replaces.
+- spyc `DESIGN.md` "Component vocabulary" + "Interaction philosophy" — the surface-organized worldview that aligns natively with WC's substance.
+- spyc `README.md` "What it is" — the existing positioning ("file commander Claude can query") is *narrower* than what the toolkit supports; the reframe widens it without changing any code.
+- WC `positioning-context-not-coordination` and `watercooler-manifesto` threads — the source material for the surface/substance vocabulary.
+
+Ball flips with this entry. If the reframe lands, the next move is W-0 (the three navigation skills + the entry-ID rendering convention) — that's the keystone, and it's a one-day's-work artifact, not a multi-week build.
+
+<!-- Entry-ID: 01KRR3E9MER3A0JFJR4TH2BD7A -->
