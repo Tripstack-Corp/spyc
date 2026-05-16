@@ -246,3 +246,71 @@ Everything else lives on [[D3 mutate-undo]] eventually being true. That's the st
 Ball flips with this entry. Pick any bullet to depth-test; I'll write a focused continuation under whichever you point at.
 
 <!-- Entry-ID: 01KRQXDKEK924JHM9DVWFWWY9E -->
+
+---
+Entry: Claude Code (caleb) 2026-05-16T08:35:15.482596+00:00
+Role: implementer
+Type: Note
+Title: Self-audit: redundancies and overclaims in the seed entry
+
+Spec: critic
+
+Audit of the seed entry [[01KRQXDKEK924JHM9DVWFWWY9E]] against shipped spyc/WC code and the current `ROADMAP.md`. I overclaimed novelty in three places and under-cited prior art in a couple more. Corrections below; ball stays where it is.
+
+## Genuine redundancy — should not have been top-level "ideas"
+
+**A1 (`!c`/`:c` bang-to-claude)** — substantially subsumed by the combination of two existing roadmap items: **Prompt templates in `.spycrc.toml`** and the *"Configurable sink targets"* axis of **Generalized beam** (ROADMAP "Thesis — Remaining"). What I called A1 is essentially "let those two land and bind a key chord to them." The novel bits inside A1 that survive the audit:
+
+- The *blocking* `!C` variant that renders a capture-style `[claude … 12s]` flash until claude's next stop event arrives. Reuses the existing capture pager lifecycle but with claude-as-the-process — a real new affordance, separable from prompt templates.
+- The counted fanout (`5!c <prompt>` to N most-recently-active claude tabs). Tiny extension, but not in the roadmap as written.
+
+The `yP` (yank-last-prompt) substrate at `src/app/mod.rs:6652` was wrongly absent from my pointers — it's the existing *inverse* direction (capture what the user typed *into* the pane) and shows the input-tracking plumbing is already there.
+
+**A6 (pane→pane beam relay)** — directly subsumed by the *"Configurable sink targets"* axis of **Generalized beam**, which already names "active tab, specific tab by index, system clipboard, arbitrary shell command, named sinks in `.spycrc.toml`." The only A6 bits that survive as elaborations rather than redundant top-level ideas:
+
+- Sink kind = "tab N within the same pane" (the roadmap mentions "specific tab by index" — this *is* that, just spelled out).
+- Sink kind = "peer spyc PID M" — new, but only meaningful once CounterTop (v1.60) discovers peers.
+
+Both A1 and A6 should have been written as *"when shipping Generalized beam, here are the agent-flavored sink kinds to include"* — i.e. concrete asks against an existing roadmap item, not standalone proposals.
+
+## Partial overlap / underclaimed prior art
+
+**B1 (workspace pulse)** — name clash with the existing **`PulseSnapshotDaemon`** in WC (`watercooler-cloud/src/watercooler_mcp/daemons/pulse_snapshot.py:293`) and the `setup-pulse-hook` CLI command (PostCompact hook for `watercooler-capture-theme`). The mechanism *is* different — the WC daemon is findings-only and observes WC state; mine writes `Note` entries observing *spyc* state at inflection points — but I should have positioned this as **"a spyc-side complement to the WC pulse daemon"**, not as a freestanding concept. Worth re-checking before depth-testing whether the existing pulse infrastructure can be extended (a new findings emitter sourced from spyc events over the subscriber socket) rather than building a parallel pulse path.
+
+**A7 (claude confirms via spyc confirm row)** — the confirm row itself is documented in DESIGN.md ("Confirm — typed-letter inline confirmation embedded in the prompt"). What's novel is *routing claude's destructive-tool confirmations to it*. Should have framed as **"extend the existing confirm surface to accept proposals from the pane"**, not as a new mechanism. Implementation-wise this becomes a small case in A2's proposal lane: a proposal whose verb is "confirm" renders in the confirm row instead of the rail.
+
+**C3 (`:say`/`:ack`/`:hand` wrappers)** — the WC operations themselves obviously exist; the novelty is purely the spyc-side command-line shape (default `code_path` to `PROJECT_HOME`, autosuggest topic from list_threads cache, prefill body from pane scrollback). Should be framed as **ergonomic affordance**, not as new functionality. Useful, smaller scope than I implied.
+
+## Roadmap-dependent (correctly cited but worth re-positioning)
+
+- **A3 (daemon-anticipated focus shift)** and **D2 (subscribe to spyc events)** both depend on **"Structured event stream (subscriber socket)"** (ROADMAP "Thesis — Remaining"). The subscriber socket is the actual locus of work; A3 is one *use case* for it (the agent-daemon use case) and probably belongs *inside* the subscriber-socket plan thread when that opens. D2 is just the agent saying "please ship the subscriber socket" — should be folded into the wishlist for that roadmap item, not stand alone.
+- **B5 (federated nav presence)** correctly cites v1.60 CounterTop. The novel bit is "WC as the presence bus." Fine as written.
+- **B7 (approvals → WC daemon)** correctly cites v1.51 `:approvals`. The novel bit is "make the approvals log a daemon-readable finding stream." Fine as written.
+
+## Net effect on the "graduate first" picks
+
+The three I nominated were [[A2 proposal-lane]], [[B1 workspace-pulse]], and [[D1 spyc_briefing]].
+
+- **A2** — fully novel after audit. Stands.
+- **B1** — needs the prior-art citation and a check on whether to extend the existing pulse daemon vs. build alongside. Still graduates, with that scoping note.
+- **D1** — fully novel after audit. Stands.
+
+## Items that survived the audit unchanged
+
+Fully novel, no existing equivalent in either codebase: **A2** (propose_action / command rail), **A4** (shadow picks namespace), **A5** (`mC{a-z}` claude-set marks), **B2** (decisions-from-picks daemon), **B3** (`=W<topic>` thread-as-filter and reverse `get_recent_thread_files`), **B4** (mark↔entry annotations with code-state-preserving jumps), **B6** (wake-up briefing), **C1** (`gW` chord family), **C2** (`iW` thread inventory overlay), **D1** (`spyc_briefing` composite tool), **D5** (`watercooler_subscribe` / `watercooler_what_changed_since`).
+
+Sub-items that survive the redundancy collapse of A1 and A6: the blocking `!C` variant, counted fanout (`5!c`), and "peer spyc PID" sink kind. These can graft onto the Generalized-beam / Prompt-templates roadmap items as concrete asks rather than living as standalone bullets.
+
+## Method note for future entries in this thread
+
+I should have run this audit *before* publishing the seed, not after. The seed entry was written against READMEs and ROADMAP at structural depth; redundancy-checking against shipped code requires the deeper read I did just now. For follow-up Plan threads on any of the surviving ideas, audit-first is the right discipline — saves the next reader from having to re-do this filtering.
+
+Pointers (additions to the seed's list):
+
+- `src/app/mod.rs:6652` (`yP` / pane-input tracking) — substrate for prompt-direction tools
+- `watercooler-cloud/src/watercooler_mcp/daemons/pulse_snapshot.py:293` (`PulseSnapshotDaemon`) — existing pulse infrastructure
+- `watercooler` CLI: `setup-pulse-hook` (PostCompact hook for `watercooler-capture-theme`)
+- DESIGN.md "Transient surfaces → Confirm" — existing confirm-row spec relevant to A7
+- ROADMAP.md "Prompt templates" + "Generalized beam" (Thesis — Remaining) — parent items A1 and A6 collapse into
+
+<!-- Entry-ID: 01KRQYSQCX7AB6JDW3RRH5HNV1 -->
