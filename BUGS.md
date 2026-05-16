@@ -1,11 +1,4 @@
 ### SMALL ###
-- `F10` / `^a \` (toggle pane) SIGKILLs the running claude (or
-  whatever) on close. No state preserved; re-toggle spawns a
-  bare process. Fix shape: hide-don't-destroy — keep `pane_tabs`
-  alive on toggle, add `state.pane_hidden: bool` that the
-  renderer respects, flip it instead of dropping the tabs.
-  Explicit kill stays via `^a-x` on each tab. Reported by
-  external contributor 2026-05-15 — daily-driver pain.
 - `J ?` should open the jump-history popup (spy-parity). The
   popup itself already exists at `App::show_jump_history_popup`
   but is only reachable via `J <Esc> <Space>`. Fix: in

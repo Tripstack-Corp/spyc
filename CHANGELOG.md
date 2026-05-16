@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`F10` / `^a-\` hides the pane instead of killing it.** Previous
+  behavior was destructive: `toggle_pane` set `pane_tabs = None`,
+  which dropped every `TabEntry`, which dropped every `PtyHost`,
+  which SIGKILLed the claude (or whatever) child via the
+  `Drop for PtyHost` chain. Daily-drivers lost their conversation
+  every time they wanted the full screen for a few seconds.
+  Replaced with a visibility flag (`state.pane_hidden: bool`):
+  toggle flips the flag; child ptys keep running in
+  `pane_tabs`; layout treats hidden as "no pane" so the file
+  list reclaims the middle region; re-toggle restores everything
+  unchanged. Discoverability: flash on hide is
+  `pane hidden — F10/^a-\ to show`. Explicit kill of a tab
+  remains via `^a-x` (`PaneCloseTab`); killing the *whole* pane
+  container is now an intentional multi-step act (close each tab
+  via `^a-x`), not a one-keystroke side effect. Sourced from
+  external-contributor analysis (Caleb Howard,
+  `feature-pane-toggle-preserve-context` thread).
+
 - **Worktree entry / exit re-anchors `PROJECT_HOME`.** Selecting
   an existing worktree via `W l` → digit, creating one via `W n`,
   or deleting one via `W d` now updates `state.project_home` to

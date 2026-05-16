@@ -745,6 +745,7 @@ impl App {
             pane_height_pct: 70,
             pane_zoomed: false,
             pane_focus_before_zoom: None,
+            pane_hidden: false,
             harpoon_filter_set: harpoon
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
@@ -2363,7 +2364,11 @@ impl App {
         //   than above the divider.
         let layout = Self::compute_layout(
             frame_area,
-            self.pane_tabs.is_some(),
+            // `pane_hidden` makes the toggle act like "no pane" for
+            // layout purposes — file list reclaims the full middle
+            // region. The pty stays alive in `pane_tabs`; just no
+            // rect for it this frame.
+            self.pane_tabs.is_some() && !self.state.pane_hidden,
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
@@ -4639,19 +4644,55 @@ impl App {
         }
     }
 
-    /// Open the split pane if it's closed, close all tabs if it's open.
+    /// Hide / show the bottom pane (or spawn it on first use).
+    ///
+    /// Three states:
+    ///   1. No tabs yet (`pane_tabs.is_none()`): spawn the default
+    ///      command. Same as before.
+    ///   2. Tabs exist and visible: flip `pane_hidden = true`. The
+    ///      child ptys keep running; render skips the pane area;
+    ///      `pane_focused` parks at false so keystrokes go to the
+    ///      file list. SIGWINCH is held off — the next show pass
+    ///      restores the prior pane geometry.
+    ///   3. Tabs exist and hidden: flip `pane_hidden = false`,
+    ///      restore focus to the pane. Children pick up wherever
+    ///      they left off.
+    ///
+    /// Why this is hide-don't-kill: previously toggle was destructive
+    /// (`pane_tabs = None`, `Drop for PtyHost` → SIGKILL on the
+    /// claude process group). Daily-drivers reported losing their
+    /// in-flight conversation every time they wanted the whole
+    /// screen for a few seconds. Explicit kill of a tab still goes
+    /// through `^a-x` (`PaneCloseTab`); destroying the *whole*
+    /// pane container is now a multi-step intentional act (close
+    /// each tab via `^a-x`), not a one-keystroke side effect.
     fn toggle_pane(&mut self) {
         if self.pane_tabs.is_some() {
-            self.pane_tabs = None;
-            self.state.pane_focused = false;
-            self.state.pane_zoomed = false;
-            self.state.pane_focus_before_zoom = None;
+            self.state.pane_hidden = !self.state.pane_hidden;
             self.needs_full_repaint = true;
-            self.state.flash_info("pane closed");
+            if self.state.pane_hidden {
+                // Park focus on the list while hidden. Keystrokes
+                // can't drive an off-screen pane sensibly. Zoom is
+                // mutually exclusive with hidden — clear it so a
+                // re-show doesn't try to render zoomed onto a
+                // newly-resized area.
+                self.state.pane_focused = false;
+                self.state.pane_zoomed = false;
+                self.state.pane_focus_before_zoom = None;
+                self.state.flash_info("pane hidden — F10/^a-\\ to show");
+            } else {
+                // Re-show: focus the pane so the next keystroke
+                // lands in the child. Matches the "I'm opening this
+                // because I want to interact with it" intent.
+                self.state.pane_focused = true;
+                self.state.flash_info("pane shown");
+            }
             return;
         }
+        // No pane container yet — spawn the default command.
         let cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
         self.open_pane_tab(&cmd);
+        self.state.pane_hidden = false;
     }
 
     /// Spawn a new pane tab. If no tabs exist, creates the container.

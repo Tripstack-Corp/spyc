@@ -172,6 +172,17 @@ pub struct AppState {
     /// Focus state captured at zoom-on, restored at zoom-off. `None`
     /// when not zoomed.
     pub pane_focus_before_zoom: Option<bool>,
+    /// `F10` / `^a-\` (TogglePane) toggles this. When true, the pane
+    /// row is hidden — render skips the pane area, layout treats it
+    /// as if no pane existed — but `pane_tabs` and every child pty
+    /// stay alive. Re-toggle flips it back; the rendered grid picks
+    /// up wherever the running processes left off. Previous behavior
+    /// was destructive (`pane_tabs = None`, SIGKILL via `Drop for
+    /// PtyHost`), which the user experienced as "I lost my claude
+    /// conversation every time I needed the whole screen for a
+    /// second."  Explicit kill of a tab still goes through `^a-x`
+    /// (`PaneCloseTab`).
+    pub pane_hidden: bool,
     pub rows: Vec<RowData>,
     pub last_grid: Grid,
     /// Monotonic counter bumped whenever the display row list changes.
@@ -1717,6 +1728,7 @@ mod tests {
             pane_height_pct: 30,
             pane_zoomed: false,
             pane_focus_before_zoom: None,
+            pane_hidden: false,
             rows: Vec::new(),
             last_grid: Grid {
                 cols: 1,
