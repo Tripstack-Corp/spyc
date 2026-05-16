@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`J ?` opens the jump-history popup (spy-parity).** The popup
+  already existed at `App::show_jump_history_popup` but was only
+  reachable via `J <Esc> <Space>` — two prerequisites a spy user
+  has no reason to know. The `?`-on-empty-buffer pattern already
+  worked for shell history (`!?`); extended the same handler in
+  `handle_vi_prompt_key` to recognize `PromptKind::Jump` and
+  route to the jump-history popup instead. Also fixed two stale
+  docstrings (`src/app/mod.rs:555-560` and `:7972-7976`) that
+  described an Esc-on-empty trigger that didn't exist in the
+  code. Help-overlay J line updated to advertise the `?`
+  affordance.
+
 - **`F10` / `^a-\` hides the pane instead of killing it.** Previous
   behavior was destructive: `toggle_pane` set `pane_tabs = None`,
   which dropped every `TabEntry`, which dropped every `PtyHost`,

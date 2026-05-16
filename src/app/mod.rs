@@ -553,10 +553,11 @@ pub struct App {
     background_tasks: BackgroundTasks,
     pending_history_pick: Option<LineEditor>,
     /// Snapshot of jump-history entries (newest first) for the popup
-    /// opened by `Esc` on an empty `J` prompt. While `Some`, an
-    /// `Enter` on the active pager chdirs to the entry at the
-    /// cursor; `^D` deletes the entry from history and the snapshot.
-    /// `None` when no jump-history popup is active.
+    /// opened by `?` on an empty `J` prompt (spy parity), or by
+    /// `<Space>` while the `J` editor is in Normal mode. While
+    /// `Some`, an `Enter` on the active pager chdirs to the entry at
+    /// the cursor; `^D` deletes the entry from history and the
+    /// snapshot. `None` when no jump-history popup is active.
     pending_jump_history: Option<Vec<String>>,
     /// Active F-finder state (filename fuzzy picker). When `Some`,
     /// the pager renders the picker UI and key input is intercepted
@@ -3719,19 +3720,34 @@ impl App {
             return PostAction::None;
         }
 
-        // `!?` — when the buffer is empty and the user types '?',
-        // immediately open the history editor (no Enter needed).
+        // `!?` and `J?` — when the buffer is empty and the user
+        // types '?', immediately open the matching history popup (no
+        // Enter needed). Mirrors spy's `J ?` muscle memory and
+        // matches the long-standing `!?` shell-history affordance.
+        // For `J`, the popup exists at `show_jump_history_popup` but
+        // was previously only reachable via `J <Esc> <Space>` — two
+        // prerequisites a spy user is unlikely to know.
         if key.code == KeyCode::Char('?') {
             if let Mode::Prompting(Prompt {
-                kind: PromptKind::ShellCmdCaptured,
+                ref kind,
                 ref buffer,
                 ..
             }) = self.state.mode
             {
                 if buffer.is_empty() {
-                    self.state.mode = Mode::Normal;
-                    self.show_history_popup();
-                    return PostAction::None;
+                    match kind {
+                        PromptKind::ShellCmdCaptured => {
+                            self.state.mode = Mode::Normal;
+                            self.show_history_popup();
+                            return PostAction::None;
+                        }
+                        PromptKind::Jump => {
+                            self.state.mode = Mode::Normal;
+                            self.show_jump_history_popup();
+                            return PostAction::None;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -7955,9 +7971,11 @@ impl App {
 
     /// Open a popup listing every entry in `jump_history`, newest at
     /// the top. j/k navigate, Enter chdirs to the cursored path,
-    /// ^D deletes the entry from history, q/Esc closes. Triggered by
-    /// hitting Esc on an empty `J` prompt -- since there's nothing to
-    /// throw away, the cancel turns into "show me my jumps."
+    /// ^D deletes the entry from history, q/Esc closes. Two triggers:
+    /// `?` on an empty `J` prompt (spy parity, the short reflex), or
+    /// `<Space>` while the `J` line editor is in Normal mode
+    /// (a vi-style alternative for users already exploring the
+    /// prompt's editor).
     fn show_jump_history_popup(&mut self) {
         let entries = self.state.jump_history.entries();
         if entries.is_empty() {

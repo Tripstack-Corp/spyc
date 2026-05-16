@@ -1,12 +1,4 @@
 ### SMALL ###
-- `J ?` should open the jump-history popup (spy-parity). The
-  popup itself already exists at `App::show_jump_history_popup`
-  but is only reachable via `J <Esc> <Space>`. Fix: in
-  `handle_vi_prompt_key`, route `?` on empty `J` buffer to the
-  popup, mirroring how `!?` already works for shell history at
-  `src/app/mod.rs:3719-3731`. Also fix stale docstrings at
-  `src/app/mod.rs:555-560` and `:7849-7853` that describe an
-  Esc-on-empty trigger that doesn't exist in the code.
 - PgUp/PgDn in the live (focused) pane should auto-enter
   `^a-v` scrollback mode with a single page move applied, so
   users without `^a` in their fingertips get a discoverable
