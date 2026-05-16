@@ -1,4 +1,41 @@
 ### SMALL ###
+- `F10` / `^a \` (toggle pane) SIGKILLs the running claude (or
+  whatever) on close. No state preserved; re-toggle spawns a
+  bare process. Fix shape: hide-don't-destroy — keep `pane_tabs`
+  alive on toggle, add `state.pane_hidden: bool` that the
+  renderer respects, flip it instead of dropping the tabs.
+  Explicit kill stays via `^a-x` on each tab. Reported by
+  external contributor 2026-05-15 — daily-driver pain.
+- `J ?` should open the jump-history popup (spy-parity). The
+  popup itself already exists at `App::show_jump_history_popup`
+  but is only reachable via `J <Esc> <Space>`. Fix: in
+  `handle_vi_prompt_key`, route `?` on empty `J` buffer to the
+  popup, mirroring how `!?` already works for shell history at
+  `src/app/mod.rs:3719-3731`. Also fix stale docstrings at
+  `src/app/mod.rs:555-560` and `:7849-7853` that describe an
+  Esc-on-empty trigger that doesn't exist in the code.
+- PgUp/PgDn in the live (focused) pane should auto-enter
+  `^a-v` scrollback mode with a single page move applied, so
+  users without `^a` in their fingertips get a discoverable
+  scroll affordance. Guard with `!is_alternate_screen()` (the
+  scroll-mode entry already does this) and with a modifier
+  (Shift-PgUp?) so claude's own PgUp handling isn't stolen.
+  Reported by external contributor 2026-05-15.
+- Pane-focus first-time hint: on the first time the user
+  focuses a pane this session, flash `^a-v scrolls history`
+  for a couple seconds. Pure discoverability, no behavior
+  change. Reported by external contributor 2026-05-15.
+- DSL gap: many `Action` variants are unbindable via
+  `.spycrc.toml` — `HarpoonAppend`, `SetMark(_)`, `JumpMark(_)`,
+  `PaneTabByIndex(_)`, the whole `Yank*` family, `Goto*`,
+  `WorktreeList`, `GitDiff*`. They exist as actions but
+  `src/config/dsl.rs::parse_action` doesn't accept them. Either
+  grow the parser or note explicitly which actions are
+  user-bindable. Reported by external contributor 2026-05-15.
+- `unmap` in the keymap DSL is parsed as `Ok(None)` with a
+  `// TODO: represent unbind` at `src/config/dsl.rs:53`. Users
+  can't currently remove built-in bindings cleanly. Wire it
+  through so `unmap <KEY>` actually unbinds.
 - should be able to reorder tabs?
 - support drag and drop features - give multiple options to the user e.g. send
   to lower pane as image, create new file (auto type detect), etc.

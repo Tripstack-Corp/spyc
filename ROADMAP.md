@@ -468,6 +468,14 @@ same commit.
   Architecture: curate each agent's native permission system, no
   pty-level interception. Six-phase plan in
   [`docs/AUTO_APPROVAL_PLAN.md`](docs/AUTO_APPROVAL_PLAN.md).
+- **v1.52 -- Pane state recovery.** Cross-restart continuity beyond
+  what `Session` JSON already captures. Phase 0: cosmetic vt100-grid
+  snapshot rendered as a faded backdrop on the just-respawned pane
+  until the new process produces output. Phase 1: MCP-side Claude
+  sid capture to eliminate the banner/JSONL race. Phase 2 (opt-in):
+  `[pane] use_tmux` flag that wraps each pane in a hidden tmux
+  session for real cross-restart process survival. Tiered design
+  written up in [`docs/PANE_RECOVERY_PLAN.md`](docs/PANE_RECOVERY_PLAN.md).
 - **v1.60 -- CounterTop.** A hub view above any one spyc instance.
   Discovery surface so peer spycs find each other, a HUD that
   aggregates per-workspace agent state, `--hub` mode for "launch one
