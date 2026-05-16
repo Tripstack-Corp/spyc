@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Markdown pager: loose-list bullets stay attached to their item
+  text.** Viewing a `.md` file with blank-line-separated bullets
+  (a *loose* list per CommonMark — what BUGS.md happens to be)
+  rendered as `•` alone on one line, then the item text on the
+  next line. Cause: pulldown-cmark wraps each loose-list item in a
+  `Paragraph`, and the paragraph-start handler unconditionally
+  flushed `current` to start a new line — dumping the bullet glyph
+  that `Tag::Item` had just pushed. Fix: new `just_started_item`
+  flag set by `Tag::Item`, honored by `Tag::Paragraph` to suppress
+  exactly that flush. Tight lists were already fine because
+  pulldown-cmark skips the Paragraph wrapper for them; added a
+  loose-list regression test to pin the new behavior.
+
 - **`J ?` opens the jump-history popup (spy-parity).** The popup
   already existed at `App::show_jump_history_popup` but was only
   reachable via `J <Esc> <Space>` — two prerequisites a spy user

@@ -74,6 +74,15 @@ struct Renderer<'t> {
     /// cell buffer instead of `current`. On `End(Table)` we render
     /// the collected rows into `lines` as an ASCII-aligned table.
     table: Option<TableBuilder>,
+    /// True for exactly one event after `Tag::Item` — long enough to
+    /// suppress the paragraph-start flush that would otherwise dump
+    /// the bullet glyph (`•`) onto its own line and leave the item's
+    /// text on the next line. pulldown-cmark wraps loose-list items
+    /// in `Paragraph` events; without this guard the bullet and
+    /// text get separated visually. Cleared on the next event
+    /// (whether it's the paragraph open we're guarding against or
+    /// a direct text event in a tight list).
+    just_started_item: bool,
 }
 
 struct TableBuilder {
@@ -113,6 +122,7 @@ impl<'t> Renderer<'t> {
             code_block: None,
             pending_link_url: None,
             table: None,
+            just_started_item: false,
         }
     }
 
@@ -280,7 +290,14 @@ impl<'t> Renderer<'t> {
     fn start_tag(&mut self, tag: Tag<'_>) {
         match tag {
             Tag::Paragraph => {
-                if !self.current.is_empty() {
+                // Inside a list item we want bullet + text on one
+                // line. pulldown-cmark wraps loose-list item content
+                // in a Paragraph; without this guard the flush at
+                // paragraph-start would dump the bullet glyph alone
+                // and put the item's text on the next line.
+                if self.just_started_item {
+                    self.just_started_item = false;
+                } else if !self.current.is_empty() {
                     self.flush_line();
                 }
             }
@@ -330,6 +347,9 @@ impl<'t> Renderer<'t> {
                     format!("{indent}\u{2022} "),
                     Style::default().fg(self.theme.status_path),
                 ));
+                // Tell the next paragraph-start to skip the flush so
+                // the bullet glyph stays attached to the item's text.
+                self.just_started_item = true;
             }
             Tag::Emphasis => {
                 self.style_mods |= Modifier::ITALIC;
@@ -857,6 +877,34 @@ mod tests {
         let lines = render_plain("- alpha\n- beta\n");
         assert!(lines.iter().any(|l| l == "\u{2022} alpha"));
         assert!(lines.iter().any(|l| l == "\u{2022} beta"));
+    }
+
+    /// Regression: a *loose* list (blank lines between items) wraps
+    /// each item in a Paragraph at the pulldown-cmark event level.
+    /// Before the `just_started_item` guard, the paragraph-start
+    /// flush would dump the bullet glyph onto its own line and leave
+    /// the item's text on the next line — visible as `•` + newline +
+    /// `text` in the pager (reported against BUGS.md when viewed via
+    /// the markdown viewer).
+    #[test]
+    fn loose_list_keeps_bullet_attached_to_item_text() {
+        let src = "- alpha\n\n- beta\n";
+        let lines = render_plain(src);
+        // First and second item content must be on the same row as
+        // their bullet — not orphaned to its own row.
+        assert!(
+            lines.iter().any(|l| l == "\u{2022} alpha"),
+            "expected `• alpha` together on one line; got: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "\u{2022} beta"),
+            "expected `• beta` together on one line; got: {lines:?}"
+        );
+        // And the bullet glyph must NOT appear as a standalone line.
+        assert!(
+            !lines.iter().any(|l| l == "\u{2022} " || l == "\u{2022}"),
+            "bullet glyph should not be on its own line; got: {lines:?}"
+        );
     }
 
     #[test]
