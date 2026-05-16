@@ -501,6 +501,16 @@ transition.
 Lower-priority items retained from the prior roadmap. Will graduate to
 one of the tracks above when picked up.
 
+- **Configurable startup pane tabs.** Let `.spycrc.toml` declare K
+  tabs that open in the bottom pane at launch, instead of just one.
+  Compact array form (`[pane] tabs = ["claude", "bash"]`) plus a
+  table form for per-tab cwd/label. No splits, no layout refactor —
+  uses the existing tab system. Plan in
+  [`docs/PANE_STARTUP_TABS_PLAN.md`](docs/PANE_STARTUP_TABS_PLAN.md),
+  which also captures the larger "real splits" ask (horizontal /
+  tree / grid options) as a deferred future direction with rationale.
+  No urgent driver; opportunistic land.
+
 - ~~**Markdown viewer with source/rendered toggle.**~~ Shipped
   v1.26.0. `pulldown-cmark` + a small custom renderer in
   `src/ui/markdown.rs`. `.md` / `.markdown` files open in
