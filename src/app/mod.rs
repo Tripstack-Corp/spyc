@@ -6184,7 +6184,7 @@ impl App {
             self.state.flash_error("pane is empty");
             return PostAction::None;
         }
-        match Self::copy_to_clipboard(&text) {
+        match crate::clipboard::copy(&text) {
             Ok(()) => {
                 let count = text.lines().count();
                 self.state
@@ -6211,7 +6211,7 @@ impl App {
             self.state.flash_error("pane scrollback is empty");
             return PostAction::None;
         }
-        match Self::copy_to_clipboard(&text) {
+        match crate::clipboard::copy(&text) {
             Ok(()) => {
                 let count = text.lines().count();
                 self.state
@@ -6220,17 +6220,6 @@ impl App {
             Err(e) => self.state.flash_error(format!("yank failed: {e}")),
         }
         PostAction::None
-    }
-
-    fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(text.as_bytes())?;
-        }
-        child.wait()?;
-        Ok(())
     }
 
     /// yf — yank the cursor file's absolute path to the system
@@ -6251,7 +6240,7 @@ impl App {
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        match Self::copy_to_clipboard(&text) {
+        match crate::clipboard::copy(&text) {
             Ok(()) => {
                 if paths.len() == 1 {
                     let preview: String = text.chars().take(80).collect();
@@ -6274,7 +6263,7 @@ impl App {
             self.state.flash_error("no prompt to yank");
             return PostAction::None;
         };
-        match Self::copy_to_clipboard(text) {
+        match crate::clipboard::copy(text) {
             Ok(()) => {
                 let preview: String = text.chars().take(60).collect();
                 let ellipsis = if text.len() > 60 { "…" } else { "" };
@@ -7359,7 +7348,7 @@ impl App {
     }
 
     fn yank_quick_select(&mut self, text: &str, kind_label: &str) {
-        match Self::copy_to_clipboard(text) {
+        match crate::clipboard::copy(text) {
             Ok(()) => {
                 let preview: String = text.chars().take(60).collect();
                 let ellipsis = if text.len() > 60 { "…" } else { "" };
