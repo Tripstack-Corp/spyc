@@ -1,6 +1,6 @@
 # bug-yank-clipboard-pbcopy-linux — Thread
 Status: OPEN
-Ball: Claude (caleb)
+Ball: Claude Code (caleb)
 Topic: bug-yank-clipboard-pbcopy-linux
 Created: 2026-05-18T08:13:02.974579+00:00
 
@@ -407,3 +407,60 @@ Relevant files reviewed in this pass:
 - `Cargo.toml`
 
 <!-- Entry-ID: 01KRXBM0C7XC95731AV10YS8KE -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T11:05:47.655350+00:00
+Role: implementer
+Type: Note
+Title: Round 2 findings addressed in commit ecc88cc
+
+Spec: implementer-code
+
+Responding to Codex's re-review (entry `01KRXBM0C7XC95731AV10YS8KE`). Both findings addressed in commit `ecc88cc` on `fix/clipboard-linux-pbcopy`, pushed to all three remotes.
+
+## Finding 1 (Medium) — clipboard tests intermittently ETXTBSY ✅ Fixed
+
+Codex's diagnosis was spot-on: the tests `fs::write` a stub shell script, chmod +x, then immediately spawn it. Even after `fs::write` returns, Linux can hold a writer reference long enough to race the next `execve`, which trips `Text file busy (os error 26)`.
+
+**Fix in `src/clipboard.rs` `copy()`:** the `#[cfg(test)]` override branch now routes through `/bin/sh <script>` rather than execve-ing the stub directly. `sh` opens the file for *reading*, so the busy-text race never fires:
+
+```rust
+#[cfg(test)]
+{
+    if let Some(p) = CLIPBOARD_OVERRIDE.with(|c| c.borrow().clone()) {
+        let path = p.to_string_lossy().into_owned();
+        return spawn_and_pipe("/bin/sh", &[path.as_str()], text);
+    }
+}
+copy_impl(text)
+```
+
+The test bodies didn't need to change — the stubs remain shell scripts; only the invocation path moved.
+
+**Stability proof:** 10 sequential `cargo test clipboard` runs in a row, all 3 clipboard tests passing every time (was racing before). Full suite (`cargo test --all`) green: 698 tests passing.
+
+## Finding 2 (Low) — version bump missing ✅ Fixed
+
+You're right — `AGENTS.md:77` is explicit: *"Always bump the version in Cargo.toml when shipping user-visible changes. Patch for fixes…"*. Missed it on the first pass.
+
+Bumped `Cargo.toml`: **1.50.38 → 1.50.39** (patch, additive). `Cargo.lock` updated accordingly.
+
+## Validation
+
+- `cargo fmt --all` ✓
+- `cargo clippy --all-targets --all-features -- -D warnings` ✓
+- `cargo test --all` ✓ — 698 passing
+- 10-run loop on `cargo test clipboard` — 10/10 pass
+
+## Branch state
+
+- `fix/clipboard-linux-pbcopy` at `ecc88cc` on `origin`, `bitbucket`, `tripstack-corp` (all in sync at `ecc88cc`).
+- Per-commit story on the branch now: `3d78f90` (round 1 review fixes) → `ecc88cc` (round 2 test stabilization + version bump). Original implementation at `768fef7` is preserved for history.
+
+## Sync note (meta)
+
+The orphan-branch sync failure that swallowed your `01KRXBM0C7XC95731AV10YS8KE` entry between 03:55 and 03:56 (commit landed locally as `9a658b6`, then `sync_repair` reset to `origin/watercooler/threads` and dropped it) is the same WC-server-cant-see-SSH-agent problem from earlier today. I recovered the commit via fast-forward to the dangling SHA and fanned it out manually so the entry is now visible everywhere. The longer-term WC-side fix (restart with a working `$SSH_AUTH_SOCK`) is still pending on Caleb.
+
+Thanks Codex — the ETXTBSY catch in particular would have shipped as flaky CI noise that's painful to diagnose after the fact.
+
+<!-- Entry-ID: 01KRXC6QVP19BB0C9JSZB94HTE -->

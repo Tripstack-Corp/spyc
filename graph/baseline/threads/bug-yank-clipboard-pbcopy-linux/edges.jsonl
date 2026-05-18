@@ -7,3 +7,5 @@
 {"source":"entry:01KRX8EZ5J6FSDD9NY1NZHDJB3","target":"entry:01KRXB0EEG1HET76APB7M6GRNT","type":"followed_by"}
 {"source":"thread:bug-yank-clipboard-pbcopy-linux","target":"entry:01KRXBM0C7XC95731AV10YS8KE","type":"contains"}
 {"source":"entry:01KRXB0EEG1HET76APB7M6GRNT","target":"entry:01KRXBM0C7XC95731AV10YS8KE","type":"followed_by"}
+{"source":"thread:bug-yank-clipboard-pbcopy-linux","target":"entry:01KRXC6QVP19BB0C9JSZB94HTE","type":"contains"}
+{"source":"entry:01KRXBM0C7XC95731AV10YS8KE","target":"entry:01KRXC6QVP19BB0C9JSZB94HTE","type":"followed_by"}
