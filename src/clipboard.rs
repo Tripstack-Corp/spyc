@@ -46,7 +46,16 @@ pub fn copy(text: &str) -> io::Result<()> {
     #[cfg(test)]
     {
         if let Some(p) = CLIPBOARD_OVERRIDE.with(|c| c.borrow().clone()) {
-            return spawn_and_pipe(p.to_string_lossy().as_ref(), &[], text);
+            // Route the override through `/bin/sh <script>` rather
+            // than execve'ing the script directly. Direct exec of a
+            // just-written file intermittently trips
+            // `Text file busy (os error 26)` on Linux even after
+            // `fs::write` has returned — the kernel can still hold a
+            // writer reference long enough to race the next exec.
+            // sh opens the file for reading, so the busy-text race
+            // goes away.
+            let path = p.to_string_lossy().into_owned();
+            return spawn_and_pipe("/bin/sh", &[path.as_str()], text);
         }
     }
     copy_impl(text)
