@@ -1075,3 +1075,33 @@ Optional fragments that appear conditionally:
 tags: #reference #status-bar #ui #discoverability
 
 <!-- Entry-ID: 01KRYKPCPBAY5VFY29VESRE2AE -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T22:36:28.651192+00:00
+Role: scribe
+Type: Note
+Title: session_name vs agent_info — two different identities in one status line
+
+Spec: docs
+
+The status bar shows two distinct identifiers that are easy to conflate. They're for completely different things.
+
+### `session_name` — handle for the **spyc workspace session**
+- A spice pair assigned at startup, e.g. `FENUGREEK_SAFFRON` (`src/state/session_names.rs:8-53`). Format: two distinct uppercase spice words separated by `_`; ~900 possible pairings, collision-safe for the per-user 20-session cap.
+- User-renameable via the `:name <NEW>` command (`src/ui/help.rs:152-154`; normalization at `src/state/session_names.rs:60+`).
+- Identifies one entry in spyc's saved-session list at `$XDG_STATE_HOME/spyc/sessions/<epoch-ms>.json`. The snapshot holds tab layout, per-tab cwd, `project_home`, `pane_height_pct`, `pane_focused`, `active_tab`, and per-tab agent resume tokens (`src/state/sessions.rs:71-89`).
+- Also fed into the host terminal's window title — `🌶️: spyc · FENUGREEK_SAFFRON` (`src/term_title.rs:58-69`), so you can disambiguate windows in your dock / tab list.
+- **TL;DR**: a memorable label so you can pick the right session row in the picker on next launch.
+
+### `agent_info` — live label for the **active bottom-pane agent**
+- Shown only when the focused bottom-pane tab is running a known coding agent (claude / codex / gemini); hidden for `bash`, `vim`, `make`, anything else (`src/app/mod.rs:2883-2905`, `AgentKind::Other` returns `None`).
+- Format: `claude:<8-hex>` / `gemini:<8-hex>` / bare `codex` (the codex short-id resolution is a follow-up — its rollout filenames encode the UUID but spyc doesn't parse them yet).
+- The hex is the short form of the agent's *own* resume id — claude's UUID-or-thread-name, gemini's UUID. That id is the resume token spyc uses to reattach to the same conversation across restarts.
+- Drives per-agent resume mechanics on session restore — Claude `/resume <token>` over stdin (CLI flag is regression-prone), Codex `codex resume <UUID>` directly, Gemini `--resume <index>` after a `--list-sessions` lookup (`src/state/sessions.rs:13-26`, `src/app/mod.rs:8064-8092`).
+- **TL;DR**: tells you which agent conversation the **active** pane tab is attached to right now, and is the token used to reattach to that same conversation after a restart.
+
+So `session_name` names the **whole spyc window state**; `agent_info` names the **conversation inside one pane tab**. A single spyc session can host several agent tabs, each with its own `agent_info`.
+
+tags: #reference #status-bar #session #agent-info #discoverability
+
+<!-- Entry-ID: 01KRYKQEB1KVAVSPMM3E2NP2Z4 -->
