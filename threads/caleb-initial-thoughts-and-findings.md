@@ -985,3 +985,55 @@ Spec: docs
 - `src/ui/help.rs:88-97` — graveyard chords (`:undo`, in-view `p` / `P` / `dd` / `Z`).
 
 <!-- Entry-ID: 01KRWYP9304BGYAR7BAN65ZEPJ -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T07:13:05.350126+00:00
+Role: scribe
+Type: Note
+Title: Addendum to scope one-pager: ^R reload, graveyard archive format, history file paths
+
+Spec: docs
+
+Refines (does not supersede) `01KRWYP9304BGYAR7BAN65ZEPJ`. The corrected table is materially right; this entry adds one missing chord and tightens two persistence descriptions after a second validation pass against source.
+
+## 1. Missing chord — `^R` (ReloadConfig)
+
+Manual config reload, complementary to the file-watcher live-reload already noted in the **Per-user config** row.
+
+- Key: `^R` (Ctrl-R).
+- Action: `Action::ReloadConfig` — re-reads `~/.spycrc.toml` + `<project>/.spycrc.toml` in the same hierarchy as startup.
+- Source: `src/keymap/action.rs:99` (`ReloadConfig, // ^R — re-read ~/.spycrc.toml + project config`); `src/keymap/resolver.rs:139` (`KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::ReloadConfig)`, inside the `if ctrl` block at resolver.rs:123).
+
+Suggested row patch (slot into the config rows):
+
+| **Manual config reload** | `^R` | (operation, not state) | n/a — re-reads both `.spycrc.toml` files in hierarchy | ✗ |
+
+## 2. Tighter wording — Graveyard persistence
+
+Previous: `$XDG_STATE_HOME/spyc/graveyard/` (archives).
+
+Tighter: `$XDG_STATE_HOME/spyc/graveyard/<uuid>.tar.zst` (zstd-compressed tarballs; one tarball per removed entry, with `<uuid>.json` sidecar metadata).
+
+- Source: `src/state/graveyard.rs:19,26,70-93` — explicit "tar.zst" archive shape, with `<uuid>.tar.zst` blob plus per-entry metadata struct tracking `paths_count` and compressed `size`.
+
+## 3. Tighter wording — Command/shell history persistence
+
+Previous: "History file under state dir, deduped."
+
+Tighter: `$XDG_STATE_HOME/spyc/history` (plain text, one command per line) for `:` `!` `;` prompt history; **separately** `$XDG_STATE_HOME/spyc/pane_history` for pane prompt history. Dedup is **move-to-end on push** (the new entry wins, prior duplicates are removed) — not a "consecutive only" dedup.
+
+- Source: `src/state/history.rs:1-4` (docstring); `:26` (default filename "history"); `:20` (separate `pane_history` file); `:61-66` ("Remove earlier duplicate (move-to-end dedup)") plus the `push_deduplicates_moves_to_end` test at `:201`.
+
+## What was right and didn't change
+
+Spot-checked the remaining rows to be sure:
+
+- **Picks** `t` / `T` / `^T` — resolver.rs:391 (bare `t`), 397 (bare `T`), 129 (`^T` inside ctrl block). ✓
+- **Sessions** filename pattern — `<epoch-ms>.json` per session (sessions.rs:5,100). ✓
+- **MCP context** — `.spyc-context-<pid>.json` written to project root via atomic temp-rename (context.rs:42,51). ✓
+- **Config hierarchy** — `~/.spycrc.toml` then `<cwd>/.spycrc.toml` with project winning, plus an explicit watcher tracking the loaded paths (config/mod.rs:1-5, 54, 242-243). ✓
+- **Cursor position** — no persistence code in `src/state/cursor.rs` or `src/app/state.rs`; the "never persisted across chdir or restart" claim holds. ✓
+
+The table in entry `01KRWYP9304BGYAR7BAN65ZEPJ` remains the canonical one-pager; treat this entry as three small fixes layered on top.
+
+<!-- Entry-ID: 01KRWYWMF77JFSSZNAFSSJ8NNR -->
