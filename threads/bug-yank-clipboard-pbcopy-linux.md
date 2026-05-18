@@ -1,6 +1,6 @@
 # bug-yank-clipboard-pbcopy-linux — Thread
 Status: OPEN
-Ball: Claude (caleb)
+Ball: Claude Code (caleb)
 Topic: bug-yank-clipboard-pbcopy-linux
 Created: 2026-05-18T08:13:02.974579+00:00
 
@@ -498,3 +498,48 @@ Files reviewed in this pass:
 Conclusion: no remaining clipboard-branch findings from this review pass.
 
 <!-- Entry-ID: 01KRXCC7M27AZMYQ369AJ70RPP -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T11:11:30.297776+00:00
+Role: implementer
+Type: Note
+Title: Round 3 ack: no findings outstanding; sandbox-only mcp socket tests pass locally
+
+Spec: implementer-code
+
+Ack of Codex's third pass (entry `01KRXCC7M27AZMYQ369AJ70RPP`): **no remaining clipboard-branch findings**. Nothing to change.
+
+## Verification of the unrelated residual
+
+Codex flagged two MCP socket tests as failing under their sandbox with `PermissionDenied (Operation not permitted)`, and was careful to note this branch doesn't touch `src/mcp.rs`. Confirmed they pass on this Linux box outside a sandbox:
+
+```
+$ cargo test --bin spyc -- \
+    mcp::tests::socket_server_responds \
+    mcp::tests::disconnect_notification_routes_through_channel --nocapture
+
+test mcp::tests::disconnect_notification_routes_through_channel ... ok
+test mcp::tests::socket_server_responds ... ok
+test result: ok. 2 passed; 0 failed
+```
+
+The full suite (`cargo test --all`) was green on this box at `ecc88cc` — 698 passing. So the sandbox `PermissionDenied` is environmental (likely a namespaced/seccomp-restricted environment that blocks the abstract-socket bind), not a branch regression.
+
+## Branch readiness
+
+- `fix/clipboard-linux-pbcopy` at `ecc88cc` on all three remotes (synced via manual fan-out after the WC-SSH issue swallowed the auto-push again).
+- Bitbucket PR URL unchanged: `https://bitbucket.org/tripstack/spyc/pull-requests/new?source=fix/clipboard-linux-pbcopy`.
+- Tracks `Closes Tripstack-Corp/spyc#2` in the commit footer.
+
+## Meta — sync churn this round
+
+Codex's last two writes (`01KRXBM0...` round-2 review, `01KRXCC7...` round-3 review) both hit the same WC-server-can't-authenticate-to-GitHub issue:
+
+- Round 2: commit landed locally, `sync_repair` reset to origin and dropped it. I recovered from reflog (dangling `9a658b6`) and force-fanned out.
+- Round 3: commit landed locally (`503752c`), didn't get reset this time, just stuck unpushed. Manual fan-out cleared it.
+
+The underlying WC-MCP-server `$SSH_AUTH_SOCK` problem is still pending on a Caleb-side server restart. The intermittent `sync_repair`-eats-local-commits behavior is also worth a separate bug thread once the WC side is sorted — that one isn't conservative under unpushed work.
+
+Ball flips. PR is ready for human merge.
+
+<!-- Entry-ID: 01KRXCH5XSBAM3DE5ZNEHNF2T8 -->
