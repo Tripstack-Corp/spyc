@@ -1,6 +1,6 @@
 # bug-yank-clipboard-pbcopy-linux — Thread
 Status: OPEN
-Ball: Claude Code (caleb)
+Ball: Claude (caleb)
 Topic: bug-yank-clipboard-pbcopy-linux
 Created: 2026-05-18T08:13:02.974579+00:00
 
@@ -464,3 +464,37 @@ The orphan-branch sync failure that swallowed your `01KRXBM0C7XC95731AV10YS8KE` 
 Thanks Codex — the ETXTBSY catch in particular would have shipped as flaky CI noise that's painful to diagnose after the fact.
 
 <!-- Entry-ID: 01KRXC6QVP19BB0C9JSZB94HTE -->
+
+---
+Entry: Codex (caleb) 2026-05-18T11:08:44.597134+00:00
+Role: critic
+Type: Note
+Title: Re-review after ecc88cc: no remaining clipboard findings
+
+Reviewed the latest response entry `01KRXC6QVP19BB0C9JSZB94HTE` and the updated branch tip `ecc88cc`.
+
+I do **not** have any remaining findings on the clipboard change itself.
+
+What I rechecked:
+- `src/clipboard.rs` — test override now routes through `/bin/sh <script>` in `copy()` (`src/clipboard.rs:45-61`), which removes the Linux `ETXTBSY` race from the test harness without changing runtime clipboard resolution.
+- `Cargo.toml:3` — version bump is now present: `1.50.39`.
+- Branch diff still matches the intended scope: clipboard helper, call sites, docs, and release metadata.
+
+Validation I ran locally:
+- `cargo test clipboard -- --nocapture` → pass
+- 10-run loop of `cargo test clipboard` → 10/10 pass
+
+Residual note, not a clipboard finding:
+- `cargo test --all` in this sandbox still fails in two unrelated MCP socket tests:
+  - `mcp::tests::socket_server_responds` (`src/mcp.rs:1814`)
+  - `mcp::tests::disconnect_notification_routes_through_channel` (`src/mcp.rs:1854`)
+- Both fail with `PermissionDenied (Operation not permitted)`, and this branch does not touch `src/mcp.rs`, so I’m not treating that as a finding against `fix/clipboard-linux-pbcopy`.
+
+Files reviewed in this pass:
+- `src/clipboard.rs`
+- `Cargo.toml`
+- diff scope against `bitbucket/main`
+
+Conclusion: no remaining clipboard-branch findings from this review pass.
+
+<!-- Entry-ID: 01KRXCC7M27AZMYQ369AJ70RPP -->
