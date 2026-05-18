@@ -106,7 +106,21 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
     if let Some(stdin) = child.stdin.as_mut() {
         stdin.write_all(text.as_bytes())?;
     }
-    child.wait()?;
+    // `wait()?` only surfaces wait-syscall failure, not a non-zero
+    // exit from the helper itself. xclip/wl-copy/xsel can launch
+    // cleanly and then fail (no compositor, archived display, dbus
+    // unreachable…) — we need to treat those as errors so the user
+    // sees the real reason instead of a phantom "yanked" flash, and
+    // so the Linux cascade doesn't get stuck on a present-but-broken
+    // helper. ErrorKind::Other is deliberate: callers in this module
+    // only fall through to the next candidate on `NotFound`, so
+    // non-zero-exit failures stop the cascade and surface immediately.
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "{prog} exited unsuccessfully: {status}"
+        )));
+    }
     Ok(())
 }
 
@@ -139,5 +153,31 @@ mod tests {
         let err = spawn_and_pipe("this-binary-does-not-exist-spyc-test", &[], "ignored")
             .expect_err("missing binary should error");
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_via_override_propagates_non_zero_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-fail.sh");
+        // Drain stdin so spyc's `write_all` doesn't fail with EPIPE
+        // before the helper exits — we want to exercise the
+        // *exit-status* path, not the stdin-broken-pipe path.
+        fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nexit 1\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let err = with_clipboard_override(&stub, || copy("ignored"))
+            .expect_err("non-zero exit should surface as error");
+        // Crucially NOT NotFound — the Linux cascade falls through
+        // only on NotFound, so a present-but-failing helper must
+        // produce a different ErrorKind to halt the cascade.
+        assert_ne!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            err.to_string().contains("exited unsuccessfully"),
+            "error message should mention non-zero exit, got: {err}"
+        );
     }
 }
