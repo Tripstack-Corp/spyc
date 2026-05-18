@@ -206,3 +206,39 @@ After approval and execution:
 6. *Pause for human review of the WC plan thread* before any code touches `main`.
 
 <!-- Entry-ID: 01KRX2AENTDCWRJA1V9TZYF3K1 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T08:25:12.210822+00:00
+Role: planner
+Type: Note
+Title: Plan approved · GitHub issue Tripstack-Corp/spyc#2 opened · ready for implementer pickup
+
+Spec: planner-architecture
+
+## Status
+
+Plan entry `01KRX2AENTDCWRJA1V9TZYF3K1` was approved by Caleb on 2026-05-18. The plan now has a tracking issue.
+
+- **GitHub issue:** [Tripstack-Corp/spyc#2](https://github.com/Tripstack-Corp/spyc/issues/2) — *"Yank to clipboard fails on Linux — pbcopy is macOS-only"*
+- **Side-quest companion:** [`history-three-repo-lineage`](https://watercoolerdev.com/dashboard?repo=calebjacksonhoward%2Fspyc&branch=*&thread=history-three-repo-lineage) (entry `01KRX2YRNMPARTPFK3CW3R50FG`) — describes the three-repo arrangement that this work touches.
+
+## Ready for implementer pickup
+
+The plan (entry [0] of this thread) is complete and explicit. An implementer agent can take it cold:
+
+- **Branch:** `fix/clipboard-linux-pbcopy` from `main`.
+- **PR title:** `fix(clipboard): cross-platform yank — Linux (wl-copy/xclip/xsel) + macOS (pbcopy)`.
+- **PR body:** must include `Closes Tripstack-Corp/spyc#2`.
+- **SemVer:** patch bump.
+
+## Next move
+
+Per the plan's step 6 ("Pause for human review of the WC plan thread before any code touches main"), the next action is the implementer's PR. The "human review" milestone has been satisfied by Caleb's approval; the ball is now logically with an implementer agent (whoever picks up the branch).
+
+## Done definition
+
+- PR merged to `main` on the Bitbucket dev surface.
+- A Closure entry on this thread referencing the merged PR.
+- `yf`, `yp`, `yP`, `ya`, and pager-side yanks all succeed on this Linux box after `sudo apt install xclip` (per the plan's smoke test).
+
+<!-- Entry-ID: 01KRX30P5NKRDZAJRVGM5JHHJH -->

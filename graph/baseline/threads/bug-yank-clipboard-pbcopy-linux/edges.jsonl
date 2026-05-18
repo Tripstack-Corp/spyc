@@ -1,1 +1,3 @@
 {"source":"thread:bug-yank-clipboard-pbcopy-linux","target":"entry:01KRX2AENTDCWRJA1V9TZYF3K1","type":"contains"}
+{"source":"thread:bug-yank-clipboard-pbcopy-linux","target":"entry:01KRX30P5NKRDZAJRVGM5JHHJH","type":"contains"}
+{"source":"entry:01KRX2AENTDCWRJA1V9TZYF3K1","target":"entry:01KRX30P5NKRDZAJRVGM5JHHJH","type":"followed_by"}
