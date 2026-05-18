@@ -5,7 +5,7 @@
   "title": "caleb-initial-thoughts-and-findings",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-18T07:13:05.353219+00:00",
+  "last_updated": "2026-05-18T22:35:55.682658+00:00",
   "summary": "The thread discusses comparisons between spy and spyc keymaps, navigation features for jump history, and scrollback functionality in the bottom pane, with key decisions on implementation details and outcomes related to usability and functionality.",
-  "entry_count": 8
+  "entry_count": 9
 }

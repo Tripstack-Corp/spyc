@@ -1037,3 +1037,41 @@ Spot-checked the remaining rows to be sure:
 The table in entry `01KRWYP9304BGYAR7BAN65ZEPJ` remains the canonical one-pager; treat this entry as three small fixes layered on top.
 
 <!-- Entry-ID: 01KRWYWMF77JFSSZNAFSSJ8NNR -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T22:35:55.574249+00:00
+Role: scribe
+Type: Note
+Title: Top status bar — every segment decoded
+
+Spec: docs
+
+Decoding the top-of-pane status line, e.g.
+
+` 🌶️   spyc  FENUGREEK_SAFFRON  ~/Downloads   claude:2c16d025  [picks:0 inv:0 m1:on m2:on hidden:1] `
+
+| Segment | Meaning | Source |
+|---|---|---|
+| 🌶️ | spyc logo (pepper emoji), no background | `src/ui/status.rs:79` |
+| `spyc` | `project_home` — basename of `PROJECT_HOME` (hidden if unset) | `src/ui/status.rs:13` |
+| `FENUGREEK_SAFFRON` | `session_name` — random spice-pair handle | `src/ui/status.rs:15` |
+| `~/Downloads` | active pane's cwd (truncated middle if narrow) | `src/ui/status.rs:16` |
+| `claude:2c16d025` | `agent_info` — bottom-pane agent label + short session id | `src/ui/status.rs:21-26` |
+| `[ … ]` | `suffix` — live state counters | `src/ui/status.rs:17-18` |
+
+**Suffix internals** (built in `src/app/mod.rs:2937-2946`):
+
+- `picks:N` — currently picked files (`state.picks.len()`)
+- `inv:N` — items stashed in the inventory (`state.inventory.len()`)
+- `m1:on|off` / `m2:on|off` — mask 1 / mask 2 toggles
+- `hidden:N` — entries hidden by current mask/filter (`total − shown`)
+
+Optional fragments that appear conditionally:
+- ` limit:<expr>` — active temporary filter; renders as `limit:picks` when filter is `!`
+- ` bg:N●` / ` bg:N●M✓` — running / done background-task counts. Only when no bottom-pane tabs are open (with tabs, this info renders in the divider above the pane instead).
+
+**Color band semantics** (powerline mode, `src/ui/status.rs:54-73`): warm brown for project, lavender for session, indigo for path, dark-blue for git, distinct accent for agent, darker for suffix. Mono mode falls back to a plain `project session: <path>  <suffix>` layout (`src/ui/status.rs:172-214`).
+
+tags: #reference #status-bar #ui #discoverability
+
+<!-- Entry-ID: 01KRYKPCPBAY5VFY29VESRE2AE -->
