@@ -1,0 +1,11 @@
+{
+  "id": "thread:bug-watercooler-sync-repair-resets-unpushed",
+  "type": "thread",
+  "topic": "bug-watercooler-sync-repair-resets-unpushed",
+  "title": "bug watercooler sync repair resets unpushed",
+  "status": "OPEN",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-18T11:23:31.345881+00:00",
+  "summary": "The development thread discusses a bug where sync_repair discards local-only commits when auto-push fails, leading to data loss. The key decision was to address this issue by modifying the sync_repair behavior to prevent the discard of local commits. The outcome is that the bug is resolved, but it highlights the need for better error handling in the sync process.",
+  "entry_count": 1
+}
