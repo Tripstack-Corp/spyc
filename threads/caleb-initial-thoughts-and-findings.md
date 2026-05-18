@@ -919,3 +919,69 @@ The table below was verified against source — `src/state/*.rs`, `src/keymap/{a
 - `src/keymap/resolver.rs` — chord-prefix state machine (`g`, `m`, `'`, `H`, `[`, `]`, `y`).
 
 <!-- Entry-ID: 01KRWWJM94E6PZBSNVF0T9TF3Y -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T07:09:36.831730+00:00
+Role: scribe
+Type: Note
+Title: Corrected: spyc state by scope — keystrokes × persistence × MCP write-access (one-pager)
+
+Spec: docs
+
+**Supersedes the prior entry** (`01KRWWJM94E6PZBSNVF0T9TF3Y`). Every row in this version was re-verified against `src/keymap/{action,resolver}.rs`, `src/state/*.rs`, `src/app/state.rs`, `src/state/ignore.rs`, and `src/ui/help.rs`.
+
+**What was wrong before:**
+
+- Mask toggles row claimed `i` toggled dotfiles. `i` actually toggles **inventory view**. The dotfile mask toggle is `a`. (resolver.rs:413 → `ToggleInventoryView`; resolver.rs:423 → `ToggleMask(1)`; help.rs:102 confirms `a` = "toggle mask 1 (dotfiles by default)".)
+- Graveyard row had `R` as the restore chord. `R` is unbound in the top-pane; restore is `:undo` (most-recent), or — inside the `gy` graveyard view — `p` (to cwd) / `P` (to original path). (help.rs:88-97.)
+- `J` was described as "frecency-ranked"; frecency is actually a **fallback completion source** when filesystem completion misses (app/mod.rs:4143). The prompt itself is a path-entry with command-history recall.
+- Yank-prefix sub-actions were under-specified: `yp` is yank-pane-output, `yP` is yank-last-prompt, `ya` is yank-pane-scrollback (help.rs:69-71).
+
+## Table
+
+| Feature | Keys / commands | Scope | Persistence | MCP-managed? |
+|---|---|---|---|---|
+| **Picks** (multi-select) | `t` toggle · `T` glob · `^T` all/clear · `=!` filter to picks | **Per-directory**, in-memory | None — lost on quit | ✓ `pick_files`, `clear_picks`, `search_picks` (R/W) |
+| **Limit filter** | `=<glob>` · `=!` picks · `=h` harpoon · `=g` / `=git` git-changed · `=` clears | **Per-session** (in-memory `temp_filter: Option<String>`) | None | ✓ `set_filter` (R/W) |
+| **Ignore masks** | `a` toggle mask 1 (dotfiles) · `o` toggle mask 2 (build artifacts) | **Per-session** | Defaults in config; toggles in-memory | ✗ |
+| **Project Home** | `gP` set to cwd · `gh` jump to it · `:project [.\|<path>\|clear]` | **Per-session**, auto-detected from `.git` at startup | Saved with session (`spyc -r`); else session-only | Exposed read-only via `get_spyc_context` |
+| **Cursor position / view-top** | `j` `k` `gg` `G` `^d` `^u` etc. | **Per-listing**, in-memory | Never persisted across chdir or restart | Cursor file exposed by `get_spyc_context` |
+| **Inventory** (file-ops staging) | `yy` take · `Y` untake (remove from inventory) · `p` put · `yf` yank path · `i` toggle inventory view · `z` clear (to graveyard) | **Per-user / global** | `$XDG_STATE_HOME/spyc/inventory/<id>.{json,dat}` | ✓ `search_inventory` (read only) |
+| **Yank-to-clipboard family** | `yf` cursor/picks path · `yp` pane output · `yP` last typed prompt · `ya` full scrollback | (operations, not state) | n/a | ✗ |
+| **Marks** (named bookmarks) | `m{a-z}` set · `'{a-z}` jump · `''` last dir · `` ` `` start dir | **Per-user / global** (single 26-slot namespace, *not* project-scoped) | `$XDG_STATE_HOME/spyc/marks.toml` | ✗ |
+| **Harpoon** (pinned working set) | `Ha` append · `H1`..`H9` jump · `Hx` remove · `Hh` menu · `=h` filter | **Per-project** (keyed by hash of `PROJECT_HOME`) | `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml` | ✗ |
+| **Sessions** | `spyc -r` / `--resume` CLI (tabs, cwd, pane, project_home etc.) | **Per-user / global** | `$XDG_STATE_HOME/spyc/sessions/*.json` | ✗ |
+| **Frecency** (J fallback completion) | `J` path prompt (`~` / `$VAR` expanded; history via `↑`/`↓`; frecency completes when filesystem completion misses) | **Per-user / global** (cross-project directory score) | `$XDG_STATE_HOME/spyc/frecency.json` | ✗ |
+| **Graveyard** (undo for deletes) | `gy` open view · `:undo` restore most-recent · in view: `p` restore to cwd, `P` restore to original, `dd`/`x` purge, `Z` purge all | **Per-user / global** | `$XDG_STATE_HOME/spyc/graveyard/` (archives) | ✗ |
+| **Worktrees** | `W l` list worktrees (pick to chdir) | **Per-project**, lives in git, not spyc | git metadata | ✗ |
+| **Git status overlay** | passive · `=g` / `=git` filter · `]g` / `[g` next/prev changed | **Per-directory**, refreshed live | None — recomputed from `git status` | ✗ |
+| **Command-line / shell history** | `:` `!` `;` prompts; `↑` / `↓` to browse | **Per-user / global** | History file under state dir, deduped | ✗ |
+| **Per-user config** | `~/.spycrc.toml` — keybindings, theme, masks, layout | **Per-user / global** | TOML file, live-reload on change | ✗ |
+| **Per-project config** | `<project>/.spycrc.toml` (overrides user config) | **Per-project** | TOML file in project root | ✗ |
+| **MCP socket** | implicit — Claude integration | **Per-session** (PID-scoped) | `.spyc-context-<pid>.json` in project root, atomic writes | All `mcp__spyc__*` tools read/write this surface |
+| **cwd** | every chdir | **Per-session** | Not persisted (but recoverable via session restore) | ✓ `navigate_to` (R/W) |
+
+`gh` = jump to PROJECT_HOME. `Hh` = open harpoon overlay menu. Different chords.
+
+## Scope notes worth knowing
+
+- **Single global state root:** `$XDG_STATE_HOME/spyc` (or `~/.local/state/spyc`) holds everything persistent. All disk-backed features live as subdirs/files under it. No project-local state dir; project-scoping is done by keying *into* global files (harpoon hashes the project path; marks don't scope at all).
+- **Marks vs harpoon, the key asymmetry:** marks are a single 26-slot global namespace — `ma` set in project A and project B *collide* (last write wins). Harpoon is the project-scoped equivalent: each project has its own independent 9-slot list. Choose accordingly — marks for "the doc I always want", harpoon for "the four files in *this* project I'm cycling between".
+- **Picks vs inventory:** both are multi-select-like, but picks are *per-directory, ephemeral, references to live paths* and inventory is *global, persistent, cached file copies*. `t` adds a pick; `yy` (take) lifts the cursor or all picks *into* inventory.
+- **MCP write surface is narrow:** Claude can only mutate picks, the limit filter, and cwd. Marks, harpoon, sessions, project_home, mask toggles, and the config files are **user-only** today — the agent can read them (via `get_spyc_context`) but not set them. That asymmetry is intentional per AGENTS.md / SECURITY.md.
+- **Per-session vs per-listing:** `temp_filter` is per-session (survives chdir — it's a `String` on `AppState`, not tied to a dir). Picks reset implicitly because they're keyed by absolute path and the listing changes. Cursor position resets at every chdir.
+- **Auto-detection at startup:** `project_home` is auto-set to the nearest `.git` ancestor of cwd; `XDG_STATE_HOME` defaults to `~/.local/state` if unset; config files are sought at both `~/.spycrc.toml` and `<project>/.spycrc.toml` with project winning.
+- **`spyc -r` is the only "save my state" gesture** — there is no `:w` or autosave. Everything not in a state file (picks, filter, mask toggles, cursor position) is forfeit on quit unless captured by a session.
+
+## Pointers (source of truth)
+
+- `src/state/mod.rs` — `state_root()` resolution (`$XDG_STATE_HOME/spyc` → `~/.local/state/spyc`).
+- `src/state/{picks,marks,harpoon,inventory,sessions,frecency,graveyard,history}.rs` — one module per persistent feature.
+- `src/state/ignore.rs:27-40` — `IgnoreMasks { mask1, mask2 }` with mask1 = `.*` (dotfiles), mask2 = build files.
+- `src/app/state.rs:570-605` — `apply_temp_filter` (the actual filter modes: `"!"`, `"h"`, `"git"`, glob).
+- `src/app/state.rs:1438-1454` — limit-filter prompt acceptance of `g`/`git`/`h`/`!`.
+- `src/keymap/action.rs` — full action catalog with one-line chord notes.
+- `src/keymap/resolver.rs:413-429` — `i` → `ToggleInventoryView`, `a` → `ToggleMask(1)`, `o` → `ToggleMask(2)`.
+- `src/ui/help.rs:88-97` — graveyard chords (`:undo`, in-view `p` / `P` / `dd` / `Z`).
+
+<!-- Entry-ID: 01KRWYP9304BGYAR7BAN65ZEPJ -->

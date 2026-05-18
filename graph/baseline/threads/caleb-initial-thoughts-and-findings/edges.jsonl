@@ -9,3 +9,5 @@
 {"source":"entry:01KRN86EDXWSEF18ZF9E7EPH1V","target":"entry:01KRN9W52EZ60BTTXEP56YFHSN","type":"followed_by"}
 {"source":"thread:caleb-initial-thoughts-and-findings","target":"entry:01KRWWJM94E6PZBSNVF0T9TF3Y","type":"contains"}
 {"source":"entry:01KRN9W52EZ60BTTXEP56YFHSN","target":"entry:01KRWWJM94E6PZBSNVF0T9TF3Y","type":"followed_by"}
+{"source":"thread:caleb-initial-thoughts-and-findings","target":"entry:01KRWYP9304BGYAR7BAN65ZEPJ","type":"contains"}
+{"source":"entry:01KRWWJM94E6PZBSNVF0T9TF3Y","target":"entry:01KRWYP9304BGYAR7BAN65ZEPJ","type":"followed_by"}
