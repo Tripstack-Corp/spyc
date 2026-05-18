@@ -1,6 +1,6 @@
 # bug-yank-clipboard-pbcopy-linux — Thread
 Status: OPEN
-Ball: Claude Code (caleb)
+Ball: Claude (caleb)
 Topic: bug-yank-clipboard-pbcopy-linux
 Created: 2026-05-18T08:13:02.974579+00:00
 
@@ -242,3 +242,58 @@ Per the plan's step 6 ("Pause for human review of the WC plan thread before any 
 - `yf`, `yp`, `yP`, `ya`, and pager-side yanks all succeed on this Linux box after `sudo apt install xclip` (per the plan's smoke test).
 
 <!-- Entry-ID: 01KRX30P5NKRDZAJRVGM5JHHJH -->
+
+---
+Entry: Codex (caleb) 2026-05-18T10:00:19.690283+00:00
+Role: critic
+Type: Note
+Title: Review findings on `fix/clipboard-linux-pbcopy`
+
+Reviewed `fix/clipboard-linux-pbcopy` against `bitbucket/main` (local `origin/main` is stale here, so `origin/main...branch` included unrelated already-merged work).
+
+Primary finding:
+
+1. High — `src/clipboard.rs:101-110`
+`spawn_and_pipe()` returns `Ok(())` whenever the helper process launches and `wait()` succeeds, even if the helper exits non-zero. `child.wait()?` only reports wait/syscall failure, not command failure. That means:
+- `wl-copy`/`xclip`/`xsel` can fail due to missing display/compositor/session issues and spyc will still flash a successful yank.
+- Linux fallback never advances to the next helper when the first helper exists on PATH but exits unsuccessfully.
+
+Suggested fix:
+- Check `status.success()` after `child.wait()?`.
+- If false, return an `io::Error` that includes the helper name and exit status.
+- In the Linux `try_one` path, continue to fall through only on `ErrorKind::NotFound`; return non-zero-exit failures immediately so the user sees the real reason.
+- Add a unit test using the existing test override to run a stub that exits `1`, and assert `copy()` returns an error rather than success.
+
+Secondary note:
+
+2. Low — docs are still incomplete for the user-visible install path.
+Files touched: `INSTALL.md`, `FEATURES.md`, `CHANGELOG.md`, `BUGS.md`.
+Still missing/partial:
+- `README.md` install/keybinding surfaces still advertise clipboard yanks with no Linux helper prerequisite.
+- `AGENTS.md` says user-visible behavior changes should update README/AGENTS when affected.
+
+Suggested doc follow-up:
+- In `README.md`, add a short Linux clipboard-helper note near install and/or the yank key table (`wl-copy`, `xclip`, `xsel`).
+- Update any examples that imply `pbpaste` portability if they’re meant to be cross-platform.
+- Only update `AGENTS.md` if you want the top-level behavior summary to mention the new clipboard backend; otherwise README is the more important gap.
+
+Validation I ran:
+- `cargo test clipboard -- --nocapture` passed.
+- I did not run the full suite.
+
+Relevant changed files reviewed:
+- `src/clipboard.rs`
+- `src/app/mod.rs`
+- `src/ui/pager.rs`
+- `src/main.rs`
+- `INSTALL.md`
+- `FEATURES.md`
+- `CHANGELOG.md`
+- `BUGS.md`
+
+Recommended next step for the spyc session:
+- Patch `src/clipboard.rs` exit-status handling first.
+- Add one regression test for non-zero helper exit.
+- Update README install/user docs, then run targeted tests plus `cargo test clipboard` again.
+
+<!-- Entry-ID: 01KRX8EZ5J6FSDD9NY1NZHDJB3 -->
