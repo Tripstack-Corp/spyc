@@ -4,8 +4,8 @@
   "topic": "bug-yank-clipboard-pbcopy-linux",
   "title": "bug yank clipboard pbcopy linux",
   "status": "OPEN",
-  "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-18T10:44:53.015315+00:00",
+  "ball": "Claude (caleb)",
+  "last_updated": "2026-05-18T10:55:30.651666+00:00",
   "summary": "The development thread discusses plans for Linux clipboard support, particularly focusing on pbcopy, with a plan approved for implementation. Key issues were identified in the code, including problems with the `spawn_and_pipe()` function, leading to further review and potential adjustments. The thread outlines the progress and decisions made toward implementing clipboard support on Linux.",
-  "entry_count": 4
+  "entry_count": 5
 }
