@@ -1105,3 +1105,51 @@ So `session_name` names the **whole spyc window state**; `agent_info` names the 
 tags: #reference #status-bar #session #agent-info #discoverability
 
 <!-- Entry-ID: 01KRYKQEB1KVAVSPMM3E2NP2Z4 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-18T22:37:09.340941+00:00
+Role: scribe
+Type: Note
+Title: Restarting spyc with a saved session, and reattaching the claude pane
+
+Spec: docs
+
+This supersedes the "session state not persisted across restarts" remark in entry [4] — it **is** persisted (and reattached, including the claude conversation), just only via the interactive picker. Documenting the actual workflow here.
+
+### 1) Launching spyc and choosing a saved session
+
+- Run `spyc -r` (or `spyc --resume`). The `-r` flag's only effect is to fire `show_session_picker()` once the app is fully constructed (`src/main.rs:46-48`, `src/app/mod.rs:877-879`).
+- The picker lists every saved session with: spice-name (`(unnamed)` if blank), relative age, cwd, tab labels, and a per-tab agent summary — `claude:<name> (<short-id>)` / `codex:<short-id>` / `gemini:<short-id>` (`src/app/mod.rs:7865-7918`).
+- Keys inside the picker: `j/k` navigate, `Enter` restore, `n` for new, `q` close (`src/app/mod.rs:7920-7927`).
+- **There is no `spyc --session FENUGREEK_SAFFRON` flag.** The spice name is purely a visible label so you can recognize the right row. Restore is always interactive.
+
+### 2) Does session restore also reattach the claude pane to its conversation?
+
+Yes — automatically. `restore_session` (`src/app/mod.rs:8027-8125`) walks the saved tabs and dispatches per agent kind using each tab's stored resume token:
+
+- **Claude**: spawn a **fresh** `claude` (the `--resume` CLI flag has a known regression that crashes at mount with non-empty `initialMessages`), then once the pty has settled, `pending_resume_send` types `/resume <sid>\r` into the pane's stdin to attach to the saved conversation (`src/app/mod.rs:8065`, `8096-8104`; comments at `src/state/sessions.rs:13-26` and `src/app/mod.rs:1438`, `5818-5825`). A watchdog (`src/app/mod.rs:311`, `5842`) auto-falls-back to a fresh `claude` if the restored tab looks broken.
+- **Codex**: spawned directly as `codex resume <UUID>` (its `--resume` flag works); falls back to `codex resume --last` with no saved id (`src/app/mod.rs:8064-8075`).
+- **Gemini**: spyc synchronously runs `gemini --list-sessions`, maps the saved UUID → its required positional index, then spawns `gemini --resume <N>`. Falls back to bare `gemini` if the binary isn't on `PATH` or the UUID isn't in the listing (`src/app/mod.rs:8076-8092`, `gemini_resume_index_for` at `:6152`).
+- **Other** commands (`bash`, `vim`, …): re-runs the saved command line; no conversation concept (`src/app/mod.rs:8093`).
+
+Single Enter in the picker → workspace **and** each agent pane back on its prior conversation.
+
+### 3) Restarting / reattaching claude from inside a running spyc
+
+Several paths, depending on intent (`src/ui/help.rs:189-214`):
+
+- **F9** — opens a new pane tab running `claude --resume`, which surfaces claude's *own* picker for any past conversation it knows about for this cwd (`src/ui/help.rs:193`, `src/app/mod.rs:9447` → `open_pane_tab("claude --resume")`).
+- **^a R** — restart the active tab's command (re-runs whatever launched it; for a plain `claude` tab that's a fresh claude in the same cwd).
+- **^a c** — new pane tab, prompts for command + cwd. Type `claude --resume <token>` to attach to a specific saved conversation directly. The `<token>` is the `(<short-id>)` shown next to `claude:<name>` in spyc's session picker.
+- **Inside the running claude itself** — type `/resume <token>`. This is exactly what spyc types into the pane on session restore. `/resume` alone opens claude's built-in picker.
+- **^a K / ^a x** then **^\\** (or **F10**) — close the tab, re-open a fresh bottom pane with the default command.
+
+### Worth noting
+
+- Save is **on quit**, not continuous — `src/state/sessions.rs:95-104` (`save_session`) writes one JSON file per session, pruned to `MAX_SESSIONS = 20`.
+- The `agent_session_id` field was renamed from `claude_session_id` in v1.41.6; the `#[serde(alias = "claude_session_id")]` keeps older saves loadable (`src/state/sessions.rs:42-56`).
+- Sessions that point at a directory that no longer exists short-circuit with a `session dir gone:` flash (`src/app/mod.rs:8036-8040`) — restore aborts safely instead of chdir'ing into a void.
+
+tags: #reference #session-restore #claude #codex #gemini #discoverability
+
+<!-- Entry-ID: 01KRYKRN99ZPTN0JS5YM5HC65C -->
