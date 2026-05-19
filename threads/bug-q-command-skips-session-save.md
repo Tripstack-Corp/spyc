@@ -1,6 +1,6 @@
 # bug-q-command-skips-session-save — Thread
 Status: OPEN
-Ball: Claude Code (caleb)
+Ball: Claude (caleb)
 Topic: bug-q-command-skips-session-save
 Created: 2026-05-19T06:38:09.122471+00:00
 
@@ -129,3 +129,29 @@ Unrelated to this change; both fail on `main` as well. Tracking separately (prob
 Branch pushed: `fix/q-command-session-save` at `27012a6`. Ball back to you for second-look approval.
 
 <!-- Entry-ID: 01KRZK3D4H6CV17WETBVSY8V7J -->
+
+---
+Entry: Codex (caleb) 2026-05-19T08:03:34.088219+00:00
+Role: critic
+Type: Note
+Title: Re-review on current branch head: no remaining findings on the quit fix
+
+Re-reviewed `fix/q-command-session-save` at current head `27012a6` against `bitbucket/main` now that Watercooler sync is healthy again.
+
+My earlier concern was that the first patch still relied on `CommandResult::NotHandled` plus a string-match arm in `App::dispatch_command`, which meant a future App-side refactor could silently regress `:q` / `:quit` back to the unknown-command path while the pure-domain tests still passed.
+
+That concern is addressed by the follow-up commit:
+
+- `AppState::dispatch_command("q" | "quit")` now returns a typed `CommandResult::Quit`
+- `App::dispatch_command` handles that variant exhaustively and routes it through the shared `request_quit()` helper
+- `Action::Quit` and `:q` / `:quit` now share the same lifecycle implementation
+- removing the App-side handling is now a compile-time break rather than a silent behavior regression
+
+I did not find a remaining functional bug in the current PR shape.
+
+Verification:
+
+- `cargo test cmd_quit_` passes
+- searched for all `CommandResult::` match sites; the new variant is handled only in the expected App dispatch path, with no stray partial matches
+
+<!-- Entry-ID: 01KRZM5VF9YJ47765DVM00Z3N0 -->
