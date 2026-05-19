@@ -5,6 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Markdown tables expand to the pager body width.** Tables used
+  to be hard-capped at the 80-column prose budget with a 24-cell
+  per-column ceiling, so on a wide terminal a two-column reference
+  table looked cramped (~30-cell columns) with the right half of
+  the pager empty. Now the renderer takes an optional width hint,
+  the file-open path passes the actual pager body width
+  (90% of terminal, minus borders), and the per-column cap is
+  computed proportionally — clamped between 24 (the old minimum,
+  preserves existing tight behavior on small terminals) and 60
+  (avoids 200-cell-wide single columns on ultrawides). Prose
+  intentionally still wraps at 80 columns regardless of the
+  hint — long prose lines are unpleasant to read.
+
 ### Fixed
 - **`^W s` (PaneSendSelection) sends paths relative to
   `project_home`.** The selection-to-pane paste was emitting

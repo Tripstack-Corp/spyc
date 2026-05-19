@@ -5360,7 +5360,15 @@ impl App {
                 // truncated files since markdown rendering of half a
                 // doc looks weird (broken refs, half-closed code
                 // fences).
-                let rendered = crate::ui::markdown::render(&content, &self.theme);
+                // Hint the markdown renderer at the actual pager body
+                // width so wide tables expand instead of wrapping into
+                // the 80-col prose budget. Centered overlay pager
+                // claims 90% of the terminal minus block borders;
+                // matches the `pager_inner_area` math.
+                let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+                let pager_w =
+                    crate::ui::pager::centered_body_width(term_w).saturating_sub(2) as usize;
+                let rendered = crate::ui::markdown::render(&content, &self.theme, Some(pager_w));
                 if self.state.config.markdown.open_as_rendered {
                     let mut v = PagerView::new_styled(name, rendered);
                     v.alt_lines = Some(source_lines);

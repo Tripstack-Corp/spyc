@@ -6,10 +6,11 @@
 //! changelogs viewed in the pager. The pager's `m` toggle swaps
 //! between this rendering and the syntect-highlighted source.
 //!
-//! Out of scope for v1: tables (TUI tables look mediocre), embedded
-//! HTML (passed through as text), images (alt text only). Footnotes
-//! and task lists work because pulldown-cmark's defaults handle
-//! them as inline events.
+//! Out of scope for v1: embedded HTML (passed through as text),
+//! images (alt text only). Footnotes and task lists work because
+//! pulldown-cmark's defaults handle them as inline events. Tables
+//! are supported as ASCII-bordered blocks; column widths adapt to
+//! the pager body width via the renderer's `table_width_hint`.
 //!
 //! Code blocks fall through to syntect when a language hint is given
 //! and the language is recognized; unrecognized languages render
@@ -21,12 +22,15 @@ use ratatui::text::{Line, Span};
 
 use crate::ui::theme::Theme;
 
-/// Maximum visual width of a single table column. Caps a runaway
-/// "very long content in one cell" from blowing past CONTENT_WIDTH.
-/// Per-column widths are *also* capped to fit the overall table
-/// inside CONTENT_WIDTH; this is the upper bound regardless of
-/// column count.
-const TABLE_MAX_COL_WIDTH: usize = 24;
+/// Per-column upper bound when the caller didn't supply a width hint
+/// (tests, programmatic use). Real renders pass an actual pager body
+/// width and the per-column cap is computed from it. See [`render`].
+const TABLE_MAX_COL_WIDTH_FALLBACK: usize = 24;
+
+/// Hard ceiling on a single table column even with vast amounts of
+/// terminal real estate. A 200-char-wide single column on an
+/// ultrawide monitor is unreadable; prefer wrapping past this.
+const TABLE_MAX_COL_WIDTH_CEILING: usize = 60;
 
 /// Target visual width for wrapped Markdown content, before any
 /// blockquote rule or list-item indent is added. 80 columns is the
@@ -34,18 +38,31 @@ const TABLE_MAX_COL_WIDTH: usize = 24;
 /// land in that range and stay scannable. The pager pane itself
 /// stays full-width so the user can still see other surrounding UI;
 /// just the content body is bounded.
+///
+/// Tables intentionally diverge: a wide reference table looks better
+/// using the actual pager width than padded out to 80. See the
+/// `table_width_hint` argument on [`render`].
 const CONTENT_WIDTH: usize = 80;
 
 /// Render a Markdown source string into styled lines suitable for
-/// the pager's `lines` field.
-pub fn render(source: &str, theme: &Theme) -> Vec<Line<'static>> {
+/// the pager's `lines` field. `table_width_hint` is the available
+/// pager body width in cells; when larger than [`CONTENT_WIDTH`],
+/// tables compute per-column widths against the hint instead of
+/// the prose target — wide reference tables in a wide pager get
+/// wide columns instead of being padded out to 80 columns with
+/// truncation/wrap. Pass `None` (or `Some(CONTENT_WIDTH)`) to
+/// keep the tight prose-width behavior.
+///
+/// Prose still wraps at `CONTENT_WIDTH` regardless of the hint;
+/// 200-char-wide prose lines are unpleasant to read.
+pub fn render(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> Vec<Line<'static>> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(source, opts);
-    let mut r = Renderer::new(theme);
+    let mut r = Renderer::new(theme, table_width_hint);
     for event in parser {
         r.handle(event);
     }
@@ -83,6 +100,12 @@ struct Renderer<'t> {
     /// (whether it's the paragraph open we're guarding against or
     /// a direct text event in a tight list).
     just_started_item: bool,
+    /// Target total width for tables, in cells. At least `CONTENT_WIDTH`;
+    /// larger when the caller hinted a wider pager. Drives both the
+    /// proportional-trim ceiling and the dynamic per-column cap in
+    /// `end_table`. Prose intentionally still wraps at `CONTENT_WIDTH`
+    /// regardless — long prose lines are unpleasant to read.
+    table_width: usize,
 }
 
 struct TableBuilder {
@@ -111,7 +134,12 @@ struct CodeBlockState {
 }
 
 impl<'t> Renderer<'t> {
-    const fn new(theme: &'t Theme) -> Self {
+    fn new(theme: &'t Theme, table_width_hint: Option<usize>) -> Self {
+        // Tables expand up to the hinted width when it exceeds the
+        // prose target. `max(CONTENT_WIDTH)` guarantees small hints
+        // (e.g. a 60-col terminal) don't *shrink* tables below the
+        // existing baseline — wider only.
+        let table_width = table_width_hint.unwrap_or(CONTENT_WIDTH).max(CONTENT_WIDTH);
         Self {
             theme,
             lines: Vec::new(),
@@ -123,6 +151,7 @@ impl<'t> Renderer<'t> {
             pending_link_url: None,
             table: None,
             just_started_item: false,
+            table_width,
         }
     }
 
@@ -529,16 +558,30 @@ impl<'t> Renderer<'t> {
         for row in &t.body {
             update_widths(row, &mut widths);
         }
-        // Per-column cap.
+        // Per-column cap. When the caller supplied a wider table
+        // budget (e.g. real pager body width on a 200-col terminal),
+        // compute the cap proportionally so a few columns each get a
+        // decent slice rather than every column getting hard-clamped
+        // at 24. Fallback (no hint, or budget == CONTENT_WIDTH)
+        // preserves the original tight cap so existing tests / small
+        // terminals keep their behavior.
+        let per_col_cap = if self.table_width > CONTENT_WIDTH {
+            // Frame overhead: 3 cells per column + 1 outer border.
+            let usable = self.table_width.saturating_sub(3 * n_cols + 1);
+            (usable / n_cols.max(1))
+                .clamp(TABLE_MAX_COL_WIDTH_FALLBACK, TABLE_MAX_COL_WIDTH_CEILING)
+        } else {
+            TABLE_MAX_COL_WIDTH_FALLBACK
+        };
         for w in &mut widths {
-            *w = (*w).clamp(3, TABLE_MAX_COL_WIDTH);
+            *w = (*w).clamp(3, per_col_cap);
         }
-        // Proportional trim if total > CONTENT_WIDTH. Each cell takes
+        // Proportional trim if total > table_width. Each cell takes
         // `width + 2` columns of frame (space-content-space) plus one
         // border char between cells (`│`) plus the two outer borders.
         // total = sum(w+2) + (n+1) = sum(w) + 3n + 1.
         let total_with_frame = |widths: &[usize]| widths.iter().sum::<usize>() + 3 * n_cols + 1;
-        while total_with_frame(&widths) > CONTENT_WIDTH {
+        while total_with_frame(&widths) > self.table_width {
             // Shrink the widest column by one. Stop if everything is
             // already at the floor of 3.
             let Some((idx, _)) = widths.iter().enumerate().max_by_key(|(_, w)| **w) else {
@@ -849,7 +892,7 @@ mod tests {
 
     fn render_plain(src: &str) -> Vec<String> {
         let theme = Theme::default();
-        render(src, &theme)
+        render(src, &theme, None)
             .iter()
             .map(|l| {
                 l.spans
