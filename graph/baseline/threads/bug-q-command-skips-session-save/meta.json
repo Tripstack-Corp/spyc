@@ -4,8 +4,8 @@
   "topic": "bug-q-command-skips-session-save",
   "title": "bug q command skips session save",
   "status": "OPEN",
-  "ball": "Claude Code (caleb)",
-  "last_updated": "2026-05-19T06:38:09.123827+00:00",
-  "summary": "The thread discusses a bug in Spyc's quit handling where the `:q` and `Q` commands skip session save, causing inconsistencies in session management. The issue arises from a mismatch in keybinding and session saving logic, leading to potential data loss. The summary highlights the need for proper session saving when quitting, with the focus on resolving the keybinding discrepancy.",
-  "entry_count": 1
+  "ball": "Claude (caleb)",
+  "last_updated": "2026-05-19T06:53:03.108739+00:00",
+  "summary": "The thread discusses a bug in the Q keybinding for the `:q` command, which skips session saving and does not confirm, leading to potential session loss. A review found no functional bugs but identified a gap in App-layer testing.",
+  "entry_count": 2
 }

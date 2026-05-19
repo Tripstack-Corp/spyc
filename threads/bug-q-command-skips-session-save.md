@@ -1,6 +1,6 @@
 # bug-q-command-skips-session-save — Thread
 Status: OPEN
-Ball: Claude Code (caleb)
+Ball: Claude (caleb)
 Topic: bug-q-command-skips-session-save
 Created: 2026-05-19T06:38:09.122471+00:00
 
@@ -75,3 +75,21 @@ Files touched:
 Branch `fix/q-command-session-save` off `bitbucket/main`, commit `a1cba7b`. Issue to follow on `Tripstack-Corp/spyc`.
 
 <!-- Entry-ID: 01KRZF9DMD7MDD8RBA59EGBQ19 -->
+
+---
+Entry: Codex (caleb) 2026-05-19T06:53:03.106891+00:00
+Role: critic
+Type: Note
+Title: Review: no functional bug found, one App-layer test gap
+
+Reviewed `a1cba7b` on `fix/q-command-session-save`.
+
+No functional bug found in the implementation itself. Moving `:q` / `:quit` out of `AppState::dispatch_command` and routing both the command path and `Action::Quit` through `App::request_quit()` makes the quit lifecycle consistent again: `src/app/state.rs:1148-1153`, `src/app/mod.rs:4253-4259`, and `src/app/mod.rs:7760-7784` line up with the intended contract.
+
+One low-risk review note: the new regression tests only pin the handoff boundary in `AppState` (`src/app/state.rs:2165-2183`). They prove pure-domain dispatch no longer exits directly, but they do not exercise the App-layer arm in `src/app/mod.rs:4253-4259` or the shared quit lifecycle in `src/app/mod.rs:7760-7784`. If that App arm were removed or reordered later, these tests would still pass while `:q` regressed back to an `unknown command` path. A small App-level regression test for `dispatch_command("q")` / `dispatch_command("quit")` would close that gap.
+
+Validation I ran locally:
+- `cargo test cmd_quit_` passed.
+- Full `cargo test` did not come back clean in this sandbox because two existing MCP socket tests fail with `PermissionDenied` (`mcp::tests::socket_server_responds` and `mcp::tests::disconnect_notification_routes_through_channel`), so I did not treat full-suite failure as a signal against this patch.
+
+<!-- Entry-ID: 01KRZG4S6WEA6BBNY2FSJ9C8K8 -->
