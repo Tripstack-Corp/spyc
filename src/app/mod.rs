@@ -4244,6 +4244,15 @@ impl App {
                 self.pager = Some(PagerView::new_plain(title, lines));
                 return PostAction::None;
             }
+            CommandResult::Quit => {
+                // Same lifecycle as the Q keybinding: double-tap
+                // confirm, running-process warning, save_session on
+                // confirm. The typed variant means removing this
+                // arm is a compile error — the wiring can't silently
+                // regress to "unknown command".
+                self.request_quit();
+                return PostAction::None;
+            }
             CommandResult::NotHandled => {}
         }
 
@@ -7731,6 +7740,39 @@ impl App {
 
     // ---- Session management --------------------------------------------------
 
+    /// Run the canonical quit lifecycle: first call arms a 2-second
+    /// confirm window (and flashes any running-process count); a
+    /// second call inside that window persists the session and sets
+    /// `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
+    /// and the `:q` / `:quit` command — both paths must save and warn
+    /// identically.
+    fn request_quit(&mut self) {
+        let now = std::time::Instant::now();
+        if self
+            .state
+            .quit_pending
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
+        {
+            self.save_session();
+            self.state.should_quit = true;
+        } else {
+            self.state.quit_pending = Some(now);
+            let running_panes = self.pane_tabs.as_ref().map_or(0, |tabs| {
+                tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
+            });
+            let running_bg = self.background_tasks.running_count();
+            let running = running_panes + running_bg;
+            if running > 0 {
+                self.state.flash_info(format!(
+                    "{running} running process{} — press again to quit",
+                    if running == 1 { "" } else { "es" }
+                ));
+            } else {
+                self.state.flash_info("press again to quit");
+            }
+        }
+    }
+
     fn save_session(&mut self) {
         use crate::state::sessions::{SavedTab, Session};
         let epoch_secs = crate::sysinfo::epoch_secs();
@@ -9565,32 +9607,7 @@ impl App {
             Action::Redraw => {
                 self.needs_full_repaint = true;
             }
-            Action::Quit => {
-                let now = std::time::Instant::now();
-                if self
-                    .state
-                    .quit_pending
-                    .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
-                {
-                    self.save_session();
-                    self.state.should_quit = true;
-                } else {
-                    self.state.quit_pending = Some(now);
-                    let running_panes = self.pane_tabs.as_ref().map_or(0, |tabs| {
-                        tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
-                    });
-                    let running_bg = self.background_tasks.running_count();
-                    let running = running_panes + running_bg;
-                    if running > 0 {
-                        self.state.flash_info(format!(
-                            "{running} running process{} — press again to quit",
-                            if running == 1 { "" } else { "es" }
-                        ));
-                    } else {
-                        self.state.flash_info("press again to quit");
-                    }
-                }
-            }
+            Action::Quit => self.request_quit(),
 
             Action::GotoFile | Action::GotoFileLine => {
                 let open_at_line = matches!(action, Action::GotoFileLine);

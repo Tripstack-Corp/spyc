@@ -28,6 +28,14 @@ pub enum CommandResult {
     Handled,
     /// Open the marks view in the pager. Carries the lines.
     OpenPager { title: String, lines: Vec<String> },
+    /// `:q` / `:quit`. Caller must run the full quit lifecycle
+    /// (`App::request_quit`) — pure-domain can't reach
+    /// `save_session()` or the pane/background-task counts. A typed
+    /// variant (rather than `NotHandled`) makes the App-side
+    /// exhaustive match a compile-time check: dropping the arm
+    /// breaks the build instead of silently regressing `:q` to an
+    /// "unknown command" path.
+    Quit,
     /// The input was a shell/pager/overlay command — caller should handle it.
     NotHandled,
 }
@@ -1145,10 +1153,14 @@ impl AppState {
             return CommandResult::Handled;
         }
 
-        // :q / :quit
+        // :q / :quit — defer to App so the path matches Action::Quit
+        // exactly (double-tap confirm, running-process warning, and
+        // save_session on confirm). Setting should_quit from
+        // pure-domain would skip pane teardown + session persistence.
+        // The typed `Quit` variant forces the App-side match to
+        // handle it; dropping that arm is a compile error.
         if input == "q" || input == "quit" {
-            self.should_quit = true;
-            return CommandResult::Handled;
+            return CommandResult::Quit;
         }
 
         // :limit [pattern]
@@ -2160,17 +2172,22 @@ mod tests {
     }
 
     #[test]
-    fn cmd_quit() {
+    fn cmd_quit_defers_to_app() {
+        // :q / :quit are App-layer commands now — they need save_session
+        // and the double-tap confirm, neither of which the pure-domain
+        // layer can see. Pure-domain must return the typed Quit variant
+        // (forcing the App-side match to handle it) and must NOT flip
+        // should_quit on its own.
         let mut s = test_state();
-        assert!(matches!(s.dispatch_command("q"), CommandResult::Handled));
-        assert!(s.should_quit);
+        assert!(matches!(s.dispatch_command("q"), CommandResult::Quit));
+        assert!(!s.should_quit);
     }
 
     #[test]
-    fn cmd_quit_long() {
+    fn cmd_quit_long_defers_to_app() {
         let mut s = test_state();
-        assert!(matches!(s.dispatch_command("quit"), CommandResult::Handled));
-        assert!(s.should_quit);
+        assert!(matches!(s.dispatch_command("quit"), CommandResult::Quit));
+        assert!(!s.should_quit);
     }
 
     #[test]

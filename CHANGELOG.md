@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`:q` / `:quit` now save the session and warn about running
+  processes, matching the `Q` keybinding.** Previously the two
+  quit surfaces diverged: `Action::Quit` (bound to `Q` / `^D`) ran
+  the full lifecycle — double-tap confirm, running-process count,
+  `save_session()` on the second press — while the `:q` colon
+  command in `AppState::dispatch_command` just flipped
+  `should_quit = true`, skipping persistence *and* the
+  "N running processes — press again to quit" warning. That
+  contradicted the user-facing contract documented in the
+  reserve-`q` flash (`"q reserved for future macro recording — Q
+  or :q to quit"` at `src/app/state.rs:1120`) and explained why
+  long-time `:q` users could quit thousands of times and still
+  see "no saved sessions" from `spyc -r`. Fix: pure-domain
+  dispatch returns a typed `CommandResult::Quit` variant for
+  `:q` / `:quit`; the App-side exhaustive match routes it
+  through a new `App::request_quit()` helper shared with
+  `Action::Quit`. The typed variant means a future refactor
+  that drops the App arm is a compile error rather than a
+  silent regression to "unknown command".
+
 - **Yank to clipboard now works on Linux.** Previously `yf`, `yp`,
   `yP`, `ya`, and every pager-side yank failed with
   `yank failed: No such file or directory (os error 2)` because both
