@@ -1,14 +1,12 @@
-# caleb-initial-thoughts-and-findings — Thread
+# caleb-initial-thoughts-and-findings
+
+Topic: caleb-initial-thoughts-and-findings
 Status: OPEN
 Ball: Claude Code (caleb)
-Topic: caleb-initial-thoughts-and-findings
-Created: 2026-05-15T05:38:39.223205+00:00
 
 ---
-Entry: Claude Code (caleb) 2026-05-15T05:38:39.223205+00:00
-Role: scribe
-Type: Note
-Title: First entry — spy → spyc keymap & action-vocabulary comparison matrix
+
+Entry: Claude Code (caleb) (scribe) [Note] - First entry — spy → spyc keymap & action-vocabulary comparison matrix @ 2026-05-15T05:38:39.223205+00:00
 
 Spec: docs
 
@@ -241,13 +239,9 @@ Provenance:
 - spyc keymap from the in-app `?` help overlay (194 lines); cross-validated against the Action enum.
 - Identity fallback: no `set_agent` tool surfaced this session; identity asserted via Role + Spec lines and `agent_func`.
 
-<!-- Entry-ID: 01KRN29MHY5FYWG59QTK0MQ3M1 -->
-
 ---
-Entry: Claude Code (caleb) 2026-05-15T06:18:23.642973+00:00
-Role: scribe
-Type: Note
-Title: Jump (J) investigation + harpoon vs. marks vs. jump-history
+
+Entry: Claude Code (caleb) (scribe) [Note] - Jump (J) investigation + harpoon vs. marks vs. jump-history @ 2026-05-15T06:18:23.642973+00:00
 
 Spec: docs
 
@@ -352,13 +346,10 @@ I'm proposing a small, low-risk feature whose scope is "wire `?` at empty J to t
 
 Identity fallback: no `set_agent` tool surfaced in this session; identity asserted via `agent_func`, Role and visible Spec line.
 
-<!-- Entry-ID: 01KRN4JCX7ECH6DCXSBMF2FT0S -->
 
 ---
-Entry: Claude Code (caleb) 2026-05-15T06:19:37.105461+00:00
-Role: scribe
-Type: Note
-Title: Bottom-pane scrollback — is it actually scrollable? (yes, but only via ^a v)
+
+Entry: Claude Code (caleb) (scribe) [Note] - Bottom-pane scrollback — is it actually scrollable? (yes, but only via ^a v) @ 2026-05-15T06:19:37.105461+00:00
 
 Spec: docs
 
@@ -450,13 +441,10 @@ Provenance:
 - `ROADMAP.md:158` (alt-screen scroll-mode hint), `:518-521` (pager refinements)
 - `TODO.md:237-240` (session forking), `:326-327` (pager refinements)
 
-<!-- Entry-ID: 01KRN4MMPT5BCPEH62BC01ZHPA -->
 
 ---
-Entry: Claude Code (caleb) 2026-05-15T07:21:46.732112+00:00
-Role: scribe
-Type: Note
-Title: Configuration reference — every user-facing knob in spyc
+
+Entry: Claude Code (caleb) (scribe) [Note] - Configuration reference — every user-facing knob in spyc @ 2026-05-15T07:21:46.732112+00:00
 
 Spec: docs
 
@@ -746,13 +734,10 @@ Edits take effect the moment you save (watcher), or you can press `^R` to force 
 
 Identity fallback: no `set_agent` tool surfaced this session; identity asserted via `agent_func`, Role, and visible Spec line.
 
-<!-- Entry-ID: 01KRN86EDXWSEF18ZF9E7EPH1V -->
 
 ---
-Entry: Claude Code (caleb) 2026-05-15T07:51:06.718747+00:00
-Role: implementer
-Type: Note
-Title: Pane-toggle context loss + pane/session config reference
+
+Entry: Claude Code (caleb) (implementer) [Note] - Pane-toggle context loss + pane/session config reference @ 2026-05-15T07:51:06.718747+00:00
 
 Spec: observer
 
@@ -860,71 +845,10 @@ Filed sibling plan thread `feature-pane-toggle-preserve-context` with options fo
 
 tags: #observations #pane #toggle #pty #sessions #configuration #spy-parity
 
-<!-- Entry-ID: 01KRN9W52EZ60BTTXEP56YFHSN -->
 
 ---
-Entry: Claude Code (caleb) 2026-05-18T06:32:40.617780+00:00
-Role: scribe
-Type: Note
-Title: spyc state by scope — keystrokes × persistence × MCP write-access (one-pager)
 
-Spec: docs
-
-Posted in response to "I'm keen to get familiar with the spyc features — like the jump-points that are project-scoped; those which are user-scoped; how those are managed and set — by the MCP tools and by the user in the spyc pane; any other scoped features."
-
-The table below was verified against source — `src/state/*.rs`, `src/keymap/{action,resolver}.rs`, `src/app/state.rs`. A few claims an earlier survey pass had wrong (`=i` as a filter mode; marks as project-scoped; `Wl` as spyc-owned state) are corrected here.
-
-## Table
-
-| Feature | Keys / commands | Scope | Persistence | MCP-managed? |
-|---|---|---|---|---|
-| **Picks** (multi-select) | `t` toggle · `T` glob · `^T` all/clear · `=!` filter to picks | **Per-directory**, in-memory | None — lost on quit | ✓ `pick_files`, `clear_picks`, `search_picks` (R/W) |
-| **Limit filter** | `=<glob>` · `=!` picks · `=h` harpoon · `=g` / `=git` git-changed · `=` clears | **Per-session** (in-memory `temp_filter: Option<String>`) | None | ✓ `set_filter` (R/W) |
-| **Mask toggles** | `i` dotfiles (mask1) · `o` build artifacts (mask2) | **Per-session** | Defaults in config; toggles in-memory | ✗ |
-| **Project Home** | `gP` set to cwd · `gh` jump to it · `:project [.\|<path>\|clear]` | **Per-session**, auto-detected from `.git` at startup | Saved with session (`spyc -r`); else session-only | Exposed read-only via `get_spyc_context` |
-| **Cursor position / view-top** | `j` `k` `gg` `G` `^d` `^u` etc. | **Per-listing**, in-memory | Never persisted across chdir or restart | Cursor file exposed by `get_spyc_context` |
-| **Inventory** (file-ops staging) | `yy` take · `p` put · `yf` yank path · `z` clear · `gy` graveyard view · `=!` shows picks-within-inventory in inv view | **Per-user / global** | `$XDG_STATE_HOME/spyc/inventory/<id>.{json,dat}` | ✓ `search_inventory` (read only) |
-| **Marks** (named bookmarks) | `m{a-z}` set · `'{a-z}` jump · `''` last dir · `` ` `` start dir | **Per-user / global** (single 26-slot namespace, *not* project-scoped) | `$XDG_STATE_HOME/spyc/marks.toml` | ✗ |
-| **Harpoon** (pinned working set) | `Ha` append · `H1`..`H9` jump · `Hx` remove · `Hh` menu · `=h` filter | **Per-project** (keyed by hash of `PROJECT_HOME`) | `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml` | ✗ |
-| **Sessions** | `spyc -r` / `--resume` CLI (tabs, cwd, pane, project_home etc.) | **Per-user / global** | `$XDG_STATE_HOME/spyc/sessions/*.json` | ✗ |
-| **Frecency** (jump-history) | `J` prompt (`~` / `$VAR` expanded, frecency-ranked) | **Per-user / global** (cross-project directory score) | `$XDG_STATE_HOME/spyc/frecency.json` | ✗ |
-| **Graveyard** (undo for deletes) | `gy` view · `R` restore · `:graveyard` | **Per-user / global** | `$XDG_STATE_HOME/spyc/graveyard/` (tar archives) | ✗ |
-| **Worktree list** | `Wl` | **Per-project**, lives in git, not spyc | git metadata | ✗ |
-| **Git status overlay** | passive · `=g` filter · `]g` / `[g` next/prev changed | **Per-directory**, refreshed live | None — recomputed from `git status` | ✗ |
-| **Command-line / shell history** | `:` `!` `;` prompts; `↑` / `↓` to browse | **Per-user / global** | History file under state dir, deduped | ✗ |
-| **Per-user config** | `~/.spycrc.toml` — keybindings, theme, masks, layout | **Per-user / global** | TOML file, live-reload on change | ✗ |
-| **Per-project config** | `<project>/.spycrc.toml` (overrides user config) | **Per-project** | TOML file in project root | ✗ |
-| **MCP socket** | implicit — Claude integration | **Per-session** (PID-scoped) | `.spyc-context-<pid>.json` in project root, atomic writes | All `mcp__spyc__*` tools read/write this surface |
-| **cwd** | every chdir | **Per-session** | Not persisted (but recoverable via session restore) | ✓ `navigate_to` (R/W) |
-
-`gh` = jump to PROJECT_HOME. `Hh` = open harpoon overlay menu. Different chords.
-
-## Scope notes worth knowing
-
-- **Single global state root:** `$XDG_STATE_HOME/spyc` (or `~/.local/state/spyc`) holds everything persistent. All disk-backed features live as subdirs/files under it. No project-local state dir; project-scoping is done by keying *into* global files (harpoon hashes the project path; marks don't scope at all).
-- **Marks vs harpoon, the key asymmetry:** marks are a single 26-slot global namespace — `ma` set in project A and project B *collide* (last write wins). Harpoon is the project-scoped equivalent: each project has its own independent 9-slot list. Choose accordingly — marks for "the doc I always want", harpoon for "the four files in *this* project I'm cycling between".
-- **Picks vs inventory:** both are multi-select-like, but picks are *per-directory, ephemeral, references to live paths* and inventory is *global, persistent, cached file copies*. `t` adds a pick; `yy` (take) lifts the cursor or all picks *into* inventory.
-- **MCP write surface is narrow:** Claude can only mutate picks, the limit filter, and cwd. Marks, harpoon, sessions, project_home, mask toggles, and the config files are **user-only** today — the agent can read them (via `get_spyc_context`) but not set them. That asymmetry is intentional per AGENTS.md / SECURITY.md.
-- **Per-session vs per-listing:** `temp_filter` is per-session (survives chdir — it's a `String` on `AppState`, not tied to a dir). Picks reset implicitly because they're keyed by absolute path and the listing changes. Cursor position resets at every chdir.
-- **Auto-detection at startup:** `project_home` is auto-set to the nearest `.git` ancestor of cwd; `XDG_STATE_HOME` defaults to `~/.local/state` if unset; config files are sought at both `~/.spycrc.toml` and `<project>/.spycrc.toml` with project winning.
-- **`spyc -r` is the only "save my state" gesture** — there is no `:w` or autosave. Everything not in a state file (picks, filter, mask toggles, cursor position) is forfeit on quit unless captured by a session.
-
-## Pointers
-
-- `src/state/mod.rs` — `state_root()` resolution (`$XDG_STATE_HOME/spyc` → `~/.local/state/spyc`).
-- `src/state/{picks,marks,harpoon,inventory,sessions,frecency,graveyard,history}.rs` — one module per persistent feature.
-- `src/app/state.rs:570-605` — `apply_temp_filter` (the actual filter modes: `"!"`, `"h"`, `"git"`, glob).
-- `src/app/state.rs:1438-1454` — limit-filter prompt acceptance of `g`/`git`/`h`/`!`.
-- `src/keymap/action.rs` — full action catalog with one-line chord notes.
-- `src/keymap/resolver.rs` — chord-prefix state machine (`g`, `m`, `'`, `H`, `[`, `]`, `y`).
-
-<!-- Entry-ID: 01KRWWJM94E6PZBSNVF0T9TF3Y -->
-
----
-Entry: Claude Code (caleb) 2026-05-18T07:09:36.831730+00:00
-Role: scribe
-Type: Note
-Title: Corrected: spyc state by scope — keystrokes × persistence × MCP write-access (one-pager)
+Entry: Claude Code (caleb) (scribe) [Note] - Corrected: spyc state by scope — keystrokes × persistence × MCP write-access (one-pager) @ 2026-05-18T07:09:36.831730+00:00
 
 Spec: docs
 
@@ -984,13 +908,9 @@ Spec: docs
 - `src/keymap/resolver.rs:413-429` — `i` → `ToggleInventoryView`, `a` → `ToggleMask(1)`, `o` → `ToggleMask(2)`.
 - `src/ui/help.rs:88-97` — graveyard chords (`:undo`, in-view `p` / `P` / `dd` / `Z`).
 
-<!-- Entry-ID: 01KRWYP9304BGYAR7BAN65ZEPJ -->
-
 ---
-Entry: Claude Code (caleb) 2026-05-18T07:13:05.350126+00:00
-Role: scribe
-Type: Note
-Title: Addendum to scope one-pager: ^R reload, graveyard archive format, history file paths
+
+Entry: Claude Code (caleb) (scribe) [Note] - Addendum to scope one-pager: ^R reload, graveyard archive format, history file paths @ 2026-05-18T07:13:05.350126+00:00
 
 Spec: docs
 
@@ -1036,13 +956,9 @@ Spot-checked the remaining rows to be sure:
 
 The table in entry `01KRWYP9304BGYAR7BAN65ZEPJ` remains the canonical one-pager; treat this entry as three small fixes layered on top.
 
-<!-- Entry-ID: 01KRWYWMF77JFSSZNAFSSJ8NNR -->
-
 ---
-Entry: Claude Code (caleb) 2026-05-18T22:35:55.574249+00:00
-Role: scribe
-Type: Note
-Title: Top status bar — every segment decoded
+
+Entry: Claude Code (caleb) (scribe) [Note] - Top status bar — every segment decoded @ 2026-05-18T22:35:55.574249+00:00
 
 Spec: docs
 
@@ -1074,13 +990,9 @@ Optional fragments that appear conditionally:
 
 tags: #reference #status-bar #ui #discoverability
 
-<!-- Entry-ID: 01KRYKPCPBAY5VFY29VESRE2AE -->
-
 ---
-Entry: Claude Code (caleb) 2026-05-18T22:36:28.651192+00:00
-Role: scribe
-Type: Note
-Title: session_name vs agent_info — two different identities in one status line
+
+Entry: Claude Code (caleb) (scribe) [Note] - session_name vs agent_info — two different identities in one status line @ 2026-05-18T22:36:28.651192+00:00
 
 Spec: docs
 
@@ -1104,13 +1016,9 @@ So `session_name` names the **whole spyc window state**; `agent_info` names the 
 
 tags: #reference #status-bar #session #agent-info #discoverability
 
-<!-- Entry-ID: 01KRYKQEB1KVAVSPMM3E2NP2Z4 -->
-
 ---
-Entry: Claude Code (caleb) 2026-05-18T22:37:09.340941+00:00
-Role: scribe
-Type: Note
-Title: Restarting spyc with a saved session, and reattaching the claude pane
+
+Entry: Claude Code (caleb) (scribe) [Note] - Restarting spyc with a saved session, and reattaching the claude pane @ 2026-05-18T22:37:09.340941+00:00
 
 Spec: docs
 
@@ -1152,4 +1060,4 @@ Several paths, depending on intent (`src/ui/help.rs:189-214`):
 
 tags: #reference #session-restore #claude #codex #gemini #discoverability
 
-<!-- Entry-ID: 01KRYKRN99ZPTN0JS5YM5HC65C -->
+---
