@@ -1,1 +1,3 @@
 {"source":"thread:bug-watercooler-sync-repair-resets-unpushed","target":"entry:01KRXD78HHKJ49AM5E02PGNHK7","type":"contains"}
+{"source":"thread:bug-watercooler-sync-repair-resets-unpushed","target":"entry:01KRZK09F1Y8CDAHMA9CX98J4C","type":"contains"}
+{"source":"entry:01KRXD78HHKJ49AM5E02PGNHK7","target":"entry:01KRZK09F1Y8CDAHMA9CX98J4C","type":"followed_by"}
