@@ -133,6 +133,14 @@
   day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
+- (fixed) Yank to clipboard on Linux. `yf`, `yp`, `yP`, `ya`, and
+  pager-side yanks failed with `yank failed: No such file or
+  directory (os error 2)` because both clipboard sites hard-coded
+  `pbcopy` (macOS-only). New `src/clipboard.rs` does the right
+  thing per platform: macOS = `pbcopy`; Linux = `wl-copy` (Wayland)
+  / `xclip` / `xsel` (X11), with an actionable error when none is
+  installed. Tracked at Tripstack-Corp/spyc#2 and WC thread
+  `bug-yank-clipboard-pbcopy-linux`.
 - (fixed, v1.41.32) Pane scrollback view (`^a-v`) opens
   cleanly: no jump (renderer-driven scroll-to-bottom on first
   frame); wrap on by default so long lines fold instead of

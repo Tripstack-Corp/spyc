@@ -84,6 +84,21 @@ cargo build --release
 install -m 755 target/release/spyc ~/.local/bin/
 ```
 
+## Clipboard helper (Linux only)
+
+The yank-to-clipboard features (`yf`, `yp`, `yP`, `ya`, and pager-side
+yanks) need a helper binary to push text onto the system clipboard.
+macOS uses the built-in `pbcopy`; Linux needs one of:
+
+- `wl-copy` (Wayland; `sudo apt install wl-clipboard`)
+- `xclip` (X11; `sudo apt install xclip`)
+- `xsel` (X11; `sudo apt install xsel`)
+
+spyc auto-detects the session — `wl-copy` when `$WAYLAND_DISPLAY` is
+set, otherwise `xclip` → `xsel`. With none installed, yanks flash
+`yank failed: no clipboard helper available — install xclip, xsel,
+or wl-copy`.
+
 ## Cross-compilation (optional)
 
 To build for Linux or create a macOS universal binary, you'll need a

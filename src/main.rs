@@ -1,6 +1,7 @@
 //! spyc — a vi-keyboard-driven file commander inspired by SideFX's spy.
 
 mod app;
+mod clipboard;
 mod config;
 mod context;
 mod debug_log;

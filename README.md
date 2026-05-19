@@ -65,6 +65,10 @@ The name: **spy** (inspired by SideFX's in-house file manager) +
   inside spyc to toggle a mono fallback if you don't have one.
   Install one with: `brew install --cask font-meslo-lg-nerd-font`
 - **Claude Code** (optional) -- `npm install -g @anthropic-ai/claude-code`
+- **Linux clipboard helper** -- yank-to-clipboard (`yf`, `yp`, `yP`,
+  `ya`, pager yanks) needs `wl-copy` (Wayland) or `xclip` / `xsel`
+  (X11). macOS uses the built-in `pbcopy`. See
+  [INSTALL.md](INSTALL.md#clipboard-helper-linux-only) for details.
 
 ### Install
 
@@ -156,6 +160,10 @@ file cache that survives across sessions.
 | `Y` | Remove cursor file from inventory |
 | `p` | Put inventory files into cwd |
 | `i` | Toggle inventory view |
+
+> Yank-to-clipboard uses `pbcopy` on macOS and `wl-copy` / `xclip` /
+> `xsel` on Linux (auto-detected). Install one of those on Linux —
+> see [INSTALL.md](INSTALL.md#clipboard-helper-linux-only).
 
 ### Graveyard (R-undo + soft-delete recovery)
 

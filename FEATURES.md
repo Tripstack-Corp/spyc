@@ -80,6 +80,12 @@ Two levels of selection for flexible file management.
   use without a pane (`git restore $(pbpaste)` etc.)
 - **yp** yank visible pane output to the system clipboard
 - **yP** yank the last prompt you typed into the pane to the clipboard
+
+  *Clipboard backend:* macOS uses built-in `pbcopy`; Linux uses
+  `wl-copy` (Wayland) or `xclip` / `xsel` (X11) — see INSTALL.md
+  for setup. With no helper on PATH, yanks flash an actionable
+  install hint.
+
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory
 - **i** toggle the inventory view (replaces the file listing)

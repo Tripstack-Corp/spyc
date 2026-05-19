@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Yank to clipboard now works on Linux.** Previously `yf`, `yp`,
+  `yP`, `ya`, and every pager-side yank failed with
+  `yank failed: No such file or directory (os error 2)` because both
+  clipboard sites unconditionally invoked `pbcopy` (macOS-only).
+  Extracted a single `src/clipboard.rs` helper with platform branches:
+  macOS keeps `pbcopy`; Linux tries `wl-copy` (when `$WAYLAND_DISPLAY`
+  is set), then `xclip -selection clipboard`, then `xsel -ib`, and
+  flashes `no clipboard helper available — install xclip, xsel, or
+  wl-copy` when none is on PATH. Deduped two identical bodies
+  (`src/app/mod.rs` and `src/ui/pager.rs`) into the new module. No
+  new crate dependency — mirrors the `cfg(target_os)` pattern from
+  `src/sysinfo.rs`. Closes Tripstack-Corp/spyc#2.
+
 - **Markdown pager: loose-list bullets stay attached to their item
   text.** Viewing a `.md` file with blank-line-separated bullets
   (a *loose* list per CommonMark — what BUGS.md happens to be)

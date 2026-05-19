@@ -437,7 +437,7 @@ impl PagerView {
     /// `# {title}` header (with one blank line of separation) so the
     /// pasted content keeps its source context.
     pub fn yank_to_clipboard(&self, include_title: bool) -> std::io::Result<()> {
-        pbcopy(&self.with_title_header(self.source_text(), include_title))
+        crate::clipboard::copy(&self.with_title_header(self.source_text(), include_title))
     }
 
     /// Yank the *visible* content to the system clipboard. For
@@ -453,10 +453,10 @@ impl PagerView {
             .map(line_plain_text)
             .collect::<Vec<_>>()
             .join("\n");
-        pbcopy(&self.with_title_header(text, include_title))
+        crate::clipboard::copy(&self.with_title_header(text, include_title))
     }
 
-    /// Build the optional header + body string handed to `pbcopy`.
+    /// Build the optional header + body string handed to the clipboard helper.
     /// Empty title or `include_title == false` ⇒ body returned as-is.
     /// Header format: `# {title}` then one blank line, so a paste
     /// into code/chat reads as a comment line followed by content.
@@ -621,24 +621,11 @@ impl PagerView {
                     .join("\n")
             }
         };
-        pbcopy(&self.with_title_header(text, include_title))?;
+        crate::clipboard::copy(&self.with_title_header(text, include_title))?;
         let count = hi - lo + 1;
         self.visual = None;
         Ok(count)
     }
-}
-
-/// Pipe `text` to `pbcopy`. Shared by both yank-source and
-/// yank-visible so they only differ in *which* text they hand off.
-fn pbcopy(text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(text.as_bytes())?;
-    }
-    child.wait()?;
-    Ok(())
 }
 
 impl PagerView {
@@ -2264,7 +2251,7 @@ mod tests {
         let sel = view.visual.unwrap();
         let (lo_col, hi_col) = sel.col_range();
         assert_eq!((lo_col, hi_col), (0, 3));
-        // We can't exercise the pbcopy side from a unit test, but
+        // We can't exercise the system-clipboard side from a unit test, but
         // the slice math is what we want to verify. Reproduce the
         // same logic the yank uses:
         let plain: Vec<String> = view
