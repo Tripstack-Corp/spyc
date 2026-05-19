@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`^W s` (PaneSendSelection) sends paths relative to
+  `project_home`.** The selection-to-pane paste was emitting
+  absolute paths, so a Claude (or shell) session running inside
+  the project received `/Users/.../src/foo.rs` when the agent
+  would expect `src/foo.rs`. Paths inside `project_home` now
+  strip the project prefix; the project root itself becomes `.`;
+  paths *outside* `project_home` stay absolute rather than walking
+  up with `../../..` (rare and rarely intended). No change to
+  other `selection_paths()` consumers — file commands, shell `%`
+  expansion, `:grep`, etc.
+
 - **Session save anchors on `project_home`, which now always
   defaults to the launch dir.** Two changes:
 
