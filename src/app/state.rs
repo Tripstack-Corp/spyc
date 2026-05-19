@@ -154,6 +154,23 @@ pub struct AppState {
     pub quit_pending: Option<std::time::Instant>,
     pub git_info: Option<String>,
     pub git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
+    /// Cached mtime pair of `.git/index` and `.git/HEAD` from the
+    /// last successful `refresh_git_state` call. The 1 Hz poll
+    /// short-circuits when both files' current mtimes match the
+    /// cache — their contents haven't changed, so re-running
+    /// `git status --porcelain -unormal` would produce identical
+    /// output. On a huge working tree (the original report:
+    /// ~112k files) that subprocess walks every tracked file, so
+    /// skipping it on the idle path drops sustained background CPU
+    /// to near zero.
+    ///
+    /// Event-driven refreshes (from `fsevents`) never consult this
+    /// cache — working-tree edits change file mtimes but NOT
+    /// `.git/index`, so a cache hit there would silently miss
+    /// the ` M filename` markers the refresh exists to surface.
+    /// `None` until the first successful poll, or when `.git/index`
+    /// can't be stat'd.
+    pub git_poll_cache: Option<(std::time::SystemTime, std::time::SystemTime)>,
     /// Snapshot of the active harpoon ancestor-set (slot paths plus
     /// every parent directory of every slot). App refreshes this
     /// whenever the harpoon list mutates so `apply_temp_filter`
@@ -663,9 +680,33 @@ impl AppState {
     /// FSEvents soft spot). The diff guard preserves the 0-dps-idle
     /// target: when nothing changed, we don't bump `list_generation`
     /// or request a repaint.
+    ///
+    /// **Mtime short-circuit.** Before spawning the two `git`
+    /// subprocesses, stat `.git/index` + `.git/HEAD` and compare
+    /// against the cache from the last successful call. When both
+    /// mtimes match, the inputs to `git status` are bit-identical
+    /// and we return false immediately. On a 100k-file working
+    /// tree the `git status --porcelain -unormal` walk costs real
+    /// CPU; skipping it on the idle path drops sustained background
+    /// load to near zero.
+    ///
+    /// The cache is intentionally scoped to *this* poll — the
+    /// event-driven `refresh_listing` path never consults it
+    /// because working-tree edits change file mtimes but NOT
+    /// `.git/index`/`HEAD`, and a cache hit there would silently
+    /// miss the ` M filename` markers that refresh exists to
+    /// surface.
     pub fn refresh_git_state(&mut self) -> bool {
+        let key = git_mtime_key(&self.listing.dir);
+        if key.is_some() && key == self.git_poll_cache {
+            return false;
+        }
         let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
         let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+        // Stash on success so the next idle poll skips the
+        // subprocesses. Stat fail (e.g. shallow repo, .git missing)
+        // ⇒ key is None and we'll keep running until it appears.
+        self.git_poll_cache = key;
         if new_git_info == self.git_info && new_git_files == self.git_files {
             return false;
         }
@@ -697,6 +738,11 @@ impl AppState {
         self.listing.sort(self.sort_order);
         self.git_info = crate::sysinfo::git_status(&canonical);
         self.git_files = crate::sysinfo::git_file_statuses(&canonical);
+        // Cache key from the just-canonical dir's repo — the chdir
+        // implicitly switched repos if the new tree has a different
+        // `.git/`, so seed the cache here rather than wait for the
+        // next 1 Hz poll to detect the mismatch.
+        self.git_poll_cache = git_mtime_key(&canonical);
         self.picks.clear();
         self.temp_filter = None;
         self.cursor = Cursor::new();
@@ -1691,6 +1737,44 @@ fn count_files_in_dir(dir: &Path) -> u64 {
     n
 }
 
+/// Stat `.git/index` and `.git/HEAD` and return their mtime pair, or
+/// `None` if either file is missing. Used as the cache key for the
+/// 1 Hz git poll's mtime short-circuit — see
+/// [`AppState::refresh_git_state`]. Walks up to the repo root via
+/// `git rev-parse --show-toplevel` so a chdir into a subdir still
+/// finds the right `.git/`.
+fn git_mtime_key(dir: &Path) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
+    // Cheap repo-root resolve. If we're not in a repo `rev-parse`
+    // exits non-zero and we return None; the caller treats that as
+    // "no cache hit possible," so the poll still runs (and harmlessly
+    // produces empty results).
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let git_dir_str = raw.trim();
+    // `rev-parse --git-dir` returns either an absolute path or one
+    // relative to `dir`; join with `dir` for the relative case.
+    let git_dir = {
+        let p = std::path::PathBuf::from(git_dir_str);
+        if p.is_absolute() { p } else { dir.join(p) }
+    };
+    let index_mt = std::fs::metadata(git_dir.join("index"))
+        .and_then(|m| m.modified())
+        .ok()?;
+    let head_mt = std::fs::metadata(git_dir.join("HEAD"))
+        .and_then(|m| m.modified())
+        .ok()?;
+    Some((index_mt, head_mt))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1729,6 +1813,7 @@ mod tests {
             quit_pending: None,
             git_info: None,
             git_files: std::collections::HashMap::new(),
+            git_poll_cache: None,
             harpoon_filter_set: std::collections::HashSet::new(),
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),

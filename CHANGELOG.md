@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Performance
+- **1 Hz git poll short-circuits when `.git/index` and `.git/HEAD`
+  haven't moved.** The poll exists as a safety net for the rare
+  case where FSEvents drops the `.git/index.lock` →
+  `.git/index` atomic-rename notification (the macOS FSEvents
+  inode-replacement edge case). On a quiet repo, it was firing
+  `git status --porcelain -unormal` every second regardless —
+  cheap on a small tree, real CPU on a ~110k-file working tree
+  (reported with a Spotlight-indexing-overlap on a freshly-cloned
+  monorepo). Cache the mtime pair of `.git/index` + `.git/HEAD`
+  from the last successful poll; on the next tick stat both files
+  and bail before any subprocess spawns if the mtimes match.
+  Cache is scoped to the poll path only — the event-driven
+  refresh (`refresh_listing` after fsevents debounce) still
+  recomputes unconditionally because working-tree edits change
+  file mtimes but NOT `.git/index`/`HEAD`, and a cache hit there
+  would silently miss ` M filename` markers. Cache is reset on
+  chdir.
+
 ### Fixed
 - **`:q` / `:quit` now save the session and warn about running
   processes, matching the `Q` keybinding.** Previously the two

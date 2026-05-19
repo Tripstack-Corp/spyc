@@ -751,6 +751,10 @@ impl App {
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
                 .unwrap_or_default(),
+            // Populated on the first successful `refresh_git_state`
+            // call. See `AppState::git_poll_cache` doc for why this
+            // starts None.
+            git_poll_cache: None,
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
