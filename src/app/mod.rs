@@ -713,8 +713,17 @@ impl App {
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
 
-        // Literal .git check, no upward walk — keep the concept explicit.
-        let project_home = cwd.join(".git").exists().then(|| cwd.clone());
+        // Always anchor PROJECT_HOME on the launch dir. Previously
+        // this was gated on `cwd.join(".git").exists()`, which meant
+        // launching spyc one level above the actual repo (e.g. from
+        // `~/src/workspace` containing a Java monorepo at
+        // `~/src/workspace/inner-repo`) left `project_home` None —
+        // and downstream code (session save, harpoon, MCP context)
+        // had no project anchor at all. Honoring the launch dir
+        // gives every spyc invocation a project anchor; users who
+        // want a different anchor can override with `:project <path>`
+        // or `gP`. Cleared with `:project clear`.
+        let project_home = Some(cwd.clone());
         let session_name = Some(crate::state::session_names::generate());
 
         // Load the harpoon list for the active project (if any). When
@@ -8019,11 +8028,29 @@ impl App {
             })
             .unwrap_or_default();
 
+        // Anchor the session on `project_home` (explicit) → `start_dir`
+        // (where spyc was launched) → `listing.dir` (last resort).
+        // `load_sessions` dedups on cwd + tab commands, so saving from
+        // a deep subdir produced a fresh entry that restored at the
+        // subdir instead of the user's project root.
+        //
+        // We don't walk up for `.git` here: a Java monorepo cloned into
+        // `~/src/foo/inner-repo` may have `.git` at `inner-repo`, but
+        // the user thinks of the *whole workspace* (`~/src/foo`) as
+        // their project. Honoring `start_dir` matches that — the user
+        // launched spyc there, so that's the natural anchor. Anyone
+        // who wants a different anchor can set `project_home`
+        // explicitly with `:project` or `gP`.
+        let session_cwd = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.start_dir.clone());
         let session = Session {
             id,
             saved_at: crate::sysinfo::format_now(),
             epoch_secs,
-            cwd: self.state.listing.dir.clone(),
+            cwd: session_cwd.clone(),
             tabs,
             active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
             pane_height_pct: self.state.pane_height_pct,
@@ -8034,7 +8061,7 @@ impl App {
         let _ = crate::state::sessions::save_session(&session);
 
         // Build exit summary for post-TUI output.
-        let cwd_display = crate::paths::display_tilde(&self.state.listing.dir);
+        let cwd_display = crate::paths::display_tilde(&session_cwd);
         let tab_count = session.tabs.len();
         let claude_names: Vec<String> = session
             .tabs

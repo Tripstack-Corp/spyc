@@ -5,6 +5,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Session save anchors on `project_home`, which now always
+  defaults to the launch dir.** Two changes:
+
+  1. `project_home` initialization at startup no longer requires a
+     literal `.git` in the cwd. Previously, launching spyc one
+     level above the actual repo (e.g. from `~/src/workspace`
+     containing a clone at `~/src/workspace/inner-repo`) left
+     `project_home` None — and downstream code (session save,
+     harpoon, MCP context) had no project anchor. Now
+     `project_home` defaults to the launch dir unconditionally;
+     override with `:project <path>` / `gP`, clear with
+     `:project clear`.
+  2. Session save uses `project_home` (→ `start_dir` →
+     `listing.dir` as defense-in-depth fallbacks) instead of the
+     current listing dir. Quitting from a deep subdir was saving
+     the session at that path, producing a noisy `session saved
+     — …` flash and (because `load_sessions` dedups on cwd + tab
+     commands) a fresh session entry for every drill-in rather
+     than one entry per project.
+
+  `spyc -r` accordingly drops you at the project root — navigate
+  from there using frecency / harpoon / history.
+
 ### Performance
 - **`git status` runs on a background worker thread.** Cache hits
   on chdir are already sub-ms, but cache *misses* (first entry into
