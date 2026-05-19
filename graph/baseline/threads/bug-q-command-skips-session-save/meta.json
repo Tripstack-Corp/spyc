@@ -4,8 +4,8 @@
   "topic": "bug-q-command-skips-session-save",
   "title": "bug q command skips session save",
   "status": "OPEN",
-  "ball": "Claude (caleb)",
-  "last_updated": "2026-05-19T08:03:34.089805+00:00",
+  "ball": "Claude Code (caleb)",
+  "last_updated": "2026-05-19T08:23:48.881882+00:00",
   "summary": "The thread discusses a bug in the Q keybinding for the `:q` command, which skips session save and does not confirm, leading to potential session loss. A review found no functional bugs but identified a gap in App-layer testing. A solution was implemented by enforcing compile-time enforcement of the `CommandResult::Quit` variant.",
-  "entry_count": 4
+  "entry_count": 5
 }

@@ -1,6 +1,6 @@
 # bug-q-command-skips-session-save — Thread
 Status: OPEN
-Ball: Claude (caleb)
+Ball: Claude Code (caleb)
 Topic: bug-q-command-skips-session-save
 Created: 2026-05-19T06:38:09.122471+00:00
 
@@ -155,3 +155,78 @@ Verification:
 - searched for all `CommandResult::` match sites; the new variant is handled only in the expected App dispatch path, with no stray partial matches
 
 <!-- Entry-ID: 01KRZM5VF9YJ47765DVM00Z3N0 -->
+
+---
+Entry: Claude Code (caleb) 2026-05-19T08:23:48.879739+00:00
+Role: tester
+Type: Note
+Title: Functional test pass: :q lifecycle saves session in PTY
+
+Spec: tester
+
+Re-tested `fix/q-command-session-save` at head `27012a6` after the restart. The fix holds end-to-end, not just at the unit-test boundary.
+
+## Build + unit/integration suite
+
+- `cargo build --release` → clean, no warnings
+- `cargo test` → 683 unit + 6 + 5 + 1 integration = **695/695 pass**
+- `cargo test cmd_quit_` → both `cmd_quit_defers_to_app` and `cmd_quit_long_defers_to_app` pass
+
+(The MCP socket failures Codex hit earlier — `mcp::tests::socket_server_responds` and `disconnect_notification_routes_through_channel` — did not reproduce here; the default test runner picked them up and they passed. Same machine, same branch, so it really does look env-specific to that sandbox.)
+
+## PTY functional test (the part that matters for caleb's empty sessions dir)
+
+The unit tests only prove `AppState::dispatch_command("q")` returns the typed `CommandResult::Quit` and doesn't flip `should_quit` on its own — that's the handoff contract, not the full lifecycle. So I drove the release binary in a PTY (`/tmp/drive_spyc.py`) under an isolated `$HOME` + `$XDG_STATE_HOME` to verify the App-side actually runs `request_quit()` → `save_session()`:
+
+1. Launch `./target/release/spyc` in `/tmp/spyc-pty-home/work` (two files).
+2. Send `:q\r` — read 1s of output.
+3. Assert process is still alive (`waitpid(WNOHANG)` returns 0).
+4. Send `:q\r` again — read 2s of output.
+5. Wait for clean exit.
+6. Assert `$XDG_STATE_HOME/spyc/sessions/` contains a non-empty file.
+
+Result:
+
+```
+=== after first :q (last 400 chars) ===
+… (still rendering the UI, no exit)
+=== after second :q (last 400 chars) ===
+… 🌶️ session saved — ~/work · restore with spyc -r
+=== spyc exited (status=0) ===
+=== sessions dir contents (/tmp/spyc-pty-home/state/spyc/sessions) ===
+  1779178923263.json  (243 bytes)
+PASS — :q saved a session and quit ran the full lifecycle.
+```
+
+Session JSON looks well-formed:
+
+```json
+{
+  "id": 1779178923263,
+  "saved_at": "2026-05-19 08:22:03 UTC",
+  "epoch_secs": 1779178923,
+  "cwd": "/tmp/spyc-pty-home/work",
+  "tabs": [],
+  "active_tab": 0,
+  "pane_height_pct": 70,
+  "pane_focused": false,
+  "name": "JUNIPER_TARRAGON"
+}
+```
+
+This is exactly the artifact that was missing in caleb's `~/.local/state/spyc/sessions/` (which I confirmed is still empty on this box — the historical `:q` short-circuit is why). Now that `:q` and `Q` share `request_quit()`, the same artifact gets written on either path.
+
+## What this proves vs. what it doesn't
+
+Proven:
+- First `:q` does **not** exit (`waitpid` confirms process still alive).
+- Second `:q` within 2s **does** save the session (file written to `$XDG_STATE_HOME/spyc/sessions/`).
+- The on-exit "🌶️ session saved" banner prints on the same path the `Q` keybinding uses.
+
+Not exercised in the PTY test (deferred — orthogonal to this bug):
+- Running-process count branch (`N running processes — press again to quit`) — would need a pane spawn during the test.
+- The 2-second window timing out (third-press-after-delay should re-arm, not exit) — also not in scope here.
+
+Ball back to caleb. Ready to open the PR on `Tripstack-Corp/spyc` whenever you say.
+
+<!-- Entry-ID: 01KRZNAXQ3Q5253TTH1CA395KZ -->

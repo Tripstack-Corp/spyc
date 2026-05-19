@@ -5,3 +5,5 @@
 {"source":"entry:01KRZG4S6WEA6BBNY2FSJ9C8K8","target":"entry:01KRZK3D4H6CV17WETBVSY8V7J","type":"followed_by"}
 {"source":"thread:bug-q-command-skips-session-save","target":"entry:01KRZM5VF9YJ47765DVM00Z3N0","type":"contains"}
 {"source":"entry:01KRZK3D4H6CV17WETBVSY8V7J","target":"entry:01KRZM5VF9YJ47765DVM00Z3N0","type":"followed_by"}
+{"source":"thread:bug-q-command-skips-session-save","target":"entry:01KRZNAXQ3Q5253TTH1CA395KZ","type":"contains"}
+{"source":"entry:01KRZM5VF9YJ47765DVM00Z3N0","target":"entry:01KRZNAXQ3Q5253TTH1CA395KZ","type":"followed_by"}
