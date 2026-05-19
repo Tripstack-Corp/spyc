@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Pager remembers your last scroll position per file.** Open
+  `foo.md`, scroll to line 200, close (or quit spyc entirely),
+  reopen later — you land back at line 200 instead of the top.
+  Stored as `pager_positions.json` under the spyc state dir,
+  LRU-capped at 500 entries, keyed by canonical path. Scope is
+  intentionally narrow: only files (`source_path: Some(_)`) — not
+  command-output buffers, help overlays, pickers, etc. (those
+  views' "start at top" is the expected interaction).
+  Out-of-range saves (file shrank) clamp to the new last line.
+  Saves on close, buffer swap, and process exit.
+
 ### Changed
 - **Markdown tables expand to the pager body width.** Tables used
   to be hard-capped at the 80-column prose budget with a 24-cell

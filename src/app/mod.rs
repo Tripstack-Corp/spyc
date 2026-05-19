@@ -646,6 +646,12 @@ pub struct App {
     /// half is held by `state.git_worker_tx` and used by chdir
     /// cache-miss paths.
     git_result_rx: std::sync::mpsc::Receiver<state::GitWorkerResult>,
+    /// Per-file scroll memory for the pager. Loaded once at startup;
+    /// updated whenever a file-backed pager view is closed or swapped
+    /// out (and also when spyc itself exits). Restores the user's
+    /// last reading position when they reopen the same file. See
+    /// [`state::pager_positions`].
+    pager_positions: crate::state::pager_positions::PagerPositions,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -922,6 +928,7 @@ impl App {
             scroll_last: None,
             last_term_title: None,
             git_result_rx: git_res_rx,
+            pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
         // Evaluate huge-tree status at startup so the first 1 Hz poll
@@ -1056,6 +1063,40 @@ impl App {
     /// Execute a writable MCP command from Claude. Runs on the main
     /// thread with full access to `AppState`. Returns a response that
     /// the MCP server thread forwards to Claude.
+    /// Persist the current pager's scroll position to disk if it's a
+    /// file-backed view (`source_path` is set). Call before any
+    /// assignment that drops or replaces `self.pager` so the user's
+    /// reading position survives close + reopen. No-op for command
+    /// output, help, picker UIs, etc. — those views intentionally
+    /// don't carry a `source_path`.
+    fn remember_pager_position(&mut self) {
+        if let Some(view) = self.pager.as_ref() {
+            if let Some(path) = view.source_path.clone() {
+                let scroll = view.scroll;
+                self.pager_positions.record(&path, scroll);
+            }
+        }
+    }
+
+    /// Close the active pager, persisting its scroll position first.
+    /// Drop-in replacement for the raw `pager = None` assignment
+    /// everywhere the user's reading position should survive close
+    /// + reopen.
+    fn clear_pager(&mut self) {
+        self.remember_pager_position();
+        self.pager = None;
+    }
+
+    /// Assign a new pager view, persisting the outgoing view's
+    /// scroll position first. Drop-in replacement for the bare
+    /// `pager = Some(view)` pattern at open / replace sites
+    /// — covers the case where the user has one file open, opens
+    /// another, then later wants to come back to the first one.
+    fn set_pager(&mut self, view: PagerView) {
+        self.remember_pager_position();
+        self.pager = Some(view);
+    }
+
     /// Apply a git-worker result if it's still relevant — matching
     /// generation, repo_root, and huge flag all required. Refills the
     /// raw-status cache, then recomputes `git_files` (parsed against
@@ -1772,7 +1813,7 @@ impl App {
                                             view.saveable = true;
                                             view.mount = mount;
                                             view.pane_scroll = pane_scroll;
-                                            self.pager = Some(view);
+                                            self.set_pager(view);
                                         }
                                         let _ = std::fs::remove_file(&path);
                                     }
@@ -1795,7 +1836,7 @@ impl App {
                                             view.scroll = scroll;
                                             view.mount = mount;
                                             view.pane_scroll = pane_scroll;
-                                            self.pager = Some(view);
+                                            self.set_pager(view);
                                         }
                                     }
                                 }
@@ -4978,11 +5019,13 @@ impl App {
         view.grep_id = Some(id);
         view.saveable = true;
         // Push any previously-open pager onto the back stack so the
-        // user can `:bprev` to it.
+        // user can `:bprev` to it. Save its scroll first so the
+        // position survives a crash before the user `:bprev`s back.
+        self.remember_pager_position();
         if let Some(prev) = self.pager.take() {
             self.pager_history.push(prev);
         }
-        self.pager = Some(view);
+        self.set_pager(view);
         self.grep_session = Some(GrepSession {
             id,
             rx,
@@ -5130,7 +5173,7 @@ impl App {
         // While the walker is still streaming, suppress [EOF] /
         // tilde markers since the candidate list is still growing.
         view.streaming = !picker.walk_complete;
-        self.pager = Some(view);
+        self.set_pager(view);
     }
 
     /// Intercept keys when the F-finder is open. Returns true when
@@ -5146,7 +5189,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.find_picker = None;
-                self.pager = None;
+                self.clear_pager();
                 self.needs_full_repaint = true;
                 true
             }
@@ -5158,7 +5201,7 @@ impl App {
                         .map(|rel| (p.root.clone(), rel))
                 });
                 self.find_picker = None;
-                self.pager = None;
+                self.clear_pager();
                 self.needs_full_repaint = true;
                 if let Some((root, rel)) = target {
                     let abs = root.join(&rel);
@@ -5291,7 +5334,7 @@ impl App {
         // page the user navigated away from and might want to revisit
         // via `[b` / `]b`.
         view.no_history = true;
-        self.pager = Some(view);
+        self.set_pager(view);
         self.state.pane_focused = false;
         self.needs_full_repaint = true;
     }
@@ -5421,6 +5464,14 @@ impl App {
                 v
             };
             view.source_path = Some(path.to_path_buf());
+            // Restore the scroll position from the previous visit (if
+            // any). Clamp to `lines.len() - 1` so a saved row that's
+            // now past the end (file shrank) lands at the new last
+            // line rather than blanking the viewport.
+            if let Some(saved) = self.pager_positions.get(path) {
+                let last = view.lines.len().saturating_sub(1);
+                view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
+            }
             Some(view)
         } else {
             // Binary file: hex dump via pretty-hex.
@@ -5515,7 +5566,7 @@ impl App {
                 let mut view =
                     PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
                 view.streaming = true;
-                self.pager = Some(view);
+                self.set_pager(view);
                 self.pending_capture = Some(PendingCapture {
                     host,
                     buffer: Vec::new(),
@@ -5555,7 +5606,7 @@ impl App {
             paused: false,
         };
         self.background_tasks.tasks.push(task);
-        self.pager = None;
+        self.clear_pager();
         self.needs_full_repaint = true;
         self.state
             .flash_info(format!("task #{id} backgrounded — :fg to resume"));
@@ -5744,7 +5795,7 @@ impl App {
         // the task no longer exists in `background_tasks`, so the
         // viewer's task_id is stale.
         if self.pager.as_ref().is_some_and(|v| v.task_id == Some(id)) {
-            self.pager = None;
+            self.clear_pager();
         }
 
         let cmd = task.cmd_display.clone();
@@ -5871,7 +5922,7 @@ impl App {
                 view.lines = text.lines;
                 view.streaming = true;
                 view.scroll_to_bottom_auto();
-                self.pager = Some(view);
+                self.set_pager(view);
                 self.pending_capture = Some(PendingCapture {
                     host: task.host,
                     buffer: task.buffer,
@@ -5906,7 +5957,7 @@ impl App {
                 view.lines = text.lines;
                 view.saveable = true;
                 view.scroll_to_bottom_auto();
-                self.pager = Some(view);
+                self.set_pager(view);
             }
         }
         self.needs_full_repaint = true;
@@ -5972,10 +6023,11 @@ impl App {
             task.has_unread_output = false;
         }
         // Push the prior pager (if any, eligible) so `[b` can walk back.
+        self.remember_pager_position();
         if let Some(prev) = self.pager.take() {
             self.pager_history.push(prev);
         }
-        self.pager = Some(view);
+        self.set_pager(view);
         self.needs_full_repaint = true;
     }
 
@@ -6806,7 +6858,7 @@ impl App {
         }
         if let Some(tabs) = self.pane_tabs.as_mut() {
             if let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take() {
-                self.pager = Some(view);
+                self.set_pager(view);
             }
         }
     }
@@ -6886,7 +6938,7 @@ impl App {
         // onto the source tab and restores it onto the destination
         // tab without revisiting this function.
         view.pending_scroll_to_bottom.set(true);
-        self.pager = Some(view);
+        self.set_pager(view);
         self.state.pane_focused = true;
         self.needs_full_repaint = true;
         self.state
@@ -7928,7 +7980,7 @@ impl App {
                     if let Some(ln) = line {
                         view.scroll = u16::try_from(ln.saturating_sub(1)).unwrap_or(u16::MAX);
                     }
-                    self.pager = Some(view);
+                    self.set_pager(view);
                 }
                 Err(e) => {
                     self.state
@@ -7962,6 +8014,12 @@ impl App {
             .quit_pending
             .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
         {
+            // If a file pager is open, capture its scroll before
+            // shutdown so reopening the file in the next session
+            // resumes where we left off. Bypassed close paths
+            // (typically session save → quit, no Esc) would
+            // otherwise drop the in-memory scroll on the floor.
+            self.remember_pager_position();
             self.save_session();
             self.state.should_quit = true;
         } else {
@@ -8193,7 +8251,7 @@ impl App {
             all_lines,
         );
         view.picker_cursor = Some(2); // Start on first session (after header).
-        self.pager = Some(view);
+        self.set_pager(view);
     }
 
     /// Prefix width for history editor lines: "  NNN  " = 7 chars.
@@ -8258,7 +8316,7 @@ impl App {
         view.show_line_numbers = false;
         view.wrap = false;
         self.pending_jump_history = Some(snapshot);
-        self.pager = Some(view);
+        self.set_pager(view);
         self.needs_full_repaint = true;
     }
 
@@ -8290,7 +8348,7 @@ impl App {
         view.picker_cursor = Some(0);
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.pending_history_pick = Some(editor);
-        self.pager = Some(view);
+        self.set_pager(view);
     }
 
     fn restore_session(&mut self, session: &crate::state::sessions::Session) {
@@ -8424,7 +8482,7 @@ impl App {
                     "git worktrees — press 1-9 to switch, q to close",
                     lines,
                 );
-                self.pager = Some(view);
+                self.set_pager(view);
             }
             None => self
                 .state
@@ -8517,7 +8575,7 @@ impl App {
         let mut view = pager::PagerView::new_styled(Self::HELP_TITLE, lines);
         view.columns = ncols as u8;
         view.no_history = true;
-        self.pager = Some(view);
+        self.set_pager(view);
     }
 
     /// True when the help pager is the currently-open pager view.
@@ -8794,7 +8852,7 @@ impl App {
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
                     let snapshot = self.pending_jump_history.take().unwrap();
-                    self.pager = None;
+                    self.clear_pager();
                     self.needs_full_repaint = true;
                     if let Some(path_str) = snapshot.get(cursor) {
                         let path = crate::paths::expand(path_str);
@@ -8829,7 +8887,7 @@ impl App {
                         snapshot.remove(cursor);
                         if snapshot.is_empty() {
                             self.pending_jump_history = None;
-                            self.pager = None;
+                            self.clear_pager();
                             self.needs_full_repaint = true;
                             self.state.flash_info("jump history empty");
                             return PostAction::None;
@@ -8859,7 +8917,7 @@ impl App {
             if let KeyCode::Char(c @ '1'..='9') = key.code {
                 let idx = (c as u8 - b'1') as usize;
                 if let Some(path) = worktrees.get(idx).cloned() {
-                    self.pager = None;
+                    self.clear_pager();
                     self.state.pending_worktrees = None;
                     self.needs_full_repaint = true;
                     if let Err(e) = self.state.chdir(&path) {
@@ -8908,7 +8966,7 @@ impl App {
                 if hist_idx < entries.len() {
                     self.state.history.remove(hist_idx);
                     if self.state.history.entries().is_empty() {
-                        self.pager = None;
+                        self.clear_pager();
                         self.pending_history_pick = None;
                         self.needs_full_repaint = true;
                         self.state.flash_info("history is empty");
@@ -9037,7 +9095,7 @@ impl App {
             match result {
                 EditResult::Submit => {
                     let cmd = editor.text();
-                    self.pager = None;
+                    self.clear_pager();
                     self.pending_history_pick = None;
                     self.needs_full_repaint = true;
                     if cmd.trim().is_empty() {
@@ -9053,7 +9111,7 @@ impl App {
                 EditResult::Cancel => {
                     // Esc in Insert → Normal (handled by editor, returns Continue).
                     // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
-                    self.pager = None;
+                    self.clear_pager();
                     self.pending_history_pick = None;
                     self.needs_full_repaint = true;
                 }
@@ -9099,7 +9157,7 @@ impl App {
                     let idx = (c as u8 - b'1') as usize;
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
-                        self.pager = None;
+                        self.clear_pager();
                         self.needs_full_repaint = true;
                         self.restore_session(&session);
                         return PostAction::None;
@@ -9111,7 +9169,7 @@ impl App {
                     let sessions = self.state.pending_sessions.take().unwrap();
                     if cursor < 2 {
                         // "New session" header.
-                        self.pager = None;
+                        self.clear_pager();
                         self.needs_full_repaint = true;
                         self.state.flash_info("new session");
                         return PostAction::None;
@@ -9119,7 +9177,7 @@ impl App {
                     let idx = cursor - 2;
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
-                        self.pager = None;
+                        self.clear_pager();
                         self.needs_full_repaint = true;
                         self.restore_session(&session);
                         return PostAction::None;
@@ -9127,7 +9185,7 @@ impl App {
                     self.state.pending_sessions = Some(sessions);
                 }
                 KeyCode::Char('n' | 'N') => {
-                    self.pager = None;
+                    self.clear_pager();
                     self.state.pending_sessions = None;
                     self.needs_full_repaint = true;
                     self.state.flash_info("new session");
@@ -9264,7 +9322,7 @@ impl App {
                     if let Some(tabs) = self.pane_tabs.as_mut() {
                         tabs.active_mut().exit_scroll_mode();
                     }
-                    self.pager = None;
+                    self.clear_pager();
                     self.needs_full_repaint = true;
                     self.state.flash_info("scroll: off");
                     return PostAction::None;
@@ -9313,7 +9371,7 @@ impl App {
                         drop(task);
                     }
                     // Don't double-push the original viewer.
-                    self.pager = None;
+                    self.clear_pager();
                 } else {
                     // Save eligible pagers to history before closing.
                     let is_picker = self.state.pending_worktrees.is_some()
@@ -9328,7 +9386,7 @@ impl App {
                             }
                         }
                     }
-                    self.pager = None;
+                    self.clear_pager();
                 }
                 self.state.pending_worktrees = None;
                 self.state.pending_sessions = None;
@@ -9429,7 +9487,7 @@ impl App {
                 let argv = shell::resolve_pager();
                 let pager_cmd = argv.join(" ");
                 let path_quoted = shell::shell_quote(&src.display().to_string());
-                self.pager = None;
+                self.clear_pager();
                 self.needs_full_repaint = true;
                 return sh_c(&format!("{pager_cmd} {path_quoted}"), false);
             }
@@ -9478,7 +9536,7 @@ impl App {
                     }
                 };
                 self.pending_pager_return = Some(pager_return);
-                self.pager = None;
+                self.clear_pager();
                 self.needs_full_repaint = true;
                 return sh_c(
                     &format!(
@@ -9611,7 +9669,7 @@ impl App {
                         v
                     }
                 };
-                self.pager = Some(view);
+                self.set_pager(view);
                 return Ok(PostAction::None);
             }
             state::ApplyResult::NotHandled => {}
@@ -9887,7 +9945,7 @@ impl App {
         match intent {
             ActivateIntent::Display => {
                 if let Some(view) = self.build_pager_view_for_file(&path) {
-                    self.pager = Some(view);
+                    self.set_pager(view);
                 }
                 PostAction::None
             }
