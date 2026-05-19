@@ -638,6 +638,14 @@ pub struct App {
     /// `None` forces an emit on next draw (used after a child process
     /// like vim may have clobbered the title).
     last_term_title: Option<String>,
+    /// Receiver for git-status worker results. The worker thread is
+    /// spawned at App construction and runs for the lifetime of the
+    /// process. Drained at the top of every event-loop iteration —
+    /// results whose `generation` doesn't match `state.git_generation`
+    /// are discarded (the user has navigated past them). The Sender
+    /// half is held by `state.git_worker_tx` and used by chdir
+    /// cache-miss paths.
+    git_result_rx: std::sync::mpsc::Receiver<state::GitWorkerResult>,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -682,8 +690,15 @@ impl App {
                 Some(start_error.unwrap_or_default() + &format!("{e}")),
             ),
         };
-        let git_info = crate::sysinfo::git_status(&cwd);
-        let git_files = crate::sysinfo::git_file_statuses(&cwd);
+        // Defer the initial git-status read to the background worker
+        // (kicked off after AppState is built, below). Previously
+        // these two `git status` spawns blocked the first paint by
+        // 200-500 ms on a ~110k-file repo. Cache-miss handling in
+        // the chdir / event-loop path will populate `git_info` and
+        // `git_files` once the worker reports back.
+        let git_info: Option<String> = None;
+        let git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> =
+            std::collections::HashMap::new();
         let (config, load_note) = match Config::load_default(&cwd) {
             Ok(c) => {
                 let note = if c.sources.is_empty() {
@@ -755,6 +770,17 @@ impl App {
             // call. See `AppState::git_poll_cache` doc for why this
             // starts None.
             git_poll_cache: None,
+            // The very first chdir of App::run will set both based
+            // on the actual tree size. Bootstrap defaults are fine —
+            // the small-tree cadence is conservative until proven
+            // huge.
+            is_huge_tree: false,
+            huge_tree_anchor: None,
+            huge_tree_decisions: std::collections::HashMap::new(),
+            current_repo_root: None,
+            git_status_raw_cache: None,
+            git_worker_tx: None,
+            git_generation: 0,
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
@@ -797,6 +823,40 @@ impl App {
                 },
                 |()| true,
             );
+        // Background git-status worker. Owns the spawn of
+        // `git status --porcelain` on cache miss so the chdir UI
+        // returns immediately. Lives for the lifetime of the
+        // process; the OS reaps the thread on exit. We hold the
+        // sender on `state.git_worker_tx` and the receiver on
+        // `App.git_result_rx`. See `state::GitWorkerRequest` /
+        // `state::GitWorkerResult` for the contract.
+        let (git_req_tx, git_req_rx) = std::sync::mpsc::channel::<state::GitWorkerRequest>();
+        let (git_res_tx, git_res_rx) = std::sync::mpsc::channel::<state::GitWorkerResult>();
+        std::thread::spawn(move || {
+            while let Ok(req) = git_req_rx.recv() {
+                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical, req.huge);
+                let (index_mtime, head_mtime) = crate::sysinfo::resolve_gitdir(&req.repo_root)
+                    .map_or((None, None), |gd| {
+                        let i = std::fs::metadata(gd.join("index"))
+                            .and_then(|m| m.modified())
+                            .ok();
+                        let h = std::fs::metadata(gd.join("HEAD"))
+                            .and_then(|m| m.modified())
+                            .ok();
+                        (i, h)
+                    });
+                let _ = git_res_tx.send(state::GitWorkerResult {
+                    generation: req.generation,
+                    repo_root: req.repo_root,
+                    huge: req.huge,
+                    raw,
+                    index_mtime,
+                    head_mtime,
+                });
+            }
+        });
+        let mut app_state = app_state;
+        app_state.git_worker_tx = Some(git_req_tx);
         let mut app = Self {
             state: app_state,
             pager: None,
@@ -852,8 +912,23 @@ impl App {
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
+            git_result_rx: git_res_rx,
         };
         app.state.rebuild_rows();
+        // Evaluate huge-tree status at startup so the first 1 Hz poll
+        // / first event-driven refresh uses the right cadence and
+        // `git status` flag. Without this, spyc launched directly
+        // in a 110k-file project root would run small-tree cadence
+        // until the user navigated somewhere.
+        let initial_cwd = app.state.listing.dir.clone();
+        app.state.update_huge_tree(&initial_cwd);
+        // Now that the worker is wired and we know is_huge_tree,
+        // kick off the first git read in the background. The branch
+        // string is computed sync from `.git/HEAD` so it's available
+        // on the first paint; only the per-file markers and dirty
+        // flag wait for the worker.
+        app.state.git_info = app.state.compute_git_info_fast();
+        let _ = app.state.git_file_statuses_cached(&initial_cwd);
         if let Some(msg) = load_note {
             app.state.flash_info(msg);
         }
@@ -972,6 +1047,69 @@ impl App {
     /// Execute a writable MCP command from Claude. Runs on the main
     /// thread with full access to `AppState`. Returns a response that
     /// the MCP server thread forwards to Claude.
+    /// Apply a git-worker result if it's still relevant — matching
+    /// generation, repo_root, and huge flag all required. Refills the
+    /// raw-status cache, then recomputes `git_files` (parsed against
+    /// the *current* listing dir's prefix, which may differ from the
+    /// dir the worker saw if the user has drilled around within the
+    /// project) and `git_info`. Returns true iff state changed.
+    fn apply_git_worker_result(&mut self, result: state::GitWorkerResult) -> bool {
+        // Generation gate: the user has navigated past this request.
+        if result.generation != self.state.git_generation {
+            return false;
+        }
+        // Relevance gate: even at the same generation, the result is
+        // for a specific repo + huge-flag combo. If either no longer
+        // matches the current state, discard. (Unusual — generation
+        // bumps cover most of this — but defends against the edge
+        // where update_huge_tree's `is_huge_tree` flipped without a
+        // chdir.)
+        if self.state.current_repo_root.as_deref() != Some(result.repo_root.as_path())
+            || self.state.is_huge_tree != result.huge
+        {
+            return false;
+        }
+        let Some(raw) = result.raw else {
+            // `git status` failed (not in a repo by the time the
+            // worker spawned, or git missing). Leave existing state.
+            return false;
+        };
+        let (Some(index_mtime), Some(head_mtime)) = (result.index_mtime, result.head_mtime) else {
+            return false;
+        };
+        self.state.git_status_raw_cache = Some(state::GitStatusRawCache {
+            repo_root: result.repo_root.clone(),
+            index_mtime,
+            head_mtime,
+            huge: result.huge,
+            raw,
+        });
+        // Seed the 1 Hz poll cache too — without this the next safety
+        // poll would observe a None cache and re-fire `git status`.
+        self.state.git_poll_cache = Some((index_mtime, head_mtime));
+        // Reparse against the current listing dir's prefix and refresh
+        // the display string. `compute_git_info_fast` reads the cache
+        // we just stored for its dirty flag.
+        let listing_dir = self.state.listing.dir.clone();
+        let new_files = {
+            let cache = self.state.git_status_raw_cache.as_ref().unwrap();
+            let prefix = listing_dir
+                .strip_prefix(&cache.repo_root)
+                .unwrap_or(std::path::Path::new(""))
+                .to_string_lossy()
+                .into_owned();
+            crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
+        };
+        let new_info = self.state.compute_git_info_fast();
+        let changed = new_files != self.state.git_files || new_info != self.state.git_info;
+        self.state.git_files = new_files;
+        self.state.git_info = new_info;
+        if changed {
+            self.state.rebuild_rows();
+        }
+        changed
+    }
+
     fn execute_mcp_command(
         &mut self,
         cmd: crate::mcp_cmd::McpCommand,
@@ -1496,12 +1634,20 @@ impl App {
                 needs_draw = true;
                 draw_reason = 3;
             }
-            const REFRESH_QUIET: Duration = Duration::from_millis(500);
-            // Always rate-limit at least 500ms apart from previous refresh.
+            // Adaptive cadence: small trees get tight latency
+            // (500 ms debounce, 1 s poll); huge trees back off so
+            // `git status` doesn't dominate idle CPU. The huge-tree
+            // flag is set on chdir by `count_subdirs_capped`.
+            let refresh_quiet = if self.state.is_huge_tree {
+                Duration::from_secs(3)
+            } else {
+                Duration::from_millis(500)
+            };
+            // Always rate-limit at least `refresh_quiet` apart from previous refresh.
             if let Some(at) = last_event_at {
                 let now = std::time::Instant::now();
-                if now.duration_since(at) >= REFRESH_QUIET
-                    && last_refresh.elapsed() >= REFRESH_QUIET
+                if now.duration_since(at) >= refresh_quiet
+                    && last_refresh.elapsed() >= refresh_quiet
                 {
                     last_event_at = None;
                     self.state.refresh_listing();
@@ -1515,9 +1661,17 @@ impl App {
             // via atomic rename, which is the inode-replacement edge
             // case where FSEvents can drop notifications). Diff-aware:
             // only repaints when git_info or git_files actually
-            // differ, so idle dps stays at 0.
-            const GIT_POLL_INTERVAL: Duration = Duration::from_secs(1);
-            if self.state.git_info.is_some() && last_git_poll.elapsed() >= GIT_POLL_INTERVAL {
+            // differ, so idle dps stays at 0. Huge trees back off to
+            // 10 s — the mtime-cache short-circuit in
+            // `refresh_git_state` already makes the idle case cheap,
+            // but the back-off bounds the worst case (e.g. a burst of
+            // legitimate index changes) where the cache misses.
+            let git_poll_interval = if self.state.is_huge_tree {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(1)
+            };
+            if self.state.git_info.is_some() && last_git_poll.elapsed() >= git_poll_interval {
                 last_git_poll = std::time::Instant::now();
                 if self.state.refresh_git_state() {
                     needs_draw = true;
@@ -1531,6 +1685,18 @@ impl App {
                 let _ = req.reply.send(resp);
                 needs_draw = true;
                 draw_reason = 3;
+            }
+
+            // Drain pending git-worker results. Stale results (the
+            // user navigated past them) are discarded via the
+            // generation counter; matching results refill the
+            // raw-status cache and recompute git_files / git_info
+            // against the *current* listing dir. Cheap when empty.
+            while let Ok(result) = self.git_result_rx.try_recv() {
+                if self.apply_git_worker_result(result) {
+                    needs_draw = true;
+                    draw_reason = 2;
+                }
             }
 
             // Adaptive poll rate:
@@ -9813,10 +9979,27 @@ const fn is_spyc_meta_when_pane_focused(
 #[cfg(target_os = "linux")]
 const MAX_RECURSIVE_WATCH_DIRS: usize = 256;
 
+/// Subdir count threshold for "this is a huge working tree" — drives
+/// adaptive backoff of the git poll cadence and the `git status`
+/// untracked-enumeration mode (see `AppState::is_huge_tree`,
+/// `AppState::chdir`). Chosen to match `MAX_RECURSIVE_WATCH_DIRS`:
+/// a tree that already trips Linux's recursive-watch downgrade is
+/// almost certainly the same tree where the 1 Hz `git status` poll
+/// hurts. Single constant on all platforms because the huge-tree
+/// signal is needed everywhere — the recursive-watch gating
+/// constant stays Linux-only because only Linux's `notify` backend
+/// pays the per-subdir walk cost.
+pub const HUGE_TREE_SUBDIR_THRESHOLD: usize = 256;
+
 /// Count subdirs under `root`, terminating as soon as the running
-/// count exceeds `cap`. Used by `pick_recursive_mode` on Linux to
-/// gate `RecursiveMode::Recursive` watch registration; see
-/// `MAX_RECURSIVE_WATCH_DIRS` for the rationale.
+/// count exceeds `cap`. Two callers:
+///
+/// - **Linux** `pick_recursive_mode` (gating `RecursiveMode::Recursive`
+///   watch registration; see `MAX_RECURSIVE_WATCH_DIRS`).
+/// - **All platforms** `AppState::chdir` (setting the
+///   `is_huge_tree` flag that drives adaptive backoff of the git
+///   poll cadence and the `git status` untracked-enumeration mode
+///   on huge working trees).
 ///
 /// Traversal is DFS (via `Vec::pop`), which differs from `notify`'s
 /// internal BFS. For an "is the count over `cap`" decision the order
@@ -9828,8 +10011,7 @@ const MAX_RECURSIVE_WATCH_DIRS: usize = 256;
 /// is not pushed onto the walk stack. This matches `notify`'s default
 /// behavior — its recursive walker does not chase symlinks either, so
 /// the count we produce here tracks what `notify` would have walked.
-#[cfg(target_os = "linux")]
-fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
+pub fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
     let mut count = 0usize;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -10560,7 +10742,7 @@ The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod listing_watch_tests {
     use super::count_subdirs_capped;
     use std::fs;

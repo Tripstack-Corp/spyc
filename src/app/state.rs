@@ -81,6 +81,52 @@ pub enum PagerLines {
     Plain(Vec<String>),
 }
 
+/// Off-main-thread git-status work item. The chdir hot path sends
+/// these to a background worker on cache miss so the UI returns
+/// immediately; the worker spawns `git status --porcelain` (the
+/// 200-500 ms operation on a ~110k-file index) and echoes results
+/// back via `GitWorkerResult`.
+#[derive(Debug)]
+pub struct GitWorkerRequest {
+    pub generation: u64,
+    pub canonical: std::path::PathBuf,
+    pub repo_root: std::path::PathBuf,
+    pub huge: bool,
+}
+
+/// Worker reply. `generation` lets the main thread discard results
+/// whose source chdir has been superseded. `raw` is `None` when the
+/// `git status` spawn failed (not in a repo, git missing, etc.) —
+/// the App treats that as "no markers" rather than a hard error.
+#[derive(Debug)]
+pub struct GitWorkerResult {
+    pub generation: u64,
+    pub repo_root: std::path::PathBuf,
+    pub huge: bool,
+    pub raw: Option<String>,
+    pub index_mtime: Option<std::time::SystemTime>,
+    pub head_mtime: Option<std::time::SystemTime>,
+}
+
+/// Cached raw `git status --porcelain` output, keyed by repo root +
+/// `.git/index` / `.git/HEAD` mtimes. The status text doesn't depend
+/// on the current listing dir — only on the repo state — so once we
+/// have it, every chdir to a sibling/child path within the same repo
+/// can re-parse it locally with a freshly-computed prefix instead of
+/// spawning `git status` again. On a ~110k-file index that spawn is
+/// 200-500 ms, dominating drill-in latency.
+#[derive(Debug, Clone)]
+pub struct GitStatusRawCache {
+    pub repo_root: PathBuf,
+    pub index_mtime: std::time::SystemTime,
+    pub head_mtime: std::time::SystemTime,
+    /// `true` if captured with `-uno` (huge-tree mode). Treated as a
+    /// distinct cache shape: a small-tree consumer must NOT reuse a
+    /// huge-tree capture (it would be missing `?` untracked entries).
+    pub huge: bool,
+    pub raw: String,
+}
+
 /// Canonical list of `:` command base names, used by the prompt's
 /// Tab-completion path. Keep in sync with the matchers in
 /// `dispatch_command` here and in `App::dispatch_command`. Sorted for
@@ -171,6 +217,78 @@ pub struct AppState {
     /// `None` until the first successful poll, or when `.git/index`
     /// can't be stat'd.
     pub git_poll_cache: Option<(std::time::SystemTime, std::time::SystemTime)>,
+    /// Set at `chdir` when the new project root has more than
+    /// `HUGE_TREE_SUBDIR_THRESHOLD` subdirs (measured with the
+    /// bounded-DFS `count_subdirs_capped`). Drives three adaptive
+    /// behaviors in the event loop:
+    ///
+    /// - Slower poll cadence: `REFRESH_QUIET` 500 ms → 3 s,
+    ///   `GIT_POLL_INTERVAL` 1 s → 10 s.
+    /// - Cheaper `git status`: `-uno` (skip untracked enumeration)
+    ///   instead of `-unormal` — trade is no `?` markers for
+    ///   untracked files on huge trees, in exchange for not
+    ///   walking the entire working tree to enumerate them.
+    /// - Initial flash on first detection so the user sees the
+    ///   trade.
+    ///
+    /// Decision is cached by [`Self::huge_tree_anchor`]: drilling
+    /// down or popping up within the same project reuses the
+    /// previous decision without re-walking. Re-evaluated only
+    /// when the chdir crosses into a different project root (or
+    /// out of any repo). Without the cache, drilling into a
+    /// deeply-nested Java package layout (`src/main/java/com/...`)
+    /// took hundreds of ms per chdir as each step re-ran
+    /// `count_subdirs_capped` against an increasingly large
+    /// subtree.
+    pub is_huge_tree: bool,
+    /// Path that `is_huge_tree` is cached against — the repo root
+    /// of the active project, or the canonical listing dir when
+    /// not in a repo. `chdir` recomputes `is_huge_tree` only when
+    /// the new dir resolves to a different anchor. Without this,
+    /// every navigation step on a deeply-nested tree (typical
+    /// Java package layout: `src/main/java/com/...`) would re-run
+    /// `count_subdirs_capped` — observed as multi-hundred-ms
+    /// drill-in latency on a ~110k-file project.
+    pub huge_tree_anchor: Option<std::path::PathBuf>,
+    /// Multi-slot cache of huge-tree decisions per anchor path,
+    /// keyed on the same value that `huge_tree_anchor` would hold.
+    /// `huge_tree_anchor` is a single-slot "current" pointer — it
+    /// tells us whether the *active* project is huge — but the
+    /// decision behind it is project-wide and stable. Caching every
+    /// previously-computed decision means re-entering a project we
+    /// already classified (after a brief excursion to its parent dir
+    /// or to a sibling repo) skips `count_subdirs_capped` entirely.
+    pub huge_tree_decisions: std::collections::HashMap<std::path::PathBuf, bool>,
+    /// Repo root of the active project (the directory containing
+    /// `.git`), or `None` when the listing dir isn't inside any
+    /// repo. Updated alongside `huge_tree_anchor` in
+    /// `update_huge_tree`. Used to compute the
+    /// `git status --porcelain` prefix without spawning
+    /// `git rev-parse --show-toplevel`, and as the cache key for
+    /// `git_status_raw_cache`.
+    pub current_repo_root: Option<std::path::PathBuf>,
+    /// Cached raw output of `git status --porcelain`. On a huge
+    /// working tree the subprocess walks every tracked file in the
+    /// index — even with `-uno`, that's 200-500 ms per spawn on a
+    /// ~110k-file repo. After the first chdir into a project,
+    /// every subsequent chdir within that project's tree hits this
+    /// cache (provided `.git/index` and `.git/HEAD` mtimes match)
+    /// and skips the spawn entirely; only the per-listing-dir
+    /// prefix re-parse is paid.
+    pub git_status_raw_cache: Option<GitStatusRawCache>,
+    /// Sender to the background git-status worker. `None` in tests
+    /// or when the worker thread hasn't been initialized yet (the
+    /// AppState constructor runs before the App-level worker spawn).
+    /// `chdir` cache-miss paths enqueue requests; results arrive
+    /// back via the App's `git_result_rx` and are gated on
+    /// `git_generation` to discard stale ones.
+    pub git_worker_tx: Option<std::sync::mpsc::Sender<GitWorkerRequest>>,
+    /// Monotonic counter bumped on every chdir-that-issues-a-git-
+    /// request. The worker echoes the counter back in its result;
+    /// the App event loop discards results whose generation doesn't
+    /// match the current value (the user has navigated past them).
+    /// Eliminates the need for explicit thread cancellation.
+    pub git_generation: u64,
     /// Snapshot of the active harpoon ancestor-set (slot paths plus
     /// every parent directory of every slot). App refreshes this
     /// whenever the harpoon list mutates so `apply_temp_filter`
@@ -646,9 +764,14 @@ impl AppState {
                 self.listing = new;
                 // Refresh the top-bar branch/dirty string too — without
                 // this the bar stays on `main` after edits and only
-                // updates when the user changes directories.
-                let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
-                let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+                // updates when the user changes directories. Event-
+                // driven refresh, so invalidate the raw cache (file
+                // mtimes moved but `.git/index` may not have — and we
+                // need fresh content for ` M` markers).
+                self.git_status_raw_cache = None;
+                let dir = self.listing.dir.clone();
+                let new_git_files = self.git_file_statuses_cached(&dir);
+                let new_git_info = self.compute_git_info_fast();
                 let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
                 new_keys.sort_unstable();
                 crate::spyc_debug!(
@@ -697,12 +820,17 @@ impl AppState {
     /// miss the ` M filename` markers that refresh exists to
     /// surface.
     pub fn refresh_git_state(&mut self) -> bool {
-        let key = git_mtime_key(&self.listing.dir);
+        let key = self.compute_git_mtime_key_fast();
         if key.is_some() && key == self.git_poll_cache {
             return false;
         }
-        let new_git_info = crate::sysinfo::git_status(&self.listing.dir);
-        let new_git_files = crate::sysinfo::git_file_statuses(&self.listing.dir);
+        // mtime moved — invalidate the raw-status cache before going
+        // through `git_file_statuses_cached`, which will re-spawn and
+        // refill it on this dir.
+        self.git_status_raw_cache = None;
+        let listing_dir = self.listing.dir.clone();
+        let new_git_files = self.git_file_statuses_cached(&listing_dir);
+        let new_git_info = self.compute_git_info_fast();
         // Stash on success so the next idle poll skips the
         // subprocesses. Stat fail (e.g. shallow repo, .git missing)
         // ⇒ key is None and we'll keep running until it appears.
@@ -714,6 +842,178 @@ impl AppState {
         self.git_files = new_git_files;
         self.rebuild_rows();
         true
+    }
+
+    /// Get the file-status map for `canonical`, using the raw-status
+    /// cache when valid. The cache hit path skips the `git status`
+    /// subprocess entirely and just re-parses the previously-captured
+    /// porcelain text against the new dir's prefix — the slow part of
+    /// the spawn is the index walk, which is identical for every
+    /// chdir within the same repo. On the ~110k-file Java monorepo,
+    /// this drops per-chdir cost from 200-500 ms to sub-millisecond.
+    ///
+    /// Caller must have already called [`Self::update_huge_tree`] for
+    /// `canonical` so `current_repo_root` and `is_huge_tree` reflect
+    /// the new dir.
+    pub fn git_file_statuses_cached(
+        &mut self,
+        canonical: &Path,
+    ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
+        let Some(repo_root) = self.current_repo_root.clone() else {
+            // Not in a repo — nothing to do, no cache to maintain.
+            return std::collections::HashMap::new();
+        };
+        let mtimes = self.compute_git_mtime_key_fast();
+        // Decide whether to reuse the cached raw output.
+        let reuse = self.git_status_raw_cache.as_ref().is_some_and(|c| {
+            c.repo_root == repo_root
+                && c.huge == self.is_huge_tree
+                && mtimes.is_some_and(|(idx, head)| idx == c.index_mtime && head == c.head_mtime)
+        });
+        if !reuse {
+            // Cache miss — the `git status` spawn walks the entire
+            // index (200-500 ms on a ~110k-file repo) and would
+            // block the UI thread. Hand it to the background worker
+            // and return an empty map for now; the App event loop
+            // will fill in real markers when the worker posts its
+            // result (matched against `git_generation` so navigating
+            // away mid-spawn discards the stale result).
+            if let Some(tx) = self.git_worker_tx.as_ref() {
+                self.git_generation = self.git_generation.wrapping_add(1);
+                let _ = tx.send(GitWorkerRequest {
+                    generation: self.git_generation,
+                    canonical: canonical.to_path_buf(),
+                    repo_root,
+                    huge: self.is_huge_tree,
+                });
+                return std::collections::HashMap::new();
+            }
+            // No worker (tests, App::new bootstrap) — fall through
+            // to the synchronous spawn path below.
+            self.git_status_raw_cache = None;
+            if let Some(raw) =
+                crate::sysinfo::git_status_porcelain_raw(canonical, self.is_huge_tree)
+                && let Some((index_mtime, head_mtime)) = mtimes
+            {
+                self.git_status_raw_cache = Some(GitStatusRawCache {
+                    repo_root,
+                    index_mtime,
+                    head_mtime,
+                    huge: self.is_huge_tree,
+                    raw,
+                });
+            }
+        }
+        // Parse with the prefix derived from the listing dir relative
+        // to the repo root — no `git rev-parse --show-toplevel`
+        // subprocess needed.
+        let Some(cache) = self.git_status_raw_cache.as_ref() else {
+            return std::collections::HashMap::new();
+        };
+        let prefix = canonical
+            .strip_prefix(&cache.repo_root)
+            .unwrap_or(Path::new(""))
+            .to_string_lossy()
+            .into_owned();
+        crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
+    }
+
+    /// Compute the `git_info` display string (`main`, `main*`,
+    /// `abc1234`, `(no git)` — well, `None`) from cached state
+    /// without spawning any subprocesses. Replaces
+    /// `sysinfo::git_status`, which spawned both
+    /// `git rev-parse --abbrev-ref HEAD` AND a full
+    /// `git status --porcelain` (with `-unormal`, walking every
+    /// untracked file on the 110k-file tree) per chdir.
+    ///
+    /// - Branch comes from `.git/HEAD` (or the gitfile pointer for
+    ///   worktrees/submodules) — pure file IO.
+    /// - Dirty flag comes from the raw porcelain we already cached
+    ///   in [`Self::git_file_statuses_cached`]. Empty raw output ⇒
+    ///   clean. Non-empty ⇒ dirty.
+    ///
+    /// Returns `None` if the listing dir isn't in a repo, mirroring
+    /// the old `sysinfo::git_status` contract.
+    pub fn compute_git_info_fast(&self) -> Option<String> {
+        let repo_root = self.current_repo_root.as_ref()?;
+        let gitdir = crate::sysinfo::resolve_gitdir(repo_root)?;
+        let branch = crate::sysinfo::read_head_branch(&gitdir)?;
+        let dirty = self
+            .git_status_raw_cache
+            .as_ref()
+            .is_some_and(|c| !c.raw.is_empty());
+        Some(if dirty { format!("{branch}*") } else { branch })
+    }
+
+    /// Stat `.git/index` and `.git/HEAD` against the cached repo
+    /// root — the no-subprocess version of `git_mtime_key`. Used
+    /// to seed `git_poll_cache` on chdir without spawning
+    /// `git rev-parse --git-dir`.
+    fn compute_git_mtime_key_fast(&self) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
+        let repo_root = self.current_repo_root.as_ref()?;
+        let gitdir = crate::sysinfo::resolve_gitdir(repo_root)?;
+        let index_mt = std::fs::metadata(gitdir.join("index"))
+            .and_then(|m| m.modified())
+            .ok()?;
+        let head_mt = std::fs::metadata(gitdir.join("HEAD"))
+            .and_then(|m| m.modified())
+            .ok()?;
+        Some((index_mt, head_mt))
+    }
+
+    /// Recompute `is_huge_tree` / `huge_tree_anchor` for the given
+    /// canonical dir. The cached anchor (the active project's repo
+    /// root, or the dir itself when not in a repo) short-circuits
+    /// re-walking on every chdir within the same project — drilling
+    /// into a deeply-nested Java package layout was observed taking
+    /// hundreds of ms per step because each chdir re-ran the
+    /// bounded-DFS walk over the package subtree.
+    ///
+    /// On a real anchor change (different repo / different non-repo
+    /// dir), runs `count_subdirs_capped` and flashes if newly huge.
+    /// Returns true if `is_huge_tree` is now set, mostly for tests.
+    pub fn update_huge_tree(&mut self, canonical: &Path) -> bool {
+        let repo_root = find_repo_root(canonical);
+        let new_anchor = repo_root.clone().unwrap_or_else(|| canonical.to_path_buf());
+        if self.huge_tree_anchor.as_ref() == Some(&new_anchor) {
+            // Same project — keep the cached decision and skip the
+            // walk. No flash either (we've already flashed this
+            // project's first entry if it was huge).
+            self.current_repo_root = repo_root;
+            return self.is_huge_tree;
+        }
+        let was_huge = self.is_huge_tree;
+        // Look up a previously-cached decision for this anchor before
+        // walking. Multi-slot cache survives leave-and-return cycles
+        // (drill into the huge project → up to its parent → back in)
+        // that the single-slot `huge_tree_anchor` thrashed on,
+        // forcing a fresh `count_subdirs_capped` walk every time.
+        self.is_huge_tree = if let Some(&cached) = self.huge_tree_decisions.get(&new_anchor) {
+            cached
+        } else {
+            let huge = crate::app::count_subdirs_capped(
+                &new_anchor,
+                crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
+            ) > crate::app::HUGE_TREE_SUBDIR_THRESHOLD;
+            self.huge_tree_decisions.insert(new_anchor.clone(), huge);
+            huge
+        };
+        self.huge_tree_anchor = Some(new_anchor);
+        self.current_repo_root = repo_root;
+        // Intentionally do NOT wipe `git_status_raw_cache` here.
+        // The cache is keyed on (repo_root, mtimes, huge) and
+        // self-invalidates in `git_file_statuses_cached` when the
+        // current dir's repo doesn't match. Wiping on every anchor
+        // change burned the cache on "up to parent and back in"
+        // patterns — re-entering the same project repaid the full
+        // `git status` index walk (200-500 ms on a ~110k-file repo).
+        if self.is_huge_tree && !was_huge {
+            self.flash_info(format!(
+                "large tree ({}+ subdirs) — git poll throttled, untracked markers off",
+                crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
+            ));
+        }
+        self.is_huge_tree
     }
 
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
@@ -736,13 +1036,23 @@ impl AppState {
         }
         self.listing = new_listing;
         self.listing.sort(self.sort_order);
-        self.git_info = crate::sysinfo::git_status(&canonical);
-        self.git_files = crate::sysinfo::git_file_statuses(&canonical);
-        // Cache key from the just-canonical dir's repo — the chdir
-        // implicitly switched repos if the new tree has a different
-        // `.git/`, so seed the cache here rather than wait for the
-        // next 1 Hz poll to detect the mismatch.
-        self.git_poll_cache = git_mtime_key(&canonical);
+        // Maybe re-evaluate "is this a huge tree?" — only runs the
+        // bounded-DFS walk when the chdir crosses into a different
+        // project (different repo root, or out of any repo). Drilling
+        // around inside the same project inherits the cached value.
+        // Must happen *before* the git calls below so they see the
+        // right `huge` value on the first run after chdir.
+        self.update_huge_tree(&canonical);
+        // Refill the raw-status cache (if needed) before computing
+        // branch/dirty — `compute_git_info_fast` reads `dirty` off
+        // the cached raw output, so it must be current.
+        self.git_files = self.git_file_statuses_cached(&canonical);
+        self.git_info = self.compute_git_info_fast();
+        // Cache key from the cached repo root — no subprocess. The
+        // chdir implicitly switched repos if the new tree has a
+        // different `.git/`, so seed the cache here rather than wait
+        // for the next 1 Hz poll to detect the mismatch.
+        self.git_poll_cache = self.compute_git_mtime_key_fast();
         self.picks.clear();
         self.temp_filter = None;
         self.cursor = Cursor::new();
@@ -1737,42 +2047,25 @@ fn count_files_in_dir(dir: &Path) -> u64 {
     n
 }
 
-/// Stat `.git/index` and `.git/HEAD` and return their mtime pair, or
-/// `None` if either file is missing. Used as the cache key for the
-/// 1 Hz git poll's mtime short-circuit — see
-/// [`AppState::refresh_git_state`]. Walks up to the repo root via
-/// `git rev-parse --show-toplevel` so a chdir into a subdir still
-/// finds the right `.git/`.
-fn git_mtime_key(dir: &Path) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
-    // Cheap repo-root resolve. If we're not in a repo `rev-parse`
-    // exits non-zero and we return None; the caller treats that as
-    // "no cache hit possible," so the poll still runs (and harmlessly
-    // produces empty results).
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--git-dir"])
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+/// Walk up from `start` looking for an enclosing `.git` (dir or
+/// gitfile). Returns the directory containing the `.git/`, or
+/// `None` if we hit the filesystem root without finding one.
+/// Used as the cache key for `AppState::update_huge_tree` — the
+/// huge-tree decision is project-wide, so anchoring on the repo
+/// root lets every chdir within that project reuse the same
+/// determination without re-walking the subtree.
+///
+/// Filesystem-only (no `git rev-parse` subprocess) — a few `lstat`
+/// calls per ancestor.
+fn find_repo_root(start: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in start.ancestors() {
+        // Both `.git` directories (normal repo) and `.git` files
+        // (worktrees, submodules, gitlink) count.
+        if ancestor.join(".git").exists() {
+            return Some(ancestor.to_path_buf());
+        }
     }
-    let raw = String::from_utf8(output.stdout).ok()?;
-    let git_dir_str = raw.trim();
-    // `rev-parse --git-dir` returns either an absolute path or one
-    // relative to `dir`; join with `dir` for the relative case.
-    let git_dir = {
-        let p = std::path::PathBuf::from(git_dir_str);
-        if p.is_absolute() { p } else { dir.join(p) }
-    };
-    let index_mt = std::fs::metadata(git_dir.join("index"))
-        .and_then(|m| m.modified())
-        .ok()?;
-    let head_mt = std::fs::metadata(git_dir.join("HEAD"))
-        .and_then(|m| m.modified())
-        .ok()?;
-    Some((index_mt, head_mt))
+    None
 }
 
 #[cfg(test)]
@@ -1814,6 +2107,13 @@ mod tests {
             git_info: None,
             git_files: std::collections::HashMap::new(),
             git_poll_cache: None,
+            is_huge_tree: false,
+            huge_tree_anchor: None,
+            huge_tree_decisions: std::collections::HashMap::new(),
+            current_repo_root: None,
+            git_status_raw_cache: None,
+            git_worker_tx: None,
+            git_generation: 0,
             harpoon_filter_set: std::collections::HashSet::new(),
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),

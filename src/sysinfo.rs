@@ -22,85 +22,86 @@ pub fn epoch_nanos() -> u128 {
     secs * 1_000_000_000 + subsec
 }
 
-/// Git status for a directory: branch name + dirty flag.
-/// Returns e.g. `"main*"` (dirty) or `"main"` (clean), or `None` if
-/// the directory isn't in a git repo.
-pub fn git_status(dir: &std::path::Path) -> Option<String> {
-    let branch = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !branch.status.success() {
-        return None;
+/// Resolve `<repo_root>/.git` to the actual gitdir on disk. For a
+/// normal repo this is just `<repo_root>/.git`; for a worktree or
+/// submodule, `.git` is a *file* whose content is `gitdir: <path>`
+/// — we follow that pointer.
+///
+/// Returns `None` if `.git` is missing or the gitfile is malformed.
+/// Pure filesystem (no subprocess); used to bypass
+/// `git rev-parse --git-dir` on every chdir.
+pub fn resolve_gitdir(repo_root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dot_git = repo_root.join(".git");
+    let meta = std::fs::symlink_metadata(&dot_git).ok()?;
+    if meta.is_dir() {
+        return Some(dot_git);
     }
-    let branch = std::str::from_utf8(&branch.stdout).ok()?.trim().to_string();
-
-    let porcelain = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    let dirty = porcelain.status.success() && !porcelain.stdout.is_empty();
-    let raw = std::str::from_utf8(&porcelain.stdout).unwrap_or("<utf8>");
-    crate::spyc_debug!(
-        "git_status({}): branch={branch:?} dirty={dirty} porcelain={:?}",
-        dir.display(),
-        raw,
-    );
-
-    Some(if dirty { format!("{branch}*") } else { branch })
+    // gitfile: `gitdir: /abs/or/rel/path\n`
+    let contents = std::fs::read_to_string(&dot_git).ok()?;
+    let line = contents.lines().find(|l| l.starts_with("gitdir:"))?;
+    let path_str = line.trim_start_matches("gitdir:").trim();
+    let p = std::path::PathBuf::from(path_str);
+    Some(if p.is_absolute() {
+        p
+    } else {
+        repo_root.join(p)
+    })
 }
 
-/// Per-file git status for the current directory. Returns a map from
-/// filename (not full path) to status. Only includes files that are
-/// modified, new, deleted, etc. — clean files are omitted.
-pub fn git_file_statuses(
-    dir: &std::path::Path,
-) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
-    let map = std::collections::HashMap::new();
-    let output = std::process::Command::new("git")
-        .args(["status", "--porcelain", "-unormal"])
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(output) = output else { return map };
-    if !output.status.success() {
-        return map;
+/// Read `<gitdir>/HEAD` and return a branch display string —
+/// `main` for an attached branch, `abc1234` for a detached HEAD
+/// (short hash), or `None` if HEAD can't be read. Pure filesystem;
+/// replaces `git rev-parse --abbrev-ref HEAD` on the chdir hot
+/// path.
+pub fn read_head_branch(gitdir: &std::path::Path) -> Option<String> {
+    let contents = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
+    let trimmed = contents.trim();
+    if let Some(rest) = trimmed.strip_prefix("ref: ") {
+        // `refs/heads/main` → `main`. For non-heads refs (e.g.
+        // `refs/remotes/origin/foo` from a weird checkout) just
+        // strip the longest known prefix we recognize, else show
+        // the bare ref name.
+        let name = rest
+            .strip_prefix("refs/heads/")
+            .or_else(|| rest.strip_prefix("refs/"))
+            .unwrap_or(rest);
+        Some(name.to_string())
+    } else if trimmed.len() >= 7 {
+        // Detached HEAD — raw commit hash. Show first 7 chars,
+        // matching `git rev-parse --short` default.
+        Some(trimmed[..7].to_string())
+    } else {
+        None
     }
-    // Compute the prefix to strip from repo-relative paths so we get
-    // paths relative to the current listing directory.
-    let prefix = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
+}
+
+/// Spawn `git status --porcelain` and return the raw stdout. Split
+/// out from [`git_file_statuses`] so callers (e.g. the chdir path)
+/// can cache the raw text across navigations within the same repo —
+/// the index walk is the expensive part of the spawn and produces
+/// identical output for every dir under one repo root.
+///
+/// Returns `None` if the spawn fails or git exits non-zero.
+pub fn git_status_porcelain_raw(dir: &std::path::Path, huge: bool) -> Option<String> {
+    let untracked_flag = if huge { "-uno" } else { "-unormal" };
+    let output = std::process::Command::new("git")
+        .args(["status", "--porcelain", untracked_flag])
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| {
-            let repo_root = std::path::PathBuf::from(s.trim());
-            dir.strip_prefix(&repo_root)
-                .unwrap_or(std::path::Path::new(""))
-                .to_string_lossy()
-                .into_owned()
-        })
-        .unwrap_or_default();
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    parse_porcelain_statuses(&text, &prefix)
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
 }
 
 /// Pure-parser half of [`git_file_statuses`]: turns raw `git status
 /// --porcelain` output (plus the dir-relative prefix) into the
 /// basename-keyed map the list view consumes. Split out so we can unit
 /// test the path-mapping rules without spawning `git`.
-fn parse_porcelain_statuses(
+pub fn parse_porcelain_statuses(
     porcelain: &str,
     prefix: &str,
 ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {

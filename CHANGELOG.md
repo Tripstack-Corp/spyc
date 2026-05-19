@@ -6,6 +6,129 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Performance
+- **`git status` runs on a background worker thread.** Cache hits
+  on chdir are already sub-ms, but cache *misses* (first entry into
+  a project, mtime moved, huge flag flipped) still blocked the UI
+  for the 200-500 ms `git status` index walk on a ~110k-file repo.
+  Now the chdir returns immediately:
+
+  - Listing renders right away with the branch from `.git/HEAD`
+    (still sync — single small file read).
+  - `git_files` is empty for the brief window between chdir and
+    worker reply; markers fade in on the next paint.
+  - The worker is a single long-running thread holding an `mpsc`
+    request queue; results return on another channel that the
+    event loop drains each tick.
+  - A `git_generation` counter bumps on every cache-miss send.
+    Results carry the generation they were spawned for; if the
+    user has navigated past that point, the result is discarded
+    silently (no thread cancellation needed).
+  - Startup itself is async: `App::new` no longer blocks on
+    `git_status` / `git_file_statuses`; the first paint shows the
+    branch, markers arrive a frame or two later.
+
+  `compute_git_info_fast` is unchanged — branch reads from
+  `.git/HEAD`; dirty marker derives from the raw cache, which is
+  empty during the in-flight window. Effect: a project the user
+  has never entered before still takes ~300 ms for `git status` to
+  walk the index, but spyc no longer freezes for it.
+
+- **Cache survives "leave the project and return".** Two
+  single-slot caches (`huge_tree_anchor` deciding `is_huge_tree`,
+  and `git_status_raw_cache` holding the parsed porcelain) were
+  wiped on every anchor change in `update_huge_tree`. Going from
+  the active project up to its parent (no `.git`) and back in
+  invalidated both, repaying:
+
+  1. A `count_subdirs_capped` walk (10-100 ms on the parent dir
+     before bailing at the 256 cap).
+  2. A `git status --porcelain -uno` spawn that walks the
+     ~110k-entry index (200-500 ms).
+
+  Two fixes: (a) added a multi-slot
+  `huge_tree_decisions: HashMap<PathBuf, bool>` so previously-
+  classified anchors are reused without re-walking; (b) removed
+  the explicit `git_status_raw_cache = None` reset — the cache
+  is keyed on (repo_root, mtimes, huge) and self-invalidates in
+  `git_file_statuses_cached`. Excursions out of a repo set
+  `current_repo_root = None`, which already short-circuits the
+  cache lookup without touching the stored entry.
+
+- **Zero-subprocess chdir on a cached repo.** Following on from the
+  huge-tree adaptive backoff, drilling into a deeply-nested package
+  layout (`com/example/foo/bar/baz/...`) was still observed taking
+  hundreds of ms per step on a ~110k-file Java monorepo. Each chdir
+  was spawning **four** `git` subprocesses:
+
+  1. `git rev-parse --abbrev-ref HEAD` (branch for the top-bar)
+  2. `git status --porcelain -unormal` (dirty flag — full untracked
+     walk even on huge trees, because the top-bar string was
+     computed by `sysinfo::git_status`, which ignored `is_huge_tree`)
+  3. `git status --porcelain -uno` (per-file markers)
+  4. `git rev-parse --show-toplevel` (prefix for parsing #3) — and
+     later `git rev-parse --git-dir` for the mtime cache key
+
+  Index walks dominate the cost on a ~110k-entry repo (200-500 ms
+  each). On a small project these are all sub-10ms — invisible —
+  but they compound on a huge tree.
+
+  After this change, every chdir on a *cached* repo (i.e. one we've
+  already seen the raw status for, and whose `.git/index` and
+  `.git/HEAD` mtimes haven't moved) does the following instead:
+
+  - **No subprocess at all.** `git_info` (branch + dirty marker) is
+    computed by reading `<repo>/.git/HEAD` directly (new
+    `sysinfo::read_head_branch` — handles attached refs and
+    detached HEADs) and using the cached raw porcelain's emptiness
+    as the dirty signal.
+  - **Per-file markers** are re-parsed from the cached raw
+    porcelain using a locally-computed prefix
+    (`canonical.strip_prefix(repo_root)`), no `git rev-parse`
+    needed.
+  - **Mtime cache key** is `stat <repo>/.git/index` + `stat
+    <repo>/.git/HEAD` directly (new `sysinfo::resolve_gitdir`
+    handles `.git` dirs *and* worktree/submodule gitfiles).
+
+  New `AppState::git_status_raw_cache` holds the raw porcelain
+  keyed on (repo root, `.git/index` mtime, `.git/HEAD` mtime, huge
+  flag). Cache is invalidated when (a) crossing into a different
+  project (in `update_huge_tree`), (b) the 1 Hz safety poll
+  detects an index/HEAD mtime move, or (c) the event-driven
+  `refresh_listing` runs (working-tree edits don't change
+  `.git/index` but should still surface ` M filename` markers).
+
+  Net: per-chdir cost on a cached repo drops from "hundreds of ms,
+  user-visible" to "single-digit ms on the worst dir read; sub-ms
+  for git work."
+
+- **Huge-tree adaptive backoff.** At chdir, count the new dir's
+  subdirs with the bounded-DFS `count_subdirs_capped` helper
+  (previously Linux-only, now platform-agnostic). When the count
+  exceeds `HUGE_TREE_SUBDIR_THRESHOLD` (256, same as the
+  recursive-watch downgrade cap), set `AppState::is_huge_tree`
+  and shift three behaviors:
+
+  - `REFRESH_QUIET` (event-driven debounce): 500 ms → 3 s.
+    Bursty fsevent storms no longer trigger `git status` on
+    every 500 ms quiescent window.
+  - `GIT_POLL_INTERVAL` (1 Hz safety net): 1 s → 10 s. Combined
+    with the Tier 0 mtime cache, the idle poll is now stat-only
+    *and* 10× less frequent.
+  - `git_file_statuses` untracked mode: `-unormal` → `-uno`.
+    Skips per-untracked-file enumeration entirely — the dominant
+    cost on a working tree where most files aren't in the index
+    (build artifacts, generated code, vendored deps). Trade:
+    untracked files no longer get a `?` marker on huge trees.
+
+  Flash on first entry: `large tree (256+ subdirs) — git poll
+  throttled, untracked markers off` so the trade is visible.
+  Reset on chdir so a brief excursion into a small subtree
+  doesn't permanently downgrade. Reported on a ~110k-file
+  freshly-cloned monorepo where Spotlight (`mdworker_shared`)
+  and the spyc git poll were stacking up. Caleb's tests for
+  `count_subdirs_capped` now run on macOS too (test module
+  un-cfg-gated from Linux-only).
+
 - **1 Hz git poll short-circuits when `.git/index` and `.git/HEAD`
   haven't moved.** The poll exists as a safety net for the rare
   case where FSEvents drops the `.git/index.lock` →
