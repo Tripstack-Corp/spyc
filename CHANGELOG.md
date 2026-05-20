@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Markdown soft line breaks render as hard breaks.** CommonMark
+  spec joins consecutive non-blank lines into one reflowed
+  paragraph, which collapsed common patterns like
+  `**To:** Alice\n**From:** Bob\n**Status:** Draft` into a single
+  wrapped line. Now each source line renders on its own row —
+  matches Discord / Slack / chat-style rendering and the way
+  technical docs with `**Key:**` metadata expect to look.
+  Prose authored at 80-col source wrap shows as several short
+  lines instead of one reflowed paragraph; small trade for the
+  metadata case actually working.
+
 - **Command-capture pager title shows a status glyph.** The `!`
   capture pager already used ⏳ while a command was running, but
   the final title (after the child exits) was a bare

@@ -277,11 +277,18 @@ impl<'t> Renderer<'t> {
                 let style = Style::default().fg(self.theme.take);
                 self.current.push(Span::styled(format!("`{t}`"), style));
             }
-            Event::SoftBreak => {
-                // Soft break → space (paragraphs flow).
-                self.current.push(Span::raw(" ".to_string()));
-            }
-            Event::HardBreak => self.flush_line(),
+            // Treat soft breaks (a single `\n` in the source mid-
+            // paragraph) the same as hard breaks. CommonMark spec
+            // says join consecutive non-blank lines into one
+            // reflowed paragraph, but in practice technical docs
+            // with `**Key:** value` metadata lines, FAQ-style
+            // entries, or any Discord/Slack-influenced authoring
+            // expect each line to render on its own row. Our pager
+            // shows the resulting hard-wrapped lines fine; reflowed
+            // paragraphs in source-authored prose (e.g. 80-col
+            // README wraps) become a few extra lines, which is a
+            // small price for the metadata case actually working.
+            Event::SoftBreak | Event::HardBreak => self.flush_line(),
             Event::Rule => {
                 if !self.current.is_empty() {
                     self.flush_line();
@@ -976,6 +983,24 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("docs") && l.contains("https://example.com"))
         );
+    }
+
+    #[test]
+    fn soft_breaks_render_as_hard_breaks() {
+        // Technical docs with `**Key:**` metadata expected each
+        // line to render on its own row, but CommonMark default
+        // collapsed consecutive non-blank lines into one paragraph.
+        // We override soft breaks → flush_line. Each input line
+        // should produce its own rendered line.
+        let src = "**To:** Alice\n**From:** Bob\n**Status:** Draft\n";
+        let lines = render_plain(src);
+        let non_empty: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
+        assert_eq!(non_empty.len(), 3, "got lines: {lines:?}");
+        // The three labels should each anchor a distinct line —
+        // joined-into-one-paragraph would collapse them.
+        assert!(non_empty[0].contains("To:"), "{:?}", non_empty[0]);
+        assert!(non_empty[1].contains("From:"), "{:?}", non_empty[1]);
+        assert!(non_empty[2].contains("Status:"), "{:?}", non_empty[2]);
     }
 
     #[test]
