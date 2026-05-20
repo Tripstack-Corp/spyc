@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Command-capture pager title shows a status glyph.** The `!`
+  capture pager already used ⏳ while a command was running, but
+  the final title (after the child exits) was a bare
+  `! cmd — exit N` with no visual cue for success vs failure. Now
+  the title gains `✓` for clean exits, `✗` for non-zero / killed
+  / crashed / `^\` interrupts — matching the glyphs the
+  bottom-status-bar already uses for backgrounded tasks. Task
+  viewer (`gB`) titles get the same treatment (⏳ running,
+  ✓ exit 0, ✗ otherwise).
+
 ### Fixed
 - **Pager position memory now actually restores.** Shipped in
   v1.50.49 but didn't work for two reasons; this fix addresses

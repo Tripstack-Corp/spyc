@@ -1440,20 +1440,26 @@ impl App {
                     // may have already harvested exit_status during
                     // drain. If not (race window), wait() now —
                     // safe because the child has exited.
-                    let exit_info = if let Some(s) = capture.host.exit_status.as_ref() {
+                    let (exit_info, ok) = if let Some(s) = capture.host.exit_status.as_ref() {
                         if s.success() {
-                            "exit 0".to_string()
+                            ("exit 0".to_string(), true)
                         } else {
-                            format!("exit {}", s.exit_code())
+                            (format!("exit {}", s.exit_code()), false)
                         }
                     } else {
                         match capture.host.child.wait() {
-                            Ok(s) if s.success() => "exit 0".to_string(),
-                            Ok(s) => format!("exit {}", s.exit_code()),
-                            Err(e) => format!("error: {e}"),
+                            Ok(s) if s.success() => ("exit 0".to_string(), true),
+                            Ok(s) => (format!("exit {}", s.exit_code()), false),
+                            Err(e) => (format!("error: {e}"), false),
                         }
                     };
-                    let title = format!("{} — {exit_info}", capture.title);
+                    // Status glyph mirrors the bottom-status-bar
+                    // conventions (✓ for exit 0, ✗ for everything else)
+                    // so the pager title bar tells the user at a glance
+                    // whether their command succeeded — same as the
+                    // hourglass communicates "still running".
+                    let glyph = if ok { "\u{2713}" } else { "\u{2717}" }; // ✓ / ✗
+                    let title = format!("{glyph} {} — {exit_info}", capture.title);
                     // Final rebuild with stderr included.
                     let normalized = strip_crlf(&capture.buffer);
                     let text = normalized.as_slice().into_text().unwrap_or_default();
@@ -3338,7 +3344,10 @@ impl App {
             {
                 let _ = capture.host.child.kill();
                 let _ = capture.host.child.wait();
-                let title = format!("{} — interrupted", capture.title);
+                // ✗ — interrupted is a non-clean termination, same
+                // glyph the bottom-status-bar uses for bg tasks that
+                // exited non-zero.
+                let title = format!("\u{2717} {} — interrupted", capture.title);
                 if let Some(view) = self.pager.as_mut() {
                     view.title = title;
                     view.saveable = true;
@@ -5952,7 +5961,12 @@ impl App {
                     TaskStatus::Crashed(msg) => format!("error: {msg}"),
                     TaskStatus::Running => unreachable!(),
                 };
-                let title = format!("{} — {status_text} ({elapsed_secs}s)", task.title);
+                let glyph = if matches!(&status, TaskStatus::Exited(0)) {
+                    "\u{2713}" // ✓
+                } else {
+                    "\u{2717}" // ✗
+                };
+                let title = format!("{glyph} {} — {status_text} ({elapsed_secs}s)", task.title);
                 let mut view = PagerView::new_plain(title, Vec::new());
                 view.lines = text.lines;
                 view.saveable = true;
@@ -5978,14 +5992,14 @@ impl App {
             .finished_at
             .map_or_else(|| task.started.elapsed(), |f| f - task.started)
             .as_secs();
-        let status_text = match &task.status {
-            TaskStatus::Running => format!("running ({elapsed}s)"),
-            TaskStatus::Exited(0) => format!("exit 0 ({elapsed}s)"),
-            TaskStatus::Exited(code) => format!("exit {code} ({elapsed}s)"),
-            TaskStatus::Killed => format!("killed ({elapsed}s)"),
-            TaskStatus::Crashed(msg) => format!("error: {msg} ({elapsed}s)"),
+        let (glyph, status_text) = match &task.status {
+            TaskStatus::Running => ("\u{23f3}", format!("running ({elapsed}s)")), // ⏳
+            TaskStatus::Exited(0) => ("\u{2713}", format!("exit 0 ({elapsed}s)")), // ✓
+            TaskStatus::Exited(code) => ("\u{2717}", format!("exit {code} ({elapsed}s)")), // ✗
+            TaskStatus::Killed => ("\u{2717}", format!("killed ({elapsed}s)")),
+            TaskStatus::Crashed(msg) => ("\u{2717}", format!("error: {msg} ({elapsed}s)")),
         };
-        let title = format!("[task #{id}] {} — {status_text}", task.cmd_display);
+        let title = format!("{glyph} [task #{id}] {} — {status_text}", task.cmd_display);
         let normalized = strip_crlf(&task.buffer);
         let text = normalized.as_slice().into_text().unwrap_or_default();
         let mut view = PagerView::new_plain(title, Vec::new());
