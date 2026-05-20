@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pager position memory now actually restores.** Shipped in
+  v1.50.49 but didn't work for two reasons; this fix addresses
+  both:
+
+  1. **Key mismatch.** `record()` canonicalized the path before
+     insert while `get()` looked up the raw path, so any caller
+     form that differed from the canonical form (`.`-segments,
+     trailing slash, `/private/tmp` vs `/tmp` on macOS) silently
+     missed. Added a single `key()` helper used by both sides
+     plus a regression test.
+  2. **Esc/q close bypassed save.** The pager Esc/q handler took
+     the active pager and pushed it to buffer history *before*
+     the trailing `clear_pager()` could run — by then
+     `self.pager` was already `None`, so the disk save was a
+     no-op. File pagers closed normally (the vast majority of
+     close events) never landed on disk, just in
+     `pager_history`. Now persistence runs before the take so
+     scroll survives the next spyc launch too.
+
 ### Added
 - **Pager remembers your last scroll position per file.** Open
   `foo.md`, scroll to line 200, close (or quit spyc entirely),

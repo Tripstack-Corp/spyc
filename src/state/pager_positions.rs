@@ -36,19 +36,27 @@ pub struct PagerPositions {
 }
 
 impl PagerPositions {
+    /// Canonicalize for use as the HashMap key. `record` and `get`
+    /// MUST agree on this — the original v1 of this module
+    /// canonicalized on save but not on load, so a path like
+    /// `./foo.md` from the listing-dir-relative caller would save
+    /// as `/abs/foo.md` and then miss on lookup.
+    fn key(path: &Path) -> PathBuf {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    }
+
     /// Look up the saved scroll for `path`. Returns `None` if the
     /// path was never seen.
     pub fn get(&self, path: &Path) -> Option<u16> {
-        self.entries.get(path).map(|e| e.scroll)
+        self.entries.get(&Self::key(path)).map(|e| e.scroll)
     }
 
     /// Record (or update) the scroll for `path`. Bumps `last_visit`
     /// and prunes if we're over the cap.
     pub fn record(&mut self, path: &Path, scroll: u16) {
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let now = crate::sysinfo::epoch_secs();
         self.entries.insert(
-            canonical,
+            Self::key(path),
             Entry {
                 scroll,
                 last_visit: now,
@@ -126,6 +134,31 @@ mod tests {
             },
         );
         assert_eq!(pp.get(&here), Some(42));
+    }
+
+    #[test]
+    fn record_then_get_round_trip_through_canonicalization() {
+        // Regression for the v1 bug: `record` canonicalized the
+        // key but `get` looked up the raw path, so any caller
+        // passing a slightly-different form (e.g. with `.`
+        // segments, trailing slash, or `/private/tmp` vs `/tmp`
+        // on macOS) silently missed. Test exercises a real file
+        // so canonicalize() actually has an effect.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.md");
+        std::fs::write(&path, "hello").unwrap();
+
+        let mut pp = PagerPositions::default();
+        pp.record(&path, 42);
+
+        // Look up via the same path: must hit.
+        assert_eq!(pp.get(&path), Some(42));
+
+        // Look up via a redundant-segment form of the same path
+        // (canonicalize collapses it). Without the symmetric
+        // canonicalization in `get`, this would miss.
+        let with_dot = path.parent().unwrap().join(".").join("note.md");
+        assert_eq!(pp.get(&with_dot), Some(42));
     }
 
     #[test]

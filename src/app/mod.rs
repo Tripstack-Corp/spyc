@@ -9380,6 +9380,14 @@ impl App {
                     if !is_picker {
                         if let Some(ref v) = self.pager {
                             if v.picker_cursor.is_none() && !v.streaming {
+                                // Persist scroll BEFORE the take —
+                                // otherwise the take leaves self.pager
+                                // None and the trailing clear_pager's
+                                // save call is a no-op. Without this,
+                                // file pagers closed via Esc/q never
+                                // got their scroll position saved to
+                                // disk (memory only, via history).
+                                self.remember_pager_position();
                                 if let Some(v) = self.pager.take() {
                                     self.pager_history.push(v);
                                 }
