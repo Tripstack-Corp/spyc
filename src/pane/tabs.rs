@@ -7,6 +7,28 @@ use std::path::PathBuf;
 
 use super::Pane;
 
+/// Two-phase scheduling for the `/resume <sid>` keystroke injection
+/// that session restore uses to recover a Claude conversation. Each
+/// variant carries the time the next write should fire so the App
+/// event loop can drain pending sends each tick without per-tab
+/// timers.
+pub enum PendingResumeSend {
+    /// Initial state right after spawn: wait for Claude's banner to
+    /// finish rendering before typing anything. When the deadline
+    /// passes we write `/resume <sid>` (no Enter) and transition to
+    /// [`Self::Enter`].
+    Text {
+        sid: String,
+        after: std::time::Instant,
+    },
+    /// Text has been written. After a small additional delay we
+    /// write `\r` so the prompt actually submits. Splitting the
+    /// write avoids the intermittent race where Claude's TUI was
+    /// mid-render and dropped the trailing `\r` from a combined
+    /// send.
+    Enter { after: std::time::Instant },
+}
+
 /// Per-tab metadata displayed in the status line.
 pub struct TabInfo {
     /// Full command string passed to `Pane::spawn`.
@@ -27,8 +49,13 @@ pub struct TabInfo {
     /// trips a known regression that crashes at mount), then once
     /// claude has had time to finish its banner, type `/resume <sid>`
     /// followed by Enter — the slash-command path doesn't hit the bug.
-    /// Holds `(session_id, spawn_time)`; cleared once sent.
-    pub pending_resume_send: Option<(String, std::time::Instant)>,
+    /// Two-phase to avoid an intermittent race where Claude's TUI was
+    /// mid-render when our bytes arrived: the chars were absorbed by
+    /// the prompt but the trailing `\r` got dropped, leaving the
+    /// command sitting unsubmitted. Sending text and Enter as
+    /// separate writes a few hundred ms apart lets the prompt settle
+    /// between them.
+    pub pending_resume_send: Option<PendingResumeSend>,
     /// When the tab's subprocess was launched. Bounds the
     /// restore-fallback window so a real user-driven exit much later
     /// doesn't trigger an automatic respawn.

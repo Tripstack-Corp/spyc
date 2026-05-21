@@ -111,6 +111,21 @@ struct BackgroundTask {
 /// usually wants. 1 MB ≈ ~10K lines of plain text.
 const TASK_BUFFER_CAP: usize = 1_048_576;
 
+/// How long to wait after spawning a restored Claude pane before
+/// typing `/resume <sid>`. Banner / version-check / MCP-auth lines
+/// can take well over a second to settle on cold starts; bumping
+/// from the original 1500 ms reduces the race window where Claude
+/// is still drawing when our keystrokes land.
+const RESTORE_BANNER_SETTLE: Duration = Duration::from_secs(2);
+
+/// Additional pause between typing `/resume <sid>` and pressing
+/// Enter. A combined send (text + `\r` in one write) intermittently
+/// landed in Claude's prompt mid-render — the chars stuck, the
+/// trailing `\r` got dropped, and the user was left staring at an
+/// unsubmitted command. Splitting the two writes a few hundred ms
+/// apart gives the prompt time to settle in between.
+const RESTORE_RESUME_ENTER_DELAY: Duration = Duration::from_millis(300);
+
 struct BackgroundTasks {
     tasks: Vec<BackgroundTask>,
     next_id: u32,
@@ -6089,27 +6104,47 @@ impl App {
     }
 
     /// For tabs that have a `pending_resume_send` armed (set by
-    /// `restore_session`), send `/resume <sid>\r` to the pty once
-    /// enough time has elapsed for claude's banner to render. We
-    /// avoid the `--resume` CLI flag because it trips a known
-    /// regression that crashes at mount; the slash-command path
-    /// goes through `tM_` and works fine.
+    /// `restore_session`), drive the two-phase keystroke injection
+    /// that recovers a Claude conversation. We avoid the `--resume`
+    /// CLI flag because it trips a known regression that crashes at
+    /// mount; the slash-command path goes through `tM_` and works
+    /// fine.
+    ///
+    /// Two phases:
+    /// - `Text` (after banner-settle): write `/resume <sid>` with no
+    ///   trailing Enter and transition to `Enter`.
+    /// - `Enter` (after a small additional delay): write `\r`.
+    ///
+    /// Splitting the writes avoids an intermittent race where
+    /// Claude's TUI was still mid-render when the original combined
+    /// `/resume <sid>\r` arrived: the chars landed in the prompt
+    /// but the trailing `\r` got dropped, leaving the command
+    /// sitting unsubmitted. Reported by a user who could "just hit
+    /// Enter" to recover. The delay between phases lets the prompt
+    /// absorb the typed chars before we tell it to submit.
     fn send_pending_resumes(&mut self) {
-        const SETTLE_DELAY: Duration = Duration::from_millis(1500);
+        use crate::pane::tabs::PendingResumeSend;
         let Some(tabs) = self.pane_tabs.as_mut() else {
             return;
         };
         let now = std::time::Instant::now();
         for entry in tabs.tabs_mut() {
-            let Some((sid, spawn_at)) = entry.info.pending_resume_send.as_ref() else {
-                continue;
-            };
-            if now.duration_since(*spawn_at) < SETTLE_DELAY {
-                continue;
+            match entry.info.pending_resume_send.take() {
+                Some(PendingResumeSend::Text { sid, after }) if now >= after => {
+                    let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());
+                    entry.info.pending_resume_send = Some(PendingResumeSend::Enter {
+                        after: now + RESTORE_RESUME_ENTER_DELAY,
+                    });
+                }
+                Some(PendingResumeSend::Enter { after }) if now >= after => {
+                    let _ = entry.pane.send_bytes(b"\r");
+                    // Cleared by take().
+                }
+                other => {
+                    // Not yet due, or empty — put back what we took.
+                    entry.info.pending_resume_send = other;
+                }
             }
-            let payload = format!("/resume {sid}\r");
-            let _ = entry.pane.send_bytes(payload.as_bytes());
-            entry.info.pending_resume_send = None;
         }
     }
 
@@ -8451,7 +8486,10 @@ impl App {
                         if let Some(tabs) = self.pane_tabs.as_mut() {
                             if let Some(entry) = tabs.tabs_mut().last_mut() {
                                 entry.info.pending_resume_send =
-                                    Some((sid.clone(), std::time::Instant::now()));
+                                    Some(crate::pane::tabs::PendingResumeSend::Text {
+                                        sid: sid.clone(),
+                                        after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
+                                    });
                             }
                         }
                     }

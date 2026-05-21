@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Intermittent "Claude restore stops at the prompt" race fixed.**
+  Restoring a session with a Claude pane sometimes left the
+  `/resume <sid>` command typed but unsubmitted — the user had
+  to press Enter once to finish the restore. Cause: a single
+  combined write of `/resume <sid>\r` could arrive at Claude's
+  TUI mid-render, the prompt absorbed the chars but the trailing
+  `\r` got dropped. Now the keystroke injection is two-phase:
+  text goes in after a 2 s banner-settle (was 1.5 s), then
+  300 ms later a separate `\r` write submits it. The pause
+  between writes lets the prompt finish reacting to the typed
+  chars before we tell it to submit.
+
 - **Wide markdown tables no longer overflow the pager's right
   edge when line numbers are on.** v1.50.48 hinted the markdown
   renderer at the actual pager body width so wide tables would
