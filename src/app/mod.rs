@@ -285,6 +285,21 @@ impl Prompt {
     }
 }
 
+/// True when the active prompt is a file/directory-path entry
+/// (copy-to, move-to, mkdir). These prompts get vi editing via
+/// `Prompt::shell` but skip history nav — they share the
+/// shell-command history slot, which has nothing useful for a
+/// path prompt and was surfacing `make sync-all` on Up arrow.
+const fn is_path_prompt_kind(mode: &Mode) -> bool {
+    matches!(
+        mode,
+        Mode::Prompting(Prompt {
+            kind: PromptKind::CopyTo | PromptKind::MoveTo | PromptKind::MakeDir,
+            ..
+        })
+    )
+}
+
 pub enum PromptKind {
     PatternPick,
     ShellCmd,
@@ -4117,6 +4132,15 @@ impl App {
                 self.cancel_prompt();
             }
             EditResult::HistoryPrev => {
+                // Path prompts (copy/move/mkdir) have a vi editor but
+                // share the shell-command history slot, which has
+                // nothing useful to offer them — surfacing
+                // `make sync-all` on Up in a `move to:` prompt was
+                // surprising. Skip nav for those kinds; let other
+                // shell-style prompts continue to cycle history.
+                if is_path_prompt_kind(&self.state.mode) {
+                    return PostAction::None;
+                }
                 let current_text = {
                     let Mode::Prompting(p) = &self.state.mode else {
                         return PostAction::None;
@@ -4136,6 +4160,9 @@ impl App {
                 }
             }
             EditResult::HistoryNext => {
+                if is_path_prompt_kind(&self.state.mode) {
+                    return PostAction::None;
+                }
                 let hist = self.history_for_prompt();
                 let replacement = match hist.next() {
                     Some(entry) => entry.to_string(),

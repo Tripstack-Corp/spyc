@@ -1291,16 +1291,22 @@ impl AppState {
             // -- File operation prompts --
             Action::CopyPrompt => {
                 if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::CopyTo, "copy to: "));
+                    // `shell` constructor gives the prompt a vi line
+                    // editor so the user can navigate / edit the
+                    // destination path with familiar bindings (w b
+                    // 0 $ cw etc.). Up/Down history nav is skipped
+                    // for path prompts in `handle_vi_prompt_key`
+                    // so the shell command history doesn't surface.
+                    self.mode = Mode::Prompting(Prompt::shell(PromptKind::CopyTo, "copy to: "));
                 }
             }
             Action::MovePrompt => {
                 if !self.selection_paths().is_empty() {
-                    self.mode = Mode::Prompting(Prompt::simple(PromptKind::MoveTo, "move to: "));
+                    self.mode = Mode::Prompting(Prompt::shell(PromptKind::MoveTo, "move to: "));
                 }
             }
             Action::MakeDirPrompt => {
-                self.mode = Mode::Prompting(Prompt::simple(PromptKind::MakeDir, "mkdir: "));
+                self.mode = Mode::Prompting(Prompt::shell(PromptKind::MakeDir, "mkdir: "));
             }
             Action::NewFilePrompt => {
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::NewFile, "new file: "));

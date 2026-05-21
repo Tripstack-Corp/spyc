@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`copy to:` / `move to:` / `mkdir:` prompts get vi editing.**
+  These prompts used `Prompt::simple` (plain char append + backspace
+  only); now they use `Prompt::shell` so vi bindings — `w`/`b`,
+  `0`/`$`, `cw`/`dd`, etc. — work for editing the destination path.
+  Tab completion already worked and still does. Up/Down history nav
+  is intentionally disabled for these prompts: they share the
+  shell-command history slot, which has nothing useful for a path
+  prompt and was surfacing `!`-typed commands on Up arrow.
+
 ### Fixed
 - **`^a-k` / `^a-j` work inside `^a-v` scrollback mode.** The
   top-level keymap resolver is bypassed when a pager is active
