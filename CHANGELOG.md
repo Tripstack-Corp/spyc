@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Dropped the redundant `⏳ running` indicator in the prompt
+  bar during `!` captures.** The pager title already shows
+  `⏳ ! cmd — running... (Ns)`; the prompt-bar duplicate
+  (`⏳ running: <cmd>  (keys → child, ^C interrupt, ^\ kill)`)
+  said the same thing one row away. The keybinding hint is
+  documented in `?` (the in-app help) for anyone who needs it.
+
 - **`copy to:` / `move to:` / `mkdir:` prompts get vi editing.**
   These prompts used `Prompt::simple` (plain char append + backspace
   only); now they use `Prompt::shell` so vi bindings — `w`/`b`,

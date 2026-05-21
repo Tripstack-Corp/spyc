@@ -3065,23 +3065,6 @@ impl App {
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
             frame.render_widget(Paragraph::new(line), layout.prompt);
-        } else if let Some(capture) = &self.pending_capture {
-            // Persistent "running" indicator while a `!` capture is active.
-            use ratatui::{
-                style::{Modifier, Style},
-                text::{Line, Span},
-                widgets::Paragraph,
-            };
-            let line = Line::from(Span::styled(
-                format!(
-                    "⏳ running: {}  (keys → child, ^C interrupt, ^\\ kill)",
-                    capture.cmd_display
-                ),
-                Style::default()
-                    .fg(self.theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            frame.render_widget(Paragraph::new(line), layout.prompt);
         } else if let Some(pending) = self.state.resolver.pending_display() {
             use ratatui::{
                 style::{Modifier, Style},
