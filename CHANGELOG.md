@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`^a-k` / `^a-j` work inside `^a-v` scrollback mode.** The
+  top-level keymap resolver is bypassed when a pager is active
+  (the pager owns the keys), so the focus-switch chord was
+  silently dropped: `^a` consumed by the pager as a no-op, then
+  `k` interpreted as scroll-up. The pager handler now tracks the
+  `^a` chord locally when the active view is a `pane_scroll`
+  pager; `^a-k` exits scroll mode and focuses the top, `^a-j`
+  exits scroll mode and stays on the pane. Other pager modes
+  (file viewer, help, task viewer) are unaffected.
+
 - **Markdown prose reflows at the pager body width.** Two
   earlier choices combined badly on source files authored with
   80-col wrap (typical README / design-doc style): (a) v1.50.52
