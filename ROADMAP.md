@@ -482,6 +482,16 @@ same commit.
   spyc on terminal open and run every project from there." Kitchen
   vocabulary for the UI surfaces (CounterTop, Burner, Pass, Spice
   Drawer). Six-phase plan in [`docs/V1_60_PLAN.md`](docs/V1_60_PLAN.md).
+- **v1.70 -- Mise en Place.** Programmatic addressability: stable
+  pane handles (stations), structured snapshots (plates), a typed
+  daemon protocol (the Order rail), and async "ready" primitives
+  (bells) that replace timer-based heuristics like
+  `RESTORE_BANNER_SETTLE`. Three clients share one protocol: the
+  existing MCP server (renamed), a new `spyc-sdk` crate, and `spyc`
+  CLI subcommands aimed at coding harnesses (`spyc send-keys`,
+  `spyc plate`, `spyc wait`). Rmux-inspired crate split into
+  single-responsibility seams (`spyc-proto`, `spyc-pty`, `spyc-os`,
+  …). Seven-phase plan in [`docs/V1_70_PLAN.md`](docs/V1_70_PLAN.md).
 - **v2.0** -- Public distribution launch. Gated on: thesis-track items
   #1-#2 shipped (session forking, prompt templates), remaining
   Distribution track complete. External announcement: TripStack
