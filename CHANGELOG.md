@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Wide markdown tables no longer overflow the pager's right
+  edge when line numbers are on.** v1.50.48 hinted the markdown
+  renderer at the actual pager body width so wide tables would
+  expand instead of wrap. That width didn't account for the
+  line-number gutter the pager draws on top of the rendered
+  lines (`ilog10(lines) + 2` cells), so a table sized to fill
+  the body width still got pushed off the right edge by the
+  gutter columns. Now we estimate the gutter from the source
+  line count (with a ~1-digit safety margin to cover soft-break-
+  as-hard-break and table expansion) and subtract it from the
+  hint. Tables fit cleanly under the right border.
+
 ### Changed
 - **Markdown soft line breaks render as hard breaks.** CommonMark
   spec joins consecutive non-blank lines into one reflowed

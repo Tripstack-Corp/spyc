@@ -5417,9 +5417,21 @@ impl App {
                 // the 80-col prose budget. Centered overlay pager
                 // claims 90% of the terminal minus block borders;
                 // matches the `pager_inner_area` math.
+                //
+                // Subtract the projected line-number gutter so a wide
+                // table doesn't overflow the right edge of the
+                // viewport. The gutter is `ilog10(lines) + 2` cells
+                // wide (see `pager::render`); we don't yet know the
+                // RENDERED line count (it can exceed the source's
+                // because of soft-break-as-hard-break + table
+                // expansion), so use 4× the source count as a
+                // conservative estimate, which buys ~1 digit of
+                // safety on the gutter.
                 let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                let pager_w =
-                    crate::ui::pager::centered_body_width(term_w).saturating_sub(2) as usize;
+                let body_w = crate::ui::pager::centered_body_width(term_w) as usize;
+                let source_line_count = content.lines().count().max(1);
+                let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
+                let pager_w = body_w.saturating_sub(2 + gutter_w);
                 let rendered = crate::ui::markdown::render(&content, &self.theme, Some(pager_w));
                 if self.state.config.markdown.open_as_rendered {
                     let mut v = PagerView::new_styled(name, rendered);
