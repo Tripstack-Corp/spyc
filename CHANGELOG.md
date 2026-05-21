@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Pager `^v` enters a placement state before visual block.**
+  Previously `^v` immediately anchored at the top visible line,
+  col 0 — awkward when the user wanted the anchor anywhere else.
+  Now `^v` enters a "placement" cursor that moves with vi motions
+  (`hjkl`, `w` / `b`, `0` / `$`, `g` / `G`); a second `^v`
+  commits the anchor at the cursor for a visual block selection,
+  or `V` commits to Line visual at the cursor's row. `Esc`
+  cancels. The placement cursor renders as a reverse-video cell;
+  a flash on entry lists the motions for discoverability.
+
 - **Dropped the redundant `⏳ running` indicator in the prompt
   bar during `!` captures.** The pager title already shows
   `⏳ ! cmd — running... (Ns)`; the prompt-bar duplicate

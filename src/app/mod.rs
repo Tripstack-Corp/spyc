@@ -9336,6 +9336,82 @@ impl App {
             }
         }
 
+        // Placement mode: pre-visual-block cursor positioning.
+        // First `^v` enters this state; vi motions move the cursor
+        // without defining a selection yet. Second `^v` commits to
+        // visual block at the cursor; `V` commits to visual line at
+        // the cursor's row; `Esc` cancels. We swallow keys that are
+        // motion-related so they don't fall through to scroll.
+        if view.is_placement() {
+            match key.code {
+                KeyCode::Esc => {
+                    view.cancel_placement();
+                    view.flash = Some("placement: cancelled".into());
+                    return PostAction::None;
+                }
+                KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    view.commit_placement_to_visual_block();
+                    view.flash = Some("visual block".into());
+                    return PostAction::None;
+                }
+                KeyCode::Char('V') => {
+                    view.commit_placement_to_visual_line();
+                    view.flash = Some("visual line".into());
+                    return PostAction::None;
+                }
+                KeyCode::Char('h') | KeyCode::Left => {
+                    view.placement_move(0, -1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('l') | KeyCode::Right => {
+                    view.placement_move(0, 1, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    view.placement_move(1, 0, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    view.placement_move(-1, 0, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('0') | KeyCode::Home => {
+                    view.placement_line_start();
+                    return PostAction::None;
+                }
+                KeyCode::Char('$') | KeyCode::End => {
+                    view.placement_line_end();
+                    return PostAction::None;
+                }
+                KeyCode::Char('w') => {
+                    view.placement_word_forward();
+                    return PostAction::None;
+                }
+                KeyCode::Char('b') => {
+                    view.placement_word_backward();
+                    return PostAction::None;
+                }
+                KeyCode::Char('g') => {
+                    // Single `g` jumps to top (no `gg` two-key required —
+                    // simpler than reusing the pager's pending-g state
+                    // machine, and placement is short-lived anyway).
+                    view.placement_jump_to(0, viewport);
+                    return PostAction::None;
+                }
+                KeyCode::Char('G') => {
+                    let last = view.lines.len().saturating_sub(1);
+                    view.placement_jump_to(last, viewport);
+                    return PostAction::None;
+                }
+                _ => {
+                    // Anything else: swallow. Keeps the user from
+                    // accidentally scrolling or yanking while in
+                    // placement.
+                    return PostAction::None;
+                }
+            }
+        }
+
         // Visual mode: Line (`V`) or Block (`^v`). Intercept first
         // so motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move
         // the selection cursor instead of the scroll position, and
@@ -9604,11 +9680,21 @@ impl App {
                 view.enter_visual();
             }
             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // ^v — enter visual *block* (columnar) mode.
-                // Anchors at the top visible line, column 0;
-                // j/k/h/l/G/etc. extend the rectangle and `y`
-                // yanks the rectangular slice. Esc / ^v exit.
-                view.enter_visual_block();
+                // ^v — enter placement mode. The user moves a
+                // cursor with vi motions (hjkl, w/b, 0/$, gg/G)
+                // and presses ^v again to commit to a visual
+                // block selection at that anchor — or `V` to
+                // commit to Line visual at the cursor's row.
+                // `Esc` cancels.
+                //
+                // The old "anchor at top visible line immediately"
+                // behavior was awkward when the user wanted the
+                // anchor anywhere other than the top of the
+                // viewport; placement makes the anchor explicit.
+                view.enter_placement();
+                view.flash = Some(
+                    "placement: hjkl/w/b/0/$/gG to move · ^v block · V line · Esc cancel".into(),
+                );
             }
             KeyCode::Char('S') if view.task_id.is_some() => {
                 // Task viewer: S (Stop) pauses the underlying task

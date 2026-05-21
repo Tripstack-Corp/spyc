@@ -115,6 +115,21 @@ impl VisualSelection {
     }
 }
 
+/// A pre-visual-block "navigation cursor" used to position the
+/// anchor before committing to a visual block selection. The user
+/// presses `^v` once to enter this state, moves the cursor with vi
+/// motions, then presses `^v` again to commit at the current
+/// position (or `V` to commit to Line visual at the current row).
+/// `Esc` cancels. Stored on [`PagerView::placement`].
+#[derive(Debug, Clone, Copy)]
+pub struct PlacementCursor {
+    /// 0-indexed line in `lines`.
+    pub row: usize,
+    /// 0-indexed character column within that line. Column 0 is
+    /// the leftmost cell.
+    pub col: usize,
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct PagerView {
     pub title: String,
@@ -229,6 +244,15 @@ pub struct PagerView {
     /// range `[min..=max]` and exits. Mutually exclusive with the
     /// search/jump prompts (entering them cancels visual mode).
     pub visual: Option<VisualSelection>,
+    /// Pre-visual-block placement cursor. While `Some`, the user is
+    /// positioning the anchor before entering visual block mode —
+    /// `hjkl` / `w`/`b` / `0`/`$` / `gg`/`G` move the cursor without
+    /// yet defining a selection. A second `^v` commits the position
+    /// as the anchor and transitions to `visual: Some(Block)`;
+    /// `V` commits to Line visual at the cursor row; `Esc` cancels.
+    /// Mutually exclusive with `visual`. A reverse-video cell at
+    /// `(row, col)` and a footer flash give the visual cue.
+    pub placement: Option<PlacementCursor>,
     /// Where this pager renders — overlay / top pane / lower pane.
     /// Default `Mount::Overlay` for every pre-v1.5 caller (set in
     /// each `new_*` constructor); v1.5 phases swap callers over to
@@ -286,6 +310,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            placement: None,
             mount: Mount::Overlay,
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
@@ -321,6 +346,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            placement: None,
             mount: Mount::Overlay,
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
@@ -360,6 +386,7 @@ impl PagerView {
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
             visual: None,
+            placement: None,
             mount: Mount::Overlay,
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
@@ -499,6 +526,197 @@ impl PagerView {
         } else {
             self.enter_visual_with_kind(VisualKind::Block);
         }
+    }
+
+    /// Enter pre-visual-block "placement" state. A navigation
+    /// cursor lands at (top visible line, col 0); the user can
+    /// then move it with vi motions (`hjkl`, `w`/`b`, `0`/`$`,
+    /// `gg`/`G`) before committing to a visual block selection
+    /// via a second `^v` or to Line visual via `V`. `Esc` cancels.
+    pub fn enter_placement(&mut self) {
+        if self.lines.is_empty() {
+            return;
+        }
+        // Clear any active selection so placement and visual are
+        // mutually exclusive (they share the cursor highlight).
+        self.visual = None;
+        let row = (self.scroll as usize).min(self.lines.len() - 1);
+        self.placement = Some(PlacementCursor { row, col: 0 });
+    }
+
+    pub const fn cancel_placement(&mut self) {
+        self.placement = None;
+    }
+
+    pub const fn is_placement(&self) -> bool {
+        self.placement.is_some()
+    }
+
+    /// Commit placement → visual block. Anchor lands at the
+    /// placement cursor; initial selection is the single cell.
+    pub const fn commit_placement_to_visual_block(&mut self) {
+        let Some(p) = self.placement.take() else {
+            return;
+        };
+        self.visual = Some(VisualSelection {
+            anchor: p.row,
+            cursor: p.row,
+            anchor_col: p.col,
+            cursor_col: p.col,
+            kind: VisualKind::Block,
+        });
+    }
+
+    /// Commit placement → visual line at the placement cursor row.
+    /// `V` from placement: skip block setup, start a line-visual
+    /// selection from the row the cursor is on.
+    pub const fn commit_placement_to_visual_line(&mut self) {
+        let Some(p) = self.placement.take() else {
+            return;
+        };
+        self.visual = Some(VisualSelection {
+            anchor: p.row,
+            cursor: p.row,
+            anchor_col: 0,
+            cursor_col: 0,
+            kind: VisualKind::Line,
+        });
+    }
+
+    /// Number of characters in `lines[row]` for cursor-clamp math.
+    /// Returns 0 if the row is out of range or empty.
+    fn placement_row_len(&self, row: usize) -> usize {
+        self.lines.get(row).map_or(0, |l| {
+            l.spans.iter().map(|s| s.content.chars().count()).sum()
+        })
+    }
+
+    /// Plain-text content of a line, joined across spans. Used for
+    /// vi-style word motions where styling is irrelevant.
+    fn placement_row_text(&self, row: usize) -> String {
+        self.lines.get(row).map_or_else(String::new, |l| {
+            l.spans.iter().map(|s| s.content.as_ref()).collect()
+        })
+    }
+
+    pub fn placement_move(&mut self, delta_row: isize, delta_col: isize, viewport_height: u16) {
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        let new_row = (p.row as isize + delta_row).clamp(0, n as isize - 1) as usize;
+        p.row = new_row;
+        let row_len = self.lines.get(new_row).map_or(0, |l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.chars().count())
+                .sum::<usize>()
+        });
+        let max_col = row_len.saturating_sub(1);
+        let new_col = (p.col as isize + delta_col).max(0).min(max_col as isize) as usize;
+        p.col = new_col;
+        self.scroll_to_keep_visible(new_row, viewport_height);
+    }
+
+    pub const fn placement_line_start(&mut self) {
+        if let Some(p) = self.placement.as_mut() {
+            p.col = 0;
+        }
+    }
+
+    pub fn placement_line_end(&mut self) {
+        let Some(row) = self.placement.as_ref().map(|p| p.row) else {
+            return;
+        };
+        let row_len = self.placement_row_len(row);
+        if let Some(p) = self.placement.as_mut() {
+            p.col = row_len.saturating_sub(1);
+        }
+    }
+
+    /// Vi `w`: jump to the next word start on the current row.
+    /// Wraps to col 0 of the next non-empty row when no word
+    /// remains. Word characters are alphanumeric + `_` (vi's
+    /// default `iskeyword`); transitions in/out of that class
+    /// count as a word boundary.
+    pub fn placement_word_forward(&mut self) {
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let (row, col) = match self.placement {
+            Some(p) => (p.row, p.col),
+            None => return,
+        };
+        let chars: Vec<char> = self.placement_row_text(row).chars().collect();
+        let target = next_word_start(&chars, col);
+        // Read the next row's text up front if we'll need to wrap,
+        // so the second `placement.as_mut()` borrow below doesn't
+        // overlap with an immutable borrow of `self`.
+        let next_row_text = if target.is_none() && row + 1 < n {
+            Some(self.placement_row_text(row + 1))
+        } else {
+            None
+        };
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        if let Some(next_col) = target {
+            p.col = next_col;
+        } else if let Some(next_text) = next_row_text {
+            p.row = row + 1;
+            p.col = next_text
+                .chars()
+                .position(|c| !c.is_whitespace())
+                .unwrap_or(0);
+        }
+    }
+
+    /// Vi `b`: jump to the previous word start on the current row.
+    /// Wraps to the last word of the previous row when no word
+    /// precedes the cursor on this row.
+    pub fn placement_word_backward(&mut self) {
+        if self.lines.is_empty() {
+            return;
+        }
+        let (row, col) = match self.placement {
+            Some(p) => (p.row, p.col),
+            None => return,
+        };
+        let chars: Vec<char> = self.placement_row_text(row).chars().collect();
+        let target = prev_word_start(&chars, col);
+        let prev_row_chars: Option<Vec<char>> = if target.is_none() && row > 0 {
+            Some(self.placement_row_text(row - 1).chars().collect())
+        } else {
+            None
+        };
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        if let Some(prev_col) = target {
+            p.col = prev_col;
+        } else if let Some(prev_chars) = prev_row_chars {
+            p.row = row - 1;
+            p.col = last_word_start(&prev_chars).unwrap_or(0);
+        }
+    }
+
+    pub fn placement_jump_to(&mut self, row: usize, viewport_height: u16) {
+        let n = self.lines.len();
+        if n == 0 {
+            return;
+        }
+        let target = row.min(n - 1);
+        let row_len = self.placement_row_len(target);
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        p.row = target;
+        p.col = p.col.min(row_len.saturating_sub(1));
+        self.scroll_to_keep_visible(target, viewport_height);
     }
 
     fn enter_visual_with_kind(&mut self, kind: VisualKind) {
@@ -1279,6 +1497,31 @@ fn apply_row_styling(
             }
         }
     }
+    // Placement cursor: single reverse-video cell at the current
+    // (row, col). The visual cue the user asked for so they can see
+    // where the anchor will land when they commit with `^v` / `V`.
+    if let Some(p) = view.placement {
+        if p.row == abs_idx {
+            let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+            let row_style = styled.style;
+            let before: String = plain.chars().take(p.col).collect();
+            let cursor_ch: String = plain
+                .chars()
+                .nth(p.col)
+                .map_or_else(|| " ".into(), |c| c.to_string());
+            let after: String = plain.chars().skip(p.col + 1).collect();
+            let cursor_style = Style::default()
+                .bg(theme.cursor_bg)
+                .fg(theme.cursor_fg)
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD);
+            styled = Line::from(vec![
+                Span::styled(before, row_style),
+                Span::styled(cursor_ch, cursor_style),
+                Span::styled(after, row_style),
+            ]);
+        }
+    }
+
     if view.picker_cursor == Some(abs_idx) {
         if let Some((col, vi_mode)) = view.picker_edit_cursor {
             // History editor: show editing cursor on this line.
@@ -1396,6 +1639,85 @@ fn paint_block_selection(
 /// Empty lines render as one visual row (a blank line); this
 /// matches the renderer's behavior so the math is symmetric.
 /// `width == 0` yields one row to match `wrap_line`'s short-circuit.
+/// Vi `w`-style word class: alphanumeric + `_`. Whitespace and
+/// punctuation each form their own class — a transition between
+/// any two of {word, punct, whitespace} counts as a word
+/// boundary for forward/backward motion.
+fn word_class(c: char) -> u8 {
+    if c.is_whitespace() {
+        0
+    } else if c.is_alphanumeric() || c == '_' {
+        1
+    } else {
+        2
+    }
+}
+
+/// Index of the next word-start char strictly after `col` in
+/// `chars`. Returns `None` when no such position exists.
+/// Mirrors vim's `w` motion within a single line: skip the rest
+/// of the current word, then any whitespace, land on the first
+/// non-whitespace character.
+fn next_word_start(chars: &[char], col: usize) -> Option<usize> {
+    if col >= chars.len() {
+        return None;
+    }
+    let start_class = word_class(chars[col]);
+    let mut i = col + 1;
+    // Skip the rest of the current run (same class as the start).
+    while i < chars.len() && word_class(chars[i]) == start_class && start_class != 0 {
+        i += 1;
+    }
+    // Skip whitespace.
+    while i < chars.len() && word_class(chars[i]) == 0 {
+        i += 1;
+    }
+    if i < chars.len() { Some(i) } else { None }
+}
+
+/// Index of the previous word-start char strictly before `col` in
+/// `chars`. Returns `None` when the cursor is already at the
+/// first word of the line.
+fn prev_word_start(chars: &[char], col: usize) -> Option<usize> {
+    if col == 0 {
+        return None;
+    }
+    let mut i = col.saturating_sub(1);
+    // Skip whitespace backwards.
+    while i > 0 && word_class(chars[i]) == 0 {
+        i -= 1;
+    }
+    if word_class(chars[i]) == 0 {
+        return None;
+    }
+    // Walk back to the start of the current run.
+    let cur_class = word_class(chars[i]);
+    while i > 0 && word_class(chars[i - 1]) == cur_class {
+        i -= 1;
+    }
+    Some(i)
+}
+
+/// Index of the last word-start char in `chars`. Used by `b` when
+/// the cursor wraps to the previous row.
+fn last_word_start(chars: &[char]) -> Option<usize> {
+    if chars.is_empty() {
+        return None;
+    }
+    let mut i = chars.len() - 1;
+    while i > 0 && word_class(chars[i]) == 0 {
+        i -= 1;
+    }
+    if word_class(chars[i]) == 0 {
+        return None;
+    }
+    let cur_class = word_class(chars[i]);
+    while i > 0 && word_class(chars[i - 1]) == cur_class {
+        i -= 1;
+    }
+    Some(i)
+}
+
 fn visual_rows(line: &Line<'_>, width: usize) -> usize {
     if width == 0 {
         return 1;
@@ -2167,6 +2489,51 @@ mod tests {
 
     fn block_view_with(content: &[&str]) -> PagerView {
         PagerView::new_plain("v", content.iter().map(|&s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn placement_move_then_commit_anchors_at_cursor() {
+        let mut view = block_view_with(&["abcdef", "ghi jkl", "mnopqr"]);
+        view.enter_placement();
+        let p = view.placement.expect("placement active");
+        assert_eq!((p.row, p.col), (0, 0));
+        // hjkl-style motion: down 1, right 2.
+        view.placement_move(1, 2, 5);
+        // Word forward from "ghi jkl" col 2 ('i') → 'j' at col 4.
+        view.placement_word_forward();
+        let p = view.placement.expect("still placement");
+        assert_eq!((p.row, p.col), (1, 4));
+        // Second ^v commits to block visual at the cursor.
+        view.commit_placement_to_visual_block();
+        assert!(view.placement.is_none(), "placement consumed on commit");
+        let sel = view.visual.expect("block visual");
+        assert_eq!(sel.kind, VisualKind::Block);
+        assert_eq!(sel.anchor, 1);
+        assert_eq!(sel.cursor, 1);
+        assert_eq!(sel.anchor_col, 4);
+        assert_eq!(sel.cursor_col, 4);
+    }
+
+    #[test]
+    fn placement_uppercase_v_commits_to_line_at_cursor_row() {
+        let mut view = block_view_with(&["aaa", "bbb", "ccc"]);
+        view.enter_placement();
+        view.placement_move(2, 0, 5);
+        view.commit_placement_to_visual_line();
+        let sel = view.visual.expect("line visual");
+        assert_eq!(sel.kind, VisualKind::Line);
+        assert_eq!(sel.anchor, 2);
+        assert_eq!(sel.cursor, 2);
+    }
+
+    #[test]
+    fn placement_esc_clears_without_starting_visual() {
+        let mut view = block_view_with(&["a", "b"]);
+        view.enter_placement();
+        view.placement_move(1, 0, 5);
+        view.cancel_placement();
+        assert!(view.placement.is_none());
+        assert!(view.visual.is_none());
     }
 
     #[test]
