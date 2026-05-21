@@ -32,36 +32,34 @@ const TABLE_MAX_COL_WIDTH_FALLBACK: usize = 24;
 /// ultrawide monitor is unreadable; prefer wrapping past this.
 const TABLE_MAX_COL_WIDTH_CEILING: usize = 60;
 
-/// Target visual width for wrapped Markdown content, before any
-/// blockquote rule or list-item indent is added. 80 columns is the
-/// standard prose-readability target -- READMEs and design docs
-/// land in that range and stay scannable. The pager pane itself
-/// stays full-width so the user can still see other surrounding UI;
-/// just the content body is bounded.
-///
-/// Tables intentionally diverge: a wide reference table looks better
-/// using the actual pager width than padded out to 80. See the
-/// `table_width_hint` argument on [`render`].
+/// Fallback prose-wrap target when no width hint is supplied
+/// (tests, programmatic use). Real renders pass an actual pager
+/// body width via [`render`] and prose reflows at that width.
 const CONTENT_WIDTH: usize = 80;
 
+/// Lower bound for the prose-wrap width even when the caller's
+/// hint is smaller. A 30-cell terminal wrapping prose at 30 chars
+/// per row is unreadable; clamp to something that holds a sentence.
+const PROSE_WRAP_MIN: usize = 40;
+
 /// Render a Markdown source string into styled lines suitable for
-/// the pager's `lines` field. `table_width_hint` is the available
-/// pager body width in cells; when larger than [`CONTENT_WIDTH`],
-/// tables compute per-column widths against the hint instead of
-/// the prose target — wide reference tables in a wide pager get
-/// wide columns instead of being padded out to 80 columns with
-/// truncation/wrap. Pass `None` (or `Some(CONTENT_WIDTH)`) to
-/// keep the tight prose-width behavior.
+/// the pager's `lines` field. `width_hint` is the available pager
+/// body width in cells; when supplied, both prose paragraphs and
+/// tables reflow at that width instead of the [`CONTENT_WIDTH`]
+/// fallback. Source-wrapped-at-80 prose then flows naturally at
+/// whatever pager width is available, instead of being broken at
+/// the source's awkward 80-col split points.
 ///
-/// Prose still wraps at `CONTENT_WIDTH` regardless of the hint;
-/// 200-char-wide prose lines are unpleasant to read.
+/// Naming kept as `table_width_hint` for back-compat with v1.50.48
+/// callers, but the hint now also drives prose wrap.
 pub fn render(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> Vec<Line<'static>> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_TABLES);
-    let parser = Parser::new_ext(source, opts);
+    let prepared = force_hard_breaks_before_keyed_lines(source);
+    let parser = Parser::new_ext(&prepared, opts);
     let mut r = Renderer::new(theme, table_width_hint);
     for event in parser {
         r.handle(event);
@@ -103,9 +101,40 @@ struct Renderer<'t> {
     /// Target total width for tables, in cells. At least `CONTENT_WIDTH`;
     /// larger when the caller hinted a wider pager. Drives both the
     /// proportional-trim ceiling and the dynamic per-column cap in
-    /// `end_table`. Prose intentionally still wraps at `CONTENT_WIDTH`
-    /// regardless — long prose lines are unpleasant to read.
+    /// `end_table`.
     table_width: usize,
+    /// Target wrap width for prose paragraphs. Tracks the caller's
+    /// hint when supplied (so source-wrapped-at-80 paragraphs flow
+    /// to fill the pager body), or falls back to `CONTENT_WIDTH`.
+    /// Clamped to [`PROSE_WRAP_MIN`] so a tiny terminal doesn't
+    /// produce 30-char rows of mangled prose.
+    prose_width: usize,
+}
+
+/// Source-level preprocessor: insert markdown's two-space hard-break
+/// marker before any line that starts with `**Word(s):**`. CommonMark
+/// would otherwise collapse a stack like
+///
+/// ```text
+/// **To:** Alice
+/// **From:** Bob
+/// **Status:** Draft
+/// ```
+///
+/// into one wrapped paragraph (`**To:** Alice **From:** Bob ...`) —
+/// the canonical reflow loses the metadata semantics. Two-space-EOL
+/// is the standard markdown way to force a line break inside a
+/// paragraph, so this preprocessor opts each `**Key:**` line into
+/// that behavior automatically while leaving regular prose alone.
+///
+/// Pattern: a newline immediately followed by `**`, then 1+ chars
+/// that are neither `*` nor newline ending with `:`, then `**`.
+/// This catches `**Word:**`, `**Multi word:**`, `**With_under:**`,
+/// etc. It does NOT catch `**Bold without colon**` (no `:`) or
+/// `**Bold**: value` (colon outside the bold).
+fn force_hard_breaks_before_keyed_lines(source: &str) -> std::borrow::Cow<'_, str> {
+    let re = regex::Regex::new(r"\n(\*\*[^*\n]+:\*\*)").expect("static regex compiles");
+    re.replace_all(source, "  \n$1")
 }
 
 struct TableBuilder {
@@ -139,7 +168,9 @@ impl<'t> Renderer<'t> {
         // prose target. `max(CONTENT_WIDTH)` guarantees small hints
         // (e.g. a 60-col terminal) don't *shrink* tables below the
         // existing baseline — wider only.
-        let table_width = table_width_hint.unwrap_or(CONTENT_WIDTH).max(CONTENT_WIDTH);
+        let hint = table_width_hint.unwrap_or(CONTENT_WIDTH);
+        let table_width = hint.max(CONTENT_WIDTH);
+        let prose_width = hint.max(PROSE_WRAP_MIN);
         Self {
             theme,
             lines: Vec::new(),
@@ -152,6 +183,7 @@ impl<'t> Renderer<'t> {
             table: None,
             just_started_item: false,
             table_width,
+            prose_width,
         }
     }
 
@@ -175,8 +207,9 @@ impl<'t> Renderer<'t> {
         let cont_indent = self.continuation_indent();
         let cont_w = cont_indent.chars().count();
         // Subtract the blockquote rule and any list-item continuation
-        // indent so the body still hits the 80-col target.
-        let wrap_w = CONTENT_WIDTH.saturating_sub(bq_w + cont_w).max(20);
+        // indent so the wrap target reflects the actual body cells
+        // available after the prefix glyphs are drawn.
+        let wrap_w = self.prose_width.saturating_sub(bq_w + cont_w).max(20);
 
         let spans = std::mem::take(&mut self.current);
         if spans.is_empty() {
@@ -277,18 +310,18 @@ impl<'t> Renderer<'t> {
                 let style = Style::default().fg(self.theme.take);
                 self.current.push(Span::styled(format!("`{t}`"), style));
             }
-            // Treat soft breaks (a single `\n` in the source mid-
-            // paragraph) the same as hard breaks. CommonMark spec
-            // says join consecutive non-blank lines into one
-            // reflowed paragraph, but in practice technical docs
-            // with `**Key:** value` metadata lines, FAQ-style
-            // entries, or any Discord/Slack-influenced authoring
-            // expect each line to render on its own row. Our pager
-            // shows the resulting hard-wrapped lines fine; reflowed
-            // paragraphs in source-authored prose (e.g. 80-col
-            // README wraps) become a few extra lines, which is a
-            // small price for the metadata case actually working.
-            Event::SoftBreak | Event::HardBreak => self.flush_line(),
+            // CommonMark: soft break (single `\n` mid-paragraph)
+            // is whitespace — the paragraph reflows at the pager's
+            // wrap width. The earlier "soft-as-hard" override
+            // helped one metadata-stacking case but broke prose
+            // authored with 80-col source wrap (every short source
+            // line became its own short row). Metadata lines are
+            // now handled by a source-level preprocessor in
+            // `force_hard_breaks_before_keyed_lines` that inserts
+            // markdown's two-space hard-break marker before each
+            // `**Key:**`-style line — so SoftBreak stays soft.
+            Event::SoftBreak => self.current.push(Span::raw(" ".to_string())),
+            Event::HardBreak => self.flush_line(),
             Event::Rule => {
                 if !self.current.is_empty() {
                     self.flush_line();
@@ -986,21 +1019,44 @@ mod tests {
     }
 
     #[test]
-    fn soft_breaks_render_as_hard_breaks() {
-        // Technical docs with `**Key:**` metadata expected each
-        // line to render on its own row, but CommonMark default
-        // collapsed consecutive non-blank lines into one paragraph.
-        // We override soft breaks → flush_line. Each input line
-        // should produce its own rendered line.
+    fn keyed_metadata_lines_stack() {
+        // Lines that start with `**Word:**` should each render on
+        // their own row, even without trailing two-space hard
+        // breaks or blank lines between them. CommonMark would
+        // collapse them into a single wrapped paragraph; our
+        // `force_hard_breaks_before_keyed_lines` preprocessor
+        // opts each such line into a markdown hard break.
         let src = "**To:** Alice\n**From:** Bob\n**Status:** Draft\n";
         let lines = render_plain(src);
         let non_empty: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
         assert_eq!(non_empty.len(), 3, "got lines: {lines:?}");
-        // The three labels should each anchor a distinct line —
-        // joined-into-one-paragraph would collapse them.
         assert!(non_empty[0].contains("To:"), "{:?}", non_empty[0]);
         assert!(non_empty[1].contains("From:"), "{:?}", non_empty[1]);
         assert!(non_empty[2].contains("Status:"), "{:?}", non_empty[2]);
+    }
+
+    #[test]
+    fn prose_reflows_across_source_line_breaks() {
+        // Source authored with 80-col wrap should reflow at the
+        // pager's width, not stick to the awkward source break
+        // points. (Regression for "soft-breaks-as-hard-breaks"
+        // which faithfully reproduced the source's 80-col splits
+        // and broke at "...using a / new / Facade API ...".)
+        let src = "Build direction §3.1 names Option A as \"build inside the IBE perimeter\n\
+                   using a new Facade API and partner-facing GraphQL.\" A natural reading\n\
+                   is that IBE's existing WEB GraphQL endpoint is the foundation to extend.";
+        let lines = render_plain(src);
+        // The whole paragraph reflows as one — no source line
+        // ending with "a" stranded on its own row, etc. With a
+        // 200-col hint we'd get 1-2 long rows; with the default
+        // 80-col target we get a few rows but each ending at a
+        // word boundary, not at the source's split points.
+        for l in &lines {
+            // The mid-paragraph fragments from the source ("using",
+            // "is that") should never appear on their own line.
+            assert_ne!(l.trim(), "using", "stranded source fragment: {lines:?}");
+            assert_ne!(l.trim(), "is that", "stranded source fragment: {lines:?}");
+        }
     }
 
     #[test]

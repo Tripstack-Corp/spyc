@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Markdown prose reflows at the pager body width.** Two
+  earlier choices combined badly on source files authored with
+  80-col wrap (typical README / design-doc style): (a) v1.50.52
+  made every source `\n` a hard line break, so each ~70-char
+  source row became its own ~70-char rendered row; (b) prose
+  wrap was hard-capped at the 80-col `CONTENT_WIDTH` even on
+  wide terminals. Result: a paragraph that ought to flow across
+  a 200-cell pager broke into a dozen short, mid-word rows.
+
+  Now: soft breaks are CommonMark-default whitespace (paragraph
+  reflows), and the wrap target tracks the pager body width
+  passed in by `display_in_pane` (the same hint tables already
+  use). Source-wrapped-at-80 paragraphs flow naturally to fill
+  whatever width is available.
+
+  The `**Key:** value` metadata stack still renders as separate
+  rows: a new `force_hard_breaks_before_keyed_lines`
+  preprocessor inserts markdown's two-space hard-break marker
+  before each line that starts with `**Word(s):**`, so the
+  metadata case keeps working without forcing every other
+  paragraph into short-line mode.
+
 - **Intermittent "Claude restore stops at the prompt" race fixed.**
   Restoring a session with a Claude pane sometimes left the
   `/resume <sid>` command typed but unsubmitted — the user had
