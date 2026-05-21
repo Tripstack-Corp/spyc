@@ -682,14 +682,6 @@ pub struct App {
     /// last reading position when they reopen the same file. See
     /// [`state::pager_positions`].
     pager_positions: crate::state::pager_positions::PagerPositions,
-    /// Pending `^a` / `^w` chord while a `pane_scroll` pager is open.
-    /// The main resolver is bypassed when a pager is active (the
-    /// pager owns the keys), so the focus-switch chord was being
-    /// silently dropped: `^a` consumed by the pager, then `k`
-    /// interpreted as scroll-up. We track the chord locally in the
-    /// pager handler so the user can leave scroll mode via the
-    /// usual `^a-k` instead of having to Esc out first.
-    pager_pending_w_chord: bool,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -967,7 +959,6 @@ impl App {
             last_term_title: None,
             git_result_rx: git_res_rx,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
-            pager_pending_w_chord: false,
         };
         app.state.rebuild_rows();
         // Evaluate huge-tree status at startup so the first 1 Hz poll
@@ -1128,9 +1119,14 @@ impl App {
 
     /// Tear down a `^a-v` scrollback pager: snap the pty back to
     /// live, clear the pager, force a repaint, and flash the
-    /// status change. Mirrors the Esc/q close path so the
-    /// chord-driven escape lands in the same final state.
+    /// status change. Mirrors the Esc/q close path so chord-driven
+    /// and focus-switch escapes land in the same final state. No-op
+    /// when no pane_scroll pager is open — safe to call from
+    /// `Action::PaneFocusUp` / `PaneFocusDown` unconditionally.
     fn close_pane_scroll_pager(&mut self) {
+        if !self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+            return;
+        }
         if let Some(tabs) = self.pane_tabs.as_mut() {
             tabs.active_mut().exit_scroll_mode();
         }
@@ -8735,51 +8731,6 @@ impl App {
         // Clear any one-shot flash message from the previous keypress.
         view.flash = None;
 
-        // `^a-j` / `^a-k` chord handling for the `^a-v` scrollback
-        // pager. The top-level resolver is bypassed when a pager is
-        // active (the pager owns keys), so the chord was silently
-        // dropped: `^a` consumed by the pager as a no-op, then `k`
-        // interpreted as scroll-up. Track the chord locally so the
-        // user can leave scroll mode via the usual focus chord
-        // instead of having to Esc out first.
-        //
-        // Scoped to `pane_scroll` views only: file viewers, help,
-        // task viewers, etc. either don't have a meaningful "focus
-        // switch" semantics or are overlays that close on Esc/q.
-        if view.pane_scroll {
-            let view_pane_scroll = true; // separate `view` borrow ends here
-            let _ = view; // explicit drop hint
-            if self.pager_pending_w_chord {
-                self.pager_pending_w_chord = false;
-                match key.code {
-                    KeyCode::Char('k') => {
-                        self.close_pane_scroll_pager();
-                        self.set_pane_focus(false);
-                        return PostAction::None;
-                    }
-                    KeyCode::Char('j' | 'J' | 'a' | 'A') => {
-                        // Already on the pane — close scroll, stay
-                        // focused on the pane in live mode.
-                        self.close_pane_scroll_pager();
-                        self.set_pane_focus(true);
-                        return PostAction::None;
-                    }
-                    _ => {
-                        // Unknown follow-up — silently drop the
-                        // pending chord. The current key falls
-                        // through to normal pager handling below.
-                    }
-                }
-            }
-            if view_pane_scroll
-                && matches!(key.code, KeyCode::Char('a' | 'A' | 'w' | 'W'))
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                self.pager_pending_w_chord = true;
-                return PostAction::None;
-            }
-        }
-
         // ^C inside the pager is contextual:
         //   - Task viewer + task running → SIGINT to the process group
         //     (mirrors a real ^C in the captured task's tty), flash
@@ -9536,12 +9487,7 @@ impl App {
                 // indicator. The pager is closed in the regular
                 // path below.
                 if self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
-                    if let Some(tabs) = self.pane_tabs.as_mut() {
-                        tabs.active_mut().exit_scroll_mode();
-                    }
-                    self.clear_pager();
-                    self.needs_full_repaint = true;
-                    self.state.flash_info("scroll: off");
+                    self.close_pane_scroll_pager();
                     return PostAction::None;
                 }
                 // Pager-help overlay: dismiss just the help, restore

@@ -5,6 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-k` / `^a-j` from inside a `^a-v` scrollback pager now
+  actually transfer key focus, *without closing the pager.***
+  v1.50.56 added a chord handler inside `handle_pager_key` to
+  make the focus-switch work from scrollback. That handler was
+  never reachable — `^a` is a meta key, so `route_key` always
+  sends it to the resolver, not to the pager. The chord *did*
+  dispatch `PaneFocusUp` correctly, but `set_pane_focus(false)`
+  only flipped the flag; the `LowerPane` pager kept owning every
+  subsequent non-meta key, so j/k went right back into the
+  scrollback view even though `pane_focused == false`. Worst
+  when visual-block was active in the pager because the user
+  expected post-`^a-k` motions to navigate the file list, not
+  extend a stale selection.
+
+  The right fix lives in `route_key`: when a `LowerPane` pager
+  is open and focus is on the top, non-meta keys flow to the
+  file list — symmetric to the existing `TopPane`-pager-with-
+  bottom-focus rule. The pager stays visible; only key
+  ownership changes. `^a-j` flips back. Remove the unreachable
+  chord handler and its `pager_pending_w_chord` field.
+
 ### Changed
 - **Pager `^v` enters a placement state before visual block.**
   Previously `^v` immediately anchored at the top visible line,

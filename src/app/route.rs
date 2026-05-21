@@ -86,16 +86,23 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
 
     // 2. In-app pager. Overlay mounts always win; slot-mounts
     //    (TopPane / LowerPane) coexist with another surface and
-    //    let two classes of key fall through:
+    //    let three classes of key fall through:
     //      - Meta chords always reach the resolver.
     //      - Non-meta keys flow to the bottom pane when the bottom
-    //        pane has focus (only meaningful for TopPane; LowerPane
-    //        visually replaces the bottom pty).
+    //        pane has focus and the pager is in the *top* slot.
+    //      - Non-meta keys flow to the file list when the top has
+    //        focus and the pager is in the *lower* slot.
+    //    Symmetric: each slot owns input only when the "other" surface
+    //    is focused away from it. `^a-k` from a `^a-v` scrollback
+    //    pager moves focus to the file list while leaving the pager
+    //    visible; j/k then navigate the file list, not the
+    //    scrollback view.
     if let Some(mount) = snap.pager_mount {
         let coexists_with_other_slot = matches!(mount, Mount::TopPane | Mount::LowerPane);
         let escape_meta = coexists_with_other_slot && is_meta;
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
-        if !(escape_meta || bottom_typing) {
+        let top_typing = matches!(mount, Mount::LowerPane) && !bottom_owns && !is_meta;
+        if !(escape_meta || bottom_typing || top_typing) {
             return KeyDestination::PagerKey;
         }
         // else fall through to the resolver / bottom-pane arms.
@@ -282,10 +289,10 @@ mod tests {
     }
 
     #[test]
-    fn lower_pane_pager_non_meta_always_goes_to_pager() {
+    fn lower_pane_pager_non_meta_with_pane_focus_goes_to_pager() {
         // LowerPane visually replaces the bottom pty; non-meta keys
-        // (scroll, search, etc.) belong to the pager regardless of
-        // focus state.
+        // (scroll, search, etc.) belong to the pager when the bottom
+        // surface is focused.
         let snap = RouteSnapshot {
             pager_mount: Some(Mount::LowerPane),
             has_pane_tabs: true,
@@ -294,6 +301,25 @@ mod tests {
         };
         assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
         assert_eq!(route_key(snap, key('/')), KeyDestination::PagerKey);
+    }
+
+    #[test]
+    fn lower_pane_pager_non_meta_with_top_focus_flows_to_top() {
+        // After `^a-k` from a `^a-v` scrollback pager, focus is on
+        // the file list while the pager stays open. Non-meta keys
+        // should now navigate the file list, not the scrollback —
+        // symmetric to how a TopPane pager lets keys through to the
+        // bottom pty when the bottom is focused.
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::LowerPane),
+            has_pane_tabs: true,
+            pane_focused: false, // ^a-k flipped focus to top
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, key('k')), KeyDestination::Resolver);
+        // Meta keys still reach the resolver too.
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
     }
 
     // ── regression: V/D top_overlay + paste / chord (#75 + V) ─────
