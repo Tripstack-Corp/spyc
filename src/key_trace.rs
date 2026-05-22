@@ -18,6 +18,11 @@ use std::sync::Mutex;
 struct TraceState {
     file: std::fs::File,
     start: std::time::Instant,
+    /// Timestamp of the most recent RX event. TX log lines are
+    /// annotated with the delta since this so an external reader
+    /// can spot input → output latency without correlating two
+    /// columns by eye. `None` until the first `note_rx_event` call.
+    last_rx_at: Option<std::time::Instant>,
 }
 
 static TRACE: Mutex<Option<TraceState>> = Mutex::new(None);
@@ -41,6 +46,7 @@ pub fn init(flag: bool) -> Option<String> {
         *slot = Some(TraceState {
             file,
             start: std::time::Instant::now(),
+            last_rx_at: None,
         });
     }
     Some(path)
@@ -60,5 +66,33 @@ pub fn log(msg: &str) {
     if let Some(state) = slot.as_mut() {
         let elapsed_ms = state.start.elapsed().as_millis();
         let _ = writeln!(state.file, "[{elapsed_ms:>8}ms] {msg}");
+    }
+}
+
+/// Stamp the most recent RX timestamp. Called immediately after the
+/// RX line is logged so `log_tx` can compute "elapsed since the last
+/// input event arrived". Cheap; no-op when the trace isn't armed.
+pub fn note_rx_event() {
+    let mut slot = TRACE.lock().unwrap();
+    if let Some(state) = slot.as_mut() {
+        state.last_rx_at = Some(std::time::Instant::now());
+    }
+}
+
+/// Log a TX (bytes-written-to-pty) event. Prepends the standard
+/// `[Nms]` global timestamp and appends `[+Nms since RX]` so the
+/// reader can see input → forward latency at a glance. The "since
+/// RX" suffix is dropped on the very first TX before any RX (e.g.
+/// startup banner forwarding from the resume-pane path).
+pub fn log_tx(msg: &str) {
+    let mut slot = TRACE.lock().unwrap();
+    if let Some(state) = slot.as_mut() {
+        let now = std::time::Instant::now();
+        let elapsed_ms = (now - state.start).as_millis();
+        let suffix = state
+            .last_rx_at
+            .map(|t| format!(" [+{}ms since RX]", (now - t).as_millis()))
+            .unwrap_or_default();
+        let _ = writeln!(state.file, "[{elapsed_ms:>8}ms] TX {msg}{suffix}");
     }
 }

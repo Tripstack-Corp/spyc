@@ -412,6 +412,19 @@ forgetting about.
   first -- complements the docs site rather than replacing it.
   Maintenance: tutor content tracks bindings, so add it to the
   "Keep docs in sync" checklist in AGENTS.md when keybindings move.
+- **First-run hint flash.** On the very first launch in a new
+  `$HOME` (detected by absence of `state_root()/first_run_done`
+  marker file — write it after the flash fires), display a short
+  status-bar flash that calls out the two highest-friction
+  things: (1) `^a` and `^w` are reserved chord prefixes and
+  won't reach a shell running in the pane, rebind in
+  `.spycrc.toml` if needed; (2) `?` opens the help overlay.
+  Single line, dismisses automatically after ~8 s or on the
+  first keystroke. Reported by Justin (in tmux, hit ^a/^w
+  conflicts immediately) — saves the next 100 shell-heavy
+  users the same surprise. Implementation: ~30 lines + a tiny
+  state file. Pairs with the docs note we added to the README.
+
 - **Repo hygiene.** `SECURITY.md` (how to report vulnerabilities),
   `CODE_OF_CONDUCT.md` (one of the standard ones, link only),
   PR template, issue templates for bug reports and feature

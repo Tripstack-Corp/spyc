@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **TX-side timestamps in the key trace.** `--key-trace` /
+  `SPYC_KEY_TRACE=1` now logs `TX` lines whenever a pane write
+  fires (`send_key` or `send_bytes`), annotated with the elapsed
+  time since the most recent RX event:
+  `[12345ms] TX send_key code=Backspace mods=... bytes="^?" [+3ms since RX]`.
+  Lets a user reporting input lag (Justin's report:
+  pane-shell keystrokes feel slow inside tmux) tell at a glance
+  whether spyc itself is adding latency vs. something upstream
+  (terminal repeat rate, tmux's `escape-time`, OS keyboard
+  pacing). New `key_trace::note_rx_event` / `log_tx` helpers; the
+  RX path stamps after logging so the next TX has a reference.
+- **README note on `^a` / `^w` chord-prefix shell conflicts.**
+  Calls out that an interactive shell running in the pane won't
+  see those readline bindings, and points at `.spycrc.toml` for
+  the rebind. Adds the tmux `escape-time 0` hint while we're at
+  it. A more permanent fix (first-run flash) is on the roadmap.
+
 ### Fixed
 - **Stale git markers after worktree switches.** Reported by
   Spencer: switching between worktrees occasionally surfaced

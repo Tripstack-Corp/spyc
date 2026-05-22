@@ -3285,6 +3285,9 @@ impl App {
                 self.state.pane_focused,
                 self.state.resolver.pending_display(),
             ));
+            // Stamp so any subsequent TX (pty write) logs its
+            // latency against this event.
+            crate::key_trace::note_rx_event();
         }
 
         // Swallow a Press/Repeat of the chord-completing key when it

@@ -227,6 +227,14 @@ impl Pane {
     pub fn send_key(&mut self, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
         let bytes = input::encode_key(key);
         if !bytes.is_empty() {
+            if crate::key_trace::is_enabled() {
+                crate::key_trace::log_tx(&format!(
+                    "send_key code={:?} mods={:?} bytes={}",
+                    key.code,
+                    key.modifiers,
+                    preview_bytes(&bytes),
+                ));
+            }
             self.host.write_all(&bytes)?;
         }
         Ok(())
@@ -266,6 +274,13 @@ impl Pane {
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
     #[allow(dead_code)] // wired into the S-key handler in the next step
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        if crate::key_trace::is_enabled() {
+            crate::key_trace::log_tx(&format!(
+                "send_bytes len={} preview={}",
+                bytes.len(),
+                preview_bytes(bytes),
+            ));
+        }
         self.host.write_all(bytes)
     }
 
@@ -440,3 +455,61 @@ impl Pane {
 // and the byte-pump thread live with the kernel. PtyHost::Drop
 // fires when a Pane is dropped (PtyHost is the only field that
 // owns the child).
+
+/// Human-readable preview of bytes for `key_trace::log_tx`. ASCII
+/// printables stay as-is; controls render with `^X` notation
+/// (CR → `^M`, ESC → `^[`, etc.). Truncated past 32 bytes so a
+/// large paste doesn't dump the whole buffer into the log.
+fn preview_bytes(bytes: &[u8]) -> String {
+    const MAX: usize = 32;
+    let slice = &bytes[..bytes.len().min(MAX)];
+    let mut out = String::with_capacity(slice.len() * 2 + 2);
+    out.push('"');
+    for &b in slice {
+        match b {
+            0x20..=0x7e if b != b'"' && b != b'\\' => out.push(b as char),
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\r' => out.push_str("^M"),
+            b'\n' => out.push_str("^J"),
+            b'\t' => out.push_str("^I"),
+            0x1b => out.push_str("^["),
+            0x00..=0x1f => {
+                use std::fmt::Write;
+                let _ = write!(out, "^{}", (b + b'@') as char);
+            }
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "\\x{b:02x}");
+            }
+        }
+    }
+    out.push('"');
+    if bytes.len() > MAX {
+        use std::fmt::Write;
+        let _ = write!(out, "+{}", bytes.len() - MAX);
+    }
+    out
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::preview_bytes;
+
+    #[test]
+    fn preview_renders_printable_and_controls() {
+        assert_eq!(preview_bytes(b"hi"), "\"hi\"");
+        assert_eq!(preview_bytes(b"\r"), "\"^M\"");
+        assert_eq!(preview_bytes(b"\x01"), "\"^A\""); // ^a as a byte
+        assert_eq!(preview_bytes(b"\x1b[A"), "\"^[[A\""); // ESC seq
+        assert_eq!(preview_bytes(b"a\"b\\c"), "\"a\\\"b\\\\c\"");
+    }
+
+    #[test]
+    fn preview_truncates_long_buffers() {
+        let buf = vec![b'x'; 40];
+        let s = preview_bytes(&buf);
+        assert!(s.contains("xxx"));
+        assert!(s.ends_with("+8"), "expected `+8` truncation suffix: {s}");
+    }
+}

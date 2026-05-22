@@ -42,7 +42,17 @@ A two-pane terminal program.
 
 The two panes share focus through a chord-prefix system (`^a` /
 screen-style), and the file commander exposes a local Unix-domain
-MCP socket the bottom-pane agent connects to. When you pick three
+MCP socket the bottom-pane agent connects to.
+
+> **Heads up for shell users:** spyc reserves `^a` and `^w` as
+> chord prefixes, so a shell running inside the pane won't see
+> them — `^a` (readline `beginning-of-line`) and `^w` (readline
+> `unix-word-rubout`) are intercepted by spyc. If you run an
+> interactive shell as your pane child, rebind the prefixes in
+> `.spycrc.toml` (`spyc --print-config` shows the relevant
+> section). The same applies inside tmux: `^a` is screen's prefix
+> and `^b` is tmux's default — keep them distinct or `set -s
+> escape-time 0` in `.tmux.conf` to keep input snappy. When you pick three
 files and ask the agent a question, it can call `get_spyc_context`
 and see your cwd, cursor file, picks, inventory, active filter, and
 git branch — no copy-paste. When the agent mentions a path in its
