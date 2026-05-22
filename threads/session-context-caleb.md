@@ -203,3 +203,65 @@ Title: Session: parallel-sprint-c03, mcp-tool-refactor, health-endpoint-auth
 }
 
 <!-- Entry-ID: 01KS4HY82RK1H2E396C6JMYSYK -->
+
+---
+Entry: Pulse Hook (caleb) 2026-05-22T08:02:51.598888+00:00
+Role: scribe
+Type: Note
+Title: Session: github-workflow-removal, mcp-tool-surface-consolidation, pull-request-optimization
+
+{
+  "record_kind": "extracted_theme",
+  "author_id": "caleb",
+  "repo_id": "spyc",
+  "branch": "fix/q-command-session-save",
+  "session_id": "eed840d3-ddac-467f-818c-c5adfe20cbc1",
+  "captured_at": "2026-05-22T08:02:35.902759+00:00",
+  "summary_hash": "sha256t16:3c97eddf6f270f2b",
+  "technical_focus": [
+    "github-workflow-removal",
+    "mcp-tool-surface-consolidation",
+    "pull-request-optimization",
+    "tool-aliasing",
+    "authority-ladder"
+  ],
+  "session_intent": "Plan and execute the MCP tool-surface consolidation for watercooler-cloud, reducing the number of tools while maintaining coherence and authority structure.",
+  "observations": [
+    {
+      "kind": "pr_merged",
+      "text": "PR #814 was created and merged to remove the Claude review process from GitHub workflow."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "PR1a (#815) was merged, fixing extract_tools.py and related methodologies."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "PR1b (#816) was merged, adding authority-aware capability resolution."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "PR2 (#817) was merged, implementing OR-default keyword search."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "PR3a (#818) was merged, removing graph_recover and decision_extractor_reset."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "PR3b (#819) was merged, collapsing roles and semantic annotations into action= tools."
+    },
+    {
+      "kind": "opened_loops",
+      "text": "B4 still needs updates to several files including server.py and resources.py."
+    },
+    {
+      "kind": "opened_loops",
+      "text": "A6 requires folding get_thread_entry_range into get_thread_entry."
+    }
+  ],
+  "confidence": 0.9,
+  "extractor_version": "pulse-extractor-v1"
+}
+
+<!-- Entry-ID: 01KS7BASJC93ZATV2D6CP075F6 -->
