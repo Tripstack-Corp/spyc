@@ -511,6 +511,20 @@ transition.
 Lower-priority items retained from the prior roadmap. Will graduate to
 one of the tracks above when picked up.
 
+- **Tree-sitter syntax highlighting.** v1.50.61 shipped a
+  user-syntax dir so people can drop `.sublime-syntax` files into
+  `~/.config/spyc/syntaxes/` and have spyc pick them up — but the
+  underlying engine is still syntect (Sublime-Text-format grammars,
+  regex-based). Tree-sitter is the modern alternative: incremental,
+  more accurate, per-language compiled parsers. It's what
+  Neovim / telescope / Helix use under the hood. Switching is a
+  real refactor of `src/ui/syntax.rs`: tree-sitter grammars come
+  as separate crates (`tree-sitter-typescript` etc.) and either
+  ship statically or as user-loadable `.so` plugins. Pairs
+  naturally with the `spyc-render-core` crate split in
+  [V1_70 Mise en Place](docs/V1_70_PLAN.md). Reported by Spencer:
+  "look into telescope for syntax highlighting solutions".
+
 - **Configurable startup pane tabs.** Let `.spycrc.toml` declare K
   tabs that open in the bottom pane at launch, instead of just one.
   Compact array form (`[pane] tabs = ["claude", "bash"]`) plus a

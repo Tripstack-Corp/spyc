@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **User-supplied syntax grammars.** The pager's syntax
+  highlighting (via `syntect`) ships with ~90 languages but has
+  notable gaps — TypeScript is the canonical missing one.
+  Instead of bundling every grammar we could ever want, spyc now
+  merges `.sublime-syntax` files dropped in
+  `$XDG_CONFIG_HOME/spyc/syntaxes/` (or
+  `~/.config/spyc/syntaxes/` when `XDG_CONFIG_HOME` is unset).
+  Grammars from Sublime's package store, `bat`'s assets, or
+  `syntect/syntaxes` work as-is. Reported by Spencer:
+  "typescript not highlighted but this should be customizable
+  rather than pre-installed". Loading is best-effort; a malformed
+  grammar fails open (log + skip) so a bad file doesn't break
+  startup. Tree-sitter as the longer-term engine swap is on the
+  roadmap.
+
 ### Fixed
 - **`^a-k` / `^a-j` from inside a `^a-v` scrollback pager now
   actually transfer key focus, *without closing the pager.***

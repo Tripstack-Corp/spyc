@@ -2,7 +2,24 @@
 //!
 //! Lazy-loads the default syntax and theme sets once, then converts
 //! syntect's highlighting output into ratatui `Line`s with RGB colors.
+//!
+//! ## User-supplied grammars
+//!
+//! syntect's `default-fancy` bundle covers ~90 languages but has
+//! notable gaps (TypeScript, Zig, …). Instead of shipping every
+//! grammar we ever might want, spyc merges `.sublime-syntax` files
+//! the user drops into one of these directories (first hit wins for
+//! a given scope):
+//!
+//! - `$XDG_CONFIG_HOME/spyc/syntaxes/` (XDG default)
+//! - `~/.config/spyc/syntaxes/` (fallback when `XDG_CONFIG_HOME` is unset)
+//!
+//! Files are best-effort; a malformed grammar is logged via
+//! `spyc_debug!` and the rest of the directory is still loaded.
+//! Permissively-licensed grammars are widely available — Sublime's
+//! TypeScript package, `bat`'s assets, the `syntect/syntaxes` repo.
 
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use ratatui::{
@@ -16,8 +33,44 @@ use syntect::{
     util::LinesWithEndings,
 };
 
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(build_syntax_set);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+/// Load syntect's bundled defaults, then layer any user-supplied
+/// `.sublime-syntax` files on top.
+fn build_syntax_set() -> SyntaxSet {
+    let defaults = SyntaxSet::load_defaults_newlines();
+    let Some(dir) = user_syntaxes_dir() else {
+        return defaults;
+    };
+    if !dir.is_dir() {
+        return defaults;
+    }
+    let mut builder = defaults.into_builder();
+    match builder.add_from_folder(&dir, true) {
+        Ok(()) => crate::spyc_debug!("loaded user syntaxes from {}", dir.display()),
+        Err(e) => crate::spyc_debug!(
+            "syntax: failed to load user syntaxes from {}: {e}",
+            dir.display()
+        ),
+    }
+    builder.build()
+}
+
+/// Resolve the user syntaxes directory. Honors `XDG_CONFIG_HOME`,
+/// falls back to `~/.config/spyc/syntaxes/`. Returns `None` only on
+/// exotic systems where neither `XDG_CONFIG_HOME` nor `HOME` is set.
+fn user_syntaxes_dir() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(xdg).join("spyc").join("syntaxes"));
+    }
+    std::env::var_os("HOME").map(|h| {
+        PathBuf::from(h)
+            .join(".config")
+            .join("spyc")
+            .join("syntaxes")
+    })
+}
 
 /// Theme name from syntect's bundled defaults. Dark theme that pairs
 /// well with spyc's Tokyo Night palette.
