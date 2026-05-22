@@ -190,9 +190,9 @@ deploy-fika: release-linux-x86 ## Build Linux x86_64 and scp to fika-vm
 doctor: ## Check build prerequisites
 	@echo "=== spyc doctor ==="
 	@echo ""
+	@printf "  %-24s" "rustup:" && (rustup --version 2>/dev/null || echo "MISSING — https://rustup.rs")
 	@printf "  %-24s" "rustc:" && (rustc --version 2>/dev/null || echo "MISSING — install via rustup")
 	@printf "  %-24s" "cargo:" && (cargo --version 2>/dev/null || echo "MISSING — install via rustup")
-	@printf "  %-24s" "rustup:" && (rustup --version 2>/dev/null | head -1 || echo "MISSING — https://rustup.rs")
 	@printf "  %-24s" "zig:" && (zig version 2>/dev/null || echo "MISSING — brew install zig")
 	@printf "  %-24s" "cargo-zigbuild:" && (cargo zigbuild --help >/dev/null 2>&1 && echo "ok" || echo "MISSING — cargo install cargo-zigbuild")
 	@echo ""
