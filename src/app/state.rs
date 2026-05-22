@@ -938,9 +938,16 @@ impl AppState {
         let repo_root = self.current_repo_root.as_ref()?;
         let gitdir = crate::sysinfo::resolve_gitdir(repo_root)?;
         let branch = crate::sysinfo::read_head_branch(&gitdir)?;
+        // Only trust the raw cache for the dirty marker if it was
+        // captured for *this* repo. Without the `c.repo_root` filter,
+        // a worktree switch left the top-bar showing the previous
+        // worktree's dirty state for a frame (until the async git
+        // worker filled the new cache) — reported by Spencer as
+        // "stale markers" after switching worktrees.
         let dirty = self
             .git_status_raw_cache
             .as_ref()
+            .filter(|c| &c.repo_root == repo_root)
             .is_some_and(|c| !c.raw.is_empty());
         Some(if dirty { format!("{branch}*") } else { branch })
     }
@@ -999,14 +1006,26 @@ impl AppState {
             huge
         };
         self.huge_tree_anchor = Some(new_anchor);
+        // Worktree-switch belt-and-suspenders: if we're crossing
+        // into a *different* repo than the raw cache holds, wipe
+        // the cache. `git_file_statuses_cached` does its own key
+        // check that catches this on the marker path, but
+        // `compute_git_info_fast` previously didn't, and Spencer
+        // reported brief "stale dirty marker" flashes on worktree
+        // switches. Clearing here is precautionary and explicit;
+        // the cache check in `git_file_statuses_cached` still
+        // covers the cache-survives-leave-and-return optimization
+        // because going from a repo to a non-repo dir doesn't
+        // satisfy `repo_root.is_some()` here, so the cache lives
+        // on for re-entry.
+        if let Some(new_root) = repo_root.as_ref() {
+            if let Some(c) = self.git_status_raw_cache.as_ref() {
+                if &c.repo_root != new_root {
+                    self.git_status_raw_cache = None;
+                }
+            }
+        }
         self.current_repo_root = repo_root;
-        // Intentionally do NOT wipe `git_status_raw_cache` here.
-        // The cache is keyed on (repo_root, mtimes, huge) and
-        // self-invalidates in `git_file_statuses_cached` when the
-        // current dir's repo doesn't match. Wiping on every anchor
-        // change burned the cache on "up to parent and back in"
-        // patterns — re-entering the same project repaid the full
-        // `git status` index walk (200-500 ms on a ~110k-file repo).
         if self.is_huge_tree && !was_huge {
             self.flash_info(format!(
                 "large tree ({}+ subdirs) — git poll throttled, untracked markers off",

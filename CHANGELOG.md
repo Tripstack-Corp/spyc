@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Stale git markers after worktree switches.** Reported by
+  Spencer: switching between worktrees occasionally surfaced
+  markers (top-bar dirty flag, per-file status) from the
+  previous worktree. Two leak paths fixed:
+
+  1. `compute_git_info_fast` derived its dirty marker from the
+     raw porcelain cache without checking the cache's
+     `repo_root` matched the current one. After a worktree
+     switch, the cache still held the old worktree's data until
+     the async git worker finished refilling — so for that
+     window the branch line showed the old dirty state. Filter
+     the cache by `repo_root` before reading.
+  2. `update_huge_tree` no longer cleared the raw cache when
+     crossing a repo boundary (removed in v1.50.44's "cache
+     survives leave-and-return" optimization). Add a targeted
+     clear: only when the *new* anchor is a different repo
+     than the cache holds — preserves the leave-and-return
+     win (going from a repo to a non-repo dir doesn't satisfy
+     the condition, so the cache lives on for re-entry).
+
 ### Added
 - **User-supplied syntax grammars.** The pager's syntax
   highlighting (via `syntect`) ships with ~90 languages but has

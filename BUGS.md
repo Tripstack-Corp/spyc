@@ -1,7 +1,4 @@
 ### SMALL ###
-- our git caching may have a bug when switching worktrees it will show stale
-  markers for file additions, etc. Switching a worktree should force a "recook"
-  (as a background process) (reported by Spencer)
 - PgUp/PgDn in the live (focused) pane should auto-enter
   `^a-v` scrollback mode with a single page move applied, so
   users without `^a` in their fingertips get a discoverable
