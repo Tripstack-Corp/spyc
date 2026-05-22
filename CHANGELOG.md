@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a-\` / F10 is a pure hide/show toggle.** When no pane
+  exists, `TogglePane` silently spawned the default command
+  (`$SPYC_PANE_CMD` or `claude`) — surprising users who pressed
+  the binding expecting a no-op (reported by Justin: "I see
+  `^a-c` defaults to claude, POLA"). Now `^a-\` with no pane
+  flashes `no pane — ^a-c to create one` and returns. Pane
+  creation stays explicit via `^a-c`.
+
 ### Added
 - **TX-side timestamps in the key trace.** `--key-trace` /
   `SPYC_KEY_TRACE=1` now logs `TX` lines whenever a pane write

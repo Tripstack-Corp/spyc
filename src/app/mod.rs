@@ -4989,10 +4989,13 @@ impl App {
             }
             return;
         }
-        // No pane container yet — spawn the default command.
-        let cmd = std::env::var("SPYC_PANE_CMD").unwrap_or_else(|_| "claude".to_string());
-        self.open_pane_tab(&cmd);
-        self.state.pane_hidden = false;
+        // No pane container exists — `^a-\` is a pure hide/show
+        // toggle, not a create binding. Previously this silently
+        // spawned the default command ($SPYC_PANE_CMD or `claude`),
+        // which surprised users expecting a no-op (reported by
+        // Justin: "I see ^a-c defaults to claude, but POLA"). Point
+        // the user at the explicit creation binding instead.
+        self.state.flash_info("no pane — ^a-c to create one");
     }
 
     /// Spawn a new pane tab. If no tabs exist, creates the container.
