@@ -43,6 +43,16 @@
 [markdown]
 # open_as_rendered = true
 
+# ── delete ────────────────────────────────────────────────────────────
+# Behavior of the `R` and `dd` / `Ndd` removal actions.
+# `confirm` (default true) shows a `y/N` prompt with a warning-color
+# highlight on the targeted rows before anything happens. Set to
+# false for "yolo mode" — deletions fire immediately, no prompt, no
+# highlight. The graveyard (`gy`) is still the destination either
+# way, so accidental yolo deletions are still recoverable.
+[delete]
+# confirm = true
+
 # ── colors ────────────────────────────────────────────────────────────
 # Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you
 # don't set falls back to the built-in palette.

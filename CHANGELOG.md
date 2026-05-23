@@ -5,6 +5,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`dd` / `Ndd` to delete; `ZZ` to quit.** Vim-style bindings
+  for the two most common ops we'd been bare-shortcut-only on.
+
+  - `dd` (no count) — confirms then removes the current selection
+    (picks if any, else cursor entry). Same shape as the existing
+    `R`.
+  - `Ndd` (count prefix) — confirms then removes the cursor + N-1
+    entries below, clamped at end of list (no wrap). The explicit
+    count *ignores picks* — the count is the user being explicit
+    about scope.
+  - `ZZ` — alias for `Quit` (auto-saves session, same as
+    `Q` / `^D` / `:q`).
+  - `0dd` is a no-op (vim: `0` is line-start motion; never reaches
+    `dd`).
+
+  `Enter` is now the sole primary for "open/descend" — previously
+  `d` and `Enter` shared the binding. Bare `d` is now a chord-
+  arming key (vim parity: `d` is always operator-pending).
+
+  Tested: bare `dd`, `4dd`, `dd` cancel-on-non-d-followup,
+  `ZZ` → Quit, `Enter` still opens after the `d` split.
+
+- **Warning-color row highlight while a delete confirm prompt is
+  up.** The prompt text counts files, but doesn't tell the user
+  *which* files — especially load-bearing for `Ndd` where the
+  affected rows depend on cursor position at the moment the chord
+  fired. Now the targeted rows render with a strong crimson
+  background (overrideable as `delete_warning` in `[colors]`) so
+  the consequence of `y` is visible at a glance. Cleared on
+  confirm or cancel.
+
+- **`[delete] confirm = false` opt-in for yolo mode.** Skips the
+  `y/N` prompt and the warning highlight; deletions fire
+  immediately on `R` / `dd` / `Ndd`. The graveyard is still the
+  destination either way, so `gy` recovers. Off by default;
+  documented in `spyc --print-config`.
+
 ### Fixed
 - **F9 (`ResumePane`) spawns in the current listing dir, not
   `PROJECT_HOME`.** Reported by Justin: after navigating to a

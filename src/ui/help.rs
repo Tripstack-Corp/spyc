@@ -112,7 +112,8 @@ const SECTIONS: &[Section] = &[
         rows: &[
             ("c", "copy selection to a destination (prompt)"),
             ("M", "move selection to a destination (prompt)"),
-            ("R", "remove selection (confirm with y)"),
+            ("R  /  dd", "remove selection (confirm with y)"),
+            ("Ndd", "remove cursor + N-1 entries below (e.g. 4dd)"),
             ("+", "make a new directory (prompt)"),
             ("O", "create new file in $EDITOR (prompt)"),
             ("L", "long listing (wide aligned table)"),
@@ -317,7 +318,7 @@ const SECTIONS: &[Section] = &[
             ("?  F1", "this help"),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
-            ("Q  ^D  :q", "quit (q reserved for future macros)"),
+            ("Q  ^D  :q  ZZ", "quit (q reserved for future macros)"),
             ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
     },

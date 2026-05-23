@@ -56,9 +56,15 @@ pub enum Action {
     JumpPrompt, // J — prompt for a path (~, $VAR expanded) and chdir
 
     // File operations.
-    CopyPrompt,    // c — prompt for destination, cp -r selection
-    MovePrompt,    // M — prompt for destination, mv selection
-    RemovePrompt,  // R — confirm, rm -rf selection
+    CopyPrompt, // c — prompt for destination, cp -r selection
+    MovePrompt, // M — prompt for destination, mv selection
+    /// `R` (no count) or `dd` (no count) — confirm-then-remove
+    /// the current selection (picks if any, else cursor entry).
+    /// `Ndd` passes `Some(N)` to request N consecutive entries from
+    /// the cursor down (clamped to end of list, no wrap). The
+    /// explicit count ignores picks — the count is the user being
+    /// explicit.
+    RemovePrompt(Option<usize>),
     MakeDirPrompt, // + — prompt for a directory name
     NewFilePrompt, // N — prompt for a filename, open in $EDITOR
     LongList,      // L — ls -lh selection | $PAGER
@@ -224,7 +230,7 @@ impl Action {
             Self::JumpPrompt => "jump to path (prompt)",
             Self::CopyPrompt => "copy (prompt)",
             Self::MovePrompt => "move (prompt)",
-            Self::RemovePrompt => "remove (confirm)",
+            Self::RemovePrompt(_) => "remove (confirm)",
             Self::MakeDirPrompt => "make directory (prompt)",
             Self::NewFilePrompt => "new file in editor (prompt)",
             Self::LongList => "long listing",

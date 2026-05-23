@@ -35,6 +35,12 @@ enum PendingSeq {
     NextBracket,
     /// Seen `[`, waiting for a "prev" sub-command (`g` = prev git change).
     PrevBracket,
+    /// Seen `d`, waiting for the second `d` of the vim-style
+    /// `dd` (or `Ndd`) delete chord. Cancels on any other key.
+    D,
+    /// Seen uppercase `Z`, waiting for the second `Z` of the
+    /// vim-style `ZZ` quit chord. Cancels on any other key.
+    Z,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -89,6 +95,8 @@ impl Resolver {
             PendingSeq::Harpoon => "H-",
             PendingSeq::NextBracket => "]-",
             PendingSeq::PrevBracket => "[-",
+            PendingSeq::D => "d-",
+            PendingSeq::Z => "Z-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -142,6 +150,37 @@ impl Resolver {
                 // here); others as the raw 0x1c / FS byte (handled at
                 // the top-level match below).
                 KeyCode::Char('\\') => ResolverOutcome::Action(Action::TogglePane),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: `d` already seen — vim-style delete chord.
+        // `dd` (no count) → remove current selection (picks-or-
+        //   cursor, same shape as `R`).
+        // `Ndd` (count set before the first `d`) → remove cursor +
+        //   N-1 entries below, ignoring picks. The count is the
+        //   user being explicit about scope.
+        // Anything else: cancel the chord silently.
+        if self.pending == PendingSeq::D {
+            let out = match ev.code {
+                KeyCode::Char('d') => {
+                    let count = self.count.take().map(|n| n as usize);
+                    ResolverOutcome::Action(Action::RemovePrompt(count))
+                }
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: `Z` already seen — vim-style quit chord.
+        // `ZZ` → Quit (which already auto-saves the session).
+        // Anything else: cancel.
+        if self.pending == PendingSeq::Z {
+            let out = match ev.code {
+                KeyCode::Char('Z') => ResolverOutcome::Action(Action::Quit),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -325,9 +364,24 @@ impl Resolver {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Down(n))
             }
-            KeyCode::Enter | KeyCode::Char('d') => {
+            KeyCode::Enter => {
                 self.reset();
                 ResolverOutcome::Action(Action::EnterOrDisplay)
+            }
+            // `d` is now a chord-arming key (vim parity: `dd` /
+            // `Ndd` for delete). Bare `d` was previously an alias
+            // for `Enter` (EnterOrDisplay) — that role is now
+            // Enter-only.
+            KeyCode::Char('d') => {
+                self.pending = PendingSeq::D;
+                ResolverOutcome::Pending
+            }
+            // `Z` arms `ZZ` (vim quit). A single `Z` is a no-op
+            // unless followed by another `Z`; anything else
+            // cancels the chord.
+            KeyCode::Char('Z') => {
+                self.pending = PendingSeq::Z;
+                ResolverOutcome::Pending
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 let n = self.take_count();
@@ -504,7 +558,7 @@ impl Resolver {
             }
             KeyCode::Char('R') => {
                 self.reset();
-                ResolverOutcome::Action(Action::RemovePrompt)
+                ResolverOutcome::Action(Action::RemovePrompt(None))
             }
             KeyCode::Char('M') => {
                 // `m` is the set-mark prefix (vi); move takes uppercase.
@@ -625,6 +679,58 @@ mod tests {
     }
 
     // ── count accumulation ────────────────────────────────────────
+
+    #[test]
+    fn bare_dd_emits_remove_prompt_without_count() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('d')), ResolverOutcome::Pending);
+        assert_eq!(
+            feed(&mut r, key('d')),
+            ResolverOutcome::Action(Action::RemovePrompt(None))
+        );
+    }
+
+    #[test]
+    fn count_dd_emits_remove_prompt_with_count() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('4')), ResolverOutcome::Pending);
+        assert_eq!(feed(&mut r, key('d')), ResolverOutcome::Pending);
+        assert_eq!(
+            feed(&mut r, key('d')),
+            ResolverOutcome::Action(Action::RemovePrompt(Some(4)))
+        );
+    }
+
+    #[test]
+    fn dd_chord_cancels_on_non_d_followup() {
+        let mut r = Resolver::new();
+        feed(&mut r, key('d'));
+        // `dx` is not a known chord; should drop without firing
+        // RemovePrompt. Subsequent `d` is a fresh chord start.
+        assert_eq!(feed(&mut r, key('x')), ResolverOutcome::Ignored);
+        assert_eq!(feed(&mut r, key('d')), ResolverOutcome::Pending);
+    }
+
+    #[test]
+    fn zz_emits_quit() {
+        let mut r = Resolver::new();
+        assert_eq!(feed(&mut r, key('Z')), ResolverOutcome::Pending);
+        assert_eq!(
+            feed(&mut r, key('Z')),
+            ResolverOutcome::Action(Action::Quit)
+        );
+    }
+
+    #[test]
+    fn enter_alone_still_opens_after_d_split() {
+        // Splitting `d` off from EnterOrDisplay shouldn't break Enter.
+        let mut r = Resolver::new();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(
+            feed(&mut r, enter),
+            ResolverOutcome::Action(Action::EnterOrDisplay)
+        );
+    }
 
     #[test]
     fn bare_zero_is_ignored() {
@@ -1368,7 +1474,7 @@ mod tests {
         );
         assert_eq!(
             feed(&mut r, key('R')),
-            ResolverOutcome::Action(Action::RemovePrompt)
+            ResolverOutcome::Action(Action::RemovePrompt(None))
         );
         assert_eq!(
             feed(&mut r, key('M')),

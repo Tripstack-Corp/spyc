@@ -74,6 +74,11 @@ pub struct Row {
     pub picked: bool,
     pub taken: bool,
     pub git_status: GitFileStatus,
+    /// True while this entry is among the targets of an active
+    /// `RemoveConfirm` prompt. Drives the warning-color row
+    /// highlight: the user sees exactly which files the next `y`
+    /// keystroke will affect. Always `false` outside the prompt.
+    pub pending_delete: bool,
 }
 
 pub struct ListView<'a> {
@@ -247,7 +252,14 @@ impl Widget for ListView<'_> {
             // marker cells and the filename. DIM doesn't apply to the
             // cursor row; the existing `cursor_bg_dim` handles the
             // unfocused case.
-            let (cursor_bg, cursor_bold) = if highlighted {
+            //
+            // A row pending delete (active `RemoveConfirm` prompt)
+            // overrides the cursor bg with the warning color so the
+            // user sees the consequence of the next `y` keystroke.
+            // The warning wins even when the row is also the cursor.
+            let (cursor_bg, cursor_bold) = if row.pending_delete {
+                (Some(self.theme.delete_warning), Modifier::BOLD)
+            } else if highlighted {
                 let bg = if self.focused {
                     self.theme.cursor_bg
                 } else {
@@ -284,7 +296,11 @@ impl Widget for ListView<'_> {
                 buf.set_string(x + 1, y, c1.to_string(), s1);
             }
 
-            let final_name_style = if highlighted {
+            let final_name_style = if highlighted || row.pending_delete {
+                // Pending-delete rows always force the bright fg +
+                // bold treatment over the warning bg so the
+                // filename stays readable against the strong color.
+                // Cursor rows do the same against the cursor bg.
                 Style::default()
                     .fg(self.theme.cursor_fg)
                     .bg(cursor_bg.unwrap_or_default())
@@ -376,6 +392,7 @@ mod tests {
             picked: false,
             taken: false,
             git_status: GitFileStatus::clean(),
+            pending_delete: false,
         }
     }
 
@@ -505,6 +522,7 @@ mod tests {
                 picked: true,
                 taken: false,
                 git_status: GitFileStatus::clean(),
+                pending_delete: false,
             },
             Row {
                 display: "beta.txt".into(),
@@ -512,6 +530,7 @@ mod tests {
                 picked: false,
                 taken: true,
                 git_status: GitFileStatus::clean(),
+                pending_delete: false,
             },
             Row {
                 display: "gamma".into(),
@@ -519,6 +538,7 @@ mod tests {
                 picked: false,
                 taken: false,
                 git_status: GitFileStatus::unstaged(GitChange::Modified),
+                pending_delete: false,
             },
         ];
         let out = render_list_to_string(&rows, 1, true, 30, 4);

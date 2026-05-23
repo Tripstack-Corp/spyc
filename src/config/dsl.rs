@@ -175,7 +175,7 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
         "file" => Ok(BoundAction::Plain(Action::FileType)),
         "copy" => Ok(BoundAction::Plain(Action::CopyPrompt)),
         "move" => Ok(BoundAction::Plain(Action::MovePrompt)),
-        "remove" => Ok(BoundAction::Plain(Action::RemovePrompt)),
+        "remove" => Ok(BoundAction::Plain(Action::RemovePrompt(None))),
         "makedirs" => Ok(BoundAction::Plain(Action::MakeDirPrompt)),
 
         "ignoretoggle" => {

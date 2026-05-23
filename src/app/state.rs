@@ -294,6 +294,14 @@ pub struct AppState {
     /// whenever the harpoon list mutates so `apply_temp_filter`
     /// remains pure-domain. Empty when no `PROJECT_HOME` is active.
     pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
+    /// Rows about to be deleted, populated while a `RemoveConfirm`
+    /// prompt is active. Drives the warning-color row highlight in
+    /// the list view: the user sees exactly which files the `y` /
+    /// `Y` keystroke will affect. Cleared when the prompt resolves
+    /// (confirm or cancel). Stored as paths so a mid-prompt
+    /// listing refresh that drops a row doesn't leave a stale
+    /// index lit up.
+    pub pending_delete_preview: Option<Vec<PathBuf>>,
     /// Snapshot of the graveyard, refreshed when `View::Graveyard`
     /// is opened or after any entry-mutating action. Newest-first
     /// (matches `Graveyard::load`). Empty when not in graveyard
@@ -1330,11 +1338,32 @@ impl AppState {
             Action::NewFilePrompt => {
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::NewFile, "new file: "));
             }
-            Action::RemovePrompt => {
-                let paths = self.selection_paths();
+            Action::RemovePrompt(count) => {
+                // `count.is_some()` = explicit `Ndd` from the user.
+                // None = bare `R` or bare `dd` → picks-or-cursor
+                // semantics (existing `R` behavior).
+                let paths: Vec<PathBuf> = if let Some(n) = count {
+                    // Cursor + (n-1) entries below, clamped at end
+                    // of list. No wrap. Ignores picks — the count
+                    // is the user being explicit.
+                    let start = self.cursor.index;
+                    self.rows
+                        .iter()
+                        .skip(start)
+                        .take(*n)
+                        .map(|r| r.path.clone())
+                        .collect()
+                } else {
+                    self.selection_paths()
+                        .into_iter()
+                        .map(Path::to_path_buf)
+                        .collect()
+                };
                 if paths.is_empty() {
                     return ApplyResult::Handled;
                 }
+                // Borrow the slice for the rest of the function.
+                let paths: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
                 // Pre-walk to count files inside any selected dirs so
                 // the user sees the actual blast radius of `R`. Cheap
                 // (interactive flow, sub-second on any sane subtree)
@@ -1365,6 +1394,12 @@ impl AppState {
                         "remove {file_count} file(s) + {dir_count} dir(s) (recursive, {dir_files} file(s))? (y/N): "
                     )
                 };
+                // Capture the targeted paths so the list view can
+                // highlight them in the warning color while the
+                // confirm prompt is up. Cleared on confirm/cancel
+                // in `handle_remove_confirm_key`.
+                self.pending_delete_preview =
+                    Some(paths.iter().map(|p| (*p).to_path_buf()).collect());
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::RemoveConfirm, prompt));
             }
 
@@ -2140,6 +2175,7 @@ mod tests {
             git_worker_tx: None,
             git_generation: 0,
             harpoon_filter_set: std::collections::HashSet::new(),
+            pending_delete_preview: None,
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,

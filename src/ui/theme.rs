@@ -31,6 +31,12 @@ pub struct Theme {
     pub status_suffix: Color,
     pub prompt_prefix: Color,
     pub empty_marker: Color,
+    /// Background tint for rows that are about to be deleted by an
+    /// active `RemoveConfirm` prompt. Stronger than the cursor /
+    /// pick tints so it reads as "consequence" — the user can see
+    /// exactly which files the next `y` keystroke will affect.
+    /// Drawn over cursor / pick / mark styling.
+    pub delete_warning: Color,
     /// When true, all colors fall back to terminal defaults. Used by the
     /// `C` (colortoggle) action — the cursor row falls back to reverse
     /// video so the selection is still visible.
@@ -55,6 +61,7 @@ impl Default for Theme {
             status_suffix: Color::Rgb(0x56, 0x5f, 0x89),
             prompt_prefix: Color::Rgb(0xe0, 0xaf, 0x68),
             empty_marker: Color::Rgb(0x56, 0x5f, 0x89),
+            delete_warning: Color::Rgb(0x80, 0x1e, 0x1e), // deep crimson
             mono: false,
         }
     }
@@ -94,6 +101,7 @@ impl Theme {
         apply!(status_path);
         apply!(status_suffix);
         apply!(prompt_prefix);
+        apply!(delete_warning);
         self
     }
 

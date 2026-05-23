@@ -811,6 +811,7 @@ impl App {
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
                 .unwrap_or_default(),
+            pending_delete_preview: None,
             // Populated on the first successful `refresh_git_state`
             // call. See `AppState::git_poll_cache` doc for why this
             // starts None.
@@ -3227,6 +3228,7 @@ impl App {
 
     fn build_rows(&self) -> Vec<Row> {
         use crate::ui::list_view::GitFileStatus;
+        let delete_preview: Option<&Vec<PathBuf>> = self.state.pending_delete_preview.as_ref();
         self.state
             .rows
             .iter()
@@ -3237,12 +3239,15 @@ impl App {
                     .get(&rd.display)
                     .copied()
                     .unwrap_or_else(GitFileStatus::clean);
+                let pending_delete =
+                    delete_preview.is_some_and(|v| v.iter().any(|p| p == &rd.path));
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,
                     picked: self.state.view == View::Dir && self.state.picks.contains(&rd.path),
                     taken: self.state.inventory.contains(&rd.path),
                     git_status,
+                    pending_delete,
                 }
             })
             .collect()
@@ -3735,10 +3740,19 @@ impl App {
     fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> PostAction {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
         self.state.mode = Mode::Normal;
+        // Pull the targeted paths out of the preview slot. This is
+        // the authoritative list (it was computed at prompt time so
+        // `Ndd` ignores any cursor wiggle that might have happened);
+        // selection_paths() would re-derive from current state and
+        // could disagree.
+        let preview = self.state.pending_delete_preview.take();
         if !confirmed {
             return PostAction::None;
         }
-        let paths = self.state.selection_paths();
+        let paths: Vec<&Path> = preview.as_ref().map_or_else(
+            || self.state.selection_paths(),
+            |v| v.iter().map(PathBuf::as_path).collect(),
+        );
         if paths.is_empty() {
             return PostAction::None;
         }
@@ -9846,7 +9860,27 @@ impl App {
 
         // Try pure-domain dispatch first.
         match self.state.apply(action) {
-            state::ApplyResult::Handled => return Ok(PostAction::None),
+            state::ApplyResult::Handled => {
+                // Yolo mode: `[delete] confirm = false` opts out of
+                // the y/N prompt. The pure-domain dispatch set up
+                // the prompt and `pending_delete_preview` as
+                // normal; synthesize the `y` keystroke here so the
+                // deletion fires in the same tick — no warning
+                // highlight ever paints.
+                if !self.state.config.delete.confirm
+                    && matches!(
+                        self.state.mode,
+                        Mode::Prompting(ref p) if matches!(p.kind, PromptKind::RemoveConfirm)
+                    )
+                {
+                    let synthetic = crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Char('y'),
+                        crossterm::event::KeyModifiers::NONE,
+                    );
+                    return Ok(self.handle_remove_confirm_key(synthetic));
+                }
+                return Ok(PostAction::None);
+            }
             state::ApplyResult::Post(post) => return Ok(post),
             state::ApplyResult::OpenPager(req) => {
                 let view = match req.lines {

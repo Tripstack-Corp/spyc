@@ -42,6 +42,9 @@ pub struct Config {
     /// Markdown viewer behavior knobs.
     pub markdown: MarkdownConfig,
 
+    /// Delete-action behavior knobs.
+    pub delete: DeleteConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -151,6 +154,32 @@ impl Default for MarkdownConfig {
     }
 }
 
+/// `[delete]` — confirmation behavior for `R` / `dd` removal.
+#[derive(Debug, Clone)]
+pub struct DeleteConfig {
+    /// When true (default), `R` and `dd` show a `y/N` confirmation
+    /// prompt before moving anything to the graveyard. Setting to
+    /// false enables "yolo mode" — deletions fire immediately on
+    /// `dd` / `R`, no prompt, no warning highlight. The graveyard
+    /// is still the destination either way, so `gy` can recover.
+    pub confirm: bool,
+}
+
+impl Default for DeleteConfig {
+    fn default() -> Self {
+        Self { confirm: true }
+    }
+}
+
+/// On-disk shape of `[delete]`. `Option` for "didn't set" disambig
+/// — letting the user write `[delete]` with no body still keeps
+/// defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileDelete {
+    confirm: Option<bool>,
+}
+
 /// On-disk shape of `[markdown]`. `Option` for "didn't set" disambig.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +204,7 @@ pub struct ColorOverrides {
     pub status_path: Option<String>,
     pub status_suffix: Option<String>,
     pub prompt_prefix: Option<String>,
+    pub delete_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -209,6 +239,8 @@ struct FileConfig {
     yank: FileYank,
     #[serde(default)]
     markdown: FileMarkdown,
+    #[serde(default)]
+    delete: FileDelete,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -305,6 +337,11 @@ impl Config {
         // Markdown: per-field merge.
         if let Some(b) = file.markdown.open_as_rendered {
             self.markdown.open_as_rendered = b;
+        }
+
+        // Delete: per-field merge.
+        if let Some(b) = file.delete.confirm {
+            self.delete.confirm = b;
         }
 
         // Ignore masks: append.
