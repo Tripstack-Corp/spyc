@@ -5359,7 +5359,9 @@ impl App {
             return;
         };
         let path = row.path.clone();
-        if row.kind == EntryKind::Dir {
+        if row.kind == EntryKind::Dir
+            || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path))
+        {
             self.state.flash_error("V: cannot edit a directory");
             return;
         }
@@ -5408,7 +5410,9 @@ impl App {
             return;
         };
         let path = row.path.clone();
-        if row.kind == EntryKind::Dir {
+        if row.kind == EntryKind::Dir
+            || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path))
+        {
             self.state.flash_error("D: cannot page a directory");
             return;
         }
@@ -10229,7 +10233,16 @@ impl App {
             }
         }
 
-        if kind == EntryKind::Dir {
+        // Symlinks are classified by lstat (`DirEntry::metadata`),
+        // so a symlink-to-dir comes through as `Symlink`, not `Dir`.
+        // Resolve through to the target for navigation so Enter does
+        // the obvious thing on `node_modules/foo -> .pnpm/...`. We
+        // *don't* generalize this to every op — `R`, picks, etc.
+        // intentionally operate on the link itself.
+        let descend = kind == EntryKind::Dir
+            || (kind == EntryKind::Symlink && crate::fs::target_is_dir(&path));
+
+        if descend {
             if let Err(e) = self.state.chdir(&path) {
                 self.state.flash_error(format!("chdir: {e}"));
             }

@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Enter follows symlinks-to-directories.** Reported in the wild
+  on a pnpm `node_modules` tree where `prettier ->
+  .pnpm/prettier@3.8.3/node_modules/prettier` couldn't be entered.
+  `DirEntry::metadata` uses lstat semantics, so symlinks land as
+  `EntryKind::Symlink` regardless of target, and the Enter handler
+  only descended on `EntryKind::Dir`. Now Enter (and the `D` / `v`
+  guards) follow through to the target kind and descend when the
+  target is a directory. Other ops (`R`, picks, etc.) still
+  intentionally operate on the symlink itself.
+
 - **Markdown re-renders after `v` (edit in $EDITOR) returns.**
   Reported by JRob: open a `.md` (rendered), press `v` to edit
   it in $EDITOR, quit the editor — the file came back as plain

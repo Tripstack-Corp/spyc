@@ -1,5 +1,5 @@
 use std::fs::Metadata;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,14 @@ impl Entry {
     }
 }
 
+/// Follow `path` through symlinks and report whether the *target*
+/// is a directory. Returns `false` on broken/missing symlinks (and
+/// on any other I/O error) — callers treat that as "fall through to
+/// the file dispatch", which will surface the real error there.
+pub fn target_is_dir(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|md| md.is_dir())
+}
+
 #[cfg(unix)]
 fn is_executable(md: &Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -78,4 +86,40 @@ fn is_executable(md: &Metadata) -> bool {
 #[cfg(not(unix))]
 fn is_executable(_md: &Metadata) -> bool {
     false
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod target_is_dir_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use tempfile::tempdir;
+
+    #[test]
+    fn follows_symlink_to_dir() {
+        let tmp = tempdir().unwrap();
+        let real_dir = tmp.path().join("real");
+        std::fs::create_dir(&real_dir).unwrap();
+        let link = tmp.path().join("link");
+        symlink(&real_dir, &link).unwrap();
+        assert!(target_is_dir(&link));
+    }
+
+    #[test]
+    fn follows_symlink_to_file_returns_false() {
+        let tmp = tempdir().unwrap();
+        let real_file = tmp.path().join("f");
+        std::fs::File::create(&real_file).unwrap();
+        let link = tmp.path().join("link");
+        symlink(&real_file, &link).unwrap();
+        assert!(!target_is_dir(&link));
+    }
+
+    #[test]
+    fn broken_symlink_returns_false() {
+        let tmp = tempdir().unwrap();
+        let link = tmp.path().join("link");
+        symlink(tmp.path().join("does-not-exist"), &link).unwrap();
+        assert!(!target_is_dir(&link));
+    }
 }

@@ -1,4 +1,8 @@
 ### SMALL ###
+- when a running command exits we should put the EOF marker at the end of the
+  output stream to make it more visually apparent that the command is finished;
+  this might only happen when a command has scrolled output to the bottom of the
+  pane and the EOF doesn't seem to advance the pager window
 - mouse scroll in pager, 'ENTER' into a file, doesn't seem to be working
 - PgUp/PgDn in the live (focused) pane should auto-enter
   `^a-v` scrollback mode with a single page move applied, so
