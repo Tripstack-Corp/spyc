@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **F9 (`ResumePane`) spawns in the current listing dir, not
+  `PROJECT_HOME`.** Reported by Justin: after navigating to a
+  different project folder in the file pane, pressing F9 opened
+  `claude --resume` in the dir where he'd originally launched
+  spyc instead of the dir he was browsing. `^a-c` (which prompts
+  for cwd) already pre-fills with `listing.dir`; the bare-spawn
+  path that F9 uses now follows the same default. Users who
+  want a specific anchor can edit the prompt in `^a-c` or move
+  `PROJECT_HOME` via `:project`.
+
 - **`^a-\` / F10 is a pure hide/show toggle.** When no pane
   exists, `TogglePane` silently spawned the default command
   (`$SPYC_PANE_CMD` or `claude`) — surprising users who pressed

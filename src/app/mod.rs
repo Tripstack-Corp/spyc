@@ -4999,13 +4999,18 @@ impl App {
     }
 
     /// Spawn a new pane tab. If no tabs exist, creates the container.
-    /// Default cwd is `PROJECT_HOME` when set, else the current listing dir.
+    /// Default cwd is the current listing dir — i.e. "open here",
+    /// matching the user's mental model of where they're browsing.
+    /// Reported by Justin: F9 (`ResumePane`) used to spawn at
+    /// `PROJECT_HOME` (typically the dir spyc was launched from)
+    /// instead of the dir he had since navigated into. `^a-c`
+    /// already pre-fills its cwd prompt with `listing.dir`; this
+    /// brings the bare-spawn path in line.
+    ///
+    /// Users who want a specific anchor should use `^a-c` and edit
+    /// the prompt, or invoke `:project` to move PROJECT_HOME.
     fn open_pane_tab(&mut self, cmd: &str) {
-        let cwd = self
-            .state
-            .project_home
-            .clone()
-            .unwrap_or_else(|| self.state.listing.dir.clone());
+        let cwd = self.state.listing.dir.clone();
         self.open_pane_tab_in(cmd, &cwd);
     }
 
