@@ -327,3 +327,51 @@ Title: Session: mcp-tool-surface-consolidation, watercooler-cloud, graph_trace-c
 }
 
 <!-- Entry-ID: 01KS7VK0B2VBXGEVDZWJHDDN2E -->
+
+---
+Entry: Pulse Hook (caleb) 2026-05-23T05:31:35.566641+00:00
+Role: scribe
+Type: Note
+Title: Session: mcp-tools-list, copybara-promotion, hybrid-remote-mount
+
+{
+  "record_kind": "extracted_theme",
+  "author_id": "caleb",
+  "repo_id": "spyc",
+  "branch": "fix/q-command-session-save",
+  "session_id": "f7d9646b-f241-4350-b59f-a05763d43d68",
+  "captured_at": "2026-05-23T05:31:24.068566+00:00",
+  "summary_hash": "sha256t16:d77d80e7926580af",
+  "technical_focus": [
+    "mcp-tools-list",
+    "copybara-promotion",
+    "hybrid-remote-mount"
+  ],
+  "session_intent": "Diagnose the discrepancy in reported tools and promote the main branch to staging and stable without triggering a public release.",
+  "observations": [
+    {
+      "kind": "insight",
+      "text": "Identified that the 40-tool surface is due to additional tools mounted from Railway's pre-consolidation code."
+    },
+    {
+      "kind": "decision",
+      "text": "Executed the promotion of the main branch to staging and then to stable without triggering a public release."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "Merged main into staging with PRs #800-#829."
+    },
+    {
+      "kind": "pr_merged",
+      "text": "Merged staging into stable with PRs #800-#829."
+    },
+    {
+      "kind": "resolved_loop",
+      "text": "Resolved the issue of the 40-tool discrepancy by confirming the correct tool surface."
+    }
+  ],
+  "confidence": 0.9,
+  "extractor_version": "pulse-extractor-v1"
+}
+
+<!-- Entry-ID: 01KS9N2H7CKVM5HVHKEMTZ9PPV -->
