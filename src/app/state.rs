@@ -171,6 +171,11 @@ pub struct AppState {
     pub masks: IgnoreMasks,
     pub temp_filter: Option<String>,
     pub sort_order: crate::fs::listing::SortMode,
+    /// When true, invert the per-mode natural direction (Name/Ext
+    /// ascending → descending, Size/Mtime descending → ascending).
+    /// Toggled by `gs` and `:sort reverse`. Dirs-first grouping is
+    /// always preserved regardless.
+    pub sort_reversed: bool,
     pub view: View,
     pub cursor: Cursor,
     pub resolver: Resolver,
@@ -1062,7 +1067,7 @@ impl AppState {
             ));
         }
         self.listing = new_listing;
-        self.listing.sort(self.sort_order);
+        self.listing.sort(self.sort_order, self.sort_reversed);
         // Maybe re-evaluate "is this a huge tree?" — only runs the
         // bounded-DFS walk when the chdir crosses into a different
         // project (different repo root, or out of any repo). Drilling
@@ -1630,17 +1635,40 @@ impl AppState {
             self.flash_info(format!("sort: {}", self.sort_order));
             return CommandResult::Handled;
         }
-        if let Some(mode_str) = input.strip_prefix("sort ") {
-            let mode_str = mode_str.trim();
-            match crate::fs::listing::SortMode::parse(mode_str) {
+        if let Some(rest) = input.strip_prefix("sort ") {
+            let rest = rest.trim();
+            // `:sort reverse` / `:sort -` toggles direction.
+            if rest == "reverse" || rest == "-" {
+                self.sort_reversed = !self.sort_reversed;
+                self.listing.sort(self.sort_order, self.sort_reversed);
+                self.rebuild_rows();
+                self.flash_info(format!(
+                    "sort: {}{}",
+                    self.sort_order,
+                    if self.sort_reversed {
+                        " (reversed)"
+                    } else {
+                        ""
+                    },
+                ));
+                return CommandResult::Handled;
+            }
+            match crate::fs::listing::SortMode::parse(rest) {
                 Some(mode) => {
                     self.sort_order = mode;
-                    self.listing.sort(mode);
+                    self.listing.sort(mode, self.sort_reversed);
                     self.rebuild_rows();
-                    self.flash_info(format!("sort: {mode}"));
+                    self.flash_info(format!(
+                        "sort: {mode}{}",
+                        if self.sort_reversed {
+                            " (reversed)"
+                        } else {
+                            ""
+                        },
+                    ));
                 }
                 None => self.flash_error(format!(
-                    "unknown sort mode: {mode_str} (name|size|mtime|ext)"
+                    "unknown sort mode: {rest} (name|size|mtime|ext|reverse)"
                 )),
             }
             return CommandResult::Handled;
@@ -1753,7 +1781,7 @@ impl AppState {
                     "sort" => match crate::fs::listing::SortMode::parse(value) {
                         Some(mode) => {
                             self.sort_order = mode;
-                            self.listing.sort(mode);
+                            self.listing.sort(mode, self.sort_reversed);
                             self.rebuild_rows();
                             self.flash_info(format!("sort={mode}"));
                         }
@@ -2145,6 +2173,7 @@ mod tests {
             masks: IgnoreMasks::default(),
             temp_filter: None,
             sort_order: SortMode::Name,
+            sort_reversed: false,
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),

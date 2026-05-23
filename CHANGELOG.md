@@ -18,6 +18,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   launching $EDITOR.
 
 ### Added
+- **`S` cycles sort; `gs` reverses; status bar shows the current
+  mode.** Requested in BUGS: there was no quick way to swap sort
+  order without typing `:sort <mode>`, and no persistent
+  indicator of which mode was active.
+
+  - `S` cycles name → size → mtime → ext → name (flashes the new
+    mode for confirmation).
+  - `gs` toggles a reverse flag on the current mode. Reversed
+    reverts each mode's natural direction (Name/Ext ascending →
+    descending; Size/Mtime descending → ascending). Dirs-first
+    grouping is always preserved.
+  - `:sort reverse` (or `:sort -`) is the colon-cmd equivalent
+    of `gs`. `:sort <mode>` still sets the mode explicitly.
+  - The status bar gains a `sort:<mode>` segment, with an `↑`
+    marker when reversed.
+
 - **`dd` / `Ndd` to delete; `ZZ` to quit.** Vim-style bindings
   for the two most common ops we'd been bare-shortcut-only on.
 

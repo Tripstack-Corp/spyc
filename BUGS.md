@@ -1,6 +1,4 @@
 ### SMALL ###
-- we should have sort order features for the main frame and some indication of
-  the sort mode ... e.g. last updated, alpha, ???
 - mouse scroll in pager, 'ENTER' into a file, doesn't seem to be working
 - PgUp/PgDn in the live (focused) pane should auto-enter
   `^a-v` scrollback mode with a single page move applied, so

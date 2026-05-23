@@ -70,6 +70,12 @@ pub enum Action {
     LongList,      // L — ls -lh selection | $PAGER
     FileType,      // f — file(1) on selection, paged output
 
+    // Sort.
+    /// `S` — cycle through sort modes (Name → Size → Mtime → Ext → Name).
+    SortCycle,
+    /// `gs` — toggle the reverse flag on the current sort mode.
+    SortReverse,
+
     // Marks (vi-style named bookmarks).
     SetMark(char),  // m{a-z}
     JumpMark(char), // '{a-z}
@@ -235,6 +241,8 @@ impl Action {
             Self::NewFilePrompt => "new file in editor (prompt)",
             Self::LongList => "long listing",
             Self::FileType => "file type",
+            Self::SortCycle => "cycle sort (name/size/mtime/ext)",
+            Self::SortReverse => "toggle reverse sort",
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
             Self::TogglePane => "toggle split pane",

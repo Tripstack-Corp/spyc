@@ -157,6 +157,17 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Sort",
+        rows: &[
+            ("S", "cycle sort: name → size → mtime → ext"),
+            ("g s", "toggle reverse on the current sort mode"),
+            (
+                ":sort <mode>|reverse|-",
+                "set explicitly (name/size/mtime/ext) or toggle reverse",
+            ),
+        ],
+    },
+    Section {
         title: "Info",
         rows: &[
             (":date", "show date/time (UTC)"),
