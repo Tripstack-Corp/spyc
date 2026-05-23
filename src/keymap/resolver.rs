@@ -200,6 +200,7 @@ impl Resolver {
                 KeyCode::Char('h') => ResolverOutcome::Action(Action::JumpProjectHome),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
+                KeyCode::Char('s') => ResolverOutcome::Action(Action::SortReverse),
                 KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
@@ -582,6 +583,10 @@ impl Resolver {
             KeyCode::Char('f') => {
                 self.reset();
                 ResolverOutcome::Action(Action::FileType)
+            }
+            KeyCode::Char('S') => {
+                self.reset();
+                ResolverOutcome::Action(Action::SortCycle)
             }
 
             // Help overlay.

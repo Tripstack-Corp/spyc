@@ -26,6 +26,18 @@ impl SortMode {
             _ => None,
         }
     }
+
+    /// Cycle to the next sort mode. Order matches the docs / status
+    /// bar: Name → Size → Mtime → Ext → Name. Bound to `S` in the
+    /// resolver.
+    pub const fn cycle_next(self) -> Self {
+        match self {
+            Self::Name => Self::Size,
+            Self::Size => Self::Mtime,
+            Self::Mtime => Self::Ext,
+            Self::Ext => Self::Name,
+        }
+    }
 }
 
 impl fmt::Display for SortMode {
@@ -113,16 +125,18 @@ impl Listing {
             entries,
             truncated,
         };
-        listing.sort(SortMode::Name);
+        listing.sort(SortMode::Name, false);
         Ok(listing)
     }
 
-    /// Re-sort entries in-place.
-    pub fn sort(&mut self, mode: SortMode) {
+    /// Re-sort entries in-place. `reversed` inverts the per-mode
+    /// natural direction (Name/Ext ascending, Size/Mtime descending
+    /// = largest/newest first) — dirs-first grouping is always
+    /// preserved.
+    pub fn sort(&mut self, mode: SortMode, reversed: bool) {
         self.entries.sort_by(|a, b| {
-            kind_rank(a.kind)
-                .cmp(&kind_rank(b.kind))
-                .then_with(|| match mode {
+            kind_rank(a.kind).cmp(&kind_rank(b.kind)).then_with(|| {
+                let primary = match mode {
                     SortMode::Name => a
                         .name
                         .to_ascii_lowercase()
@@ -138,7 +152,9 @@ impl Listing {
                                 .cmp(&b.name.to_ascii_lowercase())
                         })
                     }
-                })
+                };
+                if reversed { primary.reverse() } else { primary }
+            })
         });
     }
 

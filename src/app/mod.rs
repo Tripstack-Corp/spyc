@@ -792,6 +792,7 @@ impl App {
             },
             temp_filter: None,
             sort_order: crate::fs::listing::SortMode::Name,
+            sort_reversed: false,
             view: View::Dir,
             cursor: Cursor::new(),
             resolver: Resolver::new(),
@@ -3198,14 +3199,24 @@ impl App {
                             format!(" bg:{running}\u{25cf}{done}\u{2713}")
                         }
                     };
+                    let sort_tag = format!(
+                        " sort:{}{}",
+                        self.state.sort_order,
+                        if self.state.sort_reversed {
+                            "\u{2191}"
+                        } else {
+                            ""
+                        },
+                    );
                     format!(
-                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}]",
+                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}]",
                         self.state.picks.len(),
                         self.state.inventory.len(),
                         on_off(self.state.masks.mask1.enabled),
                         on_off(self.state.masks.mask2.enabled),
                         filter_tag,
                         hidden_tag,
+                        sort_tag,
                         bg_tag,
                     )
                 }
@@ -9958,6 +9969,36 @@ impl App {
             }
 
             Action::Help => self.open_help(),
+
+            Action::SortCycle => {
+                self.state.sort_order = self.state.sort_order.cycle_next();
+                self.state
+                    .listing
+                    .sort(self.state.sort_order, self.state.sort_reversed);
+                self.state.rebuild_rows();
+                let suffix = if self.state.sort_reversed {
+                    " (reversed)"
+                } else {
+                    ""
+                };
+                self.state
+                    .flash_info(format!("sort: {}{}", self.state.sort_order, suffix));
+            }
+
+            Action::SortReverse => {
+                self.state.sort_reversed = !self.state.sort_reversed;
+                self.state
+                    .listing
+                    .sort(self.state.sort_order, self.state.sort_reversed);
+                self.state.rebuild_rows();
+                let suffix = if self.state.sort_reversed {
+                    " (reversed)"
+                } else {
+                    ""
+                };
+                self.state
+                    .flash_info(format!("sort: {}{}", self.state.sort_order, suffix));
+            }
 
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
