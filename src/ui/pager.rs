@@ -189,6 +189,13 @@ pub struct PagerView {
     pub picker_edit_cursor: Option<(usize, crate::ui::line_edit::Mode)>,
     /// When true, suppress [EOF] and tilde markers (content is still arriving).
     pub streaming: bool,
+    /// True when the last line of `lines` is already an EOF marker
+    /// (appended by the capture-finish / task-viewer paths). When
+    /// set, the render-time `[EOF]` push is suppressed so it doesn't
+    /// double up; tilde fill below short content still happens.
+    /// Stays false for file pagers and any other source where the
+    /// "below content" `[EOF]` is the only marker.
+    pub eof_in_content: bool,
     /// When true, long lines wrap at the right edge instead of being
     /// truncated. Continuation rows get a gutter-width indent (no
     /// line number, no whitespace marker) so the wrap doesn't break
@@ -300,6 +307,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            eof_in_content: false,
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
@@ -336,6 +344,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            eof_in_content: false,
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
@@ -376,6 +385,7 @@ impl PagerView {
             picker_cursor: None,
             picker_edit_cursor: None,
             streaming: false,
+            eof_in_content: false,
             wrap: true,
             alt_lines: None,
             markdown_rendered: false,
@@ -1425,7 +1435,9 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         .fg(theme.status_suffix)
         .add_modifier(Modifier::DIM);
     if reached_end && display_lines.len() < viewport_h && !view.streaming {
-        display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
+        if !view.eof_in_content {
+            display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
+        }
         while display_lines.len() < viewport_h {
             display_lines.push(Line::from(Span::styled("~", eof_style)));
         }
@@ -1895,7 +1907,7 @@ fn render_multi_column(
         // would wrongly imply the overall document ended early.
         if display_lines.len() < viewport_h && !view.streaming {
             let is_last_col = col + 1 == ncols;
-            if is_last_col && col_start < content_end {
+            if is_last_col && col_start < content_end && !view.eof_in_content {
                 display_lines.push(Line::from(Span::styled("[EOF]", eof_style)));
             }
             while display_lines.len() < viewport_h {
