@@ -1878,16 +1878,22 @@ impl App {
                                         mount,
                                         pane_scroll,
                                     } => {
-                                        let name = path
-                                            .file_name()
-                                            .unwrap_or_default()
-                                            .to_string_lossy()
-                                            .into_owned();
-                                        if let Ok(content) = std::fs::read_to_string(&path) {
-                                            let lines: Vec<String> =
-                                                content.lines().map(String::from).collect();
-                                            let mut view = PagerView::new_plain(name, lines);
-                                            view.source_path = Some(path);
+                                        // Reuse `build_pager_view_for_file` so a
+                                        // markdown file edited via `v` re-renders
+                                        // on return. Reported by JRob: open a .md
+                                        // (rendered), `v` to edit, quit $EDITOR —
+                                        // file came back as plain text with no
+                                        // `m`-toggle (the inline rebuild here used
+                                        // `PagerView::new_plain` and skipped the
+                                        // markdown / alt_lines branch entirely).
+                                        if let Some(mut view) =
+                                            self.build_pager_view_for_file(&path)
+                                        {
+                                            // Override the position restored from
+                                            // the per-file cache with the scroll
+                                            // we explicitly stashed before
+                                            // launching $EDITOR — it's the more
+                                            // recent intent for this round-trip.
                                             view.scroll = scroll;
                                             view.mount = mount;
                                             view.pane_scroll = pane_scroll;

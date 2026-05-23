@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Markdown re-renders after `v` (edit in $EDITOR) returns.**
+  Reported by JRob: open a `.md` (rendered), press `v` to edit
+  it in $EDITOR, quit the editor — the file came back as plain
+  text and `m` had nothing to toggle to. The `PagerReturn::SourceFile`
+  restore path built the view inline via `PagerView::new_plain`,
+  skipping the markdown / alt_lines branch entirely. Reuse the
+  full `build_pager_view_for_file` builder on return so markdown
+  files go through the same rendering path as on first open;
+  override the position with the scroll we stashed before
+  launching $EDITOR.
+
 ### Added
 - **`dd` / `Ndd` to delete; `ZZ` to quit.** Vim-style bindings
   for the two most common ops we'd been bare-shortcut-only on.
