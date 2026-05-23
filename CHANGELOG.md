@@ -44,6 +44,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   documented in `spyc --print-config`.
 
 ### Fixed
+- **Graveyard view: `?` now opens the help overlay, and the
+  view flashes a hint on entry.** Reported by a user dropping
+  into the graveyard for the first time: the restore (`p` /
+  `P`), purge (`dd` / `x` / `Z`), and navigation bindings exist
+  but were undiscoverable — `?` fell through to the catch-all
+  arm in `handle_graveyard_view_key` and got swallowed. Two
+  fixes: `?` / F1 in the graveyard view now opens the standard
+  help overlay (returns to the same cursor on dismiss), and
+  entering the view flashes `graveyard: p restore here · P
+  original · dd/x purge · ? help` so the headline bindings are
+  visible without having to look.
+
 - **F9 (`ResumePane`) spawns in the current listing dir, not
   `PROJECT_HOME`.** Reported by Justin: after navigating to a
   different project folder in the file pane, pressing F9 opened

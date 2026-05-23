@@ -6686,6 +6686,17 @@ impl App {
         // semantics are distinct (we're cascading to system trash,
         // not unlinking).
         match key.code {
+            KeyCode::Char('?') | KeyCode::F(1) => {
+                // Reported: graveyard view had no `?` help, so the
+                // restore / purge bindings were undiscoverable
+                // from within the view. The pager-mounted help
+                // overlay coexists fine with the underlying
+                // graveyard view — Esc on the help returns to the
+                // same cursor position.
+                self.graveyard_pending_d = false;
+                self.graveyard_pending_g = false;
+                self.open_help();
+            }
             KeyCode::Esc => {
                 self.state.open_graveyard_view(); // toggle off
             }
@@ -10072,7 +10083,18 @@ impl App {
             Action::PanePipeInventory => self.pipe_content_to_pane(true),
 
             Action::QuickSelectOpen => self.open_quick_select(),
-            Action::OpenGraveyardView => self.state.open_graveyard_view(),
+            Action::OpenGraveyardView => {
+                self.state.open_graveyard_view();
+                // Discoverability hint on entry only — open_graveyard_view
+                // toggles, so check the post-call view to distinguish
+                // enter vs exit. Justin reported being unable to figure
+                // out the restore chord from inside the view; the flash
+                // surfaces the two main ones plus `?` for the rest.
+                if matches!(self.state.view, View::Graveyard) {
+                    self.state
+                        .flash_info("graveyard: p restore here · P original · dd/x purge · ? help");
+                }
+            }
             Action::HarpoonJump(n) => self.harpoon_jump(*n),
             Action::HarpoonAppend => self.harpoon_append(),
             Action::HarpoonRemove => self.harpoon_remove(),
