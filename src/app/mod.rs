@@ -1516,6 +1516,13 @@ impl App {
                     if let Some(view) = self.pager.as_mut() {
                         view.title = title;
                         view.lines = text.lines;
+                        // Anchor an EOF marker to the bottom of content so
+                        // it's visible even when output exceeds viewport_h
+                        // (the render-time [EOF] only appears in unused
+                        // viewport rows below content, which don't exist
+                        // for long captures).
+                        view.lines.push(eof_marker_line(&exit_info));
+                        view.eof_in_content = true;
                         view.saveable = true;
                         view.streaming = false;
                         view.scroll_to_bottom_auto();
@@ -6112,9 +6119,18 @@ impl App {
         // close-time push.
         view.no_history = true;
         view.saveable = true;
+        let running = matches!(task.status, TaskStatus::Running);
         // Suppress [EOF]/tilde markers while the underlying task is
         // still running -- the buffer is live, not finalized.
-        view.streaming = matches!(task.status, TaskStatus::Running);
+        view.streaming = running;
+        // Once the task has exited, anchor an EOF marker to the bottom
+        // of content so it's visible even when output exceeds the
+        // viewport. The render-time [EOF] only appears in unused
+        // viewport rows below content.
+        if !running {
+            view.lines.push(eof_marker_line(&status_text));
+            view.eof_in_content = true;
+        }
         view.scroll_to_bottom_auto();
         view
     }
@@ -10580,6 +10596,21 @@ fn sync_listing_watch(
 /// ANSI escape sequences never embed bare `\r` and never embed the
 /// other control bytes pass 3 strips, so the byte-level passes are
 /// safe.
+/// Build the EOF marker line appended to captures / finished tasks
+/// so the "command finished" indicator stays visible at the bottom
+/// of the pager even when content fills the viewport. `tail` is
+/// rendered after the literal `[EOF — `; pass the exit string
+/// (`"exit 0"`, `"killed"`, `"error: ..."`) or any other short
+/// status the caller wants surfaced.
+fn eof_marker_line(tail: &str) -> ratatui::text::Line<'static> {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    Line::from(Span::styled(
+        format!("[EOF — {tail}]"),
+        Style::default().add_modifier(Modifier::DIM),
+    ))
+}
+
 fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
     // Pass 1: \r\n -> \n.
     let mut step1 = Vec::with_capacity(bytes.len());
@@ -10991,6 +11022,34 @@ mod background_tasks_tests {
         let bg = BackgroundTasks::new();
         assert_eq!(bg.running_count(), 0);
         assert_eq!(bg.done_count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod eof_marker_tests {
+    use super::eof_marker_line;
+
+    fn flat(line: &ratatui::text::Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn exit_zero_renders_with_tail() {
+        let line = eof_marker_line("exit 0");
+        assert_eq!(flat(&line), "[EOF — exit 0]");
+    }
+
+    #[test]
+    fn killed_status_renders() {
+        let line = eof_marker_line("killed (12s)");
+        assert_eq!(flat(&line), "[EOF — killed (12s)]");
+    }
+
+    #[test]
+    fn marker_is_dim() {
+        use ratatui::style::Modifier;
+        let line = eof_marker_line("exit 1");
+        assert!(line.spans[0].style.add_modifier.contains(Modifier::DIM));
     }
 }
 

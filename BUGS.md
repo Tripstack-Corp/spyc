@@ -1,8 +1,11 @@
 ### SMALL ###
-- when a running command exits we should put the EOF marker at the end of the
-  output stream to make it more visually apparent that the command is finished;
-  this might only happen when a command has scrolled output to the bottom of the
-  pane and the EOF doesn't seem to advance the pager window
+- `!` percent-expansion eats `printf`-style format strings. Repro:
+  `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
+  `<selection-path>d: <selection-path>s|EOL` — `expand_percent`
+  greedily substitutes `%d` / `%s` with cursor/selection paths
+  before exec, corrupting awk/printf scripts. Likely fix: only
+  expand a documented set of tokens (`%f`, `%p`, `%P`, `%d`?),
+  require a non-alnum boundary, or add an escape (`%%`).
 - mouse scroll in pager, 'ENTER' into a file, doesn't seem to be working
 - PgUp/PgDn in the live (focused) pane should auto-enter
   `^a-v` scrollback mode with a single page move applied, so
@@ -33,7 +36,6 @@
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
-- commands that have stopped running in task runner (!) should show EOF
 - pane widget always paints a reverse-video cursor block at
   `screen.cursor_position()` even when the child has set `DEC ?25l`
   (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`;

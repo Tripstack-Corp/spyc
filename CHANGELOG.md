@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **`[EOF — exit N]` marker stays visible at the bottom of finished
+  `!` captures and task viewers, even on long output.** Previously
+  the marker was only painted in unused viewport rows below content
+  — so short captures got the marker, but anything taller than the
+  pane silently lost it after `scroll_to_bottom`. Now the marker is
+  appended as a real content line on capture-finish / task-status
+  transition, anchored to the bottom of the stream regardless of
+  content length. Tilde-fill below short content still works.
+
 - **Enter follows symlinks-to-directories.** Reported in the wild
   on a pnpm `node_modules` tree where `prettier ->
   .pnpm/prettier@3.8.3/node_modules/prettier` couldn't be entered.
