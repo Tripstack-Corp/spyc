@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **JSON pretty-print pager.** `.json` files now open with
+  canonical 2-space-indented JSON in the pager, with syntect
+  highlighting on top. Minified-on-disk files become readable on
+  open; already-pretty files render unchanged.
+  - `m` toggles **pretty ↔ raw on-disk bytes** (mirrors the
+    markdown `m` toggle). Toggle is suppressed when the two views
+    would be identical.
+  - Parse failures (json5-with-comments, malformed input) fall
+    through to the existing plain-text pager — no behavior
+    regression for non-strict JSON files.
+  - `.jsonl` (line-delimited JSON) is intentionally NOT
+    pretty-printed: reflowing would destroy the one-record-per-line
+    affordance. Source still gets syntect highlighting.
+
+  Folding, path indicator, search-within-structure, and `:jq`
+  filtering are queued for v1.50.73+. No new crate deps (uses the
+  existing `serde_json` + `syntect`).
+
 ### Fixed
 - **`[EOF — exit N]` marker stays visible at the bottom of finished
   `!` captures and task viewers, even on long output.** Previously

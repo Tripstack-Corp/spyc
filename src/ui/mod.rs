@@ -7,6 +7,7 @@
 use unicode_width::UnicodeWidthStr;
 
 pub mod help;
+pub mod json;
 #[allow(
     dead_code,
     clippy::unnested_or_patterns,

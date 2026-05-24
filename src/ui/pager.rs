@@ -2068,7 +2068,10 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
                 ("l", "toggle line numbers"),
                 ("w", "toggle whitespace markers (·, ↲, $)"),
                 ("W", "toggle line wrap (default on for content pagers)"),
-                ("m", "toggle markdown render ↔ source (.md files)"),
+                (
+                    "m",
+                    "toggle alt view (.md render ↔ source, .json pretty ↔ raw)",
+                ),
                 ("f", "toggle full-width / centered"),
             ],
         ),
