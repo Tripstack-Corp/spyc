@@ -5483,6 +5483,18 @@ impl App {
             };
             let content = expand_tabs(&content);
             let is_md = crate::ui::markdown::is_markdown_path(path);
+            // JSON pretty-print: try parse + canonical re-emit. On a
+            // successful parse with output differing from the raw
+            // bytes, `lines` holds the pretty version and `alt_lines`
+            // holds the raw (`m` toggles). Re-uses the alt-view
+            // machinery currently named for markdown (`alt_lines`,
+            // `markdown_rendered`); a rename to a generic name is
+            // queued for the folding work in v1.50.73.
+            let json_pretty: Option<String> = if !truncated && crate::ui::json::is_json_path(path) {
+                crate::ui::json::pretty_print(&content)
+            } else {
+                None
+            };
             // Source-side lines: syntect-highlighted if available AND
             // we loaded the whole file (highlighting a partial file
             // would still mostly work but blows memory, and the
@@ -5500,7 +5512,27 @@ impl App {
                         .collect()
                 })
             };
-            let mut view = if is_md && !truncated {
+            let mut view = if let Some(pretty) = json_pretty {
+                // Pretty differs from raw: build a styled view of the
+                // pretty bytes, stash the (already-highlighted) raw
+                // lines as alt for the `m` toggle.
+                let pretty_lines: Vec<ratatui::text::Line<'static>> =
+                    crate::ui::syntax::highlight_to_lines(&name, &pretty).unwrap_or_else(|| {
+                        pretty
+                            .lines()
+                            .map(|l| ratatui::text::Line::from(l.to_string()))
+                            .collect()
+                    });
+                let mut v = PagerView::new_styled(name.clone(), pretty_lines);
+                if pretty != content {
+                    v.alt_lines = Some(source_lines);
+                    // `markdown_rendered = true` semantically means
+                    // "the processed/alt-form is in `lines`". Same
+                    // interpretation for JSON: pretty is "rendered".
+                    v.markdown_rendered = true;
+                }
+                v
+            } else if is_md && !truncated {
                 // Pre-compute both views; `m` toggles. Yank/save
                 // always hit the source via `source_text()`. Which
                 // view shows first is configurable via
