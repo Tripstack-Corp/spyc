@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Syntax highlighting for `Makefile` (and other bare-filename
+  formats).** `highlight_to_lines` only consulted `path.extension()`,
+  which is `None` for `Makefile` / `GNUmakefile` / `OCamlMakefile`
+  — so the pager rendered them as plain text even though syntect's
+  bundled `Makefile.sublime-syntax` lists the filename in its
+  `file_extensions` table. Now we also probe by bare filename
+  before falling through to first-line shebang detection. Any
+  user-supplied `.sublime-syntax` keyed on a bare filename will
+  also resolve.
+
 ### Added
 - **JSON pretty-print pager.** `.json` files now open with
   canonical 2-space-indented JSON in the pager, with syntect
