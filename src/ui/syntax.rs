@@ -82,17 +82,27 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
     let ss = &*SYNTAX_SET;
     let ts = &*THEME_SET;
 
-    // Detect syntax from file extension, then try first line.
-    let ext = std::path::Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    let syntax = ss.find_syntax_by_extension(ext).or_else(|| {
-        content
-            .lines()
-            .next()
-            .and_then(|first| ss.find_syntax_by_first_line(first))
-    })?;
+    // Detect syntax from file extension, then by bare filename (so
+    // `Makefile` resolves — it has no extension but syntect's
+    // bundled `Makefile.sublime-syntax` lists the filename itself
+    // in `file_extensions`. Same path will pick up any other
+    // bundled or user-supplied syntax keyed on a bare filename).
+    // Final fallback: first-line shebang.
+    let path = std::path::Path::new(filename);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let syntax = ss
+        .find_syntax_by_extension(ext)
+        .or_else(|| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|name| ss.find_syntax_by_extension(name))
+        })
+        .or_else(|| {
+            content
+                .lines()
+                .next()
+                .and_then(|first| ss.find_syntax_by_first_line(first))
+        })?;
 
     let theme = ts.themes.get(THEME_NAME)?;
     let mut highlighter = HighlightLines::new(syntax, theme);
@@ -123,4 +133,28 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
         lines.push(Line::from(spans));
     }
     Some(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlights_makefile_by_bare_filename() {
+        let content = "all:\n\techo hello\n";
+        let lines = highlight_to_lines("Makefile", content);
+        assert!(lines.is_some(), "Makefile should resolve a syntax");
+    }
+
+    #[test]
+    fn highlights_by_extension_still_works() {
+        let lines = highlight_to_lines("main.rs", "fn main() {}\n");
+        assert!(lines.is_some());
+    }
+
+    #[test]
+    fn unknown_filename_returns_none() {
+        let lines = highlight_to_lines("nofile-xyz-zzz", "plain bytes\n");
+        assert!(lines.is_none());
+    }
 }
