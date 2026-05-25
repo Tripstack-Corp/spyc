@@ -9783,6 +9783,10 @@ impl App {
             },
             KeyCode::Char('v') => {
                 let argv = shell::resolve_editor();
+                if argv.is_empty() {
+                    view.flash = Some("no $VISUAL or $EDITOR set".to_string());
+                    return PostAction::None;
+                }
                 let editor_cmd = argv.join(" ");
                 let scroll = view.scroll;
                 // Preserve the v1.5 mount + pane_scroll across the
@@ -9791,6 +9795,37 @@ impl App {
                 // overlay (reported as a regression).
                 let mount = view.mount;
                 let pane_scroll = view.pane_scroll;
+
+                // Top-pane pager (D) with a real source path: route
+                // the editor through the same top-overlay path as `V`
+                // from the file list, so the bottom pane stays visible
+                // for the editor session. Other mounts (overlay /
+                // lower-pane) and the temp-file edit path keep the
+                // full-screen Spawn flow.
+                if matches!(mount, crate::ui::pager::Mount::TopPane) {
+                    if let Some(src) = view.source_path.clone() {
+                        let cmd = format!(
+                            "{editor_cmd} {}",
+                            shell::shell_quote(&src.display().to_string())
+                        );
+                        let (rows, cols) = Self::top_overlay_size(
+                            self.effective_pane_pct(),
+                            self.pane_tabs.is_some(),
+                        );
+                        let cwd = self.state.listing.dir.clone();
+                        self.clear_pager();
+                        self.needs_full_repaint = true;
+                        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+                            Ok(p) => {
+                                self.top_overlay = Some(p);
+                                self.state.pane_focused = false;
+                            }
+                            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+                        }
+                        return PostAction::None;
+                    }
+                }
+
                 // Determine the file to edit and the return state.
                 let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
                     (
