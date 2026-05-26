@@ -5,6 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Active tab is now visually distinct from a background tab
+  with activity.** Reported by Spencer: "tab name highlighting
+  buggy and highlights don't get cleared from tabs sometimes so
+  it's hard to tell where you are." Cause: the active-tab style
+  and the activity style were both `theme.pick` (amber) + BOLD,
+  and `pick` shares its RGB with `prompt_prefix` — so the two
+  states rendered *identically*, with only the small `*`/`+`
+  glyph distinguishing them. Active tabs now also get a
+  background-fill (REVERSED modifier), so "you are here"
+  registers in peripheral vision before glyph parsing. Activity
+  stays amber-bold; inactive stays gray. Three clearly distinct
+  states.
+
+  (Separate but related: background-tab output not being detected
+  without foreground input — filed in BUGS, follow-up PR.)
+
 ### Changed
 - **`^a v` alt-screen flash hints at inline-mode workarounds.**
   Reported by Spencer: `^w-v` on a codex pane was dead. Cause is

@@ -2353,14 +2353,20 @@ impl App {
         } else {
             Style::default().fg(self.theme.status_suffix)
         };
+        // Active tab gets REVERSED modifier (background fill) so it's
+        // unambiguously distinct from a background tab with activity
+        // — both used to render as plain amber-bold and were only
+        // differentiated by the small `*`/`+` glyph, which Spencer
+        // (and probably others) read past in peripheral vision. With
+        // reverse, "you are here" registers before glyph parsing.
         let active_tab_style = if is_scrolling {
             Style::default()
                 .fg(self.theme.pick)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         } else {
             Style::default()
                 .fg(self.theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         };
         let inactive_tab_style = Style::default().fg(self.theme.status_suffix);
 
