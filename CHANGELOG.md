@@ -15,6 +15,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Refreshed once per 1 s A-monitor tick (`ps -o rss=,thcount= -p $$`
   on macOS, `nlwp=` on Linux); hidden behind the monitor so it's
   zero-cost when off.
+- **`make install-debug` builds a symbolicated `spyc.debug`** for
+  `sample` / `lldb` / `perf`. The production `spyc` strips symbols, so
+  profilers see raw addresses; the new `release-debug` Cargo profile
+  inherits all release optimisations (opt-level 3, lto thin,
+  codegen-units 1) but keeps debug info + a packed dSYM. Run
+  `make install-debug` once, then profile `spyc.debug` instead of
+  `spyc`.
 - **`zot` agent support.** spyc now recognizes the `zot` coding agent
   in the pane (status bar shows `zot`), and `spyc -r` restores a `zot`
   tab with `zot --continue` (its resume-most-recent-for-cwd). First

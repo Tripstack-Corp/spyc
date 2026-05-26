@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.55.0"
+version = "1.55.1"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -73,6 +73,18 @@ panic = "unwind"
 
 [profile.release-static]
 inherits = "release"
+
+# release-debug: same optimized release, but keep debug symbols so
+# `sample`, `lldb`, `perf`, and dSYM-based profilers can resolve
+# Rust function names. Built via `make release-debug` /
+# `make install-debug` and installed as `spyc.debug` (alongside
+# the stripped production `spyc`), so users can switch when they
+# need to dig into a slow long-running session.
+[profile.release-debug]
+inherits = "release"
+strip = "none"
+debug = "full"
+split-debuginfo = "packed"
 
 # Clippy lint configuration.
 #
