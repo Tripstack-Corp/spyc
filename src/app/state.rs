@@ -294,6 +294,22 @@ pub struct AppState {
     /// match the current value (the user has navigated past them).
     /// Eliminates the need for explicit thread cancellation.
     pub git_generation: u64,
+    /// When the last raw-status cache invalidation was performed by
+    /// `refresh_listing` (i.e. the event-driven path). Throttles
+    /// re-spawning the git worker on huge trees where each spawn
+    /// runs full `git status` for 200-500 ms: an active filesystem
+    /// (claude editing files, build outputs) could trip
+    /// `refresh_listing` every 3 s and burn CPU on
+    /// back-to-back worker runs. The 1 s / 10 s safety poll still
+    /// invalidates on actual `.git/index` mtime changes, so the only
+    /// trade-off is a small lag in working-tree ` M` markers for
+    /// edits within the throttle window.
+    pub last_git_invalidation: Option<std::time::Instant>,
+    /// When the last git worker request was *sent* (after dedup, etc.).
+    /// Read by the activity-monitor overlay so the user can see
+    /// roundtrip duration for the most recent `git status` spawn
+    /// (which on huge trees can be 200-500 ms).
+    pub last_git_request_at: Option<std::time::Instant>,
     /// Snapshot of the active harpoon ancestor-set (slot paths plus
     /// every parent directory of every slot). App refreshes this
     /// whenever the harpoon list mutates so `apply_temp_filter`
@@ -778,10 +794,33 @@ impl AppState {
                 // Refresh the top-bar branch/dirty string too — without
                 // this the bar stays on `main` after edits and only
                 // updates when the user changes directories. Event-
-                // driven refresh, so invalidate the raw cache (file
-                // mtimes moved but `.git/index` may not have — and we
-                // need fresh content for ` M` markers).
-                self.git_status_raw_cache = None;
+                // driven refresh would normally invalidate the raw
+                // cache (file mtimes moved but `.git/index` may not
+                // have — and we need fresh content for ` M`
+                // markers).
+                //
+                // But: on huge trees, `git status` is 200-500 ms per
+                // spawn, and an active filesystem (claude writing
+                // findings, build outputs, even some IDE auto-saves)
+                // can trip `refresh_listing` every 3 s — burning the
+                // worker thread nonstop. Throttle the invalidation
+                // (huge: 10 s, small: 1 s). The 1 Hz / 10 Hz safety
+                // poll in `refresh_git_state` still catches
+                // `.git/index` changes immediately; the only
+                // trade-off is a small lag in working-tree ` M`
+                // markers for edits within the throttle window.
+                let throttle = if self.is_huge_tree {
+                    std::time::Duration::from_secs(10)
+                } else {
+                    std::time::Duration::from_secs(1)
+                };
+                let should_invalidate = self
+                    .last_git_invalidation
+                    .is_none_or(|t| t.elapsed() >= throttle);
+                if should_invalidate {
+                    self.git_status_raw_cache = None;
+                    self.last_git_invalidation = Some(std::time::Instant::now());
+                }
                 let dir = self.listing.dir.clone();
                 let new_git_files = self.git_file_statuses_cached(&dir);
                 let new_git_info = self.compute_git_info_fast();
@@ -899,6 +938,7 @@ impl AppState {
                     repo_root,
                     huge: self.is_huge_tree,
                 });
+                self.last_git_request_at = Some(std::time::Instant::now());
                 return std::collections::HashMap::new();
             }
             // No worker (tests, App::new bootstrap) — fall through
@@ -2203,6 +2243,8 @@ mod tests {
             git_status_raw_cache: None,
             git_worker_tx: None,
             git_generation: 0,
+            last_git_invalidation: None,
+            last_git_request_at: None,
             harpoon_filter_set: std::collections::HashSet::new(),
             pending_delete_preview: None,
             graveyard: Vec::new(),
