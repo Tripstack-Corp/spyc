@@ -7067,8 +7067,15 @@ impl App {
         let label = tabs.active_info().label.clone();
         let active = tabs.active_mut();
         if active.is_alternate_screen() {
-            self.state
-                .flash_info("scroll: alt-screen app, no scrollback (use the app's own history)");
+            // Alt-screen apps (codex by default, vim, less, htop, ...)
+            // do virtual scrolling inside a fixed grid — old content
+            // lives in app memory, not the terminal. Best we can do
+            // here is point at the workarounds: app's own history,
+            // or relaunching the app in an inline mode if it has one
+            // (codex: `--no-alt-screen` / `[tui] alternate_screen = "never"`).
+            self.state.flash_info(
+                "scroll: alt-screen app — use its own history (codex: --no-alt-screen)",
+            );
             return;
         }
         // Drain pending bytes into the vt100 parser before

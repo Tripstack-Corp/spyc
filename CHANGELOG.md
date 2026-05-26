@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`^a v` alt-screen flash hints at inline-mode workarounds.**
+  Reported by Spencer: `^w-v` on a codex pane was dead. Cause is
+  fundamental — alt-screen TUIs do virtual scrolling inside a
+  fixed grid, so terminal-side scrollback has nothing to show.
+  The flash now names the workaround: launch the app inline
+  (codex: `--no-alt-screen`, or `[tui] alternate_screen = "never"`
+  in `~/.codex/config.toml`; Claude Code is already inline by
+  default). FEATURES.md updated with the same guidance.
+
 ### Fixed
 - **Pager `v` from the top-pane mount (`D`) now mirrors file-list
   `V` instead of taking over the screen.** When the user opened a
