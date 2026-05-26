@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Remove v1.50.82/83 throttles — they were vestigial under the
+  worker-thread parser.** With v1.50.84 moving vt100 parsing off
+  the main thread, the two mitigations the previous PRs added
+  (defer the active-pane drain during typing, cap pane-driven
+  renders to ~30 dps during typing) stopped avoiding any work —
+  they were just *delaying* the moment the main thread checked
+  the worker's generation counter. That delay manifested as an
+  off-by-one between keystroke and visible echo: pressing space
+  or `^d` (claude vi mode delete-to-end-of-line) didn't update
+  the cursor / line content until the typing-burst window
+  expired. Removed both. Pane output now triggers a redraw the
+  same tick the worker bumps the gen counter.
+
 - **Pane render + cursor placement now share a single parser
   lock acquisition.** Follow-up to the v1.50.84 worker-thread
   refactor: the pane content was drawn under one `with_screen`

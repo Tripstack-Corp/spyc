@@ -1435,28 +1435,13 @@ impl App {
         let mut last_input_at: Option<std::time::Instant> = None;
         const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
-        // Last time we rendered the frame. Used to cap pane-driven
-        // renders to ~30 dps while the user is in a typing burst:
-        // when claude (or any chatty TUI in a pane) is emitting
-        // bytes faster than 30 Hz and the user is also pressing
-        // keys, the per-iteration vt100 + ratatui render cost stacks
-        // up enough to slow input dispatch. We always drain bytes
-        // off the PTY (no back-pressure to claude), and key-event
-        // renders stay immediate — only the pane's *visual refresh*
-        // is throttled, and only while typing.
-        let mut last_pane_render: Option<std::time::Instant> = None;
-        const PANE_RENDER_MIN_GAP: Duration = Duration::from_millis(33);
-
-        // Last time we drained the *active* pane's reader-thread
-        // channel. Used to skip parsing fresh pane bytes during the
-        // typing burst — the vt100 state stays frozen, so the
-        // upcoming ratatui render finds nothing changed in the pane
-        // region and the diff emission is empty. Bytes still queue
-        // unbounded in the channel (no back-pressure to claude), and
-        // a 100 ms minimum gap keeps the pane no more than ~100 ms
-        // stale even during sustained typing.
-        let mut last_active_drain: Option<std::time::Instant> = None;
-        const ACTIVE_DRAIN_MIN_GAP: Duration = Duration::from_millis(100);
+        // (Pre-v1.50.84 the loop carried `last_pane_render` and
+        // `last_active_drain` timestamps to throttle pane renders /
+        // parses while the user was typing. Both became unnecessary
+        // once parsing moved to a per-Pane worker thread — they
+        // were just delaying the moment the main thread noticed
+        // the worker had finished an echo, which manifested as
+        // off-by-one input lag. Removed.)
 
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
@@ -1730,39 +1715,30 @@ impl App {
             // swallowed until the next foreground keypress
             // (`sleep 10 && echo "hello"` on a background tab never
             // surfaced).
-            // During the typing burst window, skip the active-pane
-            // drain if we drained recently — bytes queue in the
-            // reader-thread channel (unbounded; no back-pressure to
-            // claude) and we catch up either after the gap elapses
-            // or after the user stops typing. Without this, every
-            // event-driven render also includes a fresh vt100 grid
-            // update for the pane, and the resulting ratatui diff
-            // emission stacks up enough that the loop iterates ~8
-            // times/sec instead of the expected 30+. Background
-            // tabs are always drained — their has_activity bit must
-            // flip promptly.
-            let typing_burst_for_drain =
-                last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
-            let defer_active_drain = typing_burst_for_drain
-                && last_active_drain.is_some_and(|t| t.elapsed() < ACTIVE_DRAIN_MIN_GAP);
-
+            // v1.50.84 moved vt100 parsing to a per-Pane worker
+            // thread, so `drain_output` is now an Acquire-load on an
+            // AtomicU64 generation counter — there's no per-iteration
+            // parse cost on the main thread to throttle. The
+            // v1.50.83 defer-during-typing-burst hack is therefore
+            // removed: it was suppressing the gen check for ~100 ms
+            // during typing, which delayed the moment the main
+            // thread noticed the worker had parsed claude's echo
+            // (visible as an off-by-one lag between keystroke and
+            // visible echo). Now every iteration polls the gen and
+            // schedules a redraw the same tick the worker finishes.
             let mut pane_had_output = false;
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
                 for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-                    // Fast path: skip try_recv() when the reader thread
-                    // hasn't posted anything. The atomic check is ~1ns vs
-                    // ~20ns for a channel operation.
+                    // Fast path: skip the gen check when the reader
+                    // thread hasn't posted anything. ~1 ns atomic
+                    // load vs ~20 ns mpsc try_recv.
                     if !entry.pane.has_pending_output() {
-                        continue;
-                    }
-                    if i == active_idx && defer_active_drain {
                         continue;
                     }
                     if entry.pane.drain_output() {
                         if i == active_idx {
                             pane_had_output = true;
-                            last_active_drain = Some(std::time::Instant::now());
                         } else {
                             entry.info.has_activity = true;
                             needs_draw = true;
@@ -1777,21 +1753,17 @@ impl App {
                 }
             }
             if pane_had_output {
-                // While the user is mid-keystroke (typing burst), cap
-                // pane-driven renders to ~30 dps. Bytes are already
-                // parsed into the vt100 grid above; we just defer the
-                // ratatui render. Key events later in this same
-                // iteration still escape the cap (event::poll sets
-                // reason=2 unconditionally), so the file-list cursor
-                // tracks every keystroke.
-                let typing_burst =
-                    last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
-                let cap_active = typing_burst
-                    && last_pane_render.is_some_and(|t| t.elapsed() < PANE_RENDER_MIN_GAP);
-                if !cap_active {
-                    needs_draw = true;
-                    draw_reason = 1;
-                }
+                // v1.50.82 capped pane-driven renders to ~30 dps
+                // during typing on the theory that the ratatui diff
+                // emission was the per-iteration cost. With
+                // v1.50.84 the parse runs on a worker thread and
+                // emission is the *only* main-thread render cost
+                // (already small) — capping it just delayed the
+                // visible echo behind the user's keystroke
+                // (^d-to-end-of-line in claude vi mode was the
+                // visible symptom). Removed.
+                needs_draw = true;
+                draw_reason = 1;
             }
 
             // Mark exited tabs AFTER drain so the Closed event has been
@@ -2230,11 +2202,6 @@ impl App {
                 }
                 let frame_area = terminal.draw(|frame| self.render(frame))?.area;
                 let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
-                // Always update last_pane_render — every render shows
-                // the current vt100 state of the pane (whatever the
-                // proximate trigger was), so the next pane-driven
-                // render can wait until 33 ms after this one.
-                last_pane_render = Some(std::time::Instant::now());
                 if self.show_activity && !activity_only_draw {
                     self.activity_draws += 1;
                     self.activity_bytes +=
