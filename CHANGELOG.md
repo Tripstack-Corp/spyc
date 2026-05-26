@@ -6,6 +6,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Performance
+- **Defer active-pane vt100 parsing during typing burst.** The
+  v1.50.82 render cap helped pane-only renders, but every
+  *event*-driven render still included a fresh vt100 grid update
+  for the pane — so each keystroke produced a ratatui frame diff
+  that emitted all the cells claude had changed since the last
+  iteration. On a chatty pane (long-running claude session), the
+  emission cost was high enough that the loop iterated only ~8
+  times/sec while holding `j`, and events queued up in
+  crossterm's buffer for seconds after the user let go.
+
+  Now: in the 300 ms typing-burst window, the active pane's
+  reader-thread channel drain is skipped if we drained within
+  the last 100 ms. Bytes still queue in the (unbounded) channel
+  — no back-pressure to claude — and the vt100 grid stays
+  frozen at the last-drained state. The next ratatui render
+  therefore finds the pane region unchanged, and the diff
+  emission is empty. After the user stops typing (or after the
+  100 ms gap), the drain catches up and the pane redraws to
+  current state.
+
+  Background tabs are always drained — their `has_activity`
+  flag must flip promptly. Only the *active* pane is deferred.
+
 - **Cap pane-driven renders to ~30 dps while typing.** Reported:
   in a session where claude had been running for a while
   (growing chat history → growing per-redraw cost on claude's
