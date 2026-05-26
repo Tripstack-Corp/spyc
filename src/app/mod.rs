@@ -1447,6 +1447,17 @@ impl App {
         let mut last_pane_render: Option<std::time::Instant> = None;
         const PANE_RENDER_MIN_GAP: Duration = Duration::from_millis(33);
 
+        // Last time we drained the *active* pane's reader-thread
+        // channel. Used to skip parsing fresh pane bytes during the
+        // typing burst — the vt100 state stays frozen, so the
+        // upcoming ratatui render finds nothing changed in the pane
+        // region and the diff emission is empty. Bytes still queue
+        // unbounded in the channel (no back-pressure to claude), and
+        // a 100 ms minimum gap keeps the pane no more than ~100 ms
+        // stale even during sustained typing.
+        let mut last_active_drain: Option<std::time::Instant> = None;
+        const ACTIVE_DRAIN_MIN_GAP: Duration = Duration::from_millis(100);
+
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
         let mut draw_reason: u8 = 3;
@@ -1719,6 +1730,22 @@ impl App {
             // swallowed until the next foreground keypress
             // (`sleep 10 && echo "hello"` on a background tab never
             // surfaced).
+            // During the typing burst window, skip the active-pane
+            // drain if we drained recently — bytes queue in the
+            // reader-thread channel (unbounded; no back-pressure to
+            // claude) and we catch up either after the gap elapses
+            // or after the user stops typing. Without this, every
+            // event-driven render also includes a fresh vt100 grid
+            // update for the pane, and the resulting ratatui diff
+            // emission stacks up enough that the loop iterates ~8
+            // times/sec instead of the expected 30+. Background
+            // tabs are always drained — their has_activity bit must
+            // flip promptly.
+            let typing_burst_for_drain =
+                last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
+            let defer_active_drain = typing_burst_for_drain
+                && last_active_drain.is_some_and(|t| t.elapsed() < ACTIVE_DRAIN_MIN_GAP);
+
             let mut pane_had_output = false;
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
@@ -1729,9 +1756,13 @@ impl App {
                     if !entry.pane.has_pending_output() {
                         continue;
                     }
+                    if i == active_idx && defer_active_drain {
+                        continue;
+                    }
                     if entry.pane.drain_output() {
                         if i == active_idx {
                             pane_had_output = true;
+                            last_active_drain = Some(std::time::Instant::now());
                         } else {
                             entry.info.has_activity = true;
                             needs_draw = true;
