@@ -1,7 +1,4 @@
 ### SMALL ###
-- we need to revisit on performance - we're starting to feel laggy again on
-  input
-- we should keep up the blue text for showing that we're in scrollback mode
 - `!` percent-expansion eats `printf`-style format strings. Repro:
   `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
   `<selection-path>d: <selection-path>s|EOL` — `expand_percent`

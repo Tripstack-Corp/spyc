@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Scrollback mode now uses blue (not amber) as its color signal.**
+  Reported repeatedly that scroll-mode is "confusing to remember" —
+  the rule, the `[SCROLL]` tag, and the active-tab REVERSED fill
+  all painted amber (`theme.pick`), which is the same color used
+  for the focused / active state in *live* mode. Three signals
+  but all the wrong color: amber kept reading as "this is your
+  focused element," not "you've left live view."
+  
+  Now: the divider rule, the `[SCROLL]` tag, and the active-tab
+  background fill all switch to `theme.dir` (the dir-color soft
+  blue) when in scrollback. Blue is unused as a UI signal color
+  elsewhere, so it unambiguously means "scrollback." Amber stays
+  the "focus" color for live mode. The uppercased active-tab
+  label stays as a shape cue independent of color.
+
 ### Performance
 - **Typing-burst poll cadence for low first-echo latency.**
   Reported: "I seem to be able to type faster than the input."

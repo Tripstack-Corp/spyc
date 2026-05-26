@@ -2377,9 +2377,16 @@ impl App {
             .pane_tabs
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
+        // Scroll mode flips the rule + active-tab color to blue
+        // (theme.dir) so "you're in scrollback" is unambiguous from
+        // peripheral vision. Amber stays the "focus" color for live
+        // mode; blue is reserved for scrollback and unused elsewhere
+        // as a UI signal. The `[SCROLL]` tag below uses the same
+        // color, plus the active tab's label stays uppercased (shape
+        // cue independent of color).
         let rule_style = if is_scrolling {
             Style::default()
-                .fg(self.theme.pick)
+                .fg(self.theme.dir)
                 .add_modifier(Modifier::BOLD)
         } else if self.state.pane_focused {
             Style::default()
@@ -2396,7 +2403,7 @@ impl App {
         // reverse, "you are here" registers before glyph parsing.
         let active_tab_style = if is_scrolling {
             Style::default()
-                .fg(self.theme.pick)
+                .fg(self.theme.dir)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         } else {
             Style::default()
@@ -2556,7 +2563,7 @@ impl App {
             spans.push(Span::styled(
                 scroll_tag,
                 Style::default()
-                    .fg(self.theme.pick)
+                    .fg(self.theme.dir)
                     .add_modifier(Modifier::BOLD),
             ));
             used += scroll_tag.len();
