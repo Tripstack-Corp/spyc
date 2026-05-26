@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pane render + cursor placement now share a single parser
+  lock acquisition.** Follow-up to the v1.50.84 worker-thread
+  refactor: the pane content was drawn under one `with_screen`
+  lock, then `place_pty_cursor` re-acquired the lock to read the
+  cursor position. Between the two, the worker thread could
+  parse a new chunk — so the cursor reflected a *newer* grid
+  state than what was just rendered. Visible as off-by-one
+  tearing in claude's input region during fast typing /
+  backspace. Each pane render path now folds the cursor
+  placement into the same `with_screen` closure as the widget
+  render, so the grid + cursor share a single mutex window.
+
 ### Performance
 - **Move pane vt100 parsing to a worker thread.** v1.50.82/83's
   defer + cap mitigations helped but didn't eliminate the
