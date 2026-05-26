@@ -534,6 +534,22 @@ impl PagerHistory {
     }
 }
 
+/// TTL cache for the active pane's status-line session short-id.
+/// Keyed by the active pane's `(kind, cwd, spawn_epoch_secs)` so
+/// switching tabs or chdir'ing inside a pane invalidates correctly.
+struct AgentStatusCache {
+    computed_at: std::time::Instant,
+    kind: AgentKind,
+    cwd: std::path::PathBuf,
+    spawn_epoch_secs: u64,
+    /// Cached status string (e.g. `"claude:9a7c4dc6"`) or `None`
+    /// when no session resolved. Cached either way to avoid
+    /// re-running the JSON walk for "no session" repeatedly.
+    status: Option<String>,
+}
+
+const AGENT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
     /// Domain state — navigation, selection, filtering, config, etc.
@@ -581,6 +597,17 @@ pub struct App {
     pending_overlay_close: bool,
     pending_capture: Option<PendingCapture>,
     background_tasks: BackgroundTasks,
+    /// TTL cache for the active pane's session short-id (used in the
+    /// status line as `claude:<8-hex>` / `gemini:<8-hex>`).
+    ///
+    /// Without this, `active_agent_status` runs on every render. Its
+    /// implementation walks every `~/.claude/sessions/*.json` (one
+    /// `serde_json::Value` parse each) and may then parse a whole
+    /// session's `*.jsonl`. On a long-running user with hundreds of
+    /// accumulated sessions, sample showed that path at ~65% of
+    /// main-thread CPU. The status string changes essentially
+    /// never within a session, so a coarse TTL is fine.
+    agent_status_cache: Option<AgentStatusCache>,
     pending_history_pick: Option<LineEditor>,
     /// Snapshot of jump-history entries (newest first) for the popup
     /// opened by `?` on an empty `J` prompt (spy parity), or by
@@ -948,6 +975,7 @@ impl App {
             pending_overlay_close: false,
             pending_capture: None,
             background_tasks: BackgroundTasks::new(),
+            agent_status_cache: None,
             pending_history_pick: None,
             pending_jump_history: None,
             find_picker: None,
@@ -3371,7 +3399,7 @@ impl App {
     /// Renders as `claude:<8-hex>` / `gemini:<8-hex>` / `codex` (the
     /// short-id resolution for codex is a follow-up — its rollout
     /// filenames encode the UUID but we don't parse them yet).
-    fn active_agent_status(&self) -> Option<String> {
+    fn active_agent_status(&mut self) -> Option<String> {
         let tabs = self.pane_tabs.as_ref()?;
         let active = tabs.active_info();
         let kind = Self::detect_agent_kind(&active.command);
@@ -3384,15 +3412,40 @@ impl App {
             AgentKind::Gemini => "gemini",
             AgentKind::Other => unreachable!(),
         };
+        // Cache hit: same (kind, cwd, spawn_epoch_secs) within
+        // AGENT_STATUS_TTL → reuse. The underlying resolver scans
+        // every `~/.claude/sessions/*.json` (one `serde_json::Value`
+        // parse per file) and is the dominant per-frame cost on
+        // long-running users with many accumulated sessions —
+        // sample showed ~65% of main-thread CPU here before this
+        // cache.
+        if let Some(cached) = self.agent_status_cache.as_ref() {
+            if cached.kind == kind
+                && cached.spawn_epoch_secs == active.spawn_epoch_secs
+                && cached.cwd == active.cwd
+                && cached.computed_at.elapsed() < AGENT_STATUS_TTL
+            {
+                return cached.status.clone();
+            }
+        }
+        // Cache miss — pay the file walk once, then memoize.
         let short_id = crate::state::sessions::resolve_active_session_short_id(
             kind,
             &active.cwd,
             active.spawn_epoch_secs,
         );
-        Some(match short_id {
+        let status = Some(match short_id {
             Some(id) => format!("{label}:{id}"),
             None => label.to_string(),
-        })
+        });
+        self.agent_status_cache = Some(AgentStatusCache {
+            computed_at: std::time::Instant::now(),
+            kind,
+            cwd: active.cwd.clone(),
+            spawn_epoch_secs: active.spawn_epoch_secs,
+            status: status.clone(),
+        });
+        status
     }
 
     fn header_parts(&self) -> (String, String) {

@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Performance
+- **Cache the status-line agent short-id (was 65% of main-thread
+  CPU on long-running sessions).** `App::render` called
+  `active_agent_status` every frame, which walked every
+  `~/.claude/sessions/*.json` with a full `serde_json::Value`
+  parse and could then scan a session's `*.jsonl` looking for
+  `custom-title`. For a long-running user with hundreds of
+  accumulated session files, a symbolicated `sample` showed
+  `serde_json::value::de::deserialize` consumed about two-thirds
+  of the main thread.
+  
+  Cache the resolved status string with a 30 s TTL, keyed on the
+  active pane's `(kind, cwd, spawn_epoch_secs)`. Switching tabs
+  or chdir'ing inside a pane invalidates correctly; the status
+  string itself changes ~never within a session, so a coarse TTL
+  is fine. The resolver function's own doc comment had even
+  flagged this as the right shape ("caller should add a per-pane
+  TTL cache if it shows up as a hotspot") — now it has.
+
 ### Fixed
 - **Remove v1.50.82/83 throttles — they were vestigial under the
   worker-thread parser.** With v1.50.84 moving vt100 parsing off
