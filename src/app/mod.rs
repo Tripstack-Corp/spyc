@@ -732,6 +732,16 @@ pub struct App {
     /// worker request — set by `apply_git_worker_result`, read by
     /// the activity overlay.
     activity_git_last_ms: u32,
+    /// Time at which `App::run` started, for the activity-monitor
+    /// uptime field. Distinct from the spyc session's *session*
+    /// start (which can survive across restores) — this is the
+    /// current process's wall-clock lifetime.
+    started_at: std::time::Instant,
+    /// Cached process stats refreshed once per 1 s A-monitor tick.
+    /// `ps -o rss=,thcount= -p <pid>` is one ~5 ms syscall so we
+    /// hide it behind the existing snapshot cadence.
+    activity_proc_rss_kb: u64,
+    activity_proc_threads: u32,
     /// Cached `build_rows()` output; invalidated by `list_generation`.
     cached_rows: Vec<Row>,
     cached_rows_gen: u64,
@@ -1053,6 +1063,9 @@ impl App {
             activity_git_results: 0,
             activity_git_results_snap: 0,
             activity_git_last_ms: 0,
+            started_at: std::time::Instant::now(),
+            activity_proc_rss_kb: 0,
+            activity_proc_threads: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),
@@ -1165,6 +1178,49 @@ impl App {
     }
 
     /// Build a context snapshot from the current state for MCP consumers.
+    /// Refresh `activity_proc_rss_kb` / `activity_proc_threads`
+    /// from `ps`. Called once per A-monitor 1 s tick. ~5 ms on
+    /// macOS; skipped on platforms where we can't easily parse a
+    /// portable `ps` output.
+    fn refresh_process_stats(&mut self) {
+        let pid = std::process::id();
+        // macOS: `ps -o rss=,thcount=` returns "<KB> <N>" on one
+        // line. Linux: `thcount` doesn't exist; use `nlwp` (number
+        // of light-weight processes / threads). FreeBSD-style ps
+        // varies; we accept best-effort and fall through silently.
+        #[cfg(target_os = "macos")]
+        let args = ["-o", "rss=,thcount=", "-p"];
+        #[cfg(target_os = "linux")]
+        let args = ["-o", "rss=,nlwp=", "-p"];
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        let args: [&str; 0] = [];
+        if args.is_empty() {
+            return;
+        }
+        let Ok(output) = std::process::Command::new("ps")
+            .args(args)
+            .arg(pid.to_string())
+            .output()
+        else {
+            return;
+        };
+        if !output.status.success() {
+            return;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut parts = stdout.split_whitespace();
+        if let Some(rss) = parts.next()
+            && let Ok(v) = rss.parse()
+        {
+            self.activity_proc_rss_kb = v;
+        }
+        if let Some(thr) = parts.next()
+            && let Ok(v) = thr.parse()
+        {
+            self.activity_proc_threads = v;
+        }
+    }
+
     fn snapshot_context(&self) -> crate::context::SpycContext {
         let cursor_file = self
             .state
@@ -2276,6 +2332,10 @@ impl App {
                 self.activity_mcp_reqs = 0;
                 self.activity_git_results = 0;
                 self.activity_last_tick = std::time::Instant::now();
+                // Refresh process stats (RSS / thread count) on the
+                // same 1 s cadence. Hidden inside the A-monitor
+                // tick so callers without it open pay zero cost.
+                self.refresh_process_stats();
             }
 
             // Only redraw when something actually changed.
@@ -3412,10 +3472,26 @@ impl App {
                 pager_state,
             );
 
+            // Line 3 — process stats. Useful for diagnosing long-
+            // running session slowdowns: PID for attaching `sample`
+            // / lldb, RSS to spot memory growth, thread count to
+            // spot accumulation of pane workers / reader threads.
+            let pid = std::process::id();
+            let uptime_secs = self.started_at.elapsed().as_secs();
+            let uptime_str = format_uptime(uptime_secs);
+            let pane_count = self.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+            let rss_mb = self.activity_proc_rss_kb / 1024;
+            let text3 = format!(
+                " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
+                self.activity_proc_threads,
+            );
+
             let w1 = text.len() as u16;
             let w2 = text2.len() as u16;
+            let w3 = text3.len() as u16;
             let row1_ok = frame_area.width > w1 + 2;
             let row2_ok = frame_area.height > 1 && frame_area.width > w2 + 2;
+            let row3_ok = frame_area.height > 2 && frame_area.width > w3 + 2;
             if row1_ok {
                 let rect = ratatui::layout::Rect {
                     x: frame_area.width - w1 - 1,
@@ -3446,6 +3522,26 @@ impl App {
                 frame.render_widget(
                     ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
                         text2, style,
+                    ))),
+                    rect,
+                );
+            }
+            if row3_ok {
+                let rect = ratatui::layout::Rect {
+                    x: frame_area.width - w3 - 1,
+                    y: 2,
+                    width: w3,
+                    height: 1,
+                };
+                // Lavender (status_user) — distinct from yellow line 1
+                // and teal line 2 so the three strata read as
+                // separate concerns at a glance.
+                let style = ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Black)
+                    .bg(self.theme.status_user);
+                frame.render_widget(
+                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+                        text3, style,
                     ))),
                     rect,
                 );
@@ -11054,6 +11150,24 @@ fn sync_listing_watch(
 /// rendered after the literal `[EOF — `; pass the exit string
 /// (`"exit 0"`, `"killed"`, `"error: ..."`) or any other short
 /// status the caller wants surfaced.
+/// Format a `Duration` in seconds as a compact human string for
+/// the activity-monitor uptime field. Forms:
+/// - `< 1 m`: `Ns`
+/// - `< 1 h`: `Nm Ns`
+/// - `< 1 d`: `Nh NNm`
+/// - `>= 1 d`: `Nd Nh`
+fn format_uptime(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else if secs < 86_400 {
+        format!("{}h {:02}m", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}d {}h", secs / 86_400, (secs % 86_400) / 3600)
+    }
+}
+
 fn eof_marker_line(tail: &str) -> ratatui::text::Line<'static> {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
@@ -11679,6 +11793,35 @@ mod background_tasks_tests {
         let bg = BackgroundTasks::new();
         assert_eq!(bg.running_count(), 0);
         assert_eq!(bg.done_count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod format_uptime_tests {
+    use super::format_uptime;
+
+    #[test]
+    fn seconds_only() {
+        assert_eq!(format_uptime(0), "0s");
+        assert_eq!(format_uptime(59), "59s");
+    }
+
+    #[test]
+    fn minutes_and_seconds() {
+        assert_eq!(format_uptime(60), "1m 0s");
+        assert_eq!(format_uptime(125), "2m 5s");
+    }
+
+    #[test]
+    fn hours_and_minutes() {
+        assert_eq!(format_uptime(3600), "1h 00m");
+        assert_eq!(format_uptime(3725), "1h 02m");
+    }
+
+    #[test]
+    fn days_and_hours() {
+        assert_eq!(format_uptime(86_400), "1d 0h");
+        assert_eq!(format_uptime(90_000), "1d 1h");
     }
 }
 
