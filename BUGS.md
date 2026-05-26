@@ -1,9 +1,7 @@
 ### SMALL ###
-- writing this shell command in a zsh tab: 'sleep 10 && echo "hello"' and then
-  switching tabs and waiting over 10 seconds .. the output activity of "hello"
-  is not detected by spyc 
 - we need to revisit on performance - we're starting to feel laggy again on
   input
+- we should keep up the blue text for showing that we're in scrollback mode
 - `!` percent-expansion eats `printf`-style format strings. Repro:
   `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
   `<selection-path>d: <selection-path>s|EOL` — `expand_percent`

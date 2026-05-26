@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Background-tab activity is now detected promptly.** Repro:
+  `sleep 10 && echo "hello"` in a zsh tab, switch tabs, wait —
+  the `+` activity indicator never appeared until you pressed a
+  key in the foreground. Cause: the event-loop pre-drain
+  consumed the background tab's bytes (correctly, to avoid
+  pile-up) but didn't flip `has_activity`. The render-path
+  `drain_all` was the only setter, and by the time it ran the
+  queue was already empty. Pre-drain now flips `has_activity` +
+  requests a redraw when background bytes arrive, so the
+  indicator shows up within one poll tick (16-100 ms depending
+  on pane state).
+
 - **Active tab is now visually distinct from a background tab
   with activity.** Reported by Spencer: "tab name highlighting
   buggy and highlights don't get cleared from tabs sometimes so

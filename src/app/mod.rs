@@ -1651,9 +1651,16 @@ impl App {
             }
 
             // Pre-drain pane output so we know if anything arrived.
-            // All tabs are drained (correctness), but only *active* tab
-            // output triggers a redraw — background tab trickle bytes
-            // (idle shell cursor blinks, prompt redraws) are silent.
+            // All tabs are drained (correctness). Active-tab output
+            // drives the smooth-streaming poll rate; background-tab
+            // output flips the `has_activity` flag so the divider
+            // gets a `+` glyph and triggers a redraw so the user sees
+            // it promptly. Previously the render-path `drain_all` was
+            // responsible for the flag, but pre-drain runs first and
+            // empties the queue — so background activity was silently
+            // swallowed until the next foreground keypress
+            // (`sleep 10 && echo "hello"` on a background tab never
+            // surfaced).
             let mut pane_had_output = false;
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
@@ -1664,8 +1671,14 @@ impl App {
                     if !entry.pane.has_pending_output() {
                         continue;
                     }
-                    if entry.pane.drain_output() && i == active_idx {
-                        pane_had_output = true;
+                    if entry.pane.drain_output() {
+                        if i == active_idx {
+                            pane_had_output = true;
+                        } else {
+                            entry.info.has_activity = true;
+                            needs_draw = true;
+                            draw_reason = 1;
+                        }
                     }
                 }
             }
