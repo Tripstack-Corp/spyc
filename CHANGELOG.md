@@ -6,6 +6,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Pager `v` from the top-pane mount (`D`) now mirrors file-list
+  `V` instead of taking over the screen.** When the user opened a
+  file with `D` (top-pane embedded pager, bottom pane visible) and
+  pressed `v` to drop into `$EDITOR`, the editor opened
+  full-screen via the `Spawn` path — same as the centered-overlay
+  pager — which defeated the whole point of staying in the
+  bottom-pane-visible workflow. Now, when `view.mount ==
+  Mount::TopPane` and a real source path is known, `v` spawns the
+  editor as a top-overlay `Pane` (the same flow `V` from the file
+  list uses), so the bottom pane stays visible for the duration of
+  the editor session. Other mounts (centered overlay, lower-pane
+  scrollback) and the temp-file edit case keep the full-screen
+  flow.
+
 - **Syntax highlighting for `Makefile` (and other bare-filename
   formats).** `highlight_to_lines` only consulted `path.extension()`,
   which is `None` for `Makefile` / `GNUmakefile` / `OCamlMakefile`
