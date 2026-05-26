@@ -617,6 +617,16 @@ pub struct App {
     context_path: PathBuf,
     /// Last serialized context JSON — skip disk write when unchanged.
     last_context_json: String,
+    /// When set, `.spyc-context.json` is stale and should be
+    /// rewritten on the next loop tick (subject to a small debounce
+    /// and a typing-burst guard). Replaces the old 1 Hz polling
+    /// write: claude's HUD plugin watches the file's mtime and
+    /// re-reads on every change, so unconditional 1 Hz writes were
+    /// yanking claude's main loop and starving its user-space input
+    /// echo. Now we only touch the file when an event source has
+    /// actually changed context-bearing state, and we defer writes
+    /// during active typing.
+    context_dirty: bool,
     /// Whether the MCP socket server is running.
     mcp_running: bool,
     /// Summary printed to stdout after the TUI exits.
@@ -950,6 +960,8 @@ impl App {
             theme,
             context_path,
             last_context_json: String::new(),
+            // Write once on startup so claude sees initial state.
+            context_dirty: true,
             mcp_running,
             exit_summary: None,
             pane_prompt_buf: String::new(),
@@ -1247,7 +1259,7 @@ impl App {
                         ));
                         // Force context write so get_spyc_context reflects
                         // the new state immediately.
-                        self.write_context();
+                        self.context_dirty = true;
                         let ctx = self.snapshot_context();
                         let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
                         McpResponse::Ok { message: json }
@@ -1267,7 +1279,7 @@ impl App {
                 let count = self.state.rows.len();
                 let label = self.state.temp_filter.as_deref().unwrap_or("(cleared)");
                 self.state.flash_info(format!("[mcp] filter: {label}"));
-                self.write_context();
+                self.context_dirty = true;
                 McpResponse::Ok {
                     message: format!("filter applied, {count} items visible"),
                 }
@@ -1296,7 +1308,7 @@ impl App {
                 }
                 self.state
                     .flash_info(format!("[mcp] picked {total} file(s)"));
-                self.write_context();
+                self.context_dirty = true;
                 McpResponse::Ok {
                     message: format!("picked {total} file(s), {} total", self.state.picks.len()),
                 }
@@ -1306,7 +1318,7 @@ impl App {
                 self.state.picks.clear();
                 self.state.list_generation = self.state.list_generation.wrapping_add(1);
                 self.state.flash_info("[mcp] picks cleared");
-                self.write_context();
+                self.context_dirty = true;
                 McpResponse::Ok {
                     message: format!("cleared {count} pick(s)"),
                 }
@@ -1815,6 +1827,10 @@ impl App {
                     last_refresh = now;
                     needs_draw = true;
                     draw_reason = 3;
+                    // Listing changed via fs watcher (not a keystroke
+                    // path) — `cursor_file` and `git_branch` in the
+                    // context may have shifted.
+                    self.context_dirty = true;
                 }
             }
             // 1Hz safety net for git state — converges within a second
@@ -1865,6 +1881,8 @@ impl App {
                 if self.apply_git_worker_result(result) {
                     needs_draw = true;
                     draw_reason = 2;
+                    // git_branch / dirty flag may have changed.
+                    self.context_dirty = true;
                 }
             }
 
@@ -1896,6 +1914,14 @@ impl App {
                         // computation above. Cheap; just stores an
                         // Instant.
                         last_input_at = Some(std::time::Instant::now());
+                        // Mark the context file dirty: every keypress
+                        // is potentially a state-mutating action
+                        // (cursor move, pick toggle, chdir, etc.).
+                        // The end-of-iteration write is debounced and
+                        // serializes-then-skips when JSON is unchanged,
+                        // so a no-op keystroke (e.g. pressing keys in
+                        // a chord prefix) won't actually touch disk.
+                        self.context_dirty = true;
                         // Throttle rapid-fire arrow keys from trackpad scroll
                         // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
                         if matches!(key.code, KeyCode::Up | KeyCode::Down)
@@ -2171,11 +2197,21 @@ impl App {
                 );
             }
 
-            // Update the MCP context file — throttled to at most once per
-            // second to avoid hammering the disk on every 16ms frame.
-            if last_context_write.elapsed() >= Duration::from_secs(1) {
+            // Update the MCP context file when state has actually
+            // changed (event-driven via `context_dirty`). Throttled
+            // by a small debounce so a rapid burst of cursor moves
+            // doesn't thrash the file. Suppressed during the typing-
+            // burst window so claude's input echo isn't yanked by an
+            // mtime change while the user is mid-keystroke.
+            let typing_burst =
+                last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
+            if self.context_dirty
+                && !typing_burst
+                && last_context_write.elapsed() >= Duration::from_millis(150)
+            {
                 self.write_context();
                 last_context_write = std::time::Instant::now();
+                self.context_dirty = false;
             }
         }
         // Clean up the context file on exit.

@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Performance
+- **`.spyc-context.json` writes are now event-driven, not 1 Hz
+  polling.** Reported: input echo in the claude pane feels laggy
+  under spyc but not standalone — confirmed via the `A` monitor
+  that spyc itself was idle (`mcp:0/s fs:0/s git:0/s p:0`), so the
+  culprit had to be something *outside* spyc that claude was
+  reacting to. Likely cause: claude's HUD plugin watches
+  `.spyc-context.json` and re-renders on every mtime change. The
+  old 1 Hz polling write kept yanking claude's main loop ~once a
+  second, even when state hadn't changed enough to matter — and
+  during that yank, claude couldn't service its user-space input
+  echo. zsh felt snappy by contrast because zsh uses kernel echo.
+
+  Now the write is gated on a `context_dirty` flag set by event
+  sources that can actually affect context (keypresses, MCP
+  commands, fs-driven refresh_listing, git worker results). At
+  end of iteration we write only if dirty AND ≥150 ms since the
+  last write AND not in the 300 ms typing-burst window. The
+  serialize-then-skip dedup still suppresses no-op writes (e.g.
+  chord-prefix keys that don't change state). Net effect: claude
+  sees the file change exactly when something meaningful
+  happened, and never while you're mid-keystroke.
+
 - **Throttle git-worker re-spawns from `refresh_listing`.** On a
   huge tree (e.g. a 112K-file monorepo), running spyc next to a
   busy agent that writes files (claude saving findings, build
