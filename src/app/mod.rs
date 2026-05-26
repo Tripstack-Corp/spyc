@@ -1389,6 +1389,18 @@ impl App {
         // sample git after the storm has passed.
         let mut last_event_at: Option<std::time::Instant> = None;
 
+        // Typing-burst window: after any keypress, briefly tighten the
+        // event-loop poll cadence to 16 ms so the *first* PTY echo
+        // after a keystroke is picked up quickly. crossterm's
+        // `event::poll` does NOT wake on pane output (it only watches
+        // the host tty), so without this we'd wait up to the idle
+        // 100 ms before draining the echo — felt as "I can type
+        // faster than the input." Sustained typing already gets 16 ms
+        // via `pane_had_output`; this just covers the first key after
+        // an idle gap. Bounded so idle CPU stays low.
+        let mut last_input_at: Option<std::time::Instant> = None;
+        const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
+
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
         let mut draw_reason: u8 = 3;
@@ -1827,10 +1839,16 @@ impl App {
 
             // Adaptive poll rate:
             // - 16ms when pane output just arrived (smooth streaming)
+            //   OR within the typing-burst window with a pane open
+            //   (catch the *first* PTY echo after a keystroke;
+            //   subsequent chars already get 16ms via pane_had_output)
             // - 100ms when pane exists but is idle
-            // - 250ms when no pane at all
-            let poll_ms = if pane_had_output || self.pending_capture.is_some() {
-                16 // smooth streaming
+            // - 500ms when no pane at all
+            let smooth_streaming = pane_had_output || self.pending_capture.is_some();
+            let typing_burst = self.pane_tabs.is_some()
+                && last_input_at.is_some_and(|t| t.elapsed() < TYPING_BURST_WINDOW);
+            let poll_ms = if smooth_streaming || typing_burst {
+                16
             } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
                 100 // pane idle — responsive to new output
             } else {
@@ -1843,6 +1861,10 @@ impl App {
                     Event::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
                     {
+                        // Arm the typing-burst window — see the poll-ms
+                        // computation above. Cheap; just stores an
+                        // Instant.
+                        last_input_at = Some(std::time::Instant::now());
                         // Throttle rapid-fire arrow keys from trackpad scroll
                         // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
                         if matches!(key.code, KeyCode::Up | KeyCode::Down)

@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Performance
+- **Typing-burst poll cadence for low first-echo latency.**
+  Reported: "I seem to be able to type faster than the input."
+  Cause: `crossterm::event::poll` doesn't wake on PTY output —
+  only on host-terminal events — so after a keystroke is sent to
+  the child, the event loop could sit at the 100 ms idle poll
+  for up to one full window before draining the echo. Sustained
+  typing was fine (`pane_had_output` already drives 16 ms), but
+  the *first* character after an idle gap had a worst-case
+  ~100 ms latency.
+  
+  Now: any keypress arms a 250 ms typing-burst window that
+  tightens the poll cadence to 16 ms when a pane is open, so the
+  first echo lands within ~16 ms instead of ~100 ms. Bounded so
+  idle CPU stays low. Longer-term fix (let pane output wake the
+  main loop directly, rather than timeout polling) is the proper
+  solution but a larger refactor.
+
 ### Fixed
 - **Background-tab activity is now detected promptly.** Repro:
   `sleep 10 && echo "hello"` in a zsh tab, switch tabs, wait —
