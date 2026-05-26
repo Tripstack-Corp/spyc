@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Performance
+- **Cap pane-driven renders to ~30 dps while typing.** Reported:
+  in a session where claude had been running for a while
+  (growing chat history → growing per-redraw cost on claude's
+  side), holding `j` to scroll the file list spiked spyc CPU to
+  90%+. The activity monitor showed all channel drains at 0 — so
+  the per-iteration cost wasn't channel work, it was the vt100
+  parse + ratatui render of the chatty pane. Each iteration was
+  doing a full render for whatever fresh bytes claude had
+  emitted, and the cost stacked enough to make the loop iterate
+  only ~9 times/sec instead of 30+.
+  
+  Now: when claude (or any pane) emits bytes *and* the user is
+  inside the 300 ms typing-burst window, we skip the
+  pane-driven render if the previous render was <33 ms ago.
+  Bytes are still drained from the PTY (no back-pressure to
+  claude), and key-event renders escape the cap entirely so the
+  file list cursor tracks every keystroke. When the user stops
+  typing, the cap lifts and the pane resumes redrawing on every
+  fresh chunk. Fresh-session claude (no lag) is unaffected.
+
 - **`.spyc-context.json` writes are now event-driven, not 1 Hz
   polling.** Reported: input echo in the claude pane feels laggy
   under spyc but not standalone — confirmed via the `A` monitor
