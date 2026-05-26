@@ -6,6 +6,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Performance
+- **Move pane vt100 parsing to a worker thread.** v1.50.82/83's
+  defer + cap mitigations helped but didn't eliminate the
+  long-running-claude input lag. The structural problem:
+  parsing pane bytes was synchronous on the main thread, so a
+  chatty pane stretched every iteration body proportional to how
+  many bytes claude had emitted since the previous iteration.
+  
+  Now each `Pane` owns a parser worker thread that consumes
+  bytes from the PTY reader-thread channel and parses them into
+  the (mutex-wrapped) vt100 grid concurrently with the main
+  loop. Main thread reads grid state via `with_screen` /
+  `with_screen_mut` closures that briefly lock the mutex.
+  `Pane::drain_output()` becomes a non-locking generation-counter
+  read.
+  
+  Effect: per-iteration cost on the main thread is now bounded
+  by render + input dispatch only, regardless of how many bytes
+  claude emits. Holding `j` while claude churns: cursor tracks
+  every keystroke at key-repeat rate; no event backlog after
+  release.
+  
+  The defer + cap mitigations from v1.50.82/83 are kept as
+  cheap belt-and-braces — they cost nothing when not triggered
+  and add a small render-throttle ceiling.
+  
+  Demote/promote path (`^a-z` / `:fg`): `Pane::take_host()` now
+  stops the parser worker and restores the byte receiver to the
+  host before handing it to `BackgroundTask`, so raw-byte
+  buffering continues without interruption.
+
 - **Defer active-pane vt100 parsing during typing burst.** The
   v1.50.82 render cap helped pane-only renders, but every
   *event*-driven render still included a fresh vt100 grid update

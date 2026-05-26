@@ -79,18 +79,31 @@ pub struct PtyHost {
     pub master: Box<dyn MasterPty + Send>,
     pub writer: Box<dyn Write + Send>,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
-    pub event_rx: mpsc::Receiver<PtyEvent>,
+    /// Receiver for the reader thread's byte chunks. `None` after
+    /// `take_event_rx()` — consumers (e.g. `Pane` with the v1.50.84
+    /// parser worker) that want to drain on a separate thread move
+    /// the receiver out at construction. Consumers that drain on
+    /// the main thread (`PendingCapture`, `BackgroundTask`) leave
+    /// the receiver in place and call [`Self::drain`].
+    pub event_rx: Option<mpsc::Receiver<PtyEvent>>,
     pub has_pending: Arc<AtomicBool>,
+    /// Set by the reader thread when it sees EOF — exposes the
+    /// closed state to whichever thread holds the parser. `closed`
+    /// (below) is the main-thread-only mirror that also tracks
+    /// whether we've harvested `exit_status` yet.
+    pub closed_atomic: Arc<AtomicBool>,
     pub closed: bool,
     pub exit_status: Option<portable_pty::ExitStatus>,
     pub last_size: (u16, u16),
     pub debug_dump: bool,
 }
 
-/// Result of a single drain pass: how much was processed and
-/// whether this drain observed the EOF that closes the host.
+/// Result of a single drain pass: whether this drain observed the
+/// EOF that closes the host. Pre-v1.50.84 also carried a `had_bytes`
+/// flag for the now-removed main-thread Pane-parsing path; the
+/// remaining consumers (`PendingCapture`, `BackgroundTask`) only
+/// care about the close transition.
 pub struct DrainResult {
-    pub had_bytes: bool,
     /// True when the reader thread's `Closed` event arrived during
     /// *this* drain. `closed` on the host is sticky (stays true
     /// across subsequent drains); `newly_closed` is only true the
@@ -134,8 +147,10 @@ impl PtyHost {
         // drains the channel without blocking on child output.
         let (tx, event_rx) = mpsc::channel::<PtyEvent>();
         let has_pending = Arc::new(AtomicBool::new(false));
+        let closed_atomic = Arc::new(AtomicBool::new(false));
         let pending_flag = Arc::clone(&has_pending);
-        thread::spawn(move || reader_loop(reader, &tx, &pending_flag));
+        let closed_flag = Arc::clone(&closed_atomic);
+        thread::spawn(move || reader_loop(reader, &tx, &pending_flag, &closed_flag));
 
         if spec.nudge_winch {
             // Send SIGWINCH so rc-file shells re-query the pty size
@@ -152,8 +167,9 @@ impl PtyHost {
             master: pair.master,
             writer,
             child,
-            event_rx,
+            event_rx: Some(event_rx),
             has_pending,
+            closed_atomic,
             closed: false,
             exit_status: None,
             last_size: (spec.rows, spec.cols),
@@ -173,10 +189,21 @@ impl PtyHost {
     /// reader thread observes EOF. Mirrors what `Pane::drain_output`
     /// did pre-refactor — extracted here so `BackgroundTask` can
     /// reuse the same lifecycle.
+    /// Take the byte-event receiver out of the host so a worker
+    /// thread can drain it directly (Pane's parser thread, v1.50.84).
+    /// After this call, [`Self::drain`] becomes a no-op — callers
+    /// that move the receiver are responsible for processing bytes
+    /// elsewhere.
+    pub const fn take_event_rx(&mut self) -> Option<mpsc::Receiver<PtyEvent>> {
+        self.event_rx.take()
+    }
+
     pub fn drain<F: FnMut(&[u8])>(&mut self, mut on_bytes: F) -> DrainResult {
-        let mut had_bytes = false;
         let mut newly_closed = false;
-        while let Ok(event) = self.event_rx.try_recv() {
+        let Some(rx) = self.event_rx.as_ref() else {
+            return DrainResult { newly_closed };
+        };
+        while let Ok(event) = rx.try_recv() {
             if self.debug_dump {
                 if let PtyEvent::Bytes(ref bytes) = event {
                     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -189,10 +216,7 @@ impl PtyHost {
                 }
             }
             match event {
-                PtyEvent::Bytes(bytes) => {
-                    had_bytes = true;
-                    on_bytes(&bytes);
-                }
+                PtyEvent::Bytes(bytes) => on_bytes(&bytes),
                 PtyEvent::Closed => {
                     if !self.closed {
                         newly_closed = true;
@@ -209,10 +233,7 @@ impl PtyHost {
             }
         }
         self.has_pending.store(false, Ordering::Relaxed);
-        DrainResult {
-            had_bytes,
-            newly_closed,
-        }
+        DrainResult { newly_closed }
     }
 
     /// Tell the pty about a new size. Coalesces redundant calls so
@@ -329,6 +350,7 @@ fn reader_loop(
     mut reader: Box<dyn Read + Send>,
     tx: &mpsc::Sender<PtyEvent>,
     pending: &AtomicBool,
+    closed: &AtomicBool,
 ) {
     let mut buf = [0u8; 8192];
     loop {
@@ -336,6 +358,7 @@ fn reader_loop(
             // Ok(0) is EOF; Err is any I/O failure. Both mean the
             // child is gone.
             Ok(0) | Err(_) => {
+                closed.store(true, Ordering::Relaxed);
                 pending.store(true, Ordering::Relaxed);
                 let _ = tx.send(PtyEvent::Closed);
                 return;
@@ -394,8 +417,12 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
         let pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let pending_cl = std::sync::Arc::clone(&pending);
+        let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let closed_cl = std::sync::Arc::clone(&closed);
 
-        let thread = std::thread::spawn(move || super::reader_loop(reader, &tx, &pending_cl));
+        let thread = std::thread::spawn(move || {
+            super::reader_loop(reader, &tx, &pending_cl, &closed_cl);
+        });
 
         // Collect events until we observe Closed. The reader
         // pumps in 8 KB chunks, then sees EOF (Cursor read

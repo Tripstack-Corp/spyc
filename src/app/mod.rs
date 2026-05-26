@@ -2872,13 +2872,15 @@ impl App {
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
             let overlay_focused = !self.state.pane_focused;
-            frame.render_widget(
-                PaneWidget {
-                    screen: overlay.screen(),
-                    focused: overlay_focused,
-                },
-                overlay_area,
-            );
+            overlay.with_screen(|screen| {
+                frame.render_widget(
+                    PaneWidget {
+                        screen,
+                        focused: overlay_focused,
+                    },
+                    overlay_area,
+                );
+            });
             // Show a dismiss prompt when the subprocess has exited.
             if self.overlay_awaiting_dismiss && overlay_area.height > 0 {
                 use ratatui::{
@@ -2913,13 +2915,10 @@ impl App {
                 if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                     let _ = tabs.active_mut().resize(rect.height, rect.width);
                     tabs.drain_all();
-                    frame.render_widget(
-                        PaneWidget {
-                            screen: tabs.active().screen(),
-                            focused: self.state.pane_focused,
-                        },
-                        rect,
-                    );
+                    let focused = self.state.pane_focused;
+                    tabs.active().with_screen(|screen| {
+                        frame.render_widget(PaneWidget { screen, focused }, rect);
+                    });
                     Some(rect)
                 } else {
                     None
@@ -2992,13 +2991,10 @@ impl App {
             if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
-                frame.render_widget(
-                    PaneWidget {
-                        screen: tabs.active().screen(),
-                        focused: self.state.pane_focused,
-                    },
-                    rect,
-                );
+                let focused = self.state.pane_focused;
+                tabs.active().with_screen(|screen| {
+                    frame.render_widget(PaneWidget { screen, focused }, rect);
+                });
                 tabs.active_mut().output_dirty = false;
                 if self.state.pane_focused {
                     place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
@@ -3207,13 +3203,10 @@ impl App {
                         crate::ui::pager::render(frame, rect, view, &self.theme);
                     }
                 } else {
-                    frame.render_widget(
-                        PaneWidget {
-                            screen: tabs.active().screen(),
-                            focused: self.state.pane_focused,
-                        },
-                        rect,
-                    );
+                    let focused = self.state.pane_focused;
+                    tabs.active().with_screen(|screen| {
+                        frame.render_widget(PaneWidget { screen, focused }, rect);
+                    });
                 }
                 tabs.active_mut().output_dirty = false;
                 // Quick Select labels paint *over* the pane widget so
@@ -6250,6 +6243,9 @@ impl App {
             return;
         };
         let TabEntry { pane, info, .. } = entry;
+        // Stop the parser worker and reclaim the byte receiver so
+        // the background task's drain still sees raw bytes.
+        let host = pane.take_host();
         // If we just took the last tab, drop the container so
         // layout / status / focus revert to "no pane open" state.
         if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
@@ -6263,7 +6259,7 @@ impl App {
             id,
             title: label.clone(),
             cmd_display: info.command,
-            host: pane.host,
+            host,
             buffer: Vec::new(),
             status: TaskStatus::Running,
             started: info.spawn_at,
@@ -6749,7 +6745,7 @@ impl App {
     ///    slug, but only if it isn't already in `claimed`. Without
     ///    the claimed-check this is what was producing the bug.
     fn resolve_claude_resume_target(
-        pane: &mut crate::pane::Pane,
+        pane: &crate::pane::Pane,
         cwd: &std::path::Path,
         pane_spawn_epoch_secs: u64,
         claimed: &std::collections::HashSet<String>,
@@ -7248,7 +7244,7 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         let path = std::path::Path::new("/tmp/spyc-scrollback.txt");
         let mut out = String::new();
         for line in &lines {
@@ -7353,7 +7349,7 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         // Setting the pane's "is scrolling" flag keeps the existing
         // visual cues alive (divider re-color, [SCROLL] tag, tab
         // uppercase) — they read off `pane.is_scrolling()` and we
@@ -8518,7 +8514,7 @@ impl App {
                         let kind = Self::detect_agent_kind(&t.info.command);
                         let (agent_session_id, agent_session_name) = match kind {
                             AgentKind::Claude => Self::resolve_claude_resume_target(
-                                &mut t.pane,
+                                &t.pane,
                                 &t.info.cwd,
                                 t.info.spawn_epoch_secs,
                                 &claimed,
@@ -10674,17 +10670,18 @@ impl Matcher {
 /// drawable rect, which can happen briefly during a resize.
 fn place_pty_cursor(frame: &mut Frame, pane: Option<&Pane>, rect: ratatui::layout::Rect) {
     let Some(pane) = pane else { return };
-    let screen = pane.screen();
-    if screen.hide_cursor() {
-        return;
-    }
-    let (cy, cx) = screen.cursor_position();
-    if u32::from(cy) >= u32::from(rect.height) || u32::from(cx) >= u32::from(rect.width) {
-        return;
-    }
-    let x = rect.x + cx;
-    let y = rect.y + cy;
-    frame.set_cursor_position((x, y));
+    pane.with_screen(|screen| {
+        if screen.hide_cursor() {
+            return;
+        }
+        let (cy, cx) = screen.cursor_position();
+        if u32::from(cy) >= u32::from(rect.height) || u32::from(cx) >= u32::from(rect.width) {
+            return;
+        }
+        let x = rect.x + cx;
+        let y = rect.y + cy;
+        frame.set_cursor_position((x, y));
+    });
 }
 
 const fn is_spyc_meta_when_pane_focused(

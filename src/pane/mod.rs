@@ -22,9 +22,13 @@ pub use widget::{PaneWidget, cell_style};
 // becomes a state shift on the same handles.
 pub mod pty_host;
 
+use std::io::Write as _;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-use crate::pane::pty_host::{PtyHost, PtySpec};
+use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec};
 
 /// A hosted subprocess + its terminal emulator state.
 ///
@@ -38,7 +42,31 @@ pub struct Pane {
     /// event channel/closed/exit_status/last_size/debug_dump.
     pub host: PtyHost,
     /// Terminal emulator parser — keeps the cell grid we render.
-    parser: vt100::Parser,
+    /// v1.50.84: shared with the parser worker thread via Mutex.
+    /// The worker thread (spawned in `adopt`) consumes bytes from
+    /// the reader-thread channel and parses them into this state;
+    /// the main thread locks briefly during render to read the
+    /// grid. Lock contention is small because each lock window is
+    /// brief.
+    parser: Arc<Mutex<vt100::Parser>>,
+    /// Generation counter incremented by the parser worker each
+    /// time it processes a byte chunk. `drain_output()` compares
+    /// this to `last_seen_gen` to detect new output without locking
+    /// the parser.
+    parser_gen: Arc<AtomicU64>,
+    /// Most recent `parser_gen` value the main thread has observed.
+    /// Diffed against `parser_gen` in `drain_output()` to decide
+    /// whether a redraw is needed.
+    last_seen_gen: u64,
+    /// Flag the parser worker checks periodically (between
+    /// `recv_timeout` waits). Set by [`Self::take_host`] when the
+    /// pane is being demoted to a `BackgroundTask` — the worker
+    /// exits without seeing EOF and returns the receiver so the
+    /// host can keep accepting raw bytes for the task.
+    stop_parser: Arc<std::sync::atomic::AtomicBool>,
+    /// Handle on the parser worker thread. Returns the receiver on
+    /// thread exit so `take_host` can restore it to the host.
+    parser_thread: Option<thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>>,
     /// Set by `drain_output()` when new bytes arrived; cleared after render.
     pub output_dirty: bool,
     /// When > 0, the visible viewport is shifted into the scrollback
@@ -113,14 +141,59 @@ impl Pane {
     /// task hands over its `PtyHost`, we wrap it in a fresh parser
     /// (or one pre-fed with the task's captured output), and the
     /// pty keeps running through the transition.
-    pub const fn adopt(host: PtyHost, parser: vt100::Parser) -> Self {
+    ///
+    /// v1.50.84: takes the byte-event receiver out of the host and
+    /// spawns a parser worker thread. The thread owns the receiver
+    /// and consumes bytes into the (mutex-wrapped) parser. Main
+    /// thread reads grid state via `with_screen` / `with_screen_mut`.
+    pub fn adopt(mut host: PtyHost, parser: vt100::Parser) -> Self {
+        let parser = Arc::new(Mutex::new(parser));
+        let parser_gen = Arc::new(AtomicU64::new(0));
+        let stop_parser = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let event_rx = host
+            .take_event_rx()
+            .expect("PtyHost::take_event_rx returned None — already taken");
+        let last_size = host.last_size;
+        let debug_dump = host.debug_dump;
+        let parser_clone = Arc::clone(&parser);
+        let gen_clone = Arc::clone(&parser_gen);
+        let stop_clone = Arc::clone(&stop_parser);
+        let parser_thread = thread::spawn(move || {
+            parser_worker(
+                event_rx,
+                stop_clone,
+                parser_clone,
+                gen_clone,
+                last_size,
+                debug_dump,
+            )
+        });
         Self {
             host,
             parser,
+            parser_gen,
+            last_seen_gen: 0,
+            stop_parser,
+            parser_thread: Some(parser_thread),
             output_dirty: false,
             scroll_offset: 0,
             scrolling: false,
         }
+    }
+
+    /// Stop the parser worker and return the underlying `PtyHost`
+    /// with the byte-event receiver restored. Used by the
+    /// pane → background-task demotion path: after this call, a
+    /// `BackgroundTask` can take the host and drain raw bytes from
+    /// the receiver as before.
+    pub fn take_host(mut self) -> PtyHost {
+        self.stop_parser.store(true, Ordering::Release);
+        if let Some(handle) = self.parser_thread.take() {
+            if let Ok(rx) = handle.join() {
+                self.host.event_rx = Some(rx);
+            }
+        }
+        self.host
     }
 
     /// Drain any pending output from the child into the parser. Call
@@ -131,25 +204,34 @@ impl Pane {
         self.host.has_pending_output()
     }
 
-    /// Drain any pending output from the child into the parser. Call
-    /// each render tick before drawing. A `Closed` event marks the
-    /// subprocess as finished so the caller can tear the pane down.
-    /// Returns `true` if any bytes were processed.
+    /// Check whether the parser worker has processed new bytes since
+    /// the last call. Replaces the old "drain bytes into parser"
+    /// path: bytes are now consumed continuously on the worker
+    /// thread; this just samples the generation counter.
+    ///
+    /// Also syncs the closed-state mirror from the atomic the reader
+    /// thread sets on EOF — without this the main thread can't see
+    /// the close transition since `PtyHost::drain` (which used to
+    /// observe `PtyEvent::Closed`) no longer runs for `Pane`.
     pub fn drain_output(&mut self) -> bool {
-        // Pull bytes through the pty host into a local Vec so the
-        // borrow on `self.host` doesn't overlap with the
-        // `process_bytes_safe(&mut self, ...)` call below — vt100
-        // reasoning is per-Pane, not per-host, so the parser stays
-        // outside the kernel.
-        let mut chunks: Vec<Vec<u8>> = Vec::new();
-        let result = self.host.drain(|bytes| chunks.push(bytes.to_vec()));
-        for chunk in &chunks {
-            self.process_bytes_safe(chunk);
+        // Sync close state. `host.closed` is the main-thread mirror
+        // used by callers (and by `shutdown` to short-circuit). The
+        // atomic is set by the reader thread on EOF.
+        if !self.host.closed && self.host.closed_atomic.load(Ordering::Acquire) {
+            self.host.closed = true;
+            // Non-blocking harvest — same as `PtyHost::drain`.
+            if let Ok(Some(status)) = self.host.child.try_wait() {
+                self.host.exit_status = Some(status);
+            }
         }
-        if result.had_bytes {
+        let gen_now = self.parser_gen.load(Ordering::Acquire);
+        if gen_now == self.last_seen_gen {
+            false
+        } else {
+            self.last_seen_gen = gen_now;
             self.output_dirty = true;
+            true
         }
-        result.had_bytes
     }
 
     /// True once the subprocess has exited (reader thread saw EOF).
@@ -174,43 +256,6 @@ impl Pane {
         }
     }
 
-    /// Feed bytes to the vt100 parser, recovering from any panic.
-    ///
-    /// We're pinned at vt100 0.15.2; upstream is at 0.16.2 (worth
-    /// trying as a separate upgrade — the bug may already be fixed
-    /// there). 0.15 has a known panic-on-`unwrap` path on some valid
-    /// escape sequences — e.g. nvim's exit-from-alt-screen byte
-    /// stream after a session in zsh has produced a particular
-    /// scroll/cursor state hits `vt100/screen.rs:934.unwrap()` on
-    /// `drawing_cell(pos)`. When that fires the entire spyc process
-    /// aborts, taking down all panes. Wrapping `parser.process` in
-    /// `catch_unwind` and replacing the parser with a fresh instance
-    /// keeps spyc alive — the user loses this pane's screen state
-    /// at the moment of recovery (which mirrors what happens when
-    /// the child redraws anyway). Useful safety net regardless of
-    /// vt100 version: any third-party parser can hit edge cases.
-    fn process_bytes_safe(&mut self, bytes: &[u8]) {
-        // Capture the grid size before the parse; even reading
-        // `parser.screen()` after a panic isn't safe, so we use the
-        // cached `last_size` from the host (maintained for resize
-        // coalescing).
-        let (rows, cols) = self.host.last_size;
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.parser.process(bytes);
-        }));
-        if result.is_err() {
-            crate::spyc_debug!(
-                "vt100 parser panicked on {} bytes; replacing parser to recover",
-                bytes.len()
-            );
-            // Fresh parser at the same dimensions + scrollback. The
-            // child's next render will repopulate the grid; in the
-            // meantime the screen looks blank, which is preferable
-            // to spyc dying.
-            self.parser = vt100::Parser::new(rows, cols, 10_000);
-        }
-    }
-
     /// Tell the pty about a new size. We also resize the emulator so the
     /// cell grid matches — without this, the child keeps drawing at the
     /// old dimensions.
@@ -219,7 +264,9 @@ impl Pane {
             return Ok(());
         }
         self.host.resize(rows, cols)?;
-        self.parser.screen_mut().set_size(rows, cols);
+        if let Ok(mut p) = self.parser.lock() {
+            p.screen_mut().set_size(rows, cols);
+        }
         Ok(())
     }
 
@@ -284,17 +331,22 @@ impl Pane {
         self.host.write_all(bytes)
     }
 
-    pub fn screen(&self) -> &vt100::Screen {
-        self.parser.screen()
+    /// Run `f` with a shared reference to the vt100 screen. The
+    /// parser is mutex-protected (the worker thread owns the write
+    /// path); this acquires the lock for the duration of `f`, so
+    /// keep the closure body short. Returns whatever `f` returns.
+    pub fn with_screen<R, F: FnOnce(&vt100::Screen) -> R>(&self, f: F) -> R {
+        let guard = self.parser.lock().expect("pane parser mutex poisoned");
+        f(guard.screen())
     }
 
-    /// Mutable access to the underlying vt100 screen. Needed by
-    /// the v1.5 scrollback adapter, which walks the scrollback
-    /// buffer by mutating `scrollback_offset` and restoring it
-    /// before returning. Don't use from the render loop — the
-    /// adapter is the right entry point.
-    pub fn parser_screen_mut(&mut self) -> &mut vt100::Screen {
-        self.parser.screen_mut()
+    /// Run `f` with a mutable reference to the vt100 screen.
+    /// Used by the scrollback adapter (which walks scrollback by
+    /// temporarily shifting the offset). Same lock semantics as
+    /// `with_screen` — keep the closure short.
+    pub fn with_screen_mut<R, F: FnOnce(&mut vt100::Screen) -> R>(&self, f: F) -> R {
+        let mut guard = self.parser.lock().expect("pane parser mutex poisoned");
+        f(guard.screen_mut())
     }
 
     /// True when the child has switched to the xterm alternate screen
@@ -305,7 +357,7 @@ impl Pane {
     /// can flash a hint pointing the user at the app's own history
     /// viewer instead.
     pub fn is_alternate_screen(&self) -> bool {
-        self.parser.screen().alternate_screen()
+        self.with_screen(vt100::Screen::alternate_screen)
     }
 
     /// Return visible screen content as individual lines (plain text,
@@ -314,8 +366,7 @@ impl Pane {
     /// tail. Use `pickable_text` for picker/scanner code that should
     /// follow the user's eye.
     pub fn visible_lines(&self) -> Vec<String> {
-        let screen = self.parser.screen();
-        screen.contents().lines().map(String::from).collect()
+        self.with_screen(|s| s.contents().lines().map(String::from).collect())
     }
 
     /// Text that interactive pickers (`gf`/`gF`, `^a u`) should scan:
@@ -327,7 +378,7 @@ impl Pane {
     /// slice means a user who scrolled up to find a URL would have
     /// it ignored — the picker would read a different region than
     /// their eyes.
-    pub fn pickable_text(&mut self, recent_n: usize) -> Vec<String> {
+    pub fn pickable_text(&self, recent_n: usize) -> Vec<String> {
         if self.is_scrolling() {
             self.visible_lines()
         } else {
@@ -338,18 +389,15 @@ impl Pane {
     /// Return the most recent `max_lines` of output (scrollback + visible
     /// screen). Used by `gf`/`gF` so path references that scrolled past
     /// the viewport are still found.
-    pub fn recent_lines(&mut self, max_lines: usize) -> Vec<String> {
+    pub fn recent_lines(&self, max_lines: usize) -> Vec<String> {
         let prev = self.scroll_offset;
         let max_sb = self.max_scrollback();
-        self.parser.screen_mut().set_scrollback(max_sb);
-        let all: Vec<String> = self
-            .parser
-            .screen()
-            .contents()
-            .lines()
-            .map(String::from)
-            .collect();
-        self.parser.screen_mut().set_scrollback(prev);
+        let all: Vec<String> = self.with_screen_mut(|s| {
+            s.set_scrollback(max_sb);
+            let lines: Vec<String> = s.contents().lines().map(String::from).collect();
+            s.set_scrollback(prev);
+            lines
+        });
         // Return only the last `max_lines` lines.
         if all.len() > max_lines {
             all[all.len() - max_lines..].to_vec()
@@ -409,14 +457,16 @@ impl Pane {
     }
 
     /// Save full scrollback + screen contents to a timestamped file.
-    pub fn save_to_file(&mut self) -> std::io::Result<std::path::PathBuf> {
+    pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
         // Temporarily set scrollback to max so contents() captures everything.
         let prev = self.scroll_offset;
         let max = self.max_scrollback();
-        self.parser.screen_mut().set_scrollback(max);
-        let text = self.parser.screen().contents();
-        // Restore previous view.
-        self.parser.screen_mut().set_scrollback(prev);
+        let text = self.with_screen_mut(|s| {
+            s.set_scrollback(max);
+            let text = s.contents();
+            s.set_scrollback(prev);
+            text
+        });
 
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = now.trim_end_matches("_UTC");
@@ -445,8 +495,71 @@ impl Pane {
         10_000 // matches our scrollback_len
     }
 
-    fn apply_scroll(&mut self) {
-        self.parser.screen_mut().set_scrollback(self.scroll_offset);
+    fn apply_scroll(&self) {
+        let off = self.scroll_offset;
+        self.with_screen_mut(|s| s.set_scrollback(off));
+    }
+}
+
+/// Parser worker thread: consumes bytes from the PTY reader-thread
+/// channel and processes them into the shared vt100 parser. Runs
+/// concurrently with the main thread; main thread reads the grid
+/// via `with_screen` while the worker writes — both serialized by
+/// the mutex.
+///
+/// vt100 0.15 has a known panic-on-`unwrap` path on some valid
+/// escape sequences (nvim's exit-from-alt-screen byte stream is a
+/// known trigger). `catch_unwind` recovers by rebuilding a fresh
+/// parser at the current dimensions; the screen looks blank
+/// briefly, then the child repaints. Same safety net as the
+/// pre-v1.50.84 main-thread `process_bytes_safe`.
+fn parser_worker(
+    rx: std::sync::mpsc::Receiver<PtyEvent>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    parser: Arc<Mutex<vt100::Parser>>,
+    parser_gen: Arc<AtomicU64>,
+    initial_size: (u16, u16),
+    debug_dump: bool,
+) -> std::sync::mpsc::Receiver<PtyEvent> {
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return rx;
+        }
+        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(PtyEvent::Bytes(bytes)) => {
+                if debug_dump {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/spyc_pty_debug.bin")
+                    {
+                        let _ = f.write_all(&bytes);
+                    }
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut p = parser.lock().expect("pane parser mutex poisoned");
+                    p.process(&bytes);
+                }));
+                if result.is_err() {
+                    crate::spyc_debug!(
+                        "vt100 parser panicked on {} bytes; replacing parser to recover",
+                        bytes.len()
+                    );
+                    if let Ok(mut p) = parser.lock() {
+                        *p = vt100::Parser::new(initial_size.0, initial_size.1, 10_000);
+                    }
+                }
+                parser_gen.fetch_add(1, Ordering::Release);
+            }
+            Ok(PtyEvent::Closed) => {
+                // EOF — done. Reader thread already set the
+                // `closed_atomic` on PtyHost. Main thread will pick
+                // it up on its next `drain_output`.
+                return rx;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return rx,
+        }
     }
 }
 
