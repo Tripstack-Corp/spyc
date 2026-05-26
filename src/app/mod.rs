@@ -1435,6 +1435,18 @@ impl App {
         let mut last_input_at: Option<std::time::Instant> = None;
         const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
+        // Last time we rendered the frame. Used to cap pane-driven
+        // renders to ~30 dps while the user is in a typing burst:
+        // when claude (or any chatty TUI in a pane) is emitting
+        // bytes faster than 30 Hz and the user is also pressing
+        // keys, the per-iteration vt100 + ratatui render cost stacks
+        // up enough to slow input dispatch. We always drain bytes
+        // off the PTY (no back-pressure to claude), and key-event
+        // renders stay immediate — only the pane's *visual refresh*
+        // is throttled, and only while typing.
+        let mut last_pane_render: Option<std::time::Instant> = None;
+        const PANE_RENDER_MIN_GAP: Duration = Duration::from_millis(33);
+
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
         let mut draw_reason: u8 = 3;
@@ -1734,8 +1746,21 @@ impl App {
                 }
             }
             if pane_had_output {
-                needs_draw = true;
-                draw_reason = 1;
+                // While the user is mid-keystroke (typing burst), cap
+                // pane-driven renders to ~30 dps. Bytes are already
+                // parsed into the vt100 grid above; we just defer the
+                // ratatui render. Key events later in this same
+                // iteration still escape the cap (event::poll sets
+                // reason=2 unconditionally), so the file-list cursor
+                // tracks every keystroke.
+                let typing_burst =
+                    last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
+                let cap_active = typing_burst
+                    && last_pane_render.is_some_and(|t| t.elapsed() < PANE_RENDER_MIN_GAP);
+                if !cap_active {
+                    needs_draw = true;
+                    draw_reason = 1;
+                }
             }
 
             // Mark exited tabs AFTER drain so the Closed event has been
@@ -2174,6 +2199,11 @@ impl App {
                 }
                 let frame_area = terminal.draw(|frame| self.render(frame))?.area;
                 let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+                // Always update last_pane_render — every render shows
+                // the current vt100 state of the pane (whatever the
+                // proximate trigger was), so the next pane-driven
+                // render can wait until 33 ms after this one.
+                last_pane_render = Some(std::time::Instant::now());
                 if self.show_activity && !activity_only_draw {
                     self.activity_draws += 1;
                     self.activity_bytes +=
