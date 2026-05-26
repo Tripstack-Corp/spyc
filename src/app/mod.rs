@@ -1435,28 +1435,13 @@ impl App {
         let mut last_input_at: Option<std::time::Instant> = None;
         const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
-        // Last time we rendered the frame. Used to cap pane-driven
-        // renders to ~30 dps while the user is in a typing burst:
-        // when claude (or any chatty TUI in a pane) is emitting
-        // bytes faster than 30 Hz and the user is also pressing
-        // keys, the per-iteration vt100 + ratatui render cost stacks
-        // up enough to slow input dispatch. We always drain bytes
-        // off the PTY (no back-pressure to claude), and key-event
-        // renders stay immediate — only the pane's *visual refresh*
-        // is throttled, and only while typing.
-        let mut last_pane_render: Option<std::time::Instant> = None;
-        const PANE_RENDER_MIN_GAP: Duration = Duration::from_millis(33);
-
-        // Last time we drained the *active* pane's reader-thread
-        // channel. Used to skip parsing fresh pane bytes during the
-        // typing burst — the vt100 state stays frozen, so the
-        // upcoming ratatui render finds nothing changed in the pane
-        // region and the diff emission is empty. Bytes still queue
-        // unbounded in the channel (no back-pressure to claude), and
-        // a 100 ms minimum gap keeps the pane no more than ~100 ms
-        // stale even during sustained typing.
-        let mut last_active_drain: Option<std::time::Instant> = None;
-        const ACTIVE_DRAIN_MIN_GAP: Duration = Duration::from_millis(100);
+        // (Pre-v1.50.84 the loop carried `last_pane_render` and
+        // `last_active_drain` timestamps to throttle pane renders /
+        // parses while the user was typing. Both became unnecessary
+        // once parsing moved to a per-Pane worker thread — they
+        // were just delaying the moment the main thread noticed
+        // the worker had finished an echo, which manifested as
+        // off-by-one input lag. Removed.)
 
         let mut needs_draw = true; // draw at least once on startup
         // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
@@ -1730,39 +1715,30 @@ impl App {
             // swallowed until the next foreground keypress
             // (`sleep 10 && echo "hello"` on a background tab never
             // surfaced).
-            // During the typing burst window, skip the active-pane
-            // drain if we drained recently — bytes queue in the
-            // reader-thread channel (unbounded; no back-pressure to
-            // claude) and we catch up either after the gap elapses
-            // or after the user stops typing. Without this, every
-            // event-driven render also includes a fresh vt100 grid
-            // update for the pane, and the resulting ratatui diff
-            // emission stacks up enough that the loop iterates ~8
-            // times/sec instead of the expected 30+. Background
-            // tabs are always drained — their has_activity bit must
-            // flip promptly.
-            let typing_burst_for_drain =
-                last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
-            let defer_active_drain = typing_burst_for_drain
-                && last_active_drain.is_some_and(|t| t.elapsed() < ACTIVE_DRAIN_MIN_GAP);
-
+            // v1.50.84 moved vt100 parsing to a per-Pane worker
+            // thread, so `drain_output` is now an Acquire-load on an
+            // AtomicU64 generation counter — there's no per-iteration
+            // parse cost on the main thread to throttle. The
+            // v1.50.83 defer-during-typing-burst hack is therefore
+            // removed: it was suppressing the gen check for ~100 ms
+            // during typing, which delayed the moment the main
+            // thread noticed the worker had parsed claude's echo
+            // (visible as an off-by-one lag between keystroke and
+            // visible echo). Now every iteration polls the gen and
+            // schedules a redraw the same tick the worker finishes.
             let mut pane_had_output = false;
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
                 for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-                    // Fast path: skip try_recv() when the reader thread
-                    // hasn't posted anything. The atomic check is ~1ns vs
-                    // ~20ns for a channel operation.
+                    // Fast path: skip the gen check when the reader
+                    // thread hasn't posted anything. ~1 ns atomic
+                    // load vs ~20 ns mpsc try_recv.
                     if !entry.pane.has_pending_output() {
-                        continue;
-                    }
-                    if i == active_idx && defer_active_drain {
                         continue;
                     }
                     if entry.pane.drain_output() {
                         if i == active_idx {
                             pane_had_output = true;
-                            last_active_drain = Some(std::time::Instant::now());
                         } else {
                             entry.info.has_activity = true;
                             needs_draw = true;
@@ -1777,21 +1753,17 @@ impl App {
                 }
             }
             if pane_had_output {
-                // While the user is mid-keystroke (typing burst), cap
-                // pane-driven renders to ~30 dps. Bytes are already
-                // parsed into the vt100 grid above; we just defer the
-                // ratatui render. Key events later in this same
-                // iteration still escape the cap (event::poll sets
-                // reason=2 unconditionally), so the file-list cursor
-                // tracks every keystroke.
-                let typing_burst =
-                    last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
-                let cap_active = typing_burst
-                    && last_pane_render.is_some_and(|t| t.elapsed() < PANE_RENDER_MIN_GAP);
-                if !cap_active {
-                    needs_draw = true;
-                    draw_reason = 1;
-                }
+                // v1.50.82 capped pane-driven renders to ~30 dps
+                // during typing on the theory that the ratatui diff
+                // emission was the per-iteration cost. With
+                // v1.50.84 the parse runs on a worker thread and
+                // emission is the *only* main-thread render cost
+                // (already small) — capping it just delayed the
+                // visible echo behind the user's keystroke
+                // (^d-to-end-of-line in claude vi mode was the
+                // visible symptom). Removed.
+                needs_draw = true;
+                draw_reason = 1;
             }
 
             // Mark exited tabs AFTER drain so the Closed event has been
@@ -2230,11 +2202,6 @@ impl App {
                 }
                 let frame_area = terminal.draw(|frame| self.render(frame))?.area;
                 let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
-                // Always update last_pane_render — every render shows
-                // the current vt100 state of the pane (whatever the
-                // proximate trigger was), so the next pane-driven
-                // render can wait until 33 ms after this one.
-                last_pane_render = Some(std::time::Instant::now());
                 if self.show_activity && !activity_only_draw {
                     self.activity_draws += 1;
                     self.activity_bytes +=
@@ -2872,13 +2839,19 @@ impl App {
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
             let overlay_focused = !self.state.pane_focused;
-            frame.render_widget(
-                PaneWidget {
-                    screen: overlay.screen(),
-                    focused: overlay_focused,
-                },
-                overlay_area,
-            );
+            let want_overlay_cursor = overlay_focused && !self.overlay_awaiting_dismiss;
+            overlay.with_screen(|screen| {
+                frame.render_widget(
+                    PaneWidget {
+                        screen,
+                        focused: overlay_focused,
+                    },
+                    overlay_area,
+                );
+                if want_overlay_cursor {
+                    place_pty_cursor_from_screen(frame, screen, overlay_area);
+                }
+            });
             // Show a dismiss prompt when the subprocess has exited.
             if self.overlay_awaiting_dismiss && overlay_area.height > 0 {
                 use ratatui::{
@@ -2913,39 +2886,32 @@ impl App {
                 if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                     let _ = tabs.active_mut().resize(rect.height, rect.width);
                     tabs.drain_all();
-                    frame.render_widget(
-                        PaneWidget {
-                            screen: tabs.active().screen(),
-                            focused: self.state.pane_focused,
-                        },
-                        rect,
-                    );
+                    let focused = self.state.pane_focused;
+                    // Single lock window: render the pane AND place
+                    // the OS cursor under the same screen snapshot,
+                    // so a worker-thread parse landing between the
+                    // two can't produce a cursor that's ahead of the
+                    // rendered grid (off-by-one tearing in claude
+                    // backspace was the symptom).
+                    let want_cursor = focused && !self.overlay_awaiting_dismiss;
+                    tabs.active().with_screen(|screen| {
+                        frame.render_widget(PaneWidget { screen, focused }, rect);
+                        if want_cursor {
+                            place_pty_cursor_from_screen(frame, screen, rect);
+                        }
+                    });
                     Some(rect)
                 } else {
                     None
                 };
-            // Position the OS terminal cursor at the focused pty's
-            // vt100 cursor location. Without this, nvim / vim / less /
-            // any alt-screen TUI inside spyc renders an invisible
-            // cursor: spyc hides the host cursor at startup
-            // (main.rs::setup_terminal -> terminal.hide_cursor()), and
-            // the v1.41.18-era pane-widget guard correctly stops us
-            // from painting a reverse-block over the child's cursor
-            // shape in alt-screen — but the host cursor stays hidden
-            // unless something calls set_cursor_position. Call it for
-            // the focused side: overlay if !pane_focused, bottom pane
-            // when pane_focused.
-            //
-            // The ratatui frame renders one OS cursor; the last
-            // set_cursor_position wins and the cursor stays hidden if
-            // none is called.
-            if !self.overlay_awaiting_dismiss {
-                if overlay_focused {
-                    place_pty_cursor(frame, self.top_overlay.as_ref(), overlay_area);
-                } else if let Some(rect) = bottom_pane_rect {
-                    place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
-                }
-            }
+            // Cursor placement is now folded into the overlay and
+            // bottom-pane with_screen blocks above, so the rendered
+            // grid and the cursor share a single lock acquisition.
+            // (Pre-v1.50.84 they were two separate calls; the worker
+            // thread could parse a chunk between them, leaving the
+            // cursor ahead of the rendered grid — visible as
+            // off-by-one tearing during fast input.)
+            let _ = bottom_pane_rect;
             return;
         }
 
@@ -2992,17 +2958,14 @@ impl App {
             if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
-                frame.render_widget(
-                    PaneWidget {
-                        screen: tabs.active().screen(),
-                        focused: self.state.pane_focused,
-                    },
-                    rect,
-                );
+                let focused = self.state.pane_focused;
+                tabs.active().with_screen(|screen| {
+                    frame.render_widget(PaneWidget { screen, focused }, rect);
+                    if focused {
+                        place_pty_cursor_from_screen(frame, screen, rect);
+                    }
+                });
                 tabs.active_mut().output_dirty = false;
-                if self.state.pane_focused {
-                    place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
-                }
             }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
@@ -3207,13 +3170,20 @@ impl App {
                         crate::ui::pager::render(frame, rect, view, &self.theme);
                     }
                 } else {
-                    frame.render_widget(
-                        PaneWidget {
-                            screen: tabs.active().screen(),
-                            focused: self.state.pane_focused,
-                        },
-                        rect,
-                    );
+                    let focused = self.state.pane_focused;
+                    // Fold cursor placement into the same lock
+                    // acquisition as the pane render — otherwise
+                    // the worker thread can advance the screen
+                    // between the two and we paint the grid from
+                    // one frame and the cursor from the next
+                    // (visible as off-by-one tearing during fast
+                    // input).
+                    tabs.active().with_screen(|screen| {
+                        frame.render_widget(PaneWidget { screen, focused }, rect);
+                        if focused {
+                            place_pty_cursor_from_screen(frame, screen, rect);
+                        }
+                    });
                 }
                 tabs.active_mut().output_dirty = false;
                 // Quick Select labels paint *over* the pane widget so
@@ -3226,15 +3196,11 @@ impl App {
             } else {
                 None
             };
-        // When the bottom pane is focused, place the OS cursor at
-        // its vt100 cursor position so alt-screen TUIs (nvim, less,
-        // htop, lazygit) actually show a cursor — see the matching
-        // call in the top_overlay branch above for the full why.
-        if self.state.pane_focused {
-            if let Some(rect) = bottom_pane_rect {
-                place_pty_cursor(frame, self.pane_tabs.as_ref().map(PaneTabs::active), rect);
-            }
-        }
+        // Cursor placement for the bottom-pane branch is folded into
+        // the `with_screen` block above (single lock window for grid
+        // + cursor). `bottom_pane_rect` is still computed so other
+        // branches that need the geometry can read it.
+        let _ = bottom_pane_rect;
 
         if let Some(divider_rect) = layout.divider {
             self.render_pane_status_line(frame, divider_rect);
@@ -6250,6 +6216,9 @@ impl App {
             return;
         };
         let TabEntry { pane, info, .. } = entry;
+        // Stop the parser worker and reclaim the byte receiver so
+        // the background task's drain still sees raw bytes.
+        let host = pane.take_host();
         // If we just took the last tab, drop the container so
         // layout / status / focus revert to "no pane open" state.
         if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
@@ -6263,7 +6232,7 @@ impl App {
             id,
             title: label.clone(),
             cmd_display: info.command,
-            host: pane.host,
+            host,
             buffer: Vec::new(),
             status: TaskStatus::Running,
             started: info.spawn_at,
@@ -6749,7 +6718,7 @@ impl App {
     ///    slug, but only if it isn't already in `claimed`. Without
     ///    the claimed-check this is what was producing the bug.
     fn resolve_claude_resume_target(
-        pane: &mut crate::pane::Pane,
+        pane: &crate::pane::Pane,
         cwd: &std::path::Path,
         pane_spawn_epoch_secs: u64,
         claimed: &std::collections::HashSet<String>,
@@ -7248,7 +7217,7 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         let path = std::path::Path::new("/tmp/spyc-scrollback.txt");
         let mut out = String::new();
         for line in &lines {
@@ -7353,7 +7322,7 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        let lines = crate::ui::scrollback::lines_from_scrollback(active.parser_screen_mut());
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         // Setting the pane's "is scrolling" flag keeps the existing
         // visual cues alive (divider re-color, [SCROLL] tag, tab
         // uppercase) — they read off `pane.is_scrolling()` and we
@@ -8518,7 +8487,7 @@ impl App {
                         let kind = Self::detect_agent_kind(&t.info.command);
                         let (agent_session_id, agent_session_name) = match kind {
                             AgentKind::Claude => Self::resolve_claude_resume_target(
-                                &mut t.pane,
+                                &t.pane,
                                 &t.info.cwd,
                                 t.info.spawn_epoch_secs,
                                 &claimed,
@@ -10672,9 +10641,11 @@ impl Matcher {
 /// cursor via DEC ?25l (vt100 surfaces this as `hide_cursor()`).
 /// Skips the call when the cursor would land outside the pane's
 /// drawable rect, which can happen briefly during a resize.
-fn place_pty_cursor(frame: &mut Frame, pane: Option<&Pane>, rect: ratatui::layout::Rect) {
-    let Some(pane) = pane else { return };
-    let screen = pane.screen();
+fn place_pty_cursor_from_screen(
+    frame: &mut Frame,
+    screen: &vt100::Screen,
+    rect: ratatui::layout::Rect,
+) {
     if screen.hide_cursor() {
         return;
     }
@@ -10686,6 +10657,11 @@ fn place_pty_cursor(frame: &mut Frame, pane: Option<&Pane>, rect: ratatui::layou
     let y = rect.y + cy;
     frame.set_cursor_position((x, y));
 }
+
+// `place_pty_cursor` removed in v1.50.84 — every pane render call-site
+// now folds the cursor placement into the same `with_screen` closure
+// as the widget render (single mutex window). See
+// `place_pty_cursor_from_screen` for the cursor logic.
 
 const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
