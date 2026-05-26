@@ -143,6 +143,15 @@ spyc's workflow: browse files above, talk to Claude below.
   `Esc` snaps back to live. Alt-screen apps (codex, vim, htop,
   lazygit) skip the pager and flash a "no scrollback" hint
   pointing at the app's own history viewer.
+  - The fundamental limit is that alt-screen apps do *virtual
+    scrolling* inside a fixed grid — old content lives in app
+    memory, not the terminal — so even a parallel vt100 parser
+    can't recover it. Several agents offer an inline mode that
+    fixes this end-to-end: launch **codex** with
+    `--no-alt-screen` (or set `[tui] alternate_screen = "never"`
+    in `~/.codex/config.toml`) and `^a v` works against codex's
+    output normally. Claude Code already runs inline by default,
+    so it just works.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

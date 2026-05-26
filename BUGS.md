@@ -1,4 +1,6 @@
 ### SMALL ###
+- we need to revisit on performance - we're starting to feel laggy again on
+  input
 - `!` percent-expansion eats `printf`-style format strings. Repro:
   `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
   `<selection-path>d: <selection-path>s|EOL` — `expand_percent`
@@ -111,6 +113,19 @@
 - ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
+- alt-screen drain → coherent log. For panes running alt-screen
+  TUIs (codex by default, vim, htop, lazygit), the vt100 grid has
+  no historical scrollback — `^a v` flashes "no scrollback" and
+  points at the app's own history. Speculative: continuously
+  drain the pane's byte stream into a side buffer, run a coherency
+  pass (collapse cursor-positioning paints to their final text,
+  strip alt-screen toggles), and offer that as a "rough log" view
+  on `^a v` for alt-screen panes. Lossy by construction — virtual
+  scrolling in the alt-screen never emits old chat lines as bytes
+  — but it might be useful for apps that mostly stream text into
+  alt-screen with light repositioning. Spawned from Spencer's
+  "codex scrolling not working with ^w-v" report 2026-05-26. Real
+  fix is launching the app inline (codex: `--no-alt-screen`).
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles
