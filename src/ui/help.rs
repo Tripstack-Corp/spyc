@@ -174,7 +174,10 @@ const SECTIONS: &[Section] = &[
             ("g V", "show spyc version (also :version)"),
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
-            ("A", "toggle activity monitor (draws/sec, cells/sec)"),
+            (
+                "A",
+                "toggle activity monitor (dps/cells + bg/git/fs/mcp internals)",
+            ),
             ("s", "set environment variable (NAME=VALUE)"),
         ],
     },

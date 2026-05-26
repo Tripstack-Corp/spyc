@@ -649,6 +649,19 @@ pub struct App {
     activity_snap_pane: u32,
     activity_snap_event: u32,
     activity_snap_other: u32,
+    /// Extended activity counters surfaced on the second status line.
+    /// All `_events` / `_reqs` counters tick during the 1 s window;
+    /// `_snap` holds the snapshot from the previous window.
+    activity_watcher_events: u32,
+    activity_watcher_events_snap: u32,
+    activity_mcp_reqs: u32,
+    activity_mcp_reqs_snap: u32,
+    activity_git_results: u32,
+    activity_git_results_snap: u32,
+    /// Roundtrip duration (ms) of the most recently completed git
+    /// worker request — set by `apply_git_worker_result`, read by
+    /// the activity overlay.
+    activity_git_last_ms: u32,
     /// Cached `build_rows()` output; invalidated by `list_generation`.
     cached_rows: Vec<Row>,
     cached_rows_gen: u64,
@@ -828,6 +841,8 @@ impl App {
             git_status_raw_cache: None,
             git_worker_tx: None,
             git_generation: 0,
+            last_git_invalidation: None,
+            last_git_request_at: None,
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
@@ -950,6 +965,13 @@ impl App {
             activity_reason_event: 0,
             activity_reason_other: 0,
             activity_snap_pane: 0,
+            activity_watcher_events: 0,
+            activity_watcher_events_snap: 0,
+            activity_mcp_reqs: 0,
+            activity_mcp_reqs_snap: 0,
+            activity_git_results: 0,
+            activity_git_results_snap: 0,
+            activity_git_last_ms: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),
@@ -1750,6 +1772,7 @@ impl App {
             // the debounce timer hadn't elapsed yet.
             while let Ok(result) = rx.try_recv() {
                 if let Ok(ev) = result {
+                    self.activity_watcher_events = self.activity_watcher_events.saturating_add(1);
                     for p in &ev.paths {
                         let listing = self.is_listing_path(p);
                         let config = self.is_config_path(p);
@@ -1819,6 +1842,7 @@ impl App {
 
             // Process writable MCP commands from Claude.
             while let Ok(req) = self.mcp_cmd_rx.try_recv() {
+                self.activity_mcp_reqs = self.activity_mcp_reqs.saturating_add(1);
                 let resp = self.execute_mcp_command(req.command);
                 let _ = req.reply.send(resp);
                 needs_draw = true;
@@ -1831,6 +1855,13 @@ impl App {
             // raw-status cache and recompute git_files / git_info
             // against the *current* listing dir. Cheap when empty.
             while let Ok(result) = self.git_result_rx.try_recv() {
+                self.activity_git_results = self.activity_git_results.saturating_add(1);
+                // Roundtrip duration: when the request was sent (set
+                // by `git_file_statuses_cached`) vs. now.
+                if let Some(sent) = self.state.last_git_request_at.take() {
+                    self.activity_git_last_ms =
+                        u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
+                }
                 if self.apply_git_worker_result(result) {
                     needs_draw = true;
                     draw_reason = 2;
@@ -2064,12 +2095,18 @@ impl App {
                 let new_sp = self.activity_reason_pane;
                 let new_se = self.activity_reason_event;
                 let new_so = self.activity_reason_other;
+                let new_we = self.activity_watcher_events;
+                let new_mr = self.activity_mcp_reqs;
+                let new_gr = self.activity_git_results;
                 // Only force a redraw if something changed.
                 if (new_dps != self.activity_dps
                     || new_bps != self.activity_bps
                     || new_sp != self.activity_snap_pane
                     || new_se != self.activity_snap_event
-                    || new_so != self.activity_snap_other)
+                    || new_so != self.activity_snap_other
+                    || new_we != self.activity_watcher_events_snap
+                    || new_mr != self.activity_mcp_reqs_snap
+                    || new_gr != self.activity_git_results_snap)
                     && !needs_draw
                 {
                     // This draw exists only to refresh the overlay —
@@ -2082,11 +2119,17 @@ impl App {
                 self.activity_snap_pane = new_sp;
                 self.activity_snap_event = new_se;
                 self.activity_snap_other = new_so;
+                self.activity_watcher_events_snap = new_we;
+                self.activity_mcp_reqs_snap = new_mr;
+                self.activity_git_results_snap = new_gr;
                 self.activity_draws = 0;
                 self.activity_bytes = 0;
                 self.activity_reason_pane = 0;
                 self.activity_reason_event = 0;
                 self.activity_reason_other = 0;
+                self.activity_watcher_events = 0;
+                self.activity_mcp_reqs = 0;
+                self.activity_git_results = 0;
                 self.activity_last_tick = std::time::Instant::now();
             }
 
@@ -3155,7 +3198,12 @@ impl App {
             self.render_harpoon_menu(frame);
         }
 
-        // Activity monitor overlay (top-right corner).
+        // Activity monitor overlay (top-right corner). Line 1 is the
+        // existing draw/byte/reason throughput on yellow; line 2
+        // surfaces internals (bg tasks, git worker, watcher, MCP,
+        // listing, pager) on a teal `take`-color background so they
+        // read as a distinct strata. Both lines run in the
+        // 1-second-window snapshot model.
         if self.show_activity {
             use ratatui::widgets::Paragraph as ActivityP;
             let text = format!(
@@ -3173,12 +3221,55 @@ impl App {
                     250
                 },
             );
-            let w = text.len() as u16;
-            if frame_area.width > w + 2 {
+
+            // Line 2 — internals digest. Compact field names so the
+            // line stays under typical 200-col terminals even with
+            // every counter populated.
+            let bg_running = self.background_tasks.running_count();
+            let bg_done = self.background_tasks.done_count();
+            let bg_paused = self
+                .background_tasks
+                .tasks
+                .iter()
+                .filter(|t| t.paused)
+                .count();
+            let pager_state = match self.pager.as_ref() {
+                None => "none",
+                Some(v) => match v.mount {
+                    crate::ui::pager::Mount::Overlay => "overlay",
+                    crate::ui::pager::Mount::TopPane => "top",
+                    crate::ui::pager::Mount::LowerPane => "lower",
+                },
+            };
+            let git_last = if self.activity_git_last_ms == 0 {
+                "—".to_string()
+            } else {
+                format!("{}ms", self.activity_git_last_ms)
+            };
+            let text2 = format!(
+                " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
+                if bg_paused > 0 {
+                    format!(" {bg_paused}\u{23f8}")
+                } else {
+                    String::new()
+                },
+                self.activity_git_results_snap,
+                git_last,
+                self.activity_watcher_events_snap,
+                self.activity_mcp_reqs_snap,
+                self.state.listing.entries.len(),
+                pager_state,
+            );
+
+            let w1 = text.len() as u16;
+            let w2 = text2.len() as u16;
+            let row1_ok = frame_area.width > w1 + 2;
+            let row2_ok = frame_area.height > 1 && frame_area.width > w2 + 2;
+            if row1_ok {
                 let rect = ratatui::layout::Rect {
-                    x: frame_area.width - w - 1,
+                    x: frame_area.width - w1 - 1,
                     y: 0,
-                    width: w,
+                    width: w1,
                     height: 1,
                 };
                 let style = ratatui::style::Style::default()
@@ -3187,6 +3278,23 @@ impl App {
                 frame.render_widget(
                     ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
                         text, style,
+                    ))),
+                    rect,
+                );
+            }
+            if row2_ok {
+                let rect = ratatui::layout::Rect {
+                    x: frame_area.width - w2 - 1,
+                    y: 1,
+                    width: w2,
+                    height: 1,
+                };
+                let style = ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Black)
+                    .bg(self.theme.take);
+                frame.render_widget(
+                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+                        text2, style,
                     ))),
                     rect,
                 );

@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Performance
+- **Throttle git-worker re-spawns from `refresh_listing`.** On a
+  huge tree (e.g. a 112K-file monorepo), running spyc next to a
+  busy agent that writes files (claude saving findings, build
+  outputs, IDE auto-saves) drove sustained ~48% CPU. Root cause:
+  `refresh_listing` unconditionally invalidated the raw git status
+  cache, causing every debounced file-system event in the listing
+  dir to re-spawn `git status --porcelain -uno` (200-500 ms each
+  on huge trees). Now throttled — at most once per 10 s on huge
+  trees (1 s on small). The 1 Hz / 10 s safety poll still catches
+  real `.git/index` changes immediately; trade-off is at-most-
+  10 s lag in working-tree ` M` markers for edits within the
+  throttle window.
+
+### Added
+- **Activity monitor (`A`) now has a second internals line.**
+  Below the existing throughput line (dps / cells/s / poll / draw
+  reasons), a second line on teal background surfaces background
+  tasks, git worker, FS watcher, MCP, listing, and pager state:
+  
+  `bg:R●D✓ [P⏸]  git:N/s last:Nms  fs:N/s  mcp:N/s  list:N  pager:none|overlay|top|lower`
+  
+  Rates are per-second in the same 1 s window as the existing
+  line. `git last:Nms` is the roundtrip duration of the most
+  recent worker request (would have surfaced the CPU bug above
+  on first glance — high spawn rate jumps out). Activity-only
+  redraws still don't count toward `dps` so the readout doesn't
+  self-oscillate.
+
 ### Changed
 - **Scrollback mode now uses blue (not amber) as its color signal.**
   Reported repeatedly that scroll-mode is "confusing to remember" —
