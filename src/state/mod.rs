@@ -58,6 +58,39 @@ pub fn state_root() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
 }
 
+/// Cap on bytes read from an agent transcript for `^a v` scrollback.
+/// Real Claude conversation JSONLs reach 100+ MB; reading the whole
+/// file froze the render thread and allocated hundreds of MB.
+/// Scrollback only needs recent history, so we read the tail.
+pub const MAX_TRANSCRIPT_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Read at most the last `max_bytes` of `path` as UTF-8 (lossy). When
+/// the file exceeds the cap, the leading partial line is dropped so
+/// callers always parse whole lines. Returns an io error only on
+/// open/metadata/seek/read failure.
+pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    if start > 0 {
+        f.seek(SeekFrom::Start(start))?;
+    }
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    if start == 0 {
+        return Ok(text);
+    }
+    // Seek landed mid-line; discard the partial head so the first
+    // parsed line is whole. (`\n` is one byte, so `nl + 1` is always
+    // a char boundary.)
+    Ok(match text.find('\n') {
+        Some(nl) => text[nl + 1..].to_string(),
+        None => String::new(),
+    })
+}
+
 /// Test-only: run `body` with `state_root()` pinned to `root`. The
 /// override is unwound when `body` returns *or panics* (RAII guard).
 #[cfg(test)]
@@ -71,4 +104,34 @@ pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R
     STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = Some(root.to_path_buf()));
     let _g = Guard;
     body()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_tail_lossy;
+    use std::io::Write;
+
+    #[test]
+    fn tail_returns_whole_small_file() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        write!(f, "a\nb\nc\n").unwrap();
+        assert_eq!(read_tail_lossy(f.path(), 1024).unwrap(), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn tail_drops_partial_leading_line() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        for i in 0..10 {
+            writeln!(f, "{i:04}").unwrap(); // 10 lines of "NNNN\n", 5 bytes each
+        }
+        // 22 bytes from a 50-byte file seeks mid-line; the partial head
+        // must be dropped so every retained line is whole.
+        let got = read_tail_lossy(f.path(), 22).unwrap();
+        assert!(got.len() as u64 <= 22);
+        assert!(got.ends_with("0009\n"));
+        assert!(
+            got.lines().all(|l| l.len() == 4),
+            "no partial leading line: {got:?}"
+        );
+    }
 }

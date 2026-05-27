@@ -49,6 +49,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   mtimes before reading status (validate-key-first), so a racing
   write forces one redundant refresh instead of a permanent stale
   snapshot.
+- **`^a v` transcript scrollback no longer freezes on large
+  conversations.** Both the codex and (opt-in) Claude transcript
+  renderers read the whole JSONL into memory synchronously on the
+  render thread — and real Claude conversation logs reach 100+ MB,
+  so a single `^a v` could hang the TUI for seconds and allocate
+  hundreds of MB. Scrollback only needs recent history, so the
+  renderers now read just the tail (last 4 MB) via
+  `state::read_tail_lossy`, dropping the leading partial line.
+  Small transcripts (all codex rollouts today) are unaffected.
 - **`^a v` on codex now explains why there's no scrollback (and
   the `--no-alt-screen` advice was wrong).** Codex confines its
   conversation history to a DECSTBM scroll region above its

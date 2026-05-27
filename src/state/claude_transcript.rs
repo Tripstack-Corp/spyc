@@ -49,7 +49,8 @@ pub fn resolve_active_jsonl(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathBuf
 /// Parse a Claude conversation JSONL into styled pager lines, in
 /// chronological order. Returns empty on read failure.
 pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
+    else {
         return Vec::new();
     };
     let user_style = Style::default()

@@ -146,7 +146,8 @@ fn parse_rfc3339_secs(s: &str) -> Option<u64> {
 /// Parse a codex rollout JSONL file into styled pager lines, in
 /// chronological order. Returns an empty vec on read failure.
 pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
+    else {
         return Vec::new();
     };
     let user_style = Style::default()
