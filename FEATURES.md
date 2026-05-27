@@ -140,18 +140,25 @@ spyc's workflow: browse files above, talk to Claude below.
   block, `y` yanks the selection, `l` toggles line numbers, `w`
   whitespace markers. The pty keeps running off-screen — output
   you miss while reading lands in scrollback for the next view.
-  `Esc` snaps back to live. Alt-screen apps (codex, vim, htop,
-  lazygit) skip the pager and flash a "no scrollback" hint
-  pointing at the app's own history viewer.
-  - The fundamental limit is that alt-screen apps do *virtual
+  `Esc` snaps back to live. Alt-screen apps (vim, htop, lazygit)
+  skip the pager and flash a hint pointing at the app's own
+  history viewer.
+  - The fundamental limit is that full-screen TUIs do *virtual
     scrolling* inside a fixed grid — old content lives in app
     memory, not the terminal — so even a parallel vt100 parser
-    can't recover it. Several agents offer an inline mode that
-    fixes this end-to-end: launch **codex** with
-    `--no-alt-screen` (or set `[tui] alternate_screen = "never"`
-    in `~/.codex/config.toml`) and `^a v` works against codex's
-    output normally. Claude Code already runs inline by default,
-    so it just works.
+    can't recover it. This applies whether the app uses the
+    alternate screen (vim, htop) *or* keeps its history in a
+    DECSTBM scroll region in inline mode.
+  - **codex specifically does the latter even with
+    `--no-alt-screen`**: it confines its conversation history to
+    a scroll region above its viewport, so those lines never
+    scroll into the main buffer. `^a v` therefore can't capture
+    codex history in either mode — use codex's own scroll keys.
+    (An earlier note here recommended `--no-alt-screen` as a
+    fix; that was wrong and has been corrected.) spyc flashes a
+    "no scrollback captured" hint when this happens.
+  - **Claude Code** runs inline and lets its output scroll into
+    the main buffer, so `^a v` captures its history normally.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
