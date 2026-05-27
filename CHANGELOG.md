@@ -6,6 +6,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Opt-in Claude transcript scrollback.** `[pane]
+  claude_transcript_scrollback = true` makes `^a v` on a Claude
+  pane render Claude's on-disk conversation JSONL
+  (`~/.claude/projects/<slug>/<session-id>.jsonl`) — structured
+  user/assistant/tool turns — instead of the default
+  terminal-scrollback capture. Default **false**: Claude's
+  terminal output scrolls into the main buffer, so the existing
+  vt100 capture works and stays the default; the transcript view
+  is the cleaner alternative for those who want it (no
+  grid/repaint artifacts). Same machinery as the codex transcript
+  view, resolving the active pane's session by cwd + spawn time.
+  If the toggle is on but no JSONL resolves, falls back to vt100
+  capture.
+
 - **Agent-aware scrollback: `^a v` on a codex pane shows the real
   conversation.** Codex keeps its history in a DECSTBM scroll
   region (both alt-screen and `--no-alt-screen`), so it can never

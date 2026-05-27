@@ -97,6 +97,13 @@ pub struct PaneConfig {
     /// are unset, preserving long-standing behavior. The env var
     /// still wins so users can override per-shell on the fly.
     pub default_command: Option<String>,
+    /// When true, `^a v` on a *Claude* pane reads Claude's on-disk
+    /// conversation JSONL and renders the transcript, instead of
+    /// the default terminal-scrollback capture. Codex always uses
+    /// the transcript (terminal capture can't see its history); for
+    /// Claude both work, so this is opt-in. Default false (keep the
+    /// current terminal-capture behavior).
+    pub claude_transcript_scrollback: bool,
 }
 
 /// On-disk shape of `[pane]`. `Option` for the same "didn't set"
@@ -106,6 +113,8 @@ pub struct PaneConfig {
 struct FilePane {
     #[serde(default)]
     default_command: Option<String>,
+    #[serde(default)]
+    claude_transcript_scrollback: Option<bool>,
 }
 
 /// Yank / clipboard knobs.
@@ -328,6 +337,9 @@ impl Config {
         if let Some(cmd) = file.pane.default_command {
             self.pane.default_command = Some(cmd);
         }
+        if let Some(b) = file.pane.claude_transcript_scrollback {
+            self.pane.claude_transcript_scrollback = b;
+        }
 
         // Yank: per-field merge.
         if let Some(b) = file.yank.include_pager_title {
@@ -469,6 +481,20 @@ mod tests {
         std::fs::write(&path, "[pane]\ndefault_command = \"codex\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert_eq!(cfg.pane.default_command.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn claude_transcript_scrollback_defaults_false() {
+        assert!(!Config::default().pane.claude_transcript_scrollback);
+    }
+
+    #[test]
+    fn parses_claude_transcript_scrollback_true() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pane]\nclaude_transcript_scrollback = true\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(cfg.pane.claude_transcript_scrollback);
     }
 
     #[test]

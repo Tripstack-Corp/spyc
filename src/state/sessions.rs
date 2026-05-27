@@ -316,6 +316,28 @@ pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
     false
 }
 
+/// Resolve the on-disk conversation JSONL path for `session_id` under
+/// the project slug for `cwd` (the file `claude --resume <id>` reads,
+/// and what the transcript scrollback view renders). Checks both `cwd`
+/// and its canonical form for the macOS symlink-slug mismatch. Returns
+/// the first existing path, or `None`.
+pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let projects = PathBuf::from(&home).join(".claude/projects");
+    let file = format!("{session_id}.jsonl");
+    let direct = projects.join(project_slug(cwd)).join(&file);
+    if direct.exists() {
+        return Some(direct);
+    }
+    if let Ok(canon) = std::fs::canonicalize(cwd) {
+        let via_canon = projects.join(project_slug(&canon)).join(&file);
+        if via_canon.exists() {
+            return Some(via_canon);
+        }
+    }
+    None
+}
+
 /// Find the most-recently-modified JSONL under `~/.claude/projects/<slug>/`.
 /// Returns the session ID (filename stem). This is the same conversation
 /// the no-arg `claude --resume` picker would surface first for this cwd.
