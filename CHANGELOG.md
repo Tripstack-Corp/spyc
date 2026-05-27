@@ -27,6 +27,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   still gated it behind `has_pending`, which was never cleared for
   panes (only the unused main-thread `drain` cleared it) — so the
   gate always fell through. Dropped the flag and its plumbing.
+- **`^a v` no longer hangs (or panics) on a very short terminal.**
+  `lines_from_scrollback` paged the buffer in `rows`-sized chunks; a
+  0-row screen made `chunk = remaining.min(0)` never decrement, so the
+  event loop spun forever. It now early-returns on a 0-row screen.
+  Separately, `Pane::resize` floors its dimensions at 1×1 so the vt100
+  emulator (whose `set_size` does an unconditional `rows - 1`) never
+  underflows when the layout produces a 0-height pane rect.
 
 ### Added
 - **Opt-in Claude transcript scrollback.** `[pane]

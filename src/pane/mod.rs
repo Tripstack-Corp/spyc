@@ -248,6 +248,12 @@ impl Pane {
     /// cell grid matches — without this, the child keeps drawing at the
     /// old dimensions.
     pub fn resize(&mut self, rows: u16, cols: u16) -> anyhow::Result<()> {
+        // vt100's `set_size` does `rows - 1` unconditionally, so a
+        // zero dimension underflow-panics (debug) / wraps to 65535
+        // (release). A tiny terminal can produce a 0-row pane rect, so
+        // never hand the emulator a zero dimension.
+        let rows = rows.max(1);
+        let cols = cols.max(1);
         if (rows, cols) == self.host.last_size {
             return Ok(());
         }

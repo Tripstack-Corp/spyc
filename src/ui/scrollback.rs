@@ -53,6 +53,13 @@ pub fn lines_from_scrollback(screen: &mut vt100::Screen) -> Vec<Line<'static>> {
     let rows_len = rows_u16 as usize;
     let cols_len = cols_u16;
 
+    // A zero-row screen has nothing to render — and the paging loop
+    // below would spin forever (`chunk = remaining.min(0)` never
+    // decrements `remaining`). Reachable on a very short terminal.
+    if rows_len == 0 {
+        return Vec::new();
+    }
+
     // `set_scrollback` clamps to actual scrollback length; ask for
     // the max and read the resulting offset to discover the cap.
     screen.set_scrollback(usize::MAX);
@@ -228,6 +235,18 @@ mod tests {
         // 4-row screen, 3 lines — nothing spilled to scrollback.
         let mut p = parser_with(4, 20, 100, b"alpha\r\nbeta\r\ngamma\r\n");
         assert_eq!(scrollback_len(p.screen_mut()), 0);
+    }
+
+    #[test]
+    fn single_row_screen_paginates_without_hanging() {
+        // Minimum non-degenerate height: a 1-row screen with several
+        // lines spills history to scrollback. The paging loop must
+        // terminate (chunk == 1 each pass) rather than spin — the
+        // regression guarded against in the 0-row early-return.
+        let mut p = parser_with(1, 20, 100, b"a\r\nb\r\nc\r\nd\r\n");
+        let plain = plain_lines(&lines_from_scrollback(p.screen_mut()));
+        assert!(plain.iter().any(|l| l == "a"), "oldest line preserved");
+        assert!(plain.iter().any(|l| l == "d"), "newest line preserved");
     }
 
     #[test]
