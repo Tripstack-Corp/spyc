@@ -42,6 +42,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   pre-mutation state for as long as the user kept typing. These
   agent-initiated mutations now write the context file synchronously.
   Ordinary edits (cursor moves, browsing) stay debounced.
+- **codex transcript resolution handles symlinked cwds and zoneless
+  timestamps.** `^a v` on a codex pane matches the rollout by working
+  directory; it now also compares the *canonicalized* cwd, so a pane
+  started under a symlinked path (e.g. `/var` → `/private/var`) still
+  resolves. Its timestamp parser also reused a stricter variant that
+  rejected zoneless stamps (bucketing them at epoch 0 and mis-ranking
+  the session); it now shares `parse_iso8601_to_epoch_secs`, which
+  falls back to assuming UTC.
 
 ### Added
 - **Opt-in Claude transcript scrollback.** `[pane]

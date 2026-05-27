@@ -469,7 +469,7 @@ pub fn find_gemini_sessions(cwd: &std::path::Path) -> Vec<GeminiSessionInfo> {
 /// to epoch seconds via `jiff`. Accepts both forms emitted in the
 /// wild — `2026-05-08T12:27:31.927Z` and `2026-05-08T12:27:31Z` —
 /// plus naive `2026-05-08T12:27:31` (no zone) by tagging UTC.
-fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
+pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
     // Try strict RFC 3339 first (handles fractional seconds + Z / offsets).
     if let Ok(ts) = s.parse::<jiff::Timestamp>() {
         let secs = ts.as_second();

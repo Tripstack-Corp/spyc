@@ -56,6 +56,12 @@ pub fn resolve_active_rollout(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathB
         return None;
     }
     let cwd_str = cwd.to_string_lossy();
+    // A symlinked pane cwd (e.g. /var → /private/var on macOS) records
+    // its *canonical* path in session_meta, so compare against that form
+    // too — mirrors the Claude resolver's canonicalize check.
+    let canon_str = std::fs::canonicalize(cwd)
+        .ok()
+        .map(|c| c.to_string_lossy().into_owned());
 
     let mut best: Option<(u64, PathBuf)> = None; // (abs time diff, path)
     for path in rollout_files(&sessions_dir) {
@@ -64,7 +70,8 @@ pub fn resolve_active_rollout(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathB
         };
         // macOS /private/tmp vs /tmp symlink, same as Claude resolver.
         let matches = session_cwd == cwd_str
-            || session_cwd.strip_prefix("/private").unwrap_or(&session_cwd) == cwd_str.as_ref();
+            || session_cwd.strip_prefix("/private").unwrap_or(&session_cwd) == cwd_str.as_ref()
+            || canon_str.as_deref() == Some(session_cwd.as_str());
         if !matches {
             continue;
         }
@@ -130,17 +137,9 @@ fn read_session_meta(path: &Path) -> Option<(String, u64)> {
     let cwd = payload["cwd"].as_str()?.to_string();
     let started_secs = payload["timestamp"]
         .as_str()
-        .and_then(parse_rfc3339_secs)
+        .and_then(crate::state::sessions::parse_iso8601_to_epoch_secs)
         .unwrap_or(0);
     Some((cwd, started_secs))
-}
-
-/// Parse an RFC3339 timestamp (`2026-05-27T01:20:40.965Z`) to epoch
-/// seconds. Best-effort via `jiff`; returns `None` on parse failure.
-fn parse_rfc3339_secs(s: &str) -> Option<u64> {
-    s.parse::<jiff::Timestamp>()
-        .ok()
-        .map(|ts| u64::try_from(ts.as_second()).unwrap_or(0))
 }
 
 /// Parse a codex rollout JSONL file into styled pager lines, in
@@ -260,13 +259,6 @@ mod tests {
     fn truncate_respects_char_boundaries() {
         assert_eq!(truncate_chars("hello", 10), "hello");
         assert_eq!(truncate_chars("hello", 3), "hel\u{2026}");
-    }
-
-    #[test]
-    fn parse_rfc3339_handles_millis_z() {
-        let secs = parse_rfc3339_secs("2026-05-27T01:20:40.965Z").unwrap();
-        // 2026-05-27 is well after the epoch; just sanity-check it parsed.
-        assert!(secs > 1_700_000_000);
     }
 
     #[test]
