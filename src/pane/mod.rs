@@ -33,7 +33,7 @@ use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec};
 /// A hosted subprocess + its terminal emulator state.
 ///
 /// v1.5 Phase 6a: pty kernel (master/writer/child/reader thread/
-/// event channel/last_size/closed/exit_status/has_pending/debug_dump)
+/// event channel/last_size/closed/exit_status/debug_dump)
 /// lives in `host: PtyHost`. `Pane` is the vt100-parser shell on top.
 /// Same struct shape `BackgroundTask` will adopt in 6a step 3, which
 /// is what unlocks promotion / demotion in 6b/6c.
@@ -58,15 +58,12 @@ pub struct Pane {
     /// Diffed against `parser_gen` in `drain_output()` to decide
     /// whether a redraw is needed.
     last_seen_gen: u64,
-    /// Flag the parser worker checks periodically (between
-    /// `recv_timeout` waits). Set by [`Self::take_host`] when the
-    /// pane is being demoted to a `BackgroundTask` — the worker
-    /// exits without seeing EOF and returns the receiver so the
-    /// host can keep accepting raw bytes for the task.
-    stop_parser: Arc<std::sync::atomic::AtomicBool>,
-    /// Handle on the parser worker thread. Returns the receiver on
-    /// thread exit so `take_host` can restore it to the host.
-    parser_thread: Option<thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>>,
+    /// Owns the parser worker thread and its stop-flag. Its `Drop`
+    /// guarantees the thread is stopped and joined on every teardown
+    /// path (tab close, restart, app exit) — `Pane` can't implement
+    /// `Drop` itself because `take_host` moves `host` out, which
+    /// `Drop` forbids (E0509).
+    worker: ParserWorker,
     /// Set by `drain_output()` when new bytes arrived; cleared after render.
     pub output_dirty: bool,
     /// When > 0, the visible viewport is shifted into the scrollback
@@ -149,7 +146,7 @@ impl Pane {
     pub fn adopt(mut host: PtyHost, parser: vt100::Parser) -> Self {
         let parser = Arc::new(Mutex::new(parser));
         let parser_gen = Arc::new(AtomicU64::new(0));
-        let stop_parser = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let event_rx = host
             .take_event_rx()
             .expect("PtyHost::take_event_rx returned None — already taken");
@@ -157,8 +154,8 @@ impl Pane {
         let debug_dump = host.debug_dump;
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
-        let stop_clone = Arc::clone(&stop_parser);
-        let parser_thread = thread::spawn(move || {
+        let stop_clone = Arc::clone(&stop);
+        let handle = thread::spawn(move || {
             parser_worker(
                 event_rx,
                 stop_clone,
@@ -173,8 +170,10 @@ impl Pane {
             parser,
             parser_gen,
             last_seen_gen: 0,
-            stop_parser,
-            parser_thread: Some(parser_thread),
+            worker: ParserWorker {
+                stop,
+                handle: Some(handle),
+            },
             output_dirty: false,
             scroll_offset: 0,
             scrolling: false,
@@ -187,21 +186,10 @@ impl Pane {
     /// `BackgroundTask` can take the host and drain raw bytes from
     /// the receiver as before.
     pub fn take_host(mut self) -> PtyHost {
-        self.stop_parser.store(true, Ordering::Release);
-        if let Some(handle) = self.parser_thread.take() {
-            if let Ok(rx) = handle.join() {
-                self.host.event_rx = Some(rx);
-            }
+        if let Some(rx) = self.worker.stop_and_reclaim_rx() {
+            self.host.event_rx = Some(rx);
         }
         self.host
-    }
-
-    /// Drain any pending output from the child into the parser. Call
-    /// Quick check whether the reader thread has posted data since
-    /// the last drain. Uses a relaxed atomic — no locking, no
-    /// syscall. Delegates to the shared `PtyHost`.
-    pub fn has_pending_output(&self) -> bool {
-        self.host.has_pending_output()
     }
 
     /// Check whether the parser worker has processed new bytes since
@@ -264,9 +252,7 @@ impl Pane {
             return Ok(());
         }
         self.host.resize(rows, cols)?;
-        if let Ok(mut p) = self.parser.lock() {
-            p.screen_mut().set_size(rows, cols);
-        }
+        self.lock_parser().screen_mut().set_size(rows, cols);
         Ok(())
     }
 
@@ -336,8 +322,18 @@ impl Pane {
     /// path); this acquires the lock for the duration of `f`, so
     /// keep the closure body short. Returns whatever `f` returns.
     pub fn with_screen<R, F: FnOnce(&vt100::Screen) -> R>(&self, f: F) -> R {
-        let guard = self.parser.lock().expect("pane parser mutex poisoned");
+        let guard = self.lock_parser();
         f(guard.screen())
+    }
+
+    /// Lock the parser, tolerating poison. The worker recovers a
+    /// panicked parser in place (see [`parser_worker`]); a poisoned
+    /// guard here would otherwise crash the render thread, turning a
+    /// recoverable one-frame glitch into a whole-session crash.
+    fn lock_parser(&self) -> std::sync::MutexGuard<'_, vt100::Parser> {
+        self.parser
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Run `f` with a mutable reference to the vt100 screen.
@@ -345,7 +341,7 @@ impl Pane {
     /// temporarily shifting the offset). Same lock semantics as
     /// `with_screen` — keep the closure short.
     pub fn with_screen_mut<R, F: FnOnce(&mut vt100::Screen) -> R>(&self, f: F) -> R {
-        let mut guard = self.parser.lock().expect("pane parser mutex poisoned");
+        let mut guard = self.lock_parser();
         f(guard.screen_mut())
     }
 
@@ -537,7 +533,9 @@ fn parser_worker(
                     }
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let mut p = parser.lock().expect("pane parser mutex poisoned");
+                    let mut p = parser
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     p.process(&bytes);
                 }));
                 if result.is_err() {
@@ -545,9 +543,18 @@ fn parser_worker(
                         "vt100 parser panicked on {} bytes; replacing parser to recover",
                         bytes.len()
                     );
-                    if let Ok(mut p) = parser.lock() {
+                    // The panic unwound through a held MutexGuard, so the
+                    // mutex is now poisoned. Recover the guard via
+                    // into_inner, install a fresh parser, then clear the
+                    // poison so the main thread's render lock is healthy
+                    // again (the child repaints into the blank grid).
+                    {
+                        let mut p = parser
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         *p = vt100::Parser::new(initial_size.0, initial_size.1, 10_000);
                     }
+                    parser.clear_poison();
                 }
                 parser_gen.fetch_add(1, Ordering::Release);
             }
@@ -559,6 +566,37 @@ fn parser_worker(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return rx,
+        }
+    }
+}
+
+/// Owns the parser worker thread and its stop-flag, with a `Drop`
+/// that guarantees the thread is signalled and joined. This lives as a
+/// `Pane` field rather than a `Pane: Drop` impl because `take_host`
+/// moves `host` out of `self`, and a type that implements `Drop`
+/// can't be partially moved (E0509). As a field, its own `Drop` still
+/// fires on every `Pane` teardown — including the leftover after
+/// `take_host` reclaims the receiver.
+struct ParserWorker {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>>,
+}
+
+impl ParserWorker {
+    /// Signal the worker to stop, join it, and hand back the byte-event
+    /// receiver (so the pane→background demotion can resume draining on
+    /// the main thread). Idempotent — a second call returns `None`.
+    fn stop_and_reclaim_rx(&mut self) -> Option<std::sync::mpsc::Receiver<PtyEvent>> {
+        self.stop.store(true, Ordering::Release);
+        self.handle.take().and_then(|h| h.join().ok())
+    }
+}
+
+impl Drop for ParserWorker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
     }
 }
@@ -624,5 +662,60 @@ mod preview_tests {
         let s = preview_bytes(&buf);
         assert!(s.contains("xxx"));
         assert!(s.ends_with("+8"), "expected `+8` truncation suffix: {s}");
+    }
+}
+
+#[cfg(test)]
+mod worker_tests {
+    use super::ParserWorker;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// `stop_and_reclaim_rx` signals the worker, joins it, hands back
+    /// the receiver, and is idempotent — a second call returns `None`.
+    /// The subsequent `Drop` must then be a no-op (no double-join).
+    #[test]
+    fn reclaim_stops_joins_and_is_idempotent() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_cl = Arc::clone(&stop);
+        let (_tx, rx) = std::sync::mpsc::channel::<super::PtyEvent>();
+        let handle = std::thread::spawn(move || {
+            while !stop_cl.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            rx
+        });
+        let mut worker = ParserWorker {
+            stop: Arc::clone(&stop),
+            handle: Some(handle),
+        };
+        assert!(worker.stop_and_reclaim_rx().is_some());
+        assert!(stop.load(Ordering::Acquire), "stop flag must be set");
+        assert!(
+            worker.stop_and_reclaim_rx().is_none(),
+            "second reclaim is a no-op"
+        );
+        drop(worker); // handle already taken → Drop joins nothing
+    }
+
+    /// Dropping a live worker without reclaiming must still stop and
+    /// join it (the tab-close / app-exit path).
+    #[test]
+    fn drop_stops_and_joins() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_cl = Arc::clone(&stop);
+        let (_tx, rx) = std::sync::mpsc::channel::<super::PtyEvent>();
+        let handle = std::thread::spawn(move || {
+            while !stop_cl.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            rx
+        });
+        let worker = ParserWorker {
+            stop: Arc::clone(&stop),
+            handle: Some(handle),
+        };
+        drop(worker);
+        assert!(stop.load(Ordering::Acquire), "Drop must set the stop flag");
     }
 }

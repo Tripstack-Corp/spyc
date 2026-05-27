@@ -18,8 +18,8 @@
 //! pane).
 //!
 //! Strict rule for Phase 6a: this module changes no observable
-//! behavior. The reader-thread protocol, debug-byte-dump, has-pending
-//! flag, exit-status harvesting, and shutdown semantics all match the
+//! behavior. The reader-thread protocol, debug-byte-dump,
+//! exit-status harvesting, and shutdown semantics all match the
 //! pre-refactor `Pane`/`BackgroundTask` paths exactly.
 
 use std::io::{Read, Write};
@@ -69,7 +69,7 @@ pub struct PtySpec<'a> {
 
 /// Shared pty host: master + writer + child + reader thread + drain
 /// channel, plus the small bag of state every consumer needs
-/// (last_size, closed, exit_status, has_pending, debug_dump).
+/// (last_size, closed, exit_status, debug_dump).
 ///
 /// Owned by `Pane` (which adds a vt100 parser on top) and by
 /// `BackgroundTask` (which adds a flat byte buffer + lifecycle
@@ -86,7 +86,6 @@ pub struct PtyHost {
     /// the main thread (`PendingCapture`, `BackgroundTask`) leave
     /// the receiver in place and call [`Self::drain`].
     pub event_rx: Option<mpsc::Receiver<PtyEvent>>,
-    pub has_pending: Arc<AtomicBool>,
     /// Set by the reader thread when it sees EOF — exposes the
     /// closed state to whichever thread holds the parser. `closed`
     /// (below) is the main-thread-only mirror that also tracks
@@ -146,11 +145,9 @@ impl PtyHost {
         // Background thread pumps reader → channel. The render loop
         // drains the channel without blocking on child output.
         let (tx, event_rx) = mpsc::channel::<PtyEvent>();
-        let has_pending = Arc::new(AtomicBool::new(false));
         let closed_atomic = Arc::new(AtomicBool::new(false));
-        let pending_flag = Arc::clone(&has_pending);
         let closed_flag = Arc::clone(&closed_atomic);
-        thread::spawn(move || reader_loop(reader, &tx, &pending_flag, &closed_flag));
+        thread::spawn(move || reader_loop(reader, &tx, &closed_flag));
 
         if spec.nudge_winch {
             // Send SIGWINCH so rc-file shells re-query the pty size
@@ -168,20 +165,12 @@ impl PtyHost {
             writer,
             child,
             event_rx: Some(event_rx),
-            has_pending,
             closed_atomic,
             closed: false,
             exit_status: None,
             last_size: (spec.rows, spec.cols),
             debug_dump: spec.debug_dump,
         })
-    }
-
-    /// Quick non-blocking check whether the reader thread has posted
-    /// data since the last drain. Relaxed-atomic; no lock, no
-    /// syscall — cheap to call every render tick.
-    pub fn has_pending_output(&self) -> bool {
-        self.has_pending.load(Ordering::Relaxed)
     }
 
     /// Drain all pending events, dispatching byte chunks to
@@ -232,7 +221,6 @@ impl PtyHost {
                 }
             }
         }
-        self.has_pending.store(false, Ordering::Relaxed);
         DrainResult { newly_closed }
     }
 
@@ -346,12 +334,7 @@ fn kill_group(pid: u32, sig: rustix::process::Signal) {
 /// Reader thread: pump bytes from the pty master into the channel
 /// until EOF or the channel is dropped. Same shape as the pre-v1.5
 /// `pane::reader_loop`.
-fn reader_loop(
-    mut reader: Box<dyn Read + Send>,
-    tx: &mpsc::Sender<PtyEvent>,
-    pending: &AtomicBool,
-    closed: &AtomicBool,
-) {
+fn reader_loop(mut reader: Box<dyn Read + Send>, tx: &mpsc::Sender<PtyEvent>, closed: &AtomicBool) {
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
@@ -359,12 +342,10 @@ fn reader_loop(
             // child is gone.
             Ok(0) | Err(_) => {
                 closed.store(true, Ordering::Relaxed);
-                pending.store(true, Ordering::Relaxed);
                 let _ = tx.send(PtyEvent::Closed);
                 return;
             }
             Ok(n) => {
-                pending.store(true, Ordering::Relaxed);
                 if tx.send(PtyEvent::Bytes(buf[..n].to_vec())).is_err() {
                     return; // Parent dropped the host.
                 }
@@ -415,13 +396,11 @@ mod tests {
         let reader =
             Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>;
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
-        let pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let pending_cl = std::sync::Arc::clone(&pending);
         let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let closed_cl = std::sync::Arc::clone(&closed);
 
         let thread = std::thread::spawn(move || {
-            super::reader_loop(reader, &tx, &pending_cl, &closed_cl);
+            super::reader_loop(reader, &tx, &closed_cl);
         });
 
         // Collect events until we observe Closed. The reader
@@ -440,10 +419,6 @@ mod tests {
         thread.join().unwrap();
         assert!(got_close, "reader_loop must emit Closed on EOF");
         assert_eq!(got_bytes, payload, "byte stream must round-trip in order");
-        assert!(
-            pending.load(std::sync::atomic::Ordering::Relaxed),
-            "pending flag must be set when bytes arrive"
-        );
     }
 
     #[test]

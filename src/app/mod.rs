@@ -1766,12 +1766,9 @@ impl App {
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
                 for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-                    // Fast path: skip the gen check when the reader
-                    // thread hasn't posted anything. ~1 ns atomic
-                    // load vs ~20 ns mpsc try_recv.
-                    if !entry.pane.has_pending_output() {
-                        continue;
-                    }
+                    // `drain_output` is itself just an Acquire-load on
+                    // the worker's generation counter, so it is the
+                    // cheap check — no separate fast-path gate needed.
                     if entry.pane.drain_output() {
                         if i == active_idx {
                             pane_had_output = true;
@@ -1784,7 +1781,7 @@ impl App {
                 }
             }
             if let Some(overlay) = self.top_overlay.as_mut() {
-                if overlay.has_pending_output() && overlay.drain_output() {
+                if overlay.drain_output() {
                     pane_had_output = true;
                 }
             }

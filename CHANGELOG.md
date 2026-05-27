@@ -5,6 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **A panicking vt100 parser no longer crashes the whole session.**
+  The pane parser runs on a worker thread inside `catch_unwind`; the
+  recovery path locked the parser mutex *inside* the guarded closure,
+  so a panic unwound through the held guard and poisoned the mutex.
+  The recovery re-lock then silently failed and the next render hit
+  `with_screen`'s `.expect(...)`, taking down spyc. The worker now
+  recovers the poisoned guard, installs a fresh parser, and clears
+  the poison; all parser lock sites tolerate poison. The intended
+  "screen blanks for a frame, the child repaints" behavior now works.
+- **The pane parser worker thread is always stopped and joined.** It
+  was only joined on the demotion path (`take_host`); tab close,
+  restart, and app exit dropped the `Pane` without joining. A new
+  `ParserWorker` RAII type owns the stop-flag + join handle and joins
+  on `Drop`, covering every teardown path. (`Pane` can't implement
+  `Drop` directly — it moves `host` out in `take_host`.)
+- **Removed the dead `has_pending` fast-path.** Since vt100 parsing
+  moved to the worker thread, `drain_output` is itself a cheap
+  Acquire-load on a generation counter, but the pane render loop
+  still gated it behind `has_pending`, which was never cleared for
+  panes (only the unused main-thread `drain` cleared it) — so the
+  gate always fell through. Dropped the flag and its plumbing.
+
 ### Added
 - **Opt-in Claude transcript scrollback.** `[pane]
   claude_transcript_scrollback = true` makes `^a v` on a Claude
