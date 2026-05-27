@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 
+pub mod codex_transcript;
 pub mod cursor;
 pub mod frecency;
 pub mod graveyard;
