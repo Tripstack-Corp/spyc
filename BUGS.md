@@ -122,8 +122,13 @@
   scrolling in the alt-screen never emits old chat lines as bytes
   — but it might be useful for apps that mostly stream text into
   alt-screen with light repositioning. Spawned from Spencer's
-  "codex scrolling not working with ^w-v" report 2026-05-26. Real
-  fix is launching the app inline (codex: `--no-alt-screen`).
+  "codex scrolling not working with ^w-v" report 2026-05-26.
+  NOTE: `--no-alt-screen` does NOT fix codex — it keeps history in
+  a DECSTBM scroll region above its inline viewport, so lines
+  never reach the main buffer either way. There is no spyc-side
+  capture for codex history; the side-buffer drain above is the
+  only avenue, and it's lossy. v1.50.88 at least flashes a clear
+  "no scrollback captured" hint instead of opening an empty pager.
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles

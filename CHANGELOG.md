@@ -5,6 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **`^a v` on codex now explains why there's no scrollback (and
+  the `--no-alt-screen` advice was wrong).** Codex confines its
+  conversation history to a DECSTBM scroll region above its
+  viewport — in *both* alt-screen and `--no-alt-screen` (inline)
+  modes — so completed lines never scroll into the terminal's
+  main buffer where vt100 (and therefore spyc) could capture
+  them. The alt-screen guard didn't catch the inline case, so
+  `^a v` previously opened a silent, empty-looking pager with no
+  explanation. Now spyc detects an empty scrollback and flashes
+  "no scrollback captured — codex & inline TUIs keep their own
+  history (use the app's scroll keys)". An earlier release
+  recommended launching codex with `--no-alt-screen` as a fix;
+  that was incorrect and is now corrected in the flash and
+  FEATURES.md. There is no spyc-side capture for codex history —
+  use codex's own scroll keys.
+
 ### Performance
 - **Cache the status-line agent short-id (was 65% of main-thread
   CPU on long-running sessions).** `App::render` called

@@ -95,6 +95,25 @@ pub fn lines_from_scrollback(screen: &mut vt100::Screen) -> Vec<Line<'static>> {
     out
 }
 
+/// Number of rows in the vt100 scrollback buffer (history above the
+/// live screen), independent of the current view offset. Zero means
+/// the pane has no captured history — either a fresh process that
+/// hasn't scrolled, or (the case this exists for) an app like codex
+/// that confines its history to a DECSTBM scroll region so lines
+/// never scroll off the top into the main buffer.
+///
+/// `&mut Screen` because the probe walks `scrollback_offset`; the
+/// original offset is restored before returning.
+pub fn scrollback_len(screen: &mut vt100::Screen) -> usize {
+    let saved_offset = screen.scrollback();
+    // `set_scrollback` clamps to the real length; ask for the max
+    // and read back the clamped offset to discover it.
+    screen.set_scrollback(usize::MAX);
+    let len = screen.scrollback();
+    screen.set_scrollback(saved_offset);
+    len
+}
+
 /// Build a single styled `Line` from row `row` of the screen's
 /// current visible window. Adjacent cells with identical styles
 /// are merged into one span; trailing whitespace at the row's
@@ -202,6 +221,35 @@ mod tests {
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
         assert_eq!(plain, vec!["alpha", "beta", "gamma", ""]);
+    }
+
+    #[test]
+    fn scrollback_len_zero_when_no_history() {
+        // 4-row screen, 3 lines — nothing spilled to scrollback.
+        let mut p = parser_with(4, 20, 100, b"alpha\r\nbeta\r\ngamma\r\n");
+        assert_eq!(scrollback_len(p.screen_mut()), 0);
+    }
+
+    #[test]
+    fn scrollback_len_counts_spilled_rows() {
+        // 2-row screen, 6 lines pushed → 4 spill into scrollback,
+        // 2 stay live. (The trailing CRLF's blank live row doesn't
+        // add to scrollback.)
+        let mut p = parser_with(
+            2,
+            20,
+            100,
+            b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n",
+        );
+        assert_eq!(scrollback_len(p.screen_mut()), 5);
+    }
+
+    #[test]
+    fn scrollback_len_restores_offset() {
+        let mut p = parser_with(2, 20, 100, b"a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n");
+        p.screen_mut().set_scrollback(2);
+        let _ = scrollback_len(p.screen_mut());
+        assert_eq!(p.screen().scrollback(), 2);
     }
 
     #[test]

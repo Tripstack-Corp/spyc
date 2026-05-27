@@ -7342,15 +7342,15 @@ impl App {
         let label = tabs.active_info().label.clone();
         let active = tabs.active_mut();
         if active.is_alternate_screen() {
-            // Alt-screen apps (codex by default, vim, less, htop, ...)
-            // do virtual scrolling inside a fixed grid — old content
-            // lives in app memory, not the terminal. Best we can do
-            // here is point at the workarounds: app's own history,
-            // or relaunching the app in an inline mode if it has one
-            // (codex: `--no-alt-screen` / `[tui] alternate_screen = "never"`).
-            self.state.flash_info(
-                "scroll: alt-screen app — use its own history (codex: --no-alt-screen)",
-            );
+            // Alt-screen apps (vim, less, htop, ...) do virtual
+            // scrolling inside a fixed grid — old content lives in
+            // app memory, not the terminal — so spyc has nothing to
+            // show. (Note: codex reaches the same dead-end even in
+            // `--no-alt-screen` mode, via a DECSTBM scroll region;
+            // that case isn't alt-screen so it falls through to the
+            // empty-scrollback hint below rather than here.)
+            self.state
+                .flash_info("scroll: alt-screen app — use its own scrollback / history keys");
             return;
         }
         // Drain pending bytes into the vt100 parser before
@@ -7375,7 +7375,24 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
+        // Detect "no captured history" before building the view. An
+        // empty scrollback means either a fresh process or — the
+        // case users hit with codex — an app that keeps its history
+        // in a DECSTBM scroll region above its viewport, so lines
+        // never scroll off the top into vt100's main buffer. Codex
+        // does this in BOTH alt-screen and `--no-alt-screen` (inline)
+        // mode, so `--no-alt-screen` does NOT make `^a v` work; the
+        // alt-screen guard above doesn't catch the inline case, which
+        // is why this previously opened a silent, empty-looking
+        // pager. Flash a hint so the user knows the history lives in
+        // the app, not in spyc.
+        let scrollback_rows = active.with_screen_mut(crate::ui::scrollback::scrollback_len);
         let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
+        if scrollback_rows == 0 {
+            self.state.flash_info(
+                "no scrollback captured — codex & inline TUIs keep their own history (use the app's scroll keys)",
+            );
+        }
         // Setting the pane's "is scrolling" flag keeps the existing
         // visual cues alive (divider re-color, [SCROLL] tag, tab
         // uppercase) — they read off `pane.is_scrolling()` and we
