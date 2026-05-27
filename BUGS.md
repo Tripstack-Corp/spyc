@@ -112,23 +112,24 @@
 
 ### MAYBE ###
 - alt-screen drain → coherent log. For panes running alt-screen
-  TUIs (codex by default, vim, htop, lazygit), the vt100 grid has
-  no historical scrollback — `^a v` flashes "no scrollback" and
-  points at the app's own history. Speculative: continuously
-  drain the pane's byte stream into a side buffer, run a coherency
-  pass (collapse cursor-positioning paints to their final text,
-  strip alt-screen toggles), and offer that as a "rough log" view
-  on `^a v` for alt-screen panes. Lossy by construction — virtual
-  scrolling in the alt-screen never emits old chat lines as bytes
-  — but it might be useful for apps that mostly stream text into
-  alt-screen with light repositioning. Spawned from Spencer's
-  "codex scrolling not working with ^w-v" report 2026-05-26.
-  NOTE: `--no-alt-screen` does NOT fix codex — it keeps history in
-  a DECSTBM scroll region above its inline viewport, so lines
-  never reach the main buffer either way. There is no spyc-side
-  capture for codex history; the side-buffer drain above is the
-  only avenue, and it's lossy. v1.50.88 at least flashes a clear
-  "no scrollback captured" hint instead of opening an empty pager.
+  TUIs (vim, htop, lazygit) the vt100 grid has no historical
+  scrollback — `^a v` flashes "no scrollback" and points at the
+  app's own history. Speculative: continuously drain the pane's
+  byte stream into a side buffer, run a coherency pass (collapse
+  cursor-positioning paints to their final text, strip alt-screen
+  toggles), and offer that as a "rough log" view on `^a v`. Lossy
+  by construction. (codex is now handled the *right* way — see
+  below — so this is only for apps with no on-disk transcript.)
+- agent-aware scrollback, more agents. v1.50.89 added codex
+  support: `^a v` on a codex pane reads its on-disk rollout
+  JSONL (`~/.codex/sessions/.../rollout-*.jsonl`) and renders the
+  real conversation, sidestepping the DECSTBM-scroll-region
+  capture problem entirely. Claude Code writes an equivalent
+  JSONL (`~/.claude/projects/<enc-cwd>/<sid>.jsonl`, which we
+  already parse for session names) — wiring the same transcript
+  view for Claude would give cleaner, structured history than the
+  terminal capture it uses today. Worth doing if the codex
+  version proves out.
 - explore swapping `ansi-to-tui` for a real vt100 emulator on captured `!`
   output (the same one the pane already uses). Today we collapse bare `\r`
   to the last frame to handle progress bars (v1.21.2), and that handles

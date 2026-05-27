@@ -7333,103 +7333,97 @@ impl App {
     }
 
     fn open_pane_scroll_pager(&mut self) {
-        let Some(tabs) = self.pane_tabs.as_mut() else {
+        let Some(tabs) = self.pane_tabs.as_ref() else {
             return;
         };
-        // Read the label first (immutable borrow) so we can hold
-        // the mutable borrow on the active pane below without
-        // overlapping. Cloning is cheap; tab labels are short.
-        let label = tabs.active_info().label.clone();
+        let active_info = tabs.active_info();
+        let label = active_info.label.clone();
+
+        // Agent-aware scrollback: codex confines its conversation
+        // history to a DECSTBM scroll region above its viewport (in
+        // BOTH alt-screen and `--no-alt-screen` modes), so vt100
+        // never captures it into the main buffer. Instead, read
+        // codex's on-disk rollout transcript — the source of truth,
+        // flushed per turn — and render the real conversation. This
+        // takes priority over the alt-screen guard + vt100 path
+        // below, and works in either codex mode.
+        if Self::detect_agent_kind(&active_info.command) == AgentKind::Codex {
+            let cwd = active_info.cwd.clone();
+            let spawn = active_info.spawn_epoch_secs;
+            if let Some(rollout) =
+                crate::state::codex_transcript::resolve_active_rollout(&cwd, spawn)
+            {
+                let lines =
+                    crate::state::codex_transcript::render_transcript(&rollout, &self.theme);
+                if !lines.is_empty() {
+                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
+                    return;
+                }
+            }
+            self.state
+                .flash_info("codex: no transcript on disk yet for this session");
+            return;
+        }
+
+        let tabs = self
+            .pane_tabs
+            .as_mut()
+            .expect("pane_tabs presence checked above");
         let active = tabs.active_mut();
         if active.is_alternate_screen() {
             // Alt-screen apps (vim, less, htop, ...) do virtual
             // scrolling inside a fixed grid — old content lives in
             // app memory, not the terminal — so spyc has nothing to
-            // show. (Note: codex reaches the same dead-end even in
-            // `--no-alt-screen` mode, via a DECSTBM scroll region;
-            // that case isn't alt-screen so it falls through to the
-            // empty-scrollback hint below rather than here.)
+            // show.
             self.state
                 .flash_info("scroll: alt-screen app — use its own scrollback / history keys");
             return;
         }
-        // Drain pending bytes into the vt100 parser before
-        // snapshotting. The reader thread reads the OS pipe and
-        // posts to a channel; `drain_output` pulls everything in
-        // the channel (non-blocking try_recv). But bytes that hit
-        // the OS pipe between the last render tick and the user
-        // pressing `^a-v` may still be in flight — read by the
-        // reader thread but not yet posted, OR in the OS pipe but
-        // not yet read.
-        //
-        // Drain in a short loop with a small yield between
-        // iterations so the reader thread gets scheduled and can
-        // flush in-flight bytes. ~30 ms total worst-case wait;
-        // imperceptible on a key event but enough to capture a
-        // HUD plugin's most-recent paint that fired moments
-        // before the keypress. Reported as "the pager view does
-        // not include all of the text on screen (e.g. claude HUD
-        // plugin)".
+        // Drain pending bytes before snapshotting. Bytes that hit
+        // the OS pipe between the last render tick and this keypress
+        // may still be in flight on the reader/parser threads; a few
+        // short yields let them flush so the snapshot includes the
+        // most-recent paint.
         for _ in 0..3 {
             active.drain_output();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        // Detect "no captured history" before building the view. An
-        // empty scrollback means either a fresh process or — the
-        // case users hit with codex — an app that keeps its history
-        // in a DECSTBM scroll region above its viewport, so lines
-        // never scroll off the top into vt100's main buffer. Codex
-        // does this in BOTH alt-screen and `--no-alt-screen` (inline)
-        // mode, so `--no-alt-screen` does NOT make `^a v` work; the
-        // alt-screen guard above doesn't catch the inline case, which
-        // is why this previously opened a silent, empty-looking
-        // pager. Flash a hint so the user knows the history lives in
-        // the app, not in spyc.
+        // Empty scrollback ⇒ a fresh process, or an app that keeps
+        // its own history (scroll region / virtual scroll). Flash a
+        // hint; still open the pager so search/yank of the visible
+        // screen works.
         let scrollback_rows = active.with_screen_mut(crate::ui::scrollback::scrollback_len);
         let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         if scrollback_rows == 0 {
-            self.state.flash_info(
-                "no scrollback captured — codex & inline TUIs keep their own history (use the app's scroll keys)",
-            );
+            self.state
+                .flash_info("no scrollback captured — this app keeps its own history");
         }
-        // Setting the pane's "is scrolling" flag keeps the existing
-        // visual cues alive (divider re-color, [SCROLL] tag, tab
-        // uppercase) — they read off `pane.is_scrolling()` and we
-        // want them to mean the same thing under the new path.
-        active.enter_scroll_mode();
+        self.mount_scroll_pager(format!(" {label} (history)"), lines);
+    }
 
-        let mut view =
-            crate::ui::pager::PagerView::new_styled(format!(" {label} (history)"), lines);
+    /// Mount a lower-pane scroll/transcript pager from pre-built
+    /// lines. Shared by the vt100-scrollback path and the codex
+    /// on-disk transcript path. Enters the active pane's scroll mode
+    /// (divider cues + key routing flip to the pager) and parks the
+    /// view at the bottom on first render.
+    fn mount_scroll_pager(&mut self, title: String, lines: Vec<ratatui::text::Line<'static>>) {
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            tabs.active_mut().enter_scroll_mode();
+        }
+        let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
         view.mount = crate::ui::pager::Mount::LowerPane;
         view.pane_scroll = true;
-        // Default off so the gutter doesn't make existing content
-        // jump horizontally when the pager opens. Toggle with `l`.
+        // Gutter off so existing content doesn't jump horizontally
+        // when the pager opens. Toggle with `l`.
         view.show_line_numbers = false;
         view.no_history = true;
-        // Wrap on: long lines in pane history (compiler errors,
-        // diff lines, log entries) should fold rather than truncate
-        // — the user can't scroll horizontally to see the rest, so
-        // truncation hides content. The pager's continuation rows
-        // share a blank gutter with line-numbers-on so toggling
-        // `l` doesn't break alignment.
+        // Wrap long lines (compiler errors, diffs, transcript turns)
+        // — no horizontal scroll, so truncation would hide content.
         view.wrap = true;
-        // Park the cursor at the bottom on first render — the user
-        // just pressed `^a-v`, the *recent* output is what they
-        // want to read. Setting `scroll` here without knowing the
-        // actual viewport height puts the last line at the *top*
-        // of the viewport (a one-frame jump). Defer to the
-        // renderer instead via `pending_scroll_to_bottom`; the
-        // App::render LowerPane branch sees the real rect, calls
-        // scroll_to_bottom(rect.height), and clears the flag — so
-        // the very first frame already shows the recent output.
-        //
-        // The "scroll back, tab away, tab back, see the same view"
-        // flow doesn't come through here at all — it goes through
-        // `swap_scrollback_pager_for_tab_switch`, which stashes the
-        // whole `PagerView` (with its `scroll`, search state, etc.)
-        // onto the source tab and restores it onto the destination
-        // tab without revisiting this function.
+        // Park at the bottom on first render via the deferred flag;
+        // the LowerPane render branch knows the real viewport height
+        // and scrolls there, avoiding a one-frame jump.
         view.pending_scroll_to_bottom.set(true);
         self.set_pager(view);
         self.state.pane_focused = true;

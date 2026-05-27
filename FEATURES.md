@@ -149,16 +149,19 @@ spyc's workflow: browse files above, talk to Claude below.
     can't recover it. This applies whether the app uses the
     alternate screen (vim, htop) *or* keeps its history in a
     DECSTBM scroll region in inline mode.
-  - **codex specifically does the latter even with
-    `--no-alt-screen`**: it confines its conversation history to
-    a scroll region above its viewport, so those lines never
-    scroll into the main buffer. `^a v` therefore can't capture
-    codex history in either mode — use codex's own scroll keys.
-    (An earlier note here recommended `--no-alt-screen` as a
-    fix; that was wrong and has been corrected.) spyc flashes a
-    "no scrollback captured" hint when this happens.
+  - **Agent-aware scrollback (codex):** rather than screen-scrape,
+    `^a v` on a codex pane reads codex's on-disk rollout
+    transcript (`~/.codex/sessions/.../rollout-*.jsonl`, the
+    source of truth, flushed per turn) and renders the actual
+    conversation — user turns, agent replies, tool calls — in the
+    pager. Works in both alt-screen and `--no-alt-screen` modes,
+    since it doesn't depend on terminal capture at all. Titled
+    `(transcript)` rather than `(history)`. If no rollout is found
+    yet (brand-new session), spyc flashes a hint.
   - **Claude Code** runs inline and lets its output scroll into
-    the main buffer, so `^a v` captures its history normally.
+    the main buffer, so `^a v` captures its history from the
+    terminal normally. (Claude also writes a JSONL transcript we
+    could read the same way — a future enhancement.)
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

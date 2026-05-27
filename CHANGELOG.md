@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Agent-aware scrollback: `^a v` on a codex pane shows the real
+  conversation.** Codex keeps its history in a DECSTBM scroll
+  region (both alt-screen and `--no-alt-screen`), so it can never
+  be screen-scraped from the terminal. Instead, `^a v` now reads
+  codex's on-disk rollout transcript
+  (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` — the source of
+  truth, flushed per turn), resolves the active pane's session by
+  cwd + spawn time, and renders the actual conversation (user
+  turns `❯`, agent replies, tool calls `⚙`) in the pager. Full
+  pager features apply — search, jump, visual-yank. Titled
+  `(transcript)`. This works in *both* codex modes since it
+  doesn't depend on terminal capture at all. Brand-new sessions
+  with no rollout yet flash a hint.
+  
+  Claude Code writes an equivalent JSONL transcript; wiring the
+  same view for Claude is a noted follow-up (it works via
+  terminal capture today, but the transcript would be cleaner).
+
 ### Fixed
 - **`^a v` on codex now explains why there's no scrollback (and
   the `--no-alt-screen` advice was wrong).** Codex confines its
