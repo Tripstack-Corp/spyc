@@ -7365,6 +7365,28 @@ impl App {
             return;
         }
 
+        // Claude transcript scrollback — opt-in (`[pane]
+        // claude_transcript_scrollback = true`). Claude's terminal
+        // output *does* scroll into the main buffer, so the default
+        // vt100 path works; this trades it for the structured
+        // on-disk conversation. When the toggle is off, or no JSONL
+        // resolves, fall through to the vt100 path below.
+        if self.state.config.pane.claude_transcript_scrollback
+            && Self::detect_agent_kind(&active_info.command) == AgentKind::Claude
+        {
+            let cwd = active_info.cwd.clone();
+            let spawn = active_info.spawn_epoch_secs;
+            if let Some(jsonl) = crate::state::claude_transcript::resolve_active_jsonl(&cwd, spawn)
+            {
+                let lines = crate::state::claude_transcript::render_transcript(&jsonl, &self.theme);
+                if !lines.is_empty() {
+                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
+                    return;
+                }
+            }
+            // No transcript resolved — fall through to vt100 capture.
+        }
+
         let tabs = self
             .pane_tabs
             .as_mut()

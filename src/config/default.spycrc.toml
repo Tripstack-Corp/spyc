@@ -21,8 +21,17 @@
 # Default command pre-filled into the `^a c` (new pane tab) prompt.
 # Falls back to "claude" if unset. The $SPYC_PANE_CMD env var still
 # overrides this value, so per-shell experimentation keeps working.
+#
+# `claude_transcript_scrollback` (default false): when true, `^a v` on
+# a Claude pane reads Claude's on-disk conversation JSONL and renders
+# the structured transcript instead of the default terminal-scrollback
+# capture. (codex always uses its transcript — terminal capture can't
+# see codex history — so this toggle only affects Claude.) Both work
+# for Claude; the transcript view is cleaner (no grid/repaint
+# artifacts), the terminal capture is verbatim.
 [pane]
 # default_command = "claude"
+# claude_transcript_scrollback = false
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behavior.

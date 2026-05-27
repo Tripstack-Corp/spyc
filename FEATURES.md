@@ -160,8 +160,11 @@ spyc's workflow: browse files above, talk to Claude below.
     yet (brand-new session), spyc flashes a hint.
   - **Claude Code** runs inline and lets its output scroll into
     the main buffer, so `^a v` captures its history from the
-    terminal normally. (Claude also writes a JSONL transcript we
-    could read the same way — a future enhancement.)
+    terminal normally (the default). Claude also writes a JSONL
+    transcript; set `[pane] claude_transcript_scrollback = true`
+    to make `^a v` render that structured transcript instead —
+    cleaner (no grid/repaint artifacts), at the cost of the
+    verbatim terminal capture. Off by default.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
