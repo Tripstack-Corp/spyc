@@ -34,6 +34,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Separately, `Pane::resize` floors its dimensions at 1×1 so the vt100
   emulator (whose `set_size` does an unconditional `rows - 1`) never
   underflows when the layout produces a 0-height pane rect.
+- **MCP clients no longer read stale picks/filter after a mutation.**
+  `navigate_to` / `set_filter` / `pick_files` / `clear_picks` marked
+  the context file dirty and let the debounced, event-driven writer
+  flush it — but that writer is suppressed during a typing burst, so a
+  follow-up `get_spyc_context` (which reads the on-disk file) could see
+  pre-mutation state for as long as the user kept typing. These
+  agent-initiated mutations now write the context file synchronously.
+  Ordinary edits (cursor moves, browsing) stay debounced.
 
 ### Added
 - **Opt-in Claude transcript scrollback.** `[pane]

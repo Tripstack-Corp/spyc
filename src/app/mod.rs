@@ -1293,9 +1293,13 @@ impl App {
                             "[mcp] navigated to {}",
                             self.state.listing.dir.display()
                         ));
-                        // Force context write so get_spyc_context reflects
-                        // the new state immediately.
-                        self.context_dirty = true;
+                        // Write synchronously: an MCP client commonly
+                        // calls get_spyc_context right after a mutation,
+                        // and that reads the on-disk context file. The
+                        // debounced gate can lag seconds behind under a
+                        // typing burst, so the follow-up read would see
+                        // stale state. (Non-MCP edits stay debounced.)
+                        self.write_context();
                         let ctx = self.snapshot_context();
                         let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
                         McpResponse::Ok { message: json }
@@ -1315,7 +1319,7 @@ impl App {
                 let count = self.state.rows.len();
                 let label = self.state.temp_filter.as_deref().unwrap_or("(cleared)");
                 self.state.flash_info(format!("[mcp] filter: {label}"));
-                self.context_dirty = true;
+                self.write_context();
                 McpResponse::Ok {
                     message: format!("filter applied, {count} items visible"),
                 }
@@ -1344,7 +1348,7 @@ impl App {
                 }
                 self.state
                     .flash_info(format!("[mcp] picked {total} file(s)"));
-                self.context_dirty = true;
+                self.write_context();
                 McpResponse::Ok {
                     message: format!("picked {total} file(s), {} total", self.state.picks.len()),
                 }
@@ -1354,7 +1358,7 @@ impl App {
                 self.state.picks.clear();
                 self.state.list_generation = self.state.list_generation.wrapping_add(1);
                 self.state.flash_info("[mcp] picks cleared");
-                self.context_dirty = true;
+                self.write_context();
                 McpResponse::Ok {
                     message: format!("cleared {count} pick(s)"),
                 }
