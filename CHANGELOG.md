@@ -39,6 +39,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   terminal capture today, but the transcript would be cleaner).
 
 ### Fixed
+- **Git status no longer gets stuck stale on a busy tree.** The
+  background git-status worker captured its cache key (`.git/index`
+  + `HEAD` mtimes) *after* running `git status`, so an index write
+  racing that window stored old status under a new mtime — and the
+  1 Hz safety poll then matched the same mtime and short-circuited
+  forever, hiding staged/working changes until an unrelated later
+  write happened to move the mtime again. The worker now stats the
+  mtimes before reading status (validate-key-first), so a racing
+  write forces one redundant refresh instead of a permanent stale
+  snapshot.
 - **`^a v` on codex now explains why there's no scrollback (and
   the `--no-alt-screen` advice was wrong).** Codex confines its
   conversation history to a DECSTBM scroll region above its

@@ -933,7 +933,14 @@ impl App {
         let (git_res_tx, git_res_rx) = std::sync::mpsc::channel::<state::GitWorkerResult>();
         std::thread::spawn(move || {
             while let Ok(req) = git_req_rx.recv() {
-                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical, req.huge);
+                // Stat the cache-key mtimes BEFORE reading status. An
+                // index write racing this read then lands in the *next*
+                // poll's diff: an older key paired with newer status is
+                // safe (forces one redundant refresh), whereas the
+                // reverse order — newer key, older status — would make
+                // the 1 Hz poll short-circuit on a stale snapshot
+                // forever, hiding staged/working changes until an
+                // unrelated later write moved the mtime.
                 let (index_mtime, head_mtime) = crate::sysinfo::resolve_gitdir(&req.repo_root)
                     .map_or((None, None), |gd| {
                         let i = std::fs::metadata(gd.join("index"))
@@ -944,6 +951,7 @@ impl App {
                             .ok();
                         (i, h)
                     });
+                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical, req.huge);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
