@@ -5,6 +5,7 @@ mod clipboard;
 mod config;
 mod context;
 mod debug_log;
+mod envset;
 mod fs;
 mod key_trace;
 mod keymap;

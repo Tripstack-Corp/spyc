@@ -535,8 +535,11 @@ impl PagerHistory {
 }
 
 /// TTL cache for the active pane's status-line session short-id.
-/// Keyed by the active pane's `(kind, cwd, spawn_epoch_secs)` so
-/// switching tabs or chdir'ing inside a pane invalidates correctly.
+/// Keyed by the active pane's `(kind, cwd, spawn_epoch_secs)` — the
+/// *spawn-time* cwd from `TabInfo`, which is immutable, so switching
+/// tabs re-keys but a chdir *inside* a pane does not. Anything the key
+/// doesn't capture (e.g. a custom session title) is bounded by the
+/// `AGENT_STATUS_TTL` re-resolve.
 struct AgentStatusCache {
     computed_at: std::time::Instant,
     kind: AgentKind,
@@ -7173,8 +7176,7 @@ impl App {
         // Precedence: $SPYC_PANE_CMD > [pane] default_command in
         // .spycrc.toml > "claude" fallback. Env var wins so a user
         // can override on the fly per shell without editing config.
-        let default_cmd = std::env::var("SPYC_PANE_CMD")
-            .ok()
+        let default_cmd = crate::envset::var("SPYC_PANE_CMD")
             .or_else(|| self.state.config.pane.default_command.clone())
             .unwrap_or_else(|| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");

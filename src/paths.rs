@@ -16,7 +16,7 @@ use std::path::PathBuf;
 pub fn expand(input: &str) -> PathBuf {
     let home = std::env::var_os("HOME");
     let home = home.as_ref().map(|h| h.to_string_lossy());
-    expand_with(input, home.as_deref(), |name| std::env::var(name).ok())
+    expand_with(input, home.as_deref(), crate::envset::var)
 }
 
 /// Pure variant of `expand` that takes the HOME value and an env

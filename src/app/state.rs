@@ -1307,7 +1307,7 @@ impl AppState {
                 self.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmd, ";"));
             }
             Action::StartShell => {
-                let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+                let sh = crate::envset::var("SHELL").unwrap_or_else(|| "/bin/sh".into());
                 return ApplyResult::Post(PostAction::Spawn {
                     program: sh,
                     args: vec![],
@@ -1923,11 +1923,12 @@ impl AppState {
                     if name.is_empty() {
                         self.flash_error("setenv: missing variable name");
                     } else {
-                        // SAFETY: single-threaded TUI; no other thread is
-                        // reading env concurrently.
-                        unsafe {
-                            std::env::set_var(name, value);
-                        }
+                        // Record a runtime override instead of mutating the
+                        // process env: `std::env::set_var` is unsound now
+                        // that worker threads may read env concurrently.
+                        // `envset` layers this over the real environment and
+                        // is merged into every child spawn. See `crate::envset`.
+                        crate::envset::set(name, value);
                         self.flash_info(format!("setenv {name}={value}"));
                     }
                 } else if !line.is_empty() {
@@ -2859,8 +2860,12 @@ mod tests {
         let mut s = test_state();
         s.dispatch_prompt(&PromptKind::SetEnv, "TEST_SPYC_VAR=hello");
         assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Info));
-        // Verify env was set
-        assert_eq!(std::env::var("TEST_SPYC_VAR").unwrap(), "hello");
+        // Verify the override was recorded (in the envset store, not the
+        // process env — `:s` no longer mutates `environ`).
+        assert_eq!(
+            crate::envset::var("TEST_SPYC_VAR").as_deref(),
+            Some("hello")
+        );
     }
 
     #[test]

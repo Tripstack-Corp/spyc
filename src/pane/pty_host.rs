@@ -127,6 +127,13 @@ impl PtyHost {
         let mut cmd = CommandBuilder::new(&shell);
         cmd.args(shell_args.iter().map(String::as_str));
         cmd.cwd(spec.cwd);
+        // Runtime `:s` overrides (formerly applied by mutating the
+        // process env, which children inherited). Applied before the
+        // caller's env so spec keys (TERM/COLUMNS/LINES/…) still win on
+        // collision, matching the old inherit-then-override order.
+        for (k, v) in crate::envset::overrides() {
+            cmd.env(k, v);
+        }
         cmd.env("TERM", spec.term);
         cmd.env("COLUMNS", spec.cols.to_string());
         cmd.env("LINES", spec.rows.to_string());

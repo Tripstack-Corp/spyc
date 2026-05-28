@@ -5,6 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **`:s` (setenv) no longer mutates the process environment.** It used
+  `unsafe { std::env::set_var }`, which is undefined behavior now that
+  spyc runs worker threads (per-pane vt100 parsers, the git-status
+  worker that itself spawns `git`) — a concurrent `getenv`/`setenv` is
+  UB. Overrides are now kept in a thread-safe store (`crate::envset`)
+  that layers over the real environment: spyc's own reads of
+  user-facing vars (`$EDITOR`/`$VISUAL`, `$PAGER`, `$SHELL`,
+  `$SPYC_PANE_CMD`, `$VAR` path expansion) consult it, and every child
+  spawned through `PtyHost` (panes, `!`/`;` commands) gets the
+  overrides merged into its environment — so behavior is unchanged, the
+  last `unsafe` env mutation is gone.
+
 ### Fixed
 - **A panicking vt100 parser no longer crashes the whole session.**
   The pane parser runs on a worker thread inside `catch_unwind`; the

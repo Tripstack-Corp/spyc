@@ -15,10 +15,9 @@ use std::path::Path;
 
 /// $EDITOR, fall back to $VISUAL, fall back to `vi`.
 pub fn resolve_editor() -> Vec<String> {
-    let raw = std::env::var("VISUAL")
-        .ok()
+    let raw = crate::envset::var("VISUAL")
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.is_empty()))
+        .or_else(|| crate::envset::var("EDITOR").filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "vi".to_string());
     split_command(&raw)
 }
@@ -29,8 +28,7 @@ pub fn resolve_editor() -> Vec<String> {
 /// line-folding-on-demand. Spyc's in-app pager remains the default
 /// for normal viewing; `p` is the escape hatch.
 pub fn resolve_pager() -> Vec<String> {
-    let raw = std::env::var("PAGER")
-        .ok()
+    let raw = crate::envset::var("PAGER")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "less".to_string());
     split_command(&raw)
@@ -59,7 +57,7 @@ fn split_command(raw: &str) -> Vec<String> {
 /// (and dash warns about it), so we only set `-i` for shells that
 /// actually source a startup file interactively.
 pub fn user_shell_invocation(cmd: &str) -> (String, Vec<String>) {
-    let shell = std::env::var("SHELL").ok();
+    let shell = crate::envset::var("SHELL");
     user_shell_invocation_for(shell.as_deref(), cmd)
 }
 
