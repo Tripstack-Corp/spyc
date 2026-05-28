@@ -1465,6 +1465,12 @@ impl App {
         // not yet committed). Waiting for quiet ensures we only
         // sample git after the storm has passed.
         let mut last_event_at: Option<std::time::Instant> = None;
+        // First listing event since the last refresh — fixed when the
+        // window opens, NOT bumped on each subsequent event. Lets the
+        // trailing-debounce fire after `max_refresh_defer` of continuous
+        // activity (cargo / claude / agent writes saturating the
+        // watcher) instead of starving indefinitely. Cleared on refresh.
+        let mut first_event_after_refresh: Option<std::time::Instant> = None;
 
         // Typing-burst window: after any keypress, briefly tighten the
         // event-loop poll cadence to 16 ms so the *first* PTY echo
@@ -1865,7 +1871,15 @@ impl App {
                             needs_reload = true;
                         }
                         if listing {
-                            last_event_at = Some(std::time::Instant::now());
+                            let now = std::time::Instant::now();
+                            // Anchor the max-defer window at the FIRST
+                            // event of this busy stretch (don't bump on
+                            // subsequent ones, or continuous activity
+                            // starves the refresh).
+                            if first_event_after_refresh.is_none() {
+                                first_event_after_refresh = Some(now);
+                            }
+                            last_event_at = Some(now);
                         }
                     }
                 }
@@ -1884,22 +1898,33 @@ impl App {
             } else {
                 Duration::from_millis(500)
             };
-            // Always rate-limit at least `refresh_quiet` apart from previous refresh.
-            if let Some(at) = last_event_at {
-                let now = std::time::Instant::now();
-                if now.duration_since(at) >= refresh_quiet
-                    && last_refresh.elapsed() >= refresh_quiet
-                {
-                    last_event_at = None;
-                    self.state.refresh_listing();
-                    last_refresh = now;
-                    needs_draw = true;
-                    draw_reason = 3;
-                    // Listing changed via fs watcher (not a keystroke
-                    // path) — `cursor_file` and `git_branch` in the
-                    // context may have shifted.
-                    self.context_dirty = true;
-                }
+            // Fire when the watcher quiets down OR the max-defer cap
+            // bites — see `should_fire_refresh`. Continuous fs activity
+            // (cargo writing `target/`, claude streaming files) used to
+            // keep bumping `last_event_at` and starve the trailing
+            // debounce indefinitely; the cap forces a refresh at least
+            // every `max_refresh_defer` so per-file markers can't go
+            // stale forever during a busy stretch.
+            let max_refresh_defer = refresh_quiet * 2;
+            let now = std::time::Instant::now();
+            if should_fire_refresh(
+                last_event_at,
+                last_refresh,
+                first_event_after_refresh,
+                now,
+                refresh_quiet,
+                max_refresh_defer,
+            ) {
+                last_event_at = None;
+                first_event_after_refresh = None;
+                self.state.refresh_listing();
+                last_refresh = now;
+                needs_draw = true;
+                draw_reason = 3;
+                // Listing changed via fs watcher (not a keystroke
+                // path) — `cursor_file` and `git_branch` in the
+                // context may have shifted.
+                self.context_dirty = true;
             }
             // 1Hz safety net for git state — converges within a second
             // when FSEvents misses an event (commits replace `.git/index`
@@ -10793,6 +10818,34 @@ fn is_post_chord_bounce(
         && !resolver_pending
 }
 
+/// Decide whether the watcher-driven `refresh_listing` should fire
+/// this loop iteration.
+///
+/// A pure trailing-edge debounce (`now - last_event_at >= refresh_quiet`)
+/// gets starved under continuous fs activity — cargo writing into
+/// `target/`, claude/agent file streams, IDE autosave bursts — because
+/// every new event resets `last_event_at` and the quiet window never
+/// arrives. So we ALSO cap the wait at `max_defer` from the *first*
+/// event of the current busy stretch, ensuring per-file markers can't
+/// stay stale forever just because the FS won't go quiet.
+fn should_fire_refresh(
+    last_event_at: Option<std::time::Instant>,
+    last_refresh: std::time::Instant,
+    first_event_after_refresh: Option<std::time::Instant>,
+    now: std::time::Instant,
+    refresh_quiet: Duration,
+    max_defer: Duration,
+) -> bool {
+    let Some(at) = last_event_at else {
+        return false;
+    };
+    let trailing_quiet = now.duration_since(at) >= refresh_quiet;
+    let max_wait_exceeded =
+        first_event_after_refresh.is_some_and(|first| now.duration_since(first) >= max_defer);
+    let rate_ok = now.duration_since(last_refresh) >= refresh_quiet;
+    (trailing_quiet || max_wait_exceeded) && rate_ok
+}
+
 const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
     resolver_pending: bool,
@@ -11365,6 +11418,109 @@ fn untracked_diff_bytes(cwd: &std::path::Path, paths: &[String]) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod refresh_debounce_tests {
+    use super::should_fire_refresh;
+    use std::time::{Duration, Instant};
+
+    const QUIET: Duration = Duration::from_millis(500);
+    const MAX_DEFER: Duration = Duration::from_secs(1);
+
+    fn at(base: Instant, ms: u64) -> Instant {
+        base + Duration::from_millis(ms)
+    }
+
+    #[test]
+    fn no_pending_event_never_fires() {
+        let base = Instant::now();
+        assert!(!should_fire_refresh(
+            None,
+            base,
+            None,
+            at(base, 5_000),
+            QUIET,
+            MAX_DEFER
+        ));
+    }
+
+    #[test]
+    fn fires_after_trailing_quiet() {
+        let base = Instant::now();
+        // Last event at t=0, now at t=600 ms → 600 ms of quiet → fire.
+        assert!(should_fire_refresh(
+            Some(base),
+            base,
+            Some(base),
+            at(base, 600),
+            QUIET,
+            MAX_DEFER
+        ));
+    }
+
+    #[test]
+    fn waits_during_trailing_quiet_window() {
+        let base = Instant::now();
+        // Last event at t=400, now at t=500 → only 100 ms of quiet → wait.
+        assert!(!should_fire_refresh(
+            Some(at(base, 400)),
+            base,
+            Some(base),
+            at(base, 500),
+            QUIET,
+            MAX_DEFER
+        ));
+    }
+
+    #[test]
+    fn max_defer_breaks_starvation_under_continuous_activity() {
+        // The regression: events keep arriving so trailing-quiet is
+        // never met, but the first-event-of-this-stretch was >= max_defer
+        // ago → fire anyway so markers don't stay stale forever.
+        let base = Instant::now();
+        let still_active = at(base, 1_100); // last event 100 ms ago — NOT quiet
+        let now = at(base, 1_200);
+        let first_event = base; // 1.2 s ago, > MAX_DEFER (1 s)
+        assert!(should_fire_refresh(
+            Some(still_active),
+            base,
+            Some(first_event),
+            now,
+            QUIET,
+            MAX_DEFER
+        ));
+    }
+
+    #[test]
+    fn rate_limit_blocks_back_to_back_fires() {
+        let base = Instant::now();
+        // Trailing quiet met but last_refresh was only 100 ms ago → wait.
+        assert!(!should_fire_refresh(
+            Some(base),
+            at(base, 400), // last_refresh 100 ms before now
+            Some(base),
+            at(base, 500),
+            QUIET,
+            MAX_DEFER
+        ));
+    }
+
+    #[test]
+    fn rate_limit_also_gates_max_defer_path() {
+        // Even when max-defer would fire, we still respect the rate
+        // limit so we never refresh twice within `refresh_quiet`.
+        let base = Instant::now();
+        let now = at(base, 1_200);
+        assert!(!should_fire_refresh(
+            Some(at(base, 1_100)), // not quiet
+            at(base, 900),         // last_refresh 300 ms ago — too recent
+            Some(base),            // first_event 1.2 s ago — max_defer hit
+            now,
+            QUIET,
+            MAX_DEFER
+        ));
+    }
 }
 
 #[cfg(test)]

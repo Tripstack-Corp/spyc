@@ -6,6 +6,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Fixed
+- **Git status markers no longer stall during sustained fs activity.**
+  The watcher-driven `refresh_listing` used a pure trailing-edge
+  debounce (`now - last_event_at >= refresh_quiet`) with no max-wait
+  cap. Continuous fs writes — cargo emitting to `target/`, claude
+  streaming files, IDE autosave bursts — kept bumping `last_event_at`
+  to "now," the quiet window never arrived, and per-file markers
+  could stay stale for as long as the activity lasted. The decision
+  now lives in a pure `should_fire_refresh` predicate that fires when
+  *either* the trailing-quiet window OR a `max_defer` (`refresh_quiet *
+  2` — 1 s small, 6 s huge) cap elapses since the *first* event of
+  the current busy stretch.
+
+  Added an integration-style test
+  (`refresh_listing_picks_up_edit_and_clears_after_commit`) that
+  drives the real refresh pipeline against a temp git repo so a
+  future regression in any of the layers
+  (`refresh_listing` → `git_file_statuses_cached` → raw porcelain
+  parse → `rebuild_rows`) shows up here. Plus six unit tests for the
+  predicate itself.
+
+### Fixed
 - **Rapid repeated `^a-j` / `^a-k` no longer drops every chord after
   the first.** A post-chord "bounce" guard suppresses a stray same-key
   Press/Repeat for ~60 ms after a focus-switch chord (so a held key

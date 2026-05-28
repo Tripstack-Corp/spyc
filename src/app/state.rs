@@ -3332,4 +3332,79 @@ mod tests {
             }
         }
     }
+
+    /// End-to-end-ish coverage of the git refresh pipeline. Edit a
+    /// tracked file → `refresh_listing` surfaces the `M` marker; commit
+    /// it → the next refresh clears it. Drives the real `refresh_listing`
+    /// → `git_file_statuses_cached` → `git status --porcelain` path on a
+    /// throwaway temp repo, so a regression in any of those (or in the
+    /// raw-cache / mtime-cache / row-rebuild plumbing) shows up here.
+    /// `git_worker_tx` is unset, so the sync spawn path runs — no
+    /// timing dependency, no real fs watcher.
+    #[test]
+    fn refresh_listing_picks_up_edit_and_clears_after_commit() {
+        // Canonicalize so macOS `/var` → `/private/var` doesn't trip the
+        // repo_root match inside the refresh path.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+
+        let run_git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@x")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@x")
+                // Suppress any user-level .gitconfig so the test is
+                // hermetic on machines with unusual defaults.
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("spawn git");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        run_git(&["init", "-q", "--initial-branch=main"]);
+        std::fs::write(root.join("file.txt"), "v1\n").unwrap();
+        run_git(&["add", "file.txt"]);
+        run_git(&["commit", "-q", "-m", "v1"]);
+
+        let mut s = test_state();
+        s.listing.dir = root.clone();
+        s.start_dir = root.clone();
+        s.update_huge_tree(&root);
+        s.git_info = s.compute_git_info_fast();
+
+        // Clean repo: refresh sees no modifications.
+        s.refresh_listing();
+        assert!(
+            s.git_files.is_empty(),
+            "clean repo: no markers (got {:?})",
+            s.git_files
+        );
+
+        // Working-tree edit → `M file.txt` should surface on next refresh.
+        std::fs::write(root.join("file.txt"), "v2\n").unwrap();
+        // Bypass the in-state 1 s invalidation throttle so this call
+        // re-fetches instead of reusing the cached clean snapshot.
+        s.last_git_invalidation = None;
+        s.refresh_listing();
+        assert!(
+            s.git_files.contains_key("file.txt"),
+            "expected M marker for file.txt after edit; got {:?}",
+            s.git_files
+        );
+
+        // Commit it → marker should clear (`.git/index` mtime moves, so
+        // the mtime-cache invalidates on its own).
+        run_git(&["add", "file.txt"]);
+        run_git(&["commit", "-q", "-m", "v2"]);
+        s.last_git_invalidation = None;
+        s.refresh_listing();
+        assert!(
+            !s.git_files.contains_key("file.txt"),
+            "expected marker to clear after commit; got {:?}",
+            s.git_files
+        );
+    }
 }
