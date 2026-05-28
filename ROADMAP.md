@@ -568,8 +568,14 @@ one of the tracks above when picked up.
   `ShellCmdCaptured` for `!`/`;`). Same generalization unlocks
   per-bucket `^D` deletes, sync_editor, etc. Estimated ~150
   LOC of careful refactor inside the !? popup machinery.
-- **Drag and drop** -- files from the desktop into spyc via OSC 52 or
-  path paste.
+- **Drag and drop** -- files between spyc and other apps. Native path
+  is the OSC 72 DnD protocol (Yazi shipped this in PR #4005, 2026-05-28);
+  kitty 0.47.0+ is the only terminal that implements it today, so defer
+  the native impl until ≥1 more terminal (iTerm2/WezTerm/Ghostty) adopts
+  OSC 72. The path-paste fallback (paste a filesystem path into the
+  prompt or `J` and have spyc resolve it) is cheap and independent --
+  ship that first. See `docs/YAZI_COMPETITIVE_REVIEW.md` for the broader
+  framing.
 - **Page scroll overlap** in the pager -- keep 2-3 lines of previous
   page visible (`_scroll_skip_page_fraction`).
 - **Auto-scroll reading mode** -- continuous scroll at configurable
