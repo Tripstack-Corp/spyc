@@ -3612,19 +3612,21 @@ impl App {
         // active, so it gets forwarded to the pane as raw input.
         // 60 ms covers system-key-repeat (~30-50 ms) and kitty-keyboard
         // Repeat events without affecting deliberate double-taps.
-        if let Some((at, code)) = self.focus_chord_completed {
-            let within_window = at.elapsed() < Duration::from_millis(60);
-            if within_window
-                && key.code == code
-                && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                && key.modifiers.is_empty()
-            {
-                crate::key_trace::log("  swallowed (post-chord bounce)");
-                return Ok(PostAction::None);
-            }
-            if !within_window {
-                self.focus_chord_completed = None;
-            }
+        if is_post_chord_bounce(
+            self.focus_chord_completed,
+            key,
+            self.state.resolver.is_pending(),
+        ) {
+            crate::key_trace::log("  swallowed (post-chord bounce)");
+            return Ok(PostAction::None);
+        }
+        // Expire the stamp once its window has passed so it can't
+        // suppress a deliberate same-key press later.
+        if self
+            .focus_chord_completed
+            .is_some_and(|(at, _)| at.elapsed() >= POST_CHORD_BOUNCE_WINDOW)
+        {
+            self.focus_chord_completed = None;
         }
 
         // Any keypress clears a lingering flash message.
@@ -10760,6 +10762,37 @@ fn place_pty_cursor_from_screen(
 // as the widget render (single mutex window). See
 // `place_pty_cursor_from_screen` for the cursor logic.
 
+/// How long after a focus-switch chord (`^a-j` / `^a-k`) a same-key
+/// Press/Repeat is treated as a stray bounce and dropped. Covers
+/// system key-repeat (~30-50 ms) and kitty-keyboard Repeat events.
+const POST_CHORD_BOUNCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Whether `key` is a stray bounce of a just-completed focus-switch
+/// chord that should be swallowed (rather than leaked to the now-
+/// focused pane child).
+///
+/// `resolver_pending` is the resolver's state *before* this key is
+/// fed: when a chord is already mid-flight (the user pressed `^a`
+/// again), `key` is a legitimate chord completion, not a bounce — so
+/// we must not swallow it. Without this clause, rapid repeated
+/// `^a-j` / `^a-k` lost every chord after the first (the second `j`/`k`
+/// landed inside the bounce window and was dropped before reaching the
+/// resolver).
+fn is_post_chord_bounce(
+    stamp: Option<(std::time::Instant, KeyCode)>,
+    key: KeyEvent,
+    resolver_pending: bool,
+) -> bool {
+    let Some((at, code)) = stamp else {
+        return false;
+    };
+    at.elapsed() < POST_CHORD_BOUNCE_WINDOW
+        && key.code == code
+        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        && key.modifiers.is_empty()
+        && !resolver_pending
+}
+
 const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
     resolver_pending: bool,
@@ -11332,6 +11365,61 @@ fn untracked_diff_bytes(cwd: &std::path::Path, paths: &[String]) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod post_chord_bounce_tests {
+    use super::{POST_CHORD_BOUNCE_WINDOW, is_post_chord_bounce};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::time::{Duration, Instant};
+
+    fn press(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn swallows_same_key_bounce_in_window_when_idle() {
+        // `^a-j` just completed; a stray `j` within the window with the
+        // resolver idle is a bounce → swallow.
+        let stamp = Some((Instant::now(), KeyCode::Char('j')));
+        assert!(is_post_chord_bounce(stamp, press('j'), false));
+    }
+
+    #[test]
+    fn does_not_swallow_when_resolver_pending() {
+        // The regression: a fresh `^a` made the resolver pending, so the
+        // incoming `j` completes a NEW chord and must reach the resolver.
+        let stamp = Some((Instant::now(), KeyCode::Char('j')));
+        assert!(!is_post_chord_bounce(stamp, press('j'), true));
+    }
+
+    #[test]
+    fn does_not_swallow_different_key() {
+        let stamp = Some((Instant::now(), KeyCode::Char('j')));
+        assert!(!is_post_chord_bounce(stamp, press('k'), false));
+    }
+
+    #[test]
+    fn does_not_swallow_with_modifiers() {
+        // A second `^a` (Ctrl-A) must never be swallowed as a bounce.
+        let stamp = Some((Instant::now(), KeyCode::Char('a')));
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        assert!(!is_post_chord_bounce(stamp, ctrl_a, false));
+    }
+
+    #[test]
+    fn does_not_swallow_after_window_expires() {
+        let past = Instant::now()
+            .checked_sub(POST_CHORD_BOUNCE_WINDOW + Duration::from_millis(40))
+            .unwrap();
+        let stamp = Some((past, KeyCode::Char('j')));
+        assert!(!is_post_chord_bounce(stamp, press('j'), false));
+    }
+
+    #[test]
+    fn no_stamp_never_swallows() {
+        assert!(!is_post_chord_bounce(None, press('j'), false));
+    }
 }
 
 #[cfg(test)]

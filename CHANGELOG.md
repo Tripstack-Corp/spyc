@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Rapid repeated `^a-j` / `^a-k` no longer drops every chord after
+  the first.** A post-chord "bounce" guard suppresses a stray same-key
+  Press/Repeat for ~60 ms after a focus-switch chord (so a held key
+  doesn't leak a `j`/`k` byte into the now-focused pane). But it ran
+  before the chord resolver and didn't account for a *fresh* `^a`
+  already being mid-chord — so a quick second `^a-j` had its completing
+  `j` swallowed inside the bounce window. The guard now stands down
+  while the resolver is pending: a key mid-chord is a legitimate
+  completion, not a bounce.
+
 ### Changed
 - **`:s` (setenv) no longer mutates the process environment.** It used
   `unsafe { std::env::set_var }`, which is undefined behavior now that
