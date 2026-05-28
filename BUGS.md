@@ -1,4 +1,23 @@
 ### SMALL ###
+- I would like ^a-^a to jump to the previous pane
+- pasting into the pager for a search / the pasted content goes to the lower
+  pane instead; do we need a better model in general for what activity is in
+  "focus" - this has come up before as an issue; let's consider a refactor?
+- when in V editor in the top pane, ^a-c will start to launch a new pane; this
+  is confusing when you quit out of EDITOR and see that a command input for a
+  new pane is started
+- I would like to include an alias of spyc that would just launch the markdown
+  pager standalone; what would that look like? spymd? it could be a useful side
+  product
+- in the visual mode of commandline history '?' should trigger the view of the
+  history list; not only just on start with: '!?'
+- ^\ sig-quit (?) should be respected - I was able to wedge my spyc session
+  somehow and there was no way out other than in another shell with kill
+- need to support ollama session recovery ... not sure how / if that will work
+- being able to run a follow-up command in the same pager buffer would be nice
+  as an option; maybe we could support a pass the previous history into stdin
+  of the next command in some nice way?
+- 
 - `!` percent-expansion eats `printf`-style format strings. Repro:
   `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
   `<selection-path>d: <selection-path>s|EOL` — `expand_percent`
@@ -30,8 +49,6 @@
   can't currently remove built-in bindings cleanly. Wire it
   through so `unmap <KEY>` actually unbinds.
 - should be able to reorder tabs?
-- support drag and drop features - give multiple options to the user e.g. send
-  to lower pane as image, create new file (auto type detect), etc.
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
@@ -57,8 +74,6 @@
   half - we need a stronger top line/bottom line marker for this
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
-- cwd should update when we quit based on where spyc is navigated to (may
-  already be mentioned in roadmap?)
 - change in git state while viewing a subdirectory did not automatically get
   updated; need to try and reproduce
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
