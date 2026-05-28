@@ -140,6 +140,17 @@ priority -- nice to have, not blocking v2.0.
   Scoped conservatively -- the common case (local NVMe, <1K entries)
   stays fast; the spinner only appears when the read actually takes
   long enough to notice (~50ms threshold).
+- **Cwd export on quit** (Yazi-inspired; promoted from Additional
+  Ideas based on BUGS.md). Yazi's `q` writes the cursor's cwd to a
+  path the parent shell wrapper sources, so the shell follows. Add
+  a `--cwd-file <path>` flag (or `$SPYC_CWD_FILE` env var); on
+  quit, write the file-list cwd to it. Document a tiny zsh/bash
+  function in INSTALL.md that wraps `spyc` and `cd`s the parent
+  shell on exit. ~30 lines of code + doc snippet. Day-driver
+  fundamentals -- `q` becomes "go here in my shell" instead of
+  "back to where I started" for users who use spyc as their
+  primary navigator. `Q` keeps the no-export semantics so users
+  who *don't* want this can opt out per-quit.
 
 ## Thesis -- deepening the agent integration
 
@@ -574,8 +585,17 @@ one of the tracks above when picked up.
   the native impl until ≥1 more terminal (iTerm2/WezTerm/Ghostty) adopts
   OSC 72. The path-paste fallback (paste a filesystem path into the
   prompt or `J` and have spyc resolve it) is cheap and independent --
-  ship that first. See `docs/YAZI_COMPETITIVE_REVIEW.md` for the broader
-  framing.
+  ship that first.
+
+  On receive, present a drop-action picker rather than a single
+  hardcoded behaviour. Candidate actions: (a) send to lower pane as
+  raw bytes or as an image attachment when the agent supports it,
+  (b) create a new file in cwd with auto-type-detect from the
+  payload, (c) add to picks or inventory, (d) open in the pager.
+  The "send to lower pane as image" arm is the spyc-shaped one Yazi
+  doesn't have -- DnD becomes a routing step into the agent
+  conversation rather than just a file copy. See
+  `docs/YAZI_COMPETITIVE_REVIEW.md` for the broader framing.
 - **Page scroll overlap** in the pager -- keep 2-3 lines of previous
   page visible (`_scroll_skip_page_fraction`).
 - **Auto-scroll reading mode** -- continuous scroll at configurable
@@ -610,16 +630,6 @@ one of the tracks above when picked up.
   diff-style error pager. No persistent UI surface -- just an
   editor round-trip -- so it doesn't bloat the keymap. Pairs
   naturally with our existing pick model (`t`/`T`).
-- **Cwd export on quit** (Yazi-inspired). Yazi's `q` writes the
-  cursor's cwd to a path the parent shell wrapper sources, so the
-  shell follows. Add a `--cwd-file <path>` flag (or
-  `$SPYC_CWD_FILE` env var); on quit, write the file-list cwd to
-  it. Document a tiny zsh/bash function in INSTALL.md that wraps
-  `spyc` and `cd`s the parent shell on exit. ~30 lines of code +
-  doc snippet. Nice UX win for users who use spyc as their primary
-  navigator -- `q` becomes "go here in my shell" instead of "back
-  to where I started." `Q` keeps the no-export semantics so users
-  who *don't* want this can opt out per-quit.
 - **Visual-mode range-pick** (`v`) (Yazi-inspired). Today picks
   are toggle-per-row (`t`) or by glob (`T`). Add a vi-flavored
   visual mode: `v` starts a range from the cursor, motion keys

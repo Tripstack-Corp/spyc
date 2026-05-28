@@ -42,7 +42,7 @@ Merged 2026-05-28 (today). Implements end-to-end drag-and-drop via
 
 ### Implication for spyc
 
-`ROADMAP.md:571` already lists "Drag and drop — files from the desktop
+`ROADMAP.md` already lists "Drag and drop — files from the desktop
 into spyc via OSC 52 or path paste." That entry predates the OSC 72
 spec landing in kitty and is now stale in two ways:
 
@@ -62,31 +62,32 @@ done independently and is cheap.
 ## Feature-by-feature standing
 
 Columns: **Yazi** = ships it; **spyc** = ships it / on roadmap / out of
-scope. Where roadmapped, the line number is cited.
+scope. Roadmap pointers cite the file only — `ROADMAP.md` gets edited
+daily and line numbers go stale fast.
 
 ### Core capabilities
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Async I/O, multithreaded scheduler     | Yes     | Background loading roadmapped (`ROADMAP.md:124`) |
+| Async I/O, multithreaded scheduler     | Yes     | Background loading roadmapped (`ROADMAP.md`) |
 | Image preview (kitty/iTerm2/sixel)     | Yes     | Out of scope today; not roadmapped     |
-| Code preview / syntax highlighting     | Yes     | Yes (tree-sitter, `ROADMAP.md:527` shipped) |
-| Markdown rendered preview              | No (?)  | Yes (v1.26.0, `ROADMAP.md:655`)        |
+| Code preview / syntax highlighting     | Yes     | Yes (tree-sitter, shipped v1.50.61) |
+| Markdown rendered preview              | No (?)  | Yes (shipped v1.26.0)              |
 | Multi-tab                              | Yes     | Yes                                    |
 | Trash bin                              | Yes (single tier) | Yes — two-tier: in-app **graveyard** (compressed, undo-able from spyc) cascading to system trash (`src/state/graveyard.rs`) |
 | Archive extraction                     | Yes     | Not implemented                        |
-| Bulk rename via `$EDITOR`              | Yes     | Roadmap (`ROADMAP.md:596`)             |
-| Visual-mode range select               | Yes     | Roadmap (`ROADMAP.md:617`)             |
-| Cwd export on quit                     | Yes (`y` wrapper) | Roadmap (`ROADMAP.md:607`)   |
-| Drag and drop (OSC 72)                 | Yes (PR #4005) | Roadmap, stale (`ROADMAP.md:571`) — see above |
+| Bulk rename via `$EDITOR`              | Yes     | Roadmap (`ROADMAP.md`)             |
+| Visual-mode range select               | Yes     | Roadmap (`ROADMAP.md`)             |
+| Cwd export on quit                     | Yes (`y` wrapper) | Roadmap, Foundations queue (`ROADMAP.md`) |
+| Drag and drop (OSC 72)                 | Yes (PR #4005) | Roadmap, stale (`ROADMAP.md`) — see above |
 | `fzf` / `fd` / `ripgrep` / `zoxide` integration | Yes | `F` finder, `:grep`, frecency `J` (homegrown) |
-| Mouse support                          | Yes     | Limited; explicit non-goal beyond current (`ROADMAP.md:458`) |
+| Mouse support                          | Yes     | Limited; explicit non-goal beyond current (`ROADMAP.md`) |
 
 ### Extensibility
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Lua plugin system                      | Yes (concurrent, BETA) | **Non-goal** (`ROADMAP.md:447`) |
+| Lua plugin system                      | Yes (concurrent, BETA) | **Non-goal** (`ROADMAP.md`) |
 | Theme system / "Flavors"               | Yes (BETA) | Nerd-font / mono toggle; no theme DSL |
 | Custom previewers / fetchers           | Yes (Lua) | Not exposed                           |
 | Keymap customization                   | Yes (`keymap.toml`) | Yes (`.spycrc.toml`)         |
@@ -96,22 +97,22 @@ scope. Where roadmapped, the line number is cited.
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Event publish (`ya pub`)               | Yes     | **Explicit non-goal** (`ROADMAP.md:336`) — wider attack surface, not on thesis |
-| Event subscribe (`--local-events`, `--remote-events`) | Yes | Roadmap as subscriber socket on existing MCP UDS (`ROADMAP.md:319`) |
+| Event publish (`ya pub`)               | Yes     | **Explicit non-goal** (`ROADMAP.md`) — wider attack surface, not on thesis |
+| Event subscribe (`--local-events`, `--remote-events`) | Yes | Roadmap as subscriber socket on existing MCP UDS (`ROADMAP.md`) |
 | Cross-instance state distribution      | Yes ("Data Distribution Service") | Per-PID MCP socket; instances coexist but don't share state |
-| MCP server (agent-callable)            | **No**  | **Yes — core thesis** (`README.md:106`) |
+| MCP server (agent-callable)            | **No**  | **Yes — core thesis** (`README.md`) |
 | Virtual filesystem for remote files    | Yes     | Out of scope                           |
 
 ### Distribution / hygiene
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Pre-built binaries on tagged release   | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md:62`)  |
-| Homebrew tap                           | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md:72`)  |
-| Signed artifacts                       | Partial | Minisign roadmap (`ROADMAP.md:378`)    |
-| Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred (`LAUNCH_PREP.md:112`) |
-| Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap (`LAUNCH_PREP.md:104`) |
-| GitHub presence                        | Yes (37k stars) | Bitbucket today; GitHub move is 2.0 blocker (`LAUNCH_PREP.md:21`) |
+| Pre-built binaries on tagged release   | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md`)  |
+| Homebrew tap                           | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md`)  |
+| Signed artifacts                       | Partial | Minisign roadmap (`ROADMAP.md`)    |
+| Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred (`LAUNCH_PREP.md`) |
+| Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap (`LAUNCH_PREP.md`) |
+| GitHub presence                        | Yes (37k stars) | Bitbucket today; GitHub move is 2.0 blocker (`LAUNCH_PREP.md`) |
 
 ## Where Yazi clearly leads
 
@@ -168,31 +169,31 @@ positioned for the audience we care about:
 Worth being explicit so the next "Yazi has this, should we?"
 conversation has a fast answer.
 
-- **Plugin system.** Non-goal. `ROADMAP.md:447` is the canonical
+- **Plugin system.** Non-goal. `ROADMAP.md` is the canonical
   statement: "A decade of maintenance debt for a feature 3% of users
   will touch."
-- **Mouse beyond current.** Non-goal (`ROADMAP.md:458`). Keyboard-first
+- **Mouse beyond current.** Non-goal (`ROADMAP.md`). Keyboard-first
   by thesis.
 - **Event publishing (`ya pub` equivalent).** Non-goal per
-  `ROADMAP.md:336–338` — the consumer ecosystem we care about is
+  `ROADMAP.md–338` — the consumer ecosystem we care about is
   keyboard/agent-flavoured, not a generic automation bus, and the
   attack surface of accepting arbitrary publishes from anywhere on
   the box is not worth it for our shape.
 - **Virtual filesystem for remote files.** Out of scope; ssh +
   local mount is the supported workflow.
 - **Localization.** English-only by stated non-goal
-  (`ROADMAP.md:450`).
+  (`ROADMAP.md`).
 
 ## Recommendations
 
 Concrete actions falling out of this review:
 
-1. **Update `ROADMAP.md:571` (drag and drop).** Replace the OSC 52
+1. **Update `ROADMAP.md` (drag and drop).** Replace the OSC 52
    reference with OSC 72; cite Yazi PR #4005; note that the native
    path is kitty-only today and defer until ≥1 more terminal adopts
    OSC 72; keep the path-paste fallback as an independent, cheap win.
 2. **Add an "image preview" row to the migration page**
-   (`LAUNCH_PREP.md:104`). Honest framing: "Yazi has it; spyc doesn't;
+   (`LAUNCH_PREP.md`). Honest framing: "Yazi has it; spyc doesn't;
    if you live in image-heavy directories, Yazi may suit you better."
    Trying to hide the gap will burn trust faster than naming it.
 3. **In the same migration page, lead the differentiator paragraph
