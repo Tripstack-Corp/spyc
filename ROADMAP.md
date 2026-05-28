@@ -151,6 +151,53 @@ priority -- nice to have, not blocking v2.0.
   "back to where I started" for users who use spyc as their
   primary navigator. `Q` keeps the no-export semantics so users
   who *don't* want this can opt out per-quit.
+- **Keymap DSL completeness** (promoted from BUGS; external
+  contributor 2026-05-15). Two paired shortcomings in
+  `src/config/dsl.rs`:
+  1. **Many `Action` variants are unbindable.** `parse_action`
+     doesn't accept `HarpoonAppend`, `SetMark(_)`, `JumpMark(_)`,
+     `PaneTabByIndex(_)`, the `Yank*` family, `Goto*`,
+     `WorktreeList`, `GitDiff*`. They exist as actions but the
+     parser has no string form. Pick one: grow `parse_action` to
+     cover them, or explicitly document which actions are
+     user-bindable and which aren't.
+  2. **`unmap` is a no-op.** `parse_dsl_line` returns `Ok(None)`
+     for `unmap KEY` with a `// TODO: represent unbind` comment.
+     Users can't currently remove built-in bindings cleanly. Wire
+     it through so `unmap <KEY>` actually unbinds.
+  Tackle as a pair -- shared parser, shared documentation.
+- **PgUp/PgDn discoverability in panes** (promoted from BUGS;
+  external contributor 2026-05-15). Two paired UX items:
+  1. **PgUp/PgDn in a focused pane auto-enters `^a-v` scrollback
+     mode** with a single page move applied, so users without
+     `^a` in their fingertips get a discoverable scroll
+     affordance. Guard with `!is_alternate_screen()` (scroll-mode
+     entry already does this) and with a modifier (Shift-PgUp) so
+     the child's own PgUp handling isn't stolen.
+  2. **First-time pane-focus hint.** On the first time the user
+     focuses a pane this session, flash `^a-v scrolls history`
+     for ~2s. Pure discoverability, no behaviour change.
+  Both small; pair them because the hint explains the binding.
+- **Mouse forwarding to the pane** (promoted from BUGS). spyc never
+  calls `EnableMouseCapture` on the host terminal
+  (`src/main.rs::setup_terminal`), and `src/pane/input.rs` has no
+  encoder for `Event::Mouse(_)`. `vt100` already tracks the mouse
+  protocols when the child enables them (1000/1002/1003/1006), but
+  no events ever reach the pty. Apps that default to mouse-on
+  (lazygit, htop, broot) look half-broken -- clicks on panel
+  headers / commit list / footer keybindings, scroll-wheel on
+  diffs, all silently no-op.
+
+  Two-layer fix: enable mouse capture on the host terminal *and*
+  add the `Event::Mouse` arm in `pane::input::encode_key` to
+  encode SGR mouse reports the child expects. Design carefully
+  because spyc itself doesn't want mouse events outside the pane
+  -- the right shape is "forward to pane only when pane is
+  focused;" the file list keeps its existing minimal mouse
+  semantics. Tension with the keyboard-first thesis is OK here:
+  the pane is a real terminal whose contents (lazygit, htop) are
+  third-party and mouse-aware, so denying the forward is
+  effectively breaking those tools.
 
 ## Thesis -- deepening the agent integration
 
@@ -259,6 +306,18 @@ terminal inside a terminal." In priority order:
   Lower-level primitive that "Prompt templates" (below) sits on top
   of. Implementation reuses `pane.send_bytes()` plus a sink dispatch
   table.
+- **Image paste (`^v`) to the agent pane** (promoted from BUGS).
+  Natural first user of the DnD drop-action picker design (see
+  `Drag and drop` under Additional Ideas): when the clipboard
+  carries an image, pressing `^v` while the file list is focused
+  changes focus to the lower pane and sends the image as an
+  attachment (when the agent supports attachments -- Claude does
+  today). Different from the OSC 72 native DnD path;
+  complementary -- the routing logic (image vs. text, target
+  agent supports attachment vs. not) is the same as the picker's
+  "send to lower pane as image" arm. Implement the routing once,
+  expose via both DnD and `^v`. Today `^v` is a no-op outside of
+  prompts so the binding is free.
 - **Project-wide search (`F` finder, `:grep`, MCP exposure).** Today
   `/` matches filenames in the current listing only and content
   search means shelling out to `! rg foo`. Two distinct gaps:
