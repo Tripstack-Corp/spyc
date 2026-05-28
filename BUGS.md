@@ -26,50 +26,11 @@
   expand a documented set of tokens (`%f`, `%p`, `%P`, `%d`?),
   require a non-alnum boundary, or add an escape (`%%`).
 - mouse scroll in pager, 'ENTER' into a file, doesn't seem to be working
-- PgUp/PgDn in the live (focused) pane should auto-enter
-  `^a-v` scrollback mode with a single page move applied, so
-  users without `^a` in their fingertips get a discoverable
-  scroll affordance. Guard with `!is_alternate_screen()` (the
-  scroll-mode entry already does this) and with a modifier
-  (Shift-PgUp?) so claude's own PgUp handling isn't stolen.
-  Reported by external contributor 2026-05-15.
-- Pane-focus first-time hint: on the first time the user
-  focuses a pane this session, flash `^a-v scrolls history`
-  for a couple seconds. Pure discoverability, no behavior
-  change. Reported by external contributor 2026-05-15.
-- DSL gap: many `Action` variants are unbindable via
-  `.spycrc.toml` — `HarpoonAppend`, `SetMark(_)`, `JumpMark(_)`,
-  `PaneTabByIndex(_)`, the whole `Yank*` family, `Goto*`,
-  `WorktreeList`, `GitDiff*`. They exist as actions but
-  `src/config/dsl.rs::parse_action` doesn't accept them. Either
-  grow the parser or note explicitly which actions are
-  user-bindable. Reported by external contributor 2026-05-15.
-- `unmap` in the keymap DSL is parsed as `Ok(None)` with a
-  `// TODO: represent unbind` at `src/config/dsl.rs:53`. Users
-  can't currently remove built-in bindings cleanly. Wire it
-  through so `unmap <KEY>` actually unbinds.
 - should be able to reorder tabs?
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
-- pane widget always paints a reverse-video cursor block at
-  `screen.cursor_position()` even when the child has set `DEC ?25l`
-  (cursor hidden). `vt100::Screen` already exposes `hide_cursor()`;
-  `src/pane/widget.rs:43-54` just doesn't read it. Most likely
-  cause of the rendering glitch reported when running lazygit in
-  the lower pane (lazygit hides the cursor and draws its own
-  selection highlight, so the stray block shows up as a cell
-  inverted in the wrong place). Fix is a single guard on
-  `screen.hide_cursor()` before the reverse-video paint.
-- pane spawn env should advertise `COLORTERM=truecolor`. We
-  already set `TERM=xterm-256color`
-  (`src/pane/mod.rs:102` in pre-quickselect numbering), but
-  modern apps that runtime-negotiate truecolor (lazygit/tcell,
-  bat, fzf) check `$COLORTERM` first and silently downgrade to
-  256-color when it's missing. Symptom: diff palettes look
-  "close but slightly off" inside the pane vs. a bare terminal
-  tab. One-line addition next to the existing `TERM` env line.
 - it's very confusing still to remember you're in scroll mode in the bottom
   half - we need a stronger top line/bottom line marker for this
 - the interactive picker tool - gum - handles our ! view very poorly - we
@@ -98,20 +59,6 @@
   into lower pane ^w-_ or into the background ^w-z
 - codex doesn't support vi bindings ... maybe we could control it and inject vi
   bindings into it's rataui pane
-- pane forwards no mouse events to the child. spyc never calls
-  `EnableMouseCapture` on the host terminal
-  (`src/main.rs::setup_terminal`), and `src/pane/input.rs` has no
-  encoder for `Event::Mouse(_)`. `vt100` *tracks* the mouse
-  protocols when the child enables them (1000/1002/1003/1006), but
-  no events ever reach the pty. Apps that default to
-  `MouseEvents: true` (lazygit, htop, broot in mouse mode) look
-  half-broken — clicks on panel headers / commit list / footer
-  keybindings, scroll-wheel on diffs, all silently no-op. Two-layer
-  fix: enable mouse capture on the host terminal *and* add the
-  `Event::Mouse` arm in `pane::input::encode_key` to encode SGR
-  mouse reports the child expects. Worth designing carefully
-  because spyc itself doesn't want mouse events outside the pane —
-  the right shape is "forward to pane only when pane is focused."
 - yank last response possible? [only if claude code terminal? is there an "api"
   in CC for it to better maintain over time?
 - include a SMALL model that can conversationally answer how to do stuff with
@@ -123,7 +70,6 @@
   disable masks and have an editable list of them
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
-- ^v should change focus and paste to the lower pane (image paste for Claude)
 
 ### MAYBE ###
 - alt-screen drain → coherent log. For panes running alt-screen
