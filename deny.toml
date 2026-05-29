@@ -72,9 +72,11 @@ feature-depth = 1
 ignore = [
     # time 0.3.45 — DoS via crafted format strings. Fix is in >=0.3.47
     # but the crate-graph route is syntect→plist→time, and plist 1.8
-    # requires Rust >=1.88; our MSRV is 1.85. Not exploitable in
-    # spyc's actual usage (we never parse user-supplied time strings).
-    { id = "RUSTSEC-2026-0009", reason = "transitive via syntect; not exploitable; MSRV-blocked" },
+    # requires Rust >=1.88. As of the 1.88 MSRV bump this is no longer
+    # blocked — pending a dep update (plist 1.8 → newer time) to drop
+    # this ignore. Not exploitable in spyc's actual usage regardless
+    # (we never parse user-supplied time strings).
+    { id = "RUSTSEC-2026-0009", reason = "transitive via syntect; not exploitable; dep update pending now MSRV is 1.88" },
     # yaml-rust 0.4.5 — unmaintained, no security advisory. Transitive
     # via syntect, no upgrade path until syntect drops it. We don't
     # parse YAML at runtime — only syntect's bundled .sublime-syntax

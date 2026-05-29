@@ -119,11 +119,9 @@ impl Resolver {
         // `user_binding_resets_pending` test covers this), so chords
         // built on `g` (`gd`, `gf`, …) remain user-overridable.
         let chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G);
-        if !chord_locked {
-            if let Some(action) = user.find(&ev) {
-                self.reset();
-                return ResolverOutcome::User(action.clone());
-            }
+        if !chord_locked && let Some(action) = user.find(&ev) {
+            self.reset();
+            return ResolverOutcome::User(action.clone());
         }
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
 

@@ -237,10 +237,10 @@ impl Pane {
     /// (the reader thread closes before `try_wait` can reap).
     /// `tabs.rs::label_exited_panes` calls this once per tick.
     pub fn try_harvest_exit_status(&mut self) {
-        if self.host.exit_status.is_none() {
-            if let Ok(Some(status)) = self.host.child.try_wait() {
-                self.host.exit_status = Some(status);
-            }
+        if self.host.exit_status.is_none()
+            && let Ok(Some(status)) = self.host.child.try_wait()
+        {
+            self.host.exit_status = Some(status);
         }
     }
 
@@ -529,14 +529,13 @@ fn parser_worker(
         }
         match rx.recv_timeout(std::time::Duration::from_millis(50)) {
             Ok(PtyEvent::Bytes(bytes)) => {
-                if debug_dump {
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                if debug_dump
+                    && let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open("/tmp/spyc_pty_debug.bin")
-                    {
-                        let _ = f.write_all(&bytes);
-                    }
+                {
+                    let _ = f.write_all(&bytes);
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut p = parser

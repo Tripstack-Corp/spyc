@@ -33,10 +33,10 @@ pub fn cwd_for_pid(pid: u32) -> Option<PathBuf> {
         return None;
     }
     for line in std::str::from_utf8(&output.stdout).ok()?.lines() {
-        if let Some(path) = line.strip_prefix('n') {
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        if let Some(path) = line.strip_prefix('n')
+            && !path.is_empty()
+        {
+            return Some(PathBuf::from(path));
         }
     }
     None

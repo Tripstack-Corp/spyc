@@ -70,24 +70,22 @@ fn split_path_line(s: &str) -> (&str, Option<usize>) {
     let first = parts.next();
 
     // path:line:col
-    if let (Some(path), Some(line_str)) = (first, mid) {
-        if let Ok(line) = line_str.parse::<usize>() {
-            if line > 0 {
-                return (path, Some(line));
-            }
-        }
+    if let (Some(path), Some(line_str)) = (first, mid)
+        && let Ok(line) = line_str.parse::<usize>()
+        && line > 0
+    {
+        return (path, Some(line));
     }
 
     // path:line (two parts)
     let mut parts = s.rsplitn(2, ':');
     let maybe_line = parts.next().unwrap_or("");
     let maybe_path = parts.next();
-    if let Some(path) = maybe_path {
-        if let Ok(line) = maybe_line.parse::<usize>() {
-            if line > 0 {
-                return (path, Some(line));
-            }
-        }
+    if let Some(path) = maybe_path
+        && let Ok(line) = maybe_line.parse::<usize>()
+        && line > 0
+    {
+        return (path, Some(line));
     }
 
     // No line number — whole string is the path.
@@ -113,13 +111,13 @@ fn candidates(line: &str) -> Vec<String> {
         // anywhere in the token — handles `Update(path/to/file)`,
         // `[path/to/file]`, etc.
         for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
-            if let Some(start) = token.find(open) {
-                if let Some(end) = token[start..].find(close) {
-                    let inner = &token[start + 1..start + end];
-                    let inner = strip_decorations(inner);
-                    if !inner.is_empty() && !result.contains(&inner.to_string()) {
-                        result.push(inner.to_string());
-                    }
+            if let Some(start) = token.find(open)
+                && let Some(end) = token[start..].find(close)
+            {
+                let inner = &token[start + 1..start + end];
+                let inner = strip_decorations(inner);
+                if !inner.is_empty() && !result.contains(&inner.to_string()) {
+                    result.push(inner.to_string());
                 }
             }
         }

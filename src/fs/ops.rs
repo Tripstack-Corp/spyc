@@ -416,10 +416,10 @@ fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
 
 fn name_with_target(path: &Path, md: &fs::Metadata) -> String {
     let base = display_name(path, md);
-    if md.file_type().is_symlink() {
-        if let Ok(target) = fs::read_link(path) {
-            return format!("{base} -> {}", target.display());
-        }
+    if md.file_type().is_symlink()
+        && let Ok(target) = fs::read_link(path)
+    {
+        return format!("{base} -> {}", target.display());
     }
     base
 }

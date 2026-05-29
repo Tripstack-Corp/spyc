@@ -520,7 +520,7 @@ impl AppState {
         true
     }
 
-    pub fn ensure_cursor_visible(&mut self) {
+    pub const fn ensure_cursor_visible(&mut self) {
         let per_page = self.last_grid.items_per_page();
         if per_page == 0 || self.rows.is_empty() {
             self.cursor.view_top = 0;
@@ -1080,12 +1080,11 @@ impl AppState {
         // because going from a repo to a non-repo dir doesn't
         // satisfy `repo_root.is_some()` here, so the cache lives
         // on for re-entry.
-        if let Some(new_root) = repo_root.as_ref() {
-            if let Some(c) = self.git_status_raw_cache.as_ref() {
-                if &c.repo_root != new_root {
-                    self.git_status_raw_cache = None;
-                }
-            }
+        if let Some(new_root) = repo_root.as_ref()
+            && let Some(c) = self.git_status_raw_cache.as_ref()
+            && &c.repo_root != new_root
+        {
+            self.git_status_raw_cache = None;
         }
         self.current_repo_root = repo_root;
         if self.is_huge_tree && !was_huge {
@@ -1159,14 +1158,13 @@ impl AppState {
                 self.flash_error(format!("chdir: {e}"));
                 return;
             }
-            if let Some(name) = prev_name {
-                if let Some(idx) = self
+            if let Some(name) = prev_name
+                && let Some(idx) = self
                     .rows
                     .iter()
                     .position(|r| r.display == name || r.display == format!("{name}/"))
-                {
-                    self.cursor.index = idx;
-                }
+            {
+                self.cursor.index = idx;
             }
         }
     }
@@ -1230,10 +1228,10 @@ impl AppState {
             // -- Navigation --
             Action::Climb => self.climb(),
             Action::Home => {
-                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-                    if let Err(e) = self.chdir(&home) {
-                        self.flash_error(format!("chdir: {e}"));
-                    }
+                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
+                    && let Err(e) = self.chdir(&home)
+                {
+                    self.flash_error(format!("chdir: {e}"));
                 }
             }
 

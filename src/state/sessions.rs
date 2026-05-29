@@ -308,10 +308,11 @@ pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
     if projects.join(project_slug(cwd)).join(&file).exists() {
         return true;
     }
-    if let Ok(canon) = std::fs::canonicalize(cwd) {
-        if canon != cwd && projects.join(project_slug(&canon)).join(&file).exists() {
-            return true;
-        }
+    if let Ok(canon) = std::fs::canonicalize(cwd)
+        && canon != cwd
+        && projects.join(project_slug(&canon)).join(&file).exists()
+    {
+        return true;
     }
     false
 }
@@ -398,10 +399,10 @@ pub fn gemini_project_name(cwd: &std::path::Path) -> Option<String> {
         return Some(name.to_string());
     }
     // macOS /private symlink mirror, mirroring the Claude logic.
-    if let Some(stripped) = cwd_str.strip_prefix("/private") {
-        if let Some(name) = projects.get(stripped).and_then(|v| v.as_str()) {
-            return Some(name.to_string());
-        }
+    if let Some(stripped) = cwd_str.strip_prefix("/private")
+        && let Some(name) = projects.get(stripped).and_then(|v| v.as_str())
+    {
+        return Some(name.to_string());
     }
     None
 }
@@ -505,14 +506,12 @@ fn find_claude_session_name(session_id: &str) -> Option<String> {
         let text = std::fs::read_to_string(&jsonl_path).ok()?;
         // Scan lines in reverse — last custom-title wins.
         for line in text.lines().rev() {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-                if val["type"].as_str() == Some("custom-title") {
-                    if let Some(title) = val["customTitle"].as_str() {
-                        if !title.is_empty() {
-                            return Some(title.to_string());
-                        }
-                    }
-                }
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(line)
+                && val["type"].as_str() == Some("custom-title")
+                && let Some(title) = val["customTitle"].as_str()
+                && !title.is_empty()
+            {
+                return Some(title.to_string());
             }
         }
     }

@@ -250,10 +250,10 @@ impl Inventory {
 
     /// Toggle pick on item at index.
     pub fn toggle_pick(&mut self, index: usize) {
-        if let Some(id) = self.items.keys().nth(index).cloned() {
-            if !self.picks.remove(&id) {
-                self.picks.insert(id);
-            }
+        if let Some(id) = self.items.keys().nth(index).cloned()
+            && !self.picks.remove(&id)
+        {
+            self.picks.insert(id);
         }
     }
 

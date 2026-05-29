@@ -73,15 +73,15 @@ fn dispatch(
     // Notifications (no "id") — no response, but some have side effects.
     if parsed.get("id").is_none() {
         let method = parsed["method"].as_str().unwrap_or("");
-        if method == "spyc/disconnected" {
-            if let Some(tx) = cmd_tx {
-                let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
-                let (reply_tx, _) = std::sync::mpsc::channel();
-                let _ = tx.send(McpRequest {
-                    command: McpCommand::Disconnected { new_pid },
-                    reply: reply_tx,
-                });
-            }
+        if method == "spyc/disconnected"
+            && let Some(tx) = cmd_tx
+        {
+            let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
+            let (reply_tx, _) = std::sync::mpsc::channel();
+            let _ = tx.send(McpRequest {
+                command: McpCommand::Disconnected { new_pid },
+                reply: reply_tx,
+            });
         }
         return Ok(());
     }
@@ -108,10 +108,10 @@ fn dispatch(
 
 /// Resolve context path from env var or project root.
 fn resolve_context_path(project_root: &Path) -> PathBuf {
-    if let Ok(p) = std::env::var(context::CONTEXT_ENV_VAR) {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
+    if let Ok(p) = std::env::var(context::CONTEXT_ENV_VAR)
+        && !p.is_empty()
+    {
+        return PathBuf::from(p);
     }
     context::context_path(project_root)
 }
@@ -129,14 +129,14 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
 /// 3. Falls back to read-only direct mode if nothing matches.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
     // Try explicit socket path from env first.
-    if let Ok(p) = std::env::var("SPYC_MCP_SOCK") {
-        if !p.is_empty() {
-            let sock = PathBuf::from(&p);
-            mcp_log(&format!("stdio: trying env socket {}", sock.display()));
-            if let Ok(stream) = UnixStream::connect(&sock) {
-                mcp_log("stdio: connected via env socket, proxying");
-                return run_proxy(stream);
-            }
+    if let Ok(p) = std::env::var("SPYC_MCP_SOCK")
+        && !p.is_empty()
+    {
+        let sock = PathBuf::from(&p);
+        mcp_log(&format!("stdio: trying env socket {}", sock.display()));
+        if let Ok(stream) = UnixStream::connect(&sock) {
+            mcp_log("stdio: connected via env socket, proxying");
+            return run_proxy(stream);
         }
     }
 
@@ -503,24 +503,22 @@ fn enterprise_allows_spyc() -> Option<bool> {
             continue;
         };
         // Denylist takes absolute precedence.
-        if let Some(denied) = parsed.get("deniedMcpServers") {
-            if let Some(arr) = denied.as_array() {
-                if arr
-                    .iter()
-                    .any(|entry| entry["serverName"].as_str() == Some("spyc"))
-                {
-                    return Some(false);
-                }
-            }
+        if let Some(denied) = parsed.get("deniedMcpServers")
+            && let Some(arr) = denied.as_array()
+            && arr
+                .iter()
+                .any(|entry| entry["serverName"].as_str() == Some("spyc"))
+        {
+            return Some(false);
         }
         // Allowlist: if present, spyc must be in it.
-        if let Some(allowed) = parsed.get("allowedMcpServers") {
-            if let Some(arr) = allowed.as_array() {
-                let ok = arr
-                    .iter()
-                    .any(|entry| entry["serverName"].as_str() == Some("spyc"));
-                return Some(ok);
-            }
+        if let Some(allowed) = parsed.get("allowedMcpServers")
+            && let Some(arr) = allowed.as_array()
+        {
+            let ok = arr
+                .iter()
+                .any(|entry| entry["serverName"].as_str() == Some("spyc"));
+            return Some(ok);
         }
         return None; // Enterprise config exists but no MCP restrictions.
     }
@@ -594,32 +592,30 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
 
     // Check for an existing live spyc instance in this directory.
     let mut took_over: Option<u32> = None;
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
-            if let Some(old_sock_str) = parsed
-                .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
-                .and_then(|v| v.as_str())
-            {
-                let old_sock = PathBuf::from(old_sock_str);
-                if old_sock != our_sock {
-                    // Another instance — check if it's still alive.
-                    if UnixStream::connect(&old_sock).is_ok() {
-                        let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
-                        if !takeover_allowed {
-                            mcp_log(&format!(
-                                "skipped takeover from PID {old_pid} ({})",
-                                old_sock.display()
-                            ));
-                            return Ok(McpConfigStatus::SkippedTakeover { old_pid });
-                        }
-                        notify_disconnect(&old_sock, our_pid);
-                        took_over = Some(old_pid);
-                        mcp_log(&format!(
-                            "taking over from PID {old_pid} ({})",
-                            old_sock.display()
-                        ));
-                    }
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && let Ok(parsed) = serde_json::from_str::<Value>(&text)
+        && let Some(old_sock_str) = parsed
+            .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
+            .and_then(|v| v.as_str())
+    {
+        let old_sock = PathBuf::from(old_sock_str);
+        if old_sock != our_sock {
+            // Another instance — check if it's still alive.
+            if UnixStream::connect(&old_sock).is_ok() {
+                let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+                if !takeover_allowed {
+                    mcp_log(&format!(
+                        "skipped takeover from PID {old_pid} ({})",
+                        old_sock.display()
+                    ));
+                    return Ok(McpConfigStatus::SkippedTakeover { old_pid });
                 }
+                notify_disconnect(&old_sock, our_pid);
+                took_over = Some(old_pid);
+                mcp_log(&format!(
+                    "taking over from PID {old_pid} ({})",
+                    old_sock.display()
+                ));
             }
         }
     }
@@ -709,33 +705,31 @@ pub fn ensure_codex_config_toml(
     // Takeover detection: existing entry pointing at a different
     // live socket means another spyc instance owns this directory.
     let mut took_over: Option<u32> = None;
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
-            if let Some(old_sock_str) = parsed
-                .get("mcp_servers")
-                .and_then(|m| m.get("spyc"))
-                .and_then(|s| s.get("env"))
-                .and_then(|e| e.get("SPYC_MCP_SOCK"))
-                .and_then(toml::Value::as_str)
-            {
-                let old_sock = PathBuf::from(old_sock_str);
-                if old_sock != our_sock && UnixStream::connect(&old_sock).is_ok() {
-                    let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
-                    if !takeover_allowed {
-                        mcp_log(&format!(
-                            "codex: skipped takeover from PID {old_pid} ({})",
-                            old_sock.display()
-                        ));
-                        return Ok(McpConfigStatus::SkippedTakeover { old_pid });
-                    }
-                    notify_disconnect(&old_sock, our_pid);
-                    took_over = Some(old_pid);
-                    mcp_log(&format!(
-                        "codex: taking over from PID {old_pid} ({})",
-                        old_sock.display()
-                    ));
-                }
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && let Ok(parsed) = toml::from_str::<toml::Value>(&text)
+        && let Some(old_sock_str) = parsed
+            .get("mcp_servers")
+            .and_then(|m| m.get("spyc"))
+            .and_then(|s| s.get("env"))
+            .and_then(|e| e.get("SPYC_MCP_SOCK"))
+            .and_then(toml::Value::as_str)
+    {
+        let old_sock = PathBuf::from(old_sock_str);
+        if old_sock != our_sock && UnixStream::connect(&old_sock).is_ok() {
+            let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+            if !takeover_allowed {
+                mcp_log(&format!(
+                    "codex: skipped takeover from PID {old_pid} ({})",
+                    old_sock.display()
+                ));
+                return Ok(McpConfigStatus::SkippedTakeover { old_pid });
             }
+            notify_disconnect(&old_sock, our_pid);
+            took_over = Some(old_pid);
+            mcp_log(&format!(
+                "codex: taking over from PID {old_pid} ({})",
+                old_sock.display()
+            ));
         }
     }
 
@@ -1294,16 +1288,16 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
 /// scope themselves the same way the in-TUI `F` and `:grep`
 /// commands do.
 fn search_root(ctx_path: &Path) -> PathBuf {
-    if let Ok(text) = std::fs::read_to_string(ctx_path) {
-        if let Ok(v) = serde_json::from_str::<Value>(&text) {
-            if let Some(home) = v["project_home"].as_str() {
-                if !home.is_empty() {
-                    return PathBuf::from(home);
-                }
-            }
-            if let Some(cwd) = v["cwd"].as_str() {
-                return PathBuf::from(cwd);
-            }
+    if let Ok(text) = std::fs::read_to_string(ctx_path)
+        && let Ok(v) = serde_json::from_str::<Value>(&text)
+    {
+        if let Some(home) = v["project_home"].as_str()
+            && !home.is_empty()
+        {
+            return PathBuf::from(home);
+        }
+        if let Some(cwd) = v["cwd"].as_str() {
+            return PathBuf::from(cwd);
         }
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
@@ -1383,12 +1377,11 @@ fn grep_matches_to_json(hits: &[crate::fs::grep::GrepMatch]) -> Value {
 }
 
 fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
-    if let Ok(text) = std::fs::read_to_string(ctx_path) {
-        if let Ok(v) = serde_json::from_str::<Value>(&text) {
-            if let Some(cwd) = v["cwd"].as_str() {
-                return PathBuf::from(cwd);
-            }
-        }
+    if let Ok(text) = std::fs::read_to_string(ctx_path)
+        && let Ok(v) = serde_json::from_str::<Value>(&text)
+        && let Some(cwd) = v["cwd"].as_str()
+    {
+        return PathBuf::from(cwd);
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
