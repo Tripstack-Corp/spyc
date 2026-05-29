@@ -82,10 +82,19 @@ pub fn read_head_branch(gitdir: &std::path::Path) -> Option<String> {
 /// identical output for every dir under one repo root.
 ///
 /// Returns `None` if the spawn fails or git exits non-zero.
-pub fn git_status_porcelain_raw(dir: &std::path::Path, huge: bool) -> Option<String> {
-    let untracked_flag = if huge { "-uno" } else { "-unormal" };
+///
+/// Always requests untracked files (`-unormal`). We used to switch to
+/// `-uno` on "huge" trees, but the huge-tree flag counts *on-disk*
+/// subdirs (dominated by gitignored build dirs like `target/`), while
+/// git's untracked scan skips gitignored dirs entirely — so `-unormal`
+/// is ~as cheap as `-uno` for the repos that tripped the heuristic,
+/// and `-uno` was silently hiding the `?` untracked markers. The cost
+/// of `-unormal` on a genuinely large *non-ignored* tree is absorbed
+/// by the background git worker (off the UI thread) and the 10 s
+/// huge-tree poll throttle.
+pub fn git_status_porcelain_raw(dir: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
-        .args(["status", "--porcelain", untracked_flag])
+        .args(["status", "--porcelain", "-unormal"])
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -435,6 +444,37 @@ mod tests {
             Some(GitChange::Modified)
         );
         assert!(!map.contains_key("bar.txt"));
+    }
+
+    #[test]
+    fn untracked_surfaces_in_subdirectory_listing() {
+        // Regression for the `-uno` huge-tree suppression: viewing
+        // `docs/` with untracked files in it must surface them as
+        // basename-keyed untracked entries. (Previously huge trees
+        // ran `git status -uno` and these `??` lines never existed;
+        // now we always pass `-unormal`.)
+        let porcelain = "?? docs/PATH_HANDOFF_PLAN.md\n?? docs/TEST_IMPROVEMENT_PLAN.md\n";
+        let map = parse_porcelain_statuses(porcelain, "docs");
+        let a = map.get("PATH_HANDOFF_PLAN.md").unwrap();
+        assert!(a.untracked);
+        assert!(a.staged.is_none() && a.unstaged.is_none());
+        assert!(map.get("TEST_IMPROVEMENT_PLAN.md").unwrap().untracked);
+    }
+
+    #[test]
+    fn untracked_subdir_collapses_to_dirty_dir_entry() {
+        // An untracked file deep under the listing dir marks the
+        // intermediate directory as dirty. Directories don't carry an
+        // untracked-specific status (no per-half staging concept), so
+        // the collapse uses the generic unstaged-Modified shape — the
+        // dir reads as "changed" rather than "untracked", which is the
+        // same treatment a deep ` M`/`A` edit gets. The deep file
+        // itself is not surfaced as a basename in this listing.
+        let map = parse_porcelain_statuses("?? docs/drafts/notes.md\n", "docs");
+        let dir = map.get("drafts/").unwrap();
+        assert_eq!(dir.unstaged, Some(GitChange::Modified));
+        assert!(!dir.untracked);
+        assert!(!map.contains_key("notes.md"));
     }
 
     #[test]
