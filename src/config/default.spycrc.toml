@@ -29,9 +29,14 @@
 # see codex history — so this toggle only affects Claude.) Both work
 # for Claude; the transcript view is cleaner (no grid/repaint
 # artifacts), the terminal capture is verbatim.
+#
+# `agy_transcript_scrollback` (default true): same as above, but for
+# Antigravity (`agy`) panes. Reads from `history.jsonl` and renders
+# cleanly without terminal artifacts.
 [pane]
 # default_command = "claude"
 # claude_transcript_scrollback = false
+# agy_transcript_scrollback = true
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behavior.
