@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.51.4] - 2026-05-29
+
+Git-status UX and a Rust toolchain refresh. Untracked files surface
+again in large repos (and untracked-only directories now read `?`
+instead of `~`); the lower pane gained `^a ^a` last-tab jump, a
+dedicated cwd history, and `?` to open the history viewer mid-prompt.
+Under the hood: pinned to Rust 1.96.0, MSRV 1.88, a codebase-wide
+`if let` chains sweep, and the `time` DoS advisory (RUSTSEC-2026-0009)
+cleared.
+
 ### Security
 - **Updated `time` 0.3.45 → 0.3.47**, clearing RUSTSEC-2026-0009 (DoS
   via crafted format strings). The fix was reachable only at Rust
