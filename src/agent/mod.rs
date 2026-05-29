@@ -362,6 +362,66 @@ impl AgentProfile for AgyProfile {
     }
 }
 
+/// Strip zot's resume flags so a saved baseline restores cleanly:
+/// `-c`/`--continue` and `-r`/`--resume` (no-arg) plus `--session
+/// <path>` / `--session=<path>` (a specific session file). Restore
+/// re-decorates with `--continue`.
+fn command_without_zot_resume(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
+    let mut skip_next = false;
+    for p in parts {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        match p {
+            "-c" | "--continue" | "-r" | "--resume" => {}
+            "--session" => skip_next = true,
+            _ if p.starts_with("--session=") => {}
+            _ => out.push(p),
+        }
+    }
+    let stripped = out.join(" ");
+    if stripped.is_empty() {
+        "zot".to_string()
+    } else {
+        stripped
+    }
+}
+
+pub struct ZotProfile;
+impl AgentProfile for ZotProfile {
+    fn kind(&self) -> AgentKind {
+        AgentKind::Zot
+    }
+    fn name(&self) -> &'static str {
+        "zot"
+    }
+    fn binary(&self) -> &'static str {
+        "zot"
+    }
+    fn command_without_resume(&self, cmd: &str) -> String {
+        command_without_zot_resume(cmd)
+    }
+    fn reconstruct_restore(&self, cmd: &str, _sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+        // zot sessions are files under `$ZOT_HOME/sessions/<cwd-hash>/`;
+        // `--continue` resumes the most recent one for this cwd (zot's
+        // own resume-latest). We don't capture a specific session path
+        // at save time yet, so restore always continues-most-recent —
+        // same shape as codex `resume --last` / agy `--continue`.
+        RestorePlan {
+            command: format!("{} --continue", command_without_zot_resume(cmd)),
+            resume: ResumeAction::None,
+        }
+    }
+    // No transcript / short-id / save-target yet: zot's session-file
+    // layout (`<cwd-hash>` scheme) and JSONL schema need a real session
+    // on disk to implement faithfully. Follow-up: add `zot_transcript`
+    // + flip `transcript()` to `Some`, and capture the active session
+    // path for `--session`-based specific resume.
+}
+
 /// The no-op profile for `bash`/`vim`/anything unrecognized. Not in
 /// `REGISTRY`; it's the `detect` / `profile_for` fallback, reproducing
 /// `AgentKind::Other` (no resume, identity strip, no transcript).
@@ -387,12 +447,12 @@ static CLAUDE: ClaudeProfile = ClaudeProfile;
 static CODEX: CodexProfile = CodexProfile;
 static GEMINI: GeminiProfile = GeminiProfile;
 static AGY: AgyProfile = AgyProfile;
+static ZOT: ZotProfile = ZotProfile;
 static OTHER: OtherProfile = OtherProfile;
 
-/// All real agents, in detection-precedence order (matches the old
-/// `detect_agent_kind` if/else chain). Binaries don't overlap, so order
-/// is not load-bearing — but keep it stable.
-pub static REGISTRY: &[&dyn AgentProfile] = &[&CLAUDE, &CODEX, &GEMINI, &AGY];
+/// All real agents, in detection-precedence order. Binaries don't
+/// overlap, so order is not load-bearing — but keep it stable.
+pub static REGISTRY: &[&dyn AgentProfile] = &[&CLAUDE, &CODEX, &GEMINI, &AGY, &ZOT];
 
 /// Profile for a persisted [`AgentKind`] (restored tabs, exit summary,
 /// picker). Returns the no-op [`OtherProfile`] for `Other`.
@@ -412,4 +472,57 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
         .copied()
         .find(|p| p.matches_command(cmd))
         .unwrap_or(&OTHER)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_known_agents_and_other() {
+        assert_eq!(detect("claude").kind(), AgentKind::Claude);
+        assert_eq!(
+            detect("/usr/local/bin/codex resume").kind(),
+            AgentKind::Codex
+        );
+        assert_eq!(detect("gemini mcp").kind(), AgentKind::Gemini);
+        assert_eq!(detect("agy --continue").kind(), AgentKind::Agy);
+        assert_eq!(detect("zot").kind(), AgentKind::Zot);
+        assert_eq!(detect("/opt/bin/zot -c").kind(), AgentKind::Zot);
+        assert_eq!(detect("bash -lc 'make'").kind(), AgentKind::Other);
+        assert_eq!(detect("").kind(), AgentKind::Other);
+    }
+
+    #[test]
+    fn zot_strips_resume_flags() {
+        assert_eq!(command_without_zot_resume("zot -c"), "zot");
+        assert_eq!(command_without_zot_resume("zot --continue"), "zot");
+        assert_eq!(command_without_zot_resume("zot -r"), "zot");
+        assert_eq!(command_without_zot_resume("zot --resume"), "zot");
+        assert_eq!(
+            command_without_zot_resume("zot --session /tmp/a/s.jsonl"),
+            "zot"
+        );
+        assert_eq!(
+            command_without_zot_resume("zot --session=/tmp/s.jsonl"),
+            "zot"
+        );
+        assert_eq!(command_without_zot_resume(""), "zot");
+    }
+
+    #[test]
+    fn zot_strip_preserves_unrelated_flags() {
+        assert_eq!(
+            command_without_zot_resume("zot --model gpt-5 --continue"),
+            "zot --model gpt-5"
+        );
+    }
+
+    #[test]
+    fn zot_restore_continues_most_recent() {
+        let plan =
+            ZotProfile.reconstruct_restore("zot --session /tmp/x.jsonl", None, Path::new("/tmp"));
+        assert_eq!(plan.command, "zot --continue");
+        assert!(matches!(plan.resume, ResumeAction::None));
+    }
 }

@@ -21,6 +21,7 @@ pub enum AgentKind {
     Codex,
     Gemini,
     Agy,
+    Zot,
     /// Anything else (`bash`, `vim`, `make`, …). No session resume.
     #[default]
     Other,
