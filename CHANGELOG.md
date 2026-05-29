@@ -39,6 +39,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Plain `^a a` (no Ctrl on the second key) still focuses the pane.
 
 ### Fixed
+- **Untracked files now show the `?` marker in large repos.** The
+  git-status poll dropped to `git status -uno` (no untracked
+  enumeration) whenever a tree exceeded the huge-tree subdir
+  threshold — but that count is dominated by gitignored build dirs
+  (`target/`, `node_modules/`), which git *skips* during the untracked
+  scan anyway. So `-uno` saved ~nothing while silently hiding every
+  untracked file in essentially any repo with a built `target/`. Now
+  always runs `-unormal`; the huge-tree flag still gates the
+  filesystem-watcher recursion and the 10 s poll throttle (its real
+  jobs), and the status spawn already runs off the UI thread. Removed
+  the now-dead `huge` plumbing from the git-status worker/cache path.
 - **`?` opens the history editor mid-prompt, not just from a fresh
   `!?`.** The `?` affordance only fired when the prompt buffer was
   empty, so after `Esc k` recalled a command into the buffer, `?` no

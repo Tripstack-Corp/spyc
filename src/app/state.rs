@@ -91,7 +91,6 @@ pub struct GitWorkerRequest {
     pub generation: u64,
     pub canonical: std::path::PathBuf,
     pub repo_root: std::path::PathBuf,
-    pub huge: bool,
 }
 
 /// Worker reply. `generation` lets the main thread discard results
@@ -102,7 +101,6 @@ pub struct GitWorkerRequest {
 pub struct GitWorkerResult {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
-    pub huge: bool,
     pub raw: Option<String>,
     pub index_mtime: Option<std::time::SystemTime>,
     pub head_mtime: Option<std::time::SystemTime>,
@@ -120,10 +118,6 @@ pub struct GitStatusRawCache {
     pub repo_root: PathBuf,
     pub index_mtime: std::time::SystemTime,
     pub head_mtime: std::time::SystemTime,
-    /// `true` if captured with `-uno` (huge-tree mode). Treated as a
-    /// distinct cache shape: a small-tree consumer must NOT reuse a
-    /// huge-tree capture (it would be missing `?` untracked entries).
-    pub huge: bool,
     pub raw: String,
 }
 
@@ -928,7 +922,6 @@ impl AppState {
         // Decide whether to reuse the cached raw output.
         let reuse = self.git_status_raw_cache.as_ref().is_some_and(|c| {
             c.repo_root == repo_root
-                && c.huge == self.is_huge_tree
                 && mtimes.is_some_and(|(idx, head)| idx == c.index_mtime && head == c.head_mtime)
         });
         if !reuse {
@@ -945,7 +938,6 @@ impl AppState {
                     generation: self.git_generation,
                     canonical: canonical.to_path_buf(),
                     repo_root,
-                    huge: self.is_huge_tree,
                 });
                 self.last_git_request_at = Some(std::time::Instant::now());
                 return std::collections::HashMap::new();
@@ -953,15 +945,13 @@ impl AppState {
             // No worker (tests, App::new bootstrap) — fall through
             // to the synchronous spawn path below.
             self.git_status_raw_cache = None;
-            if let Some(raw) =
-                crate::sysinfo::git_status_porcelain_raw(canonical, self.is_huge_tree)
+            if let Some(raw) = crate::sysinfo::git_status_porcelain_raw(canonical)
                 && let Some((index_mtime, head_mtime)) = mtimes
             {
                 self.git_status_raw_cache = Some(GitStatusRawCache {
                     repo_root,
                     index_mtime,
                     head_mtime,
-                    huge: self.is_huge_tree,
                     raw,
                 });
             }

@@ -985,11 +985,10 @@ impl App {
                             .ok();
                         (i, h)
                     });
-                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical, req.huge);
+                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
-                    huge: req.huge,
                     raw,
                     index_mtime,
                     head_mtime,
@@ -1263,14 +1262,10 @@ impl App {
             return false;
         }
         // Relevance gate: even at the same generation, the result is
-        // for a specific repo + huge-flag combo. If either no longer
-        // matches the current state, discard. (Unusual — generation
-        // bumps cover most of this — but defends against the edge
-        // where update_huge_tree's `is_huge_tree` flipped without a
-        // chdir.)
-        if self.state.current_repo_root.as_deref() != Some(result.repo_root.as_path())
-            || self.state.is_huge_tree != result.huge
-        {
+        // for a specific repo. If the repo root no longer matches the
+        // current state, discard. (Unusual — generation bumps cover
+        // most of this.)
+        if self.state.current_repo_root.as_deref() != Some(result.repo_root.as_path()) {
             return false;
         }
         let Some(raw) = result.raw else {
@@ -1285,7 +1280,6 @@ impl App {
             repo_root: result.repo_root.clone(),
             index_mtime,
             head_mtime,
-            huge: result.huge,
             raw,
         });
         // Seed the 1 Hz poll cache too — without this the next safety
