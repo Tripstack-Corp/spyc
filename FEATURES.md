@@ -247,6 +247,9 @@ Three modes of running commands, each for a different use case:
   output into a buffer; resume with `:fg` -- see Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
+  Also reachable mid-prompt: after `Esc` puts the line editor in
+  Normal mode (e.g. you pressed `Esc k` to browse history), `?` (or
+  `Space`) opens the same viewer — not just `!?` from a fresh prompt.
   Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
   with `n`/`N` to jump between matches, `:N` jumps to entry N.
   Press `i` to vi-edit the highlighted command in-place.

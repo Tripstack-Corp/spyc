@@ -244,6 +244,10 @@ const SECTIONS: &[Section] = &[
             ),
             ("!!", "repeat last captured command"),
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
+            (
+                "Esc ? / Esc Space",
+                "open history editor mid-prompt (Normal mode)",
+            ),
             (";", "interactive → runs in top pane (top, vim, htop, less)"),
             ("$", "drop into $SHELL in current dir"),
             (

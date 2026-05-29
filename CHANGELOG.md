@@ -15,6 +15,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Plain `^a a` (no Ctrl on the second key) still focuses the pane.
 
 ### Fixed
+- **`?` opens the history editor mid-prompt, not just from a fresh
+  `!?`.** The `?` affordance only fired when the prompt buffer was
+  empty, so after `Esc k` recalled a command into the buffer, `?` no
+  longer opened the viewer. `?` now mirrors `Space` in the line
+  editor's Normal mode: both open the full history viewer (routed by
+  prompt kind — jump destinations vs shell history). `?` is otherwise
+  unbound in Normal mode, so nothing was clobbered.
 - **Pane "cwd:" directories no longer pollute the pane command
   history.** The `^a c` new-tab flow has two prompts — "pane command:"
   and "pane cwd:" — and both recorded into a single `pane_history`

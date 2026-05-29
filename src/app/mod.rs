@@ -4396,12 +4396,19 @@ impl App {
             }
         }
 
-        // `<Space>` in Normal mode opens the history popup. The full
-        // sequence is `Esc Space`: first Esc enters Normal mode (the
-        // standard vi-line-editor behavior); Space then asks for the
-        // bigger pager view. Reads more naturally than double-Esc
-        // and doesn't fight Esc's "back out of something" muscle
-        // memory.
+        // `<Space>` or `?` in Normal mode opens the history popup. The
+        // full sequence is `Esc Space` (or `Esc ?`): first Esc enters
+        // Normal mode (the standard vi-line-editor behavior); Space/`?`
+        // then asks for the bigger pager view. Reads more naturally
+        // than double-Esc and doesn't fight Esc's "back out of
+        // something" muscle memory.
+        //
+        // `?` is included so the `!?` affordance keeps working *after*
+        // the user has started browsing history with `Esc k`: the
+        // empty-buffer `?` block above only fires on a fresh prompt, so
+        // once a command is recalled into the buffer it no longer
+        // matches — but in Normal mode `?` is otherwise a no-op in the
+        // line editor, so we route it here to the same viewer.
         //
         // Dispatched by prompt kind:
         //   PromptKind::Jump → show_jump_history_popup (j/k cd)
@@ -4410,7 +4417,7 @@ impl App {
         // KNOWN LIMITATION: for `:` (command line) the !? popup
         // shows shell history, not command_history. Tracked in
         // ROADMAP for proper kind-routing.
-        if matches!(key.code, KeyCode::Char(' ')) {
+        if matches!(key.code, KeyCode::Char(' ' | '?')) {
             let in_normal_mode = matches!(
                 &self.state.mode,
                 Mode::Prompting(p) if p.editor.as_ref().is_some_and(
