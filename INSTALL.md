@@ -56,6 +56,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Minimum supported Rust version: **1.80**.
 
+The repo pins an exact toolchain in `rust-toolchain.toml` (currently
+**1.96.0**), so rustup auto-installs and selects it on first build —
+no manual `rustup default` needed. Bump that file to move the project
+to a newer release.
+
 ## Build and install
 
 ```sh
