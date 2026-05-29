@@ -179,6 +179,7 @@ Multiple tabs, each running an independent pty:
 - **^a 1..9** switch to tab N
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab
+- **^a ^a** jump to the last-active tab (screen/tmux "last window")
 - **^a r** rename the active tab
 - Activity indicator (**+**) on background tabs that have new output
 - **Default command** for `^a c` resolves in this order:

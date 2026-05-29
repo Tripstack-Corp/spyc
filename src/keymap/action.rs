@@ -126,6 +126,7 @@ pub enum Action {
     PaneTabByIndex(u8), // ^W 1..9 — switch to tab N
     PaneNextTab,        // ^W ] — next tab
     PanePrevTab,        // ^W [ — previous tab
+    PaneLastTab,        // ^a ^a — jump to the previously-active tab (screen/tmux last-window)
     PaneRenameTab,      // ^W r — rename the active tab
     PaneRestartTab,     // ^W R — restart the active tab's command
     PanePipeContent,    // ^W p — send file contents of selection to pane
@@ -260,6 +261,7 @@ impl Action {
             Self::PaneTabByIndex(_) => "switch pane tab",
             Self::PaneNextTab => "next pane tab",
             Self::PanePrevTab => "prev pane tab",
+            Self::PaneLastTab => "last pane tab",
             Self::PaneRenameTab => "rename pane tab",
             Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",

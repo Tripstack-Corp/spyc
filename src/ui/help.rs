@@ -212,6 +212,7 @@ const SECTIONS: &[Section] = &[
             ("^a c", "new pane tab (prompt for command + cwd)"),
             ("^a K  ^a x", "close active pane tab"),
             ("^a 1..9", "switch to tab N"),
+            ("^a ^a", "jump to last-active tab"),
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
             ("^a +  ^a -", "grow / shrink the pane"),
