@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`zot` agent support.** spyc now recognizes the `zot` coding agent
+  in the pane (status bar shows `zot`), and `spyc -r` restores a `zot`
+  tab with `zot --continue` (its resume-most-recent-for-cwd). First
+  agent added under the new `AgentProfile` registry — one impl + one
+  registry line, no dispatch-site edits. Transcript scrollback and
+  specific-session resume (`--session <path>`) are deferred until
+  zot's on-disk session-file layout (`$ZOT_HOME/sessions/<cwd-hash>/`)
+  and JSONL schema are confirmed against a real session.
+
 ### Changed
 - **Internal: agent handling unified behind an `AgentProfile` registry**
   (`src/agent/`). The ~10 per-agent `match AgentKind` dispatch sites

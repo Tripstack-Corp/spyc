@@ -635,12 +635,15 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 - Sessions are de-duplicated by cwd + tab commands (most recent kept).
 - Capped at 20 most recent sessions.
 - **Agent session resume** — for tabs running `claude`, `codex`,
-  `gemini`, or `agy`, quitting spyc and launching with `spyc -r` will
-  restore. Claude tabs spawn a fresh `claude` and type `/resume <id>`
-  once it's settled (the CLI flag has a regression). Codex tabs
-  spawn `codex resume <UUID>` directly. When no UUID was captured
-  (pane killed before exit), codex falls back to `codex resume
-  --last`, which uses codex's native cwd-filtered picker.
+  `gemini`, `agy`, or `zot`, quitting spyc and launching with `spyc -r`
+  will restore. Claude tabs spawn a fresh `claude` and type
+  `/resume <id>` once it's settled (the CLI flag has a regression).
+  Codex tabs spawn `codex resume <UUID>` directly. When no UUID was
+  captured (pane killed before exit), codex falls back to `codex resume
+  --last`, which uses codex's native cwd-filtered picker. `zot` tabs
+  restore with `zot --continue` (zot's resume-most-recent-for-cwd);
+  specific-session resume and transcript scrollback are a follow-up
+  pending its on-disk session-file format.
 
 ## MCP server (Claude + Codex integration)
 
