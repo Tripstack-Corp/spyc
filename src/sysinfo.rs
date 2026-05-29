@@ -194,12 +194,31 @@ pub fn parse_porcelain_statuses(
         if in_this_dir && !name.is_empty() {
             map.entry(name).or_insert(status);
         }
-        // Mark parent directory as dirty for entries in subtrees.
-        // Use the unstaged-Modified shape since directories don't
-        // have a meaningful per-half staging concept.
+        // Mark the parent directory as dirty for entries in subtrees.
+        // Directories don't have a meaningful per-half staging concept,
+        // so we collapse to one of two shapes:
+        //   - untracked (`?`) when the subtree's changes are *only*
+        //     untracked content, and
+        //   - unstaged-Modified (`~`) for any tracked change.
+        // Tracked outranks untracked: a dir with both a modified file
+        // and a new file reads as changed (`~`), not untracked. Because
+        // siblings arrive in arbitrary order, an untracked flag set by
+        // an earlier sibling is upgraded to `~` when a tracked sibling
+        // shows up; the reverse never downgrades.
         if !in_this_dir && !top_component.is_empty() {
-            map.entry(format!("{top_component}/"))
-                .or_insert_with(|| GitFileStatus::unstaged(GitChange::Modified));
+            let dir = map
+                .entry(format!("{top_component}/"))
+                .or_insert_with(GitFileStatus::clean);
+            if status.untracked {
+                if dir.is_clean() {
+                    dir.untracked = true;
+                }
+            } else {
+                // Overwrite wholesale: a tracked change supersedes any
+                // untracked flag a prior sibling set, and dirs carry no
+                // per-half staging detail.
+                *dir = GitFileStatus::unstaged(GitChange::Modified);
+            }
         }
     }
     map
@@ -462,19 +481,29 @@ mod tests {
     }
 
     #[test]
-    fn untracked_subdir_collapses_to_dirty_dir_entry() {
-        // An untracked file deep under the listing dir marks the
-        // intermediate directory as dirty. Directories don't carry an
-        // untracked-specific status (no per-half staging concept), so
-        // the collapse uses the generic unstaged-Modified shape — the
-        // dir reads as "changed" rather than "untracked", which is the
-        // same treatment a deep ` M`/`A` edit gets. The deep file
-        // itself is not surfaced as a basename in this listing.
+    fn untracked_only_subdir_collapses_to_untracked_dir() {
+        // A subtree whose only change is untracked content marks the
+        // intermediate directory `?` (untracked), not `~` (modified).
+        // The deep file itself is not surfaced as a basename here.
         let map = parse_porcelain_statuses("?? docs/drafts/notes.md\n", "docs");
         let dir = map.get("drafts/").unwrap();
-        assert_eq!(dir.unstaged, Some(GitChange::Modified));
-        assert!(!dir.untracked);
+        assert!(dir.untracked);
+        assert!(dir.staged.is_none() && dir.unstaged.is_none());
         assert!(!map.contains_key("notes.md"));
+    }
+
+    #[test]
+    fn mixed_subdir_prefers_modified_over_untracked() {
+        // A dir containing both a tracked modification and an untracked
+        // file reads as changed (`~`), regardless of which row git
+        // emits first — tracked outranks untracked and never downgrades.
+        let untracked_first = parse_porcelain_statuses("?? sub/new.md\n M sub/old.md\n", "");
+        let modified_first = parse_porcelain_statuses(" M sub/old.md\n?? sub/new.md\n", "");
+        for map in [untracked_first, modified_first] {
+            let dir = map.get("sub/").unwrap();
+            assert_eq!(dir.unstaged, Some(GitChange::Modified));
+            assert!(!dir.untracked);
+        }
     }
 
     #[test]
