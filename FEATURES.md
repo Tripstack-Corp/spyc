@@ -165,6 +165,15 @@ spyc's workflow: browse files above, talk to Claude below.
     to make `^a v` render that structured transcript instead —
     cleaner (no grid/repaint artifacts), at the cost of the
     verbatim terminal capture. Off by default.
+  - **Agent-aware scrollback (agy):** `^a v` on an Antigravity
+    (`agy`) pane reads agy's on-disk conversation transcript
+    (under `~/.gemini/antigravity-cli/`, located by matching the
+    pane's cwd + spawn time against `history.jsonl`) and renders
+    the user turns, model replies, and tool calls in the pager —
+    same `(transcript)` treatment as codex. On by default
+    (`[pane] agy_transcript_scrollback = true`); set it `false` to
+    fall back to the verbatim terminal capture. Falls back
+    automatically when no transcript is found yet.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

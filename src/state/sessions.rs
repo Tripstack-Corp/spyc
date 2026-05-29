@@ -408,6 +408,77 @@ pub fn gemini_project_name(cwd: &std::path::Path) -> Option<String> {
     None
 }
 
+#[derive(Debug, Clone)]
+pub struct AgySessionInfo {
+    pub session_id: String,
+    pub started_at_secs: u64,
+}
+
+impl SessionCandidate for AgySessionInfo {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    fn started_at_secs(&self) -> u64 {
+        self.started_at_secs
+    }
+}
+
+/// Find every Agy session for a given cwd by parsing `history.jsonl`.
+/// Agy writes all history to `~/.gemini/antigravity-cli/history.jsonl`.
+///
+/// Returned sorted by `started_at_secs` descending.
+pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let history_path = PathBuf::from(home).join(".gemini/antigravity-cli/history.jsonl");
+    let Ok(text) = std::fs::read_to_string(&history_path) else {
+        return Vec::new();
+    };
+
+    let cwd_str = cwd.to_string_lossy();
+    let mut sessions: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+    for line in text.lines() {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(workspace) = val.get("workspace").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let matches = workspace == cwd_str
+            || workspace.strip_prefix("/private").unwrap_or(workspace) == cwd_str.as_ref();
+        if !matches {
+            continue;
+        }
+        let Some(conversation_id) = val.get("conversationId").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let timestamp = val
+            .get("timestamp")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let secs = timestamp / 1000;
+
+        let entry = sessions.entry(conversation_id.to_string()).or_insert(secs);
+        // We want the earliest timestamp seen for this conversationId
+        if secs < *entry {
+            *entry = secs;
+        }
+    }
+
+    let mut found: Vec<AgySessionInfo> = sessions
+        .into_iter()
+        .map(|(session_id, started_at_secs)| AgySessionInfo {
+            session_id,
+            started_at_secs,
+        })
+        .collect();
+
+    found.sort_by_key(|f| std::cmp::Reverse(f.started_at_secs));
+    found
+}
+
 /// Find every Gemini chat session for a given cwd. Each
 /// `~/.gemini/tmp/<project>/chats/session-*.jsonl` first line is JSON
 /// with `sessionId`, `startTime`, `lastUpdated`, etc. — we read just
@@ -636,12 +707,16 @@ pub fn resolve_active_session_short_id(
             .into_iter()
             .min_by_key(|c| c.started_at_secs.abs_diff(spawn_epoch_secs))
             .map(|c| short_id(&c.session_id)),
+        AgentKind::Agy => find_agy_sessions(cwd)
+            .into_iter()
+            .min_by_key(|c| c.started_at_secs.abs_diff(spawn_epoch_secs))
+            .map(|c| short_id(&c.session_id)),
         // Codex stores rollouts at
         // `~/.codex/sessions/YYYY/MM/DD/rollout-<TS>-<UUID>.jsonl` —
         // the filename encodes both timestamp and UUID. A future PR
         // can parse filenames here; for now Codex panes get no
         // short-id in the status segment.
-        AgentKind::Codex | AgentKind::Agy | AgentKind::Other => None,
+        AgentKind::Codex | AgentKind::Other => None,
     }
 }
 

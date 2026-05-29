@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Agent-aware scrollback for `agy`.** `^a v` on an Antigravity
+  pane now renders agy's on-disk conversation transcript (user turns,
+  model replies, tool calls) in the in-app pager instead of scraping
+  the terminal grid — same `(transcript)` treatment as codex. The
+  session is located by matching the pane's cwd + spawn time against
+  agy's `history.jsonl`. On by default; toggle with `[pane]
+  agy_transcript_scrollback = false`. Falls back to terminal capture
+  when no transcript is found.
 - **Antigravity CLI (`agy`) agent support.** Spyc now detects `agy` spawned in the lower pane. Closing the pane and running `spyc -r` later automatically resumes the conversation (`agy --conversation <UUID>`). The spyc status bar also reports the live `agy` short ID.
 ## [1.51.4] - 2026-05-29
 

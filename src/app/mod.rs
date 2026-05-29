@@ -7469,6 +7469,21 @@ impl App {
             // No transcript resolved — fall through to vt100 capture.
         }
 
+        // Agy transcript scrollback — opt-in default true (`[pane] agy_transcript_scrollback`).
+        if self.state.config.pane.agy_transcript_scrollback
+            && Self::detect_agent_kind(&active_info.command) == AgentKind::Agy
+        {
+            let cwd = active_info.cwd.clone();
+            let spawn = active_info.spawn_epoch_secs;
+            if let Some(jsonl) = crate::state::agy_transcript::resolve_active_jsonl(&cwd, spawn) {
+                let lines = crate::state::agy_transcript::render_transcript(&jsonl, &self.theme);
+                if !lines.is_empty() {
+                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
+                    return;
+                }
+            }
+        }
+
         let tabs = self
             .pane_tabs
             .as_mut()

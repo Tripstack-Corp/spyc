@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 
+pub mod agy_transcript;
 pub mod claude_transcript;
 pub mod codex_transcript;
 pub mod cursor;

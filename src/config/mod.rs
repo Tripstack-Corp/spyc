@@ -90,7 +90,7 @@ struct FileLayout {
 }
 
 /// Pane / pty defaults. Currently just the default command for `^a c`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PaneConfig {
     /// Default command pre-filled into the `^a c` (new tab) prompt.
     /// Falls back to `"claude"` when both this and `$SPYC_PANE_CMD`
@@ -104,6 +104,18 @@ pub struct PaneConfig {
     /// Claude both work, so this is opt-in. Default false (keep the
     /// current terminal-capture behavior).
     pub claude_transcript_scrollback: bool,
+    /// See `default.spycrc.toml` `[pane]` block for doc.
+    pub agy_transcript_scrollback: bool,
+}
+
+impl Default for PaneConfig {
+    fn default() -> Self {
+        Self {
+            default_command: None,
+            claude_transcript_scrollback: false,
+            agy_transcript_scrollback: true,
+        }
+    }
 }
 
 /// On-disk shape of `[pane]`. `Option` for the same "didn't set"
@@ -115,6 +127,8 @@ struct FilePane {
     default_command: Option<String>,
     #[serde(default)]
     claude_transcript_scrollback: Option<bool>,
+    #[serde(default)]
+    agy_transcript_scrollback: Option<bool>,
 }
 
 /// Yank / clipboard knobs.
@@ -339,6 +353,9 @@ impl Config {
         }
         if let Some(b) = file.pane.claude_transcript_scrollback {
             self.pane.claude_transcript_scrollback = b;
+        }
+        if let Some(b) = file.pane.agy_transcript_scrollback {
+            self.pane.agy_transcript_scrollback = b;
         }
 
         // Yank: per-field merge.
