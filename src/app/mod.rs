@@ -300,6 +300,36 @@ const fn is_path_prompt_kind(mode: &Mode) -> bool {
     )
 }
 
+/// Which persistent history bucket a prompt kind browses and records
+/// into. Kept as a single pure mapping so the *browse* path
+/// (`history_for_prompt`) and the *record-on-submit* path can't drift.
+/// They did drift once: the `^a c` "pane cwd:" prompt recorded into the
+/// same bucket as "pane command:", so directory paths leaked into the
+/// command history's Up/Down browse. One mapping, two callers, no skew.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HistoryBucket {
+    /// Shell prompts (`!`, `;`, path prompts) — the default bucket.
+    Shell,
+    /// "pane command:" — commands tabs were launched with.
+    PaneCmd,
+    /// "pane cwd:" — working directories tabs were launched in.
+    PaneCwd,
+    /// `J` jump-to-path destinations.
+    Jump,
+    /// `:` vim-style command line.
+    Command,
+}
+
+const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
+    match kind {
+        Some(PromptKind::PaneNewTabCmd) => HistoryBucket::PaneCmd,
+        Some(PromptKind::PaneNewTabCwd) => HistoryBucket::PaneCwd,
+        Some(PromptKind::Jump) => HistoryBucket::Jump,
+        Some(PromptKind::Command) => HistoryBucket::Command,
+        _ => HistoryBucket::Shell,
+    }
+}
+
 pub enum PromptKind {
     PatternPick,
     ShellCmd,
@@ -894,6 +924,7 @@ impl App {
             quit_pending: None,
             history: History::load(),
             pane_history: History::load_file("pane_history"),
+            pane_cwd_history: History::load_file("pane_cwd_history"),
             jump_history: History::load_file("jump_history"),
             command_history: History::load_file("command_history"),
             flash: start_error.map(|text| FlashMessage {
@@ -4272,24 +4303,25 @@ impl App {
     /// `!make sync-all` then later hitting `:` + Up surfaces
     /// `make sync-all` and submits it as a `:` command, which then
     /// errors with "unknown command".
-    #[allow(clippy::missing_const_for_fn)]
-    fn history_for_prompt(&mut self) -> &mut History {
+    /// Resolve a [`HistoryBucket`] to the owning `History`. The split
+    /// from [`history_bucket_for`] keeps the kind→bucket decision pure
+    /// (and testable) while this side does the `&mut self` projection.
+    const fn history_bucket_mut(&mut self, bucket: HistoryBucket) -> &mut History {
+        match bucket {
+            HistoryBucket::Shell => &mut self.state.history,
+            HistoryBucket::PaneCmd => &mut self.state.pane_history,
+            HistoryBucket::PaneCwd => &mut self.state.pane_cwd_history,
+            HistoryBucket::Jump => &mut self.state.jump_history,
+            HistoryBucket::Command => &mut self.state.command_history,
+        }
+    }
+
+    const fn history_for_prompt(&mut self) -> &mut History {
         let kind = match &self.state.mode {
             Mode::Prompting(p) => Some(&p.kind),
             Mode::Normal => None,
         };
-        if matches!(
-            kind,
-            Some(PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd)
-        ) {
-            &mut self.state.pane_history
-        } else if matches!(kind, Some(PromptKind::Jump)) {
-            &mut self.state.jump_history
-        } else if matches!(kind, Some(PromptKind::Command)) {
-            &mut self.state.command_history
-        } else {
-            &mut self.state.history
-        }
+        self.history_bucket_mut(history_bucket_for(kind))
     }
 
     /// Handle keys for shell prompts that use the vi line editor.
@@ -4414,44 +4446,16 @@ impl App {
 
         match result {
             EditResult::Submit => {
-                let is_pane_prompt = matches!(
-                    self.state.mode,
-                    Mode::Prompting(Prompt {
-                        kind: PromptKind::PaneNewTabCmd | PromptKind::PaneNewTabCwd,
-                        ..
-                    })
-                );
-                let is_jump_prompt = matches!(
-                    self.state.mode,
-                    Mode::Prompting(Prompt {
-                        kind: PromptKind::Jump,
-                        ..
-                    })
-                );
-                let is_command_prompt = matches!(
-                    self.state.mode,
-                    Mode::Prompting(Prompt {
-                        kind: PromptKind::Command,
-                        ..
-                    })
-                );
                 let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
                 else {
                     return PostAction::None;
                 };
                 // Push to the appropriate history before dispatching.
-                // Four buckets stay isolated -- shell, pane-tab, jump
-                // destinations, and `:` commands don't cross-pollute
-                // each other's Up/Down browse.
-                let hist = if is_pane_prompt {
-                    &mut self.state.pane_history
-                } else if is_jump_prompt {
-                    &mut self.state.jump_history
-                } else if is_command_prompt {
-                    &mut self.state.command_history
-                } else {
-                    &mut self.state.history
-                };
+                // Buckets stay isolated -- shell, pane command, pane
+                // cwd, jump destinations, and `:` commands don't
+                // cross-pollute each other's Up/Down browse. Same
+                // `history_bucket_for` mapping the browse path uses.
+                let hist = self.history_bucket_mut(history_bucket_for(Some(&p.kind)));
                 if !p.buffer.trim().is_empty() {
                     hist.push(p.buffer.trim());
                 }
@@ -11649,6 +11653,53 @@ mod layout_tests {
         assert_eq!(l.status.y, 23);
         // pane ends at the row above prompt.
         assert!(pane.y + pane.height <= l.prompt.y);
+    }
+}
+
+#[cfg(test)]
+mod history_bucket_tests {
+    use super::{HistoryBucket, PromptKind, history_bucket_for};
+
+    #[test]
+    fn pane_command_and_cwd_use_distinct_buckets() {
+        // The bug this guards: both pane prompts shared one bucket, so
+        // directories typed at "pane cwd:" leaked into the "pane
+        // command:" Up/Down browse.
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::PaneNewTabCmd)),
+            HistoryBucket::PaneCmd
+        );
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::PaneNewTabCwd)),
+            HistoryBucket::PaneCwd
+        );
+        assert_ne!(HistoryBucket::PaneCmd, HistoryBucket::PaneCwd);
+    }
+
+    #[test]
+    fn jump_and_command_stay_isolated() {
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::Jump)),
+            HistoryBucket::Jump
+        );
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::Command)),
+            HistoryBucket::Command
+        );
+    }
+
+    #[test]
+    fn shell_and_path_prompts_fall_back_to_shell_bucket() {
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::ShellCmd)),
+            HistoryBucket::Shell
+        );
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::CopyTo)),
+            HistoryBucket::Shell
+        );
+        // Normal mode (no prompt) also resolves to the default bucket.
+        assert_eq!(history_bucket_for(None), HistoryBucket::Shell);
     }
 }
 

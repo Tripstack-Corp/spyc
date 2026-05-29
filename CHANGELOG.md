@@ -15,6 +15,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Plain `^a a` (no Ctrl on the second key) still focuses the pane.
 
 ### Fixed
+- **Pane "cwd:" directories no longer pollute the pane command
+  history.** The `^a c` new-tab flow has two prompts — "pane command:"
+  and "pane cwd:" — and both recorded into a single `pane_history`
+  bucket, so directory paths typed at the cwd step showed up when
+  browsing the command prompt with Up/Down. The cwd prompt now records
+  into its own `pane_cwd_history` bucket (Up/Down there usefully
+  recalls previous working directories). Root cause was two
+  independent kind→bucket decisions that drifted; they're now one pure
+  `history_bucket_for` mapping shared by the browse and record paths.
+  Existing `pane_history` files keep their stale directory entries
+  until cleaned — they're not migrated automatically.
 - **Git status markers no longer stall during sustained fs activity.**
   The watcher-driven `refresh_listing` used a pure trailing-edge
   debounce (`now - last_event_at >= refresh_quiet`) with no max-wait
