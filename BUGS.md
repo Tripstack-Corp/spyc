@@ -8,8 +8,6 @@
 - I would like to include an alias of spyc that would just launch the markdown
   pager standalone; what would that look like? spymd? it could be a useful side
   product
-- in the visual mode of commandline history '?' should trigger the view of the
-  history list; not only just on start with: '!?'
 - ^\ sig-quit (?) should be respected - I was able to wedge my spyc session
   somehow and there was no way out other than in another shell with kill
 - need to support ollama session recovery ... not sure how / if that will work
@@ -119,6 +117,13 @@
   day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
+- (fixed, v1.51.2) `?` opens the history editor mid-prompt, not just
+  via `!?` from a fresh prompt. After `Esc` drops the line editor into
+  Normal mode (e.g. `Esc k` to browse history), `?` (like `Space`)
+  now opens the full history viewer. Previously the `?` affordance
+  only fired on an empty buffer, so once a command was recalled it
+  stopped working. `?` is a no-op in the line editor's Normal mode, so
+  nothing was clobbered.
 - (fixed, v1.51.0) `^a ^a` jumps to the previously-active pane tab
   (screen/tmux "last window"). Pressing the pane prefix twice toggles
   between the current tab and the one before it. `PaneTabs` tracks a
