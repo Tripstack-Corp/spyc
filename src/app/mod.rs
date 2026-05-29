@@ -10472,6 +10472,7 @@ impl App {
             | Action::PaneTabByIndex(_)
             | Action::PaneNextTab
             | Action::PanePrevTab
+            | Action::PaneLastTab
             | Action::PaneRenameTab
             | Action::PaneRestartTab
             | Action::HarpoonJump(_)
@@ -10551,6 +10552,26 @@ impl App {
                 }
                 self.restore_active_tab_scrollback_pager();
                 self.needs_full_repaint = true;
+            }
+            Action::PaneLastTab => {
+                self.stash_scrollback_pager_to_active_tab();
+                let jumped = self
+                    .pane_tabs
+                    .as_mut()
+                    .is_some_and(PaneTabs::switch_to_last);
+                if jumped {
+                    // Same rationale as PaneTabByIndex: a tab switch
+                    // means "interact with that tab", so pull focus
+                    // into the pane.
+                    self.state.pane_focused = true;
+                    self.needs_full_repaint = true;
+                } else {
+                    self.state.flash_info("no previous tab");
+                }
+                // Runs in both cases: on a jump it surfaces the target
+                // tab's stash; on a no-op it round-trips the pager we
+                // just stashed back onto the (unchanged) active tab.
+                self.restore_active_tab_scrollback_pager();
             }
             Action::PaneRenameTab => {
                 if let Some(tabs) = self.pane_tabs.as_ref() {

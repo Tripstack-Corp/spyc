@@ -127,6 +127,17 @@ impl Resolver {
         }
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
 
+        // `^a ^a` (prefix prefix) — screen/tmux "last window": jump back
+        // to the previously-active tab. Handled here, before the generic
+        // ctrl block below, which would otherwise treat the second `^a`
+        // as a fresh prefix and just re-arm `PendingSeq::W`. Plain `^a a`
+        // (no ctrl on the second key) still falls through to focus-down
+        // in the `W` chord block.
+        if self.pending == PendingSeq::W && ctrl && matches!(ev.code, KeyCode::Char('a' | 'A')) {
+            self.reset();
+            return ResolverOutcome::Action(Action::PaneLastTab);
+        }
+
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
@@ -216,9 +227,10 @@ impl Resolver {
         // with vim-style (j/k focus, +/- resize).
         if self.pending == PendingSeq::W {
             let out = match ev.code {
-                // Focus switching — vim-style j/J, plus screen-style ^a ^a
-                // which sends literal ^a to the pane (grouped here to shut
-                // up clippy::match_same_arms).
+                // Focus switching — vim-style j/J, plus plain `^a a`/`^a A`.
+                // (Note `^a ^a` with ctrl on the second key is intercepted
+                // above as PaneLastTab; this arm only sees the no-ctrl
+                // letters. Grouped to shut up clippy::match_same_arms.)
                 KeyCode::Char('j' | 'J' | 'a' | 'A') => {
                     ResolverOutcome::Action(Action::PaneFocusDown)
                 }
@@ -1646,6 +1658,28 @@ mod tests {
         r.feed(ctrl('a'), &user);
         let out = r.feed(key('p'), &user);
         assert_eq!(out, ResolverOutcome::Action(Action::PanePrevTab));
+    }
+
+    #[test]
+    fn ctrl_a_ctrl_a_is_last_tab() {
+        let mut r = Resolver::new();
+        let user = empty_keymap();
+        // ^a primes pending=W; a second ^a is "last window".
+        r.feed(ctrl('a'), &user);
+        let out = r.feed(ctrl('a'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::PaneLastTab));
+        assert!(!r.is_pending());
+    }
+
+    #[test]
+    fn ctrl_a_plain_a_is_focus_down() {
+        let mut r = Resolver::new();
+        let user = empty_keymap();
+        // Plain `a` (no ctrl) after the prefix stays focus-down — only
+        // the ctrl-modified second key is last-tab.
+        r.feed(ctrl('a'), &user);
+        let out = r.feed(key('a'), &user);
+        assert_eq!(out, ResolverOutcome::Action(Action::PaneFocusDown));
     }
 
     #[test]

@@ -1,5 +1,4 @@
 ### SMALL ###
-- I would like ^a-^a to jump to the previous pane
 - pasting into the pager for a search / the pasted content goes to the lower
   pane instead; do we need a better model in general for what activity is in
   "focus" - this has come up before as an issue; let's consider a refactor?
@@ -120,6 +119,12 @@
   day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
+- (fixed, v1.51.0) `^a ^a` jumps to the previously-active pane tab
+  (screen/tmux "last window"). Pressing the pane prefix twice toggles
+  between the current tab and the one before it. `PaneTabs` tracks a
+  `last_active` index, updated on every genuine switch and invalidated
+  when the target tab is closed; flashes "no previous tab" when there's
+  nothing to return to. Plain `^a a` still focuses the pane.
 - (fixed) Yank to clipboard on Linux. `yf`, `yp`, `yP`, `ya`, and
   pager-side yanks failed with `yank failed: No such file or
   directory (os error 2)` because both clipboard sites hard-coded

@@ -182,6 +182,11 @@ impl TabEntry {
 pub struct PaneTabs {
     tabs: Vec<TabEntry>,
     active: usize,
+    /// Index of the tab that was active *before* the current one, for
+    /// screen/tmux-style "last window" jumps (`^a ^a`). `None` until
+    /// the user has switched at least once, or when a removal would
+    /// leave it dangling. Updated on every genuine change of `active`.
+    last_active: Option<usize>,
 }
 
 #[allow(dead_code)]
@@ -191,7 +196,20 @@ impl PaneTabs {
         Self {
             tabs: vec![entry],
             active: 0,
+            last_active: None,
         }
+    }
+
+    /// Move `active` to `idx`, remembering the prior tab as
+    /// `last_active` when it's a real switch. Caller guarantees the
+    /// container is non-empty and `idx` is in range. Clears the
+    /// activity flag on the newly active tab.
+    fn activate(&mut self, idx: usize) {
+        if idx != self.active {
+            self.last_active = Some(self.active);
+        }
+        self.active = idx;
+        self.tabs[self.active].info.has_activity = false;
     }
 
     pub fn active(&self) -> &Pane {
@@ -234,31 +252,47 @@ impl PaneTabs {
     /// Clears the activity flag on the newly active tab.
     pub fn switch_to(&mut self, idx: usize) {
         if !self.tabs.is_empty() {
-            self.active = idx.min(self.tabs.len() - 1);
-            self.tabs[self.active].info.has_activity = false;
+            self.activate(idx.min(self.tabs.len() - 1));
         }
+    }
+
+    /// Jump back to the previously-active tab (`^a ^a`). Returns `true`
+    /// if a jump happened, `false` when there's no valid prior tab
+    /// (only one tab, never switched, or the prior tab was closed).
+    /// The jump is itself a switch, so it swaps `active`/`last_active`
+    /// — pressing it again toggles back.
+    pub fn switch_to_last(&mut self) -> bool {
+        if let Some(prev) = self.last_active {
+            if prev < self.tabs.len() && prev != self.active {
+                self.activate(prev);
+                return true;
+            }
+        }
+        false
     }
 
     pub fn next(&mut self) {
         if !self.tabs.is_empty() {
-            self.active = (self.active + 1) % self.tabs.len();
-            self.tabs[self.active].info.has_activity = false;
+            self.activate((self.active + 1) % self.tabs.len());
         }
     }
 
     pub fn prev(&mut self) {
         if !self.tabs.is_empty() {
-            self.active = if self.active == 0 {
+            let target = if self.active == 0 {
                 self.tabs.len() - 1
             } else {
                 self.active - 1
             };
-            self.tabs[self.active].info.has_activity = false;
+            self.activate(target);
         }
     }
 
-    /// Add a new tab and switch to it.
+    /// Add a new tab and switch to it. The tab we were on becomes
+    /// `last_active`, so `^a ^a` right after opening a tab returns to
+    /// where you were.
     pub fn push(&mut self, entry: TabEntry) {
+        self.last_active = Some(self.active);
         self.tabs.push(entry);
         self.active = self.tabs.len() - 1;
     }
@@ -283,7 +317,15 @@ impl PaneTabs {
     /// Remove all tabs whose subprocess has exited. Returns `true` if
     /// any tabs remain, `false` if the container is now empty.
     pub fn remove_closed(&mut self) -> bool {
+        let before = self.tabs.len();
         self.tabs.retain(|entry| !entry.pane.is_closed());
+        // A `retain` can drop tabs from anywhere, shifting every index
+        // after them. Rather than reconstruct the mapping, drop the
+        // `last_active` hint when anything was removed — losing the
+        // `^a ^a` target after a background tab exits is benign.
+        if self.tabs.len() != before {
+            self.last_active = None;
+        }
         if self.tabs.is_empty() {
             return false;
         }
@@ -291,6 +333,17 @@ impl PaneTabs {
             self.active = self.tabs.len() - 1;
         }
         true
+    }
+
+    /// Fix up `last_active` after the tab at `removed` is dropped:
+    /// invalidate it if it pointed at that tab, slide it left if it sat
+    /// after it.
+    const fn fixup_last_active_after_remove(&mut self, removed: usize) {
+        self.last_active = match self.last_active {
+            Some(x) if x == removed => None,
+            Some(x) if x > removed => Some(x - 1),
+            other => other,
+        };
     }
 
     /// Mark exited tabs with their exit code. Returns `true` if any
@@ -345,6 +398,7 @@ impl PaneTabs {
             .pane
             .shutdown(std::time::Duration::from_millis(250));
         self.tabs.remove(idx);
+        self.fixup_last_active_after_remove(idx);
         if self.tabs.is_empty() {
             return false;
         }
@@ -371,6 +425,7 @@ impl PaneTabs {
         }
         let idx = self.active;
         let entry = self.tabs.remove(idx);
+        self.fixup_last_active_after_remove(idx);
         if !self.tabs.is_empty() {
             if idx < self.active {
                 self.active -= 1;
@@ -393,7 +448,83 @@ impl PaneTabs {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_exit_suffix;
+    use super::{PaneTabs, TabEntry, TabInfo, strip_exit_suffix};
+    use crate::pane::Pane;
+
+    /// A long-lived dummy tab: `cat` blocks reading stdin so the pty
+    /// stays open for the lifetime of the test.
+    fn dummy_tab() -> TabEntry {
+        let tmp = std::env::temp_dir();
+        let ctx = tmp.join("spyc-tabs-test-context.json");
+        let pane = Pane::spawn("cat", 24, 80, &tmp, &ctx).expect("spawn dummy pane");
+        TabEntry::new(pane, TabInfo::new("cat", &tmp))
+    }
+
+    fn tabs_with(n: usize) -> PaneTabs {
+        let mut tabs = PaneTabs::new(dummy_tab());
+        for _ in 1..n {
+            tabs.push(dummy_tab());
+        }
+        tabs
+    }
+
+    #[test]
+    fn last_tab_toggles_between_two() {
+        let mut tabs = tabs_with(3);
+        // push() left us on tab 2 with last_active = 1.
+        assert_eq!(tabs.active_index(), 2);
+        tabs.switch_to(0); // now on 0, last = 2
+        assert_eq!(tabs.active_index(), 0);
+
+        assert!(tabs.switch_to_last()); // -> 2
+        assert_eq!(tabs.active_index(), 2);
+        assert!(tabs.switch_to_last()); // -> 0 (toggle back)
+        assert_eq!(tabs.active_index(), 0);
+        assert!(tabs.switch_to_last()); // -> 2
+        assert_eq!(tabs.active_index(), 2);
+    }
+
+    #[test]
+    fn last_tab_noops_without_prior() {
+        let mut tabs = PaneTabs::new(dummy_tab());
+        // Single tab, never switched: nothing to jump back to.
+        assert!(!tabs.switch_to_last());
+        assert_eq!(tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn switching_to_same_tab_does_not_arm_last() {
+        let mut tabs = tabs_with(2); // on tab 1, last = 0
+        tabs.switch_to(1); // no-op switch to current
+        // last_active should still be 0 (the genuine prior), so a jump
+        // lands on 0 — switch_to(current) must not overwrite it with 1.
+        assert!(tabs.switch_to_last());
+        assert_eq!(tabs.active_index(), 0);
+    }
+
+    #[test]
+    fn removing_last_active_tab_invalidates_jump() {
+        let mut tabs = tabs_with(3);
+        tabs.switch_to(0); // on 0, last = 2
+        tabs.switch_to(1); // on 1, last = 0
+        // Remove tab 0 (the last-active). active 1 slides to 0; the
+        // jump target is gone, so switch_to_last is a no-op.
+        tabs.remove_at(0);
+        assert_eq!(tabs.active_index(), 0);
+        assert!(!tabs.switch_to_last());
+    }
+
+    #[test]
+    fn removing_lower_tab_reindexes_last_active() {
+        let mut tabs = tabs_with(4); // on 3
+        tabs.switch_to(2); // on 2, last = 3
+        tabs.switch_to(0); // on 0, last = 2
+        // Remove tab 1 (below both active=0? no, above active). It sits
+        // below last_active(2), so last_active should slide to 1.
+        tabs.remove_at(1);
+        assert!(tabs.switch_to_last());
+        assert_eq!(tabs.active_index(), 1); // formerly tab 2
+    }
 
     #[test]
     fn strips_numeric_exit_code() {

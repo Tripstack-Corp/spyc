@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`^a ^a` jumps to the last-active pane tab** (screen/tmux
+  "last window"). Pressing the pane prefix twice toggles between the
+  current tab and the one you were on before it, so `^a ^a ^a ^a`
+  ping-pongs. `PaneTabs` now tracks a `last_active` index, updated on
+  every genuine tab switch and fixed up (or invalidated) when tabs are
+  closed. Flashes "no previous tab" when there's nothing to return to.
+  Plain `^a a` (no Ctrl on the second key) still focuses the pane.
+
 ### Fixed
 - **Git status markers no longer stall during sustained fs activity.**
   The watcher-driven `refresh_listing` used a pure trailing-edge
