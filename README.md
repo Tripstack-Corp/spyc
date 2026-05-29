@@ -37,7 +37,7 @@ A two-pane terminal program.
 - The **top pane** is a keyboard-driven, vim-flavoured file commander
   with git-aware listings.
 - The **bottom pane** is a child process — by default Claude Code or
-  codex (both first-class; Gemini also supported), but in practice any
+  codex (both first-class; Gemini and Antigravity also supported), but in practice any
   program.
 
 The two panes share focus through a chord-prefix system (`^a` /
@@ -93,7 +93,7 @@ make install          # builds release + copies to ~/.local/bin (no sudo)
 ```sh
 spyc            # opens in the current directory
 spyc -r         # resume a previous session (restores each pane to its own
-                # Claude / Codex / Gemini conversation, identified per-tab)
+                # Claude / Codex / Gemini / Antigravity conversation, identified per-tab)
 ```
 
 spyc opens with your cwd in a multi-column listing. Move with `hjkl`,

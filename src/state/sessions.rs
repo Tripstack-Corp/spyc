@@ -20,6 +20,7 @@ pub enum AgentKind {
     Claude,
     Codex,
     Gemini,
+    Agy,
     /// Anything else (`bash`, `vim`, `make`, …). No session resume.
     #[default]
     Other,
@@ -525,8 +526,10 @@ fn find_claude_session_name(session_id: &str) -> Option<String> {
 pub fn extract_claude_resume_token(lines: &[String]) -> Option<String> {
     for line in lines.iter().rev() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("claude --resume ") {
-            let tok = rest.split_whitespace().next()?.trim();
+        if let Some(rest) = trimmed.strip_prefix("claude --resume ")
+            && let Some(tok) = rest.split_whitespace().next()
+        {
+            let tok = tok.trim();
             if !tok.is_empty() {
                 return Some(tok.to_string());
             }
@@ -548,9 +551,38 @@ pub fn extract_codex_resume_token(lines: &[String]) -> Option<String> {
         // the same render line.
         if let Some(idx) = trimmed.find("codex resume ") {
             let rest = &trimmed[idx + "codex resume ".len()..];
-            let tok = rest.split_whitespace().next()?.trim();
-            if is_uuid(tok) {
-                return Some(tok.to_string());
+            if let Some(tok) = rest.split_whitespace().next() {
+                let tok = tok.trim();
+                if is_uuid(tok) {
+                    return Some(tok.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Scan pane scrollback for the exit banner agy prints on exit.
+/// Returns the UUID. Searches in reverse so the most recent banner wins.
+pub fn extract_agy_resume_token(lines: &[String]) -> Option<String> {
+    for line in lines.iter().rev() {
+        let trimmed = line.trim();
+        if let Some(idx) = trimmed.find("agy --conversation ") {
+            let rest = &trimmed[idx + "agy --conversation ".len()..];
+            if let Some(tok) = rest.split_whitespace().next() {
+                let tok = tok.trim();
+                if is_uuid(tok) {
+                    return Some(tok.to_string());
+                }
+            }
+        }
+        if let Some(idx) = trimmed.find("agy -c ") {
+            let rest = &trimmed[idx + "agy -c ".len()..];
+            if let Some(tok) = rest.split_whitespace().next() {
+                let tok = tok.trim();
+                if is_uuid(tok) {
+                    return Some(tok.to_string());
+                }
             }
         }
     }
@@ -609,7 +641,7 @@ pub fn resolve_active_session_short_id(
         // the filename encodes both timestamp and UUID. A future PR
         // can parse filenames here; for now Codex panes get no
         // short-id in the status segment.
-        AgentKind::Codex | AgentKind::Other => None,
+        AgentKind::Codex | AgentKind::Agy | AgentKind::Other => None,
     }
 }
 
@@ -757,6 +789,40 @@ mod tests {
         .collect();
         let tok = extract_codex_resume_token(&lines).unwrap();
         assert_eq!(tok, "22222222-2222-2222-2222-222222222222");
+    }
+
+    #[test]
+    fn extracts_agy_uuid_with_conversation_flag() {
+        let lines: Vec<String> = [
+            "some output",
+            "To continue this session, run agy --conversation 2afd7b70-f1e0-44a3-95c6-d9e538d231db",
+            "",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_agy_resume_token(&lines).unwrap();
+        assert_eq!(tok, "2afd7b70-f1e0-44a3-95c6-d9e538d231db");
+    }
+
+    #[test]
+    fn extracts_agy_uuid_with_c_flag() {
+        let lines: Vec<String> = [
+            "some output",
+            "To continue this session, run agy -c 2afd7b70-f1e0-44a3-95c6-d9e538d231db",
+            "",
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        let tok = extract_agy_resume_token(&lines).unwrap();
+        assert_eq!(tok, "2afd7b70-f1e0-44a3-95c6-d9e538d231db");
+    }
+
+    #[test]
+    fn agy_extractor_requires_uuid() {
+        let lines: Vec<String> = vec!["agy --conversation saffron-cumin".to_string()];
+        assert!(extract_agy_resume_token(&lines).is_none());
     }
 
     #[test]
