@@ -3470,6 +3470,7 @@ impl App {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
             AgentKind::Gemini => "gemini",
+            AgentKind::Agy => "agy",
             AgentKind::Other => unreachable!(),
         };
         // Cache hit: same (kind, cwd, spawn_epoch_secs) within
@@ -6002,6 +6003,12 @@ impl App {
         first == "gemini" || first.ends_with("/gemini")
     }
 
+    /// Does this command look like it's launching Antigravity CLI (`agy`)?
+    fn is_agy_command(cmd: &str) -> bool {
+        let first = cmd.split_whitespace().next().unwrap_or("");
+        first == "agy" || first.ends_with("/agy")
+    }
+
     /// Classify a command for session-resume purposes.
     fn detect_agent_kind(cmd: &str) -> AgentKind {
         if Self::is_claude_command(cmd) {
@@ -6010,6 +6017,8 @@ impl App {
             AgentKind::Codex
         } else if Self::is_gemini_command(cmd) {
             AgentKind::Gemini
+        } else if Self::is_agy_command(cmd) {
+            AgentKind::Agy
         } else {
             AgentKind::Other
         }
@@ -6781,6 +6790,39 @@ fn command_without_gemini_resume(cmd: &str) -> String {
     let stripped = out.join(" ");
     if stripped.is_empty() {
         "gemini".to_string()
+    } else {
+        stripped
+    }
+}
+
+/// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
+fn command_without_agy_resume(cmd: &str) -> String {
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
+    let mut skip_next = false;
+    for p in parts {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if p == "--conversation" || p == "-c" {
+            skip_next = true;
+            continue;
+        }
+        if p == "--continue" {
+            continue;
+        }
+        if let Some(_value) = p.strip_prefix("--conversation=") {
+            continue;
+        }
+        if let Some(_value) = p.strip_prefix("-c=") {
+            continue;
+        }
+        out.push(p);
+    }
+    let stripped = out.join(" ");
+    if stripped.is_empty() {
+        "agy".to_string()
     } else {
         stripped
     }
@@ -8631,6 +8673,12 @@ impl App {
                                 t.info.spawn_epoch_secs,
                                 &claimed,
                             ),
+                            AgentKind::Agy => {
+                                let lines = t.pane.recent_lines(200);
+                                let id = crate::state::sessions::extract_agy_resume_token(&lines)
+                                    .filter(|tok| !claimed.contains(tok));
+                                (id, None)
+                            }
                             AgentKind::Other => (None, None),
                         };
                         if let Some(ref id) = agent_session_id {
@@ -8643,6 +8691,7 @@ impl App {
                             AgentKind::Claude => command_without_resume(&t.info.command),
                             AgentKind::Codex => command_without_codex_resume(&t.info.command),
                             AgentKind::Gemini => command_without_gemini_resume(&t.info.command),
+                            AgentKind::Agy => command_without_agy_resume(&t.info.command),
                             AgentKind::Other => t.info.command.clone(),
                         };
                         SavedTab {
@@ -8711,6 +8760,11 @@ impl App {
             .iter()
             .filter(|t| t.effective_kind() == AgentKind::Codex && t.agent_session_id.is_some())
             .count();
+        let agy_count = session
+            .tabs
+            .iter()
+            .filter(|t| t.effective_kind() == AgentKind::Agy && t.agent_session_id.is_some())
+            .count();
         let mut parts = vec![format!("session saved — {cwd_display}")];
         if tab_count > 0 {
             parts.push(format!(
@@ -8725,6 +8779,12 @@ impl App {
             parts.push(format!(
                 "codex: {codex_count} session{}",
                 if codex_count == 1 { "" } else { "s" }
+            ));
+        }
+        if agy_count > 0 {
+            parts.push(format!(
+                "agy: {agy_count} session{}",
+                if agy_count == 1 { "" } else { "s" }
             ));
         }
         parts.push("restore with spyc -r".to_string());
@@ -8761,6 +8821,7 @@ impl App {
                             },
                             AgentKind::Codex => format!("codex:{short_id}"),
                             AgentKind::Gemini => format!("gemini:{short_id}"),
+                            AgentKind::Agy => format!("agy:{short_id}"),
                             AgentKind::Other => return None,
                         };
                         Some(label)
@@ -8965,6 +9026,17 @@ impl App {
                     }
                     (AgentKind::Gemini, None) => {
                         (command_without_gemini_resume(&tab.command), None)
+                    }
+                    (AgentKind::Agy, Some(sid)) => {
+                        let base = command_without_agy_resume(&tab.command);
+                        (
+                            format!("{base} --conversation {sid}"),
+                            Some(sid.to_string()),
+                        )
+                    }
+                    (AgentKind::Agy, None) => {
+                        let base = command_without_agy_resume(&tab.command);
+                        (format!("{base} --continue"), None)
                     }
                     (AgentKind::Other, _) => (tab.command.clone(), None),
                 };
@@ -11931,6 +12003,61 @@ The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
             parse_gemini_list_sessions_for_uuid(stdout, "11111111-1111-1111-1111-111111111111")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod agy_helpers_tests {
+    use super::command_without_agy_resume;
+
+    #[test]
+    fn strips_conversation_with_value() {
+        assert_eq!(
+            command_without_agy_resume("agy --conversation 11111111-1111-1111-1111-111111111111"),
+            "agy"
+        );
+    }
+
+    #[test]
+    fn strips_c_with_value() {
+        assert_eq!(
+            command_without_agy_resume("agy -c 11111111-1111-1111-1111-111111111111"),
+            "agy"
+        );
+    }
+
+    #[test]
+    fn strips_conversation_equals_value() {
+        assert_eq!(
+            command_without_agy_resume("agy --conversation=11111111-1111-1111-1111-111111111111"),
+            "agy"
+        );
+    }
+
+    #[test]
+    fn strips_c_equals_value() {
+        assert_eq!(
+            command_without_agy_resume("agy -c=11111111-1111-1111-1111-111111111111"),
+            "agy"
+        );
+    }
+
+    #[test]
+    fn strips_continue_flag() {
+        assert_eq!(command_without_agy_resume("agy --continue"), "agy");
+    }
+
+    #[test]
+    fn preserves_unrelated_flags() {
+        assert_eq!(
+            command_without_agy_resume("agy --print \"hello\" --continue"),
+            "agy --print \"hello\""
+        );
+    }
+
+    #[test]
+    fn empty_input_falls_back_to_agy() {
+        assert_eq!(command_without_agy_resume(""), "agy");
     }
 }
 

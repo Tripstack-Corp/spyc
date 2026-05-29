@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Antigravity CLI (`agy`) agent support.** Spyc now detects `agy` spawned in the lower pane. Closing the pane and running `spyc -r` later automatically resumes the conversation (`agy --conversation <UUID>`). The spyc status bar also reports the live `agy` short ID.
 ## [1.51.4] - 2026-05-29
 
 Git-status UX and a Rust toolchain refresh. Untracked files surface
