@@ -59,3 +59,7 @@ Cargo.lock.bak
 .codex/
 
 .claude
+
+# Antigravity (agy) CLI local state — a symlink farm into ~/.gemini;
+# machine-specific, must never be committed.
+.antigravitycli/
