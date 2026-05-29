@@ -39,6 +39,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Plain `^a a` (no Ctrl on the second key) still focuses the pane.
 
 ### Fixed
+- **Directories whose only changes are untracked now show `?`, not
+  `~`.** When the list collapses a subtree's git status onto its
+  directory row, an untracked-only subtree gets the untracked marker
+  instead of the generic modified (`~`) marker — so a folder
+  containing only new files is distinguishable from one with tracked
+  edits. Tracked changes still win: a directory with both a modified
+  file and a new file reads as `~` (order-independent).
 - **Untracked files now show the `?` marker in large repos.** The
   git-status poll dropped to `git status -uno` (no untracked
   enumeration) whenever a tree exceeded the huge-tree subdir
