@@ -189,7 +189,16 @@ pub struct AppState {
     pub last_search: Option<String>,
     pub last_captured_cmd: Option<String>,
     pub history: History,
+    /// Command history for the "pane command:" prompt (`^a c`). Holds
+    /// only the *commands* the user launched tabs with — never the
+    /// directories entered at the follow-up "pane cwd:" step, which
+    /// live in [`Self::pane_cwd_history`]. Sharing one bucket polluted
+    /// the command browse with directory paths.
     pub pane_history: History,
+    /// Destination history for the "pane cwd:" prompt — previously-used
+    /// working directories, so Up/Down recalls them without mixing into
+    /// the command history above.
+    pub pane_cwd_history: History,
     /// Persistent history for `J` (jump-to-path) prompts. Up / Down
     /// in the prompt cycle through previously-jumped destinations,
     /// independent of the shell-command and pane-prompt histories
@@ -2229,6 +2238,7 @@ mod tests {
             last_captured_cmd: None,
             history: History::load_file("test_state_h"),
             pane_history: History::load_file("test_state_ph"),
+            pane_cwd_history: History::load_file("test_state_pch"),
             jump_history: History::load_file("test_state_jh"),
             command_history: History::load_file("test_state_ch"),
             flash: None,

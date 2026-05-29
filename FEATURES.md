@@ -277,8 +277,11 @@ multi-line input).
 
 Pane command prompts (`^W n`) have their own dedicated history,
 separate from shell commands — so Up/Down shows `claude`, `zsh`,
-`bash` instead of mixed shell commands. History is de-duplicated
-(most recent use moves to the end).
+`bash` instead of mixed shell commands. The follow-up "pane cwd:"
+prompt keeps a *separate* history again, so Up/Down there recalls
+previously-used working directories without mixing them into the
+command list. History is de-duplicated (most recent use moves to the
+end).
 
 ## Command line
 
