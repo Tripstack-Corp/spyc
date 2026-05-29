@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+- **Updated `time` 0.3.45 → 0.3.47**, clearing RUSTSEC-2026-0009 (DoS
+  via crafted format strings). The fix was reachable only at Rust
+  ≥1.88; the MSRV bump in this release unblocked it. Removed the now
+  -resolved advisory ignore from `deny.toml` (and a second, already
+  -dead `paste`/RUSTSEC-2024-0436 ignore — that crate is no longer in
+  the tree). `cargo deny check` is fully clean again.
+
 ### Changed
 - **Adopted `if let` chains; MSRV bumped 1.85 → 1.88.** Flattened ~90
   nested `if let { if … }` blocks into `&&`-joined let-chains across
