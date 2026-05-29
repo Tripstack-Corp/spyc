@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Adopted `if let` chains; MSRV bumped 1.85 → 1.88.** Flattened ~90
+  nested `if let { if … }` blocks into `&&`-joined let-chains across
+  the tree (via `cargo clippy --fix`, behavior- and comment-preserving
+  — verified by the full test suite). `if let` chains require Rust
+  1.88 + edition 2024, so `rust-version` moves to 1.88. The 1.88 MSRV
+  also unblocks the `time` DoS advisory (RUSTSEC-2026-0009) for a
+  future dependency update. Sites with an `else` or trailing code are
+  intentionally left nested (not collapsible).
 - **Pinned the Rust toolchain to 1.96.0** in `rust-toolchain.toml`
   (was the floating `stable` channel). Makes the build reproducible
   and turns compiler/clippy upgrades into an explicit, reviewable

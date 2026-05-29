@@ -163,10 +163,10 @@ fn check_frecency(path: &Path, warnings: &mut Vec<String>) {
     if !path.exists() {
         return;
     }
-    if let Ok(text) = std::fs::read_to_string(path) {
-        if serde_json::from_str::<crate::state::frecency::Frecency>(&text).is_err() {
-            warnings.push(format!("frecency: corrupt {}", path.display()));
-        }
+    if let Ok(text) = std::fs::read_to_string(path)
+        && serde_json::from_str::<crate::state::frecency::Frecency>(&text).is_err()
+    {
+        warnings.push(format!("frecency: corrupt {}", path.display()));
     }
 }
 

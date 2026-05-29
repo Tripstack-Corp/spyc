@@ -200,16 +200,14 @@ impl PtyHost {
             return DrainResult { newly_closed };
         };
         while let Ok(event) = rx.try_recv() {
-            if self.debug_dump {
-                if let PtyEvent::Bytes(ref bytes) = event {
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/spyc_pty_debug.bin")
-                    {
-                        let _ = f.write_all(bytes);
-                    }
-                }
+            if self.debug_dump
+                && let PtyEvent::Bytes(ref bytes) = event
+                && let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/spyc_pty_debug.bin")
+            {
+                let _ = f.write_all(bytes);
             }
             match event {
                 PtyEvent::Bytes(bytes) => on_bytes(&bytes),
@@ -272,10 +270,10 @@ impl PtyHost {
         if self.closed {
             // Reader thread already saw EOF; harvest exit_status if
             // we haven't yet. Non-blocking.
-            if self.exit_status.is_none() {
-                if let Ok(Some(status)) = self.child.try_wait() {
-                    self.exit_status = Some(status);
-                }
+            if self.exit_status.is_none()
+                && let Ok(Some(status)) = self.child.try_wait()
+            {
+                self.exit_status = Some(status);
             }
             return;
         }

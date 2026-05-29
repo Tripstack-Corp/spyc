@@ -879,7 +879,7 @@ fn slice_spans(spans: &[Span<'static>], start: usize, end: usize) -> Vec<Span<'s
     out
 }
 
-fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+const fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
     while idx > 0 && !s.is_char_boundary(idx) {
         idx -= 1;
     }

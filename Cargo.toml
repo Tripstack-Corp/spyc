@@ -5,7 +5,7 @@ edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
 repository = "https://bitbucket.org/tripstack/spyc"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [[bin]]
 name = "spyc"

@@ -555,11 +555,11 @@ impl PagerHistory {
         }
     }
 
-    fn back_len(&self) -> usize {
+    const fn back_len(&self) -> usize {
         self.back.len()
     }
 
-    fn forward_len(&self) -> usize {
+    const fn forward_len(&self) -> usize {
         self.forward.len()
     }
 }
@@ -1206,11 +1206,11 @@ impl App {
     /// output, help, picker UIs, etc. — those views intentionally
     /// don't carry a `source_path`.
     fn remember_pager_position(&mut self) {
-        if let Some(view) = self.pager.as_ref() {
-            if let Some(path) = view.source_path.clone() {
-                let scroll = view.scroll;
-                self.pager_positions.record(&path, scroll);
-            }
+        if let Some(view) = self.pager.as_ref()
+            && let Some(path) = view.source_path.clone()
+        {
+            let scroll = view.scroll;
+            self.pager_positions.record(&path, scroll);
         }
     }
 
@@ -1463,10 +1463,11 @@ impl App {
             std::collections::HashSet::new();
         if let Some(w) = fs_watcher.as_mut() {
             for path in self.candidate_config_paths() {
-                if let Some(parent) = path.parent() {
-                    if parent.is_dir() && already_watched.insert(parent.to_path_buf()) {
-                        let _ = w.watch(parent, RecursiveMode::NonRecursive);
-                    }
+                if let Some(parent) = path.parent()
+                    && parent.is_dir()
+                    && already_watched.insert(parent.to_path_buf())
+                {
+                    let _ = w.watch(parent, RecursiveMode::NonRecursive);
                 }
             }
         }
@@ -1731,33 +1732,32 @@ impl App {
             // If a task viewer pager is open, refresh its content from
             // the live task buffer (the bg drain above may have updated
             // the buffer this tick).
-            if let Some(viewer_id) = self.pager.as_ref().and_then(|v| v.task_id) {
-                if let Some(task) = self
+            if let Some(viewer_id) = self.pager.as_ref().and_then(|v| v.task_id)
+                && let Some(task) = self
                     .background_tasks
                     .tasks
                     .iter_mut()
                     .find(|t| t.id == viewer_id)
-                {
-                    // Rebuild on new bytes OR on status transition (e.g.
-                    // Running → Exited while the user is looking at it)
-                    // so the title and the [EOF] marker keep up with
-                    // reality. Drop has_unread_output even on
-                    // status-only refreshes so the divider `+` clears.
-                    let task_running = matches!(task.status, TaskStatus::Running);
-                    let viewer_streaming = self.pager.as_ref().is_some_and(|v| v.streaming);
-                    let status_changed = task_running != viewer_streaming;
-                    if task.has_unread_output || status_changed {
-                        task.has_unread_output = false;
-                        task.viewed_in_task_viewer = true;
-                        let new_view = Self::build_task_viewer_for(viewer_id, task);
-                        if let Some(view) = self.pager.as_mut() {
-                            view.lines = new_view.lines;
-                            view.title = new_view.title;
-                            view.streaming = new_view.streaming;
-                        }
-                        needs_draw = true;
-                        draw_reason = 3;
+            {
+                // Rebuild on new bytes OR on status transition (e.g.
+                // Running → Exited while the user is looking at it)
+                // so the title and the [EOF] marker keep up with
+                // reality. Drop has_unread_output even on
+                // status-only refreshes so the divider `+` clears.
+                let task_running = matches!(task.status, TaskStatus::Running);
+                let viewer_streaming = self.pager.as_ref().is_some_and(|v| v.streaming);
+                let status_changed = task_running != viewer_streaming;
+                if task.has_unread_output || status_changed {
+                    task.has_unread_output = false;
+                    task.viewed_in_task_viewer = true;
+                    let new_view = Self::build_task_viewer_for(viewer_id, task);
+                    if let Some(view) = self.pager.as_mut() {
+                        view.lines = new_view.lines;
+                        view.title = new_view.title;
+                        view.streaming = new_view.streaming;
                     }
+                    needs_draw = true;
+                    draw_reason = 3;
                 }
             }
 
@@ -1766,13 +1766,13 @@ impl App {
             // re-render only when something changed (or the walk
             // completed -- title flips from "scanning..." to a
             // final count).
-            if let Some(picker) = self.find_picker.as_mut() {
-                if picker.drain_walk() {
-                    picker.refilter();
-                    self.render_find_picker();
-                    needs_draw = true;
-                    draw_reason = 3;
-                }
+            if let Some(picker) = self.find_picker.as_mut()
+                && picker.drain_walk()
+            {
+                picker.refilter();
+                self.render_find_picker();
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // :grep session: drain match batches into the active
@@ -1824,10 +1824,10 @@ impl App {
                     }
                 }
             }
-            if let Some(overlay) = self.top_overlay.as_mut() {
-                if overlay.drain_output() {
-                    pane_had_output = true;
-                }
+            if let Some(overlay) = self.top_overlay.as_mut()
+                && overlay.drain_output()
+            {
+                pane_had_output = true;
             }
             if pane_had_output {
                 // v1.50.82 capped pane-driven renders to ~30 dps
@@ -1846,11 +1846,11 @@ impl App {
             // Mark exited tabs AFTER drain so the Closed event has been
             // processed and is_closed() returns true. Trigger a redraw
             // so the "[exited N]" label appears immediately.
-            if let Some(tabs) = self.pane_tabs.as_mut() {
-                if tabs.mark_exited() {
-                    needs_draw = true;
-                    draw_reason = 3;
-                }
+            if let Some(tabs) = self.pane_tabs.as_mut()
+                && tabs.mark_exited()
+            {
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // For tabs spawned by session restore that need a deferred
@@ -1864,20 +1864,20 @@ impl App {
             // the signature; the 30s window auto-disarms once a resume
             // is clearly working.
             let crash_idx = self.find_crashed_restore_tab();
-            if let Some(tab_idx) = crash_idx {
-                if matches!(self.state.mode, Mode::Normal) {
-                    if let Some(tabs) = self.pane_tabs.as_mut() {
-                        if let Some(entry) = tabs.tabs_mut().get_mut(tab_idx) {
-                            entry.info.restore_fallback = None;
-                        }
-                    }
-                    self.state.mode = Mode::Prompting(Prompt::simple(
-                        PromptKind::ClaudeCrashRecover { tab_idx },
-                        "claude crash detected — start fresh and recover with /resume? [Y/n] ",
-                    ));
-                    needs_draw = true;
-                    draw_reason = 3;
+            if let Some(tab_idx) = crash_idx
+                && matches!(self.state.mode, Mode::Normal)
+            {
+                if let Some(tabs) = self.pane_tabs.as_mut()
+                    && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
+                {
+                    entry.info.restore_fallback = None;
                 }
+                self.state.mode = Mode::Prompting(Prompt::simple(
+                    PromptKind::ClaudeCrashRecover { tab_idx },
+                    "claude crash detected — start fresh and recover with /resume? [Y/n] ",
+                ));
+                needs_draw = true;
+                draw_reason = 3;
             }
 
             // Drain any pending watcher events. Refresh listing / reload
@@ -2052,10 +2052,11 @@ impl App {
                             && key.modifiers.is_empty()
                         {
                             let now = std::time::Instant::now();
-                            if let Some((prev, dir)) = self.scroll_last {
-                                if dir == key.code && now.duration_since(prev).as_millis() < 40 {
-                                    continue;
-                                }
+                            if let Some((prev, dir)) = self.scroll_last
+                                && dir == key.code
+                                && now.duration_since(prev).as_millis() < 40
+                            {
+                                continue;
                             }
                             self.scroll_last = Some((now, key.code));
                         } else {
@@ -2372,10 +2373,10 @@ impl App {
         // Ignore our own context file writes -- they land in the
         // listing directory and would otherwise trigger a self-
         // perpetuating refresh_listing → git subprocess → redraw cycle.
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with(".spyc-context-") {
-                return false;
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with(".spyc-context-")
+        {
+            return false;
         }
         let dir = self.state.listing.dir.as_path();
         let git_dir = dir.join(".git");
@@ -2392,10 +2393,10 @@ impl App {
             return true;
         }
         if path.starts_with(&git_dir) {
-            if path.parent() == Some(git_dir.as_path()) {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    return matches!(name, "index" | "HEAD");
-                }
+            if path.parent() == Some(git_dir.as_path())
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                return matches!(name, "index" | "HEAD");
             }
             return false;
         }
@@ -3068,10 +3069,8 @@ impl App {
             // top of the just-drawn slot before returning. The
             // standard branch's centered-overlay tail (further down)
             // never runs in this path.
-            if in_help {
-                if let Some(help) = self.pager.as_ref() {
-                    crate::ui::pager::render(frame, frame.area(), help, &self.theme);
-                }
+            if in_help && let Some(help) = self.pager.as_ref() {
+                crate::ui::pager::render(frame, frame.area(), help, &self.theme);
             }
             return;
         }
@@ -3249,13 +3248,12 @@ impl App {
                     // jump frame. Skipped while the help overlay is
                     // up: the stash's `pending_scroll_to_bottom` was
                     // already cleared on the original first frame.
-                    if !in_help {
-                        if let Some(view) = self.pager.as_mut() {
-                            if view.pending_scroll_to_bottom.get() {
-                                view.scroll_to_bottom(rect.height);
-                                view.pending_scroll_to_bottom.set(false);
-                            }
-                        }
+                    if !in_help
+                        && let Some(view) = self.pager.as_mut()
+                        && view.pending_scroll_to_bottom.get()
+                    {
+                        view.scroll_to_bottom(rect.height);
+                        view.pending_scroll_to_bottom.set(false);
                     }
                     let underlying = if in_help {
                         self.pager_help_stash.as_ref()
@@ -3345,10 +3343,10 @@ impl App {
         // `LowerPane` and `TopPane` mounts already rendered into
         // their slots above; only `Overlay` mount hits this centered
         // render path.
-        if let Some(view) = &self.pager {
-            if matches!(view.mount, crate::ui::pager::Mount::Overlay) {
-                pager::render(frame, frame.area(), view, &self.theme);
-            }
+        if let Some(view) = &self.pager
+            && matches!(view.mount, crate::ui::pager::Mount::Overlay)
+        {
+            pager::render(frame, frame.area(), view, &self.theme);
         }
 
         // Harpoon menu overlay — modal, drawn on top of everything
@@ -3487,14 +3485,13 @@ impl App {
         // long-running users with many accumulated sessions —
         // sample showed ~65% of main-thread CPU here before this
         // cache.
-        if let Some(cached) = self.agent_status_cache.as_ref() {
-            if cached.kind == kind
-                && cached.spawn_epoch_secs == active.spawn_epoch_secs
-                && cached.cwd == active.cwd
-                && cached.computed_at.elapsed() < AGENT_STATUS_TTL
-            {
-                return cached.status.clone();
-            }
+        if let Some(cached) = self.agent_status_cache.as_ref()
+            && cached.kind == kind
+            && cached.spawn_epoch_secs == active.spawn_epoch_secs
+            && cached.cwd == active.cwd
+            && cached.computed_at.elapsed() < AGENT_STATUS_TTL
+        {
+            return cached.status.clone();
         }
         // Cache miss — pay the file walk once, then memoize.
         let short_id = crate::state::sessions::resolve_active_session_short_id(
@@ -4371,28 +4368,26 @@ impl App {
         // For `J`, the popup exists at `show_jump_history_popup` but
         // was previously only reachable via `J <Esc> <Space>` — two
         // prerequisites a spy user is unlikely to know.
-        if key.code == KeyCode::Char('?') {
-            if let Mode::Prompting(Prompt {
+        if key.code == KeyCode::Char('?')
+            && let Mode::Prompting(Prompt {
                 ref kind,
                 ref buffer,
                 ..
             }) = self.state.mode
-            {
-                if buffer.is_empty() {
-                    match kind {
-                        PromptKind::ShellCmdCaptured => {
-                            self.state.mode = Mode::Normal;
-                            self.show_history_popup();
-                            return PostAction::None;
-                        }
-                        PromptKind::Jump => {
-                            self.state.mode = Mode::Normal;
-                            self.show_jump_history_popup();
-                            return PostAction::None;
-                        }
-                        _ => {}
-                    }
+            && buffer.is_empty()
+        {
+            match kind {
+                PromptKind::ShellCmdCaptured => {
+                    self.state.mode = Mode::Normal;
+                    self.show_history_popup();
+                    return PostAction::None;
                 }
+                PromptKind::Jump => {
+                    self.state.mode = Mode::Normal;
+                    self.show_jump_history_popup();
+                    return PostAction::None;
+                }
+                _ => {}
             }
         }
 
@@ -4544,23 +4539,24 @@ impl App {
 
         // Repeated Tab with active cycle state: cycle through matches
         // or re-flash the list for local dirs.
-        if let Some(ref mut ts) = self.tab_state {
-            if (ts.original_buf == buffer || ts.cycle_index > 0) && ts.matches.len() > 1 {
-                // Cycle to next match, fill it in.
-                let idx = ts.cycle_index % ts.matches.len();
-                let completed = format!("{}{}{}", ts.buf_prefix, ts.word_base, ts.matches[idx]);
-                ts.cycle_index = idx + 1;
-                let flash = format!("{} — {}/{}", ts.matches[idx], idx + 1, ts.matches.len());
-                self.state.flash_info(flash);
-                let Mode::Prompting(ref mut prompt) = self.state.mode else {
-                    return;
-                };
-                prompt.buffer = completed;
-                if let Some(ed) = prompt.editor.as_mut() {
-                    ed.set_content(&prompt.buffer);
-                }
+        if let Some(ref mut ts) = self.tab_state
+            && (ts.original_buf == buffer || ts.cycle_index > 0)
+            && ts.matches.len() > 1
+        {
+            // Cycle to next match, fill it in.
+            let idx = ts.cycle_index % ts.matches.len();
+            let completed = format!("{}{}{}", ts.buf_prefix, ts.word_base, ts.matches[idx]);
+            ts.cycle_index = idx + 1;
+            let flash = format!("{} — {}/{}", ts.matches[idx], idx + 1, ts.matches.len());
+            self.state.flash_info(flash);
+            let Mode::Prompting(ref mut prompt) = self.state.mode else {
                 return;
+            };
+            prompt.buffer = completed;
+            if let Some(ed) = prompt.editor.as_mut() {
+                ed.set_content(&prompt.buffer);
             }
+            return;
         }
 
         // `:` prompt with no whitespace yet — complete the spyc command
@@ -5260,10 +5256,10 @@ impl App {
             }
             PromptKind::PaneRenameTab => {
                 let name = prompt.buffer.trim().to_string();
-                if !name.is_empty() {
-                    if let Some(tabs) = self.pane_tabs.as_mut() {
-                        tabs.active_info_mut().label = name;
-                    }
+                if !name.is_empty()
+                    && let Some(tabs) = self.pane_tabs.as_mut()
+                {
+                    tabs.active_info_mut().label = name;
                 }
                 PostAction::None
             }
@@ -5641,30 +5637,30 @@ impl App {
                 true
             }
             KeyCode::Up => {
-                if let Some(picker) = self.find_picker.as_mut() {
-                    if picker.selected > 0 {
-                        picker.selected -= 1;
-                        self.render_find_picker();
-                    }
+                if let Some(picker) = self.find_picker.as_mut()
+                    && picker.selected > 0
+                {
+                    picker.selected -= 1;
+                    self.render_find_picker();
                 }
                 true
             }
             KeyCode::Down => {
-                if let Some(picker) = self.find_picker.as_mut() {
-                    if picker.selected + 1 < picker.filtered.len() {
-                        picker.selected += 1;
-                        self.render_find_picker();
-                    }
+                if let Some(picker) = self.find_picker.as_mut()
+                    && picker.selected + 1 < picker.filtered.len()
+                {
+                    picker.selected += 1;
+                    self.render_find_picker();
                 }
                 true
             }
             KeyCode::Backspace => {
-                if let Some(picker) = self.find_picker.as_mut() {
-                    if !picker.query.is_empty() {
-                        picker.query.pop();
-                        picker.refilter();
-                        self.render_find_picker();
-                    }
+                if let Some(picker) = self.find_picker.as_mut()
+                    && !picker.query.is_empty()
+                {
+                    picker.query.pop();
+                    picker.refilter();
+                    self.render_find_picker();
                 }
                 true
             }
@@ -6255,11 +6251,11 @@ impl App {
 
         // Wake a paused task — it's user-facing now, no point
         // leaving SIGSTOP'd.
-        if task.paused {
-            if let Some(pid) = task.host.process_id() {
-                #[cfg(unix)]
-                let _ = kill_pg(pid, rustix::process::Signal::CONT);
-            }
+        if task.paused
+            && let Some(pid) = task.host.process_id()
+        {
+            #[cfg(unix)]
+            let _ = kill_pg(pid, rustix::process::Signal::CONT);
         }
 
         // If the task viewer was open on this task, close it —
@@ -6370,10 +6366,10 @@ impl App {
         // user explicitly asked for it to be active again. Without
         // this, `:fg` on a paused task would re-attach the streaming
         // capture but the child would stay frozen.
-        if task.paused {
-            if let Some(pid) = task.host.process_id() {
-                let _ = kill_pg(pid, rustix::process::Signal::CONT);
-            }
+        if task.paused
+            && let Some(pid) = task.host.process_id()
+        {
+            let _ = kill_pg(pid, rustix::process::Signal::CONT);
         }
 
         match task.status {
@@ -6859,24 +6855,25 @@ impl App {
             // Step 3: final fallback. Most-recent JSONL — but only if
             // unclaimed; otherwise leave this pane unresumable rather
             // than collapse it onto another pane's conversation.
-            if let Some(id) = s::most_recent_jsonl_for_cwd(cwd) {
-                if !claimed.contains(&id) {
-                    let name = s::find_claude_session_name_public(&id);
-                    return (Some(id), name);
-                }
+            if let Some(id) = s::most_recent_jsonl_for_cwd(cwd)
+                && !claimed.contains(&id)
+            {
+                let name = s::find_claude_session_name_public(&id);
+                return (Some(id), name);
             }
             (None, None)
         })();
 
-        if let (Some(id), _) = &resolved {
-            if s::is_uuid(id) && !s::claude_jsonl_exists(cwd, id) {
-                spyc_debug!(
-                    "resolve_claude_resume_target: dropping ghost id {} (no JSONL under {})",
-                    id,
-                    cwd.display()
-                );
-                return (None, None);
-            }
+        if let (Some(id), _) = &resolved
+            && s::is_uuid(id)
+            && !s::claude_jsonl_exists(cwd, id)
+        {
+            spyc_debug!(
+                "resolve_claude_resume_target: dropping ghost id {} (no JSONL under {})",
+                id,
+                cwd.display()
+            );
+            return (None, None);
         }
         resolved
     }
@@ -7227,14 +7224,14 @@ impl App {
 
     /// ^W x — close the active pane tab.
     fn close_active_tab(&mut self) {
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            if !tabs.close_active() {
-                // Last tab removed.
-                self.pane_tabs = None;
-                self.state.pane_focused = false;
-                self.needs_full_repaint = true;
-                self.state.flash_info("pane: last tab closed");
-            }
+        if let Some(tabs) = self.pane_tabs.as_mut()
+            && !tabs.close_active()
+        {
+            // Last tab removed.
+            self.pane_tabs = None;
+            self.state.pane_focused = false;
+            self.needs_full_repaint = true;
+            self.state.flash_info("pane: last tab closed");
         }
     }
 
@@ -7247,11 +7244,11 @@ impl App {
         let cmd = tabs.active_info().command.clone();
         let cwd = tabs.active_info().cwd.clone();
         // Close the old tab first.
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            if !tabs.close_active() {
-                self.pane_tabs = None;
-                self.state.pane_focused = false;
-            }
+        if let Some(tabs) = self.pane_tabs.as_mut()
+            && !tabs.close_active()
+        {
+            self.pane_tabs = None;
+            self.state.pane_focused = false;
         }
         // Spawn a replacement with the same command and cwd.
         self.open_pane_tab_in(&cmd, &cwd);
@@ -7374,10 +7371,10 @@ impl App {
         if self.pager.is_some() {
             return;
         }
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            if let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take() {
-                self.set_pager(view);
-            }
+        if let Some(tabs) = self.pane_tabs.as_mut()
+            && let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take()
+        {
+            self.set_pager(view);
         }
     }
 
@@ -8495,10 +8492,10 @@ impl App {
 
         // Exit scroll mode and switch focus to the file list so the user
         // sees the navigation result.
-        if let Some(tabs) = self.pane_tabs.as_mut() {
-            if tabs.active().is_scrolling() {
-                tabs.active_mut().exit_scroll_mode();
-            }
+        if let Some(tabs) = self.pane_tabs.as_mut()
+            && tabs.active().is_scrolling()
+        {
+            tabs.active_mut().exit_scroll_mode();
         }
         self.state.pane_focused = false;
         self.needs_full_repaint = true;
@@ -8513,11 +8510,11 @@ impl App {
         }
 
         if let Some(parent) = path.parent() {
-            if parent != self.state.listing.dir {
-                if let Err(e) = self.state.chdir(parent) {
-                    self.state.flash_error(format!("gf: {e}"));
-                    return;
-                }
+            if parent != self.state.listing.dir
+                && let Err(e) = self.state.chdir(parent)
+            {
+                self.state.flash_error(format!("gf: {e}"));
+                return;
             }
             self.state.focus_on_path(&path);
         }
@@ -8978,18 +8975,16 @@ impl App {
                     (AgentKind::Other, _) => (tab.command.clone(), None),
                 };
                 self.open_pane_tab_in(&cmd, cwd);
-                if kind == AgentKind::Claude {
-                    if let Some(ref sid) = tab.agent_session_id {
-                        if let Some(tabs) = self.pane_tabs.as_mut() {
-                            if let Some(entry) = tabs.tabs_mut().last_mut() {
-                                entry.info.pending_resume_send =
-                                    Some(crate::pane::tabs::PendingResumeSend::Text {
-                                        sid: sid.clone(),
-                                        after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
-                                    });
-                            }
-                        }
-                    }
+                if kind == AgentKind::Claude
+                    && let Some(ref sid) = tab.agent_session_id
+                    && let Some(tabs) = self.pane_tabs.as_mut()
+                    && let Some(entry) = tabs.tabs_mut().last_mut()
+                {
+                    entry.info.pending_resume_send =
+                        Some(crate::pane::tabs::PendingResumeSend::Text {
+                            sid: sid.clone(),
+                            after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
+                        });
                 }
                 // Codex resume target is baked into `cmd` itself; no
                 // pending-stdin send needed. The local binding here
@@ -9312,20 +9307,20 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
-                    if let Ok(n) = buf.parse::<usize>() {
-                        if n > 0 {
-                            let target = n.saturating_sub(1);
-                            if self.pending_history_pick.is_some() {
-                                // History editor: jump to entry N.
-                                let max = view.lines.len().saturating_sub(1);
-                                let clamped = target.min(max);
-                                view.picker_cursor = Some(clamped);
-                                view.scroll =
-                                    u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
-                            } else {
-                                // Regular pager: jump to line N.
-                                view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
-                            }
+                    if let Ok(n) = buf.parse::<usize>()
+                        && n > 0
+                    {
+                        let target = n.saturating_sub(1);
+                        if self.pending_history_pick.is_some() {
+                            // History editor: jump to entry N.
+                            let max = view.lines.len().saturating_sub(1);
+                            let clamped = target.min(max);
+                            view.picker_cursor = Some(clamped);
+                            view.scroll =
+                                u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
+                        } else {
+                            // Regular pager: jump to line N.
+                            view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
                         }
                     }
                     view.jump_buf = None;
@@ -9474,43 +9469,43 @@ impl App {
 
         // Worktree picker: 1-9 selects a worktree, chdirs, and
         // re-anchors PROJECT_HOME on the worktree root.
-        if let Some(ref worktrees) = self.state.pending_worktrees {
-            if let KeyCode::Char(c @ '1'..='9') = key.code {
-                let idx = (c as u8 - b'1') as usize;
-                if let Some(path) = worktrees.get(idx).cloned() {
-                    self.clear_pager();
-                    self.state.pending_worktrees = None;
-                    self.needs_full_repaint = true;
-                    if let Err(e) = self.state.chdir(&path) {
-                        self.state.flash_error(format!("chdir: {e}"));
-                        return PostAction::None;
-                    }
-                    // Worktrees are independent project roots — point
-                    // PROJECT_HOME at the worktree so harpoon, MCP
-                    // context (and therefore search_paths /
-                    // search_content / claude's grep), status bar,
-                    // and `gh` (jump-home) all anchor on the worktree
-                    // instead of the parent repo. The original
-                    // behavior left PROJECT_HOME pointing at the main
-                    // repo, so a user driving an agent inside a
-                    // worktree got search results from the wrong
-                    // tree (reported by a daily-driver after a
-                    // confusing afternoon).
-                    //
-                    // `listing.dir` is the canonical worktree path
-                    // after `state.chdir` (which canonicalizes
-                    // internally). `reconcile_harpoon` saves the
-                    // outgoing list and loads a fresh one keyed on
-                    // the new project root.
-                    let new_home = self.state.listing.dir.clone();
-                    self.state.project_home = Some(new_home.clone());
-                    self.reconcile_harpoon();
-                    self.state.flash_info(format!(
-                        "worktree: {} (PROJECT_HOME updated)",
-                        crate::paths::display_tilde(&new_home),
-                    ));
+        if let Some(ref worktrees) = self.state.pending_worktrees
+            && let KeyCode::Char(c @ '1'..='9') = key.code
+        {
+            let idx = (c as u8 - b'1') as usize;
+            if let Some(path) = worktrees.get(idx).cloned() {
+                self.clear_pager();
+                self.state.pending_worktrees = None;
+                self.needs_full_repaint = true;
+                if let Err(e) = self.state.chdir(&path) {
+                    self.state.flash_error(format!("chdir: {e}"));
                     return PostAction::None;
                 }
+                // Worktrees are independent project roots — point
+                // PROJECT_HOME at the worktree so harpoon, MCP
+                // context (and therefore search_paths /
+                // search_content / claude's grep), status bar,
+                // and `gh` (jump-home) all anchor on the worktree
+                // instead of the parent repo. The original
+                // behavior left PROJECT_HOME pointing at the main
+                // repo, so a user driving an agent inside a
+                // worktree got search results from the wrong
+                // tree (reported by a daily-driver after a
+                // confusing afternoon).
+                //
+                // `listing.dir` is the canonical worktree path
+                // after `state.chdir` (which canonicalizes
+                // internally). `reconcile_harpoon` saves the
+                // outgoing list and loads a fresh one keyed on
+                // the new project root.
+                let new_home = self.state.listing.dir.clone();
+                self.state.project_home = Some(new_home.clone());
+                self.reconcile_harpoon();
+                self.state.flash_info(format!(
+                    "worktree: {} (PROJECT_HOME updated)",
+                    crate::paths::display_tilde(&new_home),
+                ));
+                return PostAction::None;
             }
         }
 
@@ -10009,21 +10004,21 @@ impl App {
                     let is_picker = self.state.pending_worktrees.is_some()
                         || self.state.pending_sessions.is_some()
                         || self.pending_history_pick.is_some();
-                    if !is_picker {
-                        if let Some(ref v) = self.pager {
-                            if v.picker_cursor.is_none() && !v.streaming {
-                                // Persist scroll BEFORE the take —
-                                // otherwise the take leaves self.pager
-                                // None and the trailing clear_pager's
-                                // save call is a no-op. Without this,
-                                // file pagers closed via Esc/q never
-                                // got their scroll position saved to
-                                // disk (memory only, via history).
-                                self.remember_pager_position();
-                                if let Some(v) = self.pager.take() {
-                                    self.pager_history.push(v);
-                                }
-                            }
+                    if !is_picker
+                        && let Some(ref v) = self.pager
+                        && v.picker_cursor.is_none()
+                        && !v.streaming
+                    {
+                        // Persist scroll BEFORE the take —
+                        // otherwise the take leaves self.pager
+                        // None and the trailing clear_pager's
+                        // save call is a no-op. Without this,
+                        // file pagers closed via Esc/q never
+                        // got their scroll position saved to
+                        // disk (memory only, via history).
+                        self.remember_pager_position();
+                        if let Some(v) = self.pager.take() {
+                            self.pager_history.push(v);
                         }
                     }
                     self.clear_pager();
@@ -10166,28 +10161,26 @@ impl App {
                 // for the editor session. Other mounts (overlay /
                 // lower-pane) and the temp-file edit path keep the
                 // full-screen Spawn flow.
-                if matches!(mount, crate::ui::pager::Mount::TopPane) {
-                    if let Some(src) = view.source_path.clone() {
-                        let cmd = format!(
-                            "{editor_cmd} {}",
-                            shell::shell_quote(&src.display().to_string())
-                        );
-                        let (rows, cols) = Self::top_overlay_size(
-                            self.effective_pane_pct(),
-                            self.pane_tabs.is_some(),
-                        );
-                        let cwd = self.state.listing.dir.clone();
-                        self.clear_pager();
-                        self.needs_full_repaint = true;
-                        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
-                            Ok(p) => {
-                                self.top_overlay = Some(p);
-                                self.state.pane_focused = false;
-                            }
-                            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+                if matches!(mount, crate::ui::pager::Mount::TopPane)
+                    && let Some(src) = view.source_path.clone()
+                {
+                    let cmd = format!(
+                        "{editor_cmd} {}",
+                        shell::shell_quote(&src.display().to_string())
+                    );
+                    let (rows, cols) =
+                        Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+                    let cwd = self.state.listing.dir.clone();
+                    self.clear_pager();
+                    self.needs_full_repaint = true;
+                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+                        Ok(p) => {
+                            self.top_overlay = Some(p);
+                            self.state.pane_focused = false;
                         }
-                        return PostAction::None;
+                        Err(e) => self.state.flash_error(format!("spawn: {e}")),
                     }
+                    return PostAction::None;
                 }
 
                 // Determine the file to edit and the return state.
@@ -10274,10 +10267,10 @@ impl App {
             return;
         }
         // Save the outgoing list before we drop it.
-        if let Some(h) = self.harpoon.as_ref() {
-            if let Err(e) = h.save() {
-                spyc_debug!("harpoon save on PROJECT_HOME swap failed: {e}");
-            }
+        if let Some(h) = self.harpoon.as_ref()
+            && let Err(e) = h.save()
+        {
+            spyc_debug!("harpoon save on PROJECT_HOME swap failed: {e}");
         }
         self.harpoon = want.map(Harpoon::load);
         // Close the menu if it's open — its cursor referenced the old
@@ -11338,17 +11331,17 @@ fn user_host_string() -> String {
 }
 
 fn hostname_best_effort() -> String {
-    if let Ok(h) = std::env::var("HOSTNAME") {
-        if !h.is_empty() {
-            return h;
-        }
+    if let Ok(h) = std::env::var("HOSTNAME")
+        && !h.is_empty()
+    {
+        return h;
     }
-    if let Ok(out) = std::process::Command::new("hostname").output() {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
-            }
+    if let Ok(out) = std::process::Command::new("hostname").output()
+        && out.status.success()
+    {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !s.is_empty() {
+            return s;
         }
     }
     "localhost".to_string()

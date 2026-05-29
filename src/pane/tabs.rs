@@ -139,10 +139,10 @@ pub fn strip_exit_suffix(label: &str) -> String {
     // containing it is recovering display behavior they likely
     // didn't intend anyway), and the suffix is always at the *end*
     // of the label.
-    if let Some((base, _)) = label.rsplit_once(" [exited ") {
-        if label.ends_with(']') {
-            return base.to_string();
-        }
+    if let Some((base, _)) = label.rsplit_once(" [exited ")
+        && label.ends_with(']')
+    {
+        return base.to_string();
     }
     label.to_string()
 }
@@ -165,12 +165,11 @@ impl TabEntry {
             .live_cwd_cache
             .as_ref()
             .is_none_or(|(at, _)| now.duration_since(*at) >= LIVE_CWD_TTL);
-        if stale {
-            if let Some(pid) = self.pane.process_id() {
-                if let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid) {
-                    self.live_cwd_cache = Some((now, cwd));
-                }
-            }
+        if stale
+            && let Some(pid) = self.pane.process_id()
+            && let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid)
+        {
+            self.live_cwd_cache = Some((now, cwd));
         }
         self.live_cwd_cache
             .as_ref()
@@ -236,11 +235,11 @@ impl PaneTabs {
         &mut self.tabs[self.active]
     }
 
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.tabs.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.tabs.is_empty()
     }
 
@@ -262,11 +261,12 @@ impl PaneTabs {
     /// The jump is itself a switch, so it swaps `active`/`last_active`
     /// — pressing it again toggles back.
     pub fn switch_to_last(&mut self) -> bool {
-        if let Some(prev) = self.last_active {
-            if prev < self.tabs.len() && prev != self.active {
-                self.activate(prev);
-                return true;
-            }
+        if let Some(prev) = self.last_active
+            && prev < self.tabs.len()
+            && prev != self.active
+        {
+            self.activate(prev);
+            return true;
         }
         false
     }

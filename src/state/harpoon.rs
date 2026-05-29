@@ -69,7 +69,7 @@ impl Harpoon {
         self.slots.get((n - 1) as usize).map(PathBuf::as_path)
     }
 
-    pub fn is_full(&self) -> bool {
+    pub const fn is_full(&self) -> bool {
         self.slots.len() >= MAX_SLOTS
     }
 

@@ -1337,13 +1337,13 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         render_single_column(frame, content_area, view, theme);
     }
 
-    if let Some(rect) = search_area {
-        if let Some(text) = view.status_text() {
-            let style = Style::default()
-                .fg(theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD);
-            frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
-        }
+    if let Some(rect) = search_area
+        && let Some(text) = view.status_text()
+    {
+        let style = Style::default()
+            .fg(theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
     }
 }
 
@@ -1512,26 +1512,26 @@ fn apply_row_styling(
     // Placement cursor: single reverse-video cell at the current
     // (row, col). The visual cue the user asked for so they can see
     // where the anchor will land when they commit with `^v` / `V`.
-    if let Some(p) = view.placement {
-        if p.row == abs_idx {
-            let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-            let row_style = styled.style;
-            let before: String = plain.chars().take(p.col).collect();
-            let cursor_ch: String = plain
-                .chars()
-                .nth(p.col)
-                .map_or_else(|| " ".into(), |c| c.to_string());
-            let after: String = plain.chars().skip(p.col + 1).collect();
-            let cursor_style = Style::default()
-                .bg(theme.cursor_bg)
-                .fg(theme.cursor_fg)
-                .add_modifier(Modifier::REVERSED | Modifier::BOLD);
-            styled = Line::from(vec![
-                Span::styled(before, row_style),
-                Span::styled(cursor_ch, cursor_style),
-                Span::styled(after, row_style),
-            ]);
-        }
+    if let Some(p) = view.placement
+        && p.row == abs_idx
+    {
+        let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+        let row_style = styled.style;
+        let before: String = plain.chars().take(p.col).collect();
+        let cursor_ch: String = plain
+            .chars()
+            .nth(p.col)
+            .map_or_else(|| " ".into(), |c| c.to_string());
+        let after: String = plain.chars().skip(p.col + 1).collect();
+        let cursor_style = Style::default()
+            .bg(theme.cursor_bg)
+            .fg(theme.cursor_fg)
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD);
+        styled = Line::from(vec![
+            Span::styled(before, row_style),
+            Span::styled(cursor_ch, cursor_style),
+            Span::styled(after, row_style),
+        ]);
     }
 
     if view.picker_cursor == Some(abs_idx) {
@@ -1774,11 +1774,11 @@ fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
             // Force at least one char even if it's wider than the
             // remaining budget (tiny pager boxes shouldn't infinite
             // loop on a 2-col emoji in a 1-col viewport).
-            if consumed_bytes == 0 {
-                if let Some(first) = rest.chars().next() {
-                    consumed_bytes = first.len_utf8();
-                    visual = unicode_width::UnicodeWidthChar::width(first).unwrap_or(1);
-                }
+            if consumed_bytes == 0
+                && let Some(first) = rest.chars().next()
+            {
+                consumed_bytes = first.len_utf8();
+                visual = unicode_width::UnicodeWidthChar::width(first).unwrap_or(1);
             }
             let chunk = rest[..consumed_bytes].to_string();
             rest = &rest[consumed_bytes..];
