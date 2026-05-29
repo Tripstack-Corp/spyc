@@ -117,6 +117,20 @@
   day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
+- (fixed, v1.51.4) untracked-only directories show `?` instead of
+  `~`. When the list collapses a subtree's git status onto its dir
+  row, an untracked-only subtree now reads `?` (untracked) rather than
+  the generic modified marker; a dir with any tracked change still
+  reads `~` (tracked outranks untracked, order-independent).
+- (fixed, v1.51.3) untracked files now show the `?` marker in large
+  repos. The git-status poll dropped to `git status -uno` (no
+  untracked enumeration) past the huge-tree subdir threshold — but
+  that count is dominated by gitignored build dirs (`target/`), which
+  git skips during the untracked scan anyway. So `-uno` saved ~nothing
+  yet hid every untracked file. Now always `-unormal`; the huge-tree
+  flag keeps gating watcher recursion + the 10 s poll throttle, and
+  the status spawn already runs off the UI thread. (Surfaced when a
+  couple of untracked `docs/*.md` files showed no marker.)
 - (fixed, v1.51.2) `?` opens the history editor mid-prompt, not just
   via `!?` from a fresh prompt. After `Esc` drops the line editor into
   Normal mode (e.g. `Esc k` to browse history), `?` (like `Space`)
@@ -124,6 +138,13 @@
   only fired on an empty buffer, so once a command was recalled it
   stopped working. `?` is a no-op in the line editor's Normal mode, so
   nothing was clobbered.
+- (fixed, v1.51.1) pane "cwd:" directories no longer pollute the pane
+  command history. The `^a c` new-tab flow prompts twice (command,
+  then cwd) and both recorded into one `pane_history` bucket, so
+  directory paths showed up when browsing the command prompt with
+  Up/Down. The cwd prompt now records into its own `pane_cwd_history`
+  (Up/Down there recalls previous working dirs). Existing history
+  files keep stale dir entries until cleaned — no auto-migration.
 - (fixed, v1.51.0) `^a ^a` jumps to the previously-active pane tab
   (screen/tmux "last window"). Pressing the pane prefix twice toggles
   between the current tab and the one before it. `PaneTabs` tracks a
