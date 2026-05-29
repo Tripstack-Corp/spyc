@@ -37,6 +37,7 @@ per-module navigation index.
 
 - **`src/app/mod.rs`** — Top-level `App` struct, event loop, layout, all key dispatch. This is the big file.
 - **`src/app/state.rs`** — `AppState`: domain state (cursor, picks, listing, mode) separated from terminal state.
+- **`src/agent/`** — Agent profile registry. One `AgentProfile` impl per hosted AI agent (claude/codex/gemini/agy); `detect(cmd)` / `profile_for(kind)` replace per-agent `match AgentKind` dispatch (detection, resume save/restore, transcript scrollback, status short-id, picker label, exit summary). Adding an agent = one impl + one `REGISTRY` entry. `AgentKind` (in `state/sessions.rs`) stays the persistence tag; profiles carry behavior.
 - **`src/keymap/action.rs`** — `Action` enum: the full vocabulary of user-observable behaviors. Every keybinding maps to an `Action`.
 - **`src/keymap/`** — Resolver, user keymap DSL parser, default bindings.
 - **`src/pane/`** — Pty-hosted subprocess. `mod.rs` is the `Pane` struct (spawn, I/O, scroll mode), `input.rs` encodes crossterm keys to ANSI, `widget.rs` renders `vt100::Screen` to ratatui, `quick_select.rs` is the `^a u` picker (regex scan + label assignment over visible pane text), `pathref.rs` is `gf`/`gF`'s path extractor.

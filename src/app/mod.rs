@@ -3462,17 +3462,12 @@ impl App {
     fn active_agent_status(&mut self) -> Option<String> {
         let tabs = self.pane_tabs.as_ref()?;
         let active = tabs.active_info();
-        let kind = Self::detect_agent_kind(&active.command);
+        let profile = crate::agent::detect(&active.command);
+        let kind = profile.kind();
         if kind == AgentKind::Other {
             return None;
         }
-        let label = match kind {
-            AgentKind::Claude => "claude",
-            AgentKind::Codex => "codex",
-            AgentKind::Gemini => "gemini",
-            AgentKind::Agy => "agy",
-            AgentKind::Other => unreachable!(),
-        };
+        let label = profile.name();
         // Cache hit: same (kind, cwd, spawn_epoch_secs) within
         // AGENT_STATUS_TTL → reuse. The underlying resolver scans
         // every `~/.claude/sessions/*.json` (one `serde_json::Value`
@@ -3489,11 +3484,7 @@ impl App {
             return cached.status.clone();
         }
         // Cache miss — pay the file walk once, then memoize.
-        let short_id = crate::state::sessions::resolve_active_session_short_id(
-            kind,
-            &active.cwd,
-            active.spawn_epoch_secs,
-        );
+        let short_id = profile.resolve_short_id(&active.cwd, active.spawn_epoch_secs);
         let status = Some(match short_id {
             Some(id) => format!("{label}:{id}"),
             None => label.to_string(),
@@ -5978,52 +5969,6 @@ impl App {
         }
     }
 
-    /// Does this command look like it's launching Claude CLI?
-    fn is_claude_command(cmd: &str) -> bool {
-        let first = cmd.split_whitespace().next().unwrap_or("");
-        first == "claude" || first.ends_with("/claude")
-    }
-
-    /// Does this command look like it's launching Codex CLI? Matches
-    /// bare `codex`, `codex resume ...`, `codex exec ...`, etc., plus
-    /// the path-qualified form (`/usr/local/bin/codex`).
-    fn is_codex_command(cmd: &str) -> bool {
-        let first = cmd.split_whitespace().next().unwrap_or("");
-        first == "codex" || first.ends_with("/codex")
-    }
-
-    /// Does this command look like it's launching the Google Gemini
-    /// CLI (`gemini` / path-qualified `/usr/local/bin/gemini`)? `gemini`
-    /// has subcommands (`mcp`, `extensions`, …) plus its default
-    /// interactive launch — we treat all forms as Gemini for resume
-    /// purposes; subcommands like `gemini mcp` will simply have no
-    /// session record to match against and resolve to no resume id.
-    fn is_gemini_command(cmd: &str) -> bool {
-        let first = cmd.split_whitespace().next().unwrap_or("");
-        first == "gemini" || first.ends_with("/gemini")
-    }
-
-    /// Does this command look like it's launching Antigravity CLI (`agy`)?
-    fn is_agy_command(cmd: &str) -> bool {
-        let first = cmd.split_whitespace().next().unwrap_or("");
-        first == "agy" || first.ends_with("/agy")
-    }
-
-    /// Classify a command for session-resume purposes.
-    fn detect_agent_kind(cmd: &str) -> AgentKind {
-        if Self::is_claude_command(cmd) {
-            AgentKind::Claude
-        } else if Self::is_codex_command(cmd) {
-            AgentKind::Codex
-        } else if Self::is_gemini_command(cmd) {
-            AgentKind::Gemini
-        } else if Self::is_agy_command(cmd) {
-            AgentKind::Agy
-        } else {
-            AgentKind::Other
-        }
-    }
-
     /// Spawn a captured shell command and install the streaming pager
     /// view + `pending_capture` so the loop can drain output. Used by
     /// the `!` prompt, `:!`, `:!!`, and the `!?` history re-execute —
@@ -6667,7 +6612,7 @@ fn pane_has_crash_marker(lines: &[String]) -> bool {
 /// preserve any other flags the user had on their original `claude`
 /// invocation but drop the resume itself so the fallback doesn't fail
 /// for the same reason.
-fn command_without_resume(cmd: &str) -> String {
+pub fn command_without_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
     let mut skip_next = false;
@@ -6696,7 +6641,7 @@ fn command_without_resume(cmd: &str) -> String {
 /// user had explicitly typed `codex resume <UUID>`. Mirrors
 /// `command_without_resume` for claude. The id we'll resume to is
 /// stored separately in `agent_session_id`.
-fn command_without_codex_resume(cmd: &str) -> String {
+pub fn command_without_codex_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
     let mut hit_resume = false;
@@ -6766,7 +6711,7 @@ fn parse_gemini_list_sessions_for_uuid(text: &str, uuid: &str) -> Option<u32> {
 /// we always recompute it at restore time from the saved UUID; baking
 /// the old index into the saved command would silently resume the
 /// wrong conversation.
-fn command_without_gemini_resume(cmd: &str) -> String {
+pub fn command_without_gemini_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
     let mut skip_next = false;
@@ -6796,7 +6741,7 @@ fn command_without_gemini_resume(cmd: &str) -> String {
 }
 
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
-fn command_without_agy_resume(cmd: &str) -> String {
+pub fn command_without_agy_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
     let mut skip_next = false;
@@ -6852,7 +6797,7 @@ impl App {
     /// 3. Last-ditch: most-recently-modified JSONL in the project
     ///    slug, but only if it isn't already in `claimed`. Without
     ///    the claimed-check this is what was producing the bug.
-    fn resolve_claude_resume_target(
+    pub(crate) fn resolve_claude_resume_target(
         pane: &crate::pane::Pane,
         cwd: &std::path::Path,
         pane_spawn_epoch_secs: u64,
@@ -6926,7 +6871,7 @@ impl App {
     /// one conversation. Returns the UUID; Gemini doesn't expose a
     /// human-readable session name from the CLI, so the second slot
     /// is always `None`.
-    fn resolve_gemini_resume_target(
+    pub(crate) fn resolve_gemini_resume_target(
         cwd: &std::path::Path,
         pane_spawn_epoch_secs: u64,
         claimed: &std::collections::HashSet<String>,
@@ -6944,7 +6889,7 @@ impl App {
     /// the binary errors, the UUID isn't in the listing, or the
     /// output format drifts. Failure is recoverable: the caller falls
     /// back to spawning `gemini` bare and lets the user pick.
-    fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32> {
+    pub(crate) fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32> {
         let out = std::process::Command::new("gemini")
             .arg("--list-sessions")
             .current_dir(cwd)
@@ -7420,65 +7365,39 @@ impl App {
         };
         let active_info = tabs.active_info();
         let label = active_info.label.clone();
+        let command = active_info.command.clone();
+        let cwd = active_info.cwd.clone();
+        let spawn = active_info.spawn_epoch_secs;
 
-        // Agent-aware scrollback: codex confines its conversation
-        // history to a DECSTBM scroll region above its viewport (in
-        // BOTH alt-screen and `--no-alt-screen` modes), so vt100
-        // never captures it into the main buffer. Instead, read
-        // codex's on-disk rollout transcript — the source of truth,
-        // flushed per turn — and render the real conversation. This
-        // takes priority over the alt-screen guard + vt100 path
-        // below, and works in either codex mode.
-        if Self::detect_agent_kind(&active_info.command) == AgentKind::Codex {
-            let cwd = active_info.cwd.clone();
-            let spawn = active_info.spawn_epoch_secs;
-            if let Some(rollout) =
-                crate::state::codex_transcript::resolve_active_rollout(&cwd, spawn)
-            {
-                let lines =
-                    crate::state::codex_transcript::render_transcript(&rollout, &self.theme);
-                if !lines.is_empty() {
-                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
-                    return;
+        // Agent-aware scrollback. An agent's `AgentProfile` may carry a
+        // `TranscriptSpec`: read its structured on-disk transcript — the
+        // source of truth (codex/agy confine history to a scroll region
+        // vt100 can't capture; claude's terminal output works too but
+        // the transcript is cleaner) — and render the real conversation,
+        // taking priority over the alt-screen guard + vt100 path below.
+        // `config_key` gates the view (`None` = always-on, e.g. codex).
+        // `miss_message` distinguishes "flash + stop" (codex — no usable
+        // terminal capture) from "fall through to vt100" (claude/agy).
+        let profile = crate::agent::detect(&command);
+        if let Some(spec) = profile.transcript() {
+            let enabled = match spec.config_key {
+                None => spec.default_enabled,
+                Some(key) => self
+                    .state
+                    .config
+                    .pane
+                    .transcript_enabled(key, spec.default_enabled),
+            };
+            if enabled {
+                if let Some(path) = (spec.resolve)(cwd.as_path(), spawn) {
+                    let lines = (spec.render)(path.as_path(), &self.theme);
+                    if !lines.is_empty() {
+                        self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
+                        return;
+                    }
                 }
-            }
-            self.state
-                .flash_info("codex: no transcript on disk yet for this session");
-            return;
-        }
-
-        // Claude transcript scrollback — opt-in (`[pane]
-        // claude_transcript_scrollback = true`). Claude's terminal
-        // output *does* scroll into the main buffer, so the default
-        // vt100 path works; this trades it for the structured
-        // on-disk conversation. When the toggle is off, or no JSONL
-        // resolves, fall through to the vt100 path below.
-        if self.state.config.pane.claude_transcript_scrollback
-            && Self::detect_agent_kind(&active_info.command) == AgentKind::Claude
-        {
-            let cwd = active_info.cwd.clone();
-            let spawn = active_info.spawn_epoch_secs;
-            if let Some(jsonl) = crate::state::claude_transcript::resolve_active_jsonl(&cwd, spawn)
-            {
-                let lines = crate::state::claude_transcript::render_transcript(&jsonl, &self.theme);
-                if !lines.is_empty() {
-                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
-                    return;
-                }
-            }
-            // No transcript resolved — fall through to vt100 capture.
-        }
-
-        // Agy transcript scrollback — opt-in default true (`[pane] agy_transcript_scrollback`).
-        if self.state.config.pane.agy_transcript_scrollback
-            && Self::detect_agent_kind(&active_info.command) == AgentKind::Agy
-        {
-            let cwd = active_info.cwd.clone();
-            let spawn = active_info.spawn_epoch_secs;
-            if let Some(jsonl) = crate::state::agy_transcript::resolve_active_jsonl(&cwd, spawn) {
-                let lines = crate::state::agy_transcript::render_transcript(&jsonl, &self.theme);
-                if !lines.is_empty() {
-                    self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
+                if let Some(msg) = spec.miss_message {
+                    self.state.flash_info(msg);
                     return;
                 }
             }
@@ -8667,48 +8586,25 @@ impl App {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
-                        let kind = Self::detect_agent_kind(&t.info.command);
-                        let (agent_session_id, agent_session_name) = match kind {
-                            AgentKind::Claude => Self::resolve_claude_resume_target(
-                                &t.pane,
-                                &t.info.cwd,
-                                t.info.spawn_epoch_secs,
-                                &claimed,
-                            ),
-                            AgentKind::Codex => {
-                                let lines = t.pane.recent_lines(200);
-                                let id = crate::state::sessions::extract_codex_resume_token(&lines)
-                                    .filter(|tok| !claimed.contains(tok));
-                                // Codex doesn't expose a display name; UUID
-                                // is what `codex resume <UUID>` consumes.
-                                (id, None)
-                            }
-                            AgentKind::Gemini => Self::resolve_gemini_resume_target(
-                                &t.info.cwd,
-                                t.info.spawn_epoch_secs,
-                                &claimed,
-                            ),
-                            AgentKind::Agy => {
-                                let lines = t.pane.recent_lines(200);
-                                let id = crate::state::sessions::extract_agy_resume_token(&lines)
-                                    .filter(|tok| !claimed.contains(tok));
-                                (id, None)
-                            }
-                            AgentKind::Other => (None, None),
-                        };
+                        let profile = crate::agent::detect(&t.info.command);
+                        let kind = profile.kind();
+                        // Resolve the (session_id, session_name) to
+                        // persist. The profile honors `claimed` internally
+                        // so multi-pane saves don't collapse onto one
+                        // conversation.
+                        let (agent_session_id, agent_session_name) = profile.resolve_resume_target(
+                            &t.pane,
+                            &t.info.cwd,
+                            t.info.spawn_epoch_secs,
+                            &claimed,
+                        );
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }
                         // The sid lives in agent_session_id; baking
                         // --resume / `resume` into `command` would survive
                         // past a resolver miss and pollute the next restore.
-                        let saved_command = match kind {
-                            AgentKind::Claude => command_without_resume(&t.info.command),
-                            AgentKind::Codex => command_without_codex_resume(&t.info.command),
-                            AgentKind::Gemini => command_without_gemini_resume(&t.info.command),
-                            AgentKind::Agy => command_without_agy_resume(&t.info.command),
-                            AgentKind::Other => t.info.command.clone(),
-                        };
+                        let saved_command = profile.command_without_resume(&t.info.command);
                         SavedTab {
                             command: saved_command,
                             // Strip any `[exited N]` suffix — that's
@@ -8764,22 +8660,6 @@ impl App {
         // Build exit summary for post-TUI output.
         let cwd_display = crate::paths::display_tilde(&session_cwd);
         let tab_count = session.tabs.len();
-        let claude_names: Vec<String> = session
-            .tabs
-            .iter()
-            .filter(|t| t.effective_kind() == AgentKind::Claude)
-            .filter_map(|t| t.agent_session_name.clone())
-            .collect();
-        let codex_count = session
-            .tabs
-            .iter()
-            .filter(|t| t.effective_kind() == AgentKind::Codex && t.agent_session_id.is_some())
-            .count();
-        let agy_count = session
-            .tabs
-            .iter()
-            .filter(|t| t.effective_kind() == AgentKind::Agy && t.agent_session_id.is_some())
-            .count();
         let mut parts = vec![format!("session saved — {cwd_display}")];
         if tab_count > 0 {
             parts.push(format!(
@@ -8787,20 +8667,40 @@ impl App {
                 if tab_count == 1 { "" } else { "s" }
             ));
         }
-        if !claude_names.is_empty() {
-            parts.push(format!("claude: {}", claude_names.join(", ")));
-        }
-        if codex_count > 0 {
-            parts.push(format!(
-                "codex: {codex_count} session{}",
-                if codex_count == 1 { "" } else { "s" }
-            ));
-        }
-        if agy_count > 0 {
-            parts.push(format!(
-                "agy: {agy_count} session{}",
-                if agy_count == 1 { "" } else { "s" }
-            ));
+        // Per-agent session summary, in registry order. `Names` lists
+        // human-readable session names (claude); `Count` reports how
+        // many panes captured a session id (codex/agy); `None` agents
+        // (gemini) are omitted.
+        for profile in crate::agent::REGISTRY {
+            let kind = profile.kind();
+            match profile.exit_summary_mode() {
+                crate::agent::ExitSummaryMode::Names => {
+                    let names: Vec<String> = session
+                        .tabs
+                        .iter()
+                        .filter(|t| t.effective_kind() == kind)
+                        .filter_map(|t| t.agent_session_name.clone())
+                        .collect();
+                    if !names.is_empty() {
+                        parts.push(format!("{}: {}", profile.name(), names.join(", ")));
+                    }
+                }
+                crate::agent::ExitSummaryMode::Count => {
+                    let count = session
+                        .tabs
+                        .iter()
+                        .filter(|t| t.effective_kind() == kind && t.agent_session_id.is_some())
+                        .count();
+                    if count > 0 {
+                        parts.push(format!(
+                            "{}: {count} session{}",
+                            profile.name(),
+                            if count == 1 { "" } else { "s" }
+                        ));
+                    }
+                }
+                crate::agent::ExitSummaryMode::None => {}
+            }
         }
         parts.push("restore with spyc -r".to_string());
         self.exit_summary = Some(parts.join(" · "));
@@ -8829,17 +8729,14 @@ impl App {
                     .filter_map(|t| {
                         let sid = t.agent_session_id.as_deref()?;
                         let short_id = &sid[..sid.len().min(8)];
-                        let label = match t.effective_kind() {
-                            AgentKind::Claude => match &t.agent_session_name {
-                                Some(name) => format!("claude:{name} ({short_id})"),
-                                None => format!("claude:{short_id}"),
-                            },
-                            AgentKind::Codex => format!("codex:{short_id}"),
-                            AgentKind::Gemini => format!("gemini:{short_id}"),
-                            AgentKind::Agy => format!("agy:{short_id}"),
-                            AgentKind::Other => return None,
-                        };
-                        Some(label)
+                        let kind = t.effective_kind();
+                        if kind == AgentKind::Other {
+                            return None;
+                        }
+                        Some(
+                            crate::agent::profile_for(kind)
+                                .picker_label(short_id, t.agent_session_name.as_deref()),
+                        )
                     })
                     .collect();
                 let tab_info = if tab_count == 0 {
@@ -9013,64 +8910,27 @@ impl App {
                 // flag (crashes at mount with non-empty initialMessages),
                 // so we always spawn fresh and type `/resume <sid>`
                 // once it has settled.
-                let (cmd, codex_resume_id) = match (kind, tab.agent_session_id.as_deref()) {
-                    (AgentKind::Claude, _) => (command_without_resume(&tab.command), None),
-                    (AgentKind::Codex, Some(sid)) => {
-                        let base = command_without_codex_resume(&tab.command);
-                        (format!("{base} resume {sid}"), Some(sid.to_string()))
-                    }
-                    (AgentKind::Codex, None) => {
-                        // No saved id — fall back to codex's own
-                        // most-recent picker for this cwd.
-                        let base = command_without_codex_resume(&tab.command);
-                        (format!("{base} resume --last"), None)
-                    }
-                    (AgentKind::Gemini, Some(uuid)) => {
-                        // Gemini's `--resume` consumes an *index* into
-                        // `--list-sessions`, not a UUID. Run the lookup
-                        // synchronously and fall back to the bare
-                        // command if the binary isn't on PATH or the
-                        // UUID isn't in the listing (session pruned,
-                        // output format drift, …) — the user can pick
-                        // manually inside Gemini.
-                        let base = command_without_gemini_resume(&tab.command);
-                        match Self::gemini_resume_index_for(cwd, uuid) {
-                            Some(idx) => (format!("{base} --resume {idx}"), None),
-                            None => (base, None),
-                        }
-                    }
-                    (AgentKind::Gemini, None) => {
-                        (command_without_gemini_resume(&tab.command), None)
-                    }
-                    (AgentKind::Agy, Some(sid)) => {
-                        let base = command_without_agy_resume(&tab.command);
-                        (
-                            format!("{base} --conversation {sid}"),
-                            Some(sid.to_string()),
-                        )
-                    }
-                    (AgentKind::Agy, None) => {
-                        let base = command_without_agy_resume(&tab.command);
-                        (format!("{base} --continue"), None)
-                    }
-                    (AgentKind::Other, _) => (tab.command.clone(), None),
-                };
-                self.open_pane_tab_in(&cmd, cwd);
-                if kind == AgentKind::Claude
-                    && let Some(ref sid) = tab.agent_session_id
+                // Reconstruct the spawn command via the agent profile.
+                // Codex/gemini/agy bake the resume into the command;
+                // claude spawns fresh and arms the `/resume <sid>` stdin
+                // send below (its `--resume` CLI flag crashes at mount
+                // with non-empty initialMessages).
+                let plan = crate::agent::profile_for(kind).reconstruct_restore(
+                    &tab.command,
+                    tab.agent_session_id.as_deref(),
+                    cwd,
+                );
+                self.open_pane_tab_in(&plan.command, cwd);
+                if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume
                     && let Some(tabs) = self.pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()
                 {
                     entry.info.pending_resume_send =
                         Some(crate::pane::tabs::PendingResumeSend::Text {
-                            sid: sid.clone(),
+                            sid: session_id,
                             after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
                         });
                 }
-                // Codex resume target is baked into `cmd` itself; no
-                // pending-stdin send needed. The local binding here
-                // mainly documents intent; suppress the unused-var lint.
-                let _ = codex_resume_id;
             }
             // Restore active tab.
             if let Some(tabs) = self.pane_tabs.as_mut() {
