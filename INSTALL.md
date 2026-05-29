@@ -54,7 +54,7 @@ spyc is written in Rust. Install the toolchain via rustup:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Minimum supported Rust version: **1.80**.
+Minimum supported Rust version: **1.85**.
 
 The repo pins an exact toolchain in `rust-toolchain.toml` (currently
 **1.96.0**), so rustup auto-installs and selects it on first build —
