@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Pinned the Rust toolchain to 1.96.0** in `rust-toolchain.toml`
+  (was the floating `stable` channel). Makes the build reproducible
+  and turns compiler/clippy upgrades into an explicit, reviewable
+  bump instead of a surprise mid-work `-D warnings` failure when a new
+  stable ships a new lint. Verified green on 1.96.0 (fmt, clippy
+  `-D warnings`, full test suite).
+
 ### Added
 - **`^a ^a` jumps to the last-active pane tab** (screen/tmux
   "last window"). Pressing the pane prefix twice toggles between the
