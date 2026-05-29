@@ -683,44 +683,12 @@ pub fn is_uuid(token: &str) -> bool {
     true
 }
 
-/// Resolve a short (8-char) session-id for the active pane, used by
-/// the status bar's agent segment. Reads from each agent's on-disk
-/// session records, picks the one whose start time is closest to the
-/// pane's `spawn_epoch_secs`, and returns the first 8 chars of the
-/// UUID. Returns `None` for `AgentKind::Other`, when the agent has
-/// no session record for `cwd` yet, or when no UUID looks like a UUID.
-///
-/// Filesystem cost is small (~10 small JSON header reads per scan on
-/// average) but called from the render path — caller should add a
-/// per-pane TTL cache if it shows up as a hotspot.
-pub fn resolve_active_session_short_id(
-    kind: AgentKind,
-    cwd: &std::path::Path,
-    spawn_epoch_secs: u64,
-) -> Option<String> {
-    match kind {
-        AgentKind::Claude => find_claude_sessions(cwd)
-            .into_iter()
-            .min_by_key(|c| c.started_at_secs.abs_diff(spawn_epoch_secs))
-            .map(|c| short_id(&c.session_id)),
-        AgentKind::Gemini => find_gemini_sessions(cwd)
-            .into_iter()
-            .min_by_key(|c| c.started_at_secs.abs_diff(spawn_epoch_secs))
-            .map(|c| short_id(&c.session_id)),
-        AgentKind::Agy => find_agy_sessions(cwd)
-            .into_iter()
-            .min_by_key(|c| c.started_at_secs.abs_diff(spawn_epoch_secs))
-            .map(|c| short_id(&c.session_id)),
-        // Codex stores rollouts at
-        // `~/.codex/sessions/YYYY/MM/DD/rollout-<TS>-<UUID>.jsonl` —
-        // the filename encodes both timestamp and UUID. A future PR
-        // can parse filenames here; for now Codex panes get no
-        // short-id in the status segment.
-        AgentKind::Codex | AgentKind::Other => None,
-    }
-}
+// Short-id resolution for the status bar's agent segment now lives in
+// each `AgentProfile::resolve_short_id` (see `crate::agent`), driven by
+// the shared `closest_short_id` helper. `short_id` below is the shared
+// formatter both the profiles and tests use.
 
-fn short_id(uuid: &str) -> String {
+pub fn short_id(uuid: &str) -> String {
     uuid.chars().take(8).collect()
 }
 

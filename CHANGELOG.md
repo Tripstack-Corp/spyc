@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Internal: agent handling unified behind an `AgentProfile` registry**
+  (`src/agent/`). The ~10 per-agent `match AgentKind` dispatch sites
+  (detection, resume save/restore, transcript scrollback, status
+  short-id, picker label, exit summary) now route through one trait +
+  registry; adding an agent is a new impl + one `REGISTRY` entry rather
+  than a tree-wide sweep. No user-visible behavior change — all
+  existing agent tests pass verbatim. `AgentKind` stays the persistence
+  tag in saved sessions.
+
 ### Added
 - **Agent-aware scrollback for `agy`.** `^a v` on an Antigravity
   pane now renders agy's on-disk conversation transcript (user turns,

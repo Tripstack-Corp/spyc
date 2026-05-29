@@ -118,6 +118,21 @@ impl Default for PaneConfig {
     }
 }
 
+impl PaneConfig {
+    /// Whether the transcript-scrollback view is enabled for the agent
+    /// whose `TranscriptSpec` carries `key`. Decouples the transcript
+    /// dispatch (in `crate::agent`) from the concrete config fields:
+    /// a new agent's toggle is one arm here, not a hot-path edit.
+    /// Unknown keys fall back to the profile-provided `default`.
+    pub fn transcript_enabled(&self, key: &str, default: bool) -> bool {
+        match key {
+            "claude_transcript_scrollback" => self.claude_transcript_scrollback,
+            "agy_transcript_scrollback" => self.agy_transcript_scrollback,
+            _ => default,
+        }
+    }
+}
+
 /// On-disk shape of `[pane]`. `Option` for the same "didn't set"
 /// distinguishability as `[layout]`.
 #[derive(Debug, Default, Deserialize)]
