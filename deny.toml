@@ -70,13 +70,6 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    # time 0.3.45 — DoS via crafted format strings. Fix is in >=0.3.47
-    # but the crate-graph route is syntect→plist→time, and plist 1.8
-    # requires Rust >=1.88. As of the 1.88 MSRV bump this is no longer
-    # blocked — pending a dep update (plist 1.8 → newer time) to drop
-    # this ignore. Not exploitable in spyc's actual usage regardless
-    # (we never parse user-supplied time strings).
-    { id = "RUSTSEC-2026-0009", reason = "transitive via syntect; not exploitable; dep update pending now MSRV is 1.88" },
     # yaml-rust 0.4.5 — unmaintained, no security advisory. Transitive
     # via syntect, no upgrade path until syntect drops it. We don't
     # parse YAML at runtime — only syntect's bundled .sublime-syntax
@@ -86,9 +79,6 @@ ignore = [
     # considers 1.3.3 a "complete" version. Transitive via syntect for
     # serializing the bundled syntax cache.
     { id = "RUSTSEC-2025-0141", reason = "unmaintained transitive via syntect; complete-as-shipped" },
-    # paste 1.0.15 — unmaintained / archived. Transitive via ratatui;
-    # used as a proc-macro at build time only.
-    { id = "RUSTSEC-2024-0436", reason = "unmaintained transitive via ratatui; build-time proc-macro" },
     # serial 0.4.0 — unmaintained since 2017. Transitive via
     # portable-pty (which spyc uses for the embedded pane). No
     # alternative without forking portable-pty.
