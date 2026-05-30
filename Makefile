@@ -12,6 +12,7 @@
 #   make dist         — all platforms → dist/
 #   make check        — fmt + clippy + test (CI gate)
 #   make install      — copy to ~/.local/bin (run `make release` first)
+#   make install-debug — install symbolicated `spyc.debug` for sample/lldb/perf
 
 BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -69,6 +70,13 @@ release: ## Optimized release for the current platform
 	cargo build $(RELEASE_FLAGS)
 	@echo "→ target/release/$(BINARY)"
 	@ls -lh target/release/$(BINARY)
+
+.PHONY: release-debug
+release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `perf`)
+	@echo "building $(BINARY) v$(VERSION) (release-debug — symbols included)…"
+	cargo build --locked --profile release-debug
+	@echo "→ target/release-debug/$(BINARY)"
+	@ls -lh target/release-debug/$(BINARY)
 
 # --- macOS ---
 
@@ -163,9 +171,24 @@ endif
 		   echo "        export PATH=\"$(PREFIX)/bin:\$$PATH\"" ;; \
 	esac
 
+.PHONY: install-debug
+install-debug: release-debug ## Install symbolicated build as $(PREFIX)/bin/spyc.debug (for profiling)
+	install -d $(PREFIX)/bin
+	install -m 755 target/release-debug/$(BINARY) $(PREFIX)/bin/$(BINARY).debug
+ifeq ($(shell uname),Darwin)
+	codesign -s - -v $(PREFIX)/bin/$(BINARY).debug
+endif
+	@echo "✓ installed $(BINARY).debug v$(VERSION) → $(PREFIX)/bin/$(BINARY).debug"
+	@echo "  Use this binary when running \`sample\` / \`lldb\` / \`perf\` —"
+	@echo "  Rust symbols are kept so the profiler can resolve function names."
+
 .PHONY: uninstall
 uninstall: ## Remove from $(PREFIX)/bin
 	rm -f $(PREFIX)/bin/$(BINARY)
+
+.PHONY: uninstall-debug
+uninstall-debug: ## Remove spyc.debug from $(PREFIX)/bin
+	rm -f $(PREFIX)/bin/$(BINARY).debug
 
 # ---------- Git hooks --------------------------------------------------------
 
