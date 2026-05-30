@@ -7269,6 +7269,62 @@ mod harness_tests {
             assert_eq!(app.state.cursor.index, 1, "j should move the cursor down");
         });
     }
+
+    fn esc() -> KeyEvent {
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())
+    }
+
+    /// Routing: while a prompt is open, a printable key edits the prompt
+    /// buffer and does NOT move the list cursor (prompt wins).
+    #[test]
+    fn prompt_input_wins_over_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            app.seed_rows(&["a", "b", "c"]);
+            app.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump: "));
+            app.handle_key(key('x')).unwrap();
+            assert_eq!(
+                app.state.cursor.index, 0,
+                "cursor must not move while prompting"
+            );
+            match &app.state.mode {
+                Mode::Prompting(p) => assert_eq!(p.buffer, "x"),
+                Mode::Normal => panic!("prompt should still be open"),
+            }
+        });
+    }
+
+    /// Routing: an Overlay-mounted in-app pager consumes normal keys —
+    /// `j` is handled by the pager, the list cursor stays put.
+    #[test]
+    fn overlay_pager_consumes_keys_not_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            app.seed_rows(&["a", "b", "c"]);
+            let lines: Vec<String> = (0..50).map(|i| format!("line {i}")).collect();
+            app.pager = Some(PagerView::new_plain("t", lines));
+            app.handle_key(key('j')).unwrap();
+            assert_eq!(
+                app.state.cursor.index, 0,
+                "list cursor must not move with a pager open"
+            );
+            assert!(app.pager.is_some(), "pager stays open on j");
+        });
+    }
+
+    /// Routing: Esc on an open overlay pager closes it.
+    #[test]
+    fn esc_closes_overlay_pager() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            app.pager = Some(PagerView::new_plain("t", vec!["a".to_string()]));
+            app.handle_key(esc()).unwrap();
+            assert!(app.pager.is_none(), "Esc should close the pager");
+        });
+    }
 }
 
 #[cfg(test)]
