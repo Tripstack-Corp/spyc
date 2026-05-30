@@ -918,6 +918,7 @@ impl App {
             huge_tree_anchor: None,
             huge_tree_decisions: std::collections::HashMap::new(),
             current_repo_root: None,
+            current_gitdir: None,
             git_status_raw_cache: None,
             git_worker_tx: None,
             git_generation: 0,
@@ -1530,6 +1531,7 @@ impl App {
             &mut watched_listing,
             &mut watched_git,
             &self.state.listing.dir,
+            self.state.current_gitdir.as_deref(),
         );
 
         let mut last_context_write = std::time::Instant::now();
@@ -2373,6 +2375,7 @@ impl App {
                     &mut watched_listing,
                     &mut watched_git,
                     &self.state.listing.dir,
+                    self.state.current_gitdir.as_deref(),
                 );
             }
 
@@ -2433,26 +2436,30 @@ impl App {
             return false;
         }
         let dir = self.state.listing.dir.as_path();
-        let git_dir = dir.join(".git");
 
-        // `.git/` filtering: macOS FSEvents sometimes coalesces multiple
+        // `.git/` filtering against the repo's *resolved* gitdir
+        // (cached on chdir). For a normal repo that's `<root>/.git`;
+        // for a linked worktree it's `<main>/.git/worktrees/<name>/`
+        // (the `.git` here is a *file*, and the real index/HEAD live
+        // outside the working tree). macOS FSEvents sometimes coalesces
         // intra-directory changes into a single event whose path *is*
-        // `.git/` itself (rather than the specific child file), so
-        // accept that as "something happened in there, refresh."
-        // Direct children: only `index` (staging/status) or `HEAD`
-        // (branch switch) -- everything else (objects, packs, lockfiles,
-        // gc activity, refs/, logs/) is rejected so background git
-        // housekeeping doesn't cascade.
-        if path == git_dir.as_path() {
-            return true;
-        }
-        if path.starts_with(&git_dir) {
-            if path.parent() == Some(git_dir.as_path())
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-            {
-                return matches!(name, "index" | "HEAD");
+        // the gitdir itself, so accept that as "something happened in
+        // there, refresh." Direct children: only `index` (staging/
+        // status) or `HEAD` (branch switch) -- everything else (objects,
+        // packs, lockfiles, gc activity, refs/, logs/) is rejected so
+        // background git housekeeping doesn't cascade.
+        if let Some(git_dir) = self.state.current_gitdir.as_deref() {
+            if path == git_dir {
+                return true;
             }
-            return false;
+            if path.starts_with(git_dir) {
+                if path.parent() == Some(git_dir)
+                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                {
+                    return matches!(name, "index" | "HEAD");
+                }
+                return false;
+            }
         }
 
         // Anywhere at or below the listing dir (recursive watch) --
@@ -11051,6 +11058,7 @@ fn sync_listing_watch(
     active: &mut Option<PathBuf>,
     active_git: &mut Option<PathBuf>,
     new_dir: &Path,
+    gitdir: Option<&Path>,
 ) {
     use notify::{RecursiveMode, Watcher};
     let Some(w) = fs_watcher else {
@@ -11083,23 +11091,26 @@ fn sync_listing_watch(
             *active = None;
         }
     }
-    // Watch the `.git/` directory non-recursively. We can't watch
-    // `.git/index` as a file because git commits via atomic rename
-    // (write `.git/index.lock`, then rename to `.git/index`), which
-    // replaces the inode — a file-level watch follows the *old* inode
-    // and goes deaf. A directory watch sees the rename land. Touched
-    // by basically every git op that changes status (add, commit,
-    // checkout, reset, merge, stash, rebase, ...). NonRecursive
-    // bounds the noise even in repos with huge `.git/objects` trees.
-    let git_dir = new_dir.join(".git");
-    let want_git = git_dir.is_dir();
-    let have_git = active_git.as_deref() == Some(&git_dir);
-    if !have_git {
+    // Watch the repo's *resolved* gitdir non-recursively. For a normal
+    // repo that's `<root>/.git`; for a linked worktree it's
+    // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*),
+    // which lives OUTSIDE the working tree — without watching it, a
+    // worktree's index/HEAD changes (stage, commit, checkout, branch
+    // switch) never fire the watcher and markers only refresh on the
+    // slower periodic poll. We can't watch the `index` *file* directly:
+    // git commits via atomic rename (write `index.lock`, rename to
+    // `index`), which replaces the inode — a file-level watch follows
+    // the *old* inode and goes deaf. A directory watch sees the rename
+    // land. NonRecursive bounds the noise even with huge `.git/objects`
+    // trees. `gitdir` is resolved + cached on chdir (`current_gitdir`).
+    if active_git.as_deref() != gitdir {
         if let Some(old) = active_git.take() {
             let _ = w.unwatch(&old);
         }
-        if want_git && w.watch(&git_dir, RecursiveMode::NonRecursive).is_ok() {
-            *active_git = Some(git_dir);
+        if let Some(gd) = gitdir
+            && w.watch(gd, RecursiveMode::NonRecursive).is_ok()
+        {
+            *active_git = Some(gd.to_path_buf());
         }
     }
 }
