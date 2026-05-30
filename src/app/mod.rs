@@ -199,12 +199,14 @@ pub enum PostAction {
 mod find_picker;
 mod grep_session;
 mod pager_history;
+mod prompt;
 mod route;
 pub mod state;
 
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
+pub use prompt::{Prompt, PromptKind};
 
 /// Which collection the user is looking at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,37 +263,6 @@ enum PagerReturn {
     },
 }
 
-pub struct Prompt {
-    pub kind: PromptKind,
-    pub prefix: String,
-    pub buffer: String,
-    /// When set, this prompt uses the vi line editor with history.
-    #[allow(dead_code)]
-    pub editor: Option<crate::ui::line_edit::LineEditor>,
-}
-
-impl Prompt {
-    /// Simple prompt (pattern pick, search, jump, etc.) — no vi editing.
-    fn simple(kind: PromptKind, prefix: impl Into<String>) -> Self {
-        Self {
-            kind,
-            prefix: prefix.into(),
-            buffer: String::new(),
-            editor: None,
-        }
-    }
-
-    /// Shell prompt (`!` / `;`) — vi line editor with history support.
-    fn shell(kind: PromptKind, prefix: impl Into<String>) -> Self {
-        Self {
-            kind,
-            prefix: prefix.into(),
-            buffer: String::new(),
-            editor: Some(LineEditor::new()),
-        }
-    }
-}
-
 /// True when the active prompt is a file/directory-path entry
 /// (copy-to, move-to, mkdir). These prompts get vi editing via
 /// `Prompt::shell` but skip history nav — they share the
@@ -335,52 +306,6 @@ const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
         Some(PromptKind::Command) => HistoryBucket::Command,
         _ => HistoryBucket::Shell,
     }
-}
-
-pub enum PromptKind {
-    PatternPick,
-    ShellCmd,
-    /// Incremental search. `saved_cursor` is where the cursor was when `/`
-    /// was pressed, so Esc can restore it.
-    Search {
-        saved_cursor: usize,
-    },
-    Jump,
-    CopyTo,
-    MoveTo,
-    MakeDir,
-    NewFile,
-    /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
-    /// anything else is treated as a cancel.
-    RemoveConfirm,
-    /// Confirm purge-all from the graveyard view (cascade
-    /// everything to system trash). Same single-key shape as
-    /// RemoveConfirm; routed separately because the verb and
-    /// destination are different.
-    GraveyardPurgeAllConfirm,
-    SetEnv,
-    /// `!` — capture command output with ANSI colors, show in in-app pager.
-    ShellCmdCaptured,
-    /// New pane tab step 1: command to run.
-    PaneNewTabCmd,
-    /// New pane tab step 2: working directory.
-    PaneNewTabCwd,
-    /// Rename the active pane tab.
-    PaneRenameTab,
-    /// W n — branch name for new worktree.
-    WorktreeNewBranch,
-    /// W d — confirm worktree removal (y/N).
-    WorktreeDeleteConfirm,
-    /// `=` — temporary file list filter (glob pattern, `!` for picks, empty clears).
-    Limit,
-    /// `:` — vim-style command line.
-    Command,
-    /// Auto-fired when a restored `claude --resume` tab looks broken;
-    /// y/Enter respawns into the same slot. Cwd and fallback command
-    /// live on the tab's `TabInfo` and are read at confirm time.
-    ClaudeCrashRecover {
-        tab_idx: usize,
-    },
 }
 
 /// State for the harpoon menu overlay (`Hh` / `gh`). Shows the
