@@ -157,6 +157,29 @@ pub const SPYC_COMMANDS: &[&str] = &[
     "whoami",
 ];
 
+/// Which surface owns the keyboard — the single focus axis that replaces
+/// the scattered `pane_focused: bool` writes. In Phase 0 the only
+/// observable derived from this is `pane_focused()`
+/// (== `matches!(self, Focus::Pane)`); the FileList / Overlay / Pager
+/// distinction is carried for the render label and future phases, but
+/// every non-Pane variant collapses to `pane_focused() == false`, exactly
+/// as the old bool did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Focus {
+    /// File-list area owns input (no pane focused, no overlay/pager
+    /// owning keys). Idle / default.
+    #[default]
+    FileList,
+    /// Bottom pty pane owns input. Unit variant for now; a `SinkId`
+    /// payload arrives in a later MVU phase.
+    Pane,
+    /// Top overlay subprocess (`V` editor / `;cmd` / huge-file `$PAGER`)
+    /// owns input.
+    Overlay,
+    /// In-app pager owns input, tagged with its mount slot.
+    Pager(crate::ui::pager::Mount),
+}
+
 pub struct AppState {
     pub listing: Listing,
     pub picks: Picks,
@@ -346,7 +369,9 @@ pub struct AppState {
     pub pending_worktrees: Option<Vec<PathBuf>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Session>>,
     pub frecency: Frecency,
-    pub pane_focused: bool,
+    /// Which surface owns the keyboard. Replaces the old `pane_focused:
+    /// bool`; read the derived bool via `self.pane_focused()`.
+    pub focus: Focus,
     pub pane_height_pct: u16,
     /// Tmux-style "zoom": when true, the bottom pane fills the middle
     /// region (list collapses to 0 rows). The user's preferred
@@ -375,6 +400,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Old `pane_focused` axis, derived from the single `focus` field.
+    /// True exactly when the bottom pty pane owns the keyboard. Every
+    /// former read of `self.state.pane_focused` is now
+    /// `self.state.pane_focused()`; behavior-equivalent because the
+    /// router, the render DIM cue, the `^C` gate and the paste filter
+    /// only ever consumed the bool, never the non-Pane discriminant.
+    pub const fn pane_focused(&self) -> bool {
+        matches!(self.focus, Focus::Pane)
+    }
+
     // --- Cursor/navigation (Phase 1) ---
 
     /// j/k — move within the current column only. Wraps at column
@@ -2272,7 +2307,7 @@ mod tests {
             pending_worktrees: None,
             pending_sessions: None,
             frecency: Frecency::default(),
-            pane_focused: false,
+            focus: Focus::FileList,
             pane_height_pct: 30,
             pane_zoomed: false,
             pane_focus_before_zoom: None,
@@ -2299,6 +2334,25 @@ mod tests {
             })
             .collect();
         s
+    }
+
+    // ── focus accessor ────────────────────────────────────────────
+
+    #[test]
+    fn pane_focused_is_true_only_for_pane_variant() {
+        let mut s = test_state();
+        s.focus = Focus::Pane;
+        assert!(s.pane_focused());
+        for f in [
+            Focus::FileList,
+            Focus::Overlay,
+            Focus::Pager(crate::ui::pager::Mount::Overlay),
+            Focus::Pager(crate::ui::pager::Mount::TopPane),
+            Focus::Pager(crate::ui::pager::Mount::LowerPane),
+        ] {
+            s.focus = f;
+            assert!(!s.pane_focused(), "{f:?} must not be pane-focused");
+        }
     }
 
     // ── cursor_move_vertical ──────────────────────────────────────

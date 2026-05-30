@@ -14,6 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::pane::Pane;
 use crate::shell;
 
+use super::state::Focus;
 use super::{App, PagerReturn, PostAction, TaskStatus, sh_c};
 
 impl App {
@@ -1007,7 +1008,7 @@ impl App {
                     match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
                         Ok(p) => {
                             self.top_overlay = Some(p);
-                            self.state.pane_focused = false;
+                            self.state.focus = Focus::Overlay;
                         }
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),
                     }

@@ -13,6 +13,7 @@ use crate::keymap::Action;
 use crate::pane::{Pane, PaneTabs};
 use crate::ui::pager::PagerView;
 
+use super::state::Focus;
 use super::{App, PostAction};
 
 impl App {
@@ -88,7 +89,7 @@ impl App {
                     // Initial focus is on the new overlay so the user
                     // can drive the subprocess directly. ^a-j hands
                     // focus to the bottom pane (when one is open).
-                    self.state.pane_focused = false;
+                    self.state.focus = Focus::Overlay;
                 }
                 Err(e) => self.state.flash_error(format!("spawn: {e}")),
             }

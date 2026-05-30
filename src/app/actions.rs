@@ -314,7 +314,7 @@ impl App {
                     // child, not the file list. Matches the
                     // behavior of `^a c` (new tab) which already
                     // does this in `open_pane_tab_in`.
-                    self.state.pane_focused = true;
+                    self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
                 self.needs_full_repaint = true;
@@ -323,7 +323,7 @@ impl App {
                 self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.next();
-                    self.state.pane_focused = true;
+                    self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
                 self.needs_full_repaint = true;
@@ -332,7 +332,7 @@ impl App {
                 self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     tabs.prev();
-                    self.state.pane_focused = true;
+                    self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
                 self.needs_full_repaint = true;
@@ -347,7 +347,7 @@ impl App {
                     // Same rationale as PaneTabByIndex: a tab switch
                     // means "interact with that tab", so pull focus
                     // into the pane.
-                    self.state.pane_focused = true;
+                    self.state.focus = state::Focus::Pane;
                     self.needs_full_repaint = true;
                 } else {
                     self.state.flash_info("no previous tab");

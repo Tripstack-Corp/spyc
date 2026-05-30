@@ -14,6 +14,7 @@ use crate::pane::PaneTabs;
 use crate::state::sessions::AgentKind;
 use crate::ui::pager::{self, PagerView};
 
+use super::state::Focus;
 use super::{App, RESTORE_BANNER_SETTLE};
 
 impl App {
@@ -103,7 +104,7 @@ impl App {
             tabs,
             active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
             pane_height_pct: self.state.pane_height_pct,
-            pane_focused: self.state.pane_focused,
+            pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
         };
@@ -298,7 +299,11 @@ impl App {
                     entry.info.label = crate::pane::tabs::strip_exit_suffix(&saved.label);
                 }
             }
-            self.state.pane_focused = session.pane_focused;
+            self.state.focus = if session.pane_focused {
+                Focus::Pane
+            } else {
+                Focus::FileList
+            };
         }
         self.state.flash_info("session restored");
     }
