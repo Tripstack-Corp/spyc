@@ -209,7 +209,7 @@ impl App {
             Style::default()
                 .fg(self.theme.dir)
                 .add_modifier(Modifier::BOLD)
-        } else if self.state.pane_focused {
+        } else if self.state.pane_focused() {
             Style::default()
                 .fg(self.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD)
@@ -552,7 +552,7 @@ impl App {
             // overlay focused (cursor block, full color); true ⇒
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
-            let overlay_focused = !self.state.pane_focused;
+            let overlay_focused = !self.state.pane_focused();
             let want_overlay_cursor = overlay_focused && !self.overlay_awaiting_dismiss;
             overlay.with_screen(|screen| {
                 frame.render_widget(
@@ -600,7 +600,7 @@ impl App {
                 if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                     let _ = tabs.active_mut().resize(rect.height, rect.width);
                     tabs.drain_all();
-                    let focused = self.state.pane_focused;
+                    let focused = self.state.pane_focused();
                     // Single lock window: render the pane AND place
                     // the OS cursor under the same screen snapshot,
                     // so a worker-thread parse landing between the
@@ -672,7 +672,7 @@ impl App {
             if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
-                let focused = self.state.pane_focused;
+                let focused = self.state.pane_focused();
                 tabs.active().with_screen(|screen| {
                     frame.render_widget(PaneWidget { screen, focused }, rect);
                     if focused {
@@ -715,7 +715,7 @@ impl App {
             self.cached_rows_gen = self.state.list_generation;
         }
         let rows = &self.cached_rows;
-        let list_focused = !self.state.pane_focused;
+        let list_focused = !self.state.pane_focused();
         // Stabilize view_top ↔ grid.  Skip the expensive multi-round
         // loop when inputs haven't changed since the last frame.
         let grid_key = (
@@ -881,7 +881,7 @@ impl App {
                         crate::ui::pager::render(frame, rect, view, &self.theme);
                     }
                 } else {
-                    let focused = self.state.pane_focused;
+                    let focused = self.state.pane_focused();
                     // Fold cursor placement into the same lock
                     // acquisition as the pane render — otherwise
                     // the worker thread can advance the screen

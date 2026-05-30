@@ -429,4 +429,22 @@ mod tests {
         };
         assert_eq!(route_key(snap, key('q')), KeyDestination::Prompt);
     }
+
+    // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
+    // normal key and a meta chord go to the pager even with a focused pane
+    // present. The existing `overlay_pager_eats_all_keys` uses bare `idle()`
+    // (no pane, unfocused), leaving the coexistence case open; this pins it
+    // ahead of the MVU `Focus::Pager(Overlay)` phase. Behavior is unchanged
+    // (route_key is untouched) — this is a regression guard, not a new rule.
+    #[test]
+    fn overlay_pager_eats_all_keys_even_with_pane_focus() {
+        let snap = RouteSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::PagerKey);
+    }
 }

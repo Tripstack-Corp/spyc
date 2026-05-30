@@ -539,7 +539,7 @@ impl App {
             project_home,
             session_name,
             frecency: crate::state::Frecency::load(),
-            pane_focused: false,
+            focus: state::Focus::FileList,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
             pane_height_pct: 70,
             pane_zoomed: false,
@@ -1830,7 +1830,7 @@ impl App {
                             crate::key_trace::log(&format!(
                                 "RX paste len={} pane_focused={} mode={:?}",
                                 text.len(),
-                                self.state.pane_focused,
+                                self.state.pane_focused(),
                                 std::mem::discriminant(&self.state.mode),
                             ));
                         }
@@ -1853,7 +1853,7 @@ impl App {
                         } else if let Some(overlay) = self
                             .top_overlay
                             .as_mut()
-                            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused))
+                            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused()))
                         {
                             // `V`/`D` top-overlay is the foreground
                             // subprocess (editor or pager). Route the
@@ -1874,7 +1874,7 @@ impl App {
                         } else if self.pane_tabs.is_some() {
                             // Switch focus to the pane — the user clearly
                             // intends to interact with it if they're pasting.
-                            if !self.state.pane_focused {
+                            if !self.state.pane_focused() {
                                 self.set_pane_focus(true);
                             }
                             // Track pasted text for yP (yank last prompt).
@@ -2270,7 +2270,7 @@ impl App {
             has_top_overlay: self.top_overlay.is_some(),
             pager_mount: self.pager.as_ref().map(|v| v.mount),
             has_pane_tabs: self.pane_tabs.is_some(),
-            pane_focused: self.state.pane_focused,
+            pane_focused: self.state.pane_focused(),
             pane_scrolling: self
                 .pane_tabs
                 .as_ref()
@@ -2666,7 +2666,7 @@ impl App {
                 match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
-                        self.state.pane_focused = false;
+                        self.state.focus = state::Focus::Overlay;
                     }
                     Err(e) => self.state.flash_error(format!("spawn: {e}")),
                 }
@@ -2792,7 +2792,7 @@ impl App {
                 // mutually exclusive with hidden — clear it so a
                 // re-show doesn't try to render zoomed onto a
                 // newly-resized area.
-                self.state.pane_focused = false;
+                self.state.focus = state::Focus::FileList;
                 self.state.pane_zoomed = false;
                 self.state.pane_focus_before_zoom = None;
                 self.state.flash_info("pane hidden — F10/^a-\\ to show");
@@ -2800,7 +2800,7 @@ impl App {
                 // Re-show: focus the pane so the next keystroke
                 // lands in the child. Matches the "I'm opening this
                 // because I want to interact with it" intent.
-                self.state.pane_focused = true;
+                self.state.focus = state::Focus::Pane;
                 self.state.flash_info("pane shown");
             }
             return;
@@ -2837,7 +2837,7 @@ impl App {
         );
         match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.context_path, &[]) {
             Ok(p) => {
-                self.state.pane_focused = true;
+                self.state.focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry::new(p, TabInfo::new(cmd, cwd));
@@ -3166,7 +3166,7 @@ impl App {
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
             Ok(p) => {
                 self.top_overlay = Some(p);
-                self.state.pane_focused = false;
+                self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
         }
@@ -3218,7 +3218,7 @@ impl App {
         // via `[b` / `]b`.
         view.no_history = true;
         self.set_pager(view);
-        self.state.pane_focused = false;
+        self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
         self.needs_full_repaint = true;
     }
 
@@ -3437,7 +3437,7 @@ impl App {
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
             Ok(p) => {
                 self.top_overlay = Some(p);
-                self.state.pane_focused = false;
+                self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
         }
@@ -3700,7 +3700,7 @@ impl App {
         info.label.clone_from(&label);
         let entry = TabEntry::new(pane, info);
 
-        self.state.pane_focused = true;
+        self.state.focus = state::Focus::Pane;
         if let Some(tabs) = self.pane_tabs.as_mut() {
             tabs.push(entry);
             // Switch active tab to the promoted one so the user
@@ -3744,7 +3744,7 @@ impl App {
         // layout / status / focus revert to "no pane open" state.
         if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
             self.pane_tabs = None;
-            self.state.pane_focused = false;
+            self.state.focus = state::Focus::FileList;
         }
 
         let id = self.background_tasks.allocate_id();
@@ -4684,7 +4684,7 @@ impl App {
         {
             // Last tab removed.
             self.pane_tabs = None;
-            self.state.pane_focused = false;
+            self.state.focus = state::Focus::FileList;
             self.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
         }
@@ -4703,7 +4703,7 @@ impl App {
             && !tabs.close_active()
         {
             self.pane_tabs = None;
-            self.state.pane_focused = false;
+            self.state.focus = state::Focus::FileList;
         }
         // Spawn a replacement with the same command and cwd.
         self.open_pane_tab_in(&cmd, &cwd);
@@ -4715,11 +4715,23 @@ impl App {
         if self.pane_tabs.is_none() {
             return;
         }
-        if self.state.pane_focused == want_pane {
+        if self.state.pane_focused() == want_pane {
             return; // already there — no-op
         }
-        self.state.pane_focused = want_pane;
-        if self.state.pane_focused {
+        // Branch order is arbitrary in Phase 0: every non-Pane arm yields
+        // `pane_focused() == false`, so it is invisible to all current
+        // consumers (router, render DIM, flash, ^C gate). The Overlay/Pager
+        // distinction is carried only for future MVU phases.
+        self.state.focus = if want_pane {
+            state::Focus::Pane
+        } else if self.top_overlay.is_some() {
+            state::Focus::Overlay
+        } else if let Some(v) = self.pager.as_ref() {
+            state::Focus::Pager(v.mount)
+        } else {
+            state::Focus::FileList
+        };
+        if self.state.pane_focused() {
             let label = self
                 .pane_tabs
                 .as_ref()
@@ -4938,7 +4950,7 @@ impl App {
         // and scrolls there, avoiding a one-frame jump.
         view.pending_scroll_to_bottom.set(true);
         self.set_pager(view);
-        self.state.pane_focused = true;
+        self.state.focus = state::Focus::Pane;
         self.needs_full_repaint = true;
         self.state
             .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
@@ -5191,13 +5203,17 @@ impl App {
         if self.state.pane_zoomed {
             self.state.pane_zoomed = false;
             if let Some(prev) = self.state.pane_focus_before_zoom.take() {
-                self.state.pane_focused = prev;
+                self.state.focus = if prev {
+                    state::Focus::Pane
+                } else {
+                    state::Focus::FileList
+                };
             }
             self.state.flash_info("zoom: off");
         } else {
-            self.state.pane_focus_before_zoom = Some(self.state.pane_focused);
+            self.state.pane_focus_before_zoom = Some(self.state.pane_focused());
             self.state.pane_zoomed = true;
-            self.state.pane_focused = true;
+            self.state.focus = state::Focus::Pane;
             self.state.flash_info("zoom: on (^a z to exit)");
         }
         // Resize all pty children to the new pane rect so their
@@ -5683,7 +5699,7 @@ impl App {
         if let Some(p) = focus {
             self.state.focus_on_path(&p);
         }
-        self.state.pane_focused = false;
+        self.state.focus = state::Focus::FileList;
         self.state.rebuild_rows();
         self.needs_full_repaint = true;
     }
@@ -5941,7 +5957,7 @@ impl App {
         {
             tabs.active_mut().exit_scroll_mode();
         }
-        self.state.pane_focused = false;
+        self.state.focus = state::Focus::FileList;
         self.needs_full_repaint = true;
 
         // Navigate: if it's a directory, chdir there; if a file, chdir to

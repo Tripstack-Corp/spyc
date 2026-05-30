@@ -42,7 +42,7 @@ impl App {
                 key.kind,
                 key.code,
                 key.modifiers,
-                self.state.pane_focused,
+                self.state.pane_focused(),
                 self.state.resolver.pending_display(),
             ));
             // Stamp so any subsequent TX (pty write) logs its
@@ -110,7 +110,7 @@ impl App {
         //    sees the spyc-list flash on the *background* status
         //    bar while looking at the pager — wrong screen for the
         //    notice.
-        let pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused;
+        let pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused();
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.pending_capture.is_none()
