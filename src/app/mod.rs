@@ -196,8 +196,11 @@ pub enum PostAction {
     },
 }
 
+mod pager_history;
 mod route;
 pub mod state;
+
+use pager_history::PagerHistory;
 
 /// Which collection the user is looking at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,79 +492,6 @@ struct HarpoonMenu {
     /// other key clears it. Avoids accidental deletion from a
     /// single-key slip.
     delete_armed: bool,
-}
-
-/// Stack of recently-closed pager views, for `:bprev`/`:bnext`.
-/// Works like a browser back/forward stack.
-struct PagerHistory {
-    back: Vec<pager::PagerView>,
-    forward: Vec<pager::PagerView>,
-}
-
-const MAX_PAGER_HISTORY: usize = 10;
-
-impl PagerHistory {
-    const fn new() -> Self {
-        Self {
-            back: Vec::new(),
-            forward: Vec::new(),
-        }
-    }
-
-    /// Save a closed pager view. Skips views flagged `no_history`
-    /// (e.g. the help overlay) so accidentally hitting `[b` doesn't
-    /// surface stale chrome. Clears the forward stack.
-    fn push(&mut self, view: pager::PagerView) {
-        if view.no_history {
-            return;
-        }
-        self.back.push(view);
-        self.forward.clear();
-        if self.back.len() > MAX_PAGER_HISTORY {
-            self.back.remove(0);
-        }
-    }
-
-    /// Go back. On success returns the prior view and tucks `current`
-    /// onto the forward stack. On failure (back stack empty) hands
-    /// `current` back unchanged so the caller can keep it on screen --
-    /// hitting `[b` at the start of history shouldn't close the pager.
-    /// PagerView is ~232B so clippy flags the Err variant size; the
-    /// alternative (Box on Err only) buys nothing on an in-process,
-    /// cold-path call.
-    #[allow(clippy::result_large_err)]
-    fn go_back(&mut self, current: pager::PagerView) -> Result<pager::PagerView, pager::PagerView> {
-        match self.back.pop() {
-            Some(prev) => {
-                self.forward.push(current);
-                Ok(prev)
-            }
-            None => Err(current),
-        }
-    }
-
-    /// Go forward. Same edge semantics as `go_back`.
-    #[allow(clippy::result_large_err)]
-    fn go_forward(
-        &mut self,
-        current: pager::PagerView,
-    ) -> Result<pager::PagerView, pager::PagerView> {
-        match self.forward.pop() {
-            Some(next) => {
-                self.back.push(current);
-                Ok(next)
-            }
-            None => Err(current),
-        }
-    }
-
-    const fn back_len(&self) -> usize {
-        self.back.len()
-    }
-
-    const fn forward_len(&self) -> usize {
-        self.forward.len()
-    }
 }
 
 /// TTL cache for the active pane's status-line session short-id.
@@ -5216,7 +5146,7 @@ impl App {
                         self.state.flash_info("no older buffers");
                     }
                 }
-            } else if let Some(prev) = self.pager_history.back.pop() {
+            } else if let Some(prev) = self.pager_history.pop_back() {
                 self.pager = Some(prev);
                 self.needs_full_repaint = true;
                 self.state
@@ -10491,7 +10421,7 @@ impl App {
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
             Action::ReopenLastBuffer => {
-                if let Some(prev) = self.pager_history.back.pop() {
+                if let Some(prev) = self.pager_history.pop_back() {
                     self.pager = Some(prev);
                     self.needs_full_repaint = true;
                     self.state

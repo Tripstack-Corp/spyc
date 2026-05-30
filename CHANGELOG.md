@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Started the `app/mod.rs` decomposition** (REFACTOR_PLAN Phase 1) —
+  the road-to-2.0 maintainability track. First extraction: the
+  pager back/forward history (`PagerHistory`) moved verbatim to
+  `src/app/pager_history.rs`. No behavior change; one module per
+  commit, shrinking the megafile incrementally.
+
 ### Fixed
 - **Git markers no longer go stale in worktrees** (and when viewing a
   subdirectory). The fs-watcher's gitdir watch and event filter both
