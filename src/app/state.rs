@@ -2249,22 +2249,22 @@ fn find_repo_root(start: &Path) -> Option<std::path::PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fs::entry::EntryKind;
-    use crate::fs::listing::SortMode;
-
-    /// Build a minimal `AppState` for testing. Uses an empty listing
-    /// and sensible defaults — no disk I/O, no terminal.
-    fn test_state() -> AppState {
-        AppState {
-            listing: Listing::empty(PathBuf::from("/tmp/test")),
+impl AppState {
+    /// Canonical test `AppState` for a given cwd — the single fixture
+    /// builder (REFACTOR_PLAN Phase -1 intent). `test_state()` and the
+    /// `App` test harness (`App::test_app`) both go through this, so
+    /// adding an `AppState` field touches exactly one place. History
+    /// buckets use `harness_*` names; wrap callers in
+    /// `crate::state::with_state_root` for an isolated state dir.
+    pub(crate) fn test_default(cwd: std::path::PathBuf) -> Self {
+        Self {
+            listing: Listing::empty(cwd.clone()),
             picks: Picks::new(),
             inventory: Inventory::new(),
             marks: Marks::default(),
             masks: IgnoreMasks::default(),
             temp_filter: None,
-            sort_order: SortMode::Name,
+            sort_order: crate::fs::listing::SortMode::Name,
             sort_reversed: false,
             view: View::Dir,
             cursor: Cursor::new(),
@@ -2272,17 +2272,17 @@ mod tests {
             user_keymap: UserKeymap::default(),
             config: Config::default(),
             mode: Mode::Normal,
-            start_dir: PathBuf::from("/tmp/test"),
+            start_dir: cwd,
             project_home: None,
             session_name: None,
             prev_dir: None,
             last_search: None,
             last_captured_cmd: None,
-            history: History::load_file("test_state_h"),
-            pane_history: History::load_file("test_state_ph"),
-            pane_cwd_history: History::load_file("test_state_pch"),
-            jump_history: History::load_file("test_state_jh"),
-            command_history: History::load_file("test_state_ch"),
+            history: History::load_file("harness_h"),
+            pane_history: History::load_file("harness_ph"),
+            pane_cwd_history: History::load_file("harness_pch"),
+            jump_history: History::load_file("harness_jh"),
+            command_history: History::load_file("harness_ch"),
             flash: None,
             should_quit: false,
             quit_pending: None,
@@ -2320,6 +2320,19 @@ mod tests {
             },
             list_generation: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::entry::EntryKind;
+    use crate::fs::listing::SortMode;
+
+    /// Build a minimal `AppState` for testing. Uses an empty listing
+    /// and sensible defaults — no disk I/O, no terminal.
+    fn test_state() -> AppState {
+        AppState::test_default(PathBuf::from("/tmp/test"))
     }
 
     /// Build a test state with named rows (simulating a directory listing).
