@@ -196,10 +196,12 @@ pub enum PostAction {
     },
 }
 
+mod find_picker;
 mod pager_history;
 mod route;
 pub mod state;
 
+use find_picker::FindPicker;
 use pager_history::PagerHistory;
 
 /// Which collection the user is looking at.
@@ -377,77 +379,6 @@ pub enum PromptKind {
     ClaudeCrashRecover {
         tab_idx: usize,
     },
-}
-
-/// State for the `F` filename finder. The walk runs in a worker
-/// thread streaming batches of paths through `walk_rx`; the picker
-/// is interactive immediately and the candidate list grows live as
-/// the walker progresses. Re-rank runs on every keystroke and on
-/// every fresh batch arrival (cheap: ~1us per candidate).
-struct FindPicker {
-    /// Repo-relative paths accumulated from the walk so far.
-    /// Append-only during the walk; never modified by the user.
-    candidates: Vec<PathBuf>,
-    /// Absolute root the walk started from. Used to construct the
-    /// final absolute path on Enter.
-    root: PathBuf,
-    /// User's current input.
-    query: String,
-    /// Current ranked subset (paths only; scores discarded after
-    /// sort). Re-built on keystroke or new-batch arrival.
-    filtered: Vec<PathBuf>,
-    /// Index into `filtered`. 0 when query just changed; arrows
-    /// move it within `[0, filtered.len())`.
-    selected: usize,
-    /// Cap on rendered results so a 100K-file repo doesn't blow up
-    /// the pager Line vec on first paint.
-    limit: usize,
-    /// Receiver for streaming candidate batches from the walker
-    /// thread. Set to `None` once the walk completes (channel
-    /// disconnects when the worker drops its sender).
-    walk_rx: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
-    /// True once the walker thread has finished. Drives the title
-    /// suffix ("scanning..." vs final count).
-    walk_complete: bool,
-}
-
-impl FindPicker {
-    /// Re-rank `candidates` against the current `query`, store in
-    /// `filtered`, reset `selected` to 0.
-    fn refilter(&mut self) {
-        self.filtered = crate::fs::finder::rank(&self.candidates, &self.query, self.limit)
-            .into_iter()
-            .map(|(p, _score)| p)
-            .collect();
-        self.selected = 0;
-    }
-
-    /// Drain any batches that have arrived since the last tick.
-    /// Returns true when new candidates were appended OR when the
-    /// walk completed (caller should re-render either way: title
-    /// changes from "scanning..." to a final count).
-    fn drain_walk(&mut self) -> bool {
-        let Some(rx) = self.walk_rx.as_ref() else {
-            return false;
-        };
-        let mut got_any = false;
-        loop {
-            match rx.try_recv() {
-                Ok(batch) => {
-                    self.candidates.extend(batch);
-                    got_any = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.walk_rx = None;
-                    self.walk_complete = true;
-                    got_any = true;
-                    break;
-                }
-            }
-        }
-        got_any
-    }
 }
 
 /// State for an active `:grep` session. The worker thread runs the
