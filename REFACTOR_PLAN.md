@@ -5,14 +5,16 @@
 > extractions (PRs #187, #189, #190, #191) have landed; `app/mod.rs` is
 > down from ~12.5k to **8,427 lines**, and `src/app/` is now a 12-file
 > directory. The rendering pass, pager-key router, colon-command
-> dispatch, and keyboard-input cluster are all out. Per the lean
-> road-to-2.0 sequencing in `ROADMAP.md`, the **MVU rewrite (Phase 3)
-> stays post-2.0**. With the planned decomposition done, the next
-> road-to-2.0 track is the daily-driver fixes / test harness work, not
-> more extraction (see Phase 2 done-criteria for optional tidy-up).
-> Original "hold until after 2.0" reasoning is kept below as historical
-> context — it applied to the *whole* plan; the decision was to take the
-> low-risk decomposition early and hold only the deep rewrite.
+> dispatch, and keyboard-input cluster are all out. **The MVU rewrite
+> (Phase 3) is now a pre-2.0 / road-to-2.0 track** — see the detailed
+> design in [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md). This **reverses** the
+> earlier "hold the MVU rewrite until 2.0 + ~2 weeks" gate (decision log,
+> 2026-05-30): 2.0 should ship *on* the cleaner foundation rather than
+> carry a refactor as launch overhang, and the strangler-fig design makes
+> it safe to land incrementally (every phase behavior-equivalent behind
+> green CI). The "When to start" / "Why we're not doing this right now"
+> sections below are **historical context** for the original whole-plan
+> hold and no longer gate the MVU work.
 
 Working doc for the staged decomposition of `app/mod.rs` (now ~12k
 lines, ~150 fns) into smaller, more reviewable units. ROADMAP
@@ -64,10 +66,15 @@ Pick up when at least two of these are true:
 - **Phase 2**: ~half-day per extraction. Real focus needed because
   some interfaces have to be designed (e.g. the pager-key handler
   surface). Don't context-switch mid-extraction.
-- **Phase 3**: multi-day commitment. **Don't start unless you can
-  block out a full week of unbroken focus.** The code's shape will
-  invert (state struct + reducer + effects), and partial conversions
-  leave both styles coexisting which is worse than either alone.
+- **Phase 3 (MVU)**: superseded by the strangler-fig design in
+  [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md). The original framing here said
+  "block out a full week; partial conversions are worse than either alone"
+  — that assumed a big-bang. The strangler-fig plan instead lands ~8
+  phases, **each behavior-equivalent behind green CI and independently
+  revertable**, so partial conversion is the *intended* steady state and it
+  interleaves with feature work like Phases 1–2 did. Per-phase focus is
+  ~half-day to multi-day depending on the phase (the single-channel loop
+  rewrite is the heaviest, and it's last).
 
 ---
 
@@ -157,9 +164,21 @@ denies `wildcard_imports`).
 
 ## Phase 3 — MVU rewrite
 
-The architectural change. **Don't start until Phase 2 is done and
-the project has stabilized post-2.0.** Multi-day work; don't
-context-switch.
+> **Detailed design: [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md)** — a
+> strangler-fig, 8-phase (Phase -1 … 6) migration with Model/Runtime/
+> ViewState split, a single `Message` channel, a four-class `Effect`
+> vocabulary, and a `Focus` value. **Now a pre-2.0 / road-to-2.0 track**
+> (2026-05-30 decision): Phase 0 (Focus-as-one-value) lands first as a
+> daily-driver bug fix; Phases 1–6 land incrementally before launch, after
+> the test-harness de-risking. The sketch in this section is the original
+> high-level target; `docs/MVU_PLAN.md` supersedes it with concrete,
+> adversarially-vetted phases.
+
+The architectural change — but **not** the block-out-a-week big-bang the
+original framing below assumed. The strangler-fig design makes every phase
+behavior-equivalent behind green CI and independently revertable, so it lands
+incrementally pre-2.0 and interleaves with the other road-to-2.0 tracks rather
+than requiring one unbroken multi-day push. Follow `docs/MVU_PLAN.md`.
 
 ### Target shape
 
@@ -234,6 +253,8 @@ the plan changed.)
   in the megafile. Decomposition also unblocks the 2.x crate split
   (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3
   (MVU) still held until 2.0 has shipped + stabilized ~2 weeks.
+  *(Superseded later the same day — see the "GATE REVERSED" entry below;
+  MVU moved pre-2.0.)*
 - **2026-05-30**: Phase 1 complete (PRs #180–#185). Six struct
   extractions, one PR each, no behavior change, no test edits, gate
   green throughout. Scoped to *data structs* — App-coupled `&mut self`
@@ -279,3 +300,27 @@ the plan changed.)
   (`app::guard_tests::mod_rs_stays_decomposed`, ceiling 8,500) so `mod.rs`
   can't silently creep back toward a monolith — the test directs
   contributors to extract a module rather than raise the ceiling.
+- **2026-05-30**: Drew up the full MVU design ([`docs/MVU_PLAN.md`](docs/MVU_PLAN.md),
+  PR #196) via a multi-agent design workflow — strangler-fig won a judge
+  panel (46/50) over effect-first (45) and model-first (40); the borrow-
+  checker / sync-only / scope-honesty reviewers surfaced the blockers
+  (render reads the live PtyHost → PaneSnapshot; parkable reader vs
+  foreground-child stdin contention; load-bearing pane poll floor;
+  lost-wakeup-safe dirty-bit; SendToPane; MCP read-after-write ordering;
+  chdir de-IO fork) which are folded into the plan.
+- **2026-05-30 — GATE REVERSED (user decision)**: the MVU rewrite moves
+  **pre-2.0**, into the road-to-2.0 track, reversing the "hold until 2.0 +
+  ~2 weeks" trigger above. Rationale (user): "I want it done pre-2.0; I
+  don't want to launch and then be faced with a big refactor" — 2.0 should
+  ship *on* the cleaner foundation, not carry it as overhang. This is only
+  safe because of the strangler-fig design: every phase is
+  behavior-equivalent behind green CI and independently revertable, so it
+  lands incrementally and interleaves with the other road-to-2.0 tracks
+  rather than being a block-out-a-week big-bang. **Honest trade-off
+  accepted:** deep loop/concurrency surgery before a public launch carries
+  timing/focus/stdin regression risk that behavior-equivalence tests don't
+  fully catch; mitigated by the test harness landing first, per-phase green
+  CI + manual smoke, Phase 0 (lowest-risk) first / the single-channel loop
+  rewrite last, and isolation-revertability per phase. The "When to start"
+  / "Why we're not doing this right now" sections above are now historical
+  context, not live gates.
