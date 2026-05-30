@@ -157,8 +157,16 @@ denies `wildcard_imports`).
 
 ## Phase 3 — MVU rewrite
 
-The architectural change. **Don't start until Phase 2 is done and
-the project has stabilized post-2.0.** Multi-day work; don't
+> **Detailed design: [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md)** — a
+> strangler-fig, 8-phase (Phase -1 … 6) migration with Model/Runtime/
+> ViewState split, a single `Message` channel, a four-class `Effect`
+> vocabulary, and a `Focus` value. Phase 0 (Focus-as-one-value) is carved
+> out as a daily-driver bug fix shippable *now*; the rest stays behind the
+> gate below. The sketch in this section is the original high-level target;
+> `docs/MVU_PLAN.md` supersedes it with concrete, adversarially-vetted phases.
+
+The architectural change. **Don't start (Phases 1–6) until Phase 2 is
+done and the project has stabilized post-2.0.** Multi-day work; don't
 context-switch.
 
 ### Target shape
