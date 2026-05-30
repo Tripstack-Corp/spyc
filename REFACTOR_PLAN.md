@@ -1,12 +1,17 @@
 # Refactor plan — `app/mod.rs` decomposition
 
-> **Status (2026-05-30): Phase 1 COMPLETE; Phase 2 next.** All six
-> Phase 1 struct extractions have landed (PRs #180–#185); `app/mod.rs`
-> is down to ~11.8k lines. Per the lean road-to-2.0 sequencing in
-> `ROADMAP.md`, **Phase 2 is now the active decomposition track on the
-> way to 2.0**; the **MVU rewrite (Phase 3) stays post-2.0**. Original
-> "hold until after 2.0" reasoning is kept below as historical context
-> — it applied to the *whole* plan; the decision now is to take the
+> **Status (2026-05-30): Phases 1 & 2 COMPLETE.** All six Phase 1
+> struct extractions (PRs #180–#185) and all four Phase 2 medium
+> extractions (PRs #187, #189, #190, #191) have landed; `app/mod.rs` is
+> down from ~12.5k to **8,427 lines**, and `src/app/` is now a 12-file
+> directory. The rendering pass, pager-key router, colon-command
+> dispatch, and keyboard-input cluster are all out. Per the lean
+> road-to-2.0 sequencing in `ROADMAP.md`, the **MVU rewrite (Phase 3)
+> stays post-2.0**. With the planned decomposition done, the next
+> road-to-2.0 track is the daily-driver fixes / test harness work, not
+> more extraction (see Phase 2 done-criteria for optional tidy-up).
+> Original "hold until after 2.0" reasoning is kept below as historical
+> context — it applied to the *whole* plan; the decision was to take the
 > low-risk decomposition early and hold only the deep rewrite.
 
 Working doc for the staged decomposition of `app/mod.rs` (now ~12k
@@ -105,29 +110,48 @@ own with the full gate green and zero test edits.
 
 ---
 
-## Phase 2 — Medium extractions
+## Phase 2 — Medium extractions ✅ DONE (2026-05-30)
 
-Once Phase 1 is done, the *shape* of what's left in `app/mod.rs`
-becomes clearer and these become more obvious. Each is a
-~half-day commit:
+All four planned extractions landed, one PR each, same child-module
+`impl App` pattern: the moved methods live in a private child module
+and read App's private state via the descendant-module rule, so almost
+nothing became `pub` — only the handful of entry points called from
+`app` or sibling modules. Explicit imports throughout (the codebase
+denies `wildcard_imports`).
 
-| # | Extract | Target file | LOC est | Notes |
-|---|---------|-------------|---------|-------|
-| 7 | `fn render()` + `compute_layout` + layout helpers | `src/app/render.rs` | ~600 | View half of MVU; biggest standalone win |
-| 8 | `fn handle_pager_key()` + sub-handlers | `src/app/pager_handler.rs` | ~700 | Key dispatch surface — design the interface to App carefully |
-| 9 | `dispatch_command()` + `:` arms | `src/app/commands.rs` | ~500 | Move the colon-command dispatch table out |
-| 10 | `fn handle_key()` top-level + capture / pane / picker routing | `src/app/key_dispatch.rs` | ~400 | Skim what's left and decide if this is worth pulling out |
+| # | Extract | Target file | PR | Status |
+|---|---------|-------------|----|--------|
+| 7 | `render` + `compute_layout` + status/harpoon render | `src/app/render.rs` (1114) | #187 | ✅ |
+| 8 | `handle_pager_key` | `src/app/pager_handler.rs` (1078) | #189 | ✅ |
+| 9 | `dispatch_command` (terminal-touching `:` arms) | `src/app/commands.rs` (321) | #190 | ✅ |
+| 10 | `handle_key` + mode sub-handlers (`apply_user`, prompt/vi-prompt, confirm handlers, `undo_last_remove`) | `src/app/key_dispatch.rs` (916) | #191 | ✅ |
 
-Cumulative: ~2200 more LOC off `app/mod.rs` → ~4200. At that point
-`app/mod.rs` is *just* the App struct, the run loop, and the
-`apply(action)` shim — close to the natural MVU shape.
+`app/mod.rs`: 12,450 (pre-Phase-1) → 10,672 (post-Phase-1) → **8,427**
+(post-Phase-2). `src/app/` is now a 12-file directory.
 
 ### Phase 2 done-criteria
 
-- `wc -l src/app/mod.rs` ≤ 4500
-- `app/mod.rs` no longer contains any rendering code or any pager-key
-  handling. Only the run loop, the App struct, and small glue.
-- Tests still pass; clippy clean.
+- ✅ `app/mod.rs` no longer contains any rendering code or any
+  pager-key / top-level-key handling — those are the qualitative goals
+  and they're met. The render pass, the pager-key router, the colon
+  command dispatch, and the keyboard-input cluster are all out.
+- ✅ Tests still pass (785, no test edits); `make check` +
+  `make lint-linux` clean. **Note:** Phase 2 surfaced that the host
+  (macOS) clippy never lints `cfg(target_os = "linux")` code — a latent
+  `collapsible_if` in `clipboard.rs` failed only on Linux CI. Fixed in
+  #188, which also added `make lint-linux` (cross-lint via zig) to catch
+  this class locally. Run it for any OS-gated change.
+- ⚠️ `wc -l src/app/mod.rs ≤ 4500` is **not** met (8,427). That number
+  was estimated off a ~7.4k baseline; the real pre-refactor file was
+  ~12.5k, so the four planned moves can't reach it. What remains is
+  largely what the criterion *intends* to stay — the App struct,
+  `App::new`, and the ~920-line `run` event loop — plus things not in
+  the Phase 2 plan that are candidates for a follow-on pass if we want
+  mod.rs smaller before Phase 3: `apply_inner` (the ~370-line action
+  dispatcher), `update_term_title`, `save_session`/`restore_session`,
+  the agent resume free-fns (`command_without_*_resume`,
+  `resolve_*_resume_target`), and the in-file test modules. None block
+  Phase 3; treat them as optional tidy-up, not required scope.
 
 ---
 
@@ -218,3 +242,23 @@ the plan changed.)
   `app/mod.rs` (11,757 now). Phase 2 (render / pager-key / command /
   key-dispatch handlers) is the next track; each is ~half-day and
   needs real interface design, so not "pick up any spare moment" work.
+- **2026-05-30**: Phase 2 complete (PRs #187, #189, #190, #191). Four
+  medium extractions, one PR each, no behavior change, no test edits.
+  Established the **child-module `impl App`** pattern: a method moved to
+  a private child module (`mod render;` etc.) reads App's private state
+  via the descendant-module rule, so fields stay private and only the
+  few cross-module entry points need `pub` (e.g. key_dispatch exposed 3
+  of 8 methods). `mod.rs`: 10,672 → 8,427. The ≤4500 target wasn't met —
+  it assumed a ~7.4k baseline; the real file was ~12.5k, and the run
+  loop / App struct (which the criterion intends to keep) account for
+  most of the remainder. Further shrinking (`apply_inner`, term-title,
+  session save/restore, agent free-fns) is optional tidy-up, not blocked
+  work and not required before Phase 3.
+- **2026-05-30**: Two workflow fixes adopted mid-Phase-2, both now
+  memories: (1) merge PRs with `bkt pr merge --close-source=false` and
+  don't delete branches — the default deletes the source branch and
+  Bitbucket Pipelines fails "branch not found" (the earlier #180–#186
+  merges never had a passing pipeline because of this). (2) `make
+  lint-linux` added (#188) and run for OS-gated changes — host clippy on
+  macOS compiles out `cfg(target_os = "linux")` code, so a latent lint
+  in clipboard.rs only failed on Linux CI.
