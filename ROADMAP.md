@@ -39,10 +39,13 @@ from these lists into `Done (recent)` as they ship.
 
 ## Foundations
 
-Foundations are ~85% complete. Testing infrastructure, CI pipeline,
-handler extraction, unicode-width, startup health check, and
-performance refactor are all shipped. Remaining items are lower
-priority -- nice to have, not blocking v2.0.
+Testing infrastructure, CI pipeline, handler extraction, unicode-width,
+startup health check, and performance refactor are all shipped. The one
+*active* foundations item is the **`app/mod.rs` decomposition** — it has
+grown to ~12k lines and is now the road-to-2.0's next track (see
+[`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) and the Releases section). The
+other remaining items below are lower priority — nice to have, mostly
+not blocking 2.0.
 
 ### Done
 
@@ -86,12 +89,15 @@ priority -- nice to have, not blocking v2.0.
 ### Remaining
 
 - **Elm Architecture refactor (Model-View-Update).** `app/mod.rs` is
-  4000+ lines with entangled concerns: domain state, TUI state,
+  ~12k lines with entangled concerns: domain state, TUI state,
   process lifecycle, rendering caches, file watching. The handler
   extraction (Phases 0-4) separated `AppState` domain logic
   (`AppState::apply` already returns an `ApplyResult` enum — the
   Update half is essentially done). The event loop and render path
-  are still fused. Target shape:
+  are still fused. **The staged path is in
+  [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md): Phases 1–2 (mechanical +
+  medium module extractions) are the road-to-2.0 decomposition track;
+  the full MVU rewrite (Phase 3) is held for post-2.0.** Target shape:
   1. **View** — pure functions in `src/ui/` that take `&AppState` and
      render. Replace the inline rendering in `app/mod.rs::render` with
      a single `ui::render(terminal, &self.state)` call. Snapshot tests
@@ -108,9 +114,11 @@ priority -- nice to have, not blocking v2.0.
      manual timeout math.
   Stick with `std::thread + mpsc` — spyc is sync end-to-end, tokio
   would be a regression here. Subsumes the deferred handler
-  extraction Phases 5-6. Big lift -- do incrementally alongside
-  feature work, not as a standalone rewrite. The View extraction is
-  the natural first slice (no behavior change, mechanical move).
+  extraction Phases 5-6. Big lift — do incrementally alongside
+  feature work, not as a standalone rewrite. The mechanical Phase 1
+  extractions (per `REFACTOR_PLAN.md`) are the natural first slices:
+  no behavior change, one module per commit, shrinking `app/mod.rs`
+  immediately.
 - **Expand snapshot tests.** `insta` + `TestBackend` infra is wired.
   Status bar snapshots done (4). Remaining: `list_view`, `pager`
   (ANSI, hex, line numbers, search highlight), `line_edit` modes.
@@ -532,62 +540,107 @@ the roadmap committing to that saves a lot of drift.
 ## Releases
 
 Semver per `CONTRIBUTING.md`. Version bumps in `Cargo.toml` as part of
-the PR that ships the change. The `CHANGELOG.md` entry lands in the
+the PR that ships the change; the `CHANGELOG.md` entry lands in the
 same commit.
 
-- **v1.8** (current) -- Writable MCP actions (navigate_to, set_filter,
-  pick_files, clear_picks, get_file_content). Command channel
-  architecture. AGENTS.md updated to instruct Claude to use tools
-  proactively.
-- **v1.7** -- Performance refactor (idle CPU ~2.5%), ^a pane prefix,
-  yank commands (yy/yp/yP), activity monitor, pager improvements,
-  exit summary, startup health check, README rewrite.
-- **v1.9** -- Distribution track. Release automation, macOS
-  notarization, Homebrew tap, asciinema demo.
-- **v1.51 -- Auto-approval & action log.** Per-agent rule curation
-  (claude `.claude/settings.json`, codex `.codex/config.toml`,
-  gemini TBD) plus a `:approvals` pager view aggregating tool
-  invocations across all three agents with auto/manual tags.
-  Architecture: curate each agent's native permission system, no
-  pty-level interception. Six-phase plan in
-  [`docs/AUTO_APPROVAL_PLAN.md`](docs/AUTO_APPROVAL_PLAN.md).
-- **v1.52 -- Pane state recovery.** Cross-restart continuity beyond
-  what `Session` JSON already captures. Phase 0: cosmetic vt100-grid
-  snapshot rendered as a faded backdrop on the just-respawned pane
-  until the new process produces output. Phase 1: MCP-side Claude
-  sid capture to eliminate the banner/JSONL race. Phase 2 (opt-in):
-  `[pane] use_tmux` flag that wraps each pane in a hidden tmux
-  session for real cross-restart process survival. Tiered design
-  written up in [`docs/PANE_RECOVERY_PLAN.md`](docs/PANE_RECOVERY_PLAN.md).
-- **v1.60 -- CounterTop.** A hub view above any one spyc instance.
-  Discovery surface so peer spycs find each other, a HUD that
-  aggregates per-workspace agent state, `--hub` mode for "launch one
-  spyc on terminal open and run every project from there." Kitchen
-  vocabulary for the UI surfaces (CounterTop, Burner, Pass, Spice
-  Drawer). Six-phase plan in [`docs/V1_60_PLAN.md`](docs/V1_60_PLAN.md).
-- **v1.70 -- Mise en Place.** Programmatic addressability: stable
-  pane handles (stations), structured snapshots (plates), a typed
-  daemon protocol (the Order rail), and async "ready" primitives
-  (bells) that replace timer-based heuristics like
-  `RESTORE_BANNER_SETTLE`. Three clients share one protocol: the
-  existing MCP server (renamed), a new `spyc-sdk` crate, and `spyc`
-  CLI subcommands aimed at coding harnesses (`spyc send-keys`,
-  `spyc plate`, `spyc wait`). Rmux-inspired crate split into
-  single-responsibility seams (`spyc-proto`, `spyc-pty`, `spyc-os`,
-  …). Seven-phase plan in [`docs/V1_70_PLAN.md`](docs/V1_70_PLAN.md).
-- **v2.0** -- Public distribution launch. Gated on: thesis-track items
-  #1-#2 shipped (session forking, prompt templates), remaining
-  Distribution track complete. External announcement: TripStack
-  engineering blog post, optional Show HN. Target: mid-to-late May
-  2026.
-- **v2.x onward** -- Remaining thesis items (session cost telemetry,
-  autocommands), feature work from Additional Ideas section,
-  community-driven contributions.
+**Current: v1.55.2.** The 1.5x line shipped the agent integration
+maturing fast — agent-aware scrollback (codex/agy transcripts), session
+resume across claude/codex/gemini/agy/zot, an `AgentProfile` registry
+that collapsed ~10 per-agent dispatch sites, untracked/worktree git
+marker fixes, the activity-monitor process line, and the `install-debug`
+profile. See `CHANGELOG.md` for the full per-version history; this
+section tracks only the milestone sequence ahead.
 
-The v2.0 version bump is a signaling choice as much as a semver one.
-The tool has been shipping 1.x for a while, but the MCP positioning
-shift + public distribution justifies a major bump to mark the
-transition.
+### Road to 2.0 (lean: refactor → launch)
+
+2.0 is a public-distribution + signaling bump. The path there is
+deliberately lean: make the codebase reviewable, fix the daily-driver
+papercuts, finish distribution, launch. The deep structural arc
+(typed protocol + crate split + MVU rewrite + multi-instance hub)
+is explicitly **2.x**, not a 2.0 gate — see "Post-2.0" below.
+
+1. **Decomposition (the next track).** Break `app/mod.rs` (now ~12k
+   lines, single crate) into reviewable modules per
+   [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) **Phases 1–2** (mechanical
+   extractions → render/key-dispatch/command extractions). No behavior
+   change; interleavable with feature work. This is both the
+   maintainability win that lets outside contributors land PRs *and*
+   the prerequisite that makes the 2.x crate split possible (you can't
+   split a 12k-line monolith into `spyc-proto`/`spyc-pty`/`spyc-os`
+   first). **MVU rewrite (Phase 3) is held for post-2.0** per the
+   refactor plan's own staging.
+2. **Daily-driver fixes (interleave with the decomposition).** Small,
+   high-value, mostly standalone:
+   - `^a s` path handoff Option A — anchor sent paths on the pane's
+     *live* cwd, not `PROJECT_HOME` (live bug;
+     [`docs/PATH_HANDOFF_PLAN.md`](docs/PATH_HANDOFF_PLAN.md)).
+   - Configurable startup pane tabs — `[pane] tabs = [...]`
+     ([`docs/PANE_STARTUP_TABS_PLAN.md`](docs/PANE_STARTUP_TABS_PLAN.md)).
+   - Pane recovery **Phase 0** — cosmetic vt100-snapshot backdrop on a
+     just-respawned pane
+     ([`docs/PANE_RECOVERY_PLAN.md`](docs/PANE_RECOVERY_PLAN.md)).
+   - Cwd-export-on-quit (`--cwd-file`), keymap-DSL completeness +
+     `unmap`, PgUp/PgDn pane discoverability — all from the
+     Foundations > Remaining list above.
+3. **Test de-risking.** The `App` workflow-test harness +
+   regression tests for the high-bug-density flows (routing/focus,
+   pane↔task transitions, session restore)
+   ([`docs/TEST_IMPROVEMENT_PLAN.md`](docs/TEST_IMPROVEMENT_PLAN.md)).
+   Raises confidence for the 2.0 push; pairs naturally with the
+   decomposition (extracted modules get focused tests).
+4. **Thesis features that gate 2.0.** Session forking (`^a f`) and
+   prompt templates in `.spycrc.toml` — the two agent-workflow
+   features the old roadmap named as 2.0 gates. Both implementable
+   on current plumbing.
+5. **Distribution / launch hygiene.** The full Distribution >
+   Remaining list: release automation (tag → cross-compile →
+   artifacts → Homebrew bump), macOS notarization, Linux signing,
+   GitHub mirror, docs site (`mdbook`), `:tutor`, shell completions,
+   first-run hint, repo hygiene, asciinema demo.
+
+**v2.0 — Public distribution launch.** Cut once: decomposition
+Phases 1–2 landed, the daily-driver fixes + session-forking +
+prompt-templates shipped, and the Distribution track is complete.
+External announcement (TripStack engineering blog, optional Show HN).
+The major bump is a signaling choice as much as a semver one — the MCP
+positioning shift + public distribution mark the transition.
+
+### Post-2.0 (2.x) — the structural arc
+
+Held until 2.0 has shipped and stabilized (~2 weeks), per
+`REFACTOR_PLAN.md`'s start criteria. These build on each other in
+order:
+
+- **Refactor Phase 3 — MVU rewrite.** `Model`/`Message`/`Effect` +
+  `update`/`view`, side effects modeled as data. Multi-day, focused.
+  Eliminates the "forgot to clear `pending_X`" bug class structurally.
+- **Mise en Place — typed addressability + crate split**
+  ([`docs/V1_70_PLAN.md`](docs/V1_70_PLAN.md)). Stations (stable pane
+  handles), Plates (structured snapshots), the typed Order-rail
+  protocol, and Bell primitives that retire timer hacks like
+  `RESTORE_BANNER_SETTLE`. One protocol, three clients (MCP server,
+  `spyc-sdk` crate, `spyc` CLI subcommands). Includes the
+  single-responsibility crate split (`spyc-proto`/`spyc-pty`/`spyc-os`
+  [unsafe isolation]/…) — **hard-depends on the decomposition above.**
+- **CounterTop — multi-instance hub**
+  ([`docs/V1_60_PLAN.md`](docs/V1_60_PLAN.md)). Peer-spyc discovery, a
+  HUD aggregating per-workspace agent state, frame mirroring +
+  take-control, `--hub` mode. Rides on Mise en Place's Order rail
+  rather than inventing ad-hoc MCP shapes — so it follows V1_70.
+- **Auto-approval & action log**
+  ([`docs/AUTO_APPROVAL_PLAN.md`](docs/AUTO_APPROVAL_PLAN.md)). Curate
+  each agent's *native* permission system + a `:approvals` view.
+  Large and partly blocked on codex/gemini permission-schema
+  verification.
+- **Trailing thesis + QoL.** Session cost telemetry, autocommands,
+  generalized beam/sinks, structured event-subscriber socket, pane
+  recovery tmux/recipes, path-handoff Options B/C, and the Additional
+  Ideas backlog. Community-driven contributions.
+
+> **Doc status:** `docs/V1_5_PLAN.md` is **shipped** (v1.5.0, the
+> pager/task-viewer unification) and kept only as historical record.
+> The remaining `docs/*_PLAN.md` files are the live, not-yet-started
+> designs referenced above.
 
 ## Additional Ideas
 
