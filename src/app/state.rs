@@ -275,6 +275,15 @@ pub struct AppState {
     /// `git rev-parse --show-toplevel`, and as the cache key for
     /// `git_status_raw_cache`.
     pub current_repo_root: Option<std::path::PathBuf>,
+    /// The active repo's *resolved* gitdir — `<root>/.git` for a normal
+    /// repo, or `<main>/.git/worktrees/<name>/` for a linked worktree
+    /// (where `.git` is a *file* pointing there). `None` outside a repo.
+    /// Cached on chdir (alongside `current_repo_root`) so the fs-event
+    /// filter and the gitdir watch stay IO-free per event. Without this,
+    /// a worktree's index/HEAD changes — which live outside the working
+    /// tree — were never watched and markers went stale until the next
+    /// poll.
+    pub current_gitdir: Option<std::path::PathBuf>,
     /// Cached raw output of `git status --porcelain`. On a huge
     /// working tree the subprocess walks every tracked file in the
     /// index — even with `-uno`, that's 200-500 ms per spawn on a
@@ -1020,6 +1029,16 @@ impl AppState {
         Some((index_mt, head_mt))
     }
 
+    /// Set `current_repo_root` and the derived `current_gitdir` together
+    /// so they never drift. The gitdir resolution follows a linked
+    /// worktree's `.git` *file* to its real gitdir.
+    fn set_repo_root(&mut self, repo_root: Option<std::path::PathBuf>) {
+        self.current_gitdir = repo_root
+            .as_deref()
+            .and_then(crate::sysinfo::resolve_gitdir);
+        self.current_repo_root = repo_root;
+    }
+
     /// Recompute `is_huge_tree` / `huge_tree_anchor` for the given
     /// canonical dir. The cached anchor (the active project's repo
     /// root, or the dir itself when not in a repo) short-circuits
@@ -1038,7 +1057,7 @@ impl AppState {
             // Same project — keep the cached decision and skip the
             // walk. No flash either (we've already flashed this
             // project's first entry if it was huge).
-            self.current_repo_root = repo_root;
+            self.set_repo_root(repo_root);
             return self.is_huge_tree;
         }
         let was_huge = self.is_huge_tree;
@@ -1076,7 +1095,7 @@ impl AppState {
         {
             self.git_status_raw_cache = None;
         }
-        self.current_repo_root = repo_root;
+        self.set_repo_root(repo_root);
         if self.is_huge_tree && !was_huge {
             self.flash_info(format!(
                 "large tree ({}+ subdirs) — git poll throttled, untracked markers off",
@@ -2239,6 +2258,7 @@ mod tests {
             huge_tree_anchor: None,
             huge_tree_decisions: std::collections::HashMap::new(),
             current_repo_root: None,
+            current_gitdir: None,
             git_status_raw_cache: None,
             git_worker_tx: None,
             git_generation: 0,

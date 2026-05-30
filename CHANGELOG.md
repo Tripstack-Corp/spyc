@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Git markers no longer go stale in worktrees** (and when viewing a
+  subdirectory). The fs-watcher's gitdir watch and event filter both
+  hardcoded `<cwd>/.git` as a *directory*. A linked worktree's `.git`
+  is a *file* pointing at `<main>/.git/worktrees/<name>/` (outside the
+  working tree), so its `index`/`HEAD` changes — stage, commit,
+  checkout, branch switch — were never watched; markers only refreshed
+  on the periodic poll (up to 10 s on huge trees). Now the real gitdir
+  is resolved once on chdir (`current_gitdir`) and both the watch and
+  the filter use it, restoring instant refresh in worktrees.
+
 ### Added
 - **Activity monitor third line: process stats.** Below the existing
   throughput (line 1) and internals (line 2) lines, `A` now surfaces a

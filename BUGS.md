@@ -32,8 +32,6 @@
   half - we need a stronger top line/bottom line marker for this
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
-- change in git state while viewing a subdirectory did not automatically get
-  updated; need to try and reproduce
 - screen should flash if I'm doing something that hits a wall - e.g. j at the
   top of a directory (the ~ in the status is not enough)
 - we should be able to send control signals to running processes e.g. ^t
@@ -117,6 +115,15 @@
   day and dark at night; current `C` toggle works fine.
 
 ### FIXED ###
+- (fixed, v1.55.2) git markers stale in worktrees (and, relatedly,
+  when viewing a subdirectory). The fs-watcher's gitdir watch and its
+  event filter both hardcoded `<cwd>/.git` as a *directory*. A linked
+  worktree's `.git` is a *file* pointing at `<main>/.git/worktrees/
+  <name>/` (outside the working tree), so its index/HEAD changes were
+  never watched — markers only refreshed on the slower periodic poll
+  (10 s on huge trees). Now resolves the real gitdir once on chdir
+  (`current_gitdir`, via `resolve_gitdir`) and watches/filters against
+  it. (Spencer's report; Reported separately as the subdir case.)
 - (fixed, v1.51.4) untracked-only directories show `?` instead of
   `~`. When the list collapses a subtree's git status onto its dir
   row, an untracked-only subtree now reads `?` (untracked) rather than
