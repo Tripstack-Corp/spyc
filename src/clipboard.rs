@@ -80,10 +80,10 @@ fn copy_impl(text: &str) -> io::Result<()> {
         }
     };
 
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        if let Some(r) = try_one("wl-copy", &[]) {
-            return r;
-        }
+    if std::env::var_os("WAYLAND_DISPLAY").is_some()
+        && let Some(r) = try_one("wl-copy", &[])
+    {
+        return r;
     }
     if std::env::var_os("DISPLAY").is_some() {
         if let Some(r) = try_one("xclip", &["-selection", "clipboard"]) {

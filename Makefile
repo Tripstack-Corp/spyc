@@ -46,6 +46,27 @@ test: ## Run all tests
 lint: ## Clippy with pedantic + nursery
 	cargo clippy --locked --all-targets -- -D warnings
 
+# Clippy for the Linux target, runnable from macOS via zig as the C
+# cross-compiler (cargo-zigbuild's `zig cc` wrapper rewrites the Rust
+# target triple into zig's format so zstd-sys et al. build). This is the
+# only way to lint `cfg(target_os = "linux")` code — e.g. clipboard.rs's
+# wl-copy/xclip path — from a Mac: the host clippy compiles that code
+# *out*, so OS-gated lints slip past `make check` and only fail in CI
+# (which lints on Linux). Run this before pushing anything that touches
+# platform-gated code. Needs the one-time setup at the top of this file.
+LINUX_LINT_TARGET := x86_64-unknown-linux-musl
+
+.PHONY: lint-linux
+lint-linux: ## Clippy for the Linux target (catches OS-gated lints; needs zig + cargo-zigbuild)
+	@command -v cargo-zigbuild >/dev/null 2>&1 || { \
+		echo "cargo-zigbuild not found — install with: cargo install cargo-zigbuild"; \
+		exit 1; \
+	}
+	CC_x86_64_unknown_linux_musl="cargo-zigbuild zig cc --" \
+	CXX_x86_64_unknown_linux_musl="cargo-zigbuild zig c++ --" \
+	CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="cargo-zigbuild zig cc --" \
+	cargo clippy --locked --all-targets --target $(LINUX_LINT_TARGET) -- -D warnings
+
 .PHONY: fmt
 fmt: ## Format code
 	cargo fmt --all
