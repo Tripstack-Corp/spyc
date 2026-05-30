@@ -1,13 +1,13 @@
 # Refactor plan — `app/mod.rs` decomposition
 
-> **Status (2026-05-30): STARTING.** `app/mod.rs` has reached ~12k
-> lines and the "When to start" criteria below are met. Per the lean
-> road-to-2.0 sequencing in `ROADMAP.md`, **Phases 1–2 are the active
-> decomposition track on the way to 2.0**; the **MVU rewrite (Phase 3)
-> stays post-2.0**. Original "hold until after 2.0" reasoning is kept
-> below as historical context — it applied to the *whole* plan; the
-> decision now is to take the low-risk decomposition early and hold
-> only the deep rewrite.
+> **Status (2026-05-30): Phase 1 COMPLETE; Phase 2 next.** All six
+> Phase 1 struct extractions have landed (PRs #180–#185); `app/mod.rs`
+> is down to ~11.8k lines. Per the lean road-to-2.0 sequencing in
+> `ROADMAP.md`, **Phase 2 is now the active decomposition track on the
+> way to 2.0**; the **MVU rewrite (Phase 3) stays post-2.0**. Original
+> "hold until after 2.0" reasoning is kept below as historical context
+> — it applied to the *whole* plan; the decision now is to take the
+> low-risk decomposition early and hold only the deep rewrite.
 
 Working doc for the staged decomposition of `app/mod.rs` (now ~12k
 lines, ~150 fns) into smaller, more reviewable units. ROADMAP
@@ -66,27 +66,32 @@ Pick up when at least two of these are true:
 
 ---
 
-## Phase 1 — Cheap mechanical extractions
+## Phase 1 — Cheap mechanical extractions ✅ DONE (2026-05-30)
 
 Self-contained types + impls that landed in `app/mod.rs` by inertia,
-not coupling. Each is a verbatim move + a `pub mod ...; use ...::*;`
-import — no behavior change, no API change. Each is one commit.
+not coupling. Each was a verbatim move + a `mod ...; use ...;` import
+— no behavior change, no API change. Each was one PR.
 
-Order doesn't matter; pick the one whose itch is loudest the day
-you sit down.
+| # | Extract | Target file | PR | Status |
+|---|---------|-------------|----|--------|
+| 1 | `BackgroundTasks` + `BackgroundTask` + `TaskStatus` | `src/app/tasks.rs` | #184 | ✅ |
+| 2 | `PagerHistory` + `MAX_PAGER_HISTORY` | `src/app/pager_history.rs` | #180 | ✅ |
+| 3 | `FindPicker` + `refilter`/`drain_walk` | `src/app/find_picker.rs` | #181 | ✅ |
+| 4 | `GrepSession` | `src/app/grep_session.rs` | #182 | ✅ |
+| 5 | `Prompt` + `PromptKind` + `simple()`/`shell()` ctors | `src/app/prompt.rs` | #183 | ✅ |
+| 6 | `PendingCapture` | `src/app/capture.rs` | #185 | ✅ |
 
-| # | Extract | Target file | LOC est | Risk |
-|---|---------|-------------|---------|------|
-| 1 | `BackgroundTasks` + `BackgroundTask` + `TaskStatus` + helpers | `src/app/tasks.rs` | ~250 | trivial |
-| 2 | `PagerHistory` + `MAX_PAGER_HISTORY` | `src/app/pager_history.rs` | ~80 | trivial |
-| 3 | `FindPicker` + `drain_walk` | `src/app/find_picker.rs` | ~150 | trivial |
-| 4 | `GrepSession` + drain logic | `src/app/grep_session.rs` | ~150 | trivial |
-| 5 | `Prompt` + `PromptKind` + `simple()`/`shell()` ctors | `src/app/prompt.rs` | ~150 | trivial |
-| 6 | `PendingCapture` + `spawn_capture` + `strip_crlf` | `src/app/capture.rs` | ~250 | low — touches the live capture path; verify a `!cargo build` round-trips after the move |
+**Scoping note:** items 1, 3, 4, 6 in the original plan also listed
+App-coupled methods (`spawn_capture`, `strip_crlf`, grep drain, etc.).
+Those take `&mut self` and read App state directly, so they stayed in
+`app` and the extracted modules are the *data* structs only (fields
+`pub` so `app` reads them). This is the one-way-dependency rule, not a
+shortcut — the methods are Phase 2 (handler) material, not Phase 1.
 
-Cumulative: ~1000 LOC off `app/mod.rs` → ~6400. Each item shippable
-on its own; failure mode is "compile error caught immediately,"
-nothing user-visible.
+Result: `app/mod.rs` went from ~12,450 → 11,757 LOC (~700 off). Less
+than the ~1000 estimate because the method bodies stayed; the structs
+alone are smaller than the table's LOC guesses. Each PR shipped on its
+own with the full gate green and zero test edits.
 
 ### Phase 1 done-criteria
 
@@ -205,3 +210,11 @@ the plan changed.)
   in the megafile. Decomposition also unblocks the 2.x crate split
   (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3
   (MVU) still held until 2.0 has shipped + stabilized ~2 weeks.
+- **2026-05-30**: Phase 1 complete (PRs #180–#185). Six struct
+  extractions, one PR each, no behavior change, no test edits, gate
+  green throughout. Scoped to *data structs* — App-coupled `&mut self`
+  methods stayed put (they're Phase 2 handler work; pulling them now
+  would violate the one-way-dependency rule). Net ~700 LOC off
+  `app/mod.rs` (11,757 now). Phase 2 (render / pager-key / command /
+  key-dispatch handlers) is the next track; each is ~half-day and
+  needs real interface design, so not "pick up any spare moment" work.
