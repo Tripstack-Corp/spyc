@@ -35,8 +35,18 @@ language (component names, surface vocabulary, key-binding philosophy,
 extension checklist) see [`DESIGN.md`](DESIGN.md). The list below is a
 per-module navigation index.
 
-- **`src/app/mod.rs`** — Top-level `App` struct, event loop, layout, all key dispatch. This is the big file.
-- **`src/app/state.rs`** — `AppState`: domain state (cursor, picks, listing, mode) separated from terminal state.
+- **`src/app/`** — The application layer. Decomposed from a former ~12k-line `mod.rs` monolith into focused modules (REFACTOR_PLAN Phases 1–2). `mod.rs` now holds the `App` struct, `App::new`, the `run` event loop, and small glue; everything below is a child module whose `impl App` methods read `App`'s private state via the descendant-module rule (so fields stay private — only the few cross-module entry points are `pub`). **New handler/render/command logic goes in the matching module below — or a new one — not back into `mod.rs`** (a test guards its line count; see Conventions).
+  - **`mod.rs`** — `App` struct, `App::new`, `run` event loop, layout glue, and helpers not yet homed elsewhere (term-title update, agent resume strippers/resolvers, history popups, worktree list).
+  - **`state.rs`** — `AppState`: domain state (cursor, picks, listing, mode) separated from terminal state. The pure/testable Update half of MVU.
+  - **`render.rs`** — the `render` pass + `compute_layout` (status bar, list, divider, pane status line, harpoon menu). The View half.
+  - **`key_dispatch.rs`** — `handle_key` top-level router + mode sub-handlers (prompt / vi-prompt editors, remove / graveyard-purge / Claude-crash-recover confirm handlers).
+  - **`pager_handler.rs`** — `handle_pager_key`, the vi-style key router for the in-app pager overlay.
+  - **`commands.rs`** — `App::dispatch_command`, the terminal-touching half of `:` command dispatch (the pure-domain half is `AppState::dispatch_command`).
+  - **`actions.rs`** — `apply` / `apply_inner`, the `Action` dispatcher, plus post-action harpoon reconcilers.
+  - **`session.rs`** — session save / restore, the `-r` picker pager, the session-info overlay.
+  - **`tasks.rs`** / **`capture.rs`** — `BackgroundTask`(s) and `PendingCapture`: backgrounded and foreground `!` shell-capture state.
+  - **`find_picker.rs`** / **`grep_session.rs`** / **`pager_history.rs`** / **`prompt.rs`** — small data structs for the `F` finder, `:grep` session, pager back/forward history, and the input prompt.
+  - **`route.rs`** — pure `KeyEvent` → destination routing (tested without a TUI).
 - **`src/agent/`** — Agent profile registry. One `AgentProfile` impl per hosted AI agent (claude/codex/gemini/agy); `detect(cmd)` / `profile_for(kind)` replace per-agent `match AgentKind` dispatch (detection, resume save/restore, transcript scrollback, status short-id, picker label, exit summary). Adding an agent = one impl + one `REGISTRY` entry. `AgentKind` (in `state/sessions.rs`) stays the persistence tag; profiles carry behavior.
 - **`src/keymap/action.rs`** — `Action` enum: the full vocabulary of user-observable behaviors. Every keybinding maps to an `Action`.
 - **`src/keymap/`** — Resolver, user keymap DSL parser, default bindings.
@@ -58,8 +68,9 @@ per-module navigation index.
 
 ## Conventions
 
-- **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler in `app.rs`.
-- **`:command` dispatch has TWO sites**: `AppState::dispatch_command` (pure-domain) and `App::dispatch_command` (terminal-touching). State runs first; if state returns `CommandResult::Handled` the command is done, if `NotHandled` App takes over. State has an "unknown command:" fallthrough at the end, so any new command handled in `App` MUST be added to state's punt list (the `if input == "..." || ...` block before the fallthrough — search for `"bprev"` to find it). Symptom of forgetting: typing the command flashes "unknown command: X" even though the App handler is in place. Bitten on `:undo` (v1.41.1) and on `:limit`/`:`-history split historically.
+- **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler arm in `src/app/actions.rs` (`apply_inner`) — or the pure-domain half in `AppState::apply`. Not in `mod.rs`.
+- **Keep `src/app/` modularized (don't regrow the monolith)**: `app/mod.rs` was a ~12k-line monolith; Phases 1–2 of `REFACTOR_PLAN.md` decomposed it into the focused modules listed above. New render/key/command/action/session logic belongs in the matching child module (or a new `src/app/<feature>.rs`), **not** appended to `mod.rs`. The pattern is a child module with `impl App { … }`: child modules can read `App`'s private fields via the descendant-module rule, so you almost never need to make a field `pub` — only the handful of methods called from `app` or sibling modules. A test (`app::guard_tests::mod_rs_stays_decomposed`) fails if `mod.rs` grows past its ceiling; if you hit it, extract a module rather than bumping the number.
+- **`:command` dispatch has TWO sites**: `AppState::dispatch_command` (pure-domain, `state.rs`) and `App::dispatch_command` (terminal-touching, `src/app/commands.rs`). State runs first; if state returns `CommandResult::Handled` the command is done, if `NotHandled` App takes over. State has an "unknown command:" fallthrough at the end, so any new command handled in `App` MUST be added to state's punt list (the `if input == "..." || ...` block before the fallthrough — search for `"bprev"` to find it). Symptom of forgetting: typing the command flashes "unknown command: X" even though the App handler is in place. Bitten on `:undo` (v1.41.1) and on `:limit`/`:`-history split historically.
 - **Milestone spikes**: Development proceeds in numbered milestones (M4, M6, M8, M9, M10...).
 - **Repaint strategy**: Event-driven dirty-frame rendering. `needs_draw` flag with reason codes (pane=1, event=2, other=3). `needs_full_repaint` for teardown transitions (pager close, overlay close). DEC 2026 synchronized output wraps every frame. `build_rows()` and grid stabilization are cached via `list_generation` counter. Target: 0 dps at idle.
 - **Pane I/O**: Keys go through `input::encode_key()`. Raw bytes use `pane.send_bytes()`. Bracketed paste wraps text in `\x1b[200~`...`\x1b[201~` before forwarding. Pane prefix is `^a` (screen-style), `^w` works as alias.

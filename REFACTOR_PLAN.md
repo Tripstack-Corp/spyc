@@ -262,3 +262,20 @@ the plan changed.)
   lint-linux` added (#188) and run for OS-gated changes — host clippy on
   macOS compiles out `cfg(target_os = "linux")` code, so a latent lint
   in clipboard.rs only failed on Linux CI.
+- **2026-05-30**: Phase 2 tidy-up (the optional follow-on candidates from
+  the done-criteria). Extracted `apply`/`apply_inner` → `actions.rs`
+  (#193) and the four session methods → `session.rs` (#194, four
+  non-contiguous cuts since they were interleaved with history-popup /
+  worktree / sizing helpers). `mod.rs`: 8,427 → 7,689. **Deliberately
+  did NOT extract** the agent-resume helpers (`command_without_*_resume`,
+  `resolve_*_resume_target`): they're split across free-fn and `impl App`
+  forms with tests far away and are `pub`/`pub(crate)` called from
+  `src/agent/*.rs`, so moving them is cross-module path churn that partly
+  undoes the agent-registry refactor's deliberate "keep strippers in
+  `app`" decision. Stopping the mechanical tidy-up here; what's left in
+  `mod.rs` is the `App` struct, `run` loop, and intentional glue.
+- **2026-05-30**: Documented the decomposed layout (AGENTS.md module
+  index + ARCHITECTURE.md) and added an anti-monolith guardrail
+  (`app::guard_tests::mod_rs_stays_decomposed`, ceiling 8,500) so `mod.rs`
+  can't silently creep back toward a monolith — the test directs
+  contributors to extract a module rather than raise the ceiling.
