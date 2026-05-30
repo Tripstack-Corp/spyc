@@ -1222,4 +1222,68 @@ mod tests {
             assert_eq!(loaded[0].id, 200);
         });
     }
+
+    /// Full save→disk→load round-trip: multiple tabs survive in order
+    /// with distinct session ids/kinds, and cwd / labels / commands /
+    /// project_home / session name / active tab / pane geometry all
+    /// persist. (TEST_IMPROVEMENT_PLAN: session restore.)
+    #[test]
+    fn session_round_trips_through_disk_preserving_tabs_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let session = Session {
+                id: 42,
+                saved_at: "2026-05-30T00:00:00Z".into(),
+                epoch_secs: 1_700_000_000,
+                cwd: PathBuf::from("/tmp/proj"),
+                tabs: vec![
+                    SavedTab {
+                        command: "claude".into(),
+                        label: "claude".into(),
+                        cwd: PathBuf::from("/tmp/proj"),
+                        agent_kind: AgentKind::Claude,
+                        agent_session_id: Some("sid-A".into()),
+                        agent_session_name: Some("AROMA".into()),
+                    },
+                    SavedTab {
+                        command: "codex".into(),
+                        label: "codex".into(),
+                        cwd: PathBuf::from("/tmp/proj/sub"),
+                        agent_kind: AgentKind::Codex,
+                        agent_session_id: Some("sid-B".into()),
+                        agent_session_name: None,
+                    },
+                ],
+                active_tab: 1,
+                pane_height_pct: 40,
+                pane_focused: true,
+                name: "SAFFRON_PAPRIKA".into(),
+                project_home: Some(PathBuf::from("/tmp/proj")),
+            };
+            save_session(&session).unwrap();
+
+            let loaded = load_sessions();
+            assert_eq!(loaded.len(), 1);
+            let s = &loaded[0];
+            assert_eq!(s.id, 42);
+            assert_eq!(s.cwd, PathBuf::from("/tmp/proj"));
+            assert_eq!(s.active_tab, 1);
+            assert_eq!(s.pane_height_pct, 40);
+            assert!(s.pane_focused);
+            assert_eq!(s.name, "SAFFRON_PAPRIKA");
+            assert_eq!(s.project_home, Some(PathBuf::from("/tmp/proj")));
+            assert_eq!(s.tabs.len(), 2);
+            // Order preserved; distinct ids + kinds.
+            assert_eq!(s.tabs[0].command, "claude");
+            assert_eq!(s.tabs[0].label, "claude");
+            assert_eq!(s.tabs[0].cwd, PathBuf::from("/tmp/proj"));
+            assert_eq!(s.tabs[0].agent_kind, AgentKind::Claude);
+            assert_eq!(s.tabs[0].agent_session_id.as_deref(), Some("sid-A"));
+            assert_eq!(s.tabs[0].agent_session_name.as_deref(), Some("AROMA"));
+            assert_eq!(s.tabs[1].command, "codex");
+            assert_eq!(s.tabs[1].agent_kind, AgentKind::Codex);
+            assert_eq!(s.tabs[1].agent_session_id.as_deref(), Some("sid-B"));
+            assert_eq!(s.tabs[1].cwd, PathBuf::from("/tmp/proj/sub"));
+        });
+    }
 }
