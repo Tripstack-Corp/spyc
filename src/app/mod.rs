@@ -7097,6 +7097,181 @@ fn untracked_diff_bytes(cwd: &std::path::Path, paths: &[String]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+impl App {
+    /// Test-only `App` constructor for workflow-harness tests
+    /// (`docs/TEST_IMPROVEMENT_PLAN.md` Phase 1). Builds a deterministic
+    /// `App` with **no** terminal, **no** MCP socket server, **no**
+    /// git-status worker thread, and **no** real-env cwd — unlike
+    /// `App::new`. Drive it with `apply(&Action)` / `handle_key(KeyEvent)`
+    /// and assert on `self.state.*`, `self.pane_tabs`, `self.pager`, etc.
+    ///
+    /// Wrap callers in `crate::state::with_state_root(tmp, || …)` so the
+    /// history / pager-position / inventory state dir is an isolated temp.
+    pub(crate) fn test_app(cwd: std::path::PathBuf) -> Self {
+        // No MCP server / git worker is spawned, so the senders drop. The
+        // harness never drives `run()`'s drain loop, and `apply` /
+        // `handle_key` don't read these receivers — a disconnected channel
+        // is harmless here.
+        let (_mcp_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
+        let (_git_tx, git_result_rx) = std::sync::mpsc::channel();
+        let context_path = crate::context::context_path(&cwd);
+        let mut app = Self {
+            state: state::AppState::test_default(cwd),
+            pager: None,
+            pager_history: PagerHistory::new(),
+            pager_pending_bracket: None,
+            pager_was_open: false,
+            pager_help_stash: None,
+            pager_jump_buf: None,
+            pane_tabs: None,
+            harpoon: None,
+            harpoon_menu: None,
+            quick_select: None,
+            graveyard_pending_d: false,
+            graveyard_pending_g: false,
+            top_overlay: None,
+            overlay_awaiting_dismiss: false,
+            pending_overlay_close: false,
+            pending_capture: None,
+            background_tasks: BackgroundTasks::new(),
+            agent_status_cache: None,
+            pending_history_pick: None,
+            pending_jump_history: None,
+            find_picker: None,
+            grep_session: None,
+            next_grep_id: 0,
+            history_pending_g: false,
+            scroll_pending_g: false,
+            pending_pager_return: None,
+            needs_full_repaint: false,
+            theme: Theme::default(),
+            context_path,
+            last_context_json: String::new(),
+            context_dirty: false,
+            mcp_running: false,
+            exit_summary: None,
+            pane_prompt_buf: String::new(),
+            focus_chord_completed: None,
+            last_pane_prompt: None,
+            show_activity: false,
+            activity_draws: 0,
+            activity_bytes: 0,
+            activity_last_tick: std::time::Instant::now(),
+            activity_dps: 0,
+            activity_bps: 0,
+            activity_reason_pane: 0,
+            activity_reason_event: 0,
+            activity_reason_other: 0,
+            activity_snap_pane: 0,
+            activity_watcher_events: 0,
+            activity_watcher_events_snap: 0,
+            activity_mcp_reqs: 0,
+            activity_mcp_reqs_snap: 0,
+            activity_git_results: 0,
+            activity_git_results_snap: 0,
+            activity_git_last_ms: 0,
+            started_at: std::time::Instant::now(),
+            activity_proc_rss_kb: 0,
+            activity_proc_threads: 0,
+            activity_snap_event: 0,
+            activity_snap_other: 0,
+            cached_rows: Vec::new(),
+            cached_rows_gen: u64::MAX,
+            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            mcp_cmd_rx,
+            tab_state: None,
+            scroll_last: None,
+            last_term_title: None,
+            git_result_rx,
+            pager_positions: crate::state::pager_positions::PagerPositions::load(),
+        };
+        app.state.rebuild_rows();
+        app
+    }
+
+    /// Seed the listing with fake file rows (no real fs), mirroring the
+    /// `state_with_rows` pattern; clamps the cursor into range.
+    pub(crate) fn seed_rows(&mut self, names: &[&str]) {
+        let dir = self.state.listing.dir.clone();
+        self.state.rows = names
+            .iter()
+            .map(|n| RowData {
+                path: dir.join(n),
+                display: (*n).to_string(),
+                kind: EntryKind::File,
+            })
+            .collect();
+        self.state.cursor.clamp(self.state.rows.len());
+    }
+
+    /// Flash message text, if any — compact assertion helper.
+    pub(crate) fn flash_text(&self) -> Option<&str> {
+        self.state.flash.as_ref().map(|f| f.text.as_str())
+    }
+}
+
+#[cfg(test)]
+mod harness_tests {
+    use super::*;
+    use crate::keymap::Action;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
+    }
+
+    /// Acceptance: a fresh harness starts with a deterministic cwd,
+    /// listing, cursor, focus, and no pane/pager.
+    #[test]
+    fn fresh_harness_is_deterministic() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            assert_eq!(app.state.focus, state::Focus::FileList);
+            assert!(!app.state.pane_focused());
+            assert!(matches!(app.state.mode, Mode::Normal));
+            assert_eq!(app.state.cursor.index, 0);
+            assert!(app.pane_tabs.is_none());
+            assert!(app.pager.is_none());
+            assert!(app.flash_text().is_none());
+            assert_eq!(
+                app.state.listing.dir,
+                std::path::PathBuf::from("/tmp/harness")
+            );
+        });
+    }
+
+    /// Acceptance: the harness can apply an `Action` and observe the
+    /// resulting state (cursor movement here) plus a `PostAction`.
+    #[test]
+    fn apply_action_moves_cursor() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            app.seed_rows(&["a", "b", "c"]);
+            assert_eq!(app.state.cursor.index, 0);
+            let post = app.apply(&Action::Down(1)).unwrap();
+            assert_eq!(app.state.cursor.index, 1);
+            assert!(matches!(post, PostAction::None));
+            app.apply(&Action::Up(1)).unwrap();
+            assert_eq!(app.state.cursor.index, 0);
+        });
+    }
+
+    /// Acceptance: a `KeyEvent` routes through the full `handle_key`
+    /// path (resolver → route → dispatch) with no pane/overlay open.
+    #[test]
+    fn handle_key_routes_j_to_cursor_down() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            app.seed_rows(&["a", "b", "c"]);
+            app.handle_key(key('j')).unwrap();
+            assert_eq!(app.state.cursor.index, 1, "j should move the cursor down");
+        });
+    }
+}
+
+#[cfg(test)]
 mod guard_tests {
     /// Anti-monolith guardrail. `app/mod.rs` was a ~12k-line monolith;
     /// REFACTOR_PLAN Phases 1–2 decomposed it into focused `src/app/`
