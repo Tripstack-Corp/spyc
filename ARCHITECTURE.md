@@ -45,10 +45,17 @@ returns an `ApplyResult` enum (`Handled`, `OpenPager`, `Post(PostAction)`)
 with no terminal access. State transitions are pure-ish and unit-
 testable without a TUI.
 
-The View and event-loop halves are still fused into `app/mod.rs`.
-Target shape:
+The View half has been pulled out of `app/mod.rs` into `src/app/render.rs`
+(the `render` pass + `compute_layout`), alongside the rest of the Phase 1–2
+decomposition (`key_dispatch`, `pager_handler`, `commands`, `actions`,
+`session` — see `AGENTS.md` for the full module index and `REFACTOR_PLAN.md`
+for the staged plan). What remains fused in `mod.rs` is the **event loop**:
+`App::run` still open-codes `event::poll` with manual timeout math and reads
+from several independent sources rather than one message channel. Target
+shape for the rest:
 
-1. **View** — pure functions in `src/ui/` taking `&AppState`. The
+1. **View** — push `render.rs` the rest of the way: from `impl App`
+   methods to pure functions in `src/ui/` taking `&AppState`, so the
    render path collapses to `ui::render(terminal, &state)`. Snapshot
    tests extend mechanically.
 2. **Single message channel** — one `mpsc::Receiver<Message>` for

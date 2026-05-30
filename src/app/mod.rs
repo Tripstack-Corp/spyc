@@ -7081,6 +7081,35 @@ fn untracked_diff_bytes(cwd: &std::path::Path, paths: &[String]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+mod guard_tests {
+    /// Anti-monolith guardrail. `app/mod.rs` was a ~12k-line monolith;
+    /// REFACTOR_PLAN Phases 1–2 decomposed it into focused `src/app/`
+    /// modules. This test fails if `mod.rs` creeps back toward that —
+    /// new render/key/command/action/session logic belongs in the
+    /// matching child module (or a new one), not appended here.
+    ///
+    /// If you hit this: extract a module, don't bump the ceiling. The
+    /// ceiling sits well below the old monolith and comfortably above
+    /// what legitimately stays in `mod.rs` (the `App` struct, `run`
+    /// event loop, and small glue), so tripping it means something that
+    /// should be its own module landed here instead. See AGENTS.md →
+    /// "Keep `src/app/` modularized".
+    #[test]
+    fn mod_rs_stays_decomposed() {
+        const CEILING: usize = 8_500;
+        let src = include_str!("mod.rs");
+        let lines = src.lines().count();
+        assert!(
+            lines <= CEILING,
+            "src/app/mod.rs is {lines} lines, over the {CEILING}-line \
+             anti-monolith ceiling. Extract logic into a src/app/ child \
+             module instead of growing mod.rs (see AGENTS.md). Don't just \
+             raise CEILING."
+        );
+    }
+}
+
+#[cfg(test)]
 mod refresh_debounce_tests {
     use super::should_fire_refresh;
     use std::time::{Duration, Instant};
