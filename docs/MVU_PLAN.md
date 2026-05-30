@@ -1,16 +1,30 @@
 # MVU migration plan — spyc → full Elm architecture
 
-> **Status (2026-05-30): DESIGN. Phase 0 shippable now; Phases 1–6 gated.**
+> **Status (2026-05-30): APPROVED — pre-2.0 / road-to-2.0 track.**
 > This is the detailed design for `REFACTOR_PLAN.md`'s Phase 3 (the
 > Model-View-Update rewrite). It is a **strangler-fig** migration: the MVU
 > machinery grows *alongside* the existing `App::run` busy-poll loop and
-> never replaces it in one step. **Phase 0 (Focus-as-one-value) is carved
-> out as a daily-driver bug fix shippable now** — it touches no threads,
-> no loop, no effects. **Phases 1–6 stay behind the documented roadmap
-> gate** (`REFACTOR_PLAN.md`: hold the MVU rewrite until "2.0 has shipped
-> + stabilized ~2 weeks", or the "a bug touches 3 duplicate handlers ⇒ the
-> seam is wrong" trigger). This plan does **not** pretend that gate is
-> cleared.
+> never replaces it in one step.
+>
+> **Sequencing decision (2026-05-30): this lands pre-2.0**, reversing the
+> earlier "hold the MVU rewrite until 2.0 + ~2 weeks" gate. Rationale: 2.0
+> should ship *on* the cleaner foundation, not carry a big-bang refactor as
+> launch overhang. This is only safe because of the strangler-fig design —
+> every phase is **behavior-equivalent behind green CI** (all 786 tests, no
+> assertion edits), so the work lands incrementally and interleaves with the
+> other road-to-2.0 tracks rather than being a block-out-a-week rewrite.
+> **Phase 0 (Focus-as-one-value) lands first** as a standalone daily-driver
+> bug fix (highest bug-leverage, zero loop change). **Phases 1–6 land
+> incrementally before launch, sequenced after the test-harness de-risking**
+> (`docs/TEST_IMPROVEMENT_PLAN.md`) so regressions in the loop/effect surgery
+> are caught.
+>
+> **Trade-off (honest):** doing deep loop/concurrency surgery before a public
+> launch carries regression risk that behavior-equivalence tests don't fully
+> catch (timing, focus, stdin) — see Risks. Mitigated by per-phase green CI +
+> manual daily-driver smoke + the test harness landing first, and by
+> sequencing the lowest-risk, highest-value phase (0) first and the scariest
+> (the single-channel loop rewrite) last.
 
 Target pattern: the canonical ratatui Elm architecture
 (<https://ratatui.rs/concepts/application-patterns/the-elm-architecture/>) —
@@ -300,23 +314,26 @@ or relocated fields is permitted** (the absolutist "zero test edits" was
 falsified against `test_state()` — an exhaustive `AppState` literal with no
 `Default` tail).
 
-| # | Phase | Gate | Ships indep. |
+All phases are **pre-2.0** (the road-to-2.0 MVU track). "When" below is the
+*ordering within* that track, not a post-launch gate.
+
+| # | Phase | When | Ships indep. |
 |---|-------|------|--------------|
-| **-1** | Re-baseline test fixtures for additive field growth | now (prereq) | ✅ |
-| **0** | **Focus as one Model value** (no loop change) | **shippable now** (daily-driver fix) | ✅ |
-| 1 | Single channel for **Input** + **parkable reader** + `ForegroundExec` rerouting | post-gate | ✅ |
-| 2 | Timer/deadline layer with **pane-presence floor** | post-gate | ✅ |
-| 3 | Migrate each non-input source onto the channel (sub-phases 3a–3d) | post-gate | ✅ |
-| 4 | Widen `PostAction` into the full **Effect** vocabulary; loop is sole executor | post-gate | ✅ |
-| 5 | Physically split **Model/Runtime/ViewState** + de-IO audit (chdir fork) | post-gate | ✅ |
-| 6 | **Pure-of-IO View** + command table; loop reaches ~100 lines | post-gate | ✅ |
+| **-1** | Re-baseline test fixtures for additive field growth | prereq | ✅ |
+| **0** | **Focus as one Model value** (no loop change) | now (daily-driver fix, ahead of the rest) | ✅ |
+| 1 | Single channel for **Input** + **parkable reader** + `ForegroundExec` rerouting | after test-harness de-risking | ✅ |
+| 2 | Timer/deadline layer with **pane-presence floor** | road-to-2.0 | ✅ |
+| 3 | Migrate each non-input source onto the channel (sub-phases 3a–3d) | road-to-2.0 | ✅ |
+| 4 | Widen `PostAction` into the full **Effect** vocabulary; loop is sole executor | road-to-2.0 | ✅ |
+| 5 | Physically split **Model/Runtime/ViewState** + de-IO audit (chdir fork) | road-to-2.0 | ✅ |
+| 6 | **Pure-of-IO View** + command table; loop reaches ~100 lines | road-to-2.0 (last) | ✅ |
 
 ### Phase -1 — Re-baseline test fixtures (prereq)
 `test_state()` and its derivatives become a single base + struct-update builder
 (`AppState { focus: …, ..base() }`), mirroring `route.rs`'s `..idle()` pattern,
 so future field additions touch **one** fixture line. No assertion changes.
 
-### Phase 0 — Focus as one Model value (shippable now, pre-gate)
+### Phase 0 — Focus as one Model value (lands first)
 Highest bug-leverage, lowest risk, zero loop change. **Spec first**: extend the
 route.rs test matrix additively for coexisting-slot pager cases. Add `Focus` +
 `focus` field; replace the ~10 copy-pasted `pane_focused = false` sites with one
@@ -327,7 +344,7 @@ inputs from `model.focus` (keeping `pane_scrolling`/`pane_closed`/`resolver_pend
 **Done**: `grep 'self.state.pane_focused\s*='` shows zero matches outside the
 single transition fn; focus dim / `^C` routing / paste target unchanged in smoke.
 
-### Phase 1 — Single channel for Input + parkable reader (post-gate)
+### Phase 1 — Single channel for Input + parkable reader (pre-2.0)
 Introduce the one `mpsc::Receiver<Message>`; move crossterm input onto it via a
 **parkable** reader thread (blocking `event::read`, Press-filtered for Key only),
 **and** reroute the still-inline `run_child_in_foreground` through a
@@ -339,7 +356,7 @@ always-on reader otherwise races vim/less for stdin). Loop calls
 non-Press Key events. Revertable by deleting the reader + park gate + FG reroute
 together.
 
-### Phase 2 — Timer/deadline layer with pane floor (post-gate)
+### Phase 2 — Timer/deadline layer with pane floor (pre-2.0)
 Replace `elapsed()`-vs-poll-cadence timers with `Message::Tick(Deadline)`; loop
 blocks on `recv_timeout(min(next_deadline - now, pane_idle_floor))`. **Keep the
 pane floor** (the 16/100/500 cadence as a floor when a pane/overlay/capture is
@@ -363,7 +380,7 @@ preserved; a **timing-equivalence harness** asserts a Message arriving 5ms into 
 clear and read; assert second wakeup + final content) + `printf done`
 renders-within-one-wakeup + firehose shows bounded channel traffic.
 
-### Phase 4 — Widen PostAction into Effect; loop is sole executor (post-gate)
+### Phase 4 — Widen PostAction into Effect; loop is sole executor (pre-2.0)
 Move every inline side effect into Effects returned by handlers. **Keep** the
 three result enums (`ApplyResult`/`CommandResult`/`PromptResult`) — widen their
 `Post(PostAction)` payload to `Post(Vec<Effect>)`; do **not** collapse the
@@ -377,7 +394,7 @@ src/app/{actions,commands,key_dispatch,pager_handler}.rs == 0` (same for
 `kill_pg`/`term_title::set`/non-MCP `write_context`); MCP mutation →
 `get_spyc_context` reads fresh state.
 
-### Phase 5 — Physically split Model/Runtime/ViewState + de-IO audit (post-gate)
+### Phase 5 — Physically split Model/Runtime/ViewState + de-IO audit (pre-2.0)
 Introduce `Runtime` and `Model`/`ViewState`; move `git_worker_tx` into Runtime
 (channel reunited), `harpoon` into Model, eliminate `last_grid`. Provide
 backward-compat accessors during the phase (same trick as Phase-0's
@@ -394,7 +411,7 @@ transition may stay as a documented exception". **Done**: mark-jump / `..` /
 `:cd` produce identical cursor+listing+git-markers on the first post-action
 frame; one `git` value feeds top-bar + markers.
 
-### Phase 6 — Pure-of-IO View + command table (post-gate)
+### Phase 6 — Pure-of-IO View + command table (pre-2.0)
 Convert `render.rs` to `ui::render(frame, &model, &view, &runtime)` (zero
 clipboard/title/fs IO; `&mut` only for `StatefulWidget`s; decide resize-in-render
 vs a `ResizePane` effect). Replace the three-way `:command` punt-list with **one
@@ -410,9 +427,16 @@ longer flash "unknown command" (regression-tests the `:undo`/`:limit` footgun);
 The plan survived four adversarial review lenses (Rust-feasibility, sync-only,
 incrementalism, scope-honesty); all returned viable after these were folded in.
 
-- **Roadmap gate.** The MVU rewrite is held until "2.0 shipped + ~2wk stable"
-  (or the seam-is-wrong trigger). → Only Phase 0 ships now (as a daily-driver
-  fix); Phases 1–6 gated. Stated up front, not buried.
+- **Pre-launch timing (the deliberate trade-off).** Landing deep loop/
+  concurrency surgery before a public 2.0 launch risks subtle regressions
+  (timing, focus, stdin) that behavior-equivalence tests don't fully catch, at
+  the worst possible moment. → Accepted to avoid a post-launch refactor
+  overhang. Mitigated by: every phase behavior-equivalent behind green CI +
+  manual daily-driver smoke; the test harness (`docs/TEST_IMPROVEMENT_PLAN.md`)
+  lands *before* Phases 1–6; Phase 0 (lowest-risk, highest-value) lands first
+  and the single-channel loop rewrite lands last; each phase is independently
+  revertable. If a phase destabilizes the daily drivers, it reverts in
+  isolation without blocking the launch.
 - **Borrow checker.** render + the yank/`gf` arms read the live `PtyHost`. →
   render takes `&runtime`; the 3 pane-reading arms source text from the Model
   `PaneSnapshot`. The "render never touches Runtime" claim is dropped.
@@ -463,7 +487,10 @@ incrementalism, scope-honesty); all returned viable after these were folded in.
 
 ## Done-criteria (whole migration)
 
-- Gate respected: Phase 0 shipped now; Phases 1–6 only after the documented trigger.
+- Sequencing: Phase 0 shipped first (as a daily-driver fix); Phases 1–6 landed
+  pre-2.0, after the test-harness de-risking, each interleaved with the other
+  road-to-2.0 tracks. 2.0 ships *on* the MVU foundation, not carrying it as
+  overhang.
 - All phases merged, each behind green CI, all 786 tests passing under the
   corrected invariant.
 - `App::run` is a ~100-line `recv_timeout → update → run_effects → render` loop

@@ -94,10 +94,13 @@ not blocking 2.0.
   extraction (Phases 0-4) separated `AppState` domain logic
   (`AppState::apply` already returns an `ApplyResult` enum — the
   Update half is essentially done). The event loop and render path
-  are still fused. **The staged path is in
-  [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md): Phases 1–2 (mechanical +
-  medium module extractions) are the road-to-2.0 decomposition track;
-  the full MVU rewrite (Phase 3) is held for post-2.0.** Target shape:
+  are still fused. **Staged in
+  [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md), detailed in
+  [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md): Phases 1–2 (the module
+  extractions) shipped; the full MVU rewrite (Phase 3) is now a
+  road-to-2.0 track too** (2026-05-30 decision — landed pre-2.0 so the
+  launch ships on the cleaner foundation, via the strangler-fig plan that
+  makes each phase behavior-equivalent behind green CI). Target shape:
   1. **View** — pure functions in `src/ui/` that take `&AppState` and
      render. Replace the inline rendering in `app/mod.rs::render` with
      a single `ui::render(terminal, &self.state)` call. Snapshot tests
@@ -554,10 +557,14 @@ section tracks only the milestone sequence ahead.
 ### Road to 2.0 (lean: refactor → launch)
 
 2.0 is a public-distribution + signaling bump. The path there is
-deliberately lean: make the codebase reviewable, fix the daily-driver
-papercuts, finish distribution, launch. The deep structural arc
-(typed protocol + crate split + MVU rewrite + multi-instance hub)
-is explicitly **2.x**, not a 2.0 gate — see "Post-2.0" below.
+deliberately lean: make the codebase reviewable, land the MVU foundation,
+fix the daily-driver papercuts, finish distribution, launch. The deep
+structural arc that *remains* 2.x is the typed protocol + crate split +
+multi-instance hub — see "Post-2.0" below. **The MVU rewrite moved into
+this road-to-2.0 list (2026-05-30 decision)** so 2.0 ships on the clean
+foundation instead of carrying it as overhang; it's safe to land pre-2.0
+because the strangler-fig plan ([`docs/MVU_PLAN.md`](docs/MVU_PLAN.md))
+makes every phase behavior-equivalent behind green CI.
 
 1. **Decomposition (the next track).** Break `app/mod.rs` (now ~12k
    lines, single crate) into reviewable modules per
@@ -567,8 +574,14 @@ is explicitly **2.x**, not a 2.0 gate — see "Post-2.0" below.
    maintainability win that lets outside contributors land PRs *and*
    the prerequisite that makes the 2.x crate split possible (you can't
    split a 12k-line monolith into `spyc-proto`/`spyc-pty`/`spyc-os`
-   first). **MVU rewrite (Phase 3) is held for post-2.0** per the
-   refactor plan's own staging.
+   first).
+1b. **MVU rewrite (now pre-2.0).** The full Model-View-Update migration
+   per [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md) — strangler-fig, 8 phases,
+   each behavior-equivalent behind green CI. **Phase 0 (Focus-as-one-value)
+   lands first as a daily-driver bug fix** (the recurring focus-confusion
+   class); Phases 1–6 land incrementally, sequenced *after* the test
+   de-risking (item 3) so the loop/effect surgery is caught by the harness.
+   Interleaves with items 2/4/5; not one unbroken push.
 2. **Daily-driver fixes (interleave with the decomposition).** Small,
    high-value, mostly standalone:
    - `^a s` path handoff Option A — anchor sent paths on the pane's
@@ -599,21 +612,21 @@ is explicitly **2.x**, not a 2.0 gate — see "Post-2.0" below.
    first-run hint, repo hygiene, asciinema demo.
 
 **v2.0 — Public distribution launch.** Cut once: decomposition
-Phases 1–2 landed, the daily-driver fixes + session-forking +
-prompt-templates shipped, and the Distribution track is complete.
+Phases 1–2 landed, the **MVU rewrite ([`docs/MVU_PLAN.md`](docs/MVU_PLAN.md))
+landed**, the daily-driver fixes + session-forking + prompt-templates
+shipped, and the Distribution track is complete.
 External announcement (TripStack engineering blog, optional Show HN).
 The major bump is a signaling choice as much as a semver one — the MCP
 positioning shift + public distribution mark the transition.
 
 ### Post-2.0 (2.x) — the structural arc
 
-Held until 2.0 has shipped and stabilized (~2 weeks), per
-`REFACTOR_PLAN.md`'s start criteria. These build on each other in
-order:
+Held until 2.0 has shipped and stabilized (~2 weeks). These build on
+each other in order. (The **MVU rewrite moved out of this list into the
+road-to-2.0 track** — 2026-05-30 decision; see above and
+[`docs/MVU_PLAN.md`](docs/MVU_PLAN.md). The crate split below still
+hard-depends on it being done, which it now is, pre-2.0.)
 
-- **Refactor Phase 3 — MVU rewrite.** `Model`/`Message`/`Effect` +
-  `update`/`view`, side effects modeled as data. Multi-day, focused.
-  Eliminates the "forgot to clear `pending_X`" bug class structurally.
 - **Mise en Place — typed addressability + crate split**
   ([`docs/V1_70_PLAN.md`](docs/V1_70_PLAN.md)). Stations (stable pane
   handles), Plates (structured snapshots), the typed Order-rail
