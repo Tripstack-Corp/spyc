@@ -1,7 +1,16 @@
 # Refactor plan — `app/mod.rs` decomposition
 
-Working doc for the staged decomposition of `app/mod.rs` (currently
-~7400 lines, ~120 fns) into smaller, more reviewable units. ROADMAP
+> **Status (2026-05-30): STARTING.** `app/mod.rs` has reached ~12k
+> lines and the "When to start" criteria below are met. Per the lean
+> road-to-2.0 sequencing in `ROADMAP.md`, **Phases 1–2 are the active
+> decomposition track on the way to 2.0**; the **MVU rewrite (Phase 3)
+> stays post-2.0**. Original "hold until after 2.0" reasoning is kept
+> below as historical context — it applied to the *whole* plan; the
+> decision now is to take the low-risk decomposition early and hold
+> only the deep rewrite.
+
+Working doc for the staged decomposition of `app/mod.rs` (now ~12k
+lines, ~150 fns) into smaller, more reviewable units. ROADMAP
 already mentions the eventual Model-View-Update (Elm-style) target;
 this doc is the *staged path* there, with cheap wins first and the
 big architectural rewrite at the end.
@@ -81,11 +90,13 @@ nothing user-visible.
 
 ### Phase 1 done-criteria
 
-- `wc -l src/app/mod.rs` ≤ 6500
+- `wc -l src/app/mod.rs` down by ~1000 from its pre-extraction size
+  (the six Phase 1 moves are ~1000 LOC; the absolute target floats
+  with the file's current size).
 - Every extracted module compiles standalone with no imports back
   into `app/mod.rs` (one-way dependency only).
-- All 470 tests still pass.
-- `cargo clippy --all-targets` clean.
+- All tests still pass (no test edits — pure moves).
+- `cargo clippy --locked --all-targets -- -D warnings` clean.
 
 ---
 
@@ -187,3 +198,10 @@ the plan changed.)
 - **2026-04-29**: Plan written. Holding Phase 1 until after 2.0
   ships. Mechanical extractions OK to interleave with feature work
   if review friction gets bad before then.
+- **2026-05-30**: Go on Phases 1–2 *now*, as the road-to-2.0
+  decomposition track (ROADMAP "Lean 2.0" sequencing). Trigger: the
+  file crossed ~12k lines, navigation is search-not-scroll, and the
+  agent-registry work showed how many fixes touch multiple handlers
+  in the megafile. Decomposition also unblocks the 2.x crate split
+  (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3
+  (MVU) still held until 2.0 has shipped + stabilized ~2 weeks.
