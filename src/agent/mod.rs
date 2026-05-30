@@ -525,4 +525,75 @@ mod tests {
         assert_eq!(plan.command, "zot --continue");
         assert!(matches!(plan.resume, ResumeAction::None));
     }
+
+    // ── reconstruct_restore per agent (session restore) ───────────────
+
+    /// Claude spawns fresh (strips any baked `--resume`) and arms the
+    /// `/resume <sid>` stdin dance when a session id is present.
+    #[test]
+    fn claude_restore_strips_resume_and_arms_stdin() {
+        let cwd = Path::new("/tmp");
+        let with_sid =
+            ClaudeProfile.reconstruct_restore("claude --resume old-sid", Some("new-sid"), cwd);
+        assert_eq!(with_sid.command, "claude");
+        assert!(matches!(
+            with_sid.resume,
+            ResumeAction::ClaudeStdin { session_id } if session_id == "new-sid"
+        ));
+
+        let fresh = ClaudeProfile.reconstruct_restore("claude", None, cwd);
+        assert_eq!(fresh.command, "claude");
+        assert!(matches!(fresh.resume, ResumeAction::None));
+    }
+
+    /// Codex bakes resume into the command: `resume <UUID>` with an id,
+    /// `resume --last` without one.
+    #[test]
+    fn codex_restore_bakes_resume_into_command() {
+        let cwd = Path::new("/tmp");
+        let with_sid = CodexProfile.reconstruct_restore("codex", Some("UUID-123"), cwd);
+        assert_eq!(with_sid.command, "codex resume UUID-123");
+        assert!(matches!(with_sid.resume, ResumeAction::None));
+
+        // A stale baked `resume <old>` is stripped before re-baking.
+        let none = CodexProfile.reconstruct_restore("codex resume old-uuid", None, cwd);
+        assert_eq!(none.command, "codex resume --last");
+    }
+
+    /// Agy: `--conversation <sid>` with an id, `--continue` without.
+    #[test]
+    fn agy_restore_bakes_conversation_or_continues() {
+        let cwd = Path::new("/tmp");
+        assert_eq!(
+            AgyProfile
+                .reconstruct_restore("agy", Some("SID"), cwd)
+                .command,
+            "agy --conversation SID"
+        );
+        assert_eq!(
+            AgyProfile.reconstruct_restore("agy", None, cwd).command,
+            "agy --continue"
+        );
+    }
+
+    /// Gemini with no recorded id restores the bare command (the
+    /// `--resume <index>` lookup needs a live `gemini --list-sessions`,
+    /// so it's exercised only when an id is present — kept out of unit
+    /// tests to avoid spawning the CLI).
+    #[test]
+    fn gemini_restore_without_id_is_bare() {
+        let plan = GeminiProfile.reconstruct_restore("gemini", None, Path::new("/tmp"));
+        assert_eq!(plan.command, "gemini");
+        assert!(matches!(plan.resume, ResumeAction::None));
+    }
+
+    /// Other (bash/vim/make): the saved command runs verbatim and any
+    /// stray session id is ignored — no resume, no panic.
+    #[test]
+    fn other_restore_runs_verbatim_ignoring_sid() {
+        let cwd = Path::new("/tmp");
+        let plan = OtherProfile.reconstruct_restore("bash -lc 'make'", Some("ignored"), cwd);
+        assert_eq!(plan.command, "bash -lc 'make'");
+        assert!(matches!(plan.resume, ResumeAction::None));
+    }
 }
