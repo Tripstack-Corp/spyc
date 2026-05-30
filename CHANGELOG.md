@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Activity monitor third line: process stats.** Below the existing
+  throughput (line 1) and internals (line 2) lines, `A` now surfaces a
+  third line (lavender):
+  `pid:NNNN  up:HHh MMm  rss:NNNm  thr:N  panes:N` — PID for attaching
+  `sample`/`lldb` mid-run, RSS for memory-growth watch, thread count
+  for worker/reader-thread accumulation, and the live pane count.
+  Refreshed once per 1 s A-monitor tick (`ps -o rss=,thcount= -p $$`
+  on macOS, `nlwp=` on Linux); hidden behind the monitor so it's
+  zero-cost when off.
 - **`zot` agent support.** spyc now recognizes the `zot` coding agent
   in the pane (status bar shows `zot`), and `spyc -r` restores a `zot`
   tab with `zot --continue` (its resume-most-recent-for-cwd). First

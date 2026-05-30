@@ -176,7 +176,7 @@ const SECTIONS: &[Section] = &[
             ("C", "toggle colors / mono"),
             (
                 "A",
-                "toggle activity monitor (dps/cells + bg/git/fs/mcp internals)",
+                "toggle activity monitor (throughput + internals + pid/rss/threads)",
             ),
             ("s", "set environment variable (NAME=VALUE)"),
         ],
