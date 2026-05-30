@@ -29,33 +29,6 @@ use crate::ui::{
 };
 use crate::{Tui, resume_tui, suspend_tui};
 
-/// Precomputed rects for the current frame. Built by `App::compute_layout`.
-/// Background capture for a `!` command. The child runs under a PTY
-/// (so programs that open `/dev/tty` for prompts — sudo, ssh, gpg —
-/// see the slave PTY instead of bleeding onto our real terminal).
-/// A reader thread feeds bytes into the channel. While the capture is
-/// live, typed keys are forwarded to the child via the master writer
-/// so the user can answer prompts. Ctrl+C kills the child outright.
-struct PendingCapture {
-    /// Shared pty kernel (master / writer / child / reader-thread /
-    /// event channel / closed / exit_status / last_size). v1.5
-    /// Phase 6a unified the pty plumbing across PendingCapture,
-    /// BackgroundTask, and Pane.
-    host: crate::pane::pty_host::PtyHost,
-    /// Accumulated raw bytes for the pager (ANSI included).
-    buffer: Vec<u8>,
-    title: String,
-    cmd_display: String,
-    /// When the capture started — for the elapsed timer.
-    started: std::time::Instant,
-    /// True once the reader thread has sent all output.
-    finished: bool,
-    /// Set when this capture was promoted from a previously-backgrounded
-    /// task via `:fg`. ^Z will reuse the same id when re-backgrounding so
-    /// the user sees `task #3` consistently across the round-trip.
-    original_id: Option<u32>,
-}
-
 /// How long to wait after spawning a restored Claude pane before
 /// typing `/resume <sid>`. Banner / version-check / MCP-auth lines
 /// can take well over a second to settle on cold starts; bumping
@@ -71,6 +44,7 @@ const RESTORE_BANNER_SETTLE: Duration = Duration::from_secs(2);
 /// apart gives the prompt time to settle in between.
 const RESTORE_RESUME_ENTER_DELAY: Duration = Duration::from_millis(300);
 
+/// Precomputed rects for the current frame. Built by `App::compute_layout`.
 struct FrameLayout {
     status: ratatui::layout::Rect,
     list: ratatui::layout::Rect,
@@ -96,6 +70,7 @@ pub enum PostAction {
     },
 }
 
+mod capture;
 mod find_picker;
 mod grep_session;
 mod pager_history;
@@ -104,6 +79,7 @@ mod route;
 pub mod state;
 mod tasks;
 
+use capture::PendingCapture;
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
