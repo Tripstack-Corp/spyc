@@ -39,6 +39,15 @@ enum Message {
     /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
     /// `Mouse` pass through unchanged.
     Input(Event),
+    /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
+    /// `Scheduler`, NOT a thread. In Phase 2 the loop never actually
+    /// sends itself a `Tick` — `recv_timeout` returning `Err(Timeout)`
+    /// IS the tick handler (it re-evaluates every timer predicate against
+    /// the fresh `now`). The variant exists so Phase 3+ subscriptions can
+    /// push real `Tick`s onto the single channel without re-touching the
+    /// enum.
+    #[allow(dead_code)]
+    Tick(Deadline),
 }
 
 /// How long to wait after spawning a restored Claude pane before
@@ -96,6 +105,7 @@ mod pager_history;
 mod prompt;
 mod render;
 mod route;
+mod scheduler;
 mod session;
 pub mod state;
 mod tasks;
@@ -105,6 +115,7 @@ use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
 pub use prompt::{Prompt, PromptKind};
+use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use tasks::{BackgroundTask, BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 
 /// Which collection the user is looking at.
@@ -1198,6 +1209,10 @@ impl App {
         // the `.git/index.lock` → `.git/index` rename. See
         // `AppState::refresh_git_state`.
         let mut last_git_poll = std::time::Instant::now();
+        // MVU Phase 2: advisory deadline scheduler — computes the
+        // recv_timeout wait from armed timers; the loop still fires each
+        // timer via its own predicate against the threaded `now`.
+        let mut scheduler = Scheduler::new();
         // Trailing debounce: fire refresh once events have stopped
         // arriving for `REFRESH_QUIET`. Bursty git operations
         // (`git add && git commit && git push`) emit several
@@ -1584,17 +1599,28 @@ impl App {
                 draw_reason = 3;
             }
 
+            // MVU Phase 2: one clock read for all PRE-recv timers
+            // (send_pending_resumes / find_crashed_restore_tab /
+            // watcher-stamp / refresh / git poll), matching their old
+            // pre-recv local reads. POST-recv timers (activity rollover,
+            // context-write) use `now_post` captured after recv returns.
+            let now_pre = std::time::Instant::now();
+
             // For tabs spawned by session restore that need a deferred
             // `/resume <sid>` (we avoid the `--resume` CLI flag because
             // of a known crash regression), wait ~1.5s for claude's
             // banner to render then send the slash command.
-            self.send_pending_resumes();
+            self.send_pending_resumes(now_pre);
+            // Arm RestoreSettle/ResumeEnter at the earliest pending
+            // resume across all tabs so the wait can wake for it (the
+            // floor dominates when a pane is present — see the wait calc).
+            arm_resume_deadlines(&mut scheduler, self.pane_tabs.as_ref());
 
             // If a restored claude tab looks broken (bad exit / crash
             // dump), prompt to respawn. See `pane_has_crash_marker` for
             // the signature; the 30s window auto-disarms once a resume
             // is clearly working.
-            let crash_idx = self.find_crashed_restore_tab();
+            let crash_idx = self.find_crashed_restore_tab(now_pre);
             if let Some(tab_idx) = crash_idx
                 && matches!(self.state.mode, Mode::Normal)
             {
@@ -1633,15 +1659,15 @@ impl App {
                             needs_reload = true;
                         }
                         if listing {
-                            let now = std::time::Instant::now();
                             // Anchor the max-defer window at the FIRST
                             // event of this busy stretch (don't bump on
                             // subsequent ones, or continuous activity
-                            // starves the refresh).
+                            // starves the refresh). `now_pre` matches the
+                            // old per-event local read position.
                             if first_event_after_refresh.is_none() {
-                                first_event_after_refresh = Some(now);
+                                first_event_after_refresh = Some(now_pre);
                             }
-                            last_event_at = Some(now);
+                            last_event_at = Some(now_pre);
                         }
                     }
                 }
@@ -1668,25 +1694,38 @@ impl App {
             // every `max_refresh_defer` so per-file markers can't go
             // stale forever during a busy stretch.
             let max_refresh_defer = refresh_quiet * 2;
-            let now = std::time::Instant::now();
+            // MVU Phase 2: arm RefreshQuiet at the exact instant
+            // should_fire_refresh can first return true (the predicate
+            // edge), so the wait can wake for it without spinning; disarm
+            // when no refresh stretch is open. Advisory — the predicate
+            // below still decides firing, against `now_pre`.
+            match (last_event_at, first_event_after_refresh) {
+                (Some(at), Some(first)) => scheduler.arm(
+                    Deadline::RefreshQuiet,
+                    (last_refresh + refresh_quiet)
+                        .max((at + refresh_quiet).min(first + max_refresh_defer)),
+                ),
+                _ => scheduler.disarm(Deadline::RefreshQuiet),
+            }
             if should_fire_refresh(
                 last_event_at,
                 last_refresh,
                 first_event_after_refresh,
-                now,
+                now_pre,
                 refresh_quiet,
                 max_refresh_defer,
             ) {
                 last_event_at = None;
                 first_event_after_refresh = None;
                 self.state.refresh_listing();
-                last_refresh = now;
+                last_refresh = now_pre;
                 needs_draw = true;
                 draw_reason = 3;
                 // Listing changed via fs watcher (not a keystroke
                 // path) — `cursor_file` and `git_branch` in the
                 // context may have shifted.
                 self.context_dirty = true;
+                scheduler.disarm(Deadline::RefreshQuiet);
             }
             // 1Hz safety net for git state — converges within a second
             // when FSEvents misses an event (commits replace `.git/index`
@@ -1703,12 +1742,21 @@ impl App {
             } else {
                 Duration::from_secs(1)
             };
-            if self.state.git_info.is_some() && last_git_poll.elapsed() >= git_poll_interval {
-                last_git_poll = std::time::Instant::now();
+            if self.state.git_info.is_some()
+                && now_pre.duration_since(last_git_poll) >= git_poll_interval
+            {
+                last_git_poll = now_pre;
                 if self.state.refresh_git_state() {
                     needs_draw = true;
                     draw_reason = 3;
                 }
+            }
+            // MVU Phase 2: arm/disarm GitPoll to reflect git_info presence
+            // (advisory — the predicate above fires it against now_pre).
+            if self.state.git_info.is_some() {
+                scheduler.arm(Deadline::GitPoll, last_git_poll + git_poll_interval);
+            } else {
+                scheduler.disarm(Deadline::GitPoll);
             }
 
             // Process writable MCP commands from Claude.
@@ -1751,14 +1799,39 @@ impl App {
             let smooth_streaming = pane_had_output || self.pending_capture.is_some();
             let typing_burst = self.pane_tabs.is_some()
                 && last_input_at.is_some_and(|t| t.elapsed() < TYPING_BURST_WINDOW);
-            let poll_ms = if smooth_streaming || typing_burst {
-                16
+            // MVU Phase 2: pane-presence floor — the lower-bound poll
+            // cadence (kept until Phase 3b). None when no pane/overlay/
+            // capture is present.
+            let floor: Option<Duration> = if smooth_streaming || typing_burst {
+                Some(Duration::from_millis(16))
             } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
-                100 // pane idle — responsive to new output
+                Some(Duration::from_millis(100)) // pane idle — responsive to new output
             } else {
-                500 // no pane — only user input matters
+                None // no pane — only user input + deadlines matter
             };
-            match msg_rx.recv_timeout(Duration::from_millis(poll_ms)) {
+            // Universal pull-source ceiling: panes / MCP / git-results have
+            // no channel wakeup, so never sleep longer than this (matches
+            // the old 500 ms no-pane poll, preserving their service interval).
+            const MAX_IDLE_CAP: Duration = Duration::from_millis(500);
+            // Fresh clock JUST before recv so a deadline-driven sleep lands
+            // on the deadline, not deadline + body-cost.
+            let wait_now = std::time::Instant::now();
+            // Next armed deadline, but only if it would SHORTEN the wait
+            // (≤ the ceiling); deadlines never lengthen it.
+            let to_deadline = scheduler
+                .next()
+                .map(|when| when.saturating_duration_since(wait_now))
+                .filter(|d| *d <= MAX_IDLE_CAP);
+            // Floor is a lower bound on poll frequency (upper bound on the
+            // wait when a pane is present); the deadline can only tighten it.
+            let wait = match (floor, to_deadline) {
+                (Some(f), Some(d)) => f.min(d),
+                (Some(f), None) => f,
+                (None, Some(d)) => d,
+                (None, None) => MAX_IDLE_CAP,
+            }
+            .max(Duration::from_millis(1)); // anti-spin: never a zero wait
+            match msg_rx.recv_timeout(wait) {
                 Ok(Message::Input(ev)) => {
                     needs_draw = true;
                     draw_reason = 2;
@@ -1970,11 +2043,12 @@ impl App {
                         _ => {}
                     }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Formerly `event::poll(...) == false`: no input this
-                    // tick. Fall through to re-poll the still-polled
-                    // sources; no draw (matches poll==false).
-                }
+                // No input this tick: re-poll the still-polled sources; no
+                // draw (matches the old `event::poll(...) == false`). In
+                // Phase 2 the loop never sends itself a Tick (the scheduler
+                // is advisory) so Tick is identical to Timeout; the variant
+                // exists for Phase 3+ subscriptions.
+                Ok(Message::Tick(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     // Reader thread exited. Preserve the prior
                     // `event::read()?` error contract: propagate a
@@ -1991,9 +2065,17 @@ impl App {
                 }
             }
 
+            // MVU Phase 2: clock for POST-recv timers (activity rollover,
+            // context-write), captured AFTER the recv sleep — matching
+            // their old live `.elapsed()` read position (a stale top-of-loop
+            // clock would defer them by up to the full wait).
+            let now_post = std::time::Instant::now();
+
             // Activity monitor: roll over the 1-second window.
             let mut activity_only_draw = false;
-            if self.show_activity && self.activity_last_tick.elapsed() >= Duration::from_secs(1) {
+            if self.show_activity
+                && now_post.duration_since(self.activity_last_tick) >= Duration::from_secs(1)
+            {
                 let new_dps = self.activity_draws;
                 let new_bps = self.activity_bytes;
                 let new_sp = self.activity_reason_pane;
@@ -2034,11 +2116,25 @@ impl App {
                 self.activity_watcher_events = 0;
                 self.activity_mcp_reqs = 0;
                 self.activity_git_results = 0;
-                self.activity_last_tick = std::time::Instant::now();
+                self.activity_last_tick = now_post;
                 // Refresh process stats (RSS / thread count) on the
                 // same 1 s cadence. Hidden inside the A-monitor
                 // tick so callers without it open pay zero cost.
                 self.refresh_process_stats();
+            }
+
+            // MVU Phase 2: re-arm ActivityRollover from current state
+            // (advisory; the predicate above fires it against now_post).
+            // The activity monitor is a status-area corner overlay (not a
+            // top_overlay pane), so when shown with no pane the floor is
+            // None and this deadline is the only thing waking the rollover.
+            if self.show_activity {
+                scheduler.arm(
+                    Deadline::ActivityRollover,
+                    self.activity_last_tick + Duration::from_secs(1),
+                );
+            } else {
+                scheduler.disarm(Deadline::ActivityRollover);
             }
 
             // Only redraw when something actually changed.
@@ -2086,15 +2182,30 @@ impl App {
             // doesn't thrash the file. Suppressed during the typing-
             // burst window so claude's input echo isn't yanked by an
             // mtime change while the user is mid-keystroke.
-            let typing_burst =
-                last_input_at.is_some_and(|t| t.elapsed() < Duration::from_millis(300));
+            let typing_burst = last_input_at
+                .is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
             if self.context_dirty
                 && !typing_burst
-                && last_context_write.elapsed() >= Duration::from_millis(150)
+                && now_post.duration_since(last_context_write) >= Duration::from_millis(150)
             {
                 self.write_context();
-                last_context_write = std::time::Instant::now();
+                last_context_write = now_post;
                 self.context_dirty = false;
+                scheduler.disarm(Deadline::ContextWrite);
+            }
+            // MVU Phase 2: arm ContextWrite at the predicate edge (the
+            // later of the 150ms min-interval and the 300ms typing-burst
+            // suppressor) while dirty; disarm once written. Recomputed
+            // every iteration so a no-pane dirty (fs/git) with no recent
+            // input is still covered. Advisory — the predicate above fires
+            // it against now_post; MAX_IDLE_CAP is the floor-of-last-resort.
+            if self.context_dirty {
+                let edge = (last_context_write + Duration::from_millis(150)).max(
+                    last_input_at.map_or(last_context_write, |t| t + Duration::from_millis(300)),
+                );
+                scheduler.arm(Deadline::ContextWrite, edge);
+            } else {
+                scheduler.disarm(Deadline::ContextWrite);
             }
         }
         // Clean up the context file on exit.
@@ -4044,12 +4155,11 @@ impl App {
     /// sitting unsubmitted. Reported by a user who could "just hit
     /// Enter" to recover. The delay between phases lets the prompt
     /// absorb the typed chars before we tell it to submit.
-    fn send_pending_resumes(&mut self) {
+    fn send_pending_resumes(&mut self, now: std::time::Instant) {
         use crate::pane::tabs::PendingResumeSend;
         let Some(tabs) = self.pane_tabs.as_mut() else {
             return;
         };
-        let now = std::time::Instant::now();
         for entry in tabs.tabs_mut() {
             match entry.info.pending_resume_send.take() {
                 Some(PendingResumeSend::Text { sid, after }) if now >= after => {
@@ -4076,9 +4186,8 @@ impl App {
     /// passed without trouble, so a real user-driven exit later isn't
     /// mistaken for a restore failure. Returns the index of the first
     /// crashed tab found, if any.
-    fn find_crashed_restore_tab(&mut self) -> Option<usize> {
+    fn find_crashed_restore_tab(&mut self, now: std::time::Instant) -> Option<usize> {
         let tabs = self.pane_tabs.as_mut()?;
-        let now = std::time::Instant::now();
         let window = Duration::from_secs(30);
         let dump_grace = Duration::from_secs(3);
         for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
@@ -7687,6 +7796,40 @@ mod refresh_debounce_tests {
 
     fn at(base: Instant, ms: u64) -> Instant {
         base + Duration::from_millis(ms)
+    }
+
+    /// MVU Phase 2 pins the RefreshQuiet armed instant to the
+    /// `should_fire_refresh` predicate edge: it must be true AT the armed
+    /// instant and false 1 ms before, so the scheduler can never drive the
+    /// recv wait to zero by arming before the predicate can fire. The
+    /// `fire_at` here is the exact formula used to arm `Deadline::RefreshQuiet`.
+    #[test]
+    fn fires_exactly_at_the_armed_edge() {
+        let base = Instant::now();
+        let last_refresh = base;
+        let last_event = at(base, 100);
+        let first_event = at(base, 100);
+        // App::run arms at: max(last_refresh+QUIET, min(last_event+QUIET,
+        // first+MAX_DEFER)) = max(base+500, min(base+600, base+1100)) = base+600.
+        let fire_at = (last_refresh + QUIET).max((last_event + QUIET).min(first_event + MAX_DEFER));
+        assert_eq!(fire_at, at(base, 600));
+        assert!(should_fire_refresh(
+            Some(last_event),
+            last_refresh,
+            Some(first_event),
+            fire_at,
+            QUIET,
+            MAX_DEFER
+        ));
+        // 1 ms before the edge (base+599): the predicate must NOT fire.
+        assert!(!should_fire_refresh(
+            Some(last_event),
+            last_refresh,
+            Some(first_event),
+            at(base, 599),
+            QUIET,
+            MAX_DEFER
+        ));
     }
 
     #[test]

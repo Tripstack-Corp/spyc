@@ -212,7 +212,7 @@ enum Message {
     FindBatch { session: FinderId, matches: Vec<FindMatch> },   // Phase 3d
     GrepBatch { session: GrepId, matches: Vec<GrepMatch> },
     Mcp(McpRequest),                    // Phase 3d; owns its one-shot reply Sender
-    Tick(Deadline),                     // Phase 2; GitPoll/ActivityRollover/RefreshQuiet/ContextWrite/RestoreSettle/ResumeEnter/ScrollThrottle
+    Tick(Deadline),                     // Phase 2 (DONE); GitPoll/ActivityRollover/RefreshQuiet/ContextWrite/RestoreSettle/ResumeEnter. (Not ScrollThrottle — it's an in-arm event-gap dedup, not a wakeup timer.)
     ForegroundDone { on_done: PostWork },                       // Phase 4; PostWork is a testable enum
     ClipboardResult(Result<usize, String>),
     ListingLoaded { dir: PathBuf, listing: Listing, gen: u64 }, // Phase 5, only if chdir is made async
