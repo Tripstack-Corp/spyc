@@ -392,13 +392,25 @@ preserved; a **timing-equivalence harness** asserts a Message arriving 5ms into 
   streaming `:task N` viewer of a running background task (both still polled
   until **3c**); `MAX_IDLE_CAP` stays (MCP/finder until 3d). Reader-death
   detection widens ~100ms→≤500ms after PR2 (fatal path, bounded — accepted).
-- **3c** capture/tasks → `CaptureOutput`/`TaskOutput`/exit messages; `child.wait()`
-  moves to the exit-Message path; demote-to-task is a worker-lifecycle swap.
-- **3d** MCP → `Mcp(McpRequest)` (reply via `McpReply`; `WriteContextSync→McpReply`
-  ordering); finder/grep → `FindBatch`/`GrepBatch`.
-**Done (3b-PR2)**: deterministic lost-wakeup test (inject a gen bump between
-clear and read; assert second wakeup + final content) + `printf done`
-renders-within-one-wakeup + firehose shows bounded channel traffic.
+- **3c** (DONE) capture/tasks → `SinkOutput` wake via a runtime-swappable
+  `PtyHost` wake slot (the demote/promote/`:fg`/`^Z` swap needs a slot, not a
+  spawn-time closure); exit observed via `newly_closed` on the main loop (the
+  reader can't call `child.wait()` — `portable_pty` needs `&mut self`), so the
+  on-channel exit message is deferred to Phase 4. PR2-of-3c deleted the pane
+  floor; PR3 deleted the streaming floor.
+- **3d** (DONE) MCP → `Mcp(McpRequest)` via a git-style forwarder (reply +
+  synchronous `write_context` stay adjacent on the main loop = single-connection
+  read-after-write); finder/grep → payloadless `FindOutput`/`GrepOutput` wakes
+  via a `WakingSender` (data stays on the per-source channels — the literal
+  `FindBatch/GrepBatch{matches}` payload is deferred to Phase 5's ReassignSink).
+  Removed `MAX_IDLE_CAP`: the loop now blocks on `recv()` (reader-death via a
+  `ReaderExited` death-wake + loop-top check; a 1Hz `CaptureTick` ticks the
+  streaming elapsed-timer the cap used to).
+**Phase 3 DONE**: every event source wakes the unified channel; the run loop is
+fully event-driven (0 idle wakes when no deadline is armed). Each sub-phase was
+spec'd via an adversarial workflow + shipped behavior-equivalent behind green
+CI, one source per PR (3b/3c/3d split add-the-wake / delete-the-floor so the
+floor backstopped every wake migration before its poll was removed).
 
 ### Phase 4 — Widen PostAction into Effect; loop is sole executor (pre-2.0)
 Move every inline side effect into Effects returned by handlers. **Keep** the

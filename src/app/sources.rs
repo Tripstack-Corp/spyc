@@ -26,7 +26,7 @@ use crossterm::event::Event;
 
 use crate::spyc_debug;
 
-use super::{App, Message, state};
+use super::{App, Message, TaskStatus, state};
 
 /// MVU Phase 3a: drain every immediately-available message into the
 /// pending buffers, returning the FIRST `Input` encountered (if any).
@@ -56,6 +56,7 @@ pub fn coalesce_pending(
             | Message::SinkOutput { .. }
             | Message::GrepOutput
             | Message::FindOutput
+            | Message::ReaderExited
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
@@ -115,6 +116,28 @@ impl App {
                 *last_event_at = Some(now_pre);
             }
         }
+    }
+
+    /// MVU Phase 3d: whether the ~1 Hz `CaptureTick` deadline should be armed
+    /// — i.e. a streaming view whose elapsed-timer title must keep advancing
+    /// now that `MAX_IDLE_CAP` is gone. True for a live `!cmd` capture, or a
+    /// `:task N` viewer whose *viewed* task is genuinely still running
+    /// (Running AND its host hasn't hit EOF — a closed-but-not-yet-finalized
+    /// task must NOT re-pin the tick, or idle CPU never settles). Disarmed the
+    /// instant the capture finishes / the viewed task exits, so idle draws
+    /// stay at 0.
+    pub(crate) fn capture_tick_should_arm(&self) -> bool {
+        if self.pending_capture.is_some() {
+            return true;
+        }
+        self.pager
+            .as_ref()
+            .and_then(|v| v.task_id)
+            .is_some_and(|id| {
+                self.background_tasks.tasks.iter().any(|t| {
+                    t.id == id && matches!(t.status, TaskStatus::Running) && !t.host.closed
+                })
+            })
     }
 
     /// MVU Phase 3a: apply one buffered git-worker result — the SOLE
@@ -350,6 +373,32 @@ mod tests {
             assert_eq!(last_event_at, Some(base));
             assert_eq!(first, Some(base));
             assert!(!needs_reload); // not a config path
+        });
+    }
+
+    #[test]
+    fn capture_tick_off_when_idle() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let app = App::test_app(tmp.path().to_path_buf());
+            // No capture, no task viewer → nothing streams, so CaptureTick
+            // stays disarmed. With MAX_IDLE_CAP gone (3d), this is what keeps
+            // a fully-idle loop blocked on recv() with 0 wakes/sec.
+            assert!(!app.capture_tick_should_arm());
+        });
+    }
+
+    #[test]
+    fn capture_tick_off_for_viewer_of_non_running_task() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            // A `:task N` pager whose viewed task isn't running must NOT arm
+            // the tick (no task id 1 exists → the strongest negative).
+            let mut view = crate::ui::pager::PagerView::new_plain("task", vec![]);
+            view.task_id = Some(1);
+            app.pager = Some(view);
+            assert!(!app.capture_tick_should_arm());
         });
     }
 
