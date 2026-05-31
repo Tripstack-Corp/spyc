@@ -50,6 +50,7 @@ pub fn coalesce_pending(
             Message::PaneOutput { .. }
             | Message::SinkOutput { .. }
             | Message::GrepOutput
+            | Message::FindOutput
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
@@ -275,10 +276,11 @@ mod tests {
             .unwrap();
         tx.send(Message::GitResult(git_result(0))).unwrap();
         tx.send(Message::Tick(Deadline::GitPoll)).unwrap();
-        // MVU Phase 3d: a burst of grep wakes collapses to nothing buffered
-        // (the data rides GrepSession.rx; the loop re-drains on re-entry).
+        // MVU Phase 3d: grep/finder wakes collapse to nothing buffered (the
+        // data rides their own channels; the loop re-drains on re-entry).
         tx.send(Message::GrepOutput).unwrap();
         tx.send(Message::GrepOutput).unwrap();
+        tx.send(Message::FindOutput).unwrap();
 
         let mut fs_pending = Vec::new();
         let mut git_pending = Vec::new();
@@ -286,7 +288,7 @@ mod tests {
 
         assert_eq!(got, None);
         assert_eq!(fs_pending.len(), 2);
-        assert_eq!(git_pending.len(), 1); // Tick + GrepOutput dropped, not buffered
+        assert_eq!(git_pending.len(), 1); // Tick + Grep/Find wakes dropped, not buffered
     }
 
     #[test]

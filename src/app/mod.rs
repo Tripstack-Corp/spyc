@@ -77,6 +77,12 @@ enum Message {
     /// `grep_id`, so a wake for a replaced/closed session self-discards).
     /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
     GrepOutput,
+    /// MVU Phase 3d: the F-finder walker produced a candidate batch or
+    /// completed. Payloadless wake — the candidates ride `FindPicker.walk_rx`,
+    /// re-drained by `drain_walk` (a wake after the picker closed no-ops at
+    /// the `if let Some(picker)` guard). Collapsed in the coalesce pre-step;
+    /// never surfaced as `Input`.
+    FindOutput,
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
@@ -1773,9 +1779,10 @@ impl App {
                             Ok(Message::Input(ev))
                         })
                 }
-                // MVU Phase 3d: a grep wake — payloadless, same collapse-to-
-                // Timeout so the pre-recv `drain_grep_session` re-runs.
-                Ok(Message::GrepOutput) => {
+                // MVU Phase 3d: a grep/finder wake — payloadless, same
+                // collapse-to-Timeout so the pre-recv drains
+                // (`drain_grep_session` / `drain_walk`) re-run.
+                Ok(Message::GrepOutput | Message::FindOutput) => {
                     coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
@@ -2028,10 +2035,11 @@ impl App {
                     | Message::GitResult(_)
                     | Message::PaneOutput { .. }
                     | Message::SinkOutput { .. }
-                    | Message::GrepOutput,
+                    | Message::GrepOutput
+                    | Message::FindOutput,
                 ) => {
                     unreachable!(
-                        "FsEvent/GitResult/PaneOutput/SinkOutput/GrepOutput are buffered/collapsed in the coalesce pre-step"
+                        "FsEvent/GitResult/PaneOutput/SinkOutput/GrepOutput/FindOutput are buffered/collapsed in the coalesce pre-step"
                     )
                 }
             }
@@ -3142,8 +3150,16 @@ impl App {
             .unwrap_or_else(|| self.state.listing.dir.clone());
         let (tx, rx) = std::sync::mpsc::channel();
         let walk_root = root.clone();
+        // MVU Phase 3d: wake the loop on each candidate batch (via
+        // WakingSender) and once more after the walk returns — that final
+        // wake drives the last drain_walk, which sees the rx disconnect and
+        // flips `walk_complete` (title → final count) without the poll floor.
+        let wake = self.make_find_wake();
+        let final_wake = std::sync::Arc::clone(&wake);
+        let tx = crate::fs::WakingSender::new(tx, wake);
         std::thread::spawn(move || {
             crate::fs::finder::walk_streaming(&walk_root, tx);
+            final_wake();
         });
         let mut picker = FindPicker {
             candidates: Vec::new(),
