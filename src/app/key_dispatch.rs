@@ -149,6 +149,11 @@ impl App {
                     view.saveable = true;
                     view.streaming = false;
                 }
+                // MVU Phase 3c: clear the wake slot before dropping the
+                // host, so the kill-driven EOF close-wake fires through a
+                // None slot rather than spuriously waking the loop for a
+                // capture that's already gone.
+                capture.host.clear_wake_slot();
                 self.pending_capture = None;
                 return Ok(PostAction::None);
             }

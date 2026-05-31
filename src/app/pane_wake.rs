@@ -50,6 +50,29 @@ impl App {
             None => Arc::new(|| {}),
         }
     }
+
+    /// MVU Phase 3c: mint a `SinkId` and build a `Wake` for a main-loop-
+    /// drained capture/task. The fire closure sends `Message::SinkOutput`;
+    /// the fresh `pending` flag is the edge the `PtyHost` reader CASes and
+    /// the main loop clears (`clear_wake_pending`). Install it on the host
+    /// via `host.set_wake(...)`. No-op fire before `run()` installs the
+    /// sender (the floor / `MAX_IDLE_CAP` still services such hosts).
+    pub(crate) fn make_sink_wake(&mut self) -> crate::pane::pty_host::Wake {
+        let sink = self.alloc_sink_id();
+        let fire: PaneWake = match &self.pane_wake_tx {
+            Some(tx) => {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Message::SinkOutput { sink });
+                })
+            }
+            None => Arc::new(|| {}),
+        };
+        crate::pane::pty_host::Wake {
+            pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fire,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +105,22 @@ mod tests {
             match rx.try_recv() {
                 Ok(Message::PaneOutput { .. }) => {}
                 _ => panic!("expected a PaneOutput wake on the channel"),
+            }
+        });
+    }
+
+    #[test]
+    fn make_sink_wake_sends_sink_output_when_armed() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let (tx, rx) = std::sync::mpsc::channel::<Message>();
+            app.pane_wake_tx = Some(tx);
+            let wake = app.make_sink_wake();
+            (wake.fire)();
+            match rx.try_recv() {
+                Ok(Message::SinkOutput { .. }) => {}
+                _ => panic!("expected a SinkOutput wake on the channel"),
             }
         });
     }

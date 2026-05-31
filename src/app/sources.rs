@@ -47,7 +47,7 @@ pub fn coalesce_pending(
             // the loop re-enters the pre-recv pane scan regardless, so a
             // wake burst collapses to a single re-scan (the worker-side
             // 0→1 CAS is the primary firehose collapse; this is the second).
-            Message::PaneOutput { .. } | Message::Tick(_) => {}
+            Message::PaneOutput { .. } | Message::SinkOutput { .. } | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
     }
