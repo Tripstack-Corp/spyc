@@ -25,10 +25,25 @@
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+
+use super::PaneWake;
+
+/// MVU Phase 3b/3c: the wake half of a pty consumer — a lost-wakeup-safe
+/// edge flag plus the closure fired on its 0→1 transition. Used by Pane's
+/// parser worker (3b, via `adopt`) AND, in 3c, by the `PtyHost` reader
+/// thread for main-loop-drained captures/tasks (installed at runtime via
+/// [`PtyHost::set_wake`], so a `take_host`-reclaimed reader can be
+/// re-targeted). `fire` is type-erased (`Arc<dyn Fn()>`), so no `Message`
+/// leaks into the kernel — the `app → pane` layering stays one-directional.
+#[derive(Clone)]
+pub struct Wake {
+    pub pending: Arc<AtomicBool>,
+    pub fire: PaneWake,
+}
 
 /// Reader-thread → main-loop event. One message per chunk of pty
 /// bytes, then exactly one `Closed` when the master sees EOF.
@@ -95,6 +110,19 @@ pub struct PtyHost {
     pub exit_status: Option<portable_pty::ExitStatus>,
     pub last_size: (u16, u16),
     pub debug_dump: bool,
+    /// MVU Phase 3c: runtime-swappable wake slot the reader thread
+    /// re-loads each iteration. `None` for a `Pane` (its parser worker
+    /// wakes via its own `Wake`); `Some` for a main-loop-drained capture/
+    /// task, installed via [`Self::set_wake`]. A slot (not a spawn-time
+    /// closure) is required because `demote_pane_to_task` reclaims a host
+    /// whose reader is already blocked in `read()` — only a slot can
+    /// retro-target it. Cleared (`clear_wake_slot`) on promote / hard-kill
+    /// so a teardown-racing close-wake fires through `None`.
+    ///
+    /// PR1 (this PR) is the plumbing; the capture/task drain sites install
+    /// + clear the slot in 3c PR2, so it reads as dead-code until then.
+    #[allow(dead_code)]
+    wake: Arc<Mutex<Option<Wake>>>,
 }
 
 /// Result of a single drain pass: whether this drain observed the
@@ -154,7 +182,11 @@ impl PtyHost {
         let (tx, event_rx) = mpsc::channel::<PtyEvent>();
         let closed_atomic = Arc::new(AtomicBool::new(false));
         let closed_flag = Arc::clone(&closed_atomic);
-        thread::spawn(move || reader_loop(reader, &tx, &closed_flag));
+        // MVU Phase 3c: the wake slot the reader re-loads each iteration.
+        // Starts empty; a capture/task installs its wake via `set_wake`.
+        let wake: Arc<Mutex<Option<Wake>>> = Arc::new(Mutex::new(None));
+        let wake_reader = Arc::clone(&wake);
+        thread::spawn(move || reader_loop(reader, &tx, &closed_flag, &wake_reader));
 
         if spec.nudge_winch {
             // Send SIGWINCH so rc-file shells re-query the pty size
@@ -168,6 +200,7 @@ impl PtyHost {
         }
 
         Ok(Self {
+            wake,
             master: pair.master,
             writer,
             child,
@@ -192,6 +225,47 @@ impl PtyHost {
     /// elsewhere.
     pub const fn take_event_rx(&mut self) -> Option<mpsc::Receiver<PtyEvent>> {
         self.event_rx.take()
+    }
+
+    /// MVU Phase 3c: install (or replace) the reader-thread wake. Called
+    /// when a host enters a main-loop-drained container (capture/task) and
+    /// on each `:fg`/`^Z`/demote transition — a single atomic store
+    /// re-targets the already-running reader. The reader re-loads the slot
+    /// per iteration, so this takes effect on the next chunk/EOF.
+    ///
+    /// PR1 plumbing; wired by the capture/task sites in 3c PR2.
+    #[allow(dead_code)]
+    pub fn set_wake(&self, w: Wake) {
+        *self.wake.lock().unwrap() = Some(w);
+    }
+
+    /// MVU Phase 3c: clear the wake slot (back to `None`). Used on promote
+    /// (host → Pane, which installs its own parser-worker wake) and on
+    /// hard-kill, so a teardown-racing close-wake fires through `None` and
+    /// never targets a container the host just left.
+    #[allow(dead_code)]
+    pub fn clear_wake_slot(&self) {
+        *self.wake.lock().unwrap() = None;
+    }
+
+    /// MVU Phase 3c: clear the wake edge flag (clear-before-read). The main
+    /// loop calls this as the FIRST statement before `drain()` at each
+    /// capture/task drain site — never inside `drain()` — so a chunk racing
+    /// the clear re-arms the producer CAS and re-sends (at most one
+    /// redundant wake, never a lost final chunk). No-op when no wake is set.
+    #[allow(dead_code)]
+    pub fn clear_wake_pending(&self) {
+        // Clone the flag Arc out and drop the guard before the store
+        // (clippy nursery significant-drop discipline; cheap refcount bump).
+        let pending = self
+            .wake
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|w| Arc::clone(&w.pending));
+        if let Some(p) = pending {
+            p.store(false, Ordering::Release);
+        }
     }
 
     pub fn drain<F: FnMut(&[u8])>(&mut self, mut on_bytes: F) -> DrainResult {
@@ -339,7 +413,16 @@ fn kill_group(pid: u32, sig: rustix::process::Signal) {
 /// Reader thread: pump bytes from the pty master into the channel
 /// until EOF or the channel is dropped. Same shape as the pre-v1.5
 /// `pane::reader_loop`.
-fn reader_loop(mut reader: Box<dyn Read + Send>, tx: &mpsc::Sender<PtyEvent>, closed: &AtomicBool) {
+fn reader_loop(
+    mut reader: Box<dyn Read + Send>,
+    tx: &mpsc::Sender<PtyEvent>,
+    closed: &AtomicBool,
+    wake: &Arc<Mutex<Option<Wake>>>,
+) {
+    // Clone the installed Wake out of the slot (dropping the guard) so the
+    // CAS + fire() never run while holding the per-host lock — clippy
+    // nursery discipline + never hold a lock across the wake's msg_tx.send.
+    let load_wake = || wake.lock().unwrap().clone();
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
@@ -354,11 +437,28 @@ fn reader_loop(mut reader: Box<dyn Read + Send>, tx: &mpsc::Sender<PtyEvent>, cl
                 // `drain_output`, so the happens-before must be real.
                 closed.store(true, Ordering::Release);
                 let _ = tx.send(PtyEvent::Closed);
+                // MVU Phase 3c: one final close-wake (AFTER the Release store
+                // + the Closed send) so the woken main-loop drain observes
+                // `newly_closed` within one wakeup. Fires through `None`
+                // (no-op) on a deliberate teardown that cleared the slot.
+                if let Some(w) = load_wake() {
+                    (w.fire)();
+                }
                 return;
             }
             Ok(n) => {
                 if tx.send(PtyEvent::Bytes(buf[..n].to_vec())).is_err() {
                     return; // Parent dropped the host.
+                }
+                // MVU Phase 3c: wake on the 0→1 edge only (collapse a byte
+                // storm to one channel message); the main loop clears
+                // `pending` before its drain (clear-before-read).
+                if let Some(w) = load_wake()
+                    && w.pending
+                        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                        .is_ok()
+                {
+                    (w.fire)();
                 }
             }
         }
@@ -410,8 +510,9 @@ mod tests {
         let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let closed_cl = std::sync::Arc::clone(&closed);
 
+        let wake = std::sync::Arc::new(std::sync::Mutex::new(None));
         let thread = std::thread::spawn(move || {
-            super::reader_loop(reader, &tx, &closed_cl);
+            super::reader_loop(reader, &tx, &closed_cl, &wake);
         });
 
         // Collect events until we observe Closed. The reader
@@ -430,6 +531,57 @@ mod tests {
         thread.join().unwrap();
         assert!(got_close, "reader_loop must emit Closed on EOF");
         assert_eq!(got_bytes, payload, "byte stream must round-trip in order");
+    }
+
+    /// MVU Phase 3c: with a `Some` wake slot, the reader fires on the byte
+    /// 0→1 edge AND once on EOF — exactly two fires for one chunk (the
+    /// output edge coalesces; the close-wake is unconditional). This is the
+    /// wake that lets a main-loop-drained capture/task observe output + exit
+    /// without the poll floor.
+    #[test]
+    fn reader_loop_some_slot_fires_on_output_and_close() {
+        use std::sync::atomic::AtomicUsize;
+        let payload = b"hello\n".to_vec();
+        let reader = Box::new(std::io::Cursor::new(payload)) as Box<dyn std::io::Read + Send>;
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let closed = Arc::new(AtomicBool::new(false));
+        let closed_cl = Arc::clone(&closed);
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_cl = Arc::clone(&count);
+        let wake = Arc::new(Mutex::new(Some(Wake {
+            pending: Arc::new(AtomicBool::new(false)),
+            fire: Arc::new(move || {
+                count_cl.fetch_add(1, Ordering::Release);
+            }),
+        })));
+        let wake_cl = Arc::clone(&wake);
+        // rx stays alive in this scope so `tx.send` succeeds and the byte
+        // fire actually runs (a dropped rx would early-return the Bytes arm).
+        let thread =
+            std::thread::spawn(move || super::reader_loop(reader, &tx, &closed_cl, &wake_cl));
+        thread.join().unwrap();
+        assert_eq!(
+            count.load(Ordering::Acquire),
+            2,
+            "one output edge (coalesced) + one unconditional close wake"
+        );
+        assert!(closed.load(Ordering::Acquire));
+        drop(rx);
+    }
+
+    /// A `None` slot (the `Pane` case — it wakes via its parser worker) must
+    /// run the reader to completion with no fire and no panic.
+    #[test]
+    fn reader_loop_none_slot_is_silent() {
+        let reader = Box::new(std::io::Cursor::new(b"x".to_vec())) as Box<dyn std::io::Read + Send>;
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let closed = Arc::new(AtomicBool::new(false));
+        let closed_cl = Arc::clone(&closed);
+        let wake = Arc::new(Mutex::new(None));
+        let thread = std::thread::spawn(move || super::reader_loop(reader, &tx, &closed_cl, &wake));
+        thread.join().unwrap();
+        assert!(closed.load(Ordering::Acquire));
+        drop(rx);
     }
 
     #[test]
