@@ -30,9 +30,12 @@ use crate::{Tui, resume_tui, suspend_tui};
 /// Unified message stream consumed by `App::run` (MVU Phase 1,
 /// `docs/MVU_PLAN.md`). The parkable crossterm reader feeds `Input`; the
 /// notify watcher closure feeds `FsEvent`; the git forwarder thread feeds
-/// `GitResult` (both Phase 3a). Later phases grow `PaneOutput`/… onto the
-/// same enum and one receiver. `MAX_IDLE_CAP` + the pane floor stay until
-/// the remaining pull sources (panes 3b, MCP/finder 3d) also migrate.
+/// `GitResult` (both Phase 3a); pane parser workers feed `PaneOutput`
+/// (Phase 3b). The pane poll floor is gone — the surviving 16ms floor
+/// covers only the still-polled streaming pull sources (a `!cmd` capture
+/// and a `:task N` viewer of a running task; both migrate in 3c), and
+/// `MAX_IDLE_CAP` bounds the remaining pull sources (captures/tasks 3c,
+/// MCP/finder/grep 3d).
 enum Message {
     /// A crossterm input event. The reader Press-filters `Key` events
     /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
@@ -1288,17 +1291,14 @@ impl App {
         let mut fs_pending: Vec<notify::Event> = Vec::new();
         let mut git_pending: Vec<state::GitWorkerResult> = Vec::new();
 
-        // Typing-burst window: after any keypress, briefly tighten the
-        // event-loop poll cadence to 16 ms so the *first* PTY echo
-        // after a keystroke is picked up quickly. crossterm's
-        // `event::poll` does NOT wake on pane output (it only watches
-        // the host tty), so without this we'd wait up to the idle
-        // 100 ms before draining the echo — felt as "I can type
-        // faster than the input." Sustained typing already gets 16 ms
-        // via `pane_had_output`; this just covers the first key after
-        // an idle gap. Bounded so idle CPU stays low.
+        // Last keypress instant. MVU Phase 3b PR2 retired its use as a
+        // poll-cadence trigger (the typing-burst hack — panes now wake the
+        // loop via `Message::PaneOutput`, so the first PTY echo after a
+        // keystroke arrives on the channel, not via a tightened poll). It
+        // survives for its OTHER consumer: the context-write debounce
+        // suppressor, which holds off the MCP context mtime bump for 300 ms
+        // after a keystroke so claude's input echo isn't yanked mid-type.
         let mut last_input_at: Option<std::time::Instant> = None;
-        const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
         // sending onto its own channel; this forwarder bridges its results
@@ -1874,29 +1874,21 @@ impl App {
                 }
             }
 
-            // Adaptive poll rate:
-            // - 16ms when pane output just arrived (smooth streaming)
-            //   OR within the typing-burst window with a pane open
-            //   (catch the *first* PTY echo after a keystroke;
-            //   subsequent chars already get 16ms via pane_had_output)
-            // - 100ms when pane exists but is idle
-            // - 500ms when no pane at all
-            let smooth_streaming = pane_had_output || self.pending_capture.is_some();
-            let typing_burst = self.pane_tabs.is_some()
-                && last_input_at.is_some_and(|t| t.elapsed() < TYPING_BURST_WINDOW);
-            // MVU Phase 2: pane-presence floor — the lower-bound poll
-            // cadence (kept until Phase 3b). None when no pane/overlay/
-            // capture is present.
-            let floor: Option<Duration> = if smooth_streaming || typing_burst {
+            // MVU Phase 3b PR2: panes + overlays now wake the loop via
+            // `Message::PaneOutput`, so the old 16ms typing-burst hack and
+            // the 100ms idle-pane floor are GONE — the first PTY echo after a
+            // keystroke and ongoing streaming both arrive on the channel. A
+            // 16ms floor survives ONLY for the still-polled streaming pull
+            // sources (see `streaming_floor_active`); everything else relies
+            // on the channel wake + MAX_IDLE_CAP.
+            let floor: Option<Duration> = if self.streaming_floor_active() {
                 Some(Duration::from_millis(16))
-            } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
-                Some(Duration::from_millis(100)) // pane idle — responsive to new output
             } else {
-                None // no pane — only user input + deadlines matter
+                None
             };
-            // Universal pull-source ceiling: panes / MCP / git-results have
-            // no channel wakeup, so never sleep longer than this (matches
-            // the old 500 ms no-pane poll, preserving their service interval).
+            // Universal pull-source ceiling: captures/tasks (3c) and MCP/
+            // finder/grep (3d) still have no channel wakeup, so never sleep
+            // longer than this (also bounds reader-death detection latency).
             const MAX_IDLE_CAP: Duration = Duration::from_millis(500);
             // Fresh clock JUST before recv so a deadline-driven sleep lands
             // on the deadline, not deadline + body-cost.
