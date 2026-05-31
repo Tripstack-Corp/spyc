@@ -83,6 +83,15 @@ enum Message {
     /// the `if let Some(picker)` guard). Collapsed in the coalesce pre-step;
     /// never surfaced as `Input`.
     FindOutput,
+    /// MVU Phase 3d: a writable MCP request forwarded from the socket server.
+    /// Unlike the wake variants, this carries a payload (the command + its
+    /// one-shot reply Sender). Buffered into `mcp_pending` by the recv
+    /// pre-step + the coalesce drain; executed + replied at the pre-recv MCP
+    /// drain (`execute_mcp_command` writes the context file synchronously,
+    /// then `reply.send` — preserving single-connection read-after-write).
+    /// MUST NOT be dropped in coalesce (the reply Sender would strand the
+    /// client). Never surfaced as `Input`.
+    Mcp(crate::mcp_cmd::McpRequest),
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
@@ -464,8 +473,12 @@ pub struct App {
     cached_rows_gen: u64,
     /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
     cached_grid_key: (u64, usize, usize, u16, u16),
-    /// Commands from the MCP server (writable actions from Claude).
-    mcp_cmd_rx: std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>,
+    /// Commands from the MCP server (writable actions from Claude). MVU
+    /// Phase 3d: `run()` `.take()`s this once and moves it into the MCP
+    /// forwarder thread, which re-sends each request onto the unified channel
+    /// as `Message::Mcp`; the pre-recv drain then executes it + replies.
+    /// `None` after `run()` takes it (and in the test harness).
+    mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
     /// Tab completion / cycle state. Tracks matches from the last Tab
     /// press and supports cycling through them on repeated Tab.
     tab_state: Option<TabState>,
@@ -800,7 +813,7 @@ impl App {
             cached_rows: Vec::new(),
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-            mcp_cmd_rx,
+            mcp_cmd_rx: Some(mcp_cmd_rx),
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
@@ -1313,6 +1326,10 @@ impl App {
         // *how* events are handled.
         let mut fs_pending: Vec<notify::Event> = Vec::new();
         let mut git_pending: Vec<state::GitWorkerResult> = Vec::new();
+        // MVU Phase 3d: writable MCP requests buffered by the recv pre-step,
+        // executed + replied at the pre-recv drain (preserving the synchronous
+        // write_context → reply read-after-write ordering).
+        let mut mcp_pending: Vec<crate::mcp_cmd::McpRequest> = Vec::new();
 
         // Last keypress instant. MVU Phase 3b PR2 retired its use as a
         // poll-cadence trigger (the typing-burst hack — panes now wake the
@@ -1338,6 +1355,25 @@ impl App {
             std::thread::spawn(move || {
                 while let Ok(r) = git_rx.recv() {
                     if gtx.send(Message::GitResult(r)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        // MVU Phase 3d: the MCP socket server (spawned in `new()`) keeps
+        // sending requests onto its own channel; this forwarder bridges them
+        // onto the unified channel as `Message::Mcp`, so `recv` wakes on an
+        // MCP request instead of waiting out the poll. `.take()` here is the
+        // sole consumer of `mcp_cmd_rx`. Same shape as the git forwarder; the
+        // socket server (`start_socket_server`) is unchanged and never names
+        // `Message`. The request carries its one-shot reply Sender, executed
+        // + replied on the main loop (read-after-write preserved).
+        if let Some(mcp_rx) = self.mcp_cmd_rx.take() {
+            let mtx = msg_tx.clone();
+            std::thread::spawn(move || {
+                while let Ok(req) = mcp_rx.recv() {
+                    if mtx.send(Message::Mcp(req)).is_err() {
                         break;
                     }
                 }
@@ -1683,8 +1719,14 @@ impl App {
                 scheduler.disarm(Deadline::GitPoll);
             }
 
-            // Process writable MCP commands from Claude.
-            while let Ok(req) = self.mcp_cmd_rx.try_recv() {
+            // Process writable MCP commands from Claude (MVU Phase 3d: the
+            // requests now arrive via Message::Mcp, buffered into mcp_pending
+            // by the recv pre-step; this drain executes + replies). Kept at
+            // its early loop position so a queued request never sits behind a
+            // TUI-tearing ForegroundExec and breaches the client's 5s timeout.
+            // `execute_mcp_command` writes the context file synchronously,
+            // then reply.send — preserving single-connection read-after-write.
+            for req in std::mem::take(&mut mcp_pending) {
                 self.activity_mcp_reqs = self.activity_mcp_reqs.saturating_add(1);
                 let resp = self.execute_mcp_command(req.command);
                 let _ = req.reply.send(resp);
@@ -1749,14 +1791,24 @@ impl App {
             let effective = match msg_rx.recv_timeout(wait) {
                 Ok(Message::FsEvent(ev)) => {
                     fs_pending.push(ev);
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
                         })
                 }
                 Ok(Message::GitResult(r)) => {
                     git_pending.push(r);
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
+                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                            Ok(Message::Input(ev))
+                        })
+                }
+                // MVU Phase 3d: buffer the MCP request (carries its reply
+                // Sender), collapse companions, synthesize Timeout so the
+                // pre-recv MCP drain executes it + replies.
+                Ok(Message::Mcp(req)) => {
+                    mcp_pending.push(req);
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
                         })
@@ -1774,7 +1826,7 @@ impl App {
                     // synthesize Timeout so control re-enters the pre-recv
                     // drains (pane scan + capture/task drains).
                     spyc_debug!("sink wake: {tab:?}");
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
                         })
@@ -1783,7 +1835,7 @@ impl App {
                 // collapse-to-Timeout so the pre-recv drains
                 // (`drain_grep_session` / `drain_walk`) re-run.
                 Ok(Message::GrepOutput | Message::FindOutput) => {
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
                         })
@@ -2033,13 +2085,14 @@ impl App {
                 Ok(
                     Message::FsEvent(_)
                     | Message::GitResult(_)
+                    | Message::Mcp(_)
                     | Message::PaneOutput { .. }
                     | Message::SinkOutput { .. }
                     | Message::GrepOutput
                     | Message::FindOutput,
                 ) => {
                     unreachable!(
-                        "FsEvent/GitResult/PaneOutput/SinkOutput/GrepOutput/FindOutput are buffered/collapsed in the coalesce pre-step"
+                        "FsEvent/GitResult/Mcp/PaneOutput/SinkOutput/GrepOutput/FindOutput are buffered/collapsed in the coalesce pre-step"
                     )
                 }
             }
@@ -7482,12 +7535,10 @@ impl App {
     /// Wrap callers in `crate::state::with_state_root(tmp, || …)` so the
     /// history / pager-position / inventory state dir is an isolated temp.
     pub(crate) fn test_app(cwd: std::path::PathBuf) -> Self {
-        // No MCP server / git worker is spawned, so the senders drop. The
-        // harness never drives `run()`'s drain loop, and `apply` /
-        // `handle_key` don't read these receivers — a disconnected MCP
-        // channel is harmless, and `git_result_rx` is `None` (Phase 3a:
-        // `run()` is the only `.take()` site).
-        let (_mcp_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
+        // No MCP server / git worker is spawned. The harness never drives
+        // `run()`'s drain loop, and `apply` / `handle_key` don't read these
+        // receivers, so both `mcp_cmd_rx` and `git_result_rx` are `None`
+        // (Phase 3a/3d: `run()` is the only `.take()` site).
         let context_path = crate::context::context_path(&cwd);
         let mut app = Self {
             state: state::AppState::test_default(cwd),
@@ -7552,7 +7603,7 @@ impl App {
             cached_rows: Vec::new(),
             cached_rows_gen: u64::MAX,
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-            mcp_cmd_rx,
+            mcp_cmd_rx: None,
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
