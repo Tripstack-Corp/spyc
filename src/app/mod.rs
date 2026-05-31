@@ -176,7 +176,7 @@ mod streaming;
 mod tasks;
 
 use capture::PendingCapture;
-pub use effect::Effect;
+pub use effect::{ClipMsg, Effect};
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
@@ -4627,15 +4627,10 @@ impl App {
             self.state.flash_error("pane is empty");
             return Vec::new();
         }
-        match crate::clipboard::copy(&text) {
-            Ok(()) => {
-                let count = text.lines().count();
-                self.state
-                    .flash_info(format!("yanked {count} lines from pane"));
-            }
-            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
-        }
-        Vec::new()
+        vec![Effect::CopyToClipboard {
+            text,
+            ok: ClipMsg::PaneLines,
+        }]
     }
 
     /// ya — yank the full scrollback + visible screen from the active pane.
@@ -4654,15 +4649,10 @@ impl App {
             self.state.flash_error("pane scrollback is empty");
             return Vec::new();
         }
-        match crate::clipboard::copy(&text) {
-            Ok(()) => {
-                let count = text.lines().count();
-                self.state
-                    .flash_info(format!("yanked {count} lines (full scrollback)"));
-            }
-            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
-        }
-        Vec::new()
+        vec![Effect::CopyToClipboard {
+            text,
+            ok: ClipMsg::Scrollback,
+        }]
     }
 
     /// yf — yank the cursor file's absolute path to the system
@@ -4683,21 +4673,12 @@ impl App {
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        match crate::clipboard::copy(&text) {
-            Ok(()) => {
-                if paths.len() == 1 {
-                    let preview: String = text.chars().take(80).collect();
-                    let ellipsis = if text.len() > 80 { "…" } else { "" };
-                    self.state
-                        .flash_info(format!("yanked path: {preview}{ellipsis}"));
-                } else {
-                    self.state
-                        .flash_info(format!("yanked {} paths", paths.len()));
-                }
-            }
-            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
-        }
-        Vec::new()
+        let ok = if paths.len() == 1 {
+            ClipMsg::SinglePath
+        } else {
+            ClipMsg::MultiPath { count: paths.len() }
+        };
+        vec![Effect::CopyToClipboard { text, ok }]
     }
 
     /// yP — yank the last prompt the user typed into the pane.
@@ -4706,16 +4687,10 @@ impl App {
             self.state.flash_error("no prompt to yank");
             return Vec::new();
         };
-        match crate::clipboard::copy(text) {
-            Ok(()) => {
-                let preview: String = text.chars().take(60).collect();
-                let ellipsis = if text.len() > 60 { "…" } else { "" };
-                self.state
-                    .flash_info(format!("yanked prompt: {preview}{ellipsis}"));
-            }
-            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
-        }
-        Vec::new()
+        vec![Effect::CopyToClipboard {
+            text: text.clone(),
+            ok: ClipMsg::Prompt,
+        }]
     }
 
     /// Put inventory items to the current working directory.
