@@ -27,14 +27,16 @@ use crate::ui::{
 use crate::{Tui, resume_tui, suspend_tui};
 
 /// Unified message stream consumed by `App::run` (MVU Phase 1,
-/// `docs/MVU_PLAN.md`). The parkable crossterm reader feeds `Input`; the
-/// notify watcher closure feeds `FsEvent`; the git forwarder thread feeds
-/// `GitResult` (both Phase 3a); pane parser workers feed `PaneOutput`
-/// (Phase 3b). The pane poll floor is gone — the surviving 16ms floor
-/// covers only the still-polled streaming pull sources (a `!cmd` capture
-/// and a `:task N` viewer of a running task; both migrate in 3c), and
-/// `MAX_IDLE_CAP` bounds the remaining pull sources (captures/tasks 3c,
-/// MCP/finder/grep 3d).
+/// `docs/MVU_PLAN.md`). As of Phase 3d the loop is **fully event-driven** —
+/// every source wakes this one channel and `run()` blocks on `recv()` with
+/// no poll floor: the parkable crossterm reader feeds `Input` (+ `ReaderExited`
+/// on death); the notify watcher closure feeds `FsEvent`; the git forwarder
+/// feeds `GitResult` (3a); pane parser workers feed `PaneOutput` (3b); capture/
+/// task reader threads feed `SinkOutput` (3c); the MCP forwarder feeds `Mcp`
+/// and the finder/grep workers feed `FindOutput`/`GrepOutput` (3d). The only
+/// remaining timed wakes are armed `Tick` deadlines (git poll, activity
+/// rollover, capture-timer, …) — and they only SHORTEN the wait; nothing armed
+/// means an unbounded block until a real message.
 enum Message {
     /// A crossterm input event. The reader Press-filters `Key` events
     /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
@@ -92,6 +94,13 @@ enum Message {
     /// MUST NOT be dropped in coalesce (the reply Sender would strand the
     /// client). Never surfaced as `Input`.
     Mcp(crate::mcp_cmd::McpRequest),
+    /// MVU Phase 3d: the input reader thread exited (fatal read/poll error or
+    /// clean stop). Payloadless death-wake, sent AFTER `reader_done.store`
+    /// (store-then-send → the loop-top Acquire-load sees the error). With the
+    /// poll floor gone, this is what kicks a blocking `recv()`; the loop-top
+    /// `reader_done` check then exits. Collapses to a Timeout like the other
+    /// wakes; never surfaced as `Input`.
+    ReaderExited,
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
@@ -991,8 +1000,14 @@ impl App {
         if json == self.last_context_json {
             return;
         }
-        let _ = crate::context::write_context_file(&self.context_path, &ctx);
-        self.last_context_json = json;
+        // MVU Phase 3d: only advance the dedup cache when the write actually
+        // landed. If `write_context_file` fails, `last_context_json` stays
+        // behind disk, so a later identical-state mutation still writes
+        // instead of dedup-skipping into a stale file. (The 500ms cap used to
+        // mask this by re-running the debounced writer; it's gone now.)
+        if crate::context::write_context_file(&self.context_path, &ctx).is_ok() {
+            self.last_context_json = json;
+        }
     }
 
     /// Execute a writable MCP command from Claude. Runs on the main
@@ -1427,6 +1442,15 @@ impl App {
         let mut draw_reason: u8 = 3;
 
         while !self.state.should_quit {
+            // MVU Phase 3d: authoritative reader-death exit. With the poll
+            // floor gone, the loop blocks on `recv()`; the reader sends a
+            // `ReaderExited` wake on death to kick that recv, but this
+            // level-triggered check is what actually exits — it can't be
+            // consumed by `coalesce_pending` (which drops the wake), so it
+            // catches death even when the edge wake races a real message.
+            if reader_done.load(std::sync::atomic::Ordering::Acquire) {
+                return take_reader_result(&read_err);
+            }
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
             // Also force repaint when the pager opens while a pane exists,
@@ -1756,39 +1780,41 @@ impl App {
             // now wakes the channel — panes via `PaneOutput`, captures/tasks
             // via `SinkOutput`, fs/git (3a) directly. The only remaining
             // pull sources are MCP + finder/grep (3d), serviced by the
-            // `MAX_IDLE_CAP` ceiling (which also bounds reader-death latency).
-            // The cap keeps waking the loop ≤500ms, so a streaming capture's
-            // elapsed-timer title still advances (drain_pending_capture
-            // redraws only when the formatted seconds change) — no separate
-            // timer deadline is needed while the cap exists (removed in 3d).
-            const MAX_IDLE_CAP: Duration = Duration::from_millis(500);
-            // Fresh clock JUST before recv so a deadline-driven sleep lands
-            // on the deadline, not deadline + body-cost.
+            // MVU Phase 3d: the last poll (`MAX_IDLE_CAP`) is GONE — every
+            // source now wakes the channel (input, fs, git, panes, captures/
+            // tasks, MCP, finder, grep, and reader-death). The loop blocks on
+            // `recv()` when no deadline is armed; an armed deadline only
+            // SHORTENS the wait (it never lengthens it, and there's no ceiling
+            // clamp — a 1s GitPoll now drives a 1s wait, a 10s huge-tree poll a
+            // 10s wait). Fresh clock JUST before recv so a deadline-driven
+            // sleep lands on the deadline, not deadline + body-cost.
             let wait_now = std::time::Instant::now();
-            // Next armed deadline, but only if it would SHORTEN the wait
-            // (≤ the ceiling); deadlines never lengthen it. With nothing
-            // armed, the cap is the wait.
-            let wait = scheduler
-                .next()
-                .map(|when| when.saturating_duration_since(wait_now))
-                .filter(|d| *d <= MAX_IDLE_CAP)
-                .unwrap_or(MAX_IDLE_CAP)
-                .max(Duration::from_millis(1)); // anti-spin: never a zero wait
+            let wait = scheduler.next().map(|when| {
+                when.saturating_duration_since(wait_now)
+                    .max(Duration::from_millis(1))
+            });
+            let recvd = match wait {
+                // Deadline armed → bounded wait.
+                Some(d) => msg_rx.recv_timeout(d),
+                // Nothing armed → block until a real message. A dead reader
+                // can't strand the loop: it sends `ReaderExited` on death
+                // (kicking this recv), and the loop-top `reader_done` check is
+                // the authoritative exit.
+                None => msg_rx
+                    .recv()
+                    .map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected),
+            };
 
-            // MVU Phase 3a: block for the next message, then *coalesce* —
-            // buffer every immediately-available FsEvent/GitResult into the
-            // pending Vecs (drained at the top of the next iteration by the
-            // unchanged pre-recv drains) and surface only an Input (or a
-            // Tick/Timeout/Disconnected) to the dispatch match below. This
-            // collapses a watcher/git burst into a single wakeup and bounds
-            // Input latency to one iteration: a keystroke queued behind
-            // thousands of FsEvents is found by the coalesce and dispatched
-            // THIS iteration, not after thousands of one-message-per-recv
-            // passes. Input is NEVER handled inside the coalesce loop (a
-            // `PostAction::Spawn` parks the reader / re-inits the TUI), only
-            // surfaced for the arm — and the coalesce stops at the first one,
-            // so Input stays one-per-iteration and FIFO.
-            let effective = match msg_rx.recv_timeout(wait) {
+            // MVU Phase 3a: having received, *coalesce* — buffer every
+            // immediately-available FsEvent/GitResult/Mcp into the pending Vecs
+            // (drained at the top of the next iteration) and surface only an
+            // Input (or a Tick/Timeout/Disconnected) to the dispatch match.
+            // This collapses a burst into a single wakeup and bounds Input
+            // latency to one iteration. Input is NEVER handled inside the
+            // coalesce loop (a `PostAction::Spawn` parks the reader / re-inits
+            // the TUI), only surfaced for the arm — and the coalesce stops at
+            // the first one, so Input stays one-per-iteration and FIFO.
+            let effective = match recvd {
                 Ok(Message::FsEvent(ev)) => {
                     fs_pending.push(ev);
                     coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
@@ -1831,10 +1857,12 @@ impl App {
                             Ok(Message::Input(ev))
                         })
                 }
-                // MVU Phase 3d: a grep/finder wake — payloadless, same
-                // collapse-to-Timeout so the pre-recv drains
-                // (`drain_grep_session` / `drain_walk`) re-run.
-                Ok(Message::GrepOutput | Message::FindOutput) => {
+                // MVU Phase 3d: a grep/finder wake or a reader death-wake —
+                // payloadless, collapse-to-Timeout. For grep/finder the
+                // pre-recv drains re-run; for ReaderExited the synthesized
+                // Timeout re-enters the loop, where the loop-top reader_done
+                // check exits.
+                Ok(Message::GrepOutput | Message::FindOutput | Message::ReaderExited) => {
                     coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
                         .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
                             Ok(Message::Input(ev))
@@ -2089,10 +2117,11 @@ impl App {
                     | Message::PaneOutput { .. }
                     | Message::SinkOutput { .. }
                     | Message::GrepOutput
-                    | Message::FindOutput,
+                    | Message::FindOutput
+                    | Message::ReaderExited,
                 ) => {
                     unreachable!(
-                        "FsEvent/GitResult/Mcp/PaneOutput/SinkOutput/GrepOutput/FindOutput are buffered/collapsed in the coalesce pre-step"
+                        "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
                     )
                 }
             }
@@ -2167,6 +2196,17 @@ impl App {
                 );
             } else {
                 scheduler.disarm(Deadline::ActivityRollover);
+            }
+
+            // MVU Phase 3d: ~1 Hz tick for a streaming capture / `:task`
+            // viewer's elapsed-timer title — the duty `MAX_IDLE_CAP` silently
+            // covered until 3d. Armed only while such a view is live; the
+            // pre-recv `drain_pending_capture` / `refresh_task_viewer` rebuild
+            // the title on the tick (redrawing only when the seconds change).
+            if self.capture_tick_should_arm() {
+                scheduler.arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
+            } else {
+                scheduler.disarm(Deadline::CaptureTick);
             }
 
             // Only redraw when something actually changed.
@@ -7117,6 +7157,10 @@ fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> ReaderHandle {
                             Err(e) => {
                                 *read_err.lock().unwrap() = Some(e);
                                 reader_done.store(true, Release);
+                                // MVU Phase 3d death-wake: store THEN send, so
+                                // the loop-top Acquire-load sees the error. With
+                                // no poll floor, this kicks the blocking recv.
+                                let _ = tx.send(Message::ReaderExited);
                                 return;
                             }
                         },
@@ -7124,6 +7168,7 @@ fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> ReaderHandle {
                         Err(e) => {
                             *read_err.lock().unwrap() = Some(e);
                             reader_done.store(true, Release);
+                            let _ = tx.send(Message::ReaderExited); // death-wake (see above)
                             return;
                         }
                     }

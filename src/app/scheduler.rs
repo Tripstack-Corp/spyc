@@ -35,6 +35,12 @@ pub enum Deadline {
     /// Resume enter-delay (300 ms) before submitting `/resume`. Per-tab in
     /// `pending_resume_send`. PRE-recv.
     ResumeEnter,
+    /// MVU Phase 3d: ~1 Hz tick for a streaming capture / running-`:task`
+    /// viewer's elapsed-timer title. Armed only while such a view is live
+    /// (`capture_tick_should_arm`), disarmed the instant it finishes. With
+    /// `MAX_IDLE_CAP` gone (3d), nothing else wakes the loop to advance the
+    /// displayed seconds on a quiet child. POST-recv (like `ActivityRollover`).
+    CaptureTick,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only
