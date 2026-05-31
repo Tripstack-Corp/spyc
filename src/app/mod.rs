@@ -27,6 +27,20 @@ use crate::ui::{
 };
 use crate::{Tui, resume_tui, suspend_tui};
 
+/// Unified message stream consumed by `App::run` (MVU Phase 1,
+/// `docs/MVU_PLAN.md`). For now only `Input` exists — the parkable
+/// crossterm reader thread feeds it; later phases grow
+/// `FsEvent`/`PaneOutput`/`Tick`/… onto the same enum and one receiver.
+/// In Phase 1 `msg_rx` is a *separate* channel carrying input only, so
+/// the adaptive 16/100/500 poll cadence and the 16 ms typing-burst hack
+/// stay necessary and unchanged (all other sources are still polled).
+enum Message {
+    /// A crossterm input event. The reader Press-filters `Key` events
+    /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
+    /// `Mouse` pass through unchanged.
+    Input(Event),
+}
+
 /// How long to wait after spawning a restored Claude pane before
 /// typing `/resume <sid>`. Banner / version-check / MCP-auth lines
 /// can take well over a second to settle on cold starts; bumping
@@ -1212,6 +1226,27 @@ impl App {
         let mut last_input_at: Option<std::time::Instant> = None;
         const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
+        // MVU Phase 1: the parkable input reader runs on its own thread
+        // and feeds `msg_rx`; the loop `recv_timeout`s on it instead of
+        // calling `event::poll`/`event::read` directly. `reader_handle`
+        // is a run()-scoped local so its `Drop` (stop + unpark + join)
+        // tears the thread down when run() returns. All other sources
+        // (watcher, panes, tasks, MCP, git) stay polled this phase.
+        let (msg_tx, msg_rx) = mpsc::channel::<Message>();
+        let reader_handle = spawn_input_reader(msg_tx);
+        let read_err = reader_handle.read_err.clone();
+        let foreground_exec = ForegroundExec {
+            park: reader_handle.park.clone(),
+            acked: reader_handle.acked.clone(),
+            reader_done: reader_handle.reader_done.clone(),
+            reader: reader_handle
+                .handle
+                .as_ref()
+                .expect("input reader handle present")
+                .thread()
+                .clone(),
+        };
+
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /
         // parses while the user was typing. Both became unnecessary
@@ -1723,214 +1758,236 @@ impl App {
             } else {
                 500 // no pane — only user input matters
             };
-            if event::poll(Duration::from_millis(poll_ms))? {
-                needs_draw = true;
-                draw_reason = 2;
-                match event::read()? {
-                    Event::Key(key)
-                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
-                    {
-                        // Arm the typing-burst window — see the poll-ms
-                        // computation above. Cheap; just stores an
-                        // Instant.
-                        last_input_at = Some(std::time::Instant::now());
-                        // Mark the context file dirty: every keypress
-                        // is potentially a state-mutating action
-                        // (cursor move, pick toggle, chdir, etc.).
-                        // The end-of-iteration write is debounced and
-                        // serializes-then-skips when JSON is unchanged,
-                        // so a no-op keystroke (e.g. pressing keys in
-                        // a chord prefix) won't actually touch disk.
-                        self.context_dirty = true;
-                        // Throttle rapid-fire arrow keys from trackpad scroll
-                        // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
-                        if matches!(key.code, KeyCode::Up | KeyCode::Down)
-                            && key.modifiers.is_empty()
+            match msg_rx.recv_timeout(Duration::from_millis(poll_ms)) {
+                Ok(Message::Input(ev)) => {
+                    needs_draw = true;
+                    draw_reason = 2;
+                    match ev {
+                        Event::Key(key)
+                            if key.kind == KeyEventKind::Press
+                                || key.kind == KeyEventKind::Repeat =>
                         {
-                            let now = std::time::Instant::now();
-                            if let Some((prev, dir)) = self.scroll_last
-                                && dir == key.code
-                                && now.duration_since(prev).as_millis() < 40
+                            // Arm the typing-burst window — see the poll-ms
+                            // computation above. Cheap; just stores an
+                            // Instant.
+                            last_input_at = Some(std::time::Instant::now());
+                            // Mark the context file dirty: every keypress
+                            // is potentially a state-mutating action
+                            // (cursor move, pick toggle, chdir, etc.).
+                            // The end-of-iteration write is debounced and
+                            // serializes-then-skips when JSON is unchanged,
+                            // so a no-op keystroke (e.g. pressing keys in
+                            // a chord prefix) won't actually touch disk.
+                            self.context_dirty = true;
+                            // Throttle rapid-fire arrow keys from trackpad scroll
+                            // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
+                            if matches!(key.code, KeyCode::Up | KeyCode::Down)
+                                && key.modifiers.is_empty()
                             {
-                                continue;
-                            }
-                            self.scroll_last = Some((now, key.code));
-                        } else {
-                            self.scroll_last = None;
-                        }
-                        let post = self.handle_key(key)?;
-                        if let PostAction::Spawn {
-                            program,
-                            args,
-                            pause_after,
-                        } = post
-                        {
-                            run_child_in_foreground(terminal, &program, &args, pause_after)?;
-                            // Child may have clobbered our title; force a
-                            // re-emit on next draw.
-                            self.last_term_title = None;
-                            // The listing may have changed (mv, rm, chmod, etc).
-                            self.state.refresh_listing();
-                            // If we were editing a pager buffer, restore it.
-                            if let Some(ret) = self.pending_pager_return.take() {
-                                match ret {
-                                    PagerReturn::TempFile {
-                                        path,
-                                        title,
-                                        scroll,
-                                        mount,
-                                        pane_scroll,
-                                    } => {
-                                        if let Ok(content) = std::fs::read_to_string(&path) {
-                                            let lines: Vec<String> =
-                                                content.lines().map(String::from).collect();
-                                            let mut view = PagerView::new_plain(title, lines);
-                                            view.scroll = scroll;
-                                            view.saveable = true;
-                                            view.mount = mount;
-                                            view.pane_scroll = pane_scroll;
-                                            self.set_pager(view);
-                                        }
-                                        let _ = std::fs::remove_file(&path);
-                                    }
-                                    PagerReturn::SourceFile {
-                                        path,
-                                        scroll,
-                                        mount,
-                                        pane_scroll,
-                                    } => {
-                                        // Reuse `build_pager_view_for_file` so a
-                                        // markdown file edited via `v` re-renders
-                                        // on return. Reported by JRob: open a .md
-                                        // (rendered), `v` to edit, quit $EDITOR —
-                                        // file came back as plain text with no
-                                        // `m`-toggle (the inline rebuild here used
-                                        // `PagerView::new_plain` and skipped the
-                                        // markdown / alt_lines branch entirely).
-                                        if let Some(mut view) =
-                                            self.build_pager_view_for_file(&path)
-                                        {
-                                            // Override the position restored from
-                                            // the per-file cache with the scroll
-                                            // we explicitly stashed before
-                                            // launching $EDITOR — it's the more
-                                            // recent intent for this round-trip.
-                                            view.scroll = scroll;
-                                            view.mount = mount;
-                                            view.pane_scroll = pane_scroll;
-                                            self.set_pager(view);
-                                        }
-                                    }
+                                let now = std::time::Instant::now();
+                                if let Some((prev, dir)) = self.scroll_last
+                                    && dir == key.code
+                                    && now.duration_since(prev).as_millis() < 40
+                                {
+                                    continue;
                                 }
-                            }
-                        }
-                    }
-                    Event::Paste(text) => {
-                        if crate::key_trace::is_enabled() {
-                            crate::key_trace::log(&format!(
-                                "RX paste len={} pane_focused={} mode={:?}",
-                                text.len(),
-                                self.state.pane_focused(),
-                                std::mem::discriminant(&self.state.mode),
-                            ));
-                        }
-                        if let Mode::Prompting(ref mut p) = self.state.mode {
-                            // Paste into the active prompt buffer.
-                            // Strip newlines (prompts are single-line).
-                            let clean = text.replace(['\n', '\r'], " ");
-                            if let Some(ed) = p.editor.as_mut() {
-                                // Editor present (`!` / `;` / `:`): splice
-                                // at the cursor so a mid-line paste lands
-                                // where the user is, then sync the
-                                // canonical buffer from the editor.
-                                ed.insert_str(&clean);
-                                p.buffer = ed.text();
+                                self.scroll_last = Some((now, key.code));
                             } else {
-                                // Simple prompt (search, mkdir, etc.) --
-                                // no cursor concept, append.
-                                p.buffer.push_str(&clean);
+                                self.scroll_last = None;
                             }
-                        } else if let Some(overlay) = self
-                            .top_overlay
-                            .as_mut()
-                            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused()))
-                        {
-                            // `V`/`D` top-overlay is the foreground
-                            // subprocess (editor or pager). Route the
-                            // paste to it rather than the bottom pane.
-                            // Bottom pane only wins when the user has
-                            // explicitly focused it (`^a-j`); without
-                            // this guard, pasting into `V`-launched
-                            // $EDITOR sent the text to claude in the
-                            // bottom pane *and* yanked focus there
-                            // — losing the paste *and* the editor
-                            // session. Do not steal focus here:
-                            // they're typing into the editor.
-                            let mut buf = Vec::with_capacity(text.len() + 12);
-                            buf.extend_from_slice(b"\x1b[200~");
-                            buf.extend_from_slice(text.as_bytes());
-                            buf.extend_from_slice(b"\x1b[201~");
-                            overlay.send_bytes(&buf)?;
-                        } else if self.pane_tabs.is_some() {
-                            // Switch focus to the pane — the user clearly
-                            // intends to interact with it if they're pasting.
-                            if !self.state.pane_focused() {
-                                self.set_pane_focus(true);
-                            }
-                            // Track pasted text for yP (yank last prompt).
-                            self.pane_prompt_buf.push_str(&text);
-                            // Wrap in bracketed paste so the child app (e.g. claude)
-                            // receives the block as a single paste, not line-by-line.
-                            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
-                            let mut buf = Vec::with_capacity(text.len() + 12);
-                            buf.extend_from_slice(b"\x1b[200~");
-                            buf.extend_from_slice(text.as_bytes());
-                            buf.extend_from_slice(b"\x1b[201~");
-                            pane.send_bytes(&buf)?;
-                        } else {
-                            // No prompt and no pane — there's nowhere
-                            // sensible to send the paste. Some terminals
-                            // wrap rapid-fire keystrokes in bracketed
-                            // paste sequences, so silently dropping
-                            // could swallow real input. Flash a hint so
-                            // the user knows it happened.
-                            let n = text.chars().count();
-                            self.state.flash_info(format!(
-                                "paste ignored ({n} chars) — open `:` or `^\\` to paste"
-                            ));
-                        }
-                    }
-                    Event::Resize(cols, rows) => {
-                        // Terminal resized — immediately resize all pty tabs
-                        // so the child shells re-render their prompts at the
-                        // correct width.
-                        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
-                        let pane_pct = self.effective_pane_pct();
-                        if let Some(tabs) = self.pane_tabs.as_mut() {
-                            let layout = Self::compute_layout(
-                                area,
-                                true,
-                                pane_pct,
-                                self.state.config.layout.status_position,
-                            );
-                            if let Some(pane_rect) = layout.pane {
-                                for entry in tabs.tabs_mut() {
-                                    let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
+                            let post = self.handle_key(key)?;
+                            if let PostAction::Spawn {
+                                program,
+                                args,
+                                pause_after,
+                            } = post
+                            {
+                                foreground_exec.run(terminal, &program, &args, pause_after)?;
+                                // Child may have clobbered our title; force a
+                                // re-emit on next draw.
+                                self.last_term_title = None;
+                                // The listing may have changed (mv, rm, chmod, etc).
+                                self.state.refresh_listing();
+                                // If we were editing a pager buffer, restore it.
+                                if let Some(ret) = self.pending_pager_return.take() {
+                                    match ret {
+                                        PagerReturn::TempFile {
+                                            path,
+                                            title,
+                                            scroll,
+                                            mount,
+                                            pane_scroll,
+                                        } => {
+                                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                                let lines: Vec<String> =
+                                                    content.lines().map(String::from).collect();
+                                                let mut view = PagerView::new_plain(title, lines);
+                                                view.scroll = scroll;
+                                                view.saveable = true;
+                                                view.mount = mount;
+                                                view.pane_scroll = pane_scroll;
+                                                self.set_pager(view);
+                                            }
+                                            let _ = std::fs::remove_file(&path);
+                                        }
+                                        PagerReturn::SourceFile {
+                                            path,
+                                            scroll,
+                                            mount,
+                                            pane_scroll,
+                                        } => {
+                                            // Reuse `build_pager_view_for_file` so a
+                                            // markdown file edited via `v` re-renders
+                                            // on return. Reported by JRob: open a .md
+                                            // (rendered), `v` to edit, quit $EDITOR —
+                                            // file came back as plain text with no
+                                            // `m`-toggle (the inline rebuild here used
+                                            // `PagerView::new_plain` and skipped the
+                                            // markdown / alt_lines branch entirely).
+                                            if let Some(mut view) =
+                                                self.build_pager_view_for_file(&path)
+                                            {
+                                                // Override the position restored from
+                                                // the per-file cache with the scroll
+                                                // we explicitly stashed before
+                                                // launching $EDITOR — it's the more
+                                                // recent intent for this round-trip.
+                                                view.scroll = scroll;
+                                                view.mount = mount;
+                                                view.pane_scroll = pane_scroll;
+                                                self.set_pager(view);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                        if let Some(overlay) = self.top_overlay.as_mut() {
-                            let (r, c) = Self::top_overlay_size(pane_pct, self.pane_tabs.is_some());
-                            let _ = overlay.resize(r, c);
+                        Event::Paste(text) => {
+                            if crate::key_trace::is_enabled() {
+                                crate::key_trace::log(&format!(
+                                    "RX paste len={} pane_focused={} mode={:?}",
+                                    text.len(),
+                                    self.state.pane_focused(),
+                                    std::mem::discriminant(&self.state.mode),
+                                ));
+                            }
+                            if let Mode::Prompting(ref mut p) = self.state.mode {
+                                // Paste into the active prompt buffer.
+                                // Strip newlines (prompts are single-line).
+                                let clean = text.replace(['\n', '\r'], " ");
+                                if let Some(ed) = p.editor.as_mut() {
+                                    // Editor present (`!` / `;` / `:`): splice
+                                    // at the cursor so a mid-line paste lands
+                                    // where the user is, then sync the
+                                    // canonical buffer from the editor.
+                                    ed.insert_str(&clean);
+                                    p.buffer = ed.text();
+                                } else {
+                                    // Simple prompt (search, mkdir, etc.) --
+                                    // no cursor concept, append.
+                                    p.buffer.push_str(&clean);
+                                }
+                            } else if let Some(overlay) = self.top_overlay.as_mut().filter(|_| {
+                                !(self.pane_tabs.is_some() && self.state.pane_focused())
+                            }) {
+                                // `V`/`D` top-overlay is the foreground
+                                // subprocess (editor or pager). Route the
+                                // paste to it rather than the bottom pane.
+                                // Bottom pane only wins when the user has
+                                // explicitly focused it (`^a-j`); without
+                                // this guard, pasting into `V`-launched
+                                // $EDITOR sent the text to claude in the
+                                // bottom pane *and* yanked focus there
+                                // — losing the paste *and* the editor
+                                // session. Do not steal focus here:
+                                // they're typing into the editor.
+                                let mut buf = Vec::with_capacity(text.len() + 12);
+                                buf.extend_from_slice(b"\x1b[200~");
+                                buf.extend_from_slice(text.as_bytes());
+                                buf.extend_from_slice(b"\x1b[201~");
+                                overlay.send_bytes(&buf)?;
+                            } else if self.pane_tabs.is_some() {
+                                // Switch focus to the pane — the user clearly
+                                // intends to interact with it if they're pasting.
+                                if !self.state.pane_focused() {
+                                    self.set_pane_focus(true);
+                                }
+                                // Track pasted text for yP (yank last prompt).
+                                self.pane_prompt_buf.push_str(&text);
+                                // Wrap in bracketed paste so the child app (e.g. claude)
+                                // receives the block as a single paste, not line-by-line.
+                                let pane = self.pane_tabs.as_mut().unwrap().active_mut();
+                                let mut buf = Vec::with_capacity(text.len() + 12);
+                                buf.extend_from_slice(b"\x1b[200~");
+                                buf.extend_from_slice(text.as_bytes());
+                                buf.extend_from_slice(b"\x1b[201~");
+                                pane.send_bytes(&buf)?;
+                            } else {
+                                // No prompt and no pane — there's nowhere
+                                // sensible to send the paste. Some terminals
+                                // wrap rapid-fire keystrokes in bracketed
+                                // paste sequences, so silently dropping
+                                // could swallow real input. Flash a hint so
+                                // the user knows it happened.
+                                let n = text.chars().count();
+                                self.state.flash_info(format!(
+                                    "paste ignored ({n} chars) — open `:` or `^\\` to paste"
+                                ));
+                            }
                         }
-                        // Help content is baked at open time for the current
-                        // width (wrap points, column count). Rebuild so the
-                        // layout matches the new dimensions.
-                        if self.help_is_open() {
-                            self.open_help();
+                        Event::Resize(cols, rows) => {
+                            // Terminal resized — immediately resize all pty tabs
+                            // so the child shells re-render their prompts at the
+                            // correct width.
+                            let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+                            let pane_pct = self.effective_pane_pct();
+                            if let Some(tabs) = self.pane_tabs.as_mut() {
+                                let layout = Self::compute_layout(
+                                    area,
+                                    true,
+                                    pane_pct,
+                                    self.state.config.layout.status_position,
+                                );
+                                if let Some(pane_rect) = layout.pane {
+                                    for entry in tabs.tabs_mut() {
+                                        let _ =
+                                            entry.pane.resize(pane_rect.height, pane_rect.width);
+                                    }
+                                }
+                            }
+                            if let Some(overlay) = self.top_overlay.as_mut() {
+                                let (r, c) =
+                                    Self::top_overlay_size(pane_pct, self.pane_tabs.is_some());
+                                let _ = overlay.resize(r, c);
+                            }
+                            // Help content is baked at open time for the current
+                            // width (wrap points, column count). Rebuild so the
+                            // layout matches the new dimensions.
+                            if self.help_is_open() {
+                                self.open_help();
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Formerly `event::poll(...) == false`: no input this
+                    // tick. Fall through to re-poll the still-polled
+                    // sources; no draw (matches poll==false).
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    // Reader thread exited. Preserve the prior
+                    // `event::read()?` error contract: propagate a
+                    // recorded fatal poll/read error; a clean stop (tx
+                    // dropped at teardown) ends the loop cleanly.
+                    // Take into a local so the mutex guard is dropped
+                    // before the branch (clippy: significant-drop in
+                    // if-let scrutinee).
+                    let fatal = read_err.lock().unwrap().take();
+                    if let Some(e) = fatal {
+                        return Err(e.into());
+                    }
+                    return Ok(());
                 }
             }
 
@@ -6854,6 +6911,270 @@ fn sh_c(cmd: &str, pause_after: bool) -> PostAction {
         program: "sh".to_string(),
         args: vec!["-c".to_string(), cmd.to_string()],
         pause_after,
+    }
+}
+
+/// Owns the parkable crossterm input-reader thread (MVU Phase 1). The
+/// reader becomes the SOLE caller of `event::poll`/`event::read`. Modeled
+/// on `ParserWorker` (src/pane/mod.rs): a stop flag set on `Drop`, then
+/// `unpark` + `join`. See `docs/MVU_PLAN.md` Phase 1 for the
+/// park/ack/drain handshake the executor below relies on.
+struct ReaderHandle {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    park: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    acked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reader_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    read_err: std::sync::Arc<std::sync::Mutex<Option<std::io::Error>>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for ReaderHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        if let Some(h) = self.handle.take() {
+            h.thread().unpark(); // in case it's parked
+            let _ = h.join();
+        }
+    }
+}
+
+/// Spawn the parkable input reader. It uses a FINITE `event::poll(10ms)`
+/// loop — never a bare `event::read()`, which would pin crossterm's
+/// process-global reader mutex indefinitely — so a parked reader holds
+/// no lock and issues no tty read, leaving a foreground child's stdin
+/// uncontended. On park it drains crossterm's buffered events to empty
+/// (dropping them) BEFORE acking, so nothing is stranded across the
+/// child's tty ownership.
+fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> ReaderHandle {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::{Acquire, Release};
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let park = Arc::new(AtomicBool::new(false));
+    let acked = Arc::new(AtomicBool::new(false));
+    let reader_done = Arc::new(AtomicBool::new(false));
+    let read_err = Arc::new(std::sync::Mutex::new(None));
+
+    let handle = {
+        let stop = stop.clone();
+        let park = park.clone();
+        let acked = acked.clone();
+        let reader_done = reader_done.clone();
+        let read_err = read_err.clone();
+        std::thread::Builder::new()
+            .name("spyc-input-reader".to_string())
+            .spawn(move || {
+                // Park-latency bound — NOT the loop cadence. 10ms <= the
+                // 16ms typing tier, so input still surfaces within one
+                // main-loop tick.
+                const READER_POLL: Duration = Duration::from_millis(10);
+                loop {
+                    if stop.load(Acquire) {
+                        reader_done.store(true, Release);
+                        return;
+                    }
+                    if park.load(Acquire) {
+                        // Reached only at loop top, i.e. AFTER any poll/read
+                        // returned: we hold no crossterm lock and issue no
+                        // tty read. Drain buffered events to empty (dropped)
+                        // so none is stranded across the child's tty
+                        // ownership, then ack and park. Spurious unparks are
+                        // safe — the loop top re-checks `park`.
+                        while matches!(event::poll(Duration::ZERO), Ok(true)) {
+                            if event::read().is_err() {
+                                break;
+                            }
+                        }
+                        acked.store(true, Release);
+                        std::thread::park();
+                        continue;
+                    }
+                    match event::poll(READER_POLL) {
+                        Ok(true) => match event::read() {
+                            Ok(ev) => {
+                                // Press-filter for Key (verbatim from the
+                                // old inline guard); everything else
+                                // (Paste/Resize/Focus/Mouse) forwarded.
+                                let forward = match &ev {
+                                    Event::Key(k) => {
+                                        k.kind == KeyEventKind::Press
+                                            || k.kind == KeyEventKind::Repeat
+                                    }
+                                    _ => true,
+                                };
+                                if forward && tx.send(Message::Input(ev)).is_err() {
+                                    reader_done.store(true, Release); // main loop gone
+                                    return;
+                                }
+                            }
+                            Err(e) => {
+                                *read_err.lock().unwrap() = Some(e);
+                                reader_done.store(true, Release);
+                                return;
+                            }
+                        },
+                        Ok(false) => {} // poll timeout — re-check stop/park
+                        Err(e) => {
+                            *read_err.lock().unwrap() = Some(e);
+                            reader_done.store(true, Release);
+                            return;
+                        }
+                    }
+                }
+            })
+            .expect("spawn spyc-input-reader thread")
+    };
+
+    ReaderHandle {
+        stop,
+        park,
+        acked,
+        reader_done,
+        read_err,
+        handle: Some(handle),
+    }
+}
+
+/// Parking-aware wrapper around `run_child_in_foreground` (MVU Phase 1).
+/// Synchronously parks + acks + drains the input reader BEFORE the child
+/// takes the tty, and re-arms it after — so only the child reads stdin
+/// during the takeover (no keystroke leakage either direction).
+struct ForegroundExec {
+    park: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    acked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reader_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reader: std::thread::Thread,
+}
+
+impl ForegroundExec {
+    /// Quiesce the reader: clear any stale ack, request park, then wait
+    /// (bounded, ~200 ms) for the ack — at which point the reader has
+    /// returned from poll/read AND drained crossterm's buffers, so the
+    /// tty is clean for the child. Returns early if the reader has
+    /// already exited (`reader_done`). Bounded so a descheduled reader
+    /// can't freeze the UI on an editor/pager launch.
+    fn park_and_wait(&self) {
+        use std::sync::atomic::Ordering::{Acquire, Release};
+        self.acked.store(false, Release);
+        self.park.store(true, Release);
+        let deadline = std::time::Instant::now() + Duration::from_millis(200);
+        while !self.acked.load(Acquire) {
+            if self.reader_done.load(Acquire) {
+                break; // reader exited — provably not reading the tty
+            }
+            if std::time::Instant::now() >= deadline {
+                spyc_debug!("FG park ack timed out; proceeding");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Re-arm the reader after the child returns (clear park BEFORE
+    /// unpark — ordering matters so a spurious wake can't strand it).
+    fn unpark_reader(&self) {
+        self.park.store(false, std::sync::atomic::Ordering::Release);
+        self.reader.unpark();
+    }
+
+    fn run(
+        &self,
+        terminal: &mut Tui,
+        program: &str,
+        args: &[String],
+        pause_after: bool,
+    ) -> Result<()> {
+        self.park_and_wait();
+        // The existing takeover, byte-for-byte unchanged.
+        let r = run_child_in_foreground(terminal, program, args, pause_after);
+        self.unpark_reader();
+        r
+    }
+}
+
+#[cfg(test)]
+mod foreground_exec_tests {
+    use super::ForegroundExec;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::{Acquire, Release};
+    use std::time::{Duration, Instant};
+
+    /// The ForegroundExec park handshake acks (proving the reader
+    /// quiesced before a child would take the tty) and a second cycle
+    /// re-acks (proving unpark resumed the parked reader). Driven by a
+    /// stub reader mirroring the real reader's park branch — CI-safe, no
+    /// tty / no App::run.
+    #[test]
+    fn park_handshake_acks_and_resumes() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let park = Arc::new(AtomicBool::new(false));
+        let acked = Arc::new(AtomicBool::new(false));
+        let reader_done = Arc::new(AtomicBool::new(false));
+        let handle = {
+            let (stop, park, acked) = (stop.clone(), park.clone(), acked.clone());
+            std::thread::spawn(move || {
+                loop {
+                    if stop.load(Acquire) {
+                        return;
+                    }
+                    if park.load(Acquire) {
+                        acked.store(true, Release);
+                        std::thread::park();
+                        continue;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+        let fe = ForegroundExec {
+            park,
+            acked: acked.clone(),
+            reader_done,
+            reader: handle.thread().clone(),
+        };
+
+        fe.park_and_wait();
+        assert!(acked.load(Acquire), "reader should ack the park");
+
+        fe.unpark_reader();
+        fe.park_and_wait();
+        assert!(acked.load(Acquire), "reader should re-ack after unpark");
+
+        stop.store(true, Release);
+        handle.thread().unpark();
+        let _ = handle.join();
+    }
+
+    /// `park_and_wait` short-circuits (does not burn the full ~200 ms
+    /// deadline) when the reader has already exited, and records no ack.
+    #[test]
+    fn wait_short_circuits_on_reader_done() {
+        let park = Arc::new(AtomicBool::new(false));
+        let acked = Arc::new(AtomicBool::new(false));
+        let reader_done = Arc::new(AtomicBool::new(true)); // already exited
+        let dummy = std::thread::spawn(std::thread::park);
+        let fe = ForegroundExec {
+            park,
+            acked: acked.clone(),
+            reader_done,
+            reader: dummy.thread().clone(),
+        };
+
+        let start = Instant::now();
+        fe.park_and_wait();
+        assert!(
+            start.elapsed() < Duration::from_millis(150),
+            "must short-circuit on reader_done, not wait the full deadline"
+        );
+        assert!(
+            !acked.load(Acquire),
+            "no ack when the reader is already done"
+        );
+
+        dummy.thread().unpark();
+        let _ = dummy.join();
     }
 }
 

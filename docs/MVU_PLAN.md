@@ -254,10 +254,19 @@ seam). Four classes by execution discipline:
   today's `PostAction::Spawn` made complete. **Precondition**: the executor
   must **park the crossterm reader** across the takeover (reader + foreground
   child would otherwise both read the controlling-tty stdin and steal
-  keystrokes). Sequence: park+**ack** reader (interruptible mid-read via
-  self-pipe) → `suspend_tui` → spawn FG process-group → `tcsetpgrp` → wait →
-  restore → optional read-key → `resume_tui` → unpark → feed back
-  `ForegroundDone`. This parking machinery is a **Phase-1** precondition.
+  keystrokes). Sequence: park+**ack**+drain reader → `suspend_tui` → spawn FG
+  process-group → `tcsetpgrp` → wait → restore → optional read-key →
+  `resume_tui` → unpark → feed back `ForegroundDone`. This parking machinery
+  is a **Phase-1** precondition. **Mechanism (resolved when Phase 1 shipped):
+  NOT a self-pipe.** crossterm 0.28 has no public mid-read interrupt (the mio
+  `Waker` is `event-stream`-only, not in our feature set), and a bare
+  `event::read()` pins crossterm's process-global reader mutex via an
+  infinite-timeout poll. So the reader loops on `event::poll(10ms)` (finite —
+  uses `try_lock`, so a parked reader holds no lock and issues no tty read)
+  and checks a park flag between polls; on park it drains crossterm's buffered
+  events to empty (dropping them) before a synchronous, bounded ack. Park
+  lands within ~one poll interval. (Done — `spawn_input_reader`/`ForegroundExec`
+  in `src/app/mod.rs`.)
 - **(C) Synchronous-ordered** (executor-only, blocking, run inline before the
   next Message): `WriteContextSync` for the MCP read-after-write contract — the
   MCP path emits an ordered `[WriteContextSync, McpReply]` so the atomic write
@@ -441,8 +450,10 @@ incrementalism, scope-honesty); all returned viable after these were folded in.
   render takes `&runtime`; the 3 pane-reading arms source text from the Model
   `PaneSnapshot`. The "render never touches Runtime" claim is dropped.
 - **Stdin contention.** The always-on reader + `ForegroundExec` would both read
-  the tty. → Parkable reader with a roundtrip ack (interruptible via self-pipe);
-  parking is a Phase-1 precondition, not deferred.
+  the tty. → Parkable reader with a synchronous bounded ack + buffer drain
+  (finite-`poll(10ms)` + park-flag, **not** a self-pipe — crossterm 0.28 has no
+  mid-read interrupt); parking is a Phase-1 precondition, not deferred. **Done
+  in Phase 1.**
 - **Pane-visibility regression.** The 100ms idle poll is load-bearing. → Phase 2
   keeps a `PANE_IDLE_FLOOR`; the floor + 16ms hack are deleted together only in
   3b-PR2 after the wakeup tests soak.
