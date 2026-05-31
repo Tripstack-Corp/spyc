@@ -1698,40 +1698,28 @@ impl App {
                 }
             }
 
-            // MVU Phase 3b PR2: panes + overlays now wake the loop via
-            // `Message::PaneOutput`, so the old 16ms typing-burst hack and
-            // the 100ms idle-pane floor are GONE — the first PTY echo after a
-            // keystroke and ongoing streaming both arrive on the channel. A
-            // 16ms floor survives ONLY for the still-polled streaming pull
-            // sources (see `streaming_floor_active`); everything else relies
-            // on the channel wake + MAX_IDLE_CAP.
-            let floor: Option<Duration> = if self.streaming_floor_active() {
-                Some(Duration::from_millis(16))
-            } else {
-                None
-            };
-            // Universal pull-source ceiling: captures/tasks (3c) and MCP/
-            // finder/grep (3d) still have no channel wakeup, so never sleep
-            // longer than this (also bounds reader-death detection latency).
+            // MVU Phase 3c: the last poll floor is GONE. Every event source
+            // now wakes the channel — panes via `PaneOutput`, captures/tasks
+            // via `SinkOutput`, fs/git (3a) directly. The only remaining
+            // pull sources are MCP + finder/grep (3d), serviced by the
+            // `MAX_IDLE_CAP` ceiling (which also bounds reader-death latency).
+            // The cap keeps waking the loop ≤500ms, so a streaming capture's
+            // elapsed-timer title still advances (drain_pending_capture
+            // redraws only when the formatted seconds change) — no separate
+            // timer deadline is needed while the cap exists (removed in 3d).
             const MAX_IDLE_CAP: Duration = Duration::from_millis(500);
             // Fresh clock JUST before recv so a deadline-driven sleep lands
             // on the deadline, not deadline + body-cost.
             let wait_now = std::time::Instant::now();
             // Next armed deadline, but only if it would SHORTEN the wait
-            // (≤ the ceiling); deadlines never lengthen it.
-            let to_deadline = scheduler
+            // (≤ the ceiling); deadlines never lengthen it. With nothing
+            // armed, the cap is the wait.
+            let wait = scheduler
                 .next()
                 .map(|when| when.saturating_duration_since(wait_now))
-                .filter(|d| *d <= MAX_IDLE_CAP);
-            // Floor is a lower bound on poll frequency (upper bound on the
-            // wait when a pane is present); the deadline can only tighten it.
-            let wait = match (floor, to_deadline) {
-                (Some(f), Some(d)) => f.min(d),
-                (Some(f), None) => f,
-                (None, Some(d)) => d,
-                (None, None) => MAX_IDLE_CAP,
-            }
-            .max(Duration::from_millis(1)); // anti-spin: never a zero wait
+                .filter(|d| *d <= MAX_IDLE_CAP)
+                .unwrap_or(MAX_IDLE_CAP)
+                .max(Duration::from_millis(1)); // anti-spin: never a zero wait
 
             // MVU Phase 3a: block for the next message, then *coalesce* —
             // buffer every immediately-available FsEvent/GitResult into the
@@ -3595,8 +3583,11 @@ impl App {
                 // MVU Phase 3c: install the capture's channel wake (a generic
                 // SinkOutput edge — the loop re-scans on it). Survives the
                 // ^Z/:fg round-trip with the host, so no re-install there.
+                // Self-wake sweeps any bytes that landed during the install
+                // window now the floor is gone.
                 let wake = self.make_sink_wake();
                 host.set_wake(wake);
+                host.fire_wake_now();
                 let mut view =
                     PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
                 view.streaming = true;
@@ -3888,14 +3879,29 @@ impl App {
             return;
         };
         let TabEntry { pane, info, .. } = entry;
+        // MVU Phase 3c PR3: refuse to demote an already-exited pane. Its
+        // reader thread has already returned, so the resulting task would
+        // never wake or finalize — and with the poll floor gone, nothing
+        // would ever flip it out of `Running` (a stuck, invisible task).
+        // The tab's already been taken, so dropping `pane` here closes it.
+        if pane.is_closed() {
+            self.state.flash_info("pane already exited — closed it");
+            if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
+                self.pane_tabs = None;
+                self.state.focus = state::Focus::FileList;
+            }
+            return;
+        }
         // Stop the parser worker and reclaim the byte receiver so
         // the background task's drain still sees raw bytes.
         let host = pane.take_host();
         // MVU Phase 3c: a pane host carries no sink wake (the pane woke via
         // its now-stopped parser worker), so install one for the task — its
         // reader thread is still alive and will fire SinkOutput on bytes/EOF.
+        // Self-wake sweeps any bytes delivered during the install window.
         let wake = self.make_sink_wake();
         host.set_wake(wake);
+        host.fire_wake_now();
         // If we just took the last tab, drop the container so
         // layout / status / focus revert to "no pane open" state.
         if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
