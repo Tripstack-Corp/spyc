@@ -17,7 +17,7 @@ use crate::state::{Cursor, Frecency, History, IgnoreMasks, Inventory, Mark, Mark
 use crate::ui::list_view::Grid;
 
 use super::{
-    FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt, PromptKind, RowData, View,
+    Effect, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt, PromptKind, RowData, View,
     row_from_entry,
 };
 
@@ -56,8 +56,9 @@ pub enum ApplyResult {
     Handled,
     /// Open a pager with these contents.
     OpenPager(PagerRequest),
-    /// Return this `PostAction` to the event loop (e.g. `Spawn` for `$SHELL`).
-    Post(PostAction),
+    /// Effects for the event loop to execute (e.g. a `ForegroundExec`
+    /// for `$SHELL`). Empty == nothing to do.
+    Post(Vec<Effect>),
     /// Caller must handle this action (terminal-touching).
     NotHandled,
 }
@@ -1359,11 +1360,14 @@ impl AppState {
             }
             Action::StartShell => {
                 let sh = crate::envset::var("SHELL").unwrap_or_else(|| "/bin/sh".into());
-                return ApplyResult::Post(PostAction::Spawn {
-                    program: sh,
-                    args: vec![],
-                    pause_after: false,
-                });
+                return ApplyResult::Post(
+                    PostAction::Spawn {
+                        program: sh,
+                        args: vec![],
+                        pause_after: false,
+                    }
+                    .into(),
+                );
             }
 
             // -- Search --
@@ -1529,7 +1533,7 @@ impl AppState {
                 let paths = self.selection_paths();
                 if paths.is_empty() {
                     self.cursor.clamp(self.rows.len());
-                    return ApplyResult::Post(PostAction::None);
+                    return ApplyResult::Post(Vec::new());
                 }
                 if paths.len() == 1 {
                     let label = fs::ops::file_type_label(paths[0]);
@@ -3239,7 +3243,7 @@ mod tests {
         let result = s.apply(&Action::StartShell);
         assert!(matches!(
             result,
-            ApplyResult::Post(PostAction::Spawn { .. })
+            ApplyResult::Post(ref e) if matches!(e.as_slice(), [Effect::ForegroundExec { .. }])
         ));
     }
 

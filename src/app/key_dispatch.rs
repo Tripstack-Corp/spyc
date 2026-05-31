@@ -26,12 +26,12 @@ use crate::state::History;
 
 use super::route;
 use super::{
-    App, HistoryBucket, Mode, POST_CHORD_BOUNCE_WINDOW, PostAction, Prompt, PromptKind, View,
+    App, Effect, HistoryBucket, Mode, POST_CHORD_BOUNCE_WINDOW, Prompt, PromptKind, View,
     history_bucket_for, is_path_prompt_kind, is_post_chord_bounce, sh_c, strip_ansi_escapes,
 };
 
 impl App {
-    pub fn handle_key(&mut self, key: KeyEvent) -> Result<PostAction> {
+    pub fn handle_key(&mut self, key: KeyEvent) -> Result<Vec<Effect>> {
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
         // Captures the input as it arrives so a user reproducing an
         // "input doesn't work" issue can ship a log. We re-trace the
@@ -65,7 +65,7 @@ impl App {
             self.state.resolver.is_pending(),
         ) {
             crate::key_trace::log("  swallowed (post-chord bounce)");
-            return Ok(PostAction::None);
+            return Ok(Vec::new());
         }
         // Expire the stamp once its window has passed so it can't
         // suppress a deliberate same-key press later.
@@ -84,7 +84,7 @@ impl App {
         // before the capture / pager / file-list dispatch so the
         // picker can't be accidentally double-routed.
         if self.handle_find_picker_key(key) {
-            return Ok(PostAction::None);
+            return Ok(Vec::new());
         }
 
         // ^C is intentionally a no-op at the spyc-normal level (we
@@ -121,7 +121,7 @@ impl App {
             self.state.flash_info(
                 "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",
             );
-            return Ok(PostAction::None);
+            return Ok(Vec::new());
         }
 
         // While a `!` capture is running, forward typed keys to the
@@ -155,7 +155,7 @@ impl App {
                 // capture that's already gone.
                 capture.host.clear_wake_slot();
                 self.pending_capture = None;
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             // ^Z: send to background. Reader thread keeps draining; the
             // pager closes; user can resume with `:fg`.
@@ -163,14 +163,14 @@ impl App {
                 && key.modifiers.contains(KeyModifiers::CONTROL)
             {
                 self.background_capture();
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             let bytes = crate::pane::input::encode_key(key);
             if !bytes.is_empty() {
                 let _ = capture.host.writer.write_all(&bytes);
                 let _ = capture.host.writer.flush();
             }
-            return Ok(PostAction::None);
+            return Ok(Vec::new());
         }
 
         // Top overlay: once the subprocess exits, hold the screen until
@@ -180,7 +180,7 @@ impl App {
             self.overlay_awaiting_dismiss = false;
             self.needs_full_repaint = true;
             self.state.flash_info("command finished");
-            return Ok(PostAction::None);
+            return Ok(Vec::new());
         }
 
         // Quick Select picker eats all keys until dismissed.
@@ -210,7 +210,7 @@ impl App {
                 if let Some(overlay) = self.top_overlay.as_mut() {
                     let _ = overlay.send_key(key);
                 }
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             route::KeyDestination::PagerKey => {
                 return Ok(self.handle_pager_key(key));
@@ -221,7 +221,7 @@ impl App {
             route::KeyDestination::PaneExitedFlash => {
                 self.state
                     .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             route::KeyDestination::BottomPane => {
                 // Track what the user types so `yP` can yank the
@@ -248,7 +248,7 @@ impl App {
                 if let Some(tabs) = self.pane_tabs.as_mut() {
                     let _ = tabs.active_mut().send_key(key);
                 }
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             route::KeyDestination::Prompt => {
                 return Ok(self.handle_prompt_key(key));
@@ -263,17 +263,17 @@ impl App {
             match key.code {
                 KeyCode::Esc => {
                     self.state.toggle_inventory_view();
-                    return Ok(PostAction::None);
+                    return Ok(Vec::new());
                 }
                 KeyCode::Char('x' | 'd') => {
                     self.state.drop_cursor();
-                    return Ok(PostAction::None);
+                    return Ok(Vec::new());
                 }
                 KeyCode::Char(' ' | 't') => {
                     self.state.inventory.toggle_pick(self.state.cursor.index);
                     self.state.list_generation = self.state.list_generation.wrapping_add(1);
                     self.state.cursor_move_vertical(1, self.state.rows.len());
-                    return Ok(PostAction::None);
+                    return Ok(Vec::new());
                 }
                 KeyCode::Char('p') => {
                     return Ok(self.put_inventory_to_cwd());
@@ -305,13 +305,13 @@ impl App {
             ResolverOutcome::User(bound) => return self.apply_user(&bound),
             ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
         }
-        Ok(PostAction::None)
+        Ok(Vec::new())
     }
 
     /// Dispatch a user-defined binding. Inline-data actions (unix command,
     /// preset pattern, preset path) run through the same machinery as the
     /// built-in prompts but skip the prompt UI.
-    fn apply_user(&mut self, bound: &BoundAction) -> Result<PostAction> {
+    fn apply_user(&mut self, bound: &BoundAction) -> Result<Vec<Effect>> {
         match bound {
             BoundAction::Plain(action) => return self.apply(action),
             BoundAction::UnixCmd(template) => {
@@ -347,10 +347,10 @@ impl App {
             }
         }
         self.state.cursor.clamp(self.state.rows.len());
-        Ok(PostAction::None)
+        Ok(Vec::new())
     }
 
-    fn handle_prompt_key(&mut self, key: KeyEvent) -> PostAction {
+    fn handle_prompt_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         // Single-key confirm prompts: `y` / `Y` proceeds, anything else cancels.
         if matches!(
             &self.state.mode,
@@ -389,11 +389,11 @@ impl App {
             && matches!(&self.state.mode, Mode::Prompting(p) if p.buffer.is_empty());
         if matches!(key.code, KeyCode::Esc) || backspace_on_empty || ctrl_c {
             self.cancel_prompt();
-            return PostAction::None;
+            return Vec::new();
         }
         if matches!(key.code, KeyCode::Enter) {
             let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
-                return PostAction::None;
+                return Vec::new();
             };
             return self.dispatch_prompt(p);
         }
@@ -409,7 +409,7 @@ impl App {
             let (_kind, buffer) = if let Mode::Prompting(p) = &self.state.mode {
                 (std::mem::discriminant(&p.kind), p.buffer.clone())
             } else {
-                return PostAction::None;
+                return Vec::new();
             };
             let is_search = matches!(
                 &self.state.mode,
@@ -434,14 +434,14 @@ impl App {
             ) {
                 self.tab_complete_path();
             }
-            return PostAction::None;
+            return Vec::new();
         }
         self.tab_state = None;
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
             let Mode::Prompting(prompt) = &mut self.state.mode else {
-                return PostAction::None;
+                return Vec::new();
             };
             match key.code {
                 KeyCode::Backspace => {
@@ -493,13 +493,13 @@ impl App {
             self.state.cursor.clamp(self.state.rows.len());
         }
 
-        PostAction::None
+        Vec::new()
     }
 
     /// Single-key confirmation for `R`. `y` / `Y` triggers the delete;
     /// anything else — including Enter, Esc, or any other letter — cancels.
     /// The prompt closes in every case.
-    pub fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> PostAction {
+    pub fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
         self.state.mode = Mode::Normal;
         // Pull the targeted paths out of the preview slot. This is
@@ -509,14 +509,14 @@ impl App {
         // could disagree.
         let preview = self.state.pending_delete_preview.take();
         if !confirmed {
-            return PostAction::None;
+            return Vec::new();
         }
         let paths: Vec<&Path> = preview.as_ref().map_or_else(
             || self.state.selection_paths(),
             |v| v.iter().map(PathBuf::as_path).collect(),
         );
         if paths.is_empty() {
-            return PostAction::None;
+            return Vec::new();
         }
         // Route through the graveyard: archive each path into
         // `<uuid>.tar.zst` first, then unlink the source. If the
@@ -557,7 +557,7 @@ impl App {
         }
         self.state.picks.clear();
         self.state.refresh_listing();
-        PostAction::None
+        Vec::new()
     }
 
     /// `:undo` — restore the most-recent graveyard entry to its
@@ -600,11 +600,11 @@ impl App {
     /// Single-key confirmation for "purge ALL graveyard entries to
     /// system trash". Bound on `Z` from the graveyard view; routes
     /// to a separate prompt kind so the wording stays accurate.
-    fn handle_graveyard_purge_all_confirm(&mut self, key: KeyEvent) -> PostAction {
+    fn handle_graveyard_purge_all_confirm(&mut self, key: KeyEvent) -> Vec<Effect> {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
         self.state.mode = Mode::Normal;
         if !confirmed {
-            return PostAction::None;
+            return Vec::new();
         }
         let mut trashed = 0usize;
         let mut errors = 0usize;
@@ -624,14 +624,14 @@ impl App {
         self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
         self.state.cursor.clamp(self.state.graveyard.len());
         self.state.rebuild_rows();
-        PostAction::None
+        Vec::new()
     }
 
     /// Single-key confirmation for the auto-fired claude crash recovery
     /// prompt. `y` / `Y` / Enter kills the broken tab and replaces it with
     /// a fresh `claude` (the user can then `/resume` manually); anything
     /// else kills it and removes the tab so the dump is off-screen.
-    fn handle_claude_crash_recover_key(&mut self, key: KeyEvent) -> PostAction {
+    fn handle_claude_crash_recover_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
         let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
         let Mode::Prompting(Prompt {
@@ -639,7 +639,7 @@ impl App {
             ..
         }) = prev_mode
         else {
-            return PostAction::None;
+            return Vec::new();
         };
 
         // Snapshot cwd + fallback from the tab and best-effort kill the
@@ -655,7 +655,7 @@ impl App {
                 .unwrap_or_else(|| "claude".to_string());
             Some((entry.info.cwd.clone(), fallback))
         }) else {
-            return PostAction::None;
+            return Vec::new();
         };
 
         if !confirmed {
@@ -667,7 +667,7 @@ impl App {
             }
             self.state.flash_info("claude crash dismissed; tab closed");
             self.needs_full_repaint = true;
-            return PostAction::None;
+            return Vec::new();
         }
 
         let (rows, cols) = Self::pane_spawn_size(
@@ -686,7 +686,7 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("claude spawn failed: {e}")),
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// Return the appropriate history for the current prompt kind.
@@ -722,7 +722,7 @@ impl App {
     }
 
     /// Handle keys for shell prompts that use the vi line editor.
-    fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> PostAction {
+    fn handle_vi_prompt_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         use crate::ui::line_edit::EditResult;
 
         // Tab completion — intercept before feeding to the editor so we
@@ -747,7 +747,7 @@ impl App {
             if wants_path {
                 self.tab_complete_path();
             }
-            return PostAction::None;
+            return Vec::new();
         }
         // Non-Tab clears double-Tab state.
         self.tab_state = None;
@@ -758,7 +758,7 @@ impl App {
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.history_for_prompt().reset_nav();
             self.cancel_prompt();
-            return PostAction::None;
+            return Vec::new();
         }
 
         // `!?` and `J?` — when the buffer is empty and the user
@@ -780,12 +780,12 @@ impl App {
                 PromptKind::ShellCmdCaptured => {
                     self.state.mode = Mode::Normal;
                     self.show_history_popup();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 PromptKind::Jump => {
                     self.state.mode = Mode::Normal;
                     self.show_jump_history_popup();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 _ => {}
             }
@@ -830,14 +830,14 @@ impl App {
                 } else {
                     self.show_history_popup();
                 }
-                return PostAction::None;
+                return Vec::new();
             }
         }
 
         // Feed key to the editor.
         let result = {
             let Mode::Prompting(prompt) = &mut self.state.mode else {
-                return PostAction::None;
+                return Vec::new();
             };
             let editor = prompt.editor.as_mut().expect("checked above");
             let r = editor.feed(key);
@@ -850,7 +850,7 @@ impl App {
             EditResult::Submit => {
                 let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
                 else {
-                    return PostAction::None;
+                    return Vec::new();
                 };
                 // Push to the appropriate history before dispatching.
                 // Buckets stay isolated -- shell, pane command, pane
@@ -876,11 +876,11 @@ impl App {
                 // surprising. Skip nav for those kinds; let other
                 // shell-style prompts continue to cycle history.
                 if is_path_prompt_kind(&self.state.mode) {
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let current_text = {
                     let Mode::Prompting(p) = &self.state.mode else {
-                        return PostAction::None;
+                        return Vec::new();
                     };
                     p.buffer.clone()
                 };
@@ -888,7 +888,7 @@ impl App {
                 if let Some(entry) = hist.prev(&current_text) {
                     let entry = entry.to_string();
                     let Mode::Prompting(p) = &mut self.state.mode else {
-                        return PostAction::None;
+                        return Vec::new();
                     };
                     if let Some(ed) = p.editor.as_mut() {
                         ed.set_content_keep_mode(&entry);
@@ -898,7 +898,7 @@ impl App {
             }
             EditResult::HistoryNext => {
                 if is_path_prompt_kind(&self.state.mode) {
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let hist = self.history_for_prompt();
                 let replacement = match hist.next() {
@@ -906,7 +906,7 @@ impl App {
                     None => hist.stashed().to_string(),
                 };
                 let Mode::Prompting(p) = &mut self.state.mode else {
-                    return PostAction::None;
+                    return Vec::new();
                 };
                 if let Some(ed) = p.editor.as_mut() {
                     ed.set_content_keep_mode(&replacement);
@@ -917,6 +917,6 @@ impl App {
             // only reachable if the editor somehow returns it.
             EditResult::TabComplete | EditResult::Continue => {}
         }
-        PostAction::None
+        Vec::new()
     }
 }

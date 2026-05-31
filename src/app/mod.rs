@@ -158,6 +158,7 @@ pub enum PostAction {
 mod actions;
 mod capture;
 mod commands;
+mod effect;
 mod find_picker;
 mod grep_session;
 mod key_dispatch;
@@ -175,6 +176,7 @@ mod streaming;
 mod tasks;
 
 use capture::PendingCapture;
+pub use effect::Effect;
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
@@ -1811,8 +1813,8 @@ impl App {
             // Input (or a Tick/Timeout/Disconnected) to the dispatch match.
             // This collapses a burst into a single wakeup and bounds Input
             // latency to one iteration. Input is NEVER handled inside the
-            // coalesce loop (a `PostAction::Spawn` parks the reader / re-inits
-            // the TUI), only surfaced for the arm — and the coalesce stops at
+            // coalesce loop (an `Effect::ForegroundExec` parks the reader /
+            // re-inits the TUI), only surfaced for the arm — and the coalesce stops at
             // the first one, so Input stays one-per-iteration and FIFO.
             let effective = match recvd {
                 Ok(Message::FsEvent(ev)) => {
@@ -1907,72 +1909,12 @@ impl App {
                             } else {
                                 self.scroll_last = None;
                             }
-                            let post = self.handle_key(key)?;
-                            if let PostAction::Spawn {
-                                program,
-                                args,
-                                pause_after,
-                            } = post
-                            {
-                                foreground_exec.run(terminal, &program, &args, pause_after)?;
-                                // Child may have clobbered our title; force a
-                                // re-emit on next draw.
-                                self.last_term_title = None;
-                                // The listing may have changed (mv, rm, chmod, etc).
-                                self.state.refresh_listing();
-                                // If we were editing a pager buffer, restore it.
-                                if let Some(ret) = self.pending_pager_return.take() {
-                                    match ret {
-                                        PagerReturn::TempFile {
-                                            path,
-                                            title,
-                                            scroll,
-                                            mount,
-                                            pane_scroll,
-                                        } => {
-                                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                                let lines: Vec<String> =
-                                                    content.lines().map(String::from).collect();
-                                                let mut view = PagerView::new_plain(title, lines);
-                                                view.scroll = scroll;
-                                                view.saveable = true;
-                                                view.mount = mount;
-                                                view.pane_scroll = pane_scroll;
-                                                self.set_pager(view);
-                                            }
-                                            let _ = std::fs::remove_file(&path);
-                                        }
-                                        PagerReturn::SourceFile {
-                                            path,
-                                            scroll,
-                                            mount,
-                                            pane_scroll,
-                                        } => {
-                                            // Reuse `build_pager_view_for_file` so a
-                                            // markdown file edited via `v` re-renders
-                                            // on return. Reported by JRob: open a .md
-                                            // (rendered), `v` to edit, quit $EDITOR —
-                                            // file came back as plain text with no
-                                            // `m`-toggle (the inline rebuild here used
-                                            // `PagerView::new_plain` and skipped the
-                                            // markdown / alt_lines branch entirely).
-                                            if let Some(mut view) =
-                                                self.build_pager_view_for_file(&path)
-                                            {
-                                                // Override the position restored from
-                                                // the per-file cache with the scroll
-                                                // we explicitly stashed before
-                                                // launching $EDITOR — it's the more
-                                                // recent intent for this round-trip.
-                                                view.scroll = scroll;
-                                                view.mount = mount;
-                                                view.pane_scroll = pane_scroll;
-                                                self.set_pager(view);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            // MVU Phase 4: the handler returns a list of
+                            // effects; `run_effects` is the sole executor
+                            // (the ForegroundExec arm carries the former
+                            // inline spawn + its after-work).
+                            let effects = self.handle_key(key)?;
+                            self.run_effects(effects, terminal, &foreground_exec)?;
                         }
                         Event::Paste(text) => {
                             if crate::key_trace::is_enabled() {
@@ -2869,7 +2811,7 @@ impl App {
     /// Pure-domain arms are handled by `AppState::dispatch_prompt`;
     /// terminal-touching arms (shell, pager, overlay, copy/move) stay here.
     #[allow(clippy::needless_pass_by_value)]
-    fn dispatch_prompt(&mut self, prompt: Prompt) -> PostAction {
+    fn dispatch_prompt(&mut self, prompt: Prompt) -> Vec<Effect> {
         use state::PromptResult;
 
         // Clear any Tab-applied filter before dispatching.
@@ -2891,7 +2833,7 @@ impl App {
                 // roots. The call is cheap when project_home is
                 // unchanged (compares paths and returns early).
                 self.reconcile_harpoon();
-                return PostAction::None;
+                return Vec::new();
             }
             PromptResult::NotHandled => {}
         }
@@ -2911,7 +2853,7 @@ impl App {
                     }
                     Err(e) => self.state.flash_error(format!("spawn: {e}")),
                 }
-                PostAction::None
+                Vec::new()
             }
             PromptKind::ShellCmdCaptured => {
                 let cmd = if prompt.buffer.trim() == "!" {
@@ -2919,7 +2861,7 @@ impl App {
                         c
                     } else {
                         self.state.flash_error("no previous ! command");
-                        return PostAction::None;
+                        return Vec::new();
                     }
                 } else {
                     prompt.buffer.clone()
@@ -2927,15 +2869,15 @@ impl App {
                 self.state.last_captured_cmd = Some(cmd.clone());
                 let expanded = shell::expand_percent(&cmd, &self.state.selection_paths());
                 self.start_capture(&expanded, &cmd, &prompt.buffer);
-                PostAction::None
+                Vec::new()
             }
             PromptKind::CopyTo => {
                 self.run_selection_to(&prompt.buffer, fs::ops::copy_selection_to, "copied");
-                PostAction::None
+                Vec::new()
             }
             PromptKind::MoveTo => {
                 self.run_selection_to(&prompt.buffer, fs::ops::move_selection_to, "moved");
-                PostAction::None
+                Vec::new()
             }
             PromptKind::PaneNewTabCwd => {
                 let cwd = prompt.buffer.trim().to_string();
@@ -2953,7 +2895,7 @@ impl App {
                     };
                     self.open_pane_tab_in(&cmd, &cwd_path);
                 }
-                PostAction::None
+                Vec::new()
             }
             PromptKind::PaneRenameTab => {
                 let name = prompt.buffer.trim().to_string();
@@ -2962,12 +2904,12 @@ impl App {
                 {
                     tabs.active_info_mut().label = name;
                 }
-                PostAction::None
+                Vec::new()
             }
             PromptKind::NewFile => {
                 let name = prompt.buffer.trim().to_string();
                 if name.is_empty() {
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let target = crate::paths::expand(&name);
                 let resolved = if target.is_absolute() {
@@ -2985,7 +2927,7 @@ impl App {
                 let mut argv = shell::resolve_editor();
                 if argv.is_empty() {
                     self.state.flash_error("$EDITOR not set");
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let program = argv.remove(0);
                 argv.push(resolved.to_string_lossy().into_owned());
@@ -2994,10 +2936,11 @@ impl App {
                     args: argv,
                     pause_after: false,
                 }
+                .into()
             }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
             // These should have been handled by AppState — unreachable in practice.
-            _ => PostAction::None,
+            _ => Vec::new(),
         }
     }
 
@@ -4669,10 +4612,10 @@ impl App {
     }
 
     /// yp — yank visible pane output to the system clipboard.
-    fn yank_pane_to_clipboard(&mut self) -> PostAction {
+    fn yank_pane_to_clipboard(&mut self) -> Vec<Effect> {
         let Some(tabs) = self.pane_tabs.as_ref() else {
             self.state.flash_error("no pane open");
-            return PostAction::None;
+            return Vec::new();
         };
         let lines = tabs.active().visible_lines();
         let text: String = lines
@@ -4682,7 +4625,7 @@ impl App {
             .join("\n");
         if text.trim().is_empty() {
             self.state.flash_error("pane is empty");
-            return PostAction::None;
+            return Vec::new();
         }
         match crate::clipboard::copy(&text) {
             Ok(()) => {
@@ -4692,14 +4635,14 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("yank failed: {e}")),
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// ya — yank the full scrollback + visible screen from the active pane.
-    fn yank_scrollback_to_clipboard(&mut self) -> PostAction {
+    fn yank_scrollback_to_clipboard(&mut self) -> Vec<Effect> {
         let Some(tabs) = self.pane_tabs.as_mut() else {
             self.state.flash_error("no pane open");
-            return PostAction::None;
+            return Vec::new();
         };
         let lines = tabs.active_mut().recent_lines(10_000);
         let text: String = lines
@@ -4709,7 +4652,7 @@ impl App {
             .join("\n");
         if text.trim().is_empty() {
             self.state.flash_error("pane scrollback is empty");
-            return PostAction::None;
+            return Vec::new();
         }
         match crate::clipboard::copy(&text) {
             Ok(()) => {
@@ -4719,7 +4662,7 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("yank failed: {e}")),
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// yf — yank the cursor file's absolute path to the system
@@ -4729,11 +4672,11 @@ impl App {
     /// pastes them. The user's recurring real-world ask was a clean
     /// way to grab a path for one-off shell commands like `git
     /// restore <path>` without opening a pane.
-    fn yank_paths_to_clipboard(&mut self) -> PostAction {
+    fn yank_paths_to_clipboard(&mut self) -> Vec<Effect> {
         let paths = self.state.selection_paths();
         if paths.is_empty() {
             self.state.flash_error("no path to yank");
-            return PostAction::None;
+            return Vec::new();
         }
         let text: String = paths
             .iter()
@@ -4754,14 +4697,14 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("yank failed: {e}")),
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// yP — yank the last prompt the user typed into the pane.
-    fn yank_last_prompt_to_clipboard(&mut self) -> PostAction {
+    fn yank_last_prompt_to_clipboard(&mut self) -> Vec<Effect> {
         let Some(text) = self.last_pane_prompt.as_ref() else {
             self.state.flash_error("no prompt to yank");
-            return PostAction::None;
+            return Vec::new();
         };
         match crate::clipboard::copy(text) {
             Ok(()) => {
@@ -4772,13 +4715,13 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("yank failed: {e}")),
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// Put inventory items to the current working directory.
     /// Picked items only if any picks exist, else all.
     /// Items are removed from inventory after successful put.
-    fn put_inventory_to_cwd(&mut self) -> PostAction {
+    fn put_inventory_to_cwd(&mut self) -> Vec<Effect> {
         let dest = self.state.listing.dir.clone();
         let item_count = if self.state.inventory.picks.is_empty() {
             self.state.inventory.len()
@@ -4787,7 +4730,7 @@ impl App {
         };
         if item_count == 0 {
             self.state.flash_error("inventory is empty");
-            return PostAction::None;
+            return Vec::new();
         }
         // TODO: confirmation for large puts (>10 items)
         let (count, _, err) = self.state.inventory.put_to(&dest);
@@ -4800,7 +4743,7 @@ impl App {
         if let Some(e) = err {
             self.state.flash_error(e);
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// Key dispatcher for `View::Graveyard`. Bindings:
@@ -4817,7 +4760,7 @@ impl App {
     ///
     /// `dd` arming uses a per-instance bool; first `d` arms, any
     /// other key (including a second non-`d`) clears it.
-    fn handle_graveyard_view_key(&mut self, key: KeyEvent) -> PostAction {
+    fn handle_graveyard_view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         // Confirm-purge-all is a transient inline confirm. We
         // signal it via a one-shot Mode::Prompting; routed there
         // directly rather than reusing RemoveConfirm because the
@@ -4897,7 +4840,7 @@ impl App {
                 self.graveyard_pending_g = false;
             }
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// Restore the cursor entry from the graveyard. `to_original`
@@ -5248,7 +5191,7 @@ impl App {
             .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
     }
 
-    fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
+    fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
         use crossterm::event::{KeyCode, KeyModifiers};
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -5271,7 +5214,7 @@ impl App {
                 }
                 _ => {} // Unknown g-sequence, ignore
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         let pane = self.pane_tabs.as_mut().unwrap().active_mut();
@@ -5299,7 +5242,7 @@ impl App {
             }
             _ => {}
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
@@ -5689,15 +5632,15 @@ impl App {
     ///   `dd` — delete slot under cursor (vim convention; first `d`
     ///          arms, second `d` confirms; any other key disarms)
     ///   `Esc`/`q` — close menu
-    fn handle_harpoon_menu_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
+    fn handle_harpoon_menu_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
         use crossterm::event::KeyCode;
         let Some(menu) = self.harpoon_menu.as_mut() else {
-            return PostAction::None;
+            return Vec::new();
         };
         let Some(h) = self.harpoon.as_mut() else {
             self.harpoon_menu = None;
             self.needs_full_repaint = true;
-            return PostAction::None;
+            return Vec::new();
         };
         let len = h.slots.len();
 
@@ -5782,7 +5725,7 @@ impl App {
             }
             _ => {}
         }
-        PostAction::None
+        Vec::new()
     }
 
     // ---- Quick Select ------------------------------------------------------
@@ -5828,10 +5771,10 @@ impl App {
     ///   any other key          — clears any narrowing buffer (so a
     ///                            stray keystroke doesn't strand the
     ///                            user; they can still type a label)
-    fn handle_quick_select_key(&mut self, key: crossterm::event::KeyEvent) -> PostAction {
+    fn handle_quick_select_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
         use crossterm::event::KeyCode;
         let Some(qs) = self.quick_select.as_mut() else {
-            return PostAction::None;
+            return Vec::new();
         };
 
         let close = |this: &mut Self| {
@@ -5842,17 +5785,17 @@ impl App {
         let c = match key.code {
             KeyCode::Esc => {
                 close(self);
-                return PostAction::None;
+                return Vec::new();
             }
             KeyCode::Char(c) => c,
-            _ => return PostAction::None,
+            _ => return Vec::new(),
         };
 
         // `q`/`Q` always exits — labels never use it (alphabet check
         // covered in unit test) so this is unambiguous.
         if c.eq_ignore_ascii_case(&'q') && qs.pending_first.is_none() {
             close(self);
-            return PostAction::None;
+            return Vec::new();
         }
 
         let is_upper = c.is_ascii_uppercase();
@@ -5864,7 +5807,7 @@ impl App {
                     // First keystroke: must be the prefix of some label.
                     let any_match = qs.matches.iter().any(|m| m.label.starts_with(lower));
                     if !any_match {
-                        return PostAction::None; // no narrowing possible — ignore
+                        return Vec::new(); // no narrowing possible — ignore
                     }
                     qs.pending_first = Some(lower);
                     if is_upper {
@@ -5893,7 +5836,7 @@ impl App {
                 self.dispatch_quick_select(&m, is_upper);
             }
         }
-        PostAction::None
+        Vec::new()
     }
 
     /// Route a picked match to the right action, given user
@@ -6587,9 +6530,9 @@ impl App {
 
     // --- Action handlers --------------------------------------------------
 
-    fn activate(&mut self, intent: ActivateIntent) -> PostAction {
+    fn activate(&mut self, intent: ActivateIntent) -> Vec<Effect> {
         let Some(row) = self.state.rows.get(self.state.cursor.index) else {
-            return PostAction::None;
+            return Vec::new();
         };
         let path = row.path.clone();
         let kind = row.kind;
@@ -6605,13 +6548,13 @@ impl App {
             };
             if let Err(e) = self.state.chdir(&target_dir) {
                 self.state.flash_error(format!("chdir: {e}"));
-                return PostAction::None;
+                return Vec::new();
             }
             self.state.view = View::Dir;
             self.state.focus_on_path(&path);
             self.state.rebuild_rows();
             if kind == EntryKind::Dir {
-                return PostAction::None;
+                return Vec::new();
             }
         }
 
@@ -6628,7 +6571,7 @@ impl App {
             if let Err(e) = self.state.chdir(&path) {
                 self.state.flash_error(format!("chdir: {e}"));
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // File: dispatch based on intent.
@@ -6637,12 +6580,12 @@ impl App {
                 if let Some(view) = self.build_pager_view_for_file(&path) {
                     self.set_pager(view);
                 }
-                PostAction::None
+                Vec::new()
             }
             ActivateIntent::Edit => {
                 let mut argv = shell::resolve_editor();
                 if argv.is_empty() {
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let program = argv.remove(0);
                 argv.push(path.to_string_lossy().into_owned());
@@ -6651,6 +6594,7 @@ impl App {
                     args: argv,
                     pause_after: false,
                 }
+                .into()
             }
         }
     }
@@ -7050,14 +6994,15 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_ho
     })
 }
 
-/// Build a PostAction that runs `cmd` through `sh -c` so shell features
+/// Build a `ForegroundExec` effect that runs `cmd` through `sh -c` so shell features
 /// (pipes, redirection, `$VAR`) work.
-fn sh_c(cmd: &str, pause_after: bool) -> PostAction {
+fn sh_c(cmd: &str, pause_after: bool) -> Vec<Effect> {
     PostAction::Spawn {
         program: "sh".to_string(),
         args: vec!["-c".to_string(), cmd.to_string()],
         pause_after,
     }
+    .into()
 }
 
 /// Owns the parkable crossterm input-reader thread (MVU Phase 1). The
@@ -7723,7 +7668,7 @@ mod harness_tests {
             assert_eq!(app.state.cursor.index, 0);
             let post = app.apply(&Action::Down(1)).unwrap();
             assert_eq!(app.state.cursor.index, 1);
-            assert!(matches!(post, PostAction::None));
+            assert!(post.is_empty());
             app.apply(&Action::Up(1)).unwrap();
             assert_eq!(app.state.cursor.index, 0);
         });
