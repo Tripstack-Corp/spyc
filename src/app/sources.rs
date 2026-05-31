@@ -47,7 +47,10 @@ pub fn coalesce_pending(
             // the loop re-enters the pre-recv pane scan regardless, so a
             // wake burst collapses to a single re-scan (the worker-side
             // 0→1 CAS is the primary firehose collapse; this is the second).
-            Message::PaneOutput { .. } | Message::SinkOutput { .. } | Message::Tick(_) => {}
+            Message::PaneOutput { .. }
+            | Message::SinkOutput { .. }
+            | Message::GrepOutput
+            | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
     }
@@ -272,6 +275,10 @@ mod tests {
             .unwrap();
         tx.send(Message::GitResult(git_result(0))).unwrap();
         tx.send(Message::Tick(Deadline::GitPoll)).unwrap();
+        // MVU Phase 3d: a burst of grep wakes collapses to nothing buffered
+        // (the data rides GrepSession.rx; the loop re-drains on re-entry).
+        tx.send(Message::GrepOutput).unwrap();
+        tx.send(Message::GrepOutput).unwrap();
 
         let mut fs_pending = Vec::new();
         let mut git_pending = Vec::new();
@@ -279,7 +286,7 @@ mod tests {
 
         assert_eq!(got, None);
         assert_eq!(fs_pending.len(), 2);
-        assert_eq!(git_pending.len(), 1); // Tick dropped, not buffered
+        assert_eq!(git_pending.len(), 1); // Tick + GrepOutput dropped, not buffered
     }
 
     #[test]

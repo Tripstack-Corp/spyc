@@ -71,6 +71,12 @@ enum Message {
     /// so a stale id after a `:fg`/`^Z`/demote/promote self-discards).
     /// Buffered/collapsed; never surfaced as `Input`.
     SinkOutput { sink: SinkId },
+    /// MVU Phase 3d: a grep worker produced a batch or completed. Payloadless
+    /// wake — the matches ride `GrepSession.rx`, re-drained by
+    /// `drain_grep_session` (which id-gates against the live pager's
+    /// `grep_id`, so a wake for a replaced/closed session self-discards).
+    /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
+    GrepOutput,
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
@@ -1767,6 +1773,14 @@ impl App {
                             Ok(Message::Input(ev))
                         })
                 }
+                // MVU Phase 3d: a grep wake — payloadless, same collapse-to-
+                // Timeout so the pre-recv `drain_grep_session` re-runs.
+                Ok(Message::GrepOutput) => {
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                            Ok(Message::Input(ev))
+                        })
+                }
                 other => other,
             };
             match effective {
@@ -2013,10 +2027,11 @@ impl App {
                     Message::FsEvent(_)
                     | Message::GitResult(_)
                     | Message::PaneOutput { .. }
-                    | Message::SinkOutput { .. },
+                    | Message::SinkOutput { .. }
+                    | Message::GrepOutput,
                 ) => {
                     unreachable!(
-                        "FsEvent/GitResult/PaneOutput/SinkOutput are buffered/collapsed in the coalesce pre-step"
+                        "FsEvent/GitResult/PaneOutput/SinkOutput/GrepOutput are buffered/collapsed in the coalesce pre-step"
                     )
                 }
             }
@@ -3011,8 +3026,16 @@ impl App {
         let walk_root = root.clone();
         let pat = pattern.to_string();
         let pat_for_thread = pat.clone();
+        // MVU Phase 3d: wake the loop on each batch (via WakingSender) and
+        // once more after the worker returns — that final wake drives the
+        // last drain_grep_session, which sees the rx disconnect and marks the
+        // session complete (title loses "scanning…") with no poll floor.
+        let wake = self.make_grep_wake();
+        let final_wake = std::sync::Arc::clone(&wake);
+        let tx = crate::fs::WakingSender::new(tx, wake);
         std::thread::spawn(move || {
             let _ = crate::fs::grep::search_streaming(&walk_root, &pat_for_thread, tx);
+            final_wake();
         });
         let title = format!("grep — \"{pat}\" — scanning…");
         let mut view = pager::PagerView::new_plain(title, Vec::<String>::new());

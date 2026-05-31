@@ -22,8 +22,9 @@
 //! grep pager), the next batch send fails and the worker exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
+use crate::fs::WakingSender;
 use grep_matcher::Matcher;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkError, SinkMatch};
@@ -69,7 +70,7 @@ impl GrepMatch {
 pub fn search_streaming(
     root: &Path,
     pattern: &str,
-    tx: Sender<Vec<GrepMatch>>,
+    tx: WakingSender<Vec<GrepMatch>>,
 ) -> Result<(), String> {
     let matcher = RegexMatcherBuilder::new()
         .case_smart(true)
@@ -99,7 +100,7 @@ fn search_one(
     walk_root: &Path,
     display_root: &Path,
     matcher: &grep_regex::RegexMatcher,
-    tx: &Sender<Vec<GrepMatch>>,
+    tx: &WakingSender<Vec<GrepMatch>>,
     count: &mut usize,
 ) -> bool {
     let walker = ignore::WalkBuilder::new(walk_root)
@@ -165,7 +166,7 @@ struct BatchSink<'a> {
     path: &'a Path,
     matcher: &'a grep_regex::RegexMatcher,
     batch: &'a mut Vec<GrepMatch>,
-    tx: &'a Sender<Vec<GrepMatch>>,
+    tx: &'a WakingSender<Vec<GrepMatch>>,
     count: &'a mut usize,
     cap_hit: bool,
     disconnected: bool,
@@ -331,6 +332,9 @@ pub fn search_to_vec(root: &Path, pattern: &str, limit: usize) -> Result<Vec<Gre
     let (tx, rx) = std::sync::mpsc::channel();
     let r = root.to_path_buf();
     let p = pattern.to_string();
+    // Synchronous collector — no event loop to wake (rx is drained right
+    // here), so a no-op wake.
+    let tx = WakingSender::new(tx, Arc::new(|| {}));
     let handle = std::thread::spawn(move || search_streaming(&r, &p, tx));
     let mut out = Vec::new();
     while let Ok(batch) = rx.recv() {
@@ -386,6 +390,7 @@ pub fn search_files(
         // formatting (column lookup, sanitize_line). Bounded buffer
         // keeps memory predictable per-file.
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx = WakingSender::new(tx, Arc::new(|| {}));
         let mut count = 0usize;
         let mut batch: Vec<GrepMatch> = Vec::new();
         let mut sink = BatchSink {
@@ -422,6 +427,7 @@ pub fn search_files(
 #[cfg(test)]
 fn search(root: &Path, pattern: &str) -> Vec<GrepMatch> {
     let (tx, rx) = std::sync::mpsc::channel();
+    let tx = WakingSender::new(tx, Arc::new(|| {}));
     let r = root.to_path_buf();
     let p = pattern.to_string();
     std::thread::spawn(move || {
@@ -636,6 +642,7 @@ mod tests {
     fn invalid_regex_returns_err() {
         let tmp = tempdir().unwrap();
         let (tx, _rx) = std::sync::mpsc::channel();
+        let tx = WakingSender::new(tx, Arc::new(|| {}));
         let result = search_streaming(tmp.path(), "[unterminated", tx);
         assert!(result.is_err());
     }
@@ -653,6 +660,7 @@ mod tests {
             }
         }
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx = WakingSender::new(tx, Arc::new(|| {}));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = search_streaming(&root, "needle", tx);
