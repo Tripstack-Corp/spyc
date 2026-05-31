@@ -14,22 +14,22 @@ use crate::pane::{Pane, PaneTabs};
 use crate::ui::pager::PagerView;
 
 use super::state::Focus;
-use super::{App, PostAction};
+use super::{App, Effect};
 
 impl App {
     /// Parse and dispatch a `:` command.
     ///
     /// Pure-domain arms are handled by `AppState::dispatch_command`;
     /// terminal-touching arms (shell, pager, overlay) stay here.
-    pub fn dispatch_command(&mut self, input: &str) -> PostAction {
+    pub fn dispatch_command(&mut self, input: &str) -> Vec<Effect> {
         use super::state::CommandResult;
 
         // Try the pure-domain handler first.
         match self.state.dispatch_command(input) {
-            CommandResult::Handled => return PostAction::None,
+            CommandResult::Handled => return Vec::new(),
             CommandResult::OpenPager { title, lines } => {
                 self.pager = Some(PagerView::new_plain(title, lines));
-                return PostAction::None;
+                return Vec::new();
             }
             CommandResult::Quit => {
                 // Same lifecycle as the Q keybinding: double-tap
@@ -38,7 +38,7 @@ impl App {
                 // arm is a compile error — the wiring can't silently
                 // regress to "unknown command".
                 self.request_quit();
-                return PostAction::None;
+                return Vec::new();
             }
             CommandResult::NotHandled => {}
         }
@@ -56,7 +56,7 @@ impl App {
                 }
                 None => self.state.flash_error("no previous ! command"),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :!<cmd> — captured shell command
@@ -64,12 +64,12 @@ impl App {
             let cmd = cmd.trim();
             if cmd.is_empty() {
                 self.state.flash_error("empty command");
-                return PostAction::None;
+                return Vec::new();
             }
             self.state.last_captured_cmd = Some(cmd.to_string());
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             self.start_capture(&expanded, cmd, cmd);
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :;<cmd> — foreground shell command
@@ -77,7 +77,7 @@ impl App {
             let cmd = cmd.trim();
             if cmd.is_empty() {
                 self.state.flash_error("empty command");
-                return PostAction::None;
+                return Vec::new();
             }
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let (rows, cols) =
@@ -94,7 +94,7 @@ impl App {
                 }
                 Err(e) => self.state.flash_error(format!("spawn: {e}")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :undo — restore the most-recent graveyard entry to its
@@ -103,7 +103,7 @@ impl App {
         // specific entry they open the graveyard view (`gy`).
         if input == "undo" {
             self.undo_last_remove();
-            return PostAction::None;
+            return Vec::new();
         }
         // :date — flash current date/time. Used to be bound to `D` but
         // `D` now opens the cursor file in $PAGER (the common
@@ -111,7 +111,7 @@ impl App {
         // the rare hand-on-keyboard moment you actually want it.
         if input == "date" {
             let _ = self.apply(&Action::Date);
-            return PostAction::None;
+            return Vec::new();
         }
         // :dump-scrollback — diagnostic for the v1.5 ^a-v
         // snapshot path. Drains the active pane and writes the
@@ -123,19 +123,19 @@ impl App {
         // our vt100 emulator at snapshot time.
         if input == "dump-scrollback" {
             self.dump_scrollback_snapshot();
-            return PostAction::None;
+            return Vec::new();
         }
         // :graveyard — open the graveyard viewer (typed alias for `gy`).
         if input == "graveyard" {
             self.state.open_graveyard_view();
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :fg [N] — bring a backgrounded task back to the foreground.
         // No arg = most-recently-backgrounded task; numeric arg = id.
         if input == "fg" {
             self.foreground_task(None);
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("fg ") {
             match arg.trim().parse::<u32>() {
@@ -144,7 +144,7 @@ impl App {
                     .state
                     .flash_error(format!("fg: expected task id (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :task-to-pane [N] — promote a backgrounded `!` task to a
@@ -157,7 +157,7 @@ impl App {
         // numeric arg = specific id.
         if input == "task-to-pane" {
             self.promote_task_to_pane(None);
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("task-to-pane ") {
             match arg.trim().parse::<u32>() {
@@ -166,7 +166,7 @@ impl App {
                     .state
                     .flash_error(format!("task-to-pane: expected task id (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :pane-to-task [N] — demote a pane tab to a background
@@ -177,7 +177,7 @@ impl App {
         // (matches the divider's `[1]` `[2]` labels).
         if input == "pane-to-task" {
             self.demote_pane_to_task();
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("pane-to-task ") {
             match arg.trim().parse::<usize>() {
@@ -198,7 +198,7 @@ impl App {
                     .state
                     .flash_error(format!("pane-to-task: expected tab number (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :grep <pattern> — project-wide content search. Walks
@@ -207,7 +207,7 @@ impl App {
         // `path:line:col: text` so gf/gF jumps to the file.
         if input == "grep" {
             self.state.flash_error("grep: pattern required");
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(pattern) = input.strip_prefix("grep ") {
             let pattern = pattern.trim();
@@ -216,14 +216,14 @@ impl App {
             } else {
                 self.open_grep_pager(pattern);
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :task [N] — open the task viewer (peek mode). No arg picks
         // the most-recent task; numeric arg targets a specific id.
         if input == "task" {
             self.open_task_viewer(None);
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("task ") {
             match arg.trim().parse::<u32>() {
@@ -232,14 +232,14 @@ impl App {
                     .state
                     .flash_error(format!("task: expected task id (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :pause [N] — pause a backgrounded task via SIGSTOP to its
         // process group. No arg = most-recent task; numeric = id.
         if input == "pause" {
             self.pause_task(None);
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("pause ") {
             match arg.trim().parse::<u32>() {
@@ -248,13 +248,13 @@ impl App {
                     .state
                     .flash_error(format!("pause: expected task id (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :resume [N] — resume a paused backgrounded task via SIGCONT.
         if input == "resume" {
             self.resume_task(None);
-            return PostAction::None;
+            return Vec::new();
         }
         if let Some(arg) = input.strip_prefix("resume ") {
             match arg.trim().parse::<u32>() {
@@ -263,7 +263,7 @@ impl App {
                     .state
                     .flash_error(format!("resume: expected task id (got {arg:?})")),
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // :bprev / :bnext — pager buffer history
@@ -292,7 +292,7 @@ impl App {
             } else {
                 self.state.flash_info("no buffers in history");
             }
-            return PostAction::None;
+            return Vec::new();
         }
         if input == "bnext" {
             if let Some(current) = self.pager.take() {
@@ -312,12 +312,12 @@ impl App {
             } else {
                 self.state.flash_info("no pager open");
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // If we get here, AppState said NotHandled but we don't recognize it
         // either — this shouldn't happen, but handle gracefully.
         self.state.flash_error(format!("unknown command: {input}"));
-        PostAction::None
+        Vec::new()
     }
 }

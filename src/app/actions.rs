@@ -1,5 +1,5 @@
 //! Action dispatch: `apply` / `apply_inner` — the controller that turns
-//! a resolved `Action` into state mutations plus a `PostAction` for the
+//! a resolved `Action` into state mutations plus effects for the
 //! run loop, with post-action project-state reconciliation
 //! (`reconcile_harpoon` / `sync_harpoon_filter_set`).
 //!
@@ -24,14 +24,14 @@ use crate::state::Harpoon;
 use crate::ui::pager::PagerView;
 
 use super::state;
-use super::{ActivateIntent, App, Mode, PostAction, Prompt, PromptKind, View};
+use super::{ActivateIntent, App, Effect, Mode, Prompt, PromptKind, View};
 
 impl App {
     /// Wrapper around the action dispatcher that reconciles
     /// project-scoped state (currently just the harpoon list) after
     /// each action. Cheap: a no-op when `state.project_home` matches
     /// the loaded harpoon's project field.
-    pub fn apply(&mut self, action: &Action) -> Result<PostAction> {
+    pub fn apply(&mut self, action: &Action) -> Result<Vec<Effect>> {
         let result = self.apply_inner(action);
         self.reconcile_harpoon();
         result
@@ -75,7 +75,7 @@ impl App {
             .unwrap_or_default();
     }
 
-    fn apply_inner(&mut self, action: &Action) -> Result<PostAction> {
+    fn apply_inner(&mut self, action: &Action) -> Result<Vec<Effect>> {
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
@@ -131,7 +131,7 @@ impl App {
                     );
                     return Ok(self.handle_remove_confirm_key(synthetic));
                 }
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             state::ApplyResult::Post(post) => return Ok(post),
             state::ApplyResult::OpenPager(req) => {
@@ -148,7 +148,7 @@ impl App {
                     }
                 };
                 self.set_pager(view);
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             state::ApplyResult::NotHandled => {}
         }
@@ -167,22 +167,22 @@ impl App {
             }
             Action::EditInPane => {
                 self.edit_in_pane();
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
             Action::DisplayInPane => {
                 self.display_in_pane();
-                return Ok(PostAction::None);
+                return Ok(Vec::new());
             }
 
             Action::ChmodAdd(mode_char) => {
                 let paths = self.state.selection_paths();
                 if paths.is_empty() {
-                    return Ok(PostAction::None);
+                    return Ok(Vec::new());
                 }
                 let bits: u32 = match mode_char {
                     'w' => 0o200,
                     'x' => 0o111,
-                    _ => return Ok(PostAction::None),
+                    _ => return Ok(Vec::new()),
                 };
                 let count = paths.len();
                 self.run_and_flash(
@@ -443,6 +443,6 @@ impl App {
             _ => {}
         }
         self.state.cursor.clamp(self.state.rows.len());
-        Ok(PostAction::None)
+        Ok(Vec::new())
     }
 }

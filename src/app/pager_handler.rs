@@ -15,14 +15,14 @@ use crate::pane::Pane;
 use crate::shell;
 
 use super::state::Focus;
-use super::{App, PagerReturn, PostAction, TaskStatus, sh_c};
+use super::{App, Effect, PagerReturn, TaskStatus, sh_c};
 
 impl App {
     /// Route a key to the pager overlay. Also uses vi-like motion so the
     /// pager feels native to the rest of the UI.
-    pub fn handle_pager_key(&mut self, key: KeyEvent) -> PostAction {
+    pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let Some(view) = &mut self.pager else {
-            return PostAction::None;
+            return Vec::new();
         };
         // Clear any one-shot flash message from the previous keypress.
         view.flash = None;
@@ -52,7 +52,7 @@ impl App {
             } else if let Some(v) = self.pager.as_mut() {
                 v.flash = Some("press Esc or q to close pager".into());
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // Compute the pager's actual viewport from the terminal size.
@@ -120,7 +120,7 @@ impl App {
                 }
                 _ => {}
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
@@ -167,7 +167,7 @@ impl App {
                     view.jump_buf = None;
                 }
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // [b / ]b — pager buffer history navigation (two-key sequence).
@@ -211,15 +211,15 @@ impl App {
                     }
                     _ => {}
                 }
-                return PostAction::None;
+                return Vec::new();
             }
             if key.code == KeyCode::Char('t') {
                 let direction = if bracket == '[' { -1 } else { 1 };
                 self.cycle_task_viewer(direction);
-                return PostAction::None;
+                return Vec::new();
             }
             // Unrecognized chord follow-up -- swallow it.
-            return PostAction::None;
+            return Vec::new();
         }
 
         // Jump-history popup: j/k navigate, Enter chdirs, x deletes,
@@ -231,11 +231,11 @@ impl App {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.picker_move(-1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
@@ -254,7 +254,7 @@ impl App {
                             Err(e) => self.state.flash_error(format!("cd: {e}")),
                         }
                     }
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     // `x` deletes the entry at the cursor. Matches
@@ -278,7 +278,7 @@ impl App {
                             self.clear_pager();
                             self.needs_full_repaint = true;
                             self.state.flash_info("jump history empty");
-                            return PostAction::None;
+                            return Vec::new();
                         }
                         // Rebuild the pager line list from the snapshot.
                         let lines: Vec<ratatui::text::Line<'static>> = snapshot
@@ -292,7 +292,7 @@ impl App {
                         if cursor >= view.lines.len() {
                             view.picker_cursor = Some(view.lines.len() - 1);
                         }
-                        return PostAction::None;
+                        return Vec::new();
                     }
                 }
                 _ => {}
@@ -311,7 +311,7 @@ impl App {
                 self.needs_full_repaint = true;
                 if let Err(e) = self.state.chdir(&path) {
                     self.state.flash_error(format!("chdir: {e}"));
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 // Worktrees are independent project roots — point
                 // PROJECT_HOME at the worktree so harpoon, MCP
@@ -337,7 +337,7 @@ impl App {
                     "worktree: {} (PROJECT_HOME updated)",
                     crate::paths::display_tilde(&new_home),
                 ));
-                return PostAction::None;
+                return Vec::new();
             }
         }
 
@@ -358,7 +358,7 @@ impl App {
                         self.pending_history_pick = None;
                         self.needs_full_repaint = true;
                         self.state.flash_info("history is empty");
-                        return PostAction::None;
+                        return Vec::new();
                     }
                     let old_cursor = cursor;
                     self.show_history_popup();
@@ -378,7 +378,7 @@ impl App {
                         }
                     }
                 }
-                return PostAction::None;
+                return Vec::new();
             }
 
             // Inline sync: update editor from the current picker line.
@@ -468,7 +468,7 @@ impl App {
                     }
                 };
                 if handled {
-                    return PostAction::None;
+                    return Vec::new();
                 }
             }
 
@@ -487,7 +487,7 @@ impl App {
                     self.pending_history_pick = None;
                     self.needs_full_repaint = true;
                     if cmd.trim().is_empty() {
-                        return PostAction::None;
+                        return Vec::new();
                     }
                     // Execute the (possibly edited) command directly.
                     self.state.last_captured_cmd = Some(cmd.clone());
@@ -525,7 +525,7 @@ impl App {
                 }
                 EditResult::TabComplete | EditResult::Continue => {}
             }
-            return PostAction::None;
+            return Vec::new();
         }
 
         // Session picker: j/k navigate, Enter/1-9 select, n new.
@@ -533,11 +533,11 @@ impl App {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.picker_move(-1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char(c @ '1'..='9') => {
                     // Direct selection — index into sessions (offset by 2 header lines).
@@ -548,7 +548,7 @@ impl App {
                         self.clear_pager();
                         self.needs_full_repaint = true;
                         self.restore_session(&session);
-                        return PostAction::None;
+                        return Vec::new();
                     }
                     self.state.pending_sessions = Some(sessions);
                 }
@@ -560,7 +560,7 @@ impl App {
                         self.clear_pager();
                         self.needs_full_repaint = true;
                         self.state.flash_info("new session");
-                        return PostAction::None;
+                        return Vec::new();
                     }
                     let idx = cursor - 2;
                     if let Some(session) = sessions.get(idx) {
@@ -568,7 +568,7 @@ impl App {
                         self.clear_pager();
                         self.needs_full_repaint = true;
                         self.restore_session(&session);
-                        return PostAction::None;
+                        return Vec::new();
                     }
                     self.state.pending_sessions = Some(sessions);
                 }
@@ -577,7 +577,7 @@ impl App {
                     self.state.pending_sessions = None;
                     self.needs_full_repaint = true;
                     self.state.flash_info("new session");
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 _ => {}
             }
@@ -594,67 +594,67 @@ impl App {
                 KeyCode::Esc => {
                     view.cancel_placement();
                     view.flash = Some("placement: cancelled".into());
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.commit_placement_to_visual_block();
                     view.flash = Some("visual block".into());
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('V') => {
                     view.commit_placement_to_visual_line();
                     view.flash = Some("visual line".into());
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('h') | KeyCode::Left => {
                     view.placement_move(0, -1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('l') | KeyCode::Right => {
                     view.placement_move(0, 1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.placement_move(1, 0, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.placement_move(-1, 0, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('0') | KeyCode::Home => {
                     view.placement_line_start();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('$') | KeyCode::End => {
                     view.placement_line_end();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('w') => {
                     view.placement_word_forward();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('b') => {
                     view.placement_word_backward();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('g') => {
                     // Single `g` jumps to top (no `gg` two-key required —
                     // simpler than reusing the pager's pending-g state
                     // machine, and placement is short-lived anyway).
                     view.placement_jump_to(0, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('G') => {
                     let last = view.lines.len().saturating_sub(1);
                     view.placement_jump_to(last, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 _ => {
                     // Anything else: swallow. Keeps the user from
                     // accidentally scrolling or yanking while in
                     // placement.
-                    return PostAction::None;
+                    return Vec::new();
                 }
             }
         }
@@ -677,7 +677,7 @@ impl App {
             // and ^v from Line upgrades. Esc cancels either.
             if matches!(key.code, KeyCode::Esc) {
                 view.cancel_visual();
-                return PostAction::None;
+                return Vec::new();
             }
             if matches!(key.code, KeyCode::Char('V'))
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -690,7 +690,7 @@ impl App {
                 } else {
                     view.cancel_visual();
                 }
-                return PostAction::None;
+                return Vec::new();
             }
             if matches!(key.code, KeyCode::Char('v'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -700,7 +700,7 @@ impl App {
                 } else {
                     view.enter_visual_block();
                 }
-                return PostAction::None;
+                return Vec::new();
             }
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
@@ -715,63 +715,63 @@ impl App {
                         }
                         Err(e) => view.flash = Some(format!("yank failed: {e}")),
                     }
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.visual_move(1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.visual_move(-1, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('h') | KeyCode::Left if in_block => {
                     view.visual_col_move(-1);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('l') | KeyCode::Right if in_block => {
                     view.visual_col_move(1);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(half_page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(-half_page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(-page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::PageDown | KeyCode::Char(' ') => {
                     view.visual_move(page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::PageUp | KeyCode::Char('b') => {
                     view.visual_move(-page as isize, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('g') | KeyCode::Home => {
                     view.visual_jump_to(0, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 KeyCode::Char('G') | KeyCode::End => {
                     let last = view.lines.len().saturating_sub(1);
                     view.visual_jump_to(last, viewport);
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 _ => {
                     // Unknown key while in visual mode — ignore so a
                     // stray `/` or `:` doesn't silently trigger a
                     // search/jump that the visual selection wasn't
                     // expecting. User must Esc out first.
-                    return PostAction::None;
+                    return Vec::new();
                 }
             }
         }
@@ -784,7 +784,7 @@ impl App {
                 // path below.
                 if self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
                     self.close_pane_scroll_pager();
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 // Pager-help overlay: dismiss just the help, restore
                 // whatever pager was active when `?` was pressed.
@@ -803,7 +803,7 @@ impl App {
                     self.pager_jump_buf = None;
                     self.pager_pending_bracket = None;
                     self.needs_full_repaint = true;
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 // Task viewer special close: if the viewed task has
                 // exited (and the user has seen it), promote -- snapshot
@@ -959,7 +959,7 @@ impl App {
                 // search / mark / pipe-out features.
                 let Some(ref src) = view.source_path else {
                     view.flash = Some("no source file (try `s` to save first)".into());
-                    return PostAction::None;
+                    return Vec::new();
                 };
                 let argv = shell::resolve_pager();
                 let pager_cmd = argv.join(" ");
@@ -976,7 +976,7 @@ impl App {
                 let argv = shell::resolve_editor();
                 if argv.is_empty() {
                     view.flash = Some("no $VISUAL or $EDITOR set".to_string());
-                    return PostAction::None;
+                    return Vec::new();
                 }
                 let editor_cmd = argv.join(" ");
                 let scroll = view.scroll;
@@ -1013,7 +1013,7 @@ impl App {
                         }
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),
                     }
-                    return PostAction::None;
+                    return Vec::new();
                 }
 
                 // Determine the file to edit and the return state.
@@ -1042,7 +1042,7 @@ impl App {
                         ),
                         Err(e) => {
                             self.state.flash_error(format!("write temp: {e}"));
-                            return PostAction::None;
+                            return Vec::new();
                         }
                     }
                 };
@@ -1075,6 +1075,6 @@ impl App {
             }
             _ => {}
         }
-        PostAction::None
+        Vec::new()
     }
 }
