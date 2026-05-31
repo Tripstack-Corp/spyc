@@ -28,24 +28,33 @@ use crate::ui::{
 use crate::{Tui, resume_tui, suspend_tui};
 
 /// Unified message stream consumed by `App::run` (MVU Phase 1,
-/// `docs/MVU_PLAN.md`). For now only `Input` exists — the parkable
-/// crossterm reader thread feeds it; later phases grow
-/// `FsEvent`/`PaneOutput`/`Tick`/… onto the same enum and one receiver.
-/// In Phase 1 `msg_rx` is a *separate* channel carrying input only, so
-/// the adaptive 16/100/500 poll cadence and the 16 ms typing-burst hack
-/// stay necessary and unchanged (all other sources are still polled).
+/// `docs/MVU_PLAN.md`). The parkable crossterm reader feeds `Input`; the
+/// notify watcher closure feeds `FsEvent`; the git forwarder thread feeds
+/// `GitResult` (both Phase 3a). Later phases grow `PaneOutput`/… onto the
+/// same enum and one receiver. `MAX_IDLE_CAP` + the pane floor stay until
+/// the remaining pull sources (panes 3b, MCP/finder 3d) also migrate.
 enum Message {
     /// A crossterm input event. The reader Press-filters `Key` events
     /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
     /// `Mouse` pass through unchanged.
     Input(Event),
+    /// MVU Phase 3a: a filesystem change from the notify watcher closure.
+    /// Carries a bare `notify::Event` — the closure drops `Err` at the
+    /// boundary, preserving the prior Ok-only drain contract. The recv arm
+    /// only *buffers* it into `fs_pending`; the unchanged pre-recv drain
+    /// stamps the debounce against `now_pre` (see `ingest_fs_event`).
+    FsEvent(notify::Event),
+    /// MVU Phase 3a: a git-worker result, routed via the forwarder thread
+    /// onto the unified channel. The recv arm only *buffers* it into
+    /// `git_pending`; the unchanged pre-recv drain applies it
+    /// (generation-gated) via `ingest_git_result`.
+    GitResult(state::GitWorkerResult),
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
-    /// `Scheduler`, NOT a thread. In Phase 2 the loop never actually
-    /// sends itself a `Tick` — `recv_timeout` returning `Err(Timeout)`
-    /// IS the tick handler (it re-evaluates every timer predicate against
-    /// the fresh `now`). The variant exists so Phase 3+ subscriptions can
-    /// push real `Tick`s onto the single channel without re-touching the
-    /// enum.
+    /// `Scheduler`, NOT a thread. The loop never actually sends itself a
+    /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
+    /// (it re-evaluates every timer predicate against the fresh `now`). The
+    /// variant exists so later subscriptions can push real `Tick`s onto the
+    /// single channel without re-touching the enum.
     #[allow(dead_code)]
     Tick(Deadline),
 }
@@ -107,6 +116,7 @@ mod render;
 mod route;
 mod scheduler;
 mod session;
+mod sources;
 pub mod state;
 mod tasks;
 
@@ -116,6 +126,7 @@ use grep_session::GrepSession;
 use pager_history::PagerHistory;
 pub use prompt::{Prompt, PromptKind};
 use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
+use sources::{coalesce_pending, sync_listing_watch, take_reader_result};
 use tasks::{BackgroundTask, BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 
 /// Which collection the user is looking at.
@@ -432,12 +443,15 @@ pub struct App {
     last_term_title: Option<String>,
     /// Receiver for git-status worker results. The worker thread is
     /// spawned at App construction and runs for the lifetime of the
-    /// process. Drained at the top of every event-loop iteration —
-    /// results whose `generation` doesn't match `state.git_generation`
-    /// are discarded (the user has navigated past them). The Sender
-    /// half is held by `state.git_worker_tx` and used by chdir
-    /// cache-miss paths.
-    git_result_rx: std::sync::mpsc::Receiver<state::GitWorkerResult>,
+    /// process. MVU Phase 3a: `run()` `.take()`s this once and moves it
+    /// into the forwarder thread, which re-sends each result onto the
+    /// unified channel as `Message::GitResult`; the pre-recv drain then
+    /// applies it (results whose `generation` doesn't match
+    /// `state.git_generation` are discarded — the user navigated past
+    /// them). `None` after `run()` takes it (and in the test harness,
+    /// which never drives `run()`). The Sender half is held by
+    /// `state.git_worker_tx` and used by chdir cache-miss paths.
+    git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
     /// Per-file scroll memory for the pager. Loaded once at startup;
     /// updated whenever a file-backed pager view is closed or swapped
     /// out (and also when spyc itself exits). Restores the user's
@@ -745,7 +759,7 @@ impl App {
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
-            git_result_rx: git_res_rx,
+            git_result_rx: Some(git_res_rx),
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
@@ -1167,7 +1181,17 @@ impl App {
         use notify::{RecursiveMode, Watcher};
         use std::sync::mpsc;
 
-        // File watcher: notify posts events into `rx`. Two kinds of watch:
+        // MVU Phase 3a: the single message channel. The parkable input
+        // reader, the notify watcher closure, and the git forwarder all
+        // feed `msg_tx`; the loop `recv_timeout`s on `msg_rx`. Created
+        // first so the watcher/forwarder can clone a sender before the
+        // reader takes ownership of the original.
+        let (msg_tx, msg_rx) = mpsc::channel::<Message>();
+
+        // File watcher: notify posts events onto the unified channel via a
+        // closure `EventHandler` that wraps each `Ok(Event)` as
+        // `Message::FsEvent`, dropping `Err` at the boundary (preserving
+        // the prior Ok-only drain contract). Two kinds of watch:
         //
         // 1. Config files — we watch their *parent* directories, not the
         //    files, because editors that replace-on-save (vim, VS Code,
@@ -1176,9 +1200,14 @@ impl App {
         // 2. The current listing directory (non-recursive) — so external
         //    changes (a build artifact dropping in, `git pull`, etc.) are
         //    reflected without a manual refresh.
-        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let watcher_tx = msg_tx.clone();
         let mut fs_watcher: Option<notify::RecommendedWatcher> =
-            notify::recommended_watcher(tx).ok();
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(ev) = res {
+                    let _ = watcher_tx.send(Message::FsEvent(ev));
+                }
+            })
+            .ok();
         let mut already_watched: std::collections::HashSet<PathBuf> =
             std::collections::HashSet::new();
         if let Some(w) = fs_watcher.as_mut() {
@@ -1229,6 +1258,15 @@ impl App {
         // watcher) instead of starving indefinitely. Cleared on refresh.
         let mut first_event_after_refresh: Option<std::time::Instant> = None;
 
+        // MVU Phase 3a: buffers for messages the recv arm coalesces. The
+        // recv arms ONLY push here (zero state mutation); the unchanged
+        // pre-recv drains above process them against `now_pre`. This keeps
+        // the timing-sensitive debounce / generation-gate logic exactly
+        // where it was — `recv` only changes *when* the loop wakes, not
+        // *how* events are handled.
+        let mut fs_pending: Vec<notify::Event> = Vec::new();
+        let mut git_pending: Vec<state::GitWorkerResult> = Vec::new();
+
         // Typing-burst window: after any keypress, briefly tighten the
         // event-loop poll cadence to 16 ms so the *first* PTY echo
         // after a keystroke is picked up quickly. crossterm's
@@ -1241,15 +1279,41 @@ impl App {
         let mut last_input_at: Option<std::time::Instant> = None;
         const TYPING_BURST_WINDOW: Duration = Duration::from_millis(250);
 
+        // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
+        // sending onto its own channel; this forwarder bridges its results
+        // onto the unified channel as `Message::GitResult`, so `recv` wakes
+        // on a fresh git status instead of waiting out the poll. `.take()`
+        // here is the sole consumer of `git_result_rx`. The thread parks in
+        // `recv()` until the worker's sender drops at App teardown (the loop
+        // has long exited by then) or `msg_rx` drops (send errors → break).
+        // Because this sender keeps the channel Connected after the input
+        // reader dies, reader-death is detected via `reader_done` below, NOT
+        // channel disconnection.
+        if let Some(git_rx) = self.git_result_rx.take() {
+            let gtx = msg_tx.clone();
+            std::thread::spawn(move || {
+                while let Ok(r) = git_rx.recv() {
+                    if gtx.send(Message::GitResult(r)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
         // MVU Phase 1: the parkable input reader runs on its own thread
-        // and feeds `msg_rx`; the loop `recv_timeout`s on it instead of
-        // calling `event::poll`/`event::read` directly. `reader_handle`
+        // and feeds `msg_tx`; the loop `recv_timeout`s on `msg_rx` instead
+        // of calling `event::poll`/`event::read` directly. `reader_handle`
         // is a run()-scoped local so its `Drop` (stop + unpark + join)
-        // tears the thread down when run() returns. All other sources
-        // (watcher, panes, tasks, MCP, git) stay polled this phase.
-        let (msg_tx, msg_rx) = mpsc::channel::<Message>();
+        // tears the thread down when run() returns. Phase 3a: the watcher
+        // (above) and git forwarder (above) also feed the channel; panes /
+        // tasks / MCP stay polled until 3b/3c/3d.
         let reader_handle = spawn_input_reader(msg_tx);
         let read_err = reader_handle.read_err.clone();
+        // Phase 3a: extra senders (watcher/forwarder) keep the channel
+        // Connected after the reader thread dies, so the `Err(Disconnected)`
+        // arm no longer fires on reader death. Gate the loop-exit on this
+        // flag instead (set true when the reader returns).
+        let reader_done = reader_handle.reader_done.clone();
         let foreground_exec = ForegroundExec {
             park: reader_handle.park.clone(),
             acked: reader_handle.acked.clone(),
@@ -1642,35 +1706,23 @@ impl App {
             // listing refreshes to avoid spawning git subprocesses on
             // every rapid-fire .git/index change.
             let mut needs_reload = false;
-            // last_event_at carries over from previous iterations when
-            // the debounce timer hadn't elapsed yet.
-            while let Ok(result) = rx.try_recv() {
-                if let Ok(ev) = result {
-                    self.activity_watcher_events = self.activity_watcher_events.saturating_add(1);
-                    for p in &ev.paths {
-                        let listing = self.is_listing_path(p);
-                        let config = self.is_config_path(p);
-                        spyc_debug!(
-                            "watcher event: {} (listing={listing}, config={config}, kind={:?})",
-                            p.display(),
-                            ev.kind
-                        );
-                        if config {
-                            needs_reload = true;
-                        }
-                        if listing {
-                            // Anchor the max-defer window at the FIRST
-                            // event of this busy stretch (don't bump on
-                            // subsequent ones, or continuous activity
-                            // starves the refresh). `now_pre` matches the
-                            // old per-event local read position.
-                            if first_event_after_refresh.is_none() {
-                                first_event_after_refresh = Some(now_pre);
-                            }
-                            last_event_at = Some(now_pre);
-                        }
-                    }
-                }
+            // MVU Phase 3a: drain the FsEvents the recv arm buffered into
+            // `fs_pending` (this iteration and during the recv sleep). The
+            // body — stamping the trailing-debounce against `now_pre` — is
+            // unchanged from the old `rx.try_recv()` drain; only the *source*
+            // moved to the unified channel. An event that arrived mid-sleep
+            // is stamped here at this iteration's `now_pre`, exactly as the
+            // old poll stamped it at the next `now_pre`. `last_event_at`
+            // carries over from previous iterations when the debounce timer
+            // hadn't elapsed yet.
+            for ev in std::mem::take(&mut fs_pending) {
+                self.ingest_fs_event(
+                    &ev,
+                    now_pre,
+                    &mut needs_reload,
+                    &mut last_event_at,
+                    &mut first_event_after_refresh,
+                );
             }
             if needs_reload {
                 self.reload_config();
@@ -1768,20 +1820,17 @@ impl App {
                 draw_reason = 3;
             }
 
-            // Drain pending git-worker results. Stale results (the
-            // user navigated past them) are discarded via the
-            // generation counter; matching results refill the
-            // raw-status cache and recompute git_files / git_info
-            // against the *current* listing dir. Cheap when empty.
-            while let Ok(result) = self.git_result_rx.try_recv() {
-                self.activity_git_results = self.activity_git_results.saturating_add(1);
-                // Roundtrip duration: when the request was sent (set
-                // by `git_file_statuses_cached`) vs. now.
-                if let Some(sent) = self.state.last_git_request_at.take() {
-                    self.activity_git_last_ms =
-                        u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
-                }
-                if self.apply_git_worker_result(result) {
+            // Drain the git-worker results the recv arm buffered into
+            // `git_pending` (MVU Phase 3a — only the source moved; the body
+            // is unchanged). Stale results (the user navigated past them)
+            // are discarded via the generation counter inside
+            // `ingest_git_result`; matching results refill the raw-status
+            // cache and recompute git_files / git_info against the *current*
+            // listing dir. This is the SOLE apply/count/take site — the recv
+            // arm and coalesce loop only buffer (no double-count/-apply).
+            // Cheap when empty.
+            for result in std::mem::take(&mut git_pending) {
+                if self.ingest_git_result(result) {
                     needs_draw = true;
                     draw_reason = 2;
                     // git_branch / dirty flag may have changed.
@@ -1831,7 +1880,38 @@ impl App {
                 (None, None) => MAX_IDLE_CAP,
             }
             .max(Duration::from_millis(1)); // anti-spin: never a zero wait
-            match msg_rx.recv_timeout(wait) {
+
+            // MVU Phase 3a: block for the next message, then *coalesce* —
+            // buffer every immediately-available FsEvent/GitResult into the
+            // pending Vecs (drained at the top of the next iteration by the
+            // unchanged pre-recv drains) and surface only an Input (or a
+            // Tick/Timeout/Disconnected) to the dispatch match below. This
+            // collapses a watcher/git burst into a single wakeup and bounds
+            // Input latency to one iteration: a keystroke queued behind
+            // thousands of FsEvents is found by the coalesce and dispatched
+            // THIS iteration, not after thousands of one-message-per-recv
+            // passes. Input is NEVER handled inside the coalesce loop (a
+            // `PostAction::Spawn` parks the reader / re-inits the TUI), only
+            // surfaced for the arm — and the coalesce stops at the first one,
+            // so Input stays one-per-iteration and FIFO.
+            let effective = match msg_rx.recv_timeout(wait) {
+                Ok(Message::FsEvent(ev)) => {
+                    fs_pending.push(ev);
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                            Ok(Message::Input(ev))
+                        })
+                }
+                Ok(Message::GitResult(r)) => {
+                    git_pending.push(r);
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                            Ok(Message::Input(ev))
+                        })
+                }
+                other => other,
+            };
+            match effective {
                 Ok(Message::Input(ev)) => {
                     needs_draw = true;
                     draw_reason = 2;
@@ -2044,24 +2124,35 @@ impl App {
                     }
                 }
                 // No input this tick: re-poll the still-polled sources; no
-                // draw (matches the old `event::poll(...) == false`). In
-                // Phase 2 the loop never sends itself a Tick (the scheduler
-                // is advisory) so Tick is identical to Timeout; the variant
-                // exists for Phase 3+ subscriptions.
-                Ok(Message::Tick(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    // Reader thread exited. Preserve the prior
-                    // `event::read()?` error contract: propagate a
-                    // recorded fatal poll/read error; a clean stop (tx
-                    // dropped at teardown) ends the loop cleanly.
-                    // Take into a local so the mutex guard is dropped
-                    // before the branch (clippy: significant-drop in
-                    // if-let scrutinee).
-                    let fatal = read_err.lock().unwrap().take();
-                    if let Some(e) = fatal {
-                        return Err(e.into());
+                // draw (matches the old `event::poll(...) == false`). The
+                // loop never sends itself a Tick (the scheduler is advisory)
+                // so Tick is identical to Timeout; the variant exists for
+                // later subscriptions. This arm is also where a buffer-only
+                // coalesce lands (it synthesizes Timeout) and where a dead
+                // reader is detected every ~wait — see the reader_done gate.
+                Ok(Message::Tick(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // MVU Phase 3a: the watcher closure + git forwarder each
+                    // hold a `msg_tx` clone, so the channel stays Connected
+                    // after the input reader dies — the `Disconnected` arm
+                    // below no longer fires on reader death (it would spin on
+                    // Timeout forever and never surface the fatal read error).
+                    // Detect reader death here instead, preserving the prior
+                    // `event::read()?` contract: propagate a recorded fatal
+                    // error, else exit cleanly.
+                    if reader_done.load(std::sync::atomic::Ordering::Acquire) {
+                        return take_reader_result(&read_err);
                     }
-                    return Ok(());
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    // Defensive fallback: every `msg_tx` clone dropped (no
+                    // watcher, no forwarder, reader gone). Same contract —
+                    // propagate a recorded fatal error; else a clean stop.
+                    return take_reader_result(&read_err);
+                }
+                // Phase 3a: FsEvent/GitResult are buffered + coalesced in the
+                // pre-step above, never surfaced as `effective`.
+                Ok(Message::FsEvent(_) | Message::GitResult(_)) => {
+                    unreachable!("FsEvent/GitResult are buffered in the coalesce pre-step")
                 }
             }
 
@@ -6777,95 +6868,6 @@ pub fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
     count
 }
 
-/// Choose `Recursive` vs `NonRecursive` for the listing watcher.
-///
-/// Linux gates `Recursive` behind the `MAX_RECURSIVE_WATCH_DIRS` cap
-/// to avoid blocking the main thread on `inotify_add_watch` walks
-/// through `$HOME`-shaped trees. On other platforms (macOS FSEvents,
-/// Windows ReadDirectoryChangesW), recursive watches are OS-level
-/// and cheap, so `Recursive` is returned unconditionally.
-#[cfg(target_os = "linux")]
-fn pick_recursive_mode(new_dir: &Path) -> notify::RecursiveMode {
-    use notify::RecursiveMode;
-    if count_subdirs_capped(new_dir, MAX_RECURSIVE_WATCH_DIRS) > MAX_RECURSIVE_WATCH_DIRS {
-        crate::spyc_debug!(
-            "watcher: {} has > {} subdirs, using non-recursive watch (parent-row dirty refresh falls back to 1 Hz git poll)",
-            new_dir.display(),
-            MAX_RECURSIVE_WATCH_DIRS,
-        );
-        RecursiveMode::NonRecursive
-    } else {
-        RecursiveMode::Recursive
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-const fn pick_recursive_mode(_new_dir: &Path) -> notify::RecursiveMode {
-    notify::RecursiveMode::Recursive
-}
-
-fn sync_listing_watch(
-    fs_watcher: Option<&mut notify::RecommendedWatcher>,
-    active: &mut Option<PathBuf>,
-    active_git: &mut Option<PathBuf>,
-    new_dir: &Path,
-    gitdir: Option<&Path>,
-) {
-    use notify::{RecursiveMode, Watcher};
-    let Some(w) = fs_watcher else {
-        return;
-    };
-    if active.as_deref() != Some(new_dir) {
-        if let Some(old) = active.as_ref() {
-            let _ = w.unwatch(old);
-        }
-        // Recursive (when feasible): catches changes anywhere below
-        // the listing dir so git status markers update on the parent
-        // directory row when a file is added/modified in a
-        // subdirectory (e.g. touching `docs/foo.md` while sitting at
-        // the repo root). Events under `.git/` are filtered to
-        // specific files (`index`, `HEAD`) by `is_listing_path` to
-        // avoid `.git/objects` / pack / lockfile churn cascading into
-        // needless `git status` calls.
-        //
-        // On Linux, `pick_recursive_mode` downgrades to non-recursive
-        // when the subtree exceeds `MAX_RECURSIVE_WATCH_DIRS` —
-        // otherwise `notify`'s synchronous per-subdir
-        // `inotify_add_watch` walk blocks the main thread (the
-        // `$HOME`-with-anaconda3 case). The 1 Hz git poll declared
-        // at the top of `App::run` covers parent-row dirty-flag
-        // refresh in that case with at most one second of lag.
-        // macOS FSEvents is OS-level and unaffected.
-        if w.watch(new_dir, pick_recursive_mode(new_dir)).is_ok() {
-            *active = Some(new_dir.to_path_buf());
-        } else {
-            *active = None;
-        }
-    }
-    // Watch the repo's *resolved* gitdir non-recursively. For a normal
-    // repo that's `<root>/.git`; for a linked worktree it's
-    // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*),
-    // which lives OUTSIDE the working tree — without watching it, a
-    // worktree's index/HEAD changes (stage, commit, checkout, branch
-    // switch) never fire the watcher and markers only refresh on the
-    // slower periodic poll. We can't watch the `index` *file* directly:
-    // git commits via atomic rename (write `index.lock`, rename to
-    // `index`), which replaces the inode — a file-level watch follows
-    // the *old* inode and goes deaf. A directory watch sees the rename
-    // land. NonRecursive bounds the noise even with huge `.git/objects`
-    // trees. `gitdir` is resolved + cached on chdir (`current_gitdir`).
-    if active_git.as_deref() != gitdir {
-        if let Some(old) = active_git.take() {
-            let _ = w.unwatch(&old);
-        }
-        if let Some(gd) = gitdir
-            && w.watch(gd, RecursiveMode::NonRecursive).is_ok()
-        {
-            *active_git = Some(gd.to_path_buf());
-        }
-    }
-}
-
 // `CaptureHandles` retired in v1.5 Phase 6a — `spawn_capture` now
 // returns a `PtyHost` directly, the same shape `Pane` and
 // `BackgroundTask` use. PTY (vs. a plain piped `Command`) is what
@@ -7540,10 +7542,10 @@ impl App {
     pub(crate) fn test_app(cwd: std::path::PathBuf) -> Self {
         // No MCP server / git worker is spawned, so the senders drop. The
         // harness never drives `run()`'s drain loop, and `apply` /
-        // `handle_key` don't read these receivers — a disconnected channel
-        // is harmless here.
+        // `handle_key` don't read these receivers — a disconnected MCP
+        // channel is harmless, and `git_result_rx` is `None` (Phase 3a:
+        // `run()` is the only `.take()` site).
         let (_mcp_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
-        let (_git_tx, git_result_rx) = std::sync::mpsc::channel();
         let context_path = crate::context::context_path(&cwd);
         let mut app = Self {
             state: state::AppState::test_default(cwd),
@@ -7612,7 +7614,7 @@ impl App {
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
-            git_result_rx,
+            git_result_rx: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
