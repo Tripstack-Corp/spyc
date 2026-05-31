@@ -108,6 +108,21 @@ impl App {
         }
     }
 
+    /// MVU Phase 3b PR2: whether the surviving 16ms streaming floor should
+    /// be active. Panes/overlays now wake the loop via `Message::PaneOutput`,
+    /// so a poll floor is needed ONLY for the streaming pull sources that
+    /// still lack a channel wakeup until 3c: a live `!cmd` capture
+    /// (`pending_capture`) and a `:task N` viewer of a *running* background
+    /// task (its pager carries the `task_id`; output streams via the polled
+    /// task drain). A viewer of an already-exited task does NOT keep the
+    /// floor up (the `running_count` guard), so idle CPU stays at zero. 3c
+    /// removes this floor entirely when captures + tasks migrate.
+    pub(crate) fn streaming_floor_active(&self) -> bool {
+        self.pending_capture.is_some()
+            || (self.pager.as_ref().and_then(|v| v.task_id).is_some()
+                && self.background_tasks.running_count() > 0)
+    }
+
     /// MVU Phase 3a: apply one buffered git-worker result — the SOLE
     /// apply/count/take site (the recv arm + coalesce only buffer). Bumps
     /// `activity_git_results` per delivered result (before the generation
@@ -338,6 +353,33 @@ mod tests {
             assert!(!app.ingest_git_result(git_result(99)));
             assert!(!app.ingest_git_result(git_result(99)));
             assert_eq!(app.activity_git_results, 2);
+        });
+    }
+
+    #[test]
+    fn streaming_floor_off_when_idle() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let app = App::test_app(tmp.path().to_path_buf());
+            // No capture, no task viewer → panes/overlays wake via the
+            // channel, so the floor stays off (idle CPU = 0).
+            assert!(!app.streaming_floor_active());
+        });
+    }
+
+    #[test]
+    fn streaming_floor_off_for_viewer_of_non_running_task() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            // A `:task N` pager whose task is NOT running (running_count==0)
+            // must NOT keep the 16ms floor up — else a leftover viewer of a
+            // dead task pins idle CPU forever.
+            let mut view = crate::ui::pager::PagerView::new_plain("task", vec![]);
+            view.task_id = Some(1);
+            app.pager = Some(view);
+            assert_eq!(app.background_tasks.running_count(), 0);
+            assert!(!app.streaming_floor_active());
         });
     }
 
