@@ -118,10 +118,6 @@ pub struct PtyHost {
     /// whose reader is already blocked in `read()` — only a slot can
     /// retro-target it. Cleared (`clear_wake_slot`) on promote / hard-kill
     /// so a teardown-racing close-wake fires through `None`.
-    ///
-    /// PR1 (this PR) is the plumbing; the capture/task drain sites install
-    /// + clear the slot in 3c PR2, so it reads as dead-code until then.
-    #[allow(dead_code)]
     wake: Arc<Mutex<Option<Wake>>>,
 }
 
@@ -232,9 +228,6 @@ impl PtyHost {
     /// on each `:fg`/`^Z`/demote transition — a single atomic store
     /// re-targets the already-running reader. The reader re-loads the slot
     /// per iteration, so this takes effect on the next chunk/EOF.
-    ///
-    /// PR1 plumbing; wired by the capture/task sites in 3c PR2.
-    #[allow(dead_code)]
     pub fn set_wake(&self, w: Wake) {
         *self.wake.lock().unwrap() = Some(w);
     }
@@ -243,7 +236,6 @@ impl PtyHost {
     /// (host → Pane, which installs its own parser-worker wake) and on
     /// hard-kill, so a teardown-racing close-wake fires through `None` and
     /// never targets a container the host just left.
-    #[allow(dead_code)]
     pub fn clear_wake_slot(&self) {
         *self.wake.lock().unwrap() = None;
     }
@@ -253,7 +245,6 @@ impl PtyHost {
     /// capture/task drain site — never inside `drain()` — so a chunk racing
     /// the clear re-arms the producer CAS and re-sends (at most one
     /// redundant wake, never a lost final chunk). No-op when no wake is set.
-    #[allow(dead_code)]
     pub fn clear_wake_pending(&self) {
         // Clone the flag Arc out and drop the guard before the store
         // (clippy nursery significant-drop discipline; cheap refcount bump).
