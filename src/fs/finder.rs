@@ -23,7 +23,9 @@
 //! ships exactly that, but for v1 the synchronous path is plenty).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::fs::WakingSender;
 use nucleo_matcher::{Config, Matcher, Utf32Str, pattern::Pattern};
 
 /// Soft cap on candidate set. A monorepo with 200K files would
@@ -56,7 +58,7 @@ const STREAM_BATCH: usize = 256;
 /// Cancellation: when the receiver is dropped (e.g. user closes
 /// the picker), `tx.send` fails and we exit cleanly without
 /// finishing the walk -- no lingering threads.
-pub fn walk_streaming(root: &Path, tx: std::sync::mpsc::Sender<Vec<PathBuf>>) {
+pub fn walk_streaming(root: &Path, tx: WakingSender<Vec<PathBuf>>) {
     let mut count = 0usize;
 
     // Pass 1: standard walk from the requested root.
@@ -85,7 +87,7 @@ pub fn walk_streaming(root: &Path, tx: std::sync::mpsc::Sender<Vec<PathBuf>>) {
 fn walk_one(
     walk_root: &Path,
     display_root: &Path,
-    tx: &std::sync::mpsc::Sender<Vec<PathBuf>>,
+    tx: &WakingSender<Vec<PathBuf>>,
     count: &mut usize,
 ) -> bool {
     let walker = ignore::WalkBuilder::new(walk_root)
@@ -176,6 +178,8 @@ fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
 /// against `query` (empty query = natural walk order, truncated).
 pub fn find_paths(root: &Path, query: &str, limit: usize) -> Vec<PathBuf> {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Synchronous collector — no event loop to wake (rx drained right here).
+    let tx = WakingSender::new(tx, Arc::new(|| {}));
     let walk_root = root.to_path_buf();
     std::thread::spawn(move || walk_streaming(&walk_root, tx));
     let mut all = Vec::new();
@@ -195,6 +199,7 @@ pub fn find_paths(root: &Path, query: &str, limit: usize) -> Vec<PathBuf> {
 #[cfg(test)]
 fn walk(root: &Path) -> Vec<PathBuf> {
     let (tx, rx) = std::sync::mpsc::channel();
+    let tx = WakingSender::new(tx, Arc::new(|| {}));
     let walk_root = root.to_path_buf();
     std::thread::spawn(move || walk_streaming(&walk_root, tx));
     let mut out = Vec::new();
@@ -335,6 +340,7 @@ mod tests {
             File::create(root.join(format!("f{i:04}"))).unwrap();
         }
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx = WakingSender::new(tx, Arc::new(|| {}));
         std::thread::spawn(move || walk_streaming(&root, tx));
         let mut total = 0;
         let mut batch_count = 0;
@@ -399,6 +405,7 @@ mod tests {
             File::create(root.join(format!("f{i:04}"))).unwrap();
         }
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx = WakingSender::new(tx, Arc::new(|| {}));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             walk_streaming(&root, tx);

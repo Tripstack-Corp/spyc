@@ -89,6 +89,21 @@ impl App {
             None => Arc::new(|| {}),
         }
     }
+
+    /// MVU Phase 3d: build the F-finder walker's wake — a payloadless
+    /// `Message::FindOutput` send (the candidates ride `FindPicker.walk_rx`,
+    /// re-drained by `drain_walk`). No-op before `run()` installs the sender.
+    pub(crate) fn make_find_wake(&self) -> PaneWake {
+        match &self.pane_wake_tx {
+            Some(tx) => {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Message::FindOutput);
+                })
+            }
+            None => Arc::new(|| {}),
+        }
+    }
 }
 
 #[cfg(test)]
