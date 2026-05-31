@@ -232,6 +232,20 @@ impl PtyHost {
         *self.wake.lock().unwrap() = Some(w);
     }
 
+    /// MVU Phase 3c: fire the installed wake once, now. Called right after
+    /// `set_wake` so any bytes the reader delivered during the install window
+    /// (slot was `None`, so the reader fired nothing) get drained within one
+    /// wakeup rather than waiting out the `MAX_IDLE_CAP` ceiling. No-op when
+    /// no wake is set.
+    pub fn fire_wake_now(&self) {
+        // Clone the fire closure out and drop the guard before calling it
+        // (don't hold the per-host lock across the wake's send).
+        let fire = self.wake.lock().unwrap().as_ref().map(|w| w.fire.clone());
+        if let Some(fire) = fire {
+            fire();
+        }
+    }
+
     /// MVU Phase 3c: clear the wake slot (back to `None`). Used on promote
     /// (host → Pane, which installs its own parser-worker wake) and on
     /// hard-kill, so a teardown-racing close-wake fires through `None` and

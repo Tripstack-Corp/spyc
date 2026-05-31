@@ -981,19 +981,17 @@ impl App {
         if self.show_activity {
             use ratatui::widgets::Paragraph as ActivityP;
             let text = format!(
-                " {} dps [p:{} e:{} o:{}]  {} cells/s  poll {}ms ",
+                " {} dps [p:{} e:{} o:{}]  {} cells/s  cap {}ms ",
                 self.activity_dps,
                 self.activity_snap_pane,
                 self.activity_snap_event,
                 self.activity_snap_other,
                 self.activity_bps,
-                if self.pending_capture.is_some() {
-                    16
-                } else if self.pane_tabs.is_some() || self.top_overlay.is_some() {
-                    50
-                } else {
-                    250
-                },
+                // MVU Phase 3c: the loop is event-driven now (panes/captures/
+                // tasks/fs/git all wake the channel); there is no adaptive
+                // poll rate. The only meaningful number is the MAX_IDLE_CAP
+                // ceiling — the longest the loop ever sleeps between wakes.
+                500,
             );
 
             // Line 2 — internals digest. Compact field names so the

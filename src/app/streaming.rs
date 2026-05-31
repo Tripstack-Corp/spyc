@@ -13,12 +13,15 @@ use super::{App, TASK_BUFFER_CAP, TaskStatus, eof_marker_line, strip_crlf};
 
 impl App {
     /// Drain the foreground `!` capture into its pager and finalize on EOF.
-    /// Returns `true` while a capture exists (PR2 preserves the pre-3c
-    /// unconditional redraw-while-streaming; PR3 gates it on actual output).
+    /// Returns whether a redraw is needed. MVU Phase 3c PR3: with the poll
+    /// floor gone, this is gated on actual change — new output, the exit
+    /// frame, or the elapsed-timer's displayed seconds ticking over — so a
+    /// quiet running capture redraws ~1 Hz (driven by the MAX_IDLE_CAP wake)
+    /// rather than every iteration, and idle draws stay at 0.
     pub(crate) fn drain_pending_capture(&mut self) -> bool {
-        let had_capture = self.pending_capture.is_some();
+        let mut redraw = false;
         if let Some(capture) = &mut self.pending_capture {
-            // MVU Phase 3c: clear-before-read (no-op until the slot is set).
+            // MVU Phase 3c: clear-before-read (paired with the reader CAS).
             capture.host.clear_wake_pending();
             let mut got_data = false;
             let mut chunks: Vec<Vec<u8>> = Vec::new();
@@ -27,10 +30,12 @@ impl App {
                 capture.buffer.extend_from_slice(&chunk);
                 got_data = true;
             }
+            redraw |= got_data;
             if drain.newly_closed {
                 capture.finished = true;
             }
-            // Update elapsed timer in the title while running.
+            // Update elapsed timer in the title while running; redraw only
+            // when the displayed seconds string actually changes.
             if !capture.finished {
                 let elapsed = capture.started.elapsed().as_secs();
                 let human_time = if elapsed >= 3600 {
@@ -47,6 +52,9 @@ impl App {
                 };
                 let timer_title = format!("\u{23f3} {} — running... ({human_time})", capture.title);
                 if let Some(view) = self.pager.as_mut() {
+                    if view.title != timer_title {
+                        redraw = true;
+                    }
                     view.title = timer_title;
                 }
             }
@@ -113,22 +121,29 @@ impl App {
                     view.scroll_to_bottom_auto();
                 }
                 self.pending_capture = None;
+                redraw = true; // the exit frame (✓/✗ title + [EOF]) must draw
             }
         }
-        had_capture
+        redraw
     }
 
     /// Drain every running background task into its buffer and harvest exit
-    /// on EOF. Returns `true` when a task finished this tick (the divider /
-    /// toast need a redraw).
+    /// on EOF. Returns `true` when a redraw is needed: a task finished (the
+    /// toast + divider), OR a backgrounded task's `[N+]` divider just
+    /// appeared (its `has_unread_output` flipped false→true this tick). MVU
+    /// Phase 3c PR3: with the floor gone, the divider-appearance redraw must
+    /// be driven here; further chunks don't change the glyph, so only the
+    /// transition redraws (idle draws stay at 0 for a chatty quiet-divider task).
     pub(crate) fn drain_background_tasks(&mut self) -> bool {
         let mut just_finished: Vec<(u32, String, String, std::time::Duration)> = Vec::new();
+        let mut divider_appeared = false;
         for task in &mut self.background_tasks.tasks {
             if !matches!(task.status, TaskStatus::Running) {
                 continue;
             }
-            // MVU Phase 3c: clear-before-read (no-op until the slot is set).
+            // MVU Phase 3c: clear-before-read (paired with the reader CAS).
             task.host.clear_wake_pending();
+            let was_unread = task.has_unread_output;
             let mut chunks: Vec<Vec<u8>> = Vec::new();
             let drain = task.host.drain(|bytes| chunks.push(bytes.to_vec()));
             for chunk in chunks {
@@ -138,6 +153,11 @@ impl App {
                     let drop_n = task.buffer.len() - TASK_BUFFER_CAP;
                     task.buffer.drain(..drop_n);
                 }
+            }
+            // The `[N+]` glyph reflects has_unread_output yes/no, so only its
+            // false→true transition needs a redraw — not every chunk.
+            if !was_unread && task.has_unread_output {
+                divider_appeared = true;
             }
             if drain.newly_closed {
                 // Reader thread observed EOF this tick. Host's drain already
@@ -170,16 +190,14 @@ impl App {
                 ));
             }
         }
-        if just_finished.is_empty() {
-            return false;
-        }
+        let finished_any = !just_finished.is_empty();
         for (id, cmd_display, status_text, elapsed) in just_finished {
             let secs = elapsed.as_secs();
             self.state.flash_info(format!(
                 "task #{id}: {cmd_display} — {status_text} ({secs}s)"
             ));
         }
-        true
+        divider_appeared || finished_any
     }
 
     /// If a task-viewer pager is open, refresh its content from the live task
