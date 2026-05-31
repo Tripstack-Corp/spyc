@@ -42,6 +42,58 @@ pub enum Effect {
         /// user can read its output before the TUI is restored.
         pause_after: bool,
     },
+
+    /// A-class. Copy `text` to the system clipboard, then flash the
+    /// per-site success message reconstructed from `ok` — or a uniform
+    /// `"yank failed: {e}"` on error (every status-bar yank site shares
+    /// that one failure string, so it is not carried). `text` is
+    /// materialized in the producer (not a pane handle) — eager grid
+    /// copy-out is the regression Phase 5's `PaneSnapshot` avoids.
+    CopyToClipboard { text: String, ok: ClipMsg },
+}
+
+/// The success-flash recipe for a [`Effect::CopyToClipboard`], rich enough
+/// to reconstruct each of the four status-bar yank strings byte-for-byte
+/// in the executor — line counts recomputed via `lines().count()`,
+/// previews via `chars().take(N)` with a byte-length-gated `…`. A bare
+/// count could only reconstruct `MultiPath`.
+#[derive(Debug)]
+pub enum ClipMsg {
+    /// `"yanked {n} lines from pane"` — `n = text.lines().count()`.
+    PaneLines,
+    /// `"yanked {n} lines (full scrollback)"` — `n = text.lines().count()`.
+    Scrollback,
+    /// `"yanked path: {preview}{…}"` — preview = `text.chars().take(80)`,
+    /// `…` iff `text.len() > 80` (byte length).
+    SinglePath,
+    /// `"yanked {count} paths"`. `count` is carried (a path may contain a
+    /// newline, so it can't be recovered from `text` reliably).
+    MultiPath { count: usize },
+    /// `"yanked prompt: {preview}{…}"` — preview = `text.chars().take(60)`,
+    /// `…` iff `text.len() > 60` (byte length).
+    Prompt,
+}
+
+impl ClipMsg {
+    /// Render the success flash for a completed copy of `text`,
+    /// byte-for-byte identical to the former inline yank sites.
+    fn success(&self, text: &str) -> String {
+        match self {
+            Self::PaneLines => format!("yanked {} lines from pane", text.lines().count()),
+            Self::Scrollback => format!("yanked {} lines (full scrollback)", text.lines().count()),
+            Self::SinglePath => {
+                let preview: String = text.chars().take(80).collect();
+                let ellipsis = if text.len() > 80 { "…" } else { "" };
+                format!("yanked path: {preview}{ellipsis}")
+            }
+            Self::MultiPath { count } => format!("yanked {count} paths"),
+            Self::Prompt => {
+                let preview: String = text.chars().take(60).collect();
+                let ellipsis = if text.len() > 60 { "…" } else { "" };
+                format!("yanked prompt: {preview}{ellipsis}")
+            }
+        }
+    }
 }
 
 /// Total conversion from the legacy `PostAction` carrier. `None` maps to
@@ -94,6 +146,15 @@ impl App {
 
         for effect in effects {
             match effect {
+                // A-class: copy + flash synchronously, same tick. Never
+                // `?`-propagate a clipboard error — a failed copy flashes
+                // and the loop survives (unlike the former inline sites,
+                // which were not in `?` scope, this arm must not abort the
+                // run loop on a transient backend failure).
+                Effect::CopyToClipboard { text, ok } => match crate::clipboard::copy(&text) {
+                    Ok(()) => self.state.flash_info(ok.success(&text)),
+                    Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                },
                 Effect::ForegroundExec {
                     program,
                     args,
@@ -166,11 +227,87 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{Effect, PostAction};
+    use super::{ClipMsg, Effect, PostAction};
 
     #[test]
     fn post_action_none_maps_to_empty() {
         assert!(Vec::<Effect>::from(PostAction::None).is_empty());
+    }
+
+    #[test]
+    fn clip_pane_lines_count_recomputed_from_text() {
+        // The count is `lines().count()` on the carried text — a trailing
+        // newline does NOT add a phantom line (matches the former inline
+        // `text.lines().count()`).
+        assert_eq!(
+            ClipMsg::PaneLines.success("a\nb\nc"),
+            "yanked 3 lines from pane"
+        );
+        assert_eq!(
+            ClipMsg::PaneLines.success("a\nb\n"),
+            "yanked 2 lines from pane"
+        );
+        assert_eq!(
+            ClipMsg::PaneLines.success("solo"),
+            "yanked 1 lines from pane"
+        );
+    }
+
+    #[test]
+    fn clip_scrollback_string() {
+        assert_eq!(
+            ClipMsg::Scrollback.success("x\ny"),
+            "yanked 2 lines (full scrollback)"
+        );
+    }
+
+    #[test]
+    fn clip_multipath_uses_carried_count_not_text() {
+        // count is carried, so a path containing a newline can't inflate it.
+        assert_eq!(
+            ClipMsg::MultiPath { count: 3 }.success("/a\nwith newline\n/b\n/c"),
+            "yanked 3 paths"
+        );
+    }
+
+    #[test]
+    fn clip_single_path_no_ellipsis_under_80_bytes() {
+        let p = "/short/path";
+        assert_eq!(ClipMsg::SinglePath.success(p), format!("yanked path: {p}"));
+    }
+
+    #[test]
+    fn clip_single_path_ellipsis_over_80_bytes_ascii() {
+        let p = "a".repeat(100);
+        let preview: String = p.chars().take(80).collect();
+        assert_eq!(
+            ClipMsg::SinglePath.success(&p),
+            format!("yanked path: {preview}…")
+        );
+    }
+
+    #[test]
+    fn clip_prompt_ellipsis_gated_on_byte_length_with_multibyte() {
+        // 30 'é' chars = 60 bytes (2 bytes each). `chars().take(60)` keeps
+        // all 30; the `…` gate is on BYTE length (`text.len() > 60`), so
+        // 60 bytes is NOT over the threshold → no ellipsis. This pins the
+        // char-preview vs byte-gate distinction the inline site had.
+        let exactly_60_bytes = "é".repeat(30);
+        assert_eq!(exactly_60_bytes.len(), 60);
+        assert_eq!(
+            ClipMsg::Prompt.success(&exactly_60_bytes),
+            format!("yanked prompt: {exactly_60_bytes}")
+        );
+
+        // 31 'é' = 62 bytes > 60 → ellipsis; preview is the first 60 CHARS
+        // (= all 31 here, since take(60) > 31), so the whole string then `…`.
+        let over = "é".repeat(31);
+        assert_eq!(over.len(), 62);
+        let preview: String = over.chars().take(60).collect();
+        assert_eq!(
+            ClipMsg::Prompt.success(&over),
+            format!("yanked prompt: {preview}…")
+        );
     }
 
     #[test]
