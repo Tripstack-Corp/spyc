@@ -38,11 +38,16 @@ pub fn coalesce_pending(
     rx: &std::sync::mpsc::Receiver<Message>,
     fs_pending: &mut Vec<notify::Event>,
     git_pending: &mut Vec<state::GitWorkerResult>,
+    mcp_pending: &mut Vec<crate::mcp_cmd::McpRequest>,
 ) -> Option<Event> {
     while let Ok(m) = rx.try_recv() {
         match m {
             Message::FsEvent(e) => fs_pending.push(e),
             Message::GitResult(r) => git_pending.push(r),
+            // MVU Phase 3d: an MCP request carries its reply Sender — it MUST
+            // be buffered (dropping it strands the client on its 5s timeout),
+            // never join the no-op drop arm below.
+            Message::Mcp(req) => mcp_pending.push(req),
             // MVU Phase 3b: pane wakes carry no payload — drop them here;
             // the loop re-enters the pre-recv pane scan regardless, so a
             // wake burst collapses to a single re-scan (the worker-side
@@ -252,7 +257,8 @@ mod tests {
 
         let mut fs_pending = Vec::new();
         let mut git_pending = Vec::new();
-        let got = coalesce_pending(&rx, &mut fs_pending, &mut git_pending);
+        let mut mcp_pending = Vec::new();
+        let got = coalesce_pending(&rx, &mut fs_pending, &mut git_pending, &mut mcp_pending);
 
         // First Input is surfaced; the fs/git before it are buffered.
         assert_eq!(got, Some(Event::FocusGained));
@@ -281,14 +287,24 @@ mod tests {
         tx.send(Message::GrepOutput).unwrap();
         tx.send(Message::GrepOutput).unwrap();
         tx.send(Message::FindOutput).unwrap();
+        // MVU Phase 3d: an MCP request carries its reply Sender — it MUST be
+        // buffered into mcp_pending, NEVER dropped (else the client strands).
+        let (reply, _reply_rx) = mpsc::channel();
+        tx.send(Message::Mcp(crate::mcp_cmd::McpRequest {
+            command: crate::mcp_cmd::McpCommand::ClearPicks,
+            reply,
+        }))
+        .unwrap();
 
         let mut fs_pending = Vec::new();
         let mut git_pending = Vec::new();
-        let got = coalesce_pending(&rx, &mut fs_pending, &mut git_pending);
+        let mut mcp_pending = Vec::new();
+        let got = coalesce_pending(&rx, &mut fs_pending, &mut git_pending, &mut mcp_pending);
 
         assert_eq!(got, None);
         assert_eq!(fs_pending.len(), 2);
         assert_eq!(git_pending.len(), 1); // Tick + Grep/Find wakes dropped, not buffered
+        assert_eq!(mcp_pending.len(), 1, "MCP request buffered, not dropped");
     }
 
     #[test]
