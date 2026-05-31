@@ -49,6 +49,15 @@ enum Message {
     /// `git_pending`; the unchanged pre-recv drain applies it
     /// (generation-gated) via `ingest_git_result`.
     GitResult(state::GitWorkerResult),
+    /// MVU Phase 3b: a pane PTY output WAKEUP — never carries bytes. A
+    /// lost-wakeup-safe edge from a parser worker's 0→1 `wake_pending` CAS
+    /// (the worker bumps `parser_gen` first). The loop treats it purely as
+    /// "wake and re-scan": it re-enters the pre-recv pane scan, which clears
+    /// each `wake_pending` and re-reads `parser_gen` via `drain_output`. The
+    /// `tab` labels which pane woke us (carried for 3c/Phase-5; in 3b the
+    /// scan re-drains all panes, so a stale id self-discards). Buffered +
+    /// collapsed in the coalesce pre-step, NEVER surfaced as `Input`.
+    PaneOutput { tab: SinkId },
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
@@ -111,6 +120,7 @@ mod grep_session;
 mod key_dispatch;
 mod pager_handler;
 mod pager_history;
+mod pane_wake;
 mod prompt;
 mod render;
 mod route;
@@ -124,6 +134,7 @@ use capture::PendingCapture;
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
+use pane_wake::SinkId;
 pub use prompt::{Prompt, PromptKind};
 use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use sources::{coalesce_pending, sync_listing_watch, take_reader_result};
@@ -452,6 +463,14 @@ pub struct App {
     /// which never drives `run()`). The Sender half is held by
     /// `state.git_worker_tx` and used by chdir cache-miss paths.
     git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
+    /// MVU Phase 3b: monotonic `SinkId` allocator (never reused). Bumped by
+    /// `alloc_sink_id` once per pane worker spawn.
+    next_sink_id: u64,
+    /// MVU Phase 3b: a clone of the unified-channel sender, installed at the
+    /// top of `run()`. Pane wake closures (built by `make_pane_wake`) clone
+    /// it to push `Message::PaneOutput`. `None` before `run()` (and in the
+    /// test harness) → `make_pane_wake` returns a no-op.
+    pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// Per-file scroll memory for the pager. Loaded once at startup;
     /// updated whenever a file-backed pager view is closed or swapped
     /// out (and also when spyc itself exits). Restores the user's
@@ -760,6 +779,8 @@ impl App {
             scroll_last: None,
             last_term_title: None,
             git_result_rx: Some(git_res_rx),
+            next_sink_id: 0,
+            pane_wake_tx: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
@@ -1300,13 +1321,21 @@ impl App {
             });
         }
 
+        // MVU Phase 3b: install the channel sender so pane wake closures
+        // (built by `make_pane_wake` at every spawn site) can push
+        // `Message::PaneOutput`. Set BEFORE the reader moves `msg_tx` and
+        // before the loop processes any user action — so every pane spawned
+        // during the session (including session-restore tabs) gets a live
+        // wake, not the pre-run no-op.
+        self.pane_wake_tx = Some(msg_tx.clone());
+
         // MVU Phase 1: the parkable input reader runs on its own thread
         // and feeds `msg_tx`; the loop `recv_timeout`s on `msg_rx` instead
         // of calling `event::poll`/`event::read` directly. `reader_handle`
         // is a run()-scoped local so its `Drop` (stop + unpark + join)
-        // tears the thread down when run() returns. Phase 3a: the watcher
-        // (above) and git forwarder (above) also feed the channel; panes /
-        // tasks / MCP stay polled until 3b/3c/3d.
+        // tears the thread down when run() returns. Phase 3a/3b: the watcher,
+        // git forwarder, and pane workers (via `pane_wake_tx`) also feed the
+        // channel; tasks / MCP stay polled until 3c/3d.
         let reader_handle = spawn_input_reader(msg_tx);
         let read_err = reader_handle.read_err.clone();
         // Phase 3a: extra senders (watcher/forwarder) keep the channel
@@ -1620,6 +1649,12 @@ impl App {
             if let Some(tabs) = self.pane_tabs.as_mut() {
                 let active_idx = tabs.active_index();
                 for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
+                    // MVU Phase 3b: clear the wake edge flag BEFORE the gen
+                    // load (clear-before-read). This is the SOLE clear site —
+                    // it must not move into `drain_output`, which render's
+                    // `drain_all` also calls every frame and would re-clear
+                    // the flag mid-stream, defeating the worker CAS coalescer.
+                    entry.pane.clear_wake();
                     // `drain_output` is itself just an Acquire-load on
                     // the worker's generation counter, so it is the
                     // cheap check — no separate fast-path gate needed.
@@ -1634,10 +1669,11 @@ impl App {
                     }
                 }
             }
-            if let Some(overlay) = self.top_overlay.as_mut()
-                && overlay.drain_output()
-            {
-                pane_had_output = true;
+            if let Some(overlay) = self.top_overlay.as_mut() {
+                overlay.clear_wake(); // clear-before-read (see the tab scan)
+                if overlay.drain_output() {
+                    pane_had_output = true;
+                }
             }
             if pane_had_output {
                 // v1.50.82 capped pane-driven renders to ~30 dps
@@ -1909,6 +1945,21 @@ impl App {
                             Ok(Message::Input(ev))
                         })
                 }
+                // MVU Phase 3b: a pane wake carries no payload to buffer —
+                // collapse any companion wakes/fs/git, then synthesize a
+                // Timeout so control re-enters the loop top and the pre-recv
+                // pane scan does the clear+drain. NEVER drained inline, NEVER
+                // surfaced as Input (except a coalesced real keystroke).
+                Ok(Message::PaneOutput { tab }) => {
+                    // `tab` labels which pane woke us — logged for wake-path
+                    // traceability (esp. when soaking the PR2 floor deletion);
+                    // the scan re-drains all panes, so it isn't used to target.
+                    spyc_debug!("pane wake: {tab:?}");
+                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending)
+                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                            Ok(Message::Input(ev))
+                        })
+                }
                 other => other,
             };
             match effective {
@@ -2151,8 +2202,10 @@ impl App {
                 }
                 // Phase 3a: FsEvent/GitResult are buffered + coalesced in the
                 // pre-step above, never surfaced as `effective`.
-                Ok(Message::FsEvent(_) | Message::GitResult(_)) => {
-                    unreachable!("FsEvent/GitResult are buffered in the coalesce pre-step")
+                Ok(Message::FsEvent(_) | Message::GitResult(_) | Message::PaneOutput { .. }) => {
+                    unreachable!(
+                        "FsEvent/GitResult/PaneOutput are buffered/collapsed in the coalesce pre-step"
+                    )
                 }
             }
 
@@ -2922,7 +2975,8 @@ impl App {
                 let (rows, cols) =
                     Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
                 let cwd = self.state.listing.dir.clone();
-                match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path) {
+                let wake = self.make_pane_wake();
+                match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path, wake) {
                     Ok(p) => {
                         self.top_overlay = Some(p);
                         self.state.focus = state::Focus::Overlay;
@@ -3094,7 +3148,8 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.context_path, &[]) {
+        let wake = self.make_pane_wake();
+        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.context_path, &[], wake) {
             Ok(p) => {
                 self.state.focus = state::Focus::Pane;
                 self.state
@@ -3422,7 +3477,8 @@ impl App {
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+        let wake = self.make_pane_wake();
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
             Ok(p) => {
                 self.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
@@ -3693,7 +3749,8 @@ impl App {
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+        let wake = self.make_pane_wake();
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
             Ok(p) => {
                 self.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
@@ -3954,7 +4011,8 @@ impl App {
         // cwd regardless.
         let cwd = self.state.listing.dir.clone();
         let label = task.title.clone();
-        let pane = Pane::adopt(task.host, parser);
+        let wake = self.make_pane_wake();
+        let pane = Pane::adopt(task.host, parser, wake);
         let mut info = TabInfo::new(&cmd, &cwd);
         info.label.clone_from(&label);
         let entry = TabEntry::new(pane, info);
@@ -7615,6 +7673,8 @@ impl App {
             scroll_last: None,
             last_term_title: None,
             git_result_rx: None,
+            next_sink_id: 0,
+            pane_wake_tx: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();

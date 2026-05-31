@@ -456,7 +456,8 @@ mod tests {
     fn dummy_tab() -> TabEntry {
         let tmp = std::env::temp_dir();
         let ctx = tmp.join("spyc-tabs-test-context.json");
-        let pane = Pane::spawn("cat", 24, 80, &tmp, &ctx).expect("spawn dummy pane");
+        let pane = Pane::spawn("cat", 24, 80, &tmp, &ctx, std::sync::Arc::new(|| {}))
+            .expect("spawn dummy pane");
         TabEntry::new(pane, TabInfo::new("cat", &tmp))
     }
 

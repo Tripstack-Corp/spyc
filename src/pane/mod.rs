@@ -24,11 +24,28 @@ pub mod pty_host;
 
 use std::io::Write as _;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec};
+
+/// MVU Phase 3b: an opaque wake callback the parser worker fires when new
+/// output arrives, so the unified event loop can sleep instead of polling
+/// the pane at the old 16/100 ms floor. `crate::app` builds the closure
+/// (capturing its `msg_tx` clone + the pane's `SinkId`) and hands it in at
+/// `adopt`; the worker only ever sees `dyn Fn()` and never names
+/// `app::Message` — the pane → app layering stays one-directional. Tests
+/// pass `Arc::new(|| {})`.
+pub type PaneWake = Arc<dyn Fn() + Send + Sync>;
+
+/// MVU Phase 3b: the wake half of a parser worker — the lost-wakeup-safe
+/// edge flag it CASes and the closure it fires on the 0→1 transition.
+/// Bundled so `parser_worker` stays within the argument-count lint.
+struct Wake {
+    pending: Arc<AtomicBool>,
+    fire: PaneWake,
+}
 
 /// A hosted subprocess + its terminal emulator state.
 ///
@@ -58,6 +75,14 @@ pub struct Pane {
     /// Diffed against `parser_gen` in `drain_output()` to decide
     /// whether a redraw is needed.
     last_seen_gen: u64,
+    /// MVU Phase 3b: lost-wakeup-safe edge flag. The worker CASes it
+    /// `false → true` after bumping `parser_gen` and fires the wake only on
+    /// the 0→1 transition (so a byte storm collapses to one channel
+    /// message). The main loop CLEARS it (`clear_wake`) at the top of its
+    /// pre-recv scan, BEFORE `drain_output`'s gen load — so a chunk racing
+    /// the clear re-arms and re-sends (at most one redundant wakeup, never a
+    /// lost final echo). Cleared by the consumer, set by the producer.
+    wake_pending: Arc<AtomicBool>,
     /// Owns the parser worker thread and its stop-flag. Its `Drop`
     /// guarantees the thread is stopped and joined on every teardown
     /// path (tab close, restart, app exit) — `Pane` can't implement
@@ -92,8 +117,9 @@ impl Pane {
         cols: u16,
         cwd: &Path,
         context_path: &Path,
+        wake: PaneWake,
     ) -> anyhow::Result<Self> {
-        Self::spawn_with_env(command, rows, cols, cwd, context_path, &[])
+        Self::spawn_with_env(command, rows, cols, cwd, context_path, &[], wake)
     }
 
     pub fn spawn_with_env(
@@ -103,6 +129,7 @@ impl Pane {
         cwd: &Path,
         context_path: &Path,
         extra_env: &[(&str, &str)],
+        wake: PaneWake,
     ) -> anyhow::Result<Self> {
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
         // where this spyc instance's context file lives, and advertise
@@ -130,7 +157,7 @@ impl Pane {
             debug_dump: std::env::var("SPYC_PTY_DEBUG").is_ok(),
         })?;
         let parser = vt100::Parser::new(rows, cols, 10_000);
-        Ok(Self::adopt(host, parser))
+        Ok(Self::adopt(host, parser, wake))
     }
 
     /// Build a `Pane` around an already-spawned `PtyHost` and a
@@ -143,10 +170,14 @@ impl Pane {
     /// spawns a parser worker thread. The thread owns the receiver
     /// and consumes bytes into the (mutex-wrapped) parser. Main
     /// thread reads grid state via `with_screen` / `with_screen_mut`.
-    pub fn adopt(mut host: PtyHost, parser: vt100::Parser) -> Self {
+    pub fn adopt(mut host: PtyHost, parser: vt100::Parser, wake: PaneWake) -> Self {
         let parser = Arc::new(Mutex::new(parser));
         let parser_gen = Arc::new(AtomicU64::new(0));
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        // MVU Phase 3b: edge flag shared with the worker. Fresh per
+        // `adopt`, so a re-promoted (demote→promote) pane gets a new flag
+        // and the old worker's wake can never re-arm this one.
+        let wake_pending = Arc::new(AtomicBool::new(false));
         let event_rx = host
             .take_event_rx()
             .expect("PtyHost::take_event_rx returned None — already taken");
@@ -155,6 +186,10 @@ impl Pane {
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
         let stop_clone = Arc::clone(&stop);
+        let wake = Wake {
+            pending: Arc::clone(&wake_pending),
+            fire: wake,
+        };
         let handle = thread::spawn(move || {
             parser_worker(
                 event_rx,
@@ -163,6 +198,7 @@ impl Pane {
                 gen_clone,
                 last_size,
                 debug_dump,
+                wake,
             )
         });
         Self {
@@ -170,6 +206,7 @@ impl Pane {
             parser,
             parser_gen,
             last_seen_gen: 0,
+            wake_pending,
             worker: ParserWorker {
                 stop,
                 handle: Some(handle),
@@ -178,6 +215,15 @@ impl Pane {
             scroll_offset: 0,
             scrolling: false,
         }
+    }
+
+    /// MVU Phase 3b: clear the wake edge flag. Called by the main loop at
+    /// the top of its pre-recv pane scan, BEFORE `drain_output`'s gen load
+    /// (clear-before-read). MUST NOT be folded into `drain_output` — that
+    /// runs from render's `drain_all` every frame and would re-clear the
+    /// flag mid-stream, defeating the worker-side CAS coalescer.
+    pub fn clear_wake(&self) {
+        self.wake_pending.store(false, Ordering::Release);
     }
 
     /// Stop the parser worker and return the underlying `PtyHost`
@@ -517,12 +563,23 @@ impl Pane {
 /// pre-v1.50.84 main-thread `process_bytes_safe`.
 fn parser_worker(
     rx: std::sync::mpsc::Receiver<PtyEvent>,
-    stop: Arc<std::sync::atomic::AtomicBool>,
+    stop: Arc<AtomicBool>,
     parser: Arc<Mutex<vt100::Parser>>,
     parser_gen: Arc<AtomicU64>,
     initial_size: (u16, u16),
     debug_dump: bool,
+    wake: Wake,
 ) -> std::sync::mpsc::Receiver<PtyEvent> {
+    // MVU Phase 3b: fire the wake once for the close transition too, so the
+    // loop runs `drain_output` (and sees `closed`) within one wakeup after
+    // the floor is gone — but ONLY on a natural EOF, never a deliberate
+    // stop (close/demote/restart sets `stop` then enqueues/observes Closed;
+    // waking then would target a just-removed pane).
+    let wake_on_close = || {
+        if !stop.load(Ordering::Acquire) {
+            (wake.fire)();
+        }
+    };
     loop {
         if stop.load(Ordering::Acquire) {
             return rx;
@@ -561,16 +618,36 @@ fn parser_worker(
                     }
                     parser.clear_poison();
                 }
+                // Publish the grid (UNCHANGED Release edge; pairs with
+                // `drain_output`'s Acquire gen load). MUST stay BEFORE the
+                // wake so a woken loop that Acquire-loads the gen always
+                // sees these bytes.
                 parser_gen.fetch_add(1, Ordering::Release);
+                // MVU Phase 3b: wake the loop only on the 0→1 edge, so a
+                // byte storm collapses to one channel message. The loop
+                // clears the flag (clear-before-read) before its gen load,
+                // so a chunk racing the clear re-arms and re-sends.
+                if wake
+                    .pending
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    (wake.fire)();
+                }
             }
             Ok(PtyEvent::Closed) => {
-                // EOF — done. Reader thread already set the
-                // `closed_atomic` on PtyHost. Main thread will pick
-                // it up on its next `drain_output`.
+                // EOF — done. Reader thread already set the `closed_atomic`
+                // on PtyHost. One final wake (natural EOF only) so the loop
+                // runs `drain_output`, observes `closed`, and renders
+                // `[exited]` within one wakeup once the poll floor is gone.
+                wake_on_close();
                 return rx;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return rx,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                wake_on_close();
+                return rx;
+            }
         }
     }
 }
@@ -722,5 +799,124 @@ mod worker_tests {
         };
         drop(worker);
         assert!(stop.load(Ordering::Acquire), "Drop must set the stop flag");
+    }
+}
+
+#[cfg(test)]
+mod wake_tests {
+    //! MVU Phase 3b: the parser worker's lost-wakeup-safe wake protocol.
+    use super::{PtyEvent, Wake, parser_worker};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    fn wait_until(label: &str, mut cond: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if cond() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        panic!("timed out waiting for: {label}");
+    }
+
+    /// Spawn a worker fed by the returned `tx`; hand back the shared
+    /// generation counter, the consumer's `wake_pending` flag, a wake-fire
+    /// counter, and the join handle.
+    #[allow(clippy::type_complexity)]
+    fn spawn_worker(
+        stop: &Arc<AtomicBool>,
+    ) -> (
+        std::sync::mpsc::Sender<PtyEvent>,
+        Arc<AtomicU64>,
+        Arc<AtomicBool>,
+        Arc<AtomicUsize>,
+        std::thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let gen_ctr = Arc::new(AtomicU64::new(0));
+        let pending = Arc::new(AtomicBool::new(false));
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_cl = Arc::clone(&count);
+        let wake = Wake {
+            pending: Arc::clone(&pending),
+            fire: Arc::new(move || {
+                count_cl.fetch_add(1, Ordering::Release);
+            }),
+        };
+        let gen_cl = Arc::clone(&gen_ctr);
+        let stop_cl = Arc::clone(stop);
+        let handle = std::thread::spawn(move || {
+            parser_worker(rx, stop_cl, parser, gen_cl, (24, 80), false, wake)
+        });
+        (tx, gen_ctr, pending, count, handle)
+    }
+
+    /// The worker wakes only on the `wake_pending` 0→1 edge: a chunk
+    /// arriving while the flag is still set (consumer hasn't cleared)
+    /// coalesces silently; clearing re-arms the edge for the next chunk.
+    #[test]
+    fn wakes_once_per_edge_and_recoalesces() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, gen_ctr, pending, count, handle) = spawn_worker(&stop);
+
+        tx.send(PtyEvent::Bytes(b"a".to_vec())).unwrap();
+        wait_until("first edge wakes", || count.load(Ordering::Acquire) == 1);
+
+        // Second chunk, consumer has NOT cleared → CAS fails, no new wake.
+        tx.send(PtyEvent::Bytes(b"b".to_vec())).unwrap();
+        wait_until("second chunk parsed", || {
+            gen_ctr.load(Ordering::Acquire) >= 2
+        });
+        assert_eq!(
+            count.load(Ordering::Acquire),
+            1,
+            "coalesced while wake_pending still set"
+        );
+
+        // Consumer clears (clear-before-read) → the next chunk re-arms.
+        pending.store(false, Ordering::Release);
+        tx.send(PtyEvent::Bytes(b"c".to_vec())).unwrap();
+        wait_until("re-armed after clear", || {
+            count.load(Ordering::Acquire) == 2
+        });
+
+        stop.store(true, Ordering::Release);
+        drop(tx);
+        let _ = handle.join();
+    }
+
+    /// A natural EOF (stop unset) fires exactly one final wake, so the loop
+    /// runs `drain_output`, sees `closed`, and renders `[exited]` within one
+    /// wakeup once the poll floor is gone.
+    #[test]
+    fn natural_eof_fires_one_final_wake() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, _gen, _pending, count, handle) = spawn_worker(&stop);
+        tx.send(PtyEvent::Closed).unwrap();
+        let _ = handle.join(); // worker returns on Closed
+        assert_eq!(
+            count.load(Ordering::Acquire),
+            1,
+            "natural EOF must fire exactly one final wake"
+        );
+    }
+
+    /// A deliberate stop (close / demote / restart sets `stop` before the
+    /// Closed lands) suppresses the final wake — it must NOT target a pane
+    /// the app just removed.
+    #[test]
+    fn deliberate_stop_suppresses_final_wake() {
+        let stop = Arc::new(AtomicBool::new(true));
+        let (tx, _gen, _pending, count, handle) = spawn_worker(&stop);
+        tx.send(PtyEvent::Closed).unwrap();
+        let _ = handle.join();
+        assert_eq!(
+            count.load(Ordering::Acquire),
+            0,
+            "deliberate stop must suppress the close wake"
+        );
     }
 }

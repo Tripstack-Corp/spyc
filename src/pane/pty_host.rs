@@ -346,7 +346,13 @@ fn reader_loop(mut reader: Box<dyn Read + Send>, tx: &mpsc::Sender<PtyEvent>, cl
             // Ok(0) is EOF; Err is any I/O failure. Both mean the
             // child is gone.
             Ok(0) | Err(_) => {
-                closed.store(true, Ordering::Relaxed);
+                // Release (MVU Phase 3b, was Relaxed): publishes the close
+                // so `Pane::drain_output`'s Acquire load of `closed_atomic`
+                // observes it. The old 100 ms poll floor masked the missing
+                // edge by re-polling; once PR2 deletes the floor the close
+                // is observed ONLY when the worker's final wake drives a
+                // `drain_output`, so the happens-before must be real.
+                closed.store(true, Ordering::Release);
                 let _ = tx.send(PtyEvent::Closed);
                 return;
             }

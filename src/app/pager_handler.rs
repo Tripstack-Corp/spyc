@@ -1005,7 +1005,8 @@ impl App {
                     let cwd = self.state.listing.dir.clone();
                     self.clear_pager();
                     self.needs_full_repaint = true;
-                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path) {
+                    let wake = self.make_pane_wake();
+                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
                         Ok(p) => {
                             self.top_overlay = Some(p);
                             self.state.focus = Focus::Overlay;

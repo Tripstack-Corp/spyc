@@ -377,10 +377,21 @@ preserved; a **timing-equivalence harness** asserts a Message arriving 5ms into 
 
 ### Phase 3 — Migrate each non-input source (sub-phases, one source per PR)
 - **3a** fs watcher → `FsEvent`; git worker → `GitResult` (generation-drop kept).
-- **3b** pane PTY: introduce `SinkId` + `PaneSnapshot`; parser-worker emits
-  coalesced `PaneOutput{tab}` via the lost-wakeup-safe clear-then-read dirty-bit.
-  Split **PR1 (add, both paths live)** / **PR2 (delete the 16ms hack + 100ms
-  floor together)** so the fallback deletion is independently revertable.
+- **3b** pane PTY: introduce `SinkId`; parser-worker emits coalesced
+  `PaneOutput{tab}` via the lost-wakeup-safe clear-then-read dirty-bit (the
+  consumer clears `wake_pending` in the pre-recv scan, NOT in `drain_output`,
+  which render's `drain_all` also calls). Split **PR1 (add, both paths live)**
+  / **PR2 (delete the pane component of the floor)** so the deletion is
+  independently revertable. **`PaneSnapshot` is DEFERRED to Phase 5** (the
+  borrow conflict it solves — render vs the yank/`gf`/quick-select text arms —
+  doesn't exist in 3b: those arms run under exclusive `&mut self`, never
+  concurrent with render's borrow, and an eager per-wakeup grid copy would
+  regress the streaming path 3b protects; populate it lazily, yank-gated, when
+  Phase 5 splits Model/Runtime). **PR2 deletes the *pane* floor only** — the
+  16ms smooth-streaming floor narrows to cover `pending_capture` **and** a
+  streaming `:task N` viewer of a running background task (both still polled
+  until **3c**); `MAX_IDLE_CAP` stays (MCP/finder until 3d). Reader-death
+  detection widens ~100ms→≤500ms after PR2 (fatal path, bounded — accepted).
 - **3c** capture/tasks → `CaptureOutput`/`TaskOutput`/exit messages; `child.wait()`
   moves to the exit-Message path; demote-to-task is a worker-lifecycle swap.
 - **3d** MCP → `Mcp(McpRequest)` (reply via `McpReply`; `WriteContextSync→McpReply`
