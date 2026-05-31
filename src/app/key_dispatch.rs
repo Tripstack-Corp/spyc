@@ -669,7 +669,8 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &self.context_path, &[]) {
+        let wake = self.make_pane_wake();
+        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &self.context_path, &[], wake) {
             Ok(p) => {
                 let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
                 if let Some(tabs) = self.pane_tabs.as_mut() {
