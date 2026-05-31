@@ -73,6 +73,22 @@ impl App {
             fire,
         }
     }
+
+    /// MVU Phase 3d: build the grep worker's wake — a payloadless
+    /// `Message::GrepOutput` send (the data rides `GrepSession.rx`; the loop
+    /// re-drains via `drain_grep_session`). Wrapped around the worker's data
+    /// `Sender` by a `WakingSender`. No-op before `run()` installs the sender.
+    pub(crate) fn make_grep_wake(&self) -> PaneWake {
+        match &self.pane_wake_tx {
+            Some(tx) => {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Message::GrepOutput);
+                })
+            }
+            None => Arc::new(|| {}),
+        }
+    }
 }
 
 #[cfg(test)]
