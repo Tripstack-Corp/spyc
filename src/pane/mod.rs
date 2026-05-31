@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec};
+use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec, Wake};
 
 /// MVU Phase 3b: an opaque wake callback the parser worker fires when new
 /// output arrives, so the unified event loop can sleep instead of polling
@@ -38,14 +38,6 @@ use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec};
 /// `app::Message` — the pane → app layering stays one-directional. Tests
 /// pass `Arc::new(|| {})`.
 pub type PaneWake = Arc<dyn Fn() + Send + Sync>;
-
-/// MVU Phase 3b: the wake half of a parser worker — the lost-wakeup-safe
-/// edge flag it CASes and the closure it fires on the 0→1 transition.
-/// Bundled so `parser_worker` stays within the argument-count lint.
-struct Wake {
-    pending: Arc<AtomicBool>,
-    fire: PaneWake,
-}
 
 /// A hosted subprocess + its terminal emulator state.
 ///
