@@ -323,6 +323,23 @@ struct AgentStatusCache {
 
 const AGENT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// MVU Phase 5: the **Runtime** cluster — IO handles (channels, worker
+/// endpoints, pty hosts, threads) held disjointly from the domain Model
+/// (`App.state`) and the render/derived `ViewState`. Fields migrate in
+/// over Phase-5 PRs; PR 1 seeds it with the git worker-result receiver
+/// (the App-side half of the previously-torn git channel). The `App::split()`
+/// three-borrow helper arrives in PR 4, where the first multi-cluster site
+/// (`route_snapshot`) needs the three clusters borrowed at once.
+struct Runtime {
+    /// Git worker → main thread results, generation-gated, applied via
+    /// `apply_git_worker_result`. The Phase-3a forwarder thread takes this
+    /// once in `run()` and bridges it onto the unified `Message` channel.
+    /// `None` after that take (and in the test harness, which never drives
+    /// `run()`). The Sender half stays on `state.git_worker_tx` (its
+    /// send-site is a `&mut AppState` chdir cache-miss path).
+    git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
     /// Domain state — navigation, selection, filtering, config, etc.
@@ -505,17 +522,9 @@ pub struct App {
     /// `None` forces an emit on next draw (used after a child process
     /// like vim may have clobbered the title).
     last_term_title: Option<String>,
-    /// Receiver for git-status worker results. The worker thread is
-    /// spawned at App construction and runs for the lifetime of the
-    /// process. MVU Phase 3a: `run()` `.take()`s this once and moves it
-    /// into the forwarder thread, which re-sends each result onto the
-    /// unified channel as `Message::GitResult`; the pre-recv drain then
-    /// applies it (results whose `generation` doesn't match
-    /// `state.git_generation` are discarded — the user navigated past
-    /// them). `None` after `run()` takes it (and in the test harness,
-    /// which never drives `run()`). The Sender half is held by
-    /// `state.git_worker_tx` and used by chdir cache-miss paths.
-    git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
+    /// MVU Phase 5: IO-handle cluster (see [`Runtime`]). PR 1 seeds it with
+    /// the git worker-result receiver (formerly `App.git_result_rx`).
+    runtime: Runtime,
     /// MVU Phase 3b: monotonic `SinkId` allocator (never reused). Bumped by
     /// `alloc_sink_id` once per pane worker spawn.
     next_sink_id: u64,
@@ -727,7 +736,7 @@ impl App {
         // returns immediately. Lives for the lifetime of the
         // process; the OS reaps the thread on exit. We hold the
         // sender on `state.git_worker_tx` and the receiver on
-        // `App.git_result_rx`. See `state::GitWorkerRequest` /
+        // `runtime.git_result_rx`. See `state::GitWorkerRequest` /
         // `state::GitWorkerResult` for the contract.
         let (git_req_tx, git_req_rx) = std::sync::mpsc::channel::<state::GitWorkerRequest>();
         let (git_res_tx, git_res_rx) = std::sync::mpsc::channel::<state::GitWorkerResult>();
@@ -831,7 +840,9 @@ impl App {
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
-            git_result_rx: Some(git_res_rx),
+            runtime: Runtime {
+                git_result_rx: Some(git_res_rx),
+            },
             next_sink_id: 0,
             pane_wake_tx: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
@@ -1318,7 +1329,7 @@ impl App {
         // Because this sender keeps the channel Connected after the input
         // reader dies, reader-death is detected via `reader_done` below, NOT
         // channel disconnection.
-        if let Some(git_rx) = self.git_result_rx.take() {
+        if let Some(git_rx) = self.runtime.git_result_rx.take() {
             let gtx = msg_tx.clone();
             std::thread::spawn(move || {
                 while let Ok(r) = git_rx.recv() {
@@ -7516,7 +7527,9 @@ impl App {
             tab_state: None,
             scroll_last: None,
             last_term_title: None,
-            git_result_rx: None,
+            runtime: Runtime {
+                git_result_rx: None,
+            },
             next_sink_id: 0,
             pane_wake_tx: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
