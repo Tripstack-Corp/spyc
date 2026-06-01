@@ -26,8 +26,9 @@ use crate::state::History;
 
 use super::route;
 use super::{
-    App, Effect, HistoryBucket, Mode, POST_CHORD_BOUNCE_WINDOW, Prompt, PromptKind, View,
-    history_bucket_for, is_path_prompt_kind, is_post_chord_bounce, sh_c, strip_ansi_escapes,
+    App, Effect, HistoryBucket, Mode, POST_CHORD_BOUNCE_WINDOW, PaneInput, PaneTarget, Prompt,
+    PromptKind, View, history_bucket_for, is_path_prompt_kind, is_post_chord_bounce, sh_c,
+    strip_ansi_escapes,
 };
 
 impl App {
@@ -207,10 +208,14 @@ impl App {
         let snap = self.route_snapshot();
         match route::route_key(snap, key) {
             route::KeyDestination::OverlayPty => {
-                if let Some(overlay) = self.top_overlay.as_mut() {
-                    let _ = overlay.send_key(key);
-                }
-                return Ok(Vec::new());
+                // Forward the keystroke to the overlay pty via the sole
+                // executor (no flash — result was always ignored).
+                return Ok(vec![Effect::SendToPane {
+                    target: PaneTarget::Overlay,
+                    input: PaneInput::Key(key),
+                    on_ok: None,
+                    err_prefix: None,
+                }]);
             }
             route::KeyDestination::PagerKey => {
                 return Ok(self.handle_pager_key(key));
@@ -245,10 +250,16 @@ impl App {
                     }
                     _ => {}
                 }
-                if let Some(tabs) = self.pane_tabs.as_mut() {
-                    let _ = tabs.active_mut().send_key(key);
-                }
-                return Ok(Vec::new());
+                // Forward the keystroke to the active pane via the sole
+                // executor (no flash — result was always ignored). The
+                // `pane_prompt_buf` tracking above stays as pure
+                // transitions before the emit.
+                return Ok(vec![Effect::SendToPane {
+                    target: PaneTarget::Active,
+                    input: PaneInput::Key(key),
+                    on_ok: None,
+                    err_prefix: None,
+                }]);
             }
             route::KeyDestination::Prompt => {
                 return Ok(self.handle_prompt_key(key));
