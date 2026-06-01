@@ -691,19 +691,22 @@ impl AppState {
         }
     }
 
-    pub fn jump_to_mark(&mut self, letter: char) {
+    /// `'<letter>` — jump to a saved mark. MVU Phase 5: the chdir is a
+    /// deferred [`Effect::ChangeDir`] (returned for the `apply()` arm to
+    /// emit), carrying the mark's saved `focus` and the success flash so the
+    /// executor reproduces this site byte-for-byte. The mark-not-set case
+    /// flashes and returns no effect.
+    pub fn jump_to_mark(&mut self, letter: char) -> Vec<Effect> {
         let Some(mark) = self.marks.get(letter).cloned() else {
             self.flash_error(format!("mark '{letter}' not set"));
-            return;
+            return Vec::new();
         };
-        if let Err(e) = self.chdir(&mark.dir) {
-            self.flash_error(format!("jump failed: {e}"));
-            return;
-        }
-        if let Some(focus) = mark.focus {
-            self.focus_on_path(&focus);
-        }
-        self.flash_info(format!("jumped to mark '{letter}'"));
+        vec![Effect::ChangeDir {
+            path: mark.dir,
+            focus: mark.focus,
+            on_ok: Some(format!("jumped to mark '{letter}'")),
+            err_prefix: "jump failed",
+        }]
     }
 
     pub fn toggle_pick_cursor(&mut self) {
@@ -1249,31 +1252,59 @@ impl AppState {
         Ok(())
     }
 
-    pub fn climb(&mut self) {
+    /// Execute an [`Effect::ChangeDir`]: `chdir`, then on success focus
+    /// `focus` (by path) and flash `on_ok`; on failure flash
+    /// `"{err_prefix}: {e}"`. The single implementation shared by the
+    /// `run_effects` executor (the pure-Model `apply()` Action arms route
+    /// their chdirs through it via the deferred effect) — kept on `AppState`
+    /// so its behavior is unit-testable without a `Tui`. Impure App-layer
+    /// callers that need bespoke post-chdir work (harpoon / finder /
+    /// inventory) stay on `chdir` directly.
+    pub fn change_dir(
+        &mut self,
+        path: &Path,
+        focus: Option<&Path>,
+        on_ok: Option<&str>,
+        err_prefix: &str,
+    ) {
+        match self.chdir(path) {
+            Ok(()) => {
+                if let Some(f) = focus {
+                    self.focus_on_path(f);
+                }
+                if let Some(msg) = on_ok {
+                    self.flash_info(msg.to_string());
+                }
+            }
+            Err(e) => self.flash_error(format!("{err_prefix}: {e}")),
+        }
+    }
+
+    /// `..` / `h` — climb to the parent directory (or leave the inventory
+    /// view). MVU Phase 5: the parent chdir is a deferred [`Effect::ChangeDir`]
+    /// (returned for the `apply()` arm to emit) so this stays a pure-Model
+    /// transition. Focus is by the just-left directory's path — the parent's
+    /// row for that child has `r.path == old_dir`, so it lands on the same row
+    /// the former by-display-name match did. The inventory-exit branch does no
+    /// IO and clamps the cursor itself (it previously relied on `apply()`'s
+    /// trailing clamp, which the effect early-return now skips).
+    pub fn climb(&mut self) -> Vec<Effect> {
         if self.view == View::Inventory {
             self.view = View::Dir;
             self.rebuild_rows();
-            return;
+            self.cursor.clamp(self.rows.len());
+            return Vec::new();
         }
-        let prev_name = self
-            .listing
-            .dir
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned());
         if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
-            if let Err(e) = self.chdir(&parent) {
-                self.flash_error(format!("chdir: {e}"));
-                return;
-            }
-            if let Some(name) = prev_name
-                && let Some(idx) = self
-                    .rows
-                    .iter()
-                    .position(|r| r.display == name || r.display == format!("{name}/"))
-            {
-                self.cursor.index = idx;
-            }
+            let old_dir = self.listing.dir.clone();
+            return vec![Effect::ChangeDir {
+                path: parent,
+                focus: Some(old_dir),
+                on_ok: None,
+                err_prefix: "chdir",
+            }];
         }
+        Vec::new()
     }
 
     // --- Action dispatch (pure-domain arms) ---
@@ -1333,12 +1364,15 @@ impl AppState {
             }
 
             // -- Navigation --
-            Action::Climb => self.climb(),
+            Action::Climb => return ApplyResult::Post(self.climb()),
             Action::Home => {
-                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
-                    && let Err(e) = self.chdir(&home)
-                {
-                    self.flash_error(format!("chdir: {e}"));
+                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+                    return ApplyResult::Post(vec![Effect::ChangeDir {
+                        path: home,
+                        focus: None,
+                        on_ok: None,
+                        err_prefix: "chdir",
+                    }]);
                 }
             }
 
@@ -1627,18 +1661,23 @@ impl AppState {
 
             // -- Marks --
             Action::SetMark(letter) => self.set_mark(*letter),
-            Action::JumpMark(letter) => self.jump_to_mark(*letter),
+            Action::JumpMark(letter) => return ApplyResult::Post(self.jump_to_mark(*letter)),
             Action::JumpStartDir => {
-                let dir = self.start_dir.clone();
-                if let Err(e) = self.chdir(&dir) {
-                    self.flash_error(format!("jump to start failed: {e}"));
-                }
+                return ApplyResult::Post(vec![Effect::ChangeDir {
+                    path: self.start_dir.clone(),
+                    focus: None,
+                    on_ok: None,
+                    err_prefix: "jump to start failed",
+                }]);
             }
             Action::JumpProjectHome => match self.project_home.clone() {
                 Some(dir) => {
-                    if let Err(e) = self.chdir(&dir) {
-                        self.flash_error(format!("jump to project home failed: {e}"));
-                    }
+                    return ApplyResult::Post(vec![Effect::ChangeDir {
+                        path: dir,
+                        focus: None,
+                        on_ok: None,
+                        err_prefix: "jump to project home failed",
+                    }]);
                 }
                 None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
             },
@@ -1653,15 +1692,17 @@ impl AppState {
                 self.start_dir = dir;
             }
             Action::ShowUserHost => self.flash_info(self.user_host.clone()),
-            Action::JumpPrevDir => {
-                if let Some(prev) = self.prev_dir.clone() {
-                    if let Err(e) = self.chdir(&prev) {
-                        self.flash_error(format!("jump back failed: {e}"));
-                    }
-                } else {
-                    self.flash_error("no previous directory");
+            Action::JumpPrevDir => match self.prev_dir.clone() {
+                Some(prev) => {
+                    return ApplyResult::Post(vec![Effect::ChangeDir {
+                        path: prev,
+                        focus: None,
+                        on_ok: None,
+                        err_prefix: "jump back failed",
+                    }]);
                 }
-            }
+                None => self.flash_error("no previous directory"),
+            },
 
             // -- Info --
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
@@ -3389,6 +3430,194 @@ mod tests {
         // No prev dir → error
         s.apply(&Action::JumpPrevDir);
         assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    // ── ChangeDir effect emission (MVU Phase 5 / PR7) ──────────────
+    // The pure-Model `apply()` Action arms emit a deferred
+    // `Effect::ChangeDir` instead of calling `chdir` inline; `run_effects`
+    // runs the IO. These tests pin the emitted effect's fields byte-for-byte
+    // (no `chdir` is called, so the parallel-runner CWD race is avoided —
+    // the suite is deliberately `chdir`-free).
+
+    #[test]
+    fn apply_jump_start_dir_emits_change_dir() {
+        let mut s = test_state(); // start_dir = /tmp/test
+        match s.apply(&Action::JumpStartDir) {
+            ApplyResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path,
+                        focus,
+                        on_ok,
+                        err_prefix,
+                    },
+                ] => {
+                    assert_eq!(path, &PathBuf::from("/tmp/test"));
+                    assert!(focus.is_none());
+                    assert!(on_ok.is_none());
+                    assert_eq!(*err_prefix, "jump to start failed");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_jump_prev_dir_emits_change_dir_when_set() {
+        let mut s = test_state();
+        s.prev_dir = Some(PathBuf::from("/tmp/prev"));
+        match s.apply(&Action::JumpPrevDir) {
+            ApplyResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path, err_prefix, ..
+                    },
+                ] => {
+                    assert_eq!(path, &PathBuf::from("/tmp/prev"));
+                    assert_eq!(*err_prefix, "jump back failed");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_jump_project_home_emits_change_dir_when_set() {
+        let mut s = test_state();
+        s.project_home = Some(PathBuf::from("/tmp/proj"));
+        match s.apply(&Action::JumpProjectHome) {
+            ApplyResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path, err_prefix, ..
+                    },
+                ] => {
+                    assert_eq!(path, &PathBuf::from("/tmp/proj"));
+                    assert_eq!(*err_prefix, "jump to project home failed");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_jump_project_home_unset_flashes_no_effect() {
+        let mut s = test_state(); // project_home = None
+        assert!(matches!(
+            s.apply(&Action::JumpProjectHome),
+            ApplyResult::Handled
+        ));
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn apply_jump_mark_emits_change_dir_with_focus_and_flash() {
+        let mut s = test_state();
+        s.marks.set(
+            'a',
+            Mark {
+                dir: PathBuf::from("/tmp/marked"),
+                focus: Some(PathBuf::from("/tmp/marked/file.rs")),
+            },
+        );
+        match s.apply(&Action::JumpMark('a')) {
+            ApplyResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path,
+                        focus,
+                        on_ok,
+                        err_prefix,
+                    },
+                ] => {
+                    assert_eq!(path, &PathBuf::from("/tmp/marked"));
+                    assert_eq!(focus.as_deref(), Some(Path::new("/tmp/marked/file.rs")));
+                    assert_eq!(on_ok.as_deref(), Some("jumped to mark 'a'"));
+                    assert_eq!(*err_prefix, "jump failed");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_jump_mark_unset_flashes_no_effect() {
+        let mut s = test_state(); // no marks
+        match s.apply(&Action::JumpMark('z')) {
+            ApplyResult::Post(fx) => assert!(fx.is_empty(), "unset mark emits no effect"),
+            other => panic!("expected empty Post, got {other:?}"),
+        }
+        assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    }
+
+    #[test]
+    fn apply_climb_emits_change_dir_to_parent_focusing_old_dir() {
+        let mut s = test_state(); // listing.dir = /tmp/test
+        match s.apply(&Action::Climb) {
+            ApplyResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path,
+                        focus,
+                        on_ok,
+                        err_prefix,
+                    },
+                ] => {
+                    assert_eq!(path, &PathBuf::from("/tmp"));
+                    // Focus by the just-left dir's path — the parent's row for
+                    // that child has `r.path == /tmp/test`, so this lands on
+                    // the same row the former by-display-name match did.
+                    assert_eq!(focus.as_deref(), Some(Path::new("/tmp/test")));
+                    assert!(on_ok.is_none());
+                    assert_eq!(*err_prefix, "chdir");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn climb_from_inventory_exits_to_dir_view_no_effect() {
+        let mut s = test_state();
+        s.view = View::Inventory;
+        let fx = s.climb();
+        assert!(fx.is_empty(), "inventory exit emits no effect");
+        assert_eq!(s.view, View::Dir);
+    }
+
+    #[test]
+    fn apply_home_emits_change_dir() {
+        let mut s = test_state();
+        let result = s.apply(&Action::Home);
+        // `Home` reads $HOME at dispatch; guard so the test is deterministic
+        // regardless of the runner's environment (CI always has it set).
+        if std::env::var_os("HOME").is_some() {
+            match result {
+                ApplyResult::Post(fx) => match fx.as_slice() {
+                    [
+                        Effect::ChangeDir {
+                            focus,
+                            on_ok,
+                            err_prefix,
+                            ..
+                        },
+                    ] => {
+                        assert!(focus.is_none());
+                        assert!(on_ok.is_none());
+                        assert_eq!(*err_prefix, "chdir");
+                    }
+                    other => panic!("expected one ChangeDir, got {other:?}"),
+                },
+                other => panic!("expected Post, got {other:?}"),
+            }
+        } else {
+            assert!(matches!(result, ApplyResult::Handled));
+        }
     }
 
     #[test]
