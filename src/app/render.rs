@@ -747,9 +747,9 @@ impl App {
                         focused: list_focused,
                         theme: &self.theme,
                     };
-                    self.state.last_grid = probe.grid(layout.list);
+                    self.state.grid_dims = probe.grid(layout.list).dims();
                     let old_vt = self.state.cursor.view_top;
-                    let pp = self.state.last_grid.items_per_page();
+                    let pp = self.state.grid_dims.items_per_page();
                     self.state.ensure_cursor_visible();
                     if self.state.cursor.view_top == old_vt {
                         spyc_debug!(
@@ -757,8 +757,8 @@ impl App {
                             round + 1,
                             old_vt,
                             self.state.cursor.index,
-                            self.state.last_grid.cols,
-                            self.state.last_grid.rows,
+                            self.state.grid_dims.cols,
+                            self.state.grid_dims.rows_per_col,
                             pp,
                         );
                         settled = true;
@@ -770,8 +770,8 @@ impl App {
                         old_vt,
                         self.state.cursor.view_top,
                         self.state.cursor.index,
-                        self.state.last_grid.cols,
-                        self.state.last_grid.rows,
+                        self.state.grid_dims.cols,
+                        self.state.grid_dims.rows_per_col,
                         pp,
                     );
                     // 2-cycle: new vt equals the vt from two rounds ago.
@@ -788,14 +788,14 @@ impl App {
                             focused: list_focused,
                             theme: &self.theme,
                         };
-                        self.state.last_grid = probe.grid(layout.list);
+                        self.state.grid_dims = probe.grid(layout.list).dims();
                         spyc_debug!(
                             "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
                             forced,
                             self.state.cursor.index,
-                            self.state.last_grid.cols,
-                            self.state.last_grid.rows,
-                            self.state.last_grid.items_per_page(),
+                            self.state.grid_dims.cols,
+                            self.state.grid_dims.rows_per_col,
+                            self.state.grid_dims.items_per_page(),
                         );
                         settled = true;
                         break;

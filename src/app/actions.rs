@@ -85,9 +85,9 @@ impl App {
             action,
             self.state.cursor.index,
             self.state.cursor.view_top,
-            self.state.last_grid.cols,
-            self.state.last_grid.rows,
-            self.state.last_grid.items_per_page(),
+            self.state.grid_dims.cols,
+            self.state.grid_dims.rows_per_col,
+            self.state.grid_dims.items_per_page(),
             self.state.rows.len(),
         );
 
