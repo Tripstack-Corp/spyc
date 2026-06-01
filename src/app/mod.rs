@@ -502,6 +502,12 @@ pub struct App {
     /// hide it behind the existing snapshot cadence.
     activity_proc_rss_kb: u64,
     activity_proc_threads: u32,
+    /// Background-refresh plumbing for the proc stats above: a detached
+    /// thread runs `ps` (off the render thread — same reason as live_cwd)
+    /// and writes `(rss_kb, threads)` here; `refresh_process_stats` picks it
+    /// up next tick. The bool guards against overlapping spawns.
+    proc_stats_shared: std::sync::Arc<std::sync::Mutex<Option<(u64, u32)>>>,
+    proc_stats_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Cached `build_rows()` output; invalidated by `list_generation`.
     cached_rows: Vec<Row>,
     cached_rows_gen: u64,
@@ -843,6 +849,8 @@ impl App {
             started_at: std::time::Instant::now(),
             activity_proc_rss_kb: 0,
             activity_proc_threads: 0,
+            proc_stats_shared: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            proc_stats_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),
@@ -959,47 +967,33 @@ impl App {
     }
 
     /// Build a context snapshot from the current state for MCP consumers.
-    /// Refresh `activity_proc_rss_kb` / `activity_proc_threads`
-    /// from `ps`. Called once per A-monitor 1 s tick. ~5 ms on
-    /// macOS; skipped on platforms where we can't easily parse a
-    /// portable `ps` output.
+    /// Refresh `activity_proc_rss_kb` / `activity_proc_threads`. Called once
+    /// per A-monitor 1 s tick. The `ps` lookup is a fork-exec (~5 ms), so it
+    /// runs on a detached thread — same reason `live_cwd` moved off-thread:
+    /// never stall the render loop, not even while the monitor that triggers
+    /// it is open. This picks up the previous tick's result and kicks the
+    /// next refresh (unless one is still in flight).
     fn refresh_process_stats(&mut self) {
-        let pid = std::process::id();
-        // macOS: `ps -o rss=,thcount=` returns "<KB> <N>" on one
-        // line. Linux: `thcount` doesn't exist; use `nlwp` (number
-        // of light-weight processes / threads). FreeBSD-style ps
-        // varies; we accept best-effort and fall through silently.
-        #[cfg(target_os = "macos")]
-        let args = ["-o", "rss=,thcount=", "-p"];
-        #[cfg(target_os = "linux")]
-        let args = ["-o", "rss=,nlwp=", "-p"];
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let args: [&str; 0] = [];
-        if args.is_empty() {
+        use std::sync::atomic::Ordering;
+        // Pick up the last background result. Bind first so the `MutexGuard`
+        // drops before the body (no lock held across it).
+        let landed = self.proc_stats_shared.lock().unwrap().take();
+        if let Some((rss, threads)) = landed {
+            self.activity_proc_rss_kb = rss;
+            self.activity_proc_threads = threads;
+        }
+        if self.proc_stats_refreshing.load(Ordering::Acquire) {
             return;
         }
-        let Ok(output) = std::process::Command::new("ps")
-            .args(args)
-            .arg(pid.to_string())
-            .output()
-        else {
-            return;
-        };
-        if !output.status.success() {
-            return;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut parts = stdout.split_whitespace();
-        if let Some(rss) = parts.next()
-            && let Ok(v) = rss.parse()
-        {
-            self.activity_proc_rss_kb = v;
-        }
-        if let Some(thr) = parts.next()
-            && let Ok(v) = thr.parse()
-        {
-            self.activity_proc_threads = v;
-        }
+        self.proc_stats_refreshing.store(true, Ordering::Release);
+        let shared = std::sync::Arc::clone(&self.proc_stats_shared);
+        let refreshing = std::sync::Arc::clone(&self.proc_stats_refreshing);
+        std::thread::spawn(move || {
+            if let Some(stats) = crate::sysinfo::proc_rss_threads() {
+                *shared.lock().unwrap() = Some(stats);
+            }
+            refreshing.store(false, Ordering::Release);
+        });
     }
 
     fn snapshot_context(&self) -> crate::context::SpycContext {
@@ -7537,6 +7531,8 @@ impl App {
             started_at: std::time::Instant::now(),
             activity_proc_rss_kb: 0,
             activity_proc_threads: 0,
+            proc_stats_shared: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            proc_stats_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),
