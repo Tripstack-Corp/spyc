@@ -283,7 +283,9 @@ impl App {
                 KeyCode::Char(' ' | 't') => {
                     self.state.inventory.toggle_pick(self.state.cursor.index);
                     self.state.list_generation = self.state.list_generation.wrapping_add(1);
-                    self.state.cursor_move_vertical(1, self.state.rows.len());
+                    let rpc = self.state.grid_dims.rows_per_col as usize;
+                    self.state
+                        .cursor_move_vertical(1, rpc, self.state.rows.len());
                     return Ok(Vec::new());
                 }
                 KeyCode::Char('p') => {

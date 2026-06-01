@@ -99,9 +99,36 @@ pub struct Grid {
     pub col_widths: Vec<u16>,
 }
 
+/// MVU Phase 5: the geometry subset of [`Grid`] that update-time cursor /
+/// page math needs — `cols` × `rows_per_col` and the derived
+/// `items_per_page`. The render-only `col_widths` / `col_x_offsets` are
+/// deliberately excluded so they never leak into `AppState` as read-back
+/// state (the "render cache read back as state" smell). Render keeps the
+/// full `Grid` local for drawing and stores only this slice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GridDims {
+    pub cols: u16,
+    pub rows_per_col: u16,
+}
+
+impl GridDims {
+    pub const fn items_per_page(self) -> usize {
+        self.cols as usize * self.rows_per_col as usize
+    }
+}
+
 impl Grid {
     pub const fn items_per_page(&self) -> usize {
         self.cols as usize * self.rows as usize
+    }
+
+    /// The update-time geometry slice (drops the render-only column
+    /// widths). MVU Phase 5.
+    pub const fn dims(&self) -> GridDims {
+        GridDims {
+            cols: self.cols,
+            rows_per_col: self.rows,
+        }
     }
 
     /// Left-edge x-coordinate (relative to list area) of each column.

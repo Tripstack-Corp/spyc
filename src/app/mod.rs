@@ -20,7 +20,7 @@ use crate::state::{Cursor, Harpoon, History, IgnoreMasks, Inventory, Marks, Pick
 use crate::ui::line_edit::LineEditor;
 use crate::ui::{
     help,
-    list_view::{Grid, Row},
+    list_view::Row,
     pager::{self, PagerView},
     theme::Theme,
 };
@@ -713,10 +713,9 @@ impl App {
             },
             should_quit: false,
             rows: Vec::new(),
-            last_grid: Grid {
+            grid_dims: crate::ui::list_view::GridDims {
                 cols: 1,
-                rows: 1,
-                col_widths: vec![20],
+                rows_per_col: 1,
             },
             list_generation: 0,
         };
@@ -4696,10 +4695,14 @@ impl App {
                 self.state.open_graveyard_view(); // toggle off
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.state.cursor_move_vertical(1, self.state.rows.len());
+                let rpc = self.state.grid_dims.rows_per_col as usize;
+                self.state
+                    .cursor_move_vertical(1, rpc, self.state.rows.len());
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.state.cursor_move_vertical(-1, self.state.rows.len());
+                let rpc = self.state.grid_dims.rows_per_col as usize;
+                self.state
+                    .cursor_move_vertical(-1, rpc, self.state.rows.len());
             }
             KeyCode::Char('g') => {
                 self.graveyard_pending_d = false;

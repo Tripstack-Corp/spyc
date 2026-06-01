@@ -14,7 +14,7 @@ use crate::fs;
 use crate::fs::Listing;
 use crate::keymap::{Action, Resolver, UserKeymap};
 use crate::state::{Cursor, Frecency, History, IgnoreMasks, Inventory, Mark, Marks, Picks};
-use crate::ui::list_view::Grid;
+use crate::ui::list_view::GridDims;
 
 use super::{
     Effect, FlashKind, FlashMessage, Matcher, Mode, PostAction, Prompt, PromptKind, RowData, View,
@@ -454,7 +454,10 @@ pub struct AppState {
     /// (`PaneCloseTab`).
     pub pane_hidden: bool,
     pub rows: Vec<RowData>,
-    pub last_grid: Grid,
+    /// MVU Phase 5: the geometry slice of the last rendered grid (cols ×
+    /// rows-per-col), written by render and read by cursor/page-math. Was
+    /// `last_grid: Grid`; slimmed to drop the render-only `col_widths`.
+    pub grid_dims: GridDims,
     /// Monotonic counter bumped whenever the display row list changes.
     /// Used by App to skip redundant `build_rows()` calls.
     pub list_generation: u64,
@@ -475,11 +478,11 @@ impl AppState {
 
     /// j/k — move within the current column only. Wraps at column
     /// boundaries. Returns false (flash) if the column has only one row.
-    pub fn cursor_move_vertical(&mut self, delta: isize, len: usize) -> bool {
+    pub fn cursor_move_vertical(&mut self, delta: isize, rows_per_col: usize, len: usize) -> bool {
         if len == 0 {
             return false;
         }
-        let rows_per_col = self.last_grid.rows.max(1) as usize;
+        let rows_per_col = rows_per_col.max(1);
         let col_start = (self.cursor.index / rows_per_col) * rows_per_col;
         let col_end = (col_start + rows_per_col).min(len);
         let col_len = col_end - col_start;
@@ -502,8 +505,7 @@ impl AppState {
     }
 
     /// `gg` — jump to the first entry of the current column.
-    pub const fn goto_col_top(&mut self) {
-        let rows_per_col = self.last_grid.rows as usize;
+    pub const fn goto_col_top(&mut self, rows_per_col: usize) {
         if rows_per_col == 0 {
             self.cursor.index = 0;
             return;
@@ -513,11 +515,10 @@ impl AppState {
     }
 
     /// `G` — jump to the last entry of the current column.
-    pub fn goto_col_bottom(&mut self, len: usize) {
+    pub fn goto_col_bottom(&mut self, rows_per_col: usize, len: usize) {
         if len == 0 {
             return;
         }
-        let rows_per_col = self.last_grid.rows as usize;
         if rows_per_col == 0 {
             self.cursor.index = len - 1;
             return;
@@ -621,7 +622,7 @@ impl AppState {
     }
 
     pub const fn ensure_cursor_visible(&mut self) {
-        let per_page = self.last_grid.items_per_page();
+        let per_page = self.grid_dims.items_per_page();
         if per_page == 0 || self.rows.is_empty() {
             self.cursor.view_top = 0;
             return;
@@ -1286,18 +1287,18 @@ impl AppState {
     /// (terminal-touching: pager, pane, theme, redraw, etc.).
     pub fn apply(&mut self, action: &Action) -> ApplyResult {
         let len = self.rows.len();
-        let rows_per_col = self.last_grid.rows as usize;
-        let per_page = self.last_grid.items_per_page();
+        let rows_per_col = self.grid_dims.rows_per_col as usize;
+        let per_page = self.grid_dims.items_per_page();
 
         match action {
             // -- Cursor motion --
             Action::Up(n) => {
-                if !self.cursor_move_vertical(-(*n as isize), len) {
+                if !self.cursor_move_vertical(-(*n as isize), rows_per_col, len) {
                     self.flash_info("~");
                 }
             }
             Action::Down(n) => {
-                if !self.cursor_move_vertical(*n as isize, len) {
+                if !self.cursor_move_vertical(*n as isize, rows_per_col, len) {
                     self.flash_info("~");
                 }
             }
@@ -1313,8 +1314,8 @@ impl AppState {
             }
             Action::PageUp => self.cursor_move_global(-(per_page as isize), len),
             Action::PageDown => self.cursor_move_global(per_page as isize, len),
-            Action::GotoFirst => self.goto_col_top(),
-            Action::GotoLast => self.goto_col_bottom(len),
+            Action::GotoFirst => self.goto_col_top(rows_per_col),
+            Action::GotoLast => self.goto_col_bottom(rows_per_col, len),
 
             // ]g / [g — cursor to next/prev git-changed entry. Wraps
             // when there's no match in the desired direction so the
@@ -2381,10 +2382,9 @@ impl AppState {
             pane_focus_before_zoom: None,
             pane_hidden: false,
             rows: Vec::new(),
-            last_grid: Grid {
+            grid_dims: GridDims {
                 cols: 1,
-                rows: 20,
-                col_widths: vec![20],
+                rows_per_col: 20,
             },
             list_generation: 0,
         }
@@ -2442,7 +2442,7 @@ mod tests {
     fn vertical_move_wraps_forward() {
         let mut s = state_with_rows(&["a", "b", "c"]);
         s.cursor.index = 2;
-        s.cursor_move_vertical(1, 3);
+        s.cursor_move_vertical(1, 3, 3);
         assert_eq!(s.cursor.index, 0);
     }
 
@@ -2450,14 +2450,14 @@ mod tests {
     fn vertical_move_wraps_backward() {
         let mut s = state_with_rows(&["a", "b", "c"]);
         s.cursor.index = 0;
-        s.cursor_move_vertical(-1, 3);
+        s.cursor_move_vertical(-1, 3, 3);
         assert_eq!(s.cursor.index, 2);
     }
 
     #[test]
     fn vertical_move_no_op_on_empty() {
         let mut s = test_state();
-        s.cursor_move_vertical(1, 0);
+        s.cursor_move_vertical(1, 1, 0);
         assert_eq!(s.cursor.index, 0);
     }
 
@@ -2465,7 +2465,7 @@ mod tests {
     fn vertical_move_multi_step() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
         s.cursor.index = 1;
-        s.cursor_move_vertical(3, 5);
+        s.cursor_move_vertical(3, 5, 5);
         assert_eq!(s.cursor.index, 4);
     }
 
@@ -2474,52 +2474,32 @@ mod tests {
     #[test]
     fn goto_col_top_first_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 2; // last in first column
-        s.goto_col_top();
+        s.goto_col_top(3);
         assert_eq!(s.cursor.index, 0);
     }
 
     #[test]
     fn goto_col_top_second_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 4; // second column, row 1
-        s.goto_col_top();
+        s.goto_col_top(3);
         assert_eq!(s.cursor.index, 3); // top of second column
     }
 
     #[test]
     fn goto_col_bottom_first_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 0;
-        s.goto_col_bottom(5);
+        s.goto_col_bottom(3, 5);
         assert_eq!(s.cursor.index, 2); // last in first column (3 rows)
     }
 
     #[test]
     fn goto_col_bottom_partial_column() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 3; // second column
-        s.goto_col_bottom(5);
+        s.goto_col_bottom(3, 5);
         assert_eq!(s.cursor.index, 4); // last entry in partial column
     }
 
@@ -2528,11 +2508,6 @@ mod tests {
     #[test]
     fn column_move_right() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 1; // col 0, row 1
         s.cursor_move_columns(1, 3, 6);
         assert_eq!(s.cursor.index, 4); // col 1, row 1
@@ -2541,11 +2516,6 @@ mod tests {
     #[test]
     fn column_move_left() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 4; // col 1, row 1
         s.cursor_move_columns(-1, 3, 6);
         assert_eq!(s.cursor.index, 1); // col 0, row 1
@@ -2554,11 +2524,6 @@ mod tests {
     #[test]
     fn column_move_wraps_at_edge() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid {
-            cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
-        };
         s.cursor.index = 4; // col 1, row 1
         s.cursor_move_columns(1, 3, 6); // wraps to col 0
         assert_eq!(s.cursor.index, 1); // col 0, row 1
@@ -2567,11 +2532,6 @@ mod tests {
     #[test]
     fn column_move_single_column_noop() {
         let mut s = state_with_rows(&["a", "b"]);
-        s.last_grid = Grid {
-            cols: 1,
-            rows: 10,
-            col_widths: vec![20],
-        };
         s.cursor.index = 0;
         s.cursor_move_columns(1, 10, 2);
         assert_eq!(s.cursor.index, 0); // no-op
@@ -2582,10 +2542,9 @@ mod tests {
     #[test]
     fn ensure_visible_snaps_view_top() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f", "g", "h"]);
-        s.last_grid = Grid {
+        s.grid_dims = GridDims {
             cols: 1,
-            rows: 3,
-            col_widths: vec![20],
+            rows_per_col: 3,
         }; // 3 items per page
         s.cursor.index = 5; // page 1 (items 3-5)
         s.ensure_cursor_visible();
@@ -2595,10 +2554,9 @@ mod tests {
     #[test]
     fn ensure_visible_first_page() {
         let mut s = state_with_rows(&["a", "b", "c", "d"]);
-        s.last_grid = Grid {
+        s.grid_dims = GridDims {
             cols: 1,
-            rows: 3,
-            col_widths: vec![20],
+            rows_per_col: 3,
         };
         s.cursor.index = 1;
         s.ensure_cursor_visible();
@@ -3122,10 +3080,9 @@ mod tests {
     #[test]
     fn apply_page_down() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid {
+        s.grid_dims = GridDims {
             cols: 1,
-            rows: 3,
-            col_widths: vec![20],
+            rows_per_col: 3,
         };
         s.apply(&Action::PageDown);
         assert_eq!(s.cursor.index, 3);
@@ -3149,10 +3106,9 @@ mod tests {
     #[test]
     fn apply_left_right_columns() {
         let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-        s.last_grid = Grid {
+        s.grid_dims = GridDims {
             cols: 2,
-            rows: 3,
-            col_widths: vec![10, 10],
+            rows_per_col: 3,
         };
         s.apply(&Action::Right(1));
         assert_eq!(s.cursor.index, 3);

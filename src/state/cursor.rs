@@ -28,7 +28,7 @@ impl Cursor {
     // - `l` / `h` preserve the row across columns and wrap at the edges
     // - `gg` / `G` jump to the top / bottom of the current column
     //
-    // Keeping the math next to the `last_grid` value means we never use
+    // Keeping the math next to the `grid_dims` value means we never use
     // stale geometry to compute a motion.
 }
 
