@@ -456,8 +456,15 @@ impl App {
             Action::Quit => self.request_quit(),
 
             Action::GotoFile | Action::GotoFileLine => {
-                let open_at_line = matches!(action, Action::GotoFileLine);
-                self.goto_file_from_pane(open_at_line);
+                // Emit a `ReadPaneText`/`GotoFile` effect (PR 5b): the executor
+                // reads the pickable lines + the pane's cwd and navigates, so
+                // the live-pane read lives in `run_effects`.
+                effects = vec![Effect::ReadPaneText {
+                    kind: PaneTextKind::Pickable(200),
+                    then: PaneTextSink::GotoFile {
+                        open_at_line: matches!(action, Action::GotoFileLine),
+                    },
+                }];
             }
 
             // All other actions were already handled by `self.state.apply()`.

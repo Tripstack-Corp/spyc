@@ -5115,23 +5115,30 @@ impl App {
         // Handle pending `g` prefix: gg = scroll top, gf/gF = goto file.
         if self.scroll_pending_g {
             self.scroll_pending_g = false;
-            match key.code {
+            return match key.code {
                 KeyCode::Char('g') => {
                     self.pane_tabs
                         .as_mut()
                         .unwrap()
                         .active_mut()
                         .scroll_to_top();
+                    Vec::new()
                 }
-                KeyCode::Char('f') => {
-                    self.goto_file_from_pane(false);
-                }
-                KeyCode::Char('F') => {
-                    self.goto_file_from_pane(true);
-                }
-                _ => {} // Unknown g-sequence, ignore
-            }
-            return Vec::new();
+                // gf/gF while scrolling a pane — same path as the file-list
+                // action: emit a `ReadPaneText`/`GotoFile` effect so the
+                // pickable read + navigation run in `run_effects` (PR 5b).
+                KeyCode::Char('f') => vec![Effect::ReadPaneText {
+                    kind: PaneTextKind::Pickable(200),
+                    then: PaneTextSink::GotoFile {
+                        open_at_line: false,
+                    },
+                }],
+                KeyCode::Char('F') => vec![Effect::ReadPaneText {
+                    kind: PaneTextKind::Pickable(200),
+                    then: PaneTextSink::GotoFile { open_at_line: true },
+                }],
+                _ => Vec::new(), // Unknown g-sequence, ignore
+            };
         }
 
         let pane = self.pane_tabs.as_mut().unwrap().active_mut();
@@ -5804,7 +5811,7 @@ impl App {
     }
 
     /// Navigate spyc to a path matched in the pane (uppercase intent
-    /// for a Path match). Mirrors `goto_file_from_pane`'s post-resolve
+    /// for a Path match). Mirrors `goto_file_navigate`'s post-resolve
     /// flow but starts from a pre-extracted path string rather than
     /// running pathref again.
     fn jump_to_pane_path(&mut self, raw: &str) {
@@ -6040,21 +6047,15 @@ impl App {
     /// `gf` / `gF` — scan the active pane's visible output for a file path
     /// reference, navigate the file list there, and optionally open the
     /// pager at the referenced line.
-    fn goto_file_from_pane(&mut self, open_at_line: bool) {
-        let Some(tabs) = self.pane_tabs.as_mut() else {
-            self.state.flash_error("no pane open");
-            return;
-        };
-        // Scan what the user is looking at. While scrolling, that's
-        // exactly the visible viewport (so a path scrolled into view
-        // is the one we find — not a different region). When live,
-        // widen to the last 200 lines so paths in large diffs that
-        // just rolled past the bottom are still findable.
-        let lines = tabs.active_mut().pickable_text(200);
+    /// Resolve a path reference from already-read pane `lines` and navigate to
+    /// it (chdir + focus); `open_at_line` (gF) also opens the file in the pager
+    /// at the referenced line. The pickable read + the pane's cwd are supplied
+    /// by the `ReadPaneText` / `GotoFile` executor (PR 5b) so the live-pane read
+    /// lives in `run_effects` — this half stays pure of the Runtime handle.
+    fn goto_file_navigate(&mut self, lines: Vec<String>, pane_cwd: PathBuf, open_at_line: bool) {
         // Also try resolving against the spyc cwd (project root), not just
         // the pane tab's cwd — Claude often prints paths relative to the
         // project root regardless of the shell's cwd.
-        let pane_cwd = tabs.active_info().cwd.clone();
         let spyc_cwd = self.state.listing.dir.clone();
 
         // Debug: dump visible lines to the debug log so we can see what
@@ -7577,6 +7578,37 @@ mod harness_tests {
             assert!(post.is_empty());
             app.apply(&Action::Up(1)).unwrap();
             assert_eq!(app.state.cursor.index, 0);
+        });
+    }
+
+    /// PR 5b: `gf`/`gF` emit a `ReadPaneText`/`GotoFile` effect (the pickable
+    /// read + navigation run in `run_effects`); `gF` sets `open_at_line`.
+    #[test]
+    fn goto_file_actions_emit_read_pane_text_pickable() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            match app.apply(&Action::GotoFile).unwrap().as_slice() {
+                [
+                    Effect::ReadPaneText {
+                        kind: PaneTextKind::Pickable(200),
+                        then:
+                            PaneTextSink::GotoFile {
+                                open_at_line: false,
+                            },
+                    },
+                ] => {}
+                other => panic!("gf: expected ReadPaneText Pickable(200)+GotoFile, got {other:?}"),
+            }
+            match app.apply(&Action::GotoFileLine).unwrap().as_slice() {
+                [
+                    Effect::ReadPaneText {
+                        kind: PaneTextKind::Pickable(200),
+                        then: PaneTextSink::GotoFile { open_at_line: true },
+                    },
+                ] => {}
+                other => panic!("gF: expected open_at_line=true, got {other:?}"),
+            }
         });
     }
 
