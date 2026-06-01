@@ -50,6 +50,36 @@ pub enum Effect {
     /// materialized in the producer (not a pane handle) — eager grid
     /// copy-out is the regression Phase 5's `PaneSnapshot` avoids.
     CopyToClipboard { text: String, ok: ClipMsg },
+
+    /// A-class. Send `sig` to the task's process group (`kill_pg` applies
+    /// the negative-pid / group convention), then on success toggle the
+    /// task's `paused` flag and flash per `on_ok`, or flash `on_err` on
+    /// failure. `pid` is derived in the producer *after* its guards — the
+    /// executor cannot re-derive it (the host may have moved). The flash
+    /// always lands on the status bar (`state.flash_*`), never the pager
+    /// footer — true for both `:pause`/`:resume` and the pager `S`/`C`
+    /// keys. `#[cfg(unix)]` because `rustix::process::Signal` is unix-only
+    /// (matches `kill_pg`).
+    #[cfg(unix)]
+    SignalGroup {
+        pid: u32,
+        sig: rustix::process::Signal,
+        on_ok: SigOk,
+        on_err: String,
+    },
+}
+
+/// The success action for an [`Effect::SignalGroup`]: which task to toggle
+/// (carries its id, re-found in the executor — same tick, so still
+/// present) and the resulting paused-state + flash string.
+#[cfg(unix)]
+#[derive(Debug)]
+pub enum SigOk {
+    /// SIGSTOP succeeded → `task.paused = true`, flash
+    /// `"task #{id} paused — :resume to continue"`.
+    Pause(u32),
+    /// SIGCONT succeeded → `task.paused = false`, flash `"task #{id} resumed"`.
+    Resume(u32),
 }
 
 /// The success-flash recipe for a [`Effect::CopyToClipboard`], rich enough
@@ -92,6 +122,30 @@ impl ClipMsg {
                 let ellipsis = if text.len() > 60 { "…" } else { "" };
                 format!("yanked prompt: {preview}{ellipsis}")
             }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl SigOk {
+    /// The task id this signal targets.
+    const fn task_id(&self) -> u32 {
+        match self {
+            Self::Pause(id) | Self::Resume(id) => *id,
+        }
+    }
+
+    /// The `paused` flag to set on success — STOP pauses, CONT resumes.
+    const fn paused(&self) -> bool {
+        matches!(self, Self::Pause(_))
+    }
+
+    /// The status-bar success flash, byte-identical to the former inline
+    /// `pause_task` / `resume_task` sites (note the U+2014 em-dash).
+    fn message(&self) -> String {
+        match self {
+            Self::Pause(id) => format!("task #{id} paused — :resume to continue"),
+            Self::Resume(id) => format!("task #{id} resumed"),
         }
     }
 }
@@ -154,6 +208,32 @@ impl App {
                 Effect::CopyToClipboard { text, ok } => match crate::clipboard::copy(&text) {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
                     Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                },
+                // A-class: signal the group, then (on success) toggle the
+                // task's paused flag — re-found by id, same tick — and
+                // flash. Like the clipboard arm this never `?`-propagates;
+                // a failed signal flashes `on_err` and the loop survives.
+                #[cfg(unix)]
+                Effect::SignalGroup {
+                    pid,
+                    sig,
+                    on_ok,
+                    on_err,
+                } => match super::kill_pg(pid, sig) {
+                    Ok(()) => {
+                        // Re-find the task by id (same tick, so still
+                        // present) and toggle its paused flag, then flash.
+                        if let Some(t) = self
+                            .background_tasks
+                            .tasks
+                            .iter_mut()
+                            .find(|t| t.id == on_ok.task_id())
+                        {
+                            t.paused = on_ok.paused();
+                        }
+                        self.state.flash_info(on_ok.message());
+                    }
+                    Err(_) => self.state.flash_error(on_err),
                 },
                 Effect::ForegroundExec {
                     program,
@@ -332,5 +412,33 @@ mod tests {
             }
             other => panic!("expected one ForegroundExec, got {other:?}"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sig_pause_message_state_and_id() {
+        let s = super::SigOk::Pause(7);
+        assert_eq!(s.message(), "task #7 paused — :resume to continue");
+        assert!(s.paused(), "STOP success sets paused = true");
+        assert_eq!(s.task_id(), 7);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sig_resume_message_state_and_id() {
+        let s = super::SigOk::Resume(42);
+        assert_eq!(s.message(), "task #42 resumed");
+        assert!(!s.paused(), "CONT success sets paused = false");
+        assert_eq!(s.task_id(), 42);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sig_pause_uses_em_dash_not_ascii_hyphen() {
+        // U+2014 EM DASH — pins the exact separator (the inline site used
+        // it; a refactor to " - " would be a silent byte divergence).
+        let m = super::SigOk::Pause(1).message();
+        assert!(m.contains('\u{2014}'), "must contain the em-dash U+2014");
+        assert!(!m.contains(" - "), "must not be an ASCII ' - '");
     }
 }
