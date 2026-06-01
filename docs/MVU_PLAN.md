@@ -213,7 +213,7 @@ enum Message {
     GrepBatch { session: GrepId, matches: Vec<GrepMatch> },
     Mcp(McpRequest),                    // Phase 3d; owns its one-shot reply Sender
     Tick(Deadline),                     // Phase 2 (DONE); GitPoll/ActivityRollover/RefreshQuiet/ContextWrite/RestoreSettle/ResumeEnter. (Not ScrollThrottle — it's an in-arm event-gap dedup, not a wakeup timer.)
-    ForegroundDone { on_done: PostWork },                       // Phase 4; PostWork is a testable enum
+    ForegroundDone { on_done: PostWork },                       // DEFERRED past Phase 4 (the spawn after-work runs inline in run_effects's ForegroundExec arm); revisit in Phase 5. PostWork is a testable enum
     ClipboardResult(Result<usize, String>),
     ListingLoaded { dir: PathBuf, listing: Listing, gen: u64 }, // Phase 5, only if chdir is made async
 }
@@ -421,10 +421,31 @@ shim (call site byte-identical, parking executor already exists from Phase 1).
 Add `SendToPane` and route the inline `send_bytes` sites through it. Convert the
 5 clipboard sites, `kill_pg`/SIGSTOP/SIGCONT, and `update_term_title`.
 Scope `^C`: only signal-**delivery** sites become `SignalGroup`; prompt-cancel/
-buffer-clear/flash-hint stay pure transitions. **Done**: `grep -c clipboard::copy
-src/app/{actions,commands,key_dispatch,pager_handler}.rs == 0` (same for
-`kill_pg`/`term_title::set`/non-MCP `write_context`); MCP mutation →
-`get_spyc_context` reads fresh state.
+buffer-clear/flash-hint stay pure transitions.
+
+**Phase 4 DONE** (PRs #213–#216, each behavior-equivalent behind green CI +
+a per-PR adversarial verification workflow): `run_effects` (in the new
+`src/app/effect.rs`) is the **sole side-effect executor** for clipboard /
+signal / send-to-pane / terminal-title. Vocabulary: `ForegroundExec` (via a
+`From<PostAction> for Vec<Effect>` shim), `CopyToClipboard` + `ClipMsg`,
+`#[cfg(unix)] SignalGroup` + `SigOk`, `SendToPane` + `PaneTarget` + `PaneInput`,
+`SetTerminalTitle`. Only `ApplyResult::Post` was widened to `Post(Vec<Effect>)`
+— the other two result enums and the `update`-signature collapse stay in
+Phase 5. **Corrected Done metrics** (the original cross-file grep was vacuous —
+those handler modules were already at 0 because the IO lived in `mod.rs`):
+`clipboard::copy` now appears exactly **5×** repo-wide (1 in `run_effects` + 3
+`pager.rs` footer yanks + 1 `yank_quick_select` — the latter four documented
+inline exceptions, footer-routing / flash-ordering); `kill_pg(STOP/CONT)` for
+pause/resume only in `run_effects`; `term_title::set` only in `run_effects`; no
+`send_key`/`send_bytes` in the 4 converted send sites.
+**Deliberately left inline** (loop-intrinsic — the producer *is* the loop, so
+threading through a non-existent handler return buys nothing): the paste
+bracketed-write, the resume-injection two-phase write (needs a `Tab`/`SinkId`
+target — Phase 5), and the context-write debounce. **Re-scoped to later work**:
+`interrupt_task`'s SIGINT stays inline (it flashes the *pager footer*, not the
+status bar) and `write_context` stays inline (protects the MCP read-after-write
+contract). The typed `ForegroundDone`/`PostWork` message was **not** added — the
+spawn after-work runs inline in `run_effects`'s `ForegroundExec` arm (Phase 5).
 
 ### Phase 5 — Physically split Model/Runtime/ViewState + de-IO audit (pre-2.0)
 Introduce `Runtime` and `Model`/`ViewState`; move `git_worker_tx` into Runtime
