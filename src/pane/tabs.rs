@@ -4,6 +4,10 @@
 //! all tab lifecycle logic out of `App`.
 
 use std::path::PathBuf;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use super::Pane;
 
@@ -95,10 +99,21 @@ impl TabInfo {
 pub struct TabEntry {
     pub pane: Pane,
     pub info: TabInfo,
-    /// Cached live cwd of the child process, refreshed at most once
-    /// per `LIVE_CWD_TTL`. `None` until first refresh succeeds, or if
-    /// the platform / process refuses the lookup.
-    live_cwd_cache: Option<(std::time::Instant, PathBuf)>,
+    /// Last-known live cwd of the child (owned, so it can be returned by
+    /// reference). Updated from `live_cwd_pending` whenever a background
+    /// refresh has landed. `None` until the first refresh succeeds.
+    live_cwd_cache: Option<PathBuf>,
+    /// Slot a detached refresh thread writes a freshly-resolved cwd into.
+    /// `cwd_for_pid` is a `lsof` fork-exec on macOS (~5–17 ms); running it
+    /// inline in the render path stalled the whole event loop once per
+    /// `LIVE_CWD_TTL` (a visible per-second typing hitch), so it now runs
+    /// off-thread and the result is picked up on a later frame.
+    live_cwd_pending: Arc<Mutex<Option<PathBuf>>>,
+    /// True while a background cwd refresh is in flight, so we kick at most
+    /// one at a time.
+    live_cwd_refreshing: Arc<AtomicBool>,
+    /// When we last kicked a refresh — the `LIVE_CWD_TTL` gate.
+    live_cwd_kicked_at: Option<std::time::Instant>,
     /// Stashed `^a-v` scrollback pager. Holds the whole `PagerView`
     /// (scroll position, search state, visual selection, line buffer
     /// snapshot — everything) while the user is on another tab so a
@@ -109,9 +124,9 @@ pub struct TabEntry {
     pub stashed_scrollback_pager: Option<crate::ui::pager::PagerView>,
 }
 
-/// How long a cached live-cwd lookup is reused before re-polling.
-/// Render-path cost on macOS is a fork-exec (~5ms), so cap polling
-/// to ~1 Hz.
+/// How long a resolved live-cwd is reused before kicking a background
+/// re-poll. The lookup runs off-thread (see `live_cwd`), so this only
+/// bounds how often a refresh thread is spawned, not any render cost.
 const LIVE_CWD_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Strip the ` [exited <N>]` suffix that [`PaneTabs::mark_exited`]
@@ -148,32 +163,57 @@ pub fn strip_exit_suffix(label: &str) -> String {
 }
 
 impl TabEntry {
-    pub const fn new(pane: Pane, info: TabInfo) -> Self {
+    pub fn new(pane: Pane, info: TabInfo) -> Self {
         Self {
             pane,
             info,
             live_cwd_cache: None,
+            live_cwd_pending: Arc::new(Mutex::new(None)),
+            live_cwd_refreshing: Arc::new(AtomicBool::new(false)),
+            live_cwd_kicked_at: None,
             stashed_scrollback_pager: None,
         }
     }
 
-    /// Live cwd of the subprocess (TTL-cached). Returns the spawn-time
-    /// cwd as a fallback when the lookup is unsupported or fails.
+    /// Live cwd of the subprocess. Returns the last resolved value (or the
+    /// spawn-time cwd until the first refresh lands) **without ever
+    /// blocking**: the actual `cwd_for_pid` lookup — a `lsof` fork-exec on
+    /// macOS — runs on a detached thread, kicked at most once per
+    /// `LIVE_CWD_TTL`. The render path used to call it inline and stall the
+    /// event loop ~once per second; now the result is just picked up on a
+    /// later frame.
     pub fn live_cwd(&mut self) -> &std::path::Path {
+        // Pick up a result a background refresh has landed. Bind the
+        // `take()` first so the `MutexGuard` drops before the body (no lock
+        // held across it).
+        let landed = self.live_cwd_pending.lock().unwrap().take();
+        if let Some(cwd) = landed {
+            self.live_cwd_cache = Some(cwd);
+        }
+        // Kick a background refresh when the value is stale and none is in
+        // flight — never run the lookup on this (render) thread.
         let now = std::time::Instant::now();
         let stale = self
-            .live_cwd_cache
-            .as_ref()
-            .is_none_or(|(at, _)| now.duration_since(*at) >= LIVE_CWD_TTL);
+            .live_cwd_kicked_at
+            .is_none_or(|at| now.duration_since(at) >= LIVE_CWD_TTL);
         if stale
+            && !self.live_cwd_refreshing.load(Ordering::Acquire)
             && let Some(pid) = self.pane.process_id()
-            && let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid)
         {
-            self.live_cwd_cache = Some((now, cwd));
+            self.live_cwd_kicked_at = Some(now);
+            self.live_cwd_refreshing.store(true, Ordering::Release);
+            let pending = Arc::clone(&self.live_cwd_pending);
+            let refreshing = Arc::clone(&self.live_cwd_refreshing);
+            std::thread::spawn(move || {
+                if let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid) {
+                    *pending.lock().unwrap() = Some(cwd);
+                }
+                refreshing.store(false, Ordering::Release);
+            });
         }
         self.live_cwd_cache
-            .as_ref()
-            .map_or(self.info.cwd.as_path(), |(_, p)| p.as_path())
+            .as_deref()
+            .unwrap_or(self.info.cwd.as_path())
     }
 }
 

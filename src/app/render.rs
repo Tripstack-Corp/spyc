@@ -981,17 +981,19 @@ impl App {
         if self.show_activity {
             use ratatui::widgets::Paragraph as ActivityP;
             let text = format!(
-                " {} dps [p:{} e:{} o:{}]  {} cells/s  cap {}ms ",
+                " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms ",
                 self.activity_dps,
                 self.activity_snap_pane,
                 self.activity_snap_event,
                 self.activity_snap_other,
                 self.activity_bps,
-                // MVU Phase 3c: the loop is event-driven now (panes/captures/
-                // tasks/fs/git all wake the channel); there is no adaptive
-                // poll rate. The only meaningful number is the MAX_IDLE_CAP
-                // ceiling — the longest the loop ever sleeps between wakes.
-                500,
+                // Peak frame stall over the last 1 s window. `pk` is the whole
+                // terminal.draw (buffer build + diff + tty emission); `r` is
+                // just the render closure (buffer build = CPU). pk-r ≈ the
+                // diff+emission. If pk approaches the inter-keystroke interval
+                // the loop is render-bound; r vs pk says CPU vs emission.
+                self.activity_frame_peak_snap as f64 / 1000.0,
+                self.activity_render_peak_snap as f64 / 1000.0,
             );
 
             // Line 2 — internals digest. Compact field names so the

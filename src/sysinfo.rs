@@ -386,6 +386,36 @@ pub fn rss_kb() -> Option<u64> {
     }
 }
 
+/// `(rss_kb, thread_count)` for the current process via `ps` — macOS
+/// `thcount`, Linux `nlwp`. Best-effort; `None` on any failure or
+/// unsupported platform. Spawns a subprocess (a fork-exec), so call it
+/// OFF the main/render thread (see `App::refresh_process_stats`).
+pub fn proc_rss_threads() -> Option<(u64, u32)> {
+    #[cfg(target_os = "macos")]
+    let args: &[&str] = &["-o", "rss=,thcount=", "-p"];
+    #[cfg(target_os = "linux")]
+    let args: &[&str] = &["-o", "rss=,nlwp=", "-p"];
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let args: &[&str] = &[];
+    if args.is_empty() {
+        return None;
+    }
+    let pid = std::process::id();
+    let output = std::process::Command::new("ps")
+        .args(args)
+        .arg(pid.to_string())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut parts = stdout.split_whitespace();
+    let rss = parts.next()?.parse().ok()?;
+    let threads = parts.next()?.parse().ok()?;
+    Some((rss, threads))
+}
+
 /// Human-readable RSS, e.g. `12.3 MB`.
 pub fn format_rss() -> String {
     match rss_kb() {
