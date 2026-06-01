@@ -211,6 +211,21 @@ impl GitState {
     }
 }
 
+/// MVU Phase 5: a cheap Model-side snapshot of the active pane's
+/// routing-relevant flags, refreshed once per loop iteration (after the
+/// tab drain + `mark_exited`, before `recv`). `route_snapshot` reads these
+/// instead of the live `PtyHost` so key routing decouples from the
+/// Runtime. Behavior-equivalent: refreshed from the live pane at the same
+/// loop point the old live read would have observed, and the only mutator
+/// of `is_scrolling`/`is_closed` (key handlers / child-exit drain) runs
+/// either before this refresh or after `route_snapshot`. (Render keeps its
+/// own live reads; the richer per-tab snapshot for render purity is Phase 6.)
+#[derive(Default, Clone, Copy)]
+pub struct PaneSnapshot {
+    pub is_scrolling: bool,
+    pub is_closed: bool,
+}
+
 pub struct AppState {
     pub listing: Listing,
     pub picks: Picks,
@@ -392,6 +407,10 @@ pub struct AppState {
     pub harpoon: Option<crate::state::Harpoon>,
     pub pane_prompt_buf: String,
     pub last_pane_prompt: Option<String>,
+    /// MVU Phase 5: active-pane routing flags, refreshed at loop-top (see
+    /// [`PaneSnapshot`]). Read by `route_snapshot` so routing reads the
+    /// Model, not the live pane host.
+    pub pane_snapshot: PaneSnapshot,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
     /// prompt is active. Drives the warning-color row highlight in
     /// the list view: the user sees exactly which files the `y` /
@@ -2348,6 +2367,7 @@ impl AppState {
             harpoon: None,
             pane_prompt_buf: String::new(),
             last_pane_prompt: None,
+            pane_snapshot: PaneSnapshot::default(),
             pending_delete_preview: None,
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),
