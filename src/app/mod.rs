@@ -668,6 +668,7 @@ impl App {
             harpoon,
             pane_prompt_buf: String::new(),
             last_pane_prompt: None,
+            pane_snapshot: state::PaneSnapshot::default(),
             pending_delete_preview: None,
             // Populated on the first successful `refresh_git_state`
             // call. See `AppState::git_poll_cache` doc for why this
@@ -1557,6 +1558,22 @@ impl App {
                 draw_reason = 3;
             }
 
+            // MVU Phase 5: snapshot the active pane's routing flags into
+            // the Model, AFTER the drain + `mark_exited` finalized
+            // `is_closed` and BEFORE `recv`. `route_snapshot` reads this
+            // instead of the live host, decoupling key routing from the
+            // Runtime. Behavior-equivalent: the only mutators of these
+            // flags (scroll-mode key handlers / child-exit drain) run
+            // either before this point or strictly after `route_snapshot`,
+            // so the value matches what the old live read observed.
+            self.state.pane_snapshot =
+                self.pane_tabs
+                    .as_ref()
+                    .map_or_else(state::PaneSnapshot::default, |t| state::PaneSnapshot {
+                        is_scrolling: t.active().is_scrolling(),
+                        is_closed: t.active().is_closed(),
+                    });
+
             // MVU Phase 2: one clock read for all PRE-recv timers
             // (send_pending_resumes / find_crashed_restore_tab /
             // watcher-stamp / refresh / git poll), matching their old
@@ -2417,14 +2434,10 @@ impl App {
             pager_mount: self.pager.as_ref().map(|v| v.mount),
             has_pane_tabs: self.pane_tabs.is_some(),
             pane_focused: self.state.pane_focused(),
-            pane_scrolling: self
-                .pane_tabs
-                .as_ref()
-                .is_some_and(|t| t.active().is_scrolling()),
-            pane_closed: self
-                .pane_tabs
-                .as_ref()
-                .is_some_and(|t| t.active().is_closed()),
+            // MVU Phase 5: read from the Model snapshot (refreshed at
+            // loop-top), not the live host — decouples routing from Runtime.
+            pane_scrolling: self.state.pane_snapshot.is_scrolling,
+            pane_closed: self.state.pane_snapshot.is_closed,
             resolver_pending: self.state.resolver.is_pending(),
         }
     }
