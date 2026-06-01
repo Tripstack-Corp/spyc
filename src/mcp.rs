@@ -30,6 +30,14 @@ const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const CONTEXT_URI: &str = "spyc://context";
 
+/// Socket IO deadline for the stdio proxy. Bounds how long it waits on a
+/// server response (and on a write) so a wedged / silent / panicked server
+/// thread surfaces as a clean JSON-RPC error to the agent instead of
+/// hanging it indefinitely. Generous — well above the server's own 5 s
+/// writable-action timeout — so a legitimately slow reply isn't cut off;
+/// only a genuine indefinite stall trips it.
+const PROXY_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Log to /tmp/spyc-mcp.log for debugging MCP connection issues.
 fn mcp_log(msg: &str) {
     use std::io::Write;
@@ -325,6 +333,11 @@ fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
             return Err(e.into());
         }
     };
+    // Bound socket IO (see `PROXY_IO_TIMEOUT`) so a wedged server can't hang
+    // the agent forever — `read_lsp_message` below would otherwise block
+    // indefinitely on a silent server thread.
+    let _ = sock_clone.set_read_timeout(Some(PROXY_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
     let mut sock_reader = io::BufReader::new(sock_clone);
     let mut sock_writer = stream;
     mcp_log("proxy: ready, waiting for stdin");
@@ -366,7 +379,32 @@ fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
 
         // Only read a response for requests (notifications get no reply).
         if is_request {
-            let response = read_lsp_message(&mut sock_reader)?;
+            let response = match read_lsp_message(&mut sock_reader) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Timeout or socket error waiting for the server. Reply to
+                    // the agent with a JSON-RPC error (reusing the request id
+                    // so the client matches it) so its tool call returns an
+                    // error instead of hanging, then end the proxy cleanly —
+                    // a late reply would desync the stream framing.
+                    mcp_log(&format!("proxy: socket read error/timeout: {e}"));
+                    let id = serde_json::from_str::<Value>(msg)
+                        .ok()
+                        .and_then(|v| v.get("id").cloned())
+                        .unwrap_or(Value::Null);
+                    let err = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32000,
+                            "message": format!("spyc MCP server did not respond ({e})"),
+                        }
+                    });
+                    let _ = writeln!(stdout_writer, "{err}");
+                    let _ = stdout_writer.flush();
+                    break;
+                }
+            };
             mcp_log(&format!(
                 "proxy: socket → stdout ({} bytes): {}",
                 response.len(),
@@ -875,6 +913,10 @@ fn handle_socket_connection(
     cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
 ) -> io::Result<()> {
     let mut reader = io::BufReader::new(stream.try_clone()?);
+    // Bound writes so a stalled client (proxy) can't wedge this server thread
+    // indefinitely. The read is intentionally left blocking — the loop waits
+    // for the next request, which is idle for minutes between agent calls.
+    let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
     let mut writer = stream;
 
     loop {
