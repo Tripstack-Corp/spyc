@@ -511,7 +511,17 @@ impl App {
         );
     }
 
+    /// Draw a full frame. Thin wrapper so the activity (`A`) monitor renders
+    /// LAST and unconditionally — visible over the `$EDITOR` / `;cmd` overlay
+    /// / top-pager paths too, which `return` early from `render_inner`
+    /// (BUGS.md: "`A` monitoring should be omnipresent").
     pub fn render(&mut self, frame: &mut Frame) {
+        self.render_inner(frame);
+        let frame_area = frame.area();
+        self.render_activity_hud(frame, frame_area);
+    }
+
+    fn render_inner(&mut self, frame: &mut Frame) {
         let frame_area = frame.area();
 
         // Layout:
@@ -971,144 +981,136 @@ impl App {
         if self.harpoon_menu.is_some() {
             self.render_harpoon_menu(frame);
         }
+    }
 
-        // Activity monitor overlay (top-right corner). Line 1 is the
-        // existing draw/byte/reason throughput on yellow; line 2
-        // surfaces internals (bg tasks, git worker, watcher, MCP,
-        // listing, pager) on a teal `take`-color background so they
-        // read as a distinct strata. Both lines run in the
-        // 1-second-window snapshot model.
-        if self.show_activity {
-            use ratatui::widgets::Paragraph as ActivityP;
-            let text = format!(
-                " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms ",
-                self.activity_dps,
-                self.activity_snap_pane,
-                self.activity_snap_event,
-                self.activity_snap_other,
-                self.activity_bps,
-                // Peak frame stall over the last 1 s window. `pk` is the whole
-                // terminal.draw (buffer build + diff + tty emission); `r` is
-                // just the render closure (buffer build = CPU). pk-r ≈ the
-                // diff+emission. If pk approaches the inter-keystroke interval
-                // the loop is render-bound; r vs pk says CPU vs emission.
-                self.activity_frame_peak_snap as f64 / 1000.0,
-                self.activity_render_peak_snap as f64 / 1000.0,
-            );
+    /// Render the activity (`A`) monitor overlay (top-right corner). Called
+    /// LAST from `render` so it sits over every render path — including the
+    /// `$EDITOR` / `;cmd` overlay and top-pager paths that return early from
+    /// `render_inner` (the "omnipresent" ask). Rows are padded to one common
+    /// display width so the block is a clean flush-right rectangle with
+    /// content right-justified, instead of the old ragged per-line staircase:
+    /// throughput + frame timing (yellow), internals (teal), process stats
+    /// (lavender), and a build + terminal-caps footer (blue). No-op unless the
+    /// monitor is toggled on.
+    fn render_activity_hud(&self, frame: &mut Frame, frame_area: ratatui::layout::Rect) {
+        if !self.show_activity {
+            return;
+        }
+        use ratatui::style::{Color, Style};
+        use ratatui::text::{Line as HudLine, Span};
+        use ratatui::widgets::Paragraph as ActivityP;
 
-            // Line 2 — internals digest. Compact field names so the
-            // line stays under typical 200-col terminals even with
-            // every counter populated.
-            let bg_running = self.background_tasks.running_count();
-            let bg_done = self.background_tasks.done_count();
-            let bg_paused = self
-                .background_tasks
-                .tasks
-                .iter()
-                .filter(|t| t.paused)
-                .count();
-            let pager_state = match self.pager.as_ref() {
-                None => "none",
-                Some(v) => match v.mount {
-                    crate::ui::pager::Mount::Overlay => "overlay",
-                    crate::ui::pager::Mount::TopPane => "top",
-                    crate::ui::pager::Mount::LowerPane => "lower",
-                },
-            };
-            let git_last = if self.activity_git_last_ms == 0 {
-                "—".to_string()
+        // Line 1 — throughput + frame timing. `pk` is the whole terminal.draw
+        // (build + diff + tty emission); `r` is just the render closure (CPU).
+        // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
+        let l1 = format!(
+            " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms ",
+            self.activity_dps,
+            self.activity_snap_pane,
+            self.activity_snap_event,
+            self.activity_snap_other,
+            self.activity_bps,
+            self.activity_frame_peak_snap as f64 / 1000.0,
+            self.activity_render_peak_snap as f64 / 1000.0,
+        );
+
+        // Line 2 — internals digest.
+        let bg_running = self.background_tasks.running_count();
+        let bg_done = self.background_tasks.done_count();
+        let bg_paused = self
+            .background_tasks
+            .tasks
+            .iter()
+            .filter(|t| t.paused)
+            .count();
+        let pager_state = match self.pager.as_ref() {
+            None => "none",
+            Some(v) => match v.mount {
+                crate::ui::pager::Mount::Overlay => "overlay",
+                crate::ui::pager::Mount::TopPane => "top",
+                crate::ui::pager::Mount::LowerPane => "lower",
+            },
+        };
+        let git_last = if self.activity_git_last_ms == 0 {
+            "—".to_string()
+        } else {
+            format!("{}ms", self.activity_git_last_ms)
+        };
+        let l2 = format!(
+            " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
+            if bg_paused > 0 {
+                format!(" {bg_paused}\u{23f8}")
             } else {
-                format!("{}ms", self.activity_git_last_ms)
+                String::new()
+            },
+            self.activity_git_results_snap,
+            git_last,
+            self.activity_watcher_events_snap,
+            self.activity_mcp_reqs_snap,
+            self.state.listing.entries.len(),
+            pager_state,
+        );
+
+        // Line 3 — process stats (PID for `sample`/lldb, RSS, threads).
+        let pid = std::process::id();
+        let uptime_str = format_uptime(self.started_at.elapsed().as_secs());
+        let pane_count = self.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        let rss_mb = self.activity_proc_rss_kb / 1024;
+        let l3 = format!(
+            " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
+            self.activity_proc_threads,
+        );
+
+        // Line 4 — build identity + terminal capabilities.
+        let term = std::env::var("TERM").unwrap_or_else(|_| "?".to_string());
+        let truecolor = std::env::var("COLORTERM")
+            .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit"));
+        let l4 = format!(
+            " spyc v{} ({})  {term}{}  {}\u{00d7}{} ",
+            env!("CARGO_PKG_VERSION"),
+            env!("SPYC_GIT_SHA"),
+            if truecolor { " truecolor" } else { "" },
+            frame_area.width,
+            frame_area.height,
+        );
+
+        // Pad every row to one common display width → a clean flush-right
+        // block (straight left edge), content right-justified.
+        let rows: [(&str, Color); 4] = [
+            (l1.as_str(), Color::Yellow),
+            (l2.as_str(), self.theme.take),
+            (l3.as_str(), self.theme.status_user),
+            (l4.as_str(), self.theme.dir),
+        ];
+        let maxw = rows
+            .iter()
+            .map(|(s, _)| crate::ui::display_width(s))
+            .max()
+            .unwrap_or(0);
+        let block_w = u16::try_from(maxw).unwrap_or(u16::MAX);
+        // Need the block plus a 1-col right margin.
+        if block_w == 0 || frame_area.width <= block_w + 1 {
+            return;
+        }
+        let x = frame_area.width - block_w - 1;
+        for (row, (text, bg)) in rows.iter().enumerate() {
+            let Ok(y) = u16::try_from(row) else { break };
+            if y >= frame_area.height {
+                break;
+            }
+            let pad = maxw.saturating_sub(crate::ui::display_width(text));
+            let padded = format!("{}{text}", " ".repeat(pad));
+            let rect = ratatui::layout::Rect {
+                x,
+                y,
+                width: block_w,
+                height: 1,
             };
-            let text2 = format!(
-                " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
-                if bg_paused > 0 {
-                    format!(" {bg_paused}\u{23f8}")
-                } else {
-                    String::new()
-                },
-                self.activity_git_results_snap,
-                git_last,
-                self.activity_watcher_events_snap,
-                self.activity_mcp_reqs_snap,
-                self.state.listing.entries.len(),
-                pager_state,
+            let style = Style::default().fg(Color::Black).bg(*bg);
+            frame.render_widget(
+                ActivityP::new(HudLine::from(Span::styled(padded, style))),
+                rect,
             );
-
-            // Line 3 — process stats. Useful for diagnosing long-
-            // running session slowdowns: PID for attaching `sample`
-            // / lldb, RSS to spot memory growth, thread count to
-            // spot accumulation of pane workers / reader threads.
-            let pid = std::process::id();
-            let uptime_secs = self.started_at.elapsed().as_secs();
-            let uptime_str = format_uptime(uptime_secs);
-            let pane_count = self.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
-            let rss_mb = self.activity_proc_rss_kb / 1024;
-            let text3 = format!(
-                " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
-                self.activity_proc_threads,
-            );
-
-            let w1 = text.len() as u16;
-            let w2 = text2.len() as u16;
-            let w3 = text3.len() as u16;
-            let row1_ok = frame_area.width > w1 + 2;
-            let row2_ok = frame_area.height > 1 && frame_area.width > w2 + 2;
-            let row3_ok = frame_area.height > 2 && frame_area.width > w3 + 2;
-            if row1_ok {
-                let rect = ratatui::layout::Rect {
-                    x: frame_area.width - w1 - 1,
-                    y: 0,
-                    width: w1,
-                    height: 1,
-                };
-                let style = ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Black)
-                    .bg(ratatui::style::Color::Yellow);
-                frame.render_widget(
-                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
-                        text, style,
-                    ))),
-                    rect,
-                );
-            }
-            if row2_ok {
-                let rect = ratatui::layout::Rect {
-                    x: frame_area.width - w2 - 1,
-                    y: 1,
-                    width: w2,
-                    height: 1,
-                };
-                let style = ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Black)
-                    .bg(self.theme.take);
-                frame.render_widget(
-                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
-                        text2, style,
-                    ))),
-                    rect,
-                );
-            }
-            if row3_ok {
-                let rect = ratatui::layout::Rect {
-                    x: frame_area.width - w3 - 1,
-                    y: 2,
-                    width: w3,
-                    height: 1,
-                };
-                // Lavender (status_user) — distinct from yellow line 1
-                // and teal line 2 so the three strata read as
-                // separate concerns at a glance.
-                let style = ratatui::style::Style::default()
-                    .fg(ratatui::style::Color::Black)
-                    .bg(self.theme.status_user);
-                frame.render_widget(
-                    ActivityP::new(ratatui::text::Line::from(ratatui::text::Span::styled(
-                        text3, style,
-                    ))),
-                    rect,
-                );
-            }
         }
     }
 }
