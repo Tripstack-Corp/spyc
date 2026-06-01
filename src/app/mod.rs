@@ -179,7 +179,7 @@ mod tasks;
 use capture::PendingCapture;
 #[cfg(unix)]
 pub use effect::SigOk;
-pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget};
+pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
@@ -4588,49 +4588,11 @@ impl App {
         parse_gemini_list_sessions_for_uuid(text, uuid)
     }
 
-    /// yp — yank visible pane output to the system clipboard.
-    fn yank_pane_to_clipboard(&mut self) -> Vec<Effect> {
-        let Some(tabs) = self.pane_tabs.as_ref() else {
-            self.state.flash_error("no pane open");
-            return Vec::new();
-        };
-        let lines = tabs.active().visible_lines();
-        let text: String = lines
-            .iter()
-            .map(|l| l.trim_end())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if text.trim().is_empty() {
-            self.state.flash_error("pane is empty");
-            return Vec::new();
-        }
-        vec![Effect::CopyToClipboard {
-            text,
-            ok: ClipMsg::PaneLines,
-        }]
-    }
-
-    /// ya — yank the full scrollback + visible screen from the active pane.
-    fn yank_scrollback_to_clipboard(&mut self) -> Vec<Effect> {
-        let Some(tabs) = self.pane_tabs.as_mut() else {
-            self.state.flash_error("no pane open");
-            return Vec::new();
-        };
-        let lines = tabs.active_mut().recent_lines(10_000);
-        let text: String = lines
-            .iter()
-            .map(|l| l.trim_end())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if text.trim().is_empty() {
-            self.state.flash_error("pane scrollback is empty");
-            return Vec::new();
-        }
-        vec![Effect::CopyToClipboard {
-            text,
-            ok: ClipMsg::Scrollback,
-        }]
-    }
+    // MVU Phase 5: `yank_pane_to_clipboard` / `yank_scrollback_to_clipboard`
+    // are gone — their live-pane read + guards + clipboard IO moved into
+    // `run_effects`'s `Effect::ReadPaneText` executor. The `yp`/`ya` action
+    // arms in `actions.rs` now emit `ReadPaneText { kind, then: Clipboard }`
+    // directly, so the handler stays pure-Model (no Runtime read).
 
     /// yf — yank the cursor file's absolute path to the system
     /// clipboard. When picks are active, yanks all of them
