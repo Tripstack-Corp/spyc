@@ -95,8 +95,10 @@ pub enum Effect {
     /// to `then`. The producer is pure-Model (it just emits this); the
     /// live-`PtyHost` read + the no-pane / empty guards + the clipboard IO
     /// all run in `run_effects`, decoupling the yank handlers from the
-    /// Runtime. (`PaneTextKind::Pickable` + `PaneTextSink::GotoFile` for
-    /// `gf` land in PR 5b, after the synchronous `ChangeDir` effect.)
+    /// Runtime. PR 5b adds `PaneTextKind::Pickable` + `PaneTextSink::GotoFile`
+    /// for `gf`/`gF`: the executor reads the pickable lines (+ the pane's cwd)
+    /// and `goto_file_navigate` resolves the path reference and chdirs to it,
+    /// the whole chain synchronous in this one pass.
     ReadPaneText {
         kind: PaneTextKind,
         then: PaneTextSink,
@@ -136,6 +138,10 @@ pub enum PaneTextKind {
     /// The recent scrollback + visible screen, capped at `n` lines
     /// (`Pane::recent_lines`).
     Scrollback(usize),
+    /// The path-pickable text (`Pane::pickable_text`): the visible viewport
+    /// while scrolling, else the last `n` lines. Used by `gf`/`gF` with
+    /// [`PaneTextSink::GotoFile`] (PR 5b).
+    Pickable(usize),
 }
 
 /// Where a [`Effect::ReadPaneText`] result goes (MVU Phase 5).
@@ -144,6 +150,11 @@ pub enum PaneTextSink {
     /// Copy to the system clipboard, flashing `ok` on success (same
     /// reconstruction as [`Effect::CopyToClipboard`]).
     Clipboard { ok: ClipMsg },
+    /// `gf`/`gF`: extract a path reference from the read lines and navigate
+    /// to it (`goto_file_navigate`). `open_at_line` (gF) also opens the file
+    /// in the pager at the referenced line. Paired with
+    /// [`PaneTextKind::Pickable`].
+    GotoFile { open_at_line: bool },
 }
 
 /// Which pane a [`Effect::SendToPane`] targets. `Active` is the active
@@ -316,41 +327,60 @@ impl App {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
                     Err(e) => self.state.flash_error(format!("yank failed: {e}")),
                 },
-                // A-class: read the active pane's text from the live host
-                // (bounded, yank-gated), then route per `then`. The no-pane
-                // / empty guards moved here from the former yank handlers —
-                // byte-identical flash strings, same `Event::Key` tick.
+                // Read the active pane's text from the live host (bounded,
+                // yank-/gf-gated), then route per `then`. The no-pane guard +
+                // the pane read moved here from the former yank / gf handlers.
+                // The read (lines + the pane's cwd, used by GotoFile) happens
+                // behind one borrow that ends before we flash / copy / navigate
+                // — byte-identical flash strings, same `Event::Key` tick.
                 Effect::ReadPaneText { kind, then } => {
-                    let PaneTextSink::Clipboard { ok } = then;
-                    // Materialize the text behind a shared `&self` borrow on
-                    // the host (interior mutability via the parser mutex), in
-                    // a block so the `pane_tabs` borrow ends before flashing.
-                    let text = {
-                        let Some(tabs) = self.pane_tabs.as_mut() else {
-                            self.state.flash_error("no pane open");
-                            continue;
-                        };
+                    let Some((lines, pane_cwd)) = self.pane_tabs.as_mut().map(|tabs| {
                         let lines = match kind {
                             PaneTextKind::Visible => tabs.active_mut().visible_lines(),
                             PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
+                            PaneTextKind::Pickable(n) => tabs.active_mut().pickable_text(n),
                         };
-                        lines
-                            .iter()
-                            .map(|l| l.trim_end())
-                            .collect::<Vec<_>>()
-                            .join("\n")
+                        let pane_cwd = tabs.active_info().cwd.clone();
+                        (lines, pane_cwd)
+                    }) else {
+                        self.state.flash_error("no pane open");
+                        continue;
                     };
-                    if text.trim().is_empty() {
-                        // Empty-flash string is per-kind (byte-identical to
-                        // the former inline yank sites).
-                        self.state.flash_error(match kind {
-                            PaneTextKind::Visible => "pane is empty",
-                            PaneTextKind::Scrollback(_) => "pane scrollback is empty",
-                        });
-                    } else {
-                        match crate::clipboard::copy(&text) {
-                            Ok(()) => self.state.flash_info(ok.success(&text)),
-                            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                    match then {
+                        // A-class: join + copy, byte-identical to the former
+                        // inline yank sites (`yp`/`ya`).
+                        PaneTextSink::Clipboard { ok } => {
+                            let text = lines
+                                .iter()
+                                .map(|l| l.trim_end())
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            if text.trim().is_empty() {
+                                // Empty-flash string is per-kind, byte-identical
+                                // to the former inline yank sites for the two
+                                // kinds yank actually uses (Visible / Scrollback).
+                                // Pickable only ever pairs with `GotoFile`, never
+                                // Clipboard — its arm here is for exhaustiveness.
+                                self.state.flash_error(match kind {
+                                    PaneTextKind::Visible | PaneTextKind::Pickable(_) => {
+                                        "pane is empty"
+                                    }
+                                    PaneTextKind::Scrollback(_) => "pane scrollback is empty",
+                                });
+                            } else {
+                                match crate::clipboard::copy(&text) {
+                                    Ok(()) => self.state.flash_info(ok.success(&text)),
+                                    Err(e) => {
+                                        self.state.flash_error(format!("yank failed: {e}"));
+                                    }
+                                }
+                            }
+                        }
+                        // C-class: gf/gF. Resolve a path reference from the
+                        // pickable lines and navigate to it (synchronous, same
+                        // tick); gF also opens it in the pager at the line.
+                        PaneTextSink::GotoFile { open_at_line } => {
+                            self.goto_file_navigate(lines, pane_cwd, open_at_line);
                         }
                     }
                 }
