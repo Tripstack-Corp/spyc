@@ -178,7 +178,7 @@ mod tasks;
 use capture::PendingCapture;
 #[cfg(unix)]
 pub use effect::SigOk;
-pub use effect::{ClipMsg, Effect};
+pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget};
 use find_picker::FindPicker;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
@@ -2160,7 +2160,10 @@ impl App {
             // terminal-side CPU.
             if needs_draw {
                 needs_draw = false;
-                self.update_term_title();
+                // Title compose + dedup stay loop-side; only the
+                // `term_title::set` IO runs through the sole executor.
+                let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
+                self.run_effects(title_fx, terminal, &foreground_exec)?;
                 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
                 let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
                 if pending_clear {
@@ -4282,17 +4285,23 @@ impl App {
 
     /// Recompute the host-terminal window title from project / session
     /// state and emit OSC 2 if it has changed since the last write.
-    fn update_term_title(&mut self) {
+    /// Compose the terminal title and, if it changed, return the
+    /// `SetTerminalTitle` effect to emit (the run loop runs it via
+    /// `run_effects`, the sole executor of the `term_title::set` IO). The
+    /// compose + dedup stay loop-side: `last_term_title` is advanced here,
+    /// and the foreground-exec after-work resets it to `None` to force a
+    /// re-emit. Returns `None` when the title is unchanged.
+    fn term_title_effect(&mut self) -> Option<Effect> {
         let title = crate::term_title::compose(
             self.state.project_home.as_deref(),
             self.state.session_name.as_deref(),
             &self.state.listing.dir,
         );
         if self.last_term_title.as_deref() == Some(&title) {
-            return;
+            return None;
         }
-        let _ = crate::term_title::set(&title);
-        self.last_term_title = Some(title);
+        self.last_term_title = Some(title.clone());
+        Some(Effect::SetTerminalTitle { title })
     }
 }
 
@@ -5220,10 +5229,10 @@ impl App {
     /// pane's stdin. A trailing space is appended so the user can keep
     /// typing without concatenating against the last path. No newline
     /// — let the user decide when to submit.
-    fn send_selection_to_pane(&mut self) {
+    fn send_selection_to_pane(&mut self) -> Vec<Effect> {
         if self.pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
-            return;
+            return Vec::new();
         }
         // Build the payload before grabbing the pane mut-borrow, so we
         // can still call self.flash_* below without overlapping borrows.
@@ -5234,7 +5243,7 @@ impl App {
             let paths = self.state.selection_paths();
             if paths.is_empty() {
                 self.state.flash_error("nothing selected");
-                return;
+                return Vec::new();
             }
             let count = paths.len();
             let mut out = String::new();
@@ -5266,30 +5275,22 @@ impl App {
             out.push(' ');
             (out, count)
         };
-        let result = {
-            let pane = self
-                .pane_tabs
-                .as_mut()
-                .expect("pane existence already checked")
-                .active_mut();
-            pane.send_bytes(payload.as_bytes())
-        };
-        match result {
-            Ok(()) => self
-                .state
-                .flash_info(format!("sent {count} path(s) to pane")),
-            Err(e) => self.state.flash_error(format!("send failed: {e}")),
-        }
+        vec![Effect::SendToPane {
+            target: PaneTarget::Active,
+            input: PaneInput::Bytes(payload.into_bytes()),
+            on_ok: Some(format!("sent {count} path(s) to pane")),
+            err_prefix: Some("send failed"),
+        }]
     }
 
     /// ^W p / ^W i — read file contents of selection (or inventory) and
     /// send them to the active pane tab as bracketed paste. Each file is
     /// wrapped with a header so the recipient (e.g. Claude) knows what
     /// it's looking at.
-    fn pipe_content_to_pane(&mut self, use_inventory: bool) {
+    fn pipe_content_to_pane(&mut self, use_inventory: bool) -> Vec<Effect> {
         if self.pane_tabs.is_none() {
             self.state.flash_error("no pane open");
-            return;
+            return Vec::new();
         }
         // Build payload: read from cache for inventory, from disk for selection.
         let mut payload = String::new();
@@ -5300,7 +5301,7 @@ impl App {
             let ids = self.state.inventory.selected_ids();
             if ids.is_empty() {
                 self.state.flash_error("inventory is empty");
-                return;
+                return Vec::new();
             }
             for id in &ids {
                 if let Some(item) = self.state.inventory.items().find(|i| &i.id == id) {
@@ -5329,7 +5330,7 @@ impl App {
                 .collect();
             if paths.is_empty() {
                 self.state.flash_error("nothing selected");
-                return;
+                return Vec::new();
             }
             for path in &paths {
                 let Ok(contents) = std::fs::read_to_string(path) else {
@@ -5347,26 +5348,24 @@ impl App {
         if count == 0 {
             self.state
                 .flash_error("no readable text files in selection");
-            return;
+            return Vec::new();
         }
         // Send as bracketed paste so it arrives as a single block.
         let mut buf = Vec::with_capacity(payload.len() + 12);
         buf.extend_from_slice(b"\x1b[200~");
         buf.extend_from_slice(payload.as_bytes());
         buf.extend_from_slice(b"\x1b[201~");
-        let result = {
-            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
-            pane.send_bytes(&buf)
-        };
         let msg = if skipped > 0 {
             format!("piped {count} file(s), skipped {skipped} binary/unreadable")
         } else {
             format!("piped {count} file(s) to pane")
         };
-        match result {
-            Ok(()) => self.state.flash_info(msg),
-            Err(e) => self.state.flash_error(format!("pipe failed: {e}")),
-        }
+        vec![Effect::SendToPane {
+            target: PaneTarget::Active,
+            input: PaneInput::Bytes(buf),
+            on_ok: Some(msg),
+            err_prefix: Some("pipe failed"),
+        }]
     }
 
     /// ^W + / ^W - — change the bottom pane's share of the middle rect
@@ -7655,6 +7654,46 @@ mod harness_tests {
             app.seed_rows(&["a", "b", "c"]);
             app.handle_key(key('j')).unwrap();
             assert_eq!(app.state.cursor.index, 1, "j should move the cursor down");
+        });
+    }
+
+    /// PR4: the term-title compose + dedup stay loop-side. First call
+    /// emits a `SetTerminalTitle` effect; an unchanged title dedups to
+    /// `None` (so `term_title::set` only runs when the title changed).
+    #[test]
+    fn term_title_effect_emits_then_dedups() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            assert!(
+                matches!(
+                    app.term_title_effect(),
+                    Some(Effect::SetTerminalTitle { .. })
+                ),
+                "first call emits the title effect"
+            );
+            assert!(
+                app.term_title_effect().is_none(),
+                "unchanged title is deduped to None"
+            );
+        });
+    }
+
+    /// PR4: the send/pipe pre-pane guards still short-circuit with no
+    /// effect (and flash inline) when no pane is open.
+    #[test]
+    fn send_and_pipe_no_pane_emit_no_effect() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            assert!(
+                app.send_selection_to_pane().is_empty(),
+                "no-pane send emits nothing"
+            );
+            assert!(
+                app.pipe_content_to_pane(false).is_empty(),
+                "no-pane pipe emits nothing"
+            );
         });
     }
 

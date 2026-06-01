@@ -18,8 +18,10 @@
 //! descendant-module rule — same pattern as `actions` / `key_dispatch`.
 
 use anyhow::Result;
+use crossterm::event::KeyEvent;
 
 use crate::Tui;
+use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
 use super::{App, ForegroundExec, PagerReturn, PostAction};
@@ -67,6 +69,54 @@ pub enum Effect {
         on_ok: SigOk,
         on_err: String,
     },
+
+    /// A-class. Deliver `input` (pre-encoded key or pre-built bytes) to a
+    /// pane, then flash `on_ok` on success / `"{err_prefix}: {e}"` on
+    /// failure — each `None` means "ignore that outcome silently" (the
+    /// `send_key` forwards do, matching their former `let _ = …`). The
+    /// target is resolved at executor time; safe because exactly one
+    /// `SendToPane` is emitted per key and no converted site switches
+    /// tabs in its own body (a `Tab`/`SinkId` target is Phase 5).
+    SendToPane {
+        target: PaneTarget,
+        input: PaneInput,
+        on_ok: Option<String>,
+        err_prefix: Option<&'static str>,
+    },
+
+    /// A-class. Set the terminal title. The compose + dedup stay loop-side
+    /// (`term_title_effect`); only the `term_title::set` IO is the effect.
+    SetTerminalTitle { title: String },
+}
+
+/// Which pane a [`Effect::SendToPane`] targets. `Active` is the active
+/// tab (`pane_tabs.active_mut()`); `Overlay` is the top overlay pty
+/// (`top_overlay`). Resolved in the executor — if the target is gone the
+/// send is skipped (matching the former `if let Some(…)` guards).
+#[derive(Debug)]
+pub enum PaneTarget {
+    Active,
+    Overlay,
+}
+
+/// What to deliver to the pane. `Key` routes through `Pane::send_key`
+/// (preserving its key-trace logging + empty-bytes guard); `Bytes` routes
+/// through `Pane::send_bytes` (its own key-trace logging) — so each former
+/// call site keeps its exact write path byte-for-byte.
+#[derive(Debug)]
+pub enum PaneInput {
+    Bytes(Vec<u8>),
+    Key(KeyEvent),
+}
+
+impl PaneInput {
+    /// Deliver to `pane` via the matching write path.
+    fn send_to(self, pane: &mut Pane) -> Result<()> {
+        match self {
+            Self::Bytes(bytes) => pane.send_bytes(&bytes),
+            Self::Key(key) => pane.send_key(key),
+        }
+    }
 }
 
 /// The success action for an [`Effect::SignalGroup`]: which task to toggle
@@ -209,6 +259,46 @@ impl App {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
                     Err(e) => self.state.flash_error(format!("yank failed: {e}")),
                 },
+                // A-class: deliver input to the target pane (same tick).
+                // Resolve the target; if it's gone, skip silently (matches
+                // the former `if let Some(…)` guards). Like the others,
+                // never `?`-propagate — flash `err_prefix` (if any) and
+                // survive. `on_ok`/`err_prefix` of `None` flash nothing
+                // (the `send_key` forwards ignored their result).
+                Effect::SendToPane {
+                    target,
+                    input,
+                    on_ok,
+                    err_prefix,
+                } => {
+                    let result = match target {
+                        PaneTarget::Active => self
+                            .pane_tabs
+                            .as_mut()
+                            .map(|t| input.send_to(t.active_mut())),
+                        PaneTarget::Overlay => {
+                            self.top_overlay.as_mut().map(|ov| input.send_to(ov))
+                        }
+                    };
+                    match result {
+                        Some(Ok(())) => {
+                            if let Some(msg) = on_ok {
+                                self.state.flash_info(msg);
+                            }
+                        }
+                        Some(Err(e)) => {
+                            if let Some(prefix) = err_prefix {
+                                self.state.flash_error(format!("{prefix}: {e}"));
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                // A-class: the only side effect of a terminal-title update;
+                // compose + dedup already happened loop-side.
+                Effect::SetTerminalTitle { title } => {
+                    let _ = crate::term_title::set(&title);
+                }
                 // A-class: signal the group, then (on success) toggle the
                 // task's paused flag — re-found by id, same tick — and
                 // flash. Like the clipboard arm this never `?`-propagates;

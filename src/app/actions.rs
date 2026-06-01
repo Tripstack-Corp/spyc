@@ -153,7 +153,11 @@ impl App {
             state::ApplyResult::NotHandled => {}
         }
 
-        // Terminal-touching arms that must stay in App.
+        // Terminal-touching arms that must stay in App. Most arms mutate
+        // and produce no effects; the few that do (pane send/pipe) assign
+        // into `effects`, which is returned after the post-match cursor
+        // clamp (so the clamp still runs for those arms, as before).
+        let mut effects: Vec<Effect> = Vec::new();
         match action {
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
@@ -283,7 +287,7 @@ impl App {
             Action::ResumePane => self.open_pane_tab("claude --resume"),
             Action::PaneFocusDown => self.set_pane_focus(true),
             Action::PaneFocusUp => self.set_pane_focus(false),
-            Action::PaneSendSelection => self.send_selection_to_pane(),
+            Action::PaneSendSelection => effects = self.send_selection_to_pane(),
             Action::PaneGrow => self.resize_pane(5),
             Action::PaneShrink => self.resize_pane(-5),
             Action::TogglePaneZoom => self.toggle_pane_zoom(),
@@ -371,8 +375,8 @@ impl App {
 
             Action::PaneRestartTab => self.restart_active_tab(),
 
-            Action::PanePipeContent => self.pipe_content_to_pane(false),
-            Action::PanePipeInventory => self.pipe_content_to_pane(true),
+            Action::PanePipeContent => effects = self.pipe_content_to_pane(false),
+            Action::PanePipeInventory => effects = self.pipe_content_to_pane(true),
 
             Action::QuickSelectOpen => self.open_quick_select(),
             Action::OpenGraveyardView => {
@@ -443,6 +447,6 @@ impl App {
             _ => {}
         }
         self.state.cursor.clamp(self.state.rows.len());
-        Ok(Vec::new())
+        Ok(effects)
     }
 }
