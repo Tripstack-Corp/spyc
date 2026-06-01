@@ -233,20 +233,20 @@ impl App {
                 // last prompt.
                 match key.code {
                     KeyCode::Enter => {
-                        let trimmed = strip_ansi_escapes(&self.pane_prompt_buf);
+                        let trimmed = strip_ansi_escapes(&self.state.pane_prompt_buf);
                         if !trimmed.is_empty() {
-                            self.last_pane_prompt = Some(trimmed);
+                            self.state.last_pane_prompt = Some(trimmed);
                         }
-                        self.pane_prompt_buf.clear();
+                        self.state.pane_prompt_buf.clear();
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.pane_prompt_buf.clear();
+                        self.state.pane_prompt_buf.clear();
                     }
                     KeyCode::Backspace => {
-                        self.pane_prompt_buf.pop();
+                        self.state.pane_prompt_buf.pop();
                     }
                     KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.pane_prompt_buf.push(c);
+                        self.state.pane_prompt_buf.push(c);
                     }
                     _ => {}
                 }

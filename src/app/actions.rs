@@ -42,17 +42,17 @@ impl App {
     /// when `PROJECT_HOME` is set/unset.
     pub fn reconcile_harpoon(&mut self) {
         let want = self.state.project_home.as_deref();
-        let have = self.harpoon.as_ref().map(|h| h.project.as_path());
+        let have = self.state.harpoon.as_ref().map(|h| h.project.as_path());
         if want == have {
             return;
         }
         // Save the outgoing list before we drop it.
-        if let Some(h) = self.harpoon.as_ref()
+        if let Some(h) = self.state.harpoon.as_ref()
             && let Err(e) = h.save()
         {
             spyc_debug!("harpoon save on PROJECT_HOME swap failed: {e}");
         }
-        self.harpoon = want.map(Harpoon::load);
+        self.state.harpoon = want.map(Harpoon::load);
         // Close the menu if it's open — its cursor referenced the old
         // list and would point at stale rows.
         self.harpoon_menu = None;
@@ -69,6 +69,7 @@ impl App {
     /// `=h` reflects the new state on the next `rebuild_rows`.
     pub fn sync_harpoon_filter_set(&mut self) {
         self.state.harpoon_filter_set = self
+            .state
             .harpoon
             .as_ref()
             .map(|h| h.ancestor_set().clone())

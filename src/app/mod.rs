@@ -362,12 +362,7 @@ pub struct App {
     /// undefined territory the user can't reach.
     pager_help_stash: Option<PagerView>,
     pane_tabs: Option<PaneTabs>,
-    /// Active harpoon list — small per-project pinned set of file
-    /// pointers. `None` when `PROJECT_HOME` is unset; loaded from
-    /// disk at startup and on chdir into a new `PROJECT_HOME`,
-    /// auto-saved on every mutation. See `state::harpoon` for the
-    /// model and persistence layout.
-    harpoon: Option<Harpoon>,
+    // MVU Phase 5: `harpoon` moved to `AppState` (Model consolidation).
     /// Active harpoon menu overlay (interactive: reorder, delete,
     /// jump). `None` when closed; intercepts keys before normal
     /// dispatch when open.
@@ -448,8 +443,7 @@ pub struct App {
     mcp_running: bool,
     /// Summary printed to stdout after the TUI exits.
     pub exit_summary: Option<String>,
-    /// Accumulates characters the user types while the pane is focused.
-    pane_prompt_buf: String,
+    // MVU Phase 5: `pane_prompt_buf` moved to `AppState`.
     /// When a focus-switch chord (^a-j / ^a-k) just completed, this
     /// captures (when, the key that completed it). The next dispatch
     /// drops any Press/Repeat of the same key within ~60 ms — without
@@ -458,8 +452,7 @@ pub struct App {
     /// chord, but a brief OS-level Repeat or a too-quick second Press
     /// arrives just after, with the new focus already in effect).
     focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
-    /// The last complete prompt the user sent to the pane (Enter commits).
-    last_pane_prompt: Option<String>,
+    // MVU Phase 5: `last_pane_prompt` moved to `AppState`.
     /// Activity monitor: draws/sec, bytes/sec overlay.
     show_activity: bool,
     activity_draws: u32,
@@ -669,6 +662,12 @@ impl App {
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
                 .unwrap_or_default(),
+            // MVU Phase 5: domain fields relocated from `App`. Note
+            // `harpoon` is moved (consumed) AFTER `harpoon_filter_set`
+            // borrowed it just above.
+            harpoon,
+            pane_prompt_buf: String::new(),
+            last_pane_prompt: None,
             pending_delete_preview: None,
             // Populated on the first successful `refresh_git_state`
             // call. See `AppState::git_poll_cache` doc for why this
@@ -783,7 +782,6 @@ impl App {
             pager_help_stash: None,
             pager_jump_buf: None,
             pane_tabs: None,
-            harpoon,
             harpoon_menu: None,
             quick_select: None,
             graveyard_pending_d: false,
@@ -810,9 +808,7 @@ impl App {
             context_dirty: true,
             mcp_running,
             exit_summary: None,
-            pane_prompt_buf: String::new(),
             focus_chord_completed: None,
-            last_pane_prompt: None,
             show_activity: false,
             activity_draws: 0,
             activity_bytes: 0,
@@ -1931,7 +1927,7 @@ impl App {
                                     self.set_pane_focus(true);
                                 }
                                 // Track pasted text for yP (yank last prompt).
-                                self.pane_prompt_buf.push_str(&text);
+                                self.state.pane_prompt_buf.push_str(&text);
                                 // Wrap in bracketed paste so the child app (e.g. claude)
                                 // receives the block as a single paste, not line-by-line.
                                 let pane = self.pane_tabs.as_mut().unwrap().active_mut();
@@ -4651,7 +4647,7 @@ impl App {
 
     /// yP — yank the last prompt the user typed into the pane.
     fn yank_last_prompt_to_clipboard(&mut self) -> Vec<Effect> {
-        let Some(text) = self.last_pane_prompt.as_ref() else {
+        let Some(text) = self.state.last_pane_prompt.as_ref() else {
             self.state.flash_error("no prompt to yank");
             return Vec::new();
         };
@@ -5420,7 +5416,7 @@ impl App {
     /// hard-capped at `MAX_SLOTS`. Saves the list immediately so a
     /// crash before the next mutation doesn't lose the entry.
     fn harpoon_append(&mut self) {
-        if self.harpoon.is_none() {
+        if self.state.harpoon.is_none() {
             self.state
                 .flash_error("harpoon: set PROJECT_HOME first (gP)");
             return;
@@ -5433,7 +5429,7 @@ impl App {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let h = self.harpoon.as_mut().unwrap();
+        let h = self.state.harpoon.as_mut().unwrap();
         match h.append(path) {
             crate::state::harpoon::AppendResult::Added(slot) => {
                 if let Err(e) = h.save() {
@@ -5462,7 +5458,7 @@ impl App {
     /// `Hx` — remove the cursor file from the harpoon list (any
     /// slot). No-op + flash if it isn't harpooned.
     fn harpoon_remove(&mut self) {
-        if self.harpoon.is_none() {
+        if self.state.harpoon.is_none() {
             self.state
                 .flash_error("harpoon: set PROJECT_HOME first (gP)");
             return;
@@ -5475,7 +5471,7 @@ impl App {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let h = self.harpoon.as_mut().unwrap();
+        let h = self.state.harpoon.as_mut().unwrap();
         match h.remove(&path) {
             Some(slot) => {
                 if let Err(e) = h.save() {
@@ -5501,7 +5497,7 @@ impl App {
     /// the verb (Enter, V, ^a s) afterwards. Missing-on-disk → flash
     /// and bail; we don't auto-prune (the user might be mid-rebase).
     fn harpoon_jump(&mut self, slot: u8) {
-        let Some(h) = self.harpoon.as_ref() else {
+        let Some(h) = self.state.harpoon.as_ref() else {
             self.state
                 .flash_error("harpoon: set PROJECT_HOME first (gP)");
             return;
@@ -5543,7 +5539,7 @@ impl App {
     /// intercepts subsequent keys until closed (Esc/q). No-op when
     /// the list is unset (no PROJECT_HOME).
     fn harpoon_open_menu(&mut self) {
-        if self.harpoon.is_none() {
+        if self.state.harpoon.is_none() {
             self.state
                 .flash_error("harpoon: set PROJECT_HOME first (gP)");
             return;
@@ -5570,7 +5566,7 @@ impl App {
         let Some(menu) = self.harpoon_menu.as_mut() else {
             return Vec::new();
         };
-        let Some(h) = self.harpoon.as_mut() else {
+        let Some(h) = self.state.harpoon.as_mut() else {
             self.harpoon_menu = None;
             self.needs_full_repaint = true;
             return Vec::new();
@@ -5645,7 +5641,7 @@ impl App {
                     }
                     // Re-fetch menu since filter sync invalidates `menu` borrow
                     if let Some(m) = self.harpoon_menu.as_mut() {
-                        let new_len = self.harpoon.as_ref().map_or(0, |hh| hh.slots.len());
+                        let new_len = self.state.harpoon.as_ref().map_or(0, |hh| hh.slots.len());
                         if new_len == 0 {
                             m.cursor = 0;
                         } else {
@@ -7472,7 +7468,6 @@ impl App {
             pager_help_stash: None,
             pager_jump_buf: None,
             pane_tabs: None,
-            harpoon: None,
             harpoon_menu: None,
             quick_select: None,
             graveyard_pending_d: false,
@@ -7498,9 +7493,7 @@ impl App {
             context_dirty: false,
             mcp_running: false,
             exit_summary: None,
-            pane_prompt_buf: String::new(),
             focus_chord_completed: None,
-            last_pane_prompt: None,
             show_activity: false,
             activity_draws: 0,
             activity_bytes: 0,
