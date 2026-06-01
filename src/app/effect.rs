@@ -17,6 +17,8 @@
 //! state and helpers (`set_pager`, `build_pager_view_for_file`) via the
 //! descendant-module rule — same pattern as `actions` / `key_dispatch`.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use crossterm::event::KeyEvent;
 
@@ -98,6 +100,31 @@ pub enum Effect {
     ReadPaneText {
         kind: PaneTextKind,
         then: PaneTextSink,
+    },
+
+    /// C-class (synchronous, MVU Phase 5 — the chdir de-IO fork). A pure
+    /// `apply()` Action arm must not call `AppState::chdir` directly: chdir
+    /// does unbounded blocking IO (`canonicalize` + `Listing::read`). It
+    /// emits this instead, and `run_effects` runs the IO via the shared
+    /// `AppState::change_dir` — synchronously, same tick, *before* the next
+    /// render, so the first post-action frame already shows the new listing
+    /// (the ratified "synchronous inline `ChangeDir`" decision — there is no
+    /// async `ListingLoaded`). On success: focus `focus` (by path) then flash
+    /// `on_ok`; on failure: flash `"{err_prefix}: {e}"`.
+    ///
+    /// Scope (PR7): only the pure-Model Action arms (`gh`/Home, `gs`/start,
+    /// `gp`/project-home, prev-dir, mark-jump, `..`/climb) route through this
+    /// effect. Impure App-layer callers (harpoon / finder / inventory /
+    /// session-restore / pager jump-history) keep calling `chdir` directly —
+    /// they already live in the executor layer, so threading an effect buys
+    /// no purity. `:cd` and the worktree prompts await PR9's
+    /// `CommandResult`/`PromptResult` carrier widening; the MCP `jump_to`
+    /// stays inline for its synchronous read-after-write reply.
+    ChangeDir {
+        path: PathBuf,
+        focus: Option<PathBuf>,
+        on_ok: Option<String>,
+        err_prefix: &'static str,
     },
 }
 
@@ -366,6 +393,21 @@ impl App {
                 // compose + dedup already happened loop-side.
                 Effect::SetTerminalTitle { title } => {
                     let _ = crate::term_title::set(&title);
+                }
+                // C-class: the chdir de-IO fork (MVU Phase 5). The blocking
+                // listing read runs here in the executor — never in the pure
+                // `apply()` transition that emitted us — then focus + flash via
+                // the shared `change_dir`. Synchronous: it completes before the
+                // next render, so the first post-action frame shows the new dir
+                // (mark-jump / `..` / `gs` / `gp` / `gh` / prev-dir).
+                Effect::ChangeDir {
+                    path,
+                    focus,
+                    on_ok,
+                    err_prefix,
+                } => {
+                    self.state
+                        .change_dir(&path, focus.as_deref(), on_ok.as_deref(), err_prefix);
                 }
                 // A-class: signal the group, then (on success) toggle the
                 // task's paused flag — re-found by id, same tick — and
