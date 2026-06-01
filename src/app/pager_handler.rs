@@ -941,15 +941,18 @@ impl App {
             KeyCode::Char('S') if view.task_id.is_some() => {
                 // Task viewer: S (Stop) pauses the underlying task
                 // via SIGSTOP to its process group. Mirrors the
-                // :pause command for hand-on-keyboard control.
+                // :pause command for hand-on-keyboard control. The
+                // pause/flash runs via run_effects (status-bar flash,
+                // never the pager footer); no post-match code follows,
+                // so returning the effect here is byte-identical.
                 let id = view.task_id.unwrap();
-                self.pause_task(Some(id));
+                return self.pause_task(Some(id));
             }
             KeyCode::Char('C') if view.task_id.is_some() => {
                 // Task viewer: C (Continue) resumes a paused task
                 // via SIGCONT. Mirrors the :resume command.
                 let id = view.task_id.unwrap();
-                self.resume_task(Some(id));
+                return self.resume_task(Some(id));
             }
             KeyCode::Char('p') => {
                 // Hand the file off to $PAGER (default less) via full

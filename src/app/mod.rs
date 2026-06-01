@@ -176,6 +176,8 @@ mod streaming;
 mod tasks;
 
 use capture::PendingCapture;
+#[cfg(unix)]
+pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect};
 use find_picker::FindPicker;
 use grep_session::GrepSession;
@@ -3725,41 +3727,37 @@ impl App {
     /// `target` of None pauses the most-recent task; numeric arg
     /// targets a specific id. No-op (with flash) if the target is
     /// not Running, doesn't exist, or is already paused.
-    fn pause_task(&mut self, target: Option<u32>) {
+    fn pause_task(&mut self, target: Option<u32>) -> Vec<Effect> {
         let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
-            return;
+            return Vec::new();
         };
         let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
             self.state.flash_error(format!("no task with id {id}"));
-            return;
+            return Vec::new();
         };
         if !matches!(task.status, TaskStatus::Running) {
             self.state.flash_error(format!("task #{id} is not running"));
-            return;
+            return Vec::new();
         }
         if task.paused {
             self.state.flash_info(format!("task #{id} already paused"));
-            return;
+            return Vec::new();
         }
         let Some(pid) = task.host.process_id() else {
             self.state.flash_error(format!("task #{id}: no process id"));
-            return;
+            return Vec::new();
         };
-        // Negative pid → process group. SIGSTOP is uncatchable, so the
-        // child can't refuse; reader thread keeps blocking on read
-        // until SIGCONT.
-        match kill_pg(pid, rustix::process::Signal::STOP) {
-            Ok(()) => {
-                task.paused = true;
-                self.state
-                    .flash_info(format!("task #{id} paused — :resume to continue"));
-            }
-            Err(_) => {
-                self.state
-                    .flash_error(format!("task #{id}: SIGSTOP failed"));
-            }
-        }
+        // SIGSTOP to the process group (negative pid → group; uncatchable,
+        // so the child can't refuse; the reader thread keeps blocking on
+        // read until SIGCONT). The signal, the `paused` toggle, and the
+        // flash all run in `run_effects` (the sole side-effect executor).
+        vec![Effect::SignalGroup {
+            pid,
+            sig: rustix::process::Signal::STOP,
+            on_ok: SigOk::Pause(id),
+            on_err: format!("task #{id}: SIGSTOP failed"),
+        }]
     }
 
     /// Send SIGINT to a running task's process group. Mirrors what
@@ -3795,33 +3793,31 @@ impl App {
     }
 
     /// Resume a paused task with SIGCONT to its process group.
-    fn resume_task(&mut self, target: Option<u32>) {
+    fn resume_task(&mut self, target: Option<u32>) -> Vec<Effect> {
         let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
-            return;
+            return Vec::new();
         };
         let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
             self.state.flash_error(format!("no task with id {id}"));
-            return;
+            return Vec::new();
         };
         if !task.paused {
             self.state.flash_info(format!("task #{id} is not paused"));
-            return;
+            return Vec::new();
         }
         let Some(pid) = task.host.process_id() else {
             self.state.flash_error(format!("task #{id}: no process id"));
-            return;
+            return Vec::new();
         };
-        match kill_pg(pid, rustix::process::Signal::CONT) {
-            Ok(()) => {
-                task.paused = false;
-                self.state.flash_info(format!("task #{id} resumed"));
-            }
-            Err(_) => {
-                self.state
-                    .flash_error(format!("task #{id}: SIGCONT failed"));
-            }
-        }
+        // SIGCONT to the process group; the signal, the `paused` toggle,
+        // and the flash all run in `run_effects`.
+        vec![Effect::SignalGroup {
+            pid,
+            sig: rustix::process::Signal::CONT,
+            on_ok: SigOk::Resume(id),
+            on_err: format!("task #{id}: SIGCONT failed"),
+        }]
     }
 
     /// `:task-to-pane [N]` — promote a backgrounded `!` task to a

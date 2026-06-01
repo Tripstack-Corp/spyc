@@ -238,32 +238,30 @@ impl App {
         // :pause [N] — pause a backgrounded task via SIGSTOP to its
         // process group. No arg = most-recent task; numeric = id.
         if input == "pause" {
-            self.pause_task(None);
-            return Vec::new();
+            return self.pause_task(None);
         }
         if let Some(arg) = input.strip_prefix("pause ") {
-            match arg.trim().parse::<u32>() {
-                Ok(id) => self.pause_task(Some(id)),
-                Err(_) => self
-                    .state
-                    .flash_error(format!("pause: expected task id (got {arg:?})")),
-            }
-            return Vec::new();
+            return if let Ok(id) = arg.trim().parse::<u32>() {
+                self.pause_task(Some(id))
+            } else {
+                self.state
+                    .flash_error(format!("pause: expected task id (got {arg:?})"));
+                Vec::new()
+            };
         }
 
         // :resume [N] — resume a paused backgrounded task via SIGCONT.
         if input == "resume" {
-            self.resume_task(None);
-            return Vec::new();
+            return self.resume_task(None);
         }
         if let Some(arg) = input.strip_prefix("resume ") {
-            match arg.trim().parse::<u32>() {
-                Ok(id) => self.resume_task(Some(id)),
-                Err(_) => self
-                    .state
-                    .flash_error(format!("resume: expected task id (got {arg:?})")),
-            }
-            return Vec::new();
+            return if let Ok(id) = arg.trim().parse::<u32>() {
+                self.resume_task(Some(id))
+            } else {
+                self.state
+                    .flash_error(format!("resume: expected task id (got {arg:?})"));
+                Vec::new()
+            };
         }
 
         // :bprev / :bnext — pager buffer history
