@@ -181,6 +181,36 @@ pub enum Focus {
     Pager(crate::ui::pager::Mount),
 }
 
+/// MVU Phase 5: the git **display pair** — the top-bar `info` string and
+/// the basename-keyed-per-listing-dir `files` status map. The previously
+/// separate `git_info` / `git_files` fields drifted when one was written
+/// without the other ("files updated but not info"). Folding them here
+/// and routing the recompute sites through [`GitState::set`] makes the
+/// pair atomic: top-bar and per-file markers always reflect the same
+/// `git status` snapshot. (The git *caches* — `raw_cache`, `repo_root`,
+/// `generation`, … — stay as `AppState` fields for now; clustering them
+/// is pure relocation, not a bug, and is deferred.)
+#[derive(Default)]
+pub struct GitState {
+    pub info: Option<String>,
+    pub files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
+}
+
+impl GitState {
+    /// The sole writer of the `info`/`files` pair — set both together so
+    /// they can never drift. The recompute sites compute `info` and
+    /// `files` from the same cached `git status` snapshot, then commit
+    /// them here in one call.
+    pub fn set(
+        &mut self,
+        info: Option<String>,
+        files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
+    ) {
+        self.info = info;
+        self.files = files;
+    }
+}
+
 pub struct AppState {
     pub listing: Listing,
     pub picks: Picks,
@@ -230,8 +260,10 @@ pub struct AppState {
     pub flash: Option<FlashMessage>,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
-    pub git_info: Option<String>,
-    pub git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
+    /// MVU Phase 5: the git display pair (top-bar string + per-file
+    /// status map), written only together via [`GitState::set`]. See
+    /// [`GitState`].
+    pub git: GitState,
     /// Cached mtime pair of `.git/index` and `.git/HEAD` from the
     /// last successful `refresh_git_state` call. The 1 Hz poll
     /// short-circuits when both files' current mtimes match the
@@ -475,13 +507,14 @@ impl AppState {
     /// so the caller can flash an empty-search message.
     pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
         let len = self.rows.len();
-        if len == 0 || self.git_files.is_empty() {
+        if len == 0 || self.git.files.is_empty() {
             return false;
         }
         let cur = self.cursor.index.min(len.saturating_sub(1));
         let is_changed = |idx: usize| -> bool {
             self.rows.get(idx).is_some_and(|r| {
-                self.git_files
+                self.git
+                    .files
                     .get(&r.display)
                     .copied()
                     .is_some_and(|s| !s.is_clean())
@@ -821,7 +854,8 @@ impl AppState {
             // useful for navigating into a subtree with edits.
             rows.into_iter()
                 .filter(|r| {
-                    self.git_files
+                    self.git
+                        .files
                         .get(&r.display)
                         .copied()
                         .is_some_and(|s| !s.is_clean())
@@ -877,14 +911,13 @@ impl AppState {
                 crate::spyc_debug!(
                     "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
                     self.listing.dir.display(),
-                    self.git_info,
+                    self.git.info,
                     new_git_info,
-                    self.git_files.len(),
+                    self.git.files.len(),
                     new_git_files.len(),
                     new_keys,
                 );
-                self.git_info = new_git_info;
-                self.git_files = new_git_files;
+                self.git.set(new_git_info, new_git_files);
                 self.rebuild_rows();
             }
             Err(e) => {
@@ -935,11 +968,10 @@ impl AppState {
         // subprocesses. Stat fail (e.g. shallow repo, .git missing)
         // ⇒ key is None and we'll keep running until it appears.
         self.git_poll_cache = key;
-        if new_git_info == self.git_info && new_git_files == self.git_files {
+        if new_git_info == self.git.info && new_git_files == self.git.files {
             return false;
         }
-        self.git_info = new_git_info;
-        self.git_files = new_git_files;
+        self.git.set(new_git_info, new_git_files);
         self.rebuild_rows();
         true
     }
@@ -1171,8 +1203,9 @@ impl AppState {
         // Refill the raw-status cache (if needed) before computing
         // branch/dirty — `compute_git_info_fast` reads `dirty` off
         // the cached raw output, so it must be current.
-        self.git_files = self.git_file_statuses_cached(&canonical);
-        self.git_info = self.compute_git_info_fast();
+        let files = self.git_file_statuses_cached(&canonical);
+        let info = self.compute_git_info_fast();
+        self.git.set(info, files);
         // Cache key from the cached repo root — no subprocess. The
         // chdir implicitly switched repos if the new tree has a
         // different `.git/`, so seed the cache here rather than wait
@@ -1616,7 +1649,7 @@ impl AppState {
 
             // -- Worktree prompts (pure state: just set mode) --
             Action::WorktreeNew => {
-                if self.git_info.is_none() {
+                if self.git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else {
                     let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
@@ -1624,7 +1657,7 @@ impl AppState {
                 }
             }
             Action::WorktreeDelete => {
-                if self.git_info.is_none() {
+                if self.git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else {
                     let dir = self.listing.dir.display().to_string();
@@ -2009,7 +2042,7 @@ impl AppState {
                     self.temp_filter = Some("h".to_string());
                     self.flash_info("limit: harpoon");
                 } else if pattern == "git" || pattern == "g" {
-                    if self.git_files.is_empty() {
+                    if self.git.files.is_empty() {
                         self.flash_error("not in a git repo (or no changes)");
                         return PromptResult::Handled;
                     }
@@ -2290,8 +2323,7 @@ impl AppState {
             flash: None,
             should_quit: false,
             quit_pending: None,
-            git_info: None,
-            git_files: std::collections::HashMap::new(),
+            git: GitState::default(),
             git_poll_cache: None,
             is_huge_tree: false,
             huge_tree_anchor: None,
@@ -3116,7 +3148,7 @@ mod tests {
         use crate::ui::list_view::{GitChange, GitFileStatus};
         let mut s = state_with_rows(names);
         for d in dirty {
-            s.git_files.insert(
+            s.git.files.insert(
                 (*d).to_string(),
                 GitFileStatus::unstaged(GitChange::Modified),
             );
@@ -3358,7 +3390,7 @@ mod tests {
 
         // With git info → prompt
         s.flash = None;
-        s.git_info = Some("main".to_string());
+        s.git.info = Some("main".to_string());
         s.apply(&Action::WorktreeNew);
         assert!(matches!(s.mode, Mode::Prompting(_)));
     }
@@ -3462,14 +3494,14 @@ mod tests {
         s.listing.dir = root.clone();
         s.start_dir = root.clone();
         s.update_huge_tree(&root);
-        s.git_info = s.compute_git_info_fast();
+        s.git.info = s.compute_git_info_fast();
 
         // Clean repo: refresh sees no modifications.
         s.refresh_listing();
         assert!(
-            s.git_files.is_empty(),
+            s.git.files.is_empty(),
             "clean repo: no markers (got {:?})",
-            s.git_files
+            s.git.files
         );
 
         // Working-tree edit → `M file.txt` should surface on next refresh.
@@ -3479,9 +3511,9 @@ mod tests {
         s.last_git_invalidation = None;
         s.refresh_listing();
         assert!(
-            s.git_files.contains_key("file.txt"),
+            s.git.files.contains_key("file.txt"),
             "expected M marker for file.txt after edit; got {:?}",
-            s.git_files
+            s.git.files
         );
 
         // Commit it → marker should clear (`.git/index` mtime moves, so
@@ -3491,9 +3523,9 @@ mod tests {
         s.last_git_invalidation = None;
         s.refresh_listing();
         assert!(
-            !s.git_files.contains_key("file.txt"),
+            !s.git.files.contains_key("file.txt"),
             "expected marker to clear after commit; got {:?}",
-            s.git_files
+            s.git.files
         );
     }
 }

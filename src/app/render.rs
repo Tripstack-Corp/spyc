@@ -704,7 +704,7 @@ impl App {
             session_name: self.state.session_name.as_deref(),
             path: &path,
             suffix: &suffix,
-            git_info: self.state.git_info.as_deref(),
+            git_info: self.state.git.info.as_deref(),
             agent_info: agent_info.as_deref(),
             theme: &self.theme,
         }

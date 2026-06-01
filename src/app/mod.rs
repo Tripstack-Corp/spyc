@@ -707,8 +707,10 @@ impl App {
                 kind: FlashKind::Error,
             }),
             user_host: user_host_string(),
-            git_info,
-            git_files,
+            git: state::GitState {
+                info: git_info,
+                files: git_files,
+            },
             should_quit: false,
             rows: Vec::new(),
             last_grid: Grid {
@@ -860,7 +862,7 @@ impl App {
         // string is computed sync from `.git/HEAD` so it's available
         // on the first paint; only the per-file markers and dirty
         // flag wait for the worker.
-        app.state.git_info = app.state.compute_git_info_fast();
+        app.state.git.info = app.state.compute_git_info_fast();
         let _ = app.state.git_file_statuses_cached(&initial_cwd);
         if let Some(msg) = load_note {
             app.state.flash_info(msg);
@@ -1002,7 +1004,7 @@ impl App {
             picks: self.state.picks.iter().cloned().collect(),
             inventory: self.state.inventory.paths().cloned().collect(),
             filter: self.state.temp_filter.clone(),
-            git_branch: self.state.git_info.clone(),
+            git_branch: self.state.git.info.clone(),
             project_home: self.state.project_home.clone(),
             session_name: self.state.session_name.clone().unwrap_or_default(),
         }
@@ -1690,7 +1692,7 @@ impl App {
             } else {
                 Duration::from_secs(1)
             };
-            if self.state.git_info.is_some()
+            if self.state.git.info.is_some()
                 && now_pre.duration_since(last_git_poll) >= git_poll_interval
             {
                 last_git_poll = now_pre;
@@ -1701,7 +1703,7 @@ impl App {
             }
             // MVU Phase 2: arm/disarm GitPoll to reflect git_info presence
             // (advisory — the predicate above fires it against now_pre).
-            if self.state.git_info.is_some() {
+            if self.state.git.info.is_some() {
                 scheduler.arm(Deadline::GitPoll, last_git_poll + git_poll_interval);
             } else {
                 scheduler.disarm(Deadline::GitPoll);
@@ -2389,7 +2391,8 @@ impl App {
             .map(|rd| {
                 let git_status = self
                     .state
-                    .git_files
+                    .git
+                    .files
                     .get(&rd.display)
                     .copied()
                     .unwrap_or_else(GitFileStatus::clean);
