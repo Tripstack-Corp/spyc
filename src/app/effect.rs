@@ -87,6 +87,36 @@ pub enum Effect {
     /// A-class. Set the terminal title. The compose + dedup stay loop-side
     /// (`term_title_effect`); only the `term_title::set` IO is the effect.
     SetTerminalTitle { title: String },
+
+    /// A-class. MVU Phase 5: read the active pane's text from the live host
+    /// (a bounded, yank-gated `&self` read — never per-frame) and route it
+    /// to `then`. The producer is pure-Model (it just emits this); the
+    /// live-`PtyHost` read + the no-pane / empty guards + the clipboard IO
+    /// all run in `run_effects`, decoupling the yank handlers from the
+    /// Runtime. (`PaneTextKind::Pickable` + `PaneTextSink::GotoFile` for
+    /// `gf` land in PR 5b, after the synchronous `ChangeDir` effect.)
+    ReadPaneText {
+        kind: PaneTextKind,
+        then: PaneTextSink,
+    },
+}
+
+/// Which slice of the active pane's text to materialize (MVU Phase 5).
+#[derive(Debug, Clone, Copy)]
+pub enum PaneTextKind {
+    /// The visible screen (`Pane::visible_lines`).
+    Visible,
+    /// The recent scrollback + visible screen, capped at `n` lines
+    /// (`Pane::recent_lines`).
+    Scrollback(usize),
+}
+
+/// Where a [`Effect::ReadPaneText`] result goes (MVU Phase 5).
+#[derive(Debug)]
+pub enum PaneTextSink {
+    /// Copy to the system clipboard, flashing `ok` on success (same
+    /// reconstruction as [`Effect::CopyToClipboard`]).
+    Clipboard { ok: ClipMsg },
 }
 
 /// Which pane a [`Effect::SendToPane`] targets. `Active` is the active
@@ -259,6 +289,44 @@ impl App {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
                     Err(e) => self.state.flash_error(format!("yank failed: {e}")),
                 },
+                // A-class: read the active pane's text from the live host
+                // (bounded, yank-gated), then route per `then`. The no-pane
+                // / empty guards moved here from the former yank handlers —
+                // byte-identical flash strings, same `Event::Key` tick.
+                Effect::ReadPaneText { kind, then } => {
+                    let PaneTextSink::Clipboard { ok } = then;
+                    // Materialize the text behind a shared `&self` borrow on
+                    // the host (interior mutability via the parser mutex), in
+                    // a block so the `pane_tabs` borrow ends before flashing.
+                    let text = {
+                        let Some(tabs) = self.pane_tabs.as_mut() else {
+                            self.state.flash_error("no pane open");
+                            continue;
+                        };
+                        let lines = match kind {
+                            PaneTextKind::Visible => tabs.active_mut().visible_lines(),
+                            PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
+                        };
+                        lines
+                            .iter()
+                            .map(|l| l.trim_end())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    if text.trim().is_empty() {
+                        // Empty-flash string is per-kind (byte-identical to
+                        // the former inline yank sites).
+                        self.state.flash_error(match kind {
+                            PaneTextKind::Visible => "pane is empty",
+                            PaneTextKind::Scrollback(_) => "pane scrollback is empty",
+                        });
+                    } else {
+                        match crate::clipboard::copy(&text) {
+                            Ok(()) => self.state.flash_info(ok.success(&text)),
+                            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                        }
+                    }
+                }
                 // A-class: deliver input to the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
                 // the former `if let Some(…)` guards). Like the others,

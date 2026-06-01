@@ -24,7 +24,10 @@ use crate::state::Harpoon;
 use crate::ui::pager::PagerView;
 
 use super::state;
-use super::{ActivateIntent, App, Effect, Mode, Prompt, PromptKind, View};
+use super::{
+    ActivateIntent, App, ClipMsg, Effect, Mode, PaneTextKind, PaneTextSink, Prompt, PromptKind,
+    View,
+};
 
 impl App {
     /// Wrapper around the action dispatcher that reconciles
@@ -93,17 +96,30 @@ impl App {
             return Ok(self.put_inventory_to_cwd());
         }
 
-        // yp — yank visible pane output to system clipboard.
+        // yp — yank visible pane output to system clipboard. MVU Phase 5:
+        // emit a `ReadPaneText` effect so the live-pane read + guards run in
+        // `run_effects` (handler stays pure-Model, no Runtime read).
         if *action == Action::YankPrompt {
-            return Ok(self.yank_pane_to_clipboard());
+            return Ok(vec![Effect::ReadPaneText {
+                kind: PaneTextKind::Visible,
+                then: PaneTextSink::Clipboard {
+                    ok: ClipMsg::PaneLines,
+                },
+            }]);
         }
         // yP — yank last typed pane prompt to system clipboard.
         if *action == Action::YankLastPrompt {
             return Ok(self.yank_last_prompt_to_clipboard());
         }
-        // ya — yank full pane scrollback to system clipboard.
+        // ya — yank full pane scrollback to system clipboard. MVU Phase 5:
+        // emits `ReadPaneText` (see `yp`).
         if *action == Action::YankScrollback {
-            return Ok(self.yank_scrollback_to_clipboard());
+            return Ok(vec![Effect::ReadPaneText {
+                kind: PaneTextKind::Scrollback(10_000),
+                then: PaneTextSink::Clipboard {
+                    ok: ClipMsg::Scrollback,
+                },
+            }]);
         }
         // yf — yank cursor file's absolute path (or all picks,
         // newline-separated) to system clipboard.
