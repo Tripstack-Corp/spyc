@@ -40,6 +40,11 @@ impl App {
                 self.request_quit();
                 return Vec::new();
             }
+            // MVU Phase 5 PR9: the pure-domain command emitted effects (e.g.
+            // `:cd` → `Effect::ChangeDir`); hand them straight to the run loop,
+            // which executes them via `run_effects` (the same path that runs
+            // the `apply()` arms' effects).
+            CommandResult::Post(effects) => return effects,
             CommandResult::NotHandled => {}
         }
 

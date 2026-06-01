@@ -36,6 +36,12 @@ pub enum CommandResult {
     /// breaks the build instead of silently regressing `:q` to an
     /// "unknown command" path.
     Quit,
+    /// Effects for the event loop to execute (MVU Phase 5 PR9: the
+    /// carrier-unification that lets a pure-domain `:`-command emit an
+    /// `Effect` — e.g. `:cd` → `Effect::ChangeDir` — instead of doing the
+    /// blocking chdir IO inline, matching `ApplyResult::Post`). Empty ==
+    /// nothing to do.
+    Post(Vec<Effect>),
     /// The input was a shell/pager/overlay command — caller should handle it.
     NotHandled,
 }
@@ -1805,14 +1811,18 @@ impl AppState {
             return CommandResult::Handled;
         }
 
-        // :cd <path>
+        // :cd [<path>] — chdir via the synchronous `Effect::ChangeDir` (PR9:
+        // the `CommandResult::Post` carrier keeps this pure-domain arm free of
+        // the blocking listing read; `run_effects` runs it via `change_dir`,
+        // flashing `"cd: {e}"` on failure — same as the former inline match).
         if input == "cd" {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-            match self.chdir(&PathBuf::from(home)) {
-                Ok(()) => {}
-                Err(e) => self.flash_error(format!("cd: {e}")),
-            }
-            return CommandResult::Handled;
+            return CommandResult::Post(vec![Effect::ChangeDir {
+                path: PathBuf::from(home),
+                focus: None,
+                on_ok: None,
+                err_prefix: "cd",
+            }]);
         }
         if let Some(raw) = input.strip_prefix("cd ") {
             let raw = raw.trim();
@@ -1820,12 +1830,12 @@ impl AppState {
                 self.flash_error("cd: missing path");
                 return CommandResult::Handled;
             }
-            let path = crate::paths::expand(raw);
-            match self.chdir(&path) {
-                Ok(()) => {}
-                Err(e) => self.flash_error(format!("cd: {e}")),
-            }
-            return CommandResult::Handled;
+            return CommandResult::Post(vec![Effect::ChangeDir {
+                path: crate::paths::expand(raw),
+                focus: None,
+                on_ok: None,
+                err_prefix: "cd",
+            }]);
         }
 
         // :sort [mode]
@@ -3669,6 +3679,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── :cd → Effect::ChangeDir emission (MVU Phase 5 / PR9) ───────
+    // `:cd` no longer chdirs inline; it emits a deferred `Effect::ChangeDir`
+    // via the new `CommandResult::Post` carrier (run by `run_effects`),
+    // matching the `apply()` Action arms from PR7. Pure (no chdir IO here).
+
+    #[test]
+    fn cd_command_emits_change_dir() {
+        let mut s = state_with_rows(&[]);
+        match s.dispatch_command("cd /tmp/somewhere") {
+            CommandResult::Post(fx) => match fx.as_slice() {
+                [
+                    Effect::ChangeDir {
+                        path,
+                        focus,
+                        on_ok,
+                        err_prefix,
+                    },
+                ] => {
+                    // Path is whatever `expand` produces (compare against it
+                    // directly so the test is robust to expansion rules).
+                    assert_eq!(path, &crate::paths::expand("/tmp/somewhere"));
+                    assert!(focus.is_none());
+                    assert!(on_ok.is_none());
+                    assert_eq!(*err_prefix, "cd");
+                }
+                other => panic!("expected one ChangeDir, got {other:?}"),
+            },
+            other => panic!("expected Post, got {other:?}"),
+        }
+        // `:cd` with no arg → $HOME (or "/" when unset); still a ChangeDir.
+        // (A trailing-space `:cd ` is trimmed to `cd` by dispatch_command, so
+        // it takes this same no-arg path.)
+        assert!(matches!(
+            s.dispatch_command("cd"),
+            CommandResult::Post(ref fx)
+                if matches!(fx.as_slice(), [Effect::ChangeDir { err_prefix: "cd", .. }])
+        ));
     }
 
     /// End-to-end-ish coverage of the git refresh pipeline. Edit a
