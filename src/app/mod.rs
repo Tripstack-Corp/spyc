@@ -160,6 +160,7 @@ mod capture;
 mod commands;
 mod effect;
 mod find_picker;
+mod git_state;
 mod grep_session;
 mod key_dispatch;
 mod pager_handler;
@@ -1075,58 +1076,6 @@ impl App {
     /// the *current* listing dir's prefix, which may differ from the
     /// dir the worker saw if the user has drilled around within the
     /// project) and `git_info`. Returns true iff state changed.
-    fn apply_git_worker_result(&mut self, result: state::GitWorkerResult) -> bool {
-        // Generation gate: the user has navigated past this request.
-        if result.generation != self.state.git_generation {
-            return false;
-        }
-        // Relevance gate: even at the same generation, the result is
-        // for a specific repo. If the repo root no longer matches the
-        // current state, discard. (Unusual — generation bumps cover
-        // most of this.)
-        if self.state.current_repo_root.as_deref() != Some(result.repo_root.as_path()) {
-            return false;
-        }
-        let Some(raw) = result.raw else {
-            // `git status` failed (not in a repo by the time the
-            // worker spawned, or git missing). Leave existing state.
-            return false;
-        };
-        let (Some(index_mtime), Some(head_mtime)) = (result.index_mtime, result.head_mtime) else {
-            return false;
-        };
-        self.state.git_status_raw_cache = Some(state::GitStatusRawCache {
-            repo_root: result.repo_root.clone(),
-            index_mtime,
-            head_mtime,
-            raw,
-        });
-        // Seed the 1 Hz poll cache too — without this the next safety
-        // poll would observe a None cache and re-fire `git status`.
-        self.state.git_poll_cache = Some((index_mtime, head_mtime));
-        // Reparse against the current listing dir's prefix and refresh
-        // the display string. `compute_git_info_fast` reads the cache
-        // we just stored for its dirty flag.
-        let listing_dir = self.state.listing.dir.clone();
-        let new_files = {
-            let cache = self.state.git_status_raw_cache.as_ref().unwrap();
-            let prefix = listing_dir
-                .strip_prefix(&cache.repo_root)
-                .unwrap_or(std::path::Path::new(""))
-                .to_string_lossy()
-                .into_owned();
-            crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
-        };
-        let new_info = self.state.compute_git_info_fast();
-        let changed = new_files != self.state.git_files || new_info != self.state.git_info;
-        self.state.git_files = new_files;
-        self.state.git_info = new_info;
-        if changed {
-            self.state.rebuild_rows();
-        }
-        changed
-    }
-
     fn execute_mcp_command(
         &mut self,
         cmd: crate::mcp_cmd::McpCommand,
