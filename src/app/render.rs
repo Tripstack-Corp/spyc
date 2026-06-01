@@ -408,7 +408,7 @@ impl App {
         let Some(menu) = self.harpoon_menu.as_ref() else {
             return;
         };
-        let Some(h) = self.harpoon.as_ref() else {
+        let Some(h) = self.state.harpoon.as_ref() else {
             return;
         };
 

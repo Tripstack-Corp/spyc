@@ -383,6 +383,15 @@ pub struct AppState {
     /// whenever the harpoon list mutates so `apply_temp_filter`
     /// remains pure-domain. Empty when no `PROJECT_HOME` is active.
     pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
+    /// MVU Phase 5: domain fields relocated from `App` (Model
+    /// consolidation). The active harpoon list (pinned per-project file
+    /// pointers; `None` when `PROJECT_HOME` is unset); the bottom-pane
+    /// prompt-echo buffer being tracked for `yP`; and the last typed pane
+    /// prompt. (`pager_positions` is deferred — its `::load()` ctor does
+    /// disk IO unwanted in `test_default`.)
+    pub harpoon: Option<crate::state::Harpoon>,
+    pub pane_prompt_buf: String,
+    pub last_pane_prompt: Option<String>,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
     /// prompt is active. Drives the warning-color row highlight in
     /// the list view: the user sees exactly which files the `y` /
@@ -2336,6 +2345,9 @@ impl AppState {
             last_git_invalidation: None,
             last_git_request_at: None,
             harpoon_filter_set: std::collections::HashSet::new(),
+            harpoon: None,
+            pane_prompt_buf: String::new(),
+            last_pane_prompt: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),
