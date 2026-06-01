@@ -479,6 +479,14 @@ pub struct App {
     activity_frame_peak_snap: u64,
     activity_render_peak_us: u64,
     activity_render_peak_snap: u64,
+    /// Peak keystroke→echo latency (microseconds) over the window, + snapshot.
+    /// Set `pane_send_at` when a keystroke is forwarded to the active pane;
+    /// measured on the next active-pane output (Claude's echo). Isolates the
+    /// pane round-trip (forward → agent echo → parse → render) from render
+    /// cost — `echo - r` ≈ the agent/pty round-trip we don't control.
+    activity_echo_peak_us: u64,
+    activity_echo_snap: u64,
+    pane_send_at: Option<std::time::Instant>,
     /// Extended activity counters surfaced on the second status line.
     /// All `_events` / `_reqs` counters tick during the 1 s window;
     /// `_snap` holds the snapshot from the previous window.
@@ -502,12 +510,6 @@ pub struct App {
     /// hide it behind the existing snapshot cadence.
     activity_proc_rss_kb: u64,
     activity_proc_threads: u32,
-    /// Background-refresh plumbing for the proc stats above: a detached
-    /// thread runs `ps` (off the render thread — same reason as live_cwd)
-    /// and writes `(rss_kb, threads)` here; `refresh_process_stats` picks it
-    /// up next tick. The bool guards against overlapping spawns.
-    proc_stats_shared: std::sync::Arc<std::sync::Mutex<Option<(u64, u32)>>>,
-    proc_stats_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Cached `build_rows()` output; invalidated by `list_generation`.
     cached_rows: Vec<Row>,
     cached_rows_gen: u64,
@@ -839,6 +841,9 @@ impl App {
             activity_frame_peak_snap: 0,
             activity_render_peak_us: 0,
             activity_render_peak_snap: 0,
+            activity_echo_peak_us: 0,
+            activity_echo_snap: 0,
+            pane_send_at: None,
             activity_watcher_events: 0,
             activity_watcher_events_snap: 0,
             activity_mcp_reqs: 0,
@@ -849,8 +854,6 @@ impl App {
             started_at: std::time::Instant::now(),
             activity_proc_rss_kb: 0,
             activity_proc_threads: 0,
-            proc_stats_shared: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            proc_stats_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),
@@ -968,32 +971,15 @@ impl App {
 
     /// Build a context snapshot from the current state for MCP consumers.
     /// Refresh `activity_proc_rss_kb` / `activity_proc_threads`. Called once
-    /// per A-monitor 1 s tick. The `ps` lookup is a fork-exec (~5 ms), so it
-    /// runs on a detached thread — same reason `live_cwd` moved off-thread:
-    /// never stall the render loop, not even while the monitor that triggers
-    /// it is open. This picks up the previous tick's result and kicks the
-    /// next refresh (unless one is still in flight).
+    /// per A-monitor 1 s tick. `proc_rss_threads` reads the OS directly
+    /// (sysinfo for rss + libproc for the macOS thread count) — a fast
+    /// syscall, not a `ps` fork-exec, so it runs inline (the off-thread
+    /// machinery #227 added for the slow `ps` spawn is no longer needed).
     fn refresh_process_stats(&mut self) {
-        use std::sync::atomic::Ordering;
-        // Pick up the last background result. Bind first so the `MutexGuard`
-        // drops before the body (no lock held across it).
-        let landed = self.proc_stats_shared.lock().unwrap().take();
-        if let Some((rss, threads)) = landed {
+        if let Some((rss, threads)) = crate::sysinfo::proc_rss_threads() {
             self.activity_proc_rss_kb = rss;
             self.activity_proc_threads = threads;
         }
-        if self.proc_stats_refreshing.load(Ordering::Acquire) {
-            return;
-        }
-        self.proc_stats_refreshing.store(true, Ordering::Release);
-        let shared = std::sync::Arc::clone(&self.proc_stats_shared);
-        let refreshing = std::sync::Arc::clone(&self.proc_stats_refreshing);
-        std::thread::spawn(move || {
-            if let Some(stats) = crate::sysinfo::proc_rss_threads() {
-                *shared.lock().unwrap() = Some(stats);
-            }
-            refreshing.store(false, Ordering::Release);
-        });
     }
 
     fn snapshot_context(&self) -> crate::context::SpycContext {
@@ -1553,6 +1539,15 @@ impl App {
                 // visible symptom). Removed.
                 needs_draw = true;
                 draw_reason = 1;
+                // Echo-latency probe (A-monitor only): this active-pane output
+                // is the agent's echo of the last forwarded keystroke. Measure
+                // forward→echo so we can see the pane round-trip vs render cost.
+                if self.show_activity
+                    && let Some(sent) = self.pane_send_at.take()
+                {
+                    let us = u64::try_from(sent.elapsed().as_micros()).unwrap_or(u64::MAX);
+                    self.activity_echo_peak_us = self.activity_echo_peak_us.max(us);
+                }
             }
 
             // Mark exited tabs AFTER drain so the Closed event has been
@@ -2102,6 +2097,8 @@ impl App {
                 self.activity_frame_peak_us = 0;
                 self.activity_render_peak_snap = self.activity_render_peak_us;
                 self.activity_render_peak_us = 0;
+                self.activity_echo_snap = self.activity_echo_peak_us;
+                self.activity_echo_peak_us = 0;
                 self.activity_draws = 0;
                 self.activity_bytes = 0;
                 self.activity_reason_pane = 0;
@@ -7521,6 +7518,9 @@ impl App {
             activity_frame_peak_snap: 0,
             activity_render_peak_us: 0,
             activity_render_peak_snap: 0,
+            activity_echo_peak_us: 0,
+            activity_echo_snap: 0,
+            pane_send_at: None,
             activity_watcher_events: 0,
             activity_watcher_events_snap: 0,
             activity_mcp_reqs: 0,
@@ -7531,8 +7531,6 @@ impl App {
             started_at: std::time::Instant::now(),
             activity_proc_rss_kb: 0,
             activity_proc_threads: 0,
-            proc_stats_shared: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            proc_stats_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             activity_snap_event: 0,
             activity_snap_other: 0,
             cached_rows: Vec::new(),

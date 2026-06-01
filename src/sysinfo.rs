@@ -391,29 +391,58 @@ pub fn rss_kb() -> Option<u64> {
 /// unsupported platform. Spawns a subprocess (a fork-exec), so call it
 /// OFF the main/render thread (see `App::refresh_process_stats`).
 pub fn proc_rss_threads() -> Option<(u64, u32)> {
-    #[cfg(target_os = "macos")]
-    let args: &[&str] = &["-o", "rss=,thcount=", "-p"];
-    #[cfg(target_os = "linux")]
-    let args: &[&str] = &["-o", "rss=,nlwp=", "-p"];
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let args: &[&str] = &[];
-    if args.is_empty() {
-        return None;
+    use sysinfo_crate::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pid = Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_memory(),
+    );
+    let proc = sys.process(pid)?;
+    // `memory()` is bytes (sysinfo 0.30+); the HUD wants KB.
+    let rss_kb = proc.memory() / 1024;
+    // Thread count: sysinfo's `tasks()` is Linux-only (`None` on macOS), so on
+    // macOS read it from `proc_pidinfo` via libproc; on Linux use `tasks()`.
+    // 0 = unavailable.
+    let threads = mac_thread_count()
+        .or_else(|| proc.tasks().map(|t| u32::try_from(t.len()).unwrap_or(0)))
+        .unwrap_or(0);
+    Some((rss_kb, threads))
+}
+
+/// macOS thread count via `proc_pidinfo(PROC_PIDTASKINFO).pti_threadnum`
+/// (safe `libproc` wrapper). `None` on failure / non-macOS.
+#[cfg(target_os = "macos")]
+fn mac_thread_count() -> Option<u32> {
+    use libproc::libproc::proc_pid::pidinfo;
+    use libproc::libproc::task_info::TaskInfo;
+    let pid = i32::try_from(std::process::id()).ok()?;
+    let info = pidinfo::<TaskInfo>(pid, 0).ok()?;
+    u32::try_from(info.pti_threadnum).ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn mac_thread_count() -> Option<u32> {
+    None
+}
+
+#[cfg(test)]
+mod proc_stats_tests {
+    #[test]
+    fn proc_rss_threads_reports_live_stats() {
+        let (rss_kb, threads) =
+            super::proc_rss_threads().expect("proc_rss_threads should read the current process");
+        assert!(rss_kb > 0, "RSS should be > 0 (got {rss_kb} KB)");
+        // macOS thread count comes from libproc (sysinfo's tasks() is
+        // Linux-only); a live process always has >= 1 thread.
+        #[cfg(target_os = "macos")]
+        assert!(
+            threads > 0,
+            "macOS thread count should be > 0 (got {threads})"
+        );
+        let _ = threads; // used by the macOS assert; silence unused elsewhere
     }
-    let pid = std::process::id();
-    let output = std::process::Command::new("ps")
-        .args(args)
-        .arg(pid.to_string())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut parts = stdout.split_whitespace();
-    let rss = parts.next()?.parse().ok()?;
-    let threads = parts.next()?.parse().ok()?;
-    Some((rss, threads))
 }
 
 /// Human-readable RSS, e.g. `12.3 MB`.
