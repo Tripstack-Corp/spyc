@@ -54,9 +54,8 @@ impl App {
             crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
         };
         let new_info = self.state.compute_git_info_fast();
-        let changed = new_files != self.state.git_files || new_info != self.state.git_info;
-        self.state.git_files = new_files;
-        self.state.git_info = new_info;
+        let changed = new_files != self.state.git.files || new_info != self.state.git.info;
+        self.state.git.set(new_info, new_files);
         if changed {
             self.state.rebuild_rows();
         }
