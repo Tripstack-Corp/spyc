@@ -69,6 +69,114 @@ pub fn coalesce_pending(
     None
 }
 
+/// MVU Phase 3a: having received, *coalesce* — buffer every
+/// immediately-available FsEvent/GitResult/Mcp into the pending Vecs
+/// (drained at the top of the next iteration) and surface only an
+/// Input (or a Tick/Timeout/Disconnected) to the dispatch match.
+/// This collapses a burst into a single wakeup and bounds Input
+/// latency to one iteration. Input is NEVER handled inside the
+/// coalesce loop (an `Effect::ForegroundExec` parks the reader /
+/// re-inits the TUI), only surfaced for the arm — and the coalesce stops at
+/// the first one, so Input stays one-per-iteration and FIFO.
+///
+/// Lives next to [`coalesce_pending`] so the recv-arm buffering and the
+/// drain can never diverge (H9): the arms here push the just-received
+/// payload, then `coalesce_pending` drains the rest of the burst.
+pub fn coalesce_recv(
+    recvd: Result<Message, std::sync::mpsc::RecvTimeoutError>,
+    rx: &std::sync::mpsc::Receiver<Message>,
+    ctx: &mut RunCtx,
+) -> Result<Message, std::sync::mpsc::RecvTimeoutError> {
+    match recvd {
+        Ok(Message::FsEvent(ev)) => {
+            ctx.fs_pending.push(ev);
+            coalesce_pending(
+                rx,
+                &mut ctx.fs_pending,
+                &mut ctx.git_pending,
+                &mut ctx.mcp_pending,
+            )
+            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                Ok(Message::Input(ev))
+            })
+        }
+        Ok(Message::GitResult(r)) => {
+            ctx.git_pending.push(r);
+            coalesce_pending(
+                rx,
+                &mut ctx.fs_pending,
+                &mut ctx.git_pending,
+                &mut ctx.mcp_pending,
+            )
+            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                Ok(Message::Input(ev))
+            })
+        }
+        // MVU Phase 3d: buffer the MCP request (carries its reply
+        // Sender), collapse companions, synthesize Timeout so the
+        // pre-recv MCP drain executes it + replies.
+        Ok(Message::Mcp(req)) => {
+            ctx.mcp_pending.push(req);
+            coalesce_pending(
+                rx,
+                &mut ctx.fs_pending,
+                &mut ctx.git_pending,
+                &mut ctx.mcp_pending,
+            )
+            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                Ok(Message::Input(ev))
+            })
+        }
+        // MVU Phase 3b: a pane wake carries no payload to buffer —
+        // collapse any companion wakes/fs/git, then synthesize a
+        // Timeout so control re-enters the loop top and the pre-recv
+        // pane scan does the clear+drain. NEVER drained inline, NEVER
+        // surfaced as Input (except a coalesced real keystroke).
+        Ok(Message::PaneOutput { tab } | Message::SinkOutput { sink: tab }) => {
+            // A pane (3b) or capture/task (3c) wake. `tab`/`sink`
+            // labels which source woke us — logged for wake-path
+            // traceability; the pre-recv drains re-scan all sources,
+            // so the id isn't used to target. Collapse companions →
+            // synthesize Timeout so control re-enters the pre-recv
+            // drains (pane scan + capture/task drains).
+            spyc_debug!("sink wake: {tab:?}");
+            coalesce_pending(
+                rx,
+                &mut ctx.fs_pending,
+                &mut ctx.git_pending,
+                &mut ctx.mcp_pending,
+            )
+            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                Ok(Message::Input(ev))
+            })
+        }
+        // MVU Phase 3d / Phase 6: a grep/finder wake, a reader
+        // death-wake, or an agent-status-resolved wake — all
+        // payloadless, collapse-to-Timeout. For grep/finder the
+        // pre-recv drains re-run; for ReaderExited the synthesized
+        // Timeout re-enters the loop, where the loop-top reader_done
+        // check exits; for AgentStatusReady the pre-recv scan's
+        // pending-check marks the frame dirty so render applies the landed
+        // short-id (the worker can't redraw, only wake — see the field
+        // doc on `agent_status_pending`).
+        Ok(
+            Message::GrepOutput
+            | Message::FindOutput
+            | Message::ReaderExited
+            | Message::AgentStatusReady,
+        ) => coalesce_pending(
+            rx,
+            &mut ctx.fs_pending,
+            &mut ctx.git_pending,
+            &mut ctx.mcp_pending,
+        )
+        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+            Ok(Message::Input(ev))
+        }),
+        other => other,
+    }
+}
+
 /// MVU Phase 3a: the run loop's reader-death exit decision, shared by the
 /// Timeout arm (gated on `reader_done`) and the Disconnected arm. Drains a
 /// recorded fatal reader error into an `Err` (preserving the prior
