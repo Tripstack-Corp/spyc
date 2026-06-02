@@ -26,7 +26,7 @@ use crossterm::event::Event;
 
 use crate::spyc_debug;
 
-use super::{App, Deadline, Message, Scheduler, TaskStatus, state};
+use super::{App, Deadline, Message, RunCtx, TaskStatus, state};
 
 /// MVU Phase 3a: drain every immediately-available message into the
 /// pending buffers, returning the FIRST `Input` encountered (if any).
@@ -134,21 +134,17 @@ impl App {
     pub(crate) fn ingest_fs_and_maybe_refresh(
         &mut self,
         now_pre: std::time::Instant,
-        scheduler: &mut Scheduler,
-        fs_pending: &mut Vec<notify::Event>,
-        last_event_at: &mut Option<std::time::Instant>,
-        first_event_after_refresh: &mut Option<std::time::Instant>,
-        last_refresh: &mut std::time::Instant,
+        ctx: &mut RunCtx,
     ) -> bool {
         let mut needs_draw = false;
         let mut needs_reload = false;
-        for ev in std::mem::take(fs_pending) {
+        for ev in std::mem::take(&mut ctx.fs_pending) {
             self.ingest_fs_event(
                 &ev,
                 now_pre,
                 &mut needs_reload,
-                last_event_at,
-                first_event_after_refresh,
+                &mut ctx.last_event_at,
+                &mut ctx.first_event_after_refresh,
             );
         }
         if needs_reload {
@@ -168,31 +164,31 @@ impl App {
         let max_refresh_defer = refresh_quiet * 2;
         // Arm RefreshQuiet at the exact instant should_fire_refresh can first
         // return true (advisory — the predicate below still decides firing).
-        match (*last_event_at, *first_event_after_refresh) {
-            (Some(at), Some(first)) => scheduler.arm(
+        match (ctx.last_event_at, ctx.first_event_after_refresh) {
+            (Some(at), Some(first)) => ctx.scheduler.arm(
                 Deadline::RefreshQuiet,
-                (*last_refresh + refresh_quiet)
+                (ctx.last_refresh + refresh_quiet)
                     .max((at + refresh_quiet).min(first + max_refresh_defer)),
             ),
-            _ => scheduler.disarm(Deadline::RefreshQuiet),
+            _ => ctx.scheduler.disarm(Deadline::RefreshQuiet),
         }
         if super::should_fire_refresh(
-            *last_event_at,
-            *last_refresh,
-            *first_event_after_refresh,
+            ctx.last_event_at,
+            ctx.last_refresh,
+            ctx.first_event_after_refresh,
             now_pre,
             refresh_quiet,
             max_refresh_defer,
         ) {
-            *last_event_at = None;
-            *first_event_after_refresh = None;
+            ctx.last_event_at = None;
+            ctx.first_event_after_refresh = None;
             self.state.refresh_listing();
-            *last_refresh = now_pre;
+            ctx.last_refresh = now_pre;
             needs_draw = true;
             // Listing changed via fs watcher (not a keystroke path) —
             // `cursor_file` / `git_branch` in the context may have shifted.
             self.view.context_dirty = true;
-            scheduler.disarm(Deadline::RefreshQuiet);
+            ctx.scheduler.disarm(Deadline::RefreshQuiet);
         }
         needs_draw
     }
