@@ -621,6 +621,42 @@ impl Draw {
     }
 }
 
+/// Run()-scoped scratch for the event loop. Ephemeral: built by
+/// `App::run_setup`, dropped when `run()` returns. Deliberately NOT
+/// persistent App state (kept off `ViewState`/`Runtime`) so non-loop paths
+/// — `test_app`, `route_snapshot`, render, MCP execute — never see it.
+///
+/// Owns the fs watcher + its watch topology (so the watcher's notify thread
+/// is torn down with the run scope), the advisory `Scheduler`, the coalesce
+/// buffers, the debounce timers, the last-keypress instant, and the per-
+/// iteration `Draw` accumulator. It does NOT own the input reader handle,
+/// `foreground_exec`, or the channel: those stay bare `run()` locals so
+/// their Drop/borrow ordering is unchanged (the reader's `Drop` joins the
+/// thread; `RunCtx` — and thus the watcher — must drop AFTER that join, so
+/// `run()` declares `ctx` BEFORE `reader_handle`). The git/MCP forwarder
+/// threads are detached (no handle kept) and self-terminate on channel drop.
+struct RunCtx {
+    fs_watcher: Option<notify::RecommendedWatcher>,
+    /// Listing dir currently watched; on chdir we unwatch it and watch the new one.
+    watched_listing: Option<PathBuf>,
+    watched_git: Option<PathBuf>,
+    scheduler: Scheduler,
+    /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
+    fs_pending: Vec<notify::Event>,
+    git_pending: Vec<state::GitWorkerResult>,
+    mcp_pending: Vec<crate::mcp_cmd::McpRequest>,
+    last_context_write: std::time::Instant,
+    last_refresh: std::time::Instant,
+    last_git_poll: std::time::Instant,
+    /// Trailing-debounce: last listing event; refresh fires after `REFRESH_QUIET` of quiet.
+    last_event_at: Option<std::time::Instant>,
+    /// First listing event since the last refresh (fixed, not bumped) — caps refresh deferral.
+    first_event_after_refresh: Option<std::time::Instant>,
+    /// Last keypress instant — suppresses the MCP context-write for 300ms after a keystroke.
+    last_input_at: Option<std::time::Instant>,
+    draw: Draw,
+}
+
 impl App {
     pub fn new(resume: bool, mcp_takeover_allowed: bool) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
@@ -1200,16 +1236,16 @@ impl App {
         out
     }
 
-    pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
+    /// Build the event loop's run()-scoped scratch (`RunCtx`): the fs
+    /// watcher + initial watch topology, the advisory scheduler, the
+    /// coalesce buffers, the debounce timers, the last-keypress instant, and
+    /// the `Draw` accumulator. Also spawns the detached git/MCP forwarder
+    /// threads and installs `pane_wake_tx` (each needs a `msg_tx` clone).
+    /// Takes `&msg_tx` (does not consume it) so `run()` can hand the original
+    /// to the input reader afterward. Does NOT spawn the reader or build
+    /// `foreground_exec` — those stay bare `run()` locals for Drop ordering.
+    fn run_setup(&mut self, msg_tx: &std::sync::mpsc::Sender<Message>) -> RunCtx {
         use notify::{RecursiveMode, Watcher};
-        use std::sync::mpsc;
-
-        // MVU Phase 3a: the single message channel. The parkable input
-        // reader, the notify watcher closure, and the git forwarder all
-        // feed `msg_tx`; the loop `recv_timeout`s on `msg_rx`. Created
-        // first so the watcher/forwarder can clone a sender before the
-        // reader takes ownership of the original.
-        let (msg_tx, msg_rx) = mpsc::channel::<Message>();
 
         // File watcher: notify posts events onto the unified channel via a
         // closure `EventHandler` that wraps each `Ok(Event)` as
@@ -1254,54 +1290,6 @@ impl App {
             &self.state.listing.dir,
             self.state.current_gitdir.as_deref(),
         );
-
-        let mut last_context_write = std::time::Instant::now();
-        let mut last_refresh = std::time::Instant::now();
-        // 1Hz safety net: re-poll git state even if FSEvents missed
-        // the `.git/index.lock` → `.git/index` rename. See
-        // `AppState::refresh_git_state`.
-        let mut last_git_poll = std::time::Instant::now();
-        // MVU Phase 2: advisory deadline scheduler — computes the
-        // recv_timeout wait from armed timers; the loop still fires each
-        // timer via its own predicate against the threaded `now`.
-        let mut scheduler = Scheduler::new();
-        // Trailing debounce: fire refresh once events have stopped
-        // arriving for `REFRESH_QUIET`. Bursty git operations
-        // (`git add && git commit && git push`) emit several
-        // `.git/index` rename events spread over hundreds of ms;
-        // firing on the *first* event meant the subprocess sometimes
-        // ran during an in-flight, transient state ("M " staged but
-        // not yet committed). Waiting for quiet ensures we only
-        // sample git after the storm has passed.
-        let mut last_event_at: Option<std::time::Instant> = None;
-        // First listing event since the last refresh — fixed when the
-        // window opens, NOT bumped on each subsequent event. Lets the
-        // trailing-debounce fire after `max_refresh_defer` of continuous
-        // activity (cargo / claude / agent writes saturating the
-        // watcher) instead of starving indefinitely. Cleared on refresh.
-        let mut first_event_after_refresh: Option<std::time::Instant> = None;
-
-        // MVU Phase 3a: buffers for messages the recv arm coalesces. The
-        // recv arms ONLY push here (zero state mutation); the unchanged
-        // pre-recv drains above process them against `now_pre`. This keeps
-        // the timing-sensitive debounce / generation-gate logic exactly
-        // where it was — `recv` only changes *when* the loop wakes, not
-        // *how* events are handled.
-        let mut fs_pending: Vec<notify::Event> = Vec::new();
-        let mut git_pending: Vec<state::GitWorkerResult> = Vec::new();
-        // MVU Phase 3d: writable MCP requests buffered by the recv pre-step,
-        // executed + replied at the pre-recv drain (preserving the synchronous
-        // write_context → reply read-after-write ordering).
-        let mut mcp_pending: Vec<crate::mcp_cmd::McpRequest> = Vec::new();
-
-        // Last keypress instant. MVU Phase 3b PR2 retired its use as a
-        // poll-cadence trigger (the typing-burst hack — panes now wake the
-        // loop via `Message::PaneOutput`, so the first PTY echo after a
-        // keystroke arrives on the channel, not via a tightened poll). It
-        // survives for its OTHER consumer: the context-write debounce
-        // suppressor, which holds off the MCP context mtime bump for 300 ms
-        // after a keystroke so claude's input echo isn't yanked mid-type.
-        let mut last_input_at: Option<std::time::Instant> = None;
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
         // sending onto its own channel; this forwarder bridges its results
@@ -1351,6 +1339,66 @@ impl App {
         // wake, not the pre-run no-op.
         self.runtime.pane_wake_tx = Some(msg_tx.clone());
 
+        RunCtx {
+            fs_watcher,
+            watched_listing,
+            watched_git,
+            // MVU Phase 2: advisory deadline scheduler — computes the
+            // recv_timeout wait from armed timers; the loop still fires each
+            // timer via its own predicate against the threaded `now`.
+            scheduler: Scheduler::new(),
+            // MVU Phase 3a/3d: buffers the recv arm pushes into (zero state
+            // mutation); the pre-recv drains process them against `now_pre`,
+            // keeping the timing-sensitive debounce / generation-gate logic
+            // exactly where it was — recv only changes *when* the loop wakes.
+            fs_pending: Vec::new(),
+            git_pending: Vec::new(),
+            mcp_pending: Vec::new(),
+            last_context_write: std::time::Instant::now(),
+            last_refresh: std::time::Instant::now(),
+            // 1Hz safety net: re-poll git state even if FSEvents missed
+            // the `.git/index.lock` → `.git/index` rename.
+            last_git_poll: std::time::Instant::now(),
+            // Trailing debounce: fire refresh once events stop arriving for
+            // `REFRESH_QUIET`. Bursty git ops emit several `.git/index`
+            // rename events over hundreds of ms; firing on the *first* meant
+            // sampling a transient state. Waiting for quiet avoids that.
+            last_event_at: None,
+            // First listing event since the last refresh — fixed (not bumped
+            // per event) so the debounce can still fire after `max_refresh_defer`
+            // of continuous activity instead of starving. Cleared on refresh.
+            first_event_after_refresh: None,
+            // Last keypress instant. MVU Phase 3b PR2 retired its poll-cadence
+            // use; it survives for the context-write debounce suppressor,
+            // which holds off the MCP context mtime bump for 300 ms after a
+            // keystroke so claude's input echo isn't yanked mid-type.
+            last_input_at: None,
+            // Draw at least once on startup (dirty: true, reason: 3 = other).
+            draw: Draw {
+                dirty: true,
+                reason: 3,
+            },
+        }
+    }
+
+    pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
+        use std::sync::mpsc;
+
+        // MVU Phase 3a: the single message channel. The parkable input
+        // reader, the notify watcher closure, and the git forwarder all
+        // feed `msg_tx`; the loop `recv_timeout`s on `msg_rx`. Created
+        // first so the watcher/forwarder can clone a sender before the
+        // reader takes ownership of the original.
+        let (msg_tx, msg_rx) = mpsc::channel::<Message>();
+
+        // All run()-scoped scratch (watcher + topology, scheduler, coalesce
+        // buffers, debounce timers, last-keypress instant, the Draw
+        // accumulator) lives in `ctx`. `run_setup` also spawns the git/MCP
+        // forwarder threads and installs `pane_wake_tx` (all needing a
+        // `msg_tx` clone). Declared BEFORE `reader_handle` so the watcher
+        // (owned by `ctx`) drops AFTER the reader thread is joined (H8).
+        let mut ctx = self.run_setup(&msg_tx);
+
         // MVU Phase 1: the parkable input reader runs on its own thread
         // and feeds `msg_tx`; the loop `recv_timeout`s on `msg_rx` instead
         // of calling `event::poll`/`event::read` directly. `reader_handle`
@@ -1385,12 +1433,6 @@ impl App {
         // the worker had finished an echo, which manifested as
         // off-by-one input lag. Removed.)
 
-        // Draw at least once on startup (dirty: true, reason: 3 = other).
-        let mut draw = Draw {
-            dirty: true,
-            reason: 3,
-        };
-
         while !self.state.should_quit {
             // MVU Phase 3d: authoritative reader-death exit. With the poll
             // floor gone, the loop blocks on `recv()`; the reader sends a
@@ -1408,10 +1450,10 @@ impl App {
             // When the pager opens over a pane, the pane's stale cells
             // need clearing. But don't use terminal.clear() for this — the
             // pager overlay will paint over everything anyway, and the
-            // clear causes a visible flash. Just force a draw instead.
+            // clear causes a visible flash. Just force a ctx.draw instead.
             let (pager_redraw, pending_clear) = self.step_pager_repaint();
             if pager_redraw {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
             // NOTE: periodic ^L to Claude pane tabs was removed — it clears
             // any draft prompt the user has typed, even when focus is on the
@@ -1426,13 +1468,13 @@ impl App {
             // poll floor still backstops them this PR; PR3 deletes it once
             // these wake the channel.
             if self.drain_pending_capture() {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
             if self.drain_background_tasks() {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
             if self.refresh_task_viewer() {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
 
             // MVU Phase 6: drain any off-thread agent-status resolve that
@@ -1443,7 +1485,7 @@ impl App {
             // the slot full and this nudge would busy-spin. Applying the result
             // updates the cache so the next render shows the short-id.
             if self.apply_landed_agent_status() {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
 
             // F-finder: drain any candidate batches the walker
@@ -1456,7 +1498,7 @@ impl App {
             {
                 picker.refilter();
                 self.render_find_picker();
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
 
             // :grep session: drain match batches into the active
@@ -1464,7 +1506,7 @@ impl App {
             // results land directly in the pager body instead of
             // being re-ranked.
             if self.drain_grep_session() {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
 
             // Pre-recv pane-output scan: drain every tab + overlay, flip the
@@ -1472,7 +1514,7 @@ impl App {
             // `drain_pane_output` — clear_wake/drain_output CAS lives there).
             let (pane_draw, pane_reason) = self.drain_pane_output();
             if pane_draw {
-                draw.mark(pane_reason);
+                ctx.draw.mark(pane_reason);
             }
 
             // MVU Phase 5: snapshot the active pane's routing flags into the
@@ -1489,39 +1531,39 @@ impl App {
 
             // Session-restore: deferred `/resume` sends + crash-recovery prompt
             // (see `handle_restore_resumes`).
-            if self.handle_restore_resumes(now_pre, &mut scheduler) {
-                draw.mark(3);
+            if self.handle_restore_resumes(now_pre, &mut ctx.scheduler) {
+                ctx.draw.mark(3);
             }
 
             // Drain buffered FsEvents + run the trailing-debounce listing
             // refresh (see `ingest_fs_and_maybe_refresh`).
             if self.ingest_fs_and_maybe_refresh(
                 now_pre,
-                &mut scheduler,
-                &mut fs_pending,
-                &mut last_event_at,
-                &mut first_event_after_refresh,
-                &mut last_refresh,
+                &mut ctx.scheduler,
+                &mut ctx.fs_pending,
+                &mut ctx.last_event_at,
+                &mut ctx.first_event_after_refresh,
+                &mut ctx.last_refresh,
             ) {
-                draw.mark(3);
+                ctx.draw.mark(3);
             }
             // 1 Hz safety-net git poll + GitPoll deadline arming (see
             // `poll_git_cadence`).
-            if self.poll_git_cadence(now_pre, &mut last_git_poll, &mut scheduler) {
-                draw.mark(3);
+            if self.poll_git_cadence(now_pre, &mut ctx.last_git_poll, &mut ctx.scheduler) {
+                ctx.draw.mark(3);
             }
 
-            // Execute writable MCP commands buffered into `mcp_pending` (see
+            // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).
-            if self.drain_mcp_pending(&mut mcp_pending) {
-                draw.mark(3);
+            if self.drain_mcp_pending(&mut ctx.mcp_pending) {
+                ctx.draw.mark(3);
             }
 
-            // Drain the git-worker results buffered into `git_pending` — the
+            // Drain the git-worker results buffered into `ctx.git_pending` — the
             // SOLE apply/count/take site (see `drain_git_pending`).
-            if self.drain_git_pending(&mut git_pending) {
-                draw.mark(2);
+            if self.drain_git_pending(&mut ctx.git_pending) {
+                ctx.draw.mark(2);
             }
 
             // MVU Phase 3c: the last poll floor is GONE. Every event source
@@ -1538,14 +1580,14 @@ impl App {
             // sleep lands on the deadline, not deadline + body-cost.
             let wait_now = std::time::Instant::now();
             // If the pre-recv drains already dirtied the frame, DON'T block —
-            // a zero-timeout recv falls straight through to the draw this
+            // a zero-timeout recv falls straight through to the ctx.draw this
             // iteration. Blocking here delayed already-drained pane output
             // (e.g. a keystroke echo) until the next message/deadline arrived,
             // a visible per-keystroke render lag. (Draw-before-you-block.)
-            let wait = if draw.dirty {
+            let wait = if ctx.draw.dirty {
                 Some(Duration::ZERO)
             } else {
-                scheduler.next().map(|when| {
+                ctx.scheduler.next().map(|when| {
                     when.saturating_duration_since(wait_now)
                         .max(Duration::from_millis(1))
                 })
@@ -1573,28 +1615,43 @@ impl App {
             // the first one, so Input stays one-per-iteration and FIFO.
             let effective = match recvd {
                 Ok(Message::FsEvent(ev)) => {
-                    fs_pending.push(ev);
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                            Ok(Message::Input(ev))
-                        })
+                    ctx.fs_pending.push(ev);
+                    coalesce_pending(
+                        &msg_rx,
+                        &mut ctx.fs_pending,
+                        &mut ctx.git_pending,
+                        &mut ctx.mcp_pending,
+                    )
+                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                        Ok(Message::Input(ev))
+                    })
                 }
                 Ok(Message::GitResult(r)) => {
-                    git_pending.push(r);
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                            Ok(Message::Input(ev))
-                        })
+                    ctx.git_pending.push(r);
+                    coalesce_pending(
+                        &msg_rx,
+                        &mut ctx.fs_pending,
+                        &mut ctx.git_pending,
+                        &mut ctx.mcp_pending,
+                    )
+                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                        Ok(Message::Input(ev))
+                    })
                 }
                 // MVU Phase 3d: buffer the MCP request (carries its reply
                 // Sender), collapse companions, synthesize Timeout so the
                 // pre-recv MCP drain executes it + replies.
                 Ok(Message::Mcp(req)) => {
-                    mcp_pending.push(req);
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                            Ok(Message::Input(ev))
-                        })
+                    ctx.mcp_pending.push(req);
+                    coalesce_pending(
+                        &msg_rx,
+                        &mut ctx.fs_pending,
+                        &mut ctx.git_pending,
+                        &mut ctx.mcp_pending,
+                    )
+                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                        Ok(Message::Input(ev))
+                    })
                 }
                 // MVU Phase 3b: a pane wake carries no payload to buffer —
                 // collapse any companion wakes/fs/git, then synthesize a
@@ -1609,10 +1666,15 @@ impl App {
                     // synthesize Timeout so control re-enters the pre-recv
                     // drains (pane scan + capture/task drains).
                     spyc_debug!("sink wake: {tab:?}");
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                            Ok(Message::Input(ev))
-                        })
+                    coalesce_pending(
+                        &msg_rx,
+                        &mut ctx.fs_pending,
+                        &mut ctx.git_pending,
+                        &mut ctx.mcp_pending,
+                    )
+                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                        Ok(Message::Input(ev))
+                    })
                 }
                 // MVU Phase 3d / Phase 6: a grep/finder wake, a reader
                 // death-wake, or an agent-status-resolved wake — all
@@ -1628,15 +1690,20 @@ impl App {
                     | Message::FindOutput
                     | Message::ReaderExited
                     | Message::AgentStatusReady,
-                ) => coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                        Ok(Message::Input(ev))
-                    }),
+                ) => coalesce_pending(
+                    &msg_rx,
+                    &mut ctx.fs_pending,
+                    &mut ctx.git_pending,
+                    &mut ctx.mcp_pending,
+                )
+                .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                    Ok(Message::Input(ev))
+                }),
                 other => other,
             };
             match effective {
                 Ok(Message::Input(ev)) => {
-                    draw.mark(2);
+                    ctx.draw.mark(2);
                     match ev {
                         Event::Key(key)
                             if key.kind == KeyEventKind::Press
@@ -1645,7 +1712,7 @@ impl App {
                             // Arm the typing-burst window — see the poll-ms
                             // computation above. Cheap; just stores an
                             // Instant.
-                            last_input_at = Some(std::time::Instant::now());
+                            ctx.last_input_at = Some(std::time::Instant::now());
                             // Mark the context file dirty: every keypress
                             // is potentially a state-mutating action
                             // (cursor move, pick toggle, chdir, etc.).
@@ -1683,8 +1750,8 @@ impl App {
                     }
                 }
                 // No input this tick: re-poll the still-polled sources; no
-                // draw (matches the old `event::poll(...) == false`). The
-                // loop never sends itself a Tick (the scheduler is advisory)
+                // ctx.draw (matches the old `event::poll(...) == false`). The
+                // loop never sends itself a Tick (the ctx.scheduler is advisory)
                 // so Tick is identical to Timeout; the variant exists for
                 // later subscriptions. This arm is also where a buffer-only
                 // coalesce lands (it synthesizes Timeout) and where a dead
@@ -1736,22 +1803,22 @@ impl App {
             // Activity monitor: roll over the 1-second window (snapshot +
             // reset + proc-stat refresh; see `roll_activity_window`). Returns
             // whether an overlay-only redraw is warranted this tick.
-            let activity_only_draw = self.roll_activity_window(now_post, draw.dirty);
+            let activity_only_draw = self.roll_activity_window(now_post, ctx.draw.dirty);
             if activity_only_draw {
-                draw.set_dirty();
+                ctx.draw.set_dirty();
             }
 
             // Re-arm the post-recv advisory deadlines — ActivityRollover +
             // CaptureTick (see `arm_post_recv_deadlines`).
-            self.arm_post_recv_deadlines(now_post, &mut scheduler);
+            self.arm_post_recv_deadlines(now_post, &mut ctx.scheduler);
 
             // Only redraw when something actually changed.
             // Wrap in DEC 2026 synchronized update so the terminal
             // emulator (iTerm2, etc.) buffers the entire frame and
             // paints it atomically — eliminates tearing and reduces
             // terminal-side CPU.
-            if draw.dirty {
-                draw.dirty = false;
+            if ctx.draw.dirty {
+                ctx.draw.dirty = false;
                 // Title compose + dedup stay loop-side; only the
                 // `term_title::set` IO runs through the sole executor.
                 let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
@@ -1787,21 +1854,21 @@ impl App {
                     self.view.activity_draws += 1;
                     self.view.activity_bytes +=
                         u64::from(frame_area.width) * u64::from(frame_area.height);
-                    match draw.reason {
+                    match ctx.draw.reason {
                         1 => self.view.activity_reason_pane += 1,
                         2 => self.view.activity_reason_event += 1,
                         _ => self.view.activity_reason_other += 1,
                     }
                 }
-                draw.reason = 0;
+                ctx.draw.reason = 0;
             }
 
             // Only re-sync the filesystem watcher when the cwd actually changed.
-            if watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
+            if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
                 sync_listing_watch(
-                    fs_watcher.as_mut(),
-                    &mut watched_listing,
-                    &mut watched_git,
+                    ctx.fs_watcher.as_mut(),
+                    &mut ctx.watched_listing,
+                    &mut ctx.watched_git,
                     &self.state.listing.dir,
                     self.state.current_gitdir.as_deref(),
                 );
@@ -1812,9 +1879,9 @@ impl App {
             // `maybe_write_context`).
             self.maybe_write_context(
                 now_post,
-                last_input_at,
-                &mut last_context_write,
-                &mut scheduler,
+                ctx.last_input_at,
+                &mut ctx.last_context_write,
+                &mut ctx.scheduler,
             );
         }
         // Clean up the context file on exit.
