@@ -282,4 +282,68 @@ impl App {
         }
         false
     }
+
+    /// MVU Phase 6 PR-C: the pre-recv pane-output scan. Drains every tab + the
+    /// top overlay (Acquire-load on each worker's `parser_gen`), flips the
+    /// background-tab `has_activity` divider glyph, and marks exited tabs.
+    /// Returns `(needs_draw, draw_reason)` — `draw_reason` is 1 for pane output
+    /// and 3 for a newly-exited tab (last-writer-wins, matching the inline
+    /// order); the caller folds them into the loop's `needs_draw`/`draw_reason`.
+    ///
+    /// CAS-CRITICAL: `clear_wake()` is the SOLE clear site and stays
+    /// immediately before `drain_output()` (clear-before-read) — it must NOT
+    /// move into `drain_output`, which render's `drain_all` also calls every
+    /// frame and would re-clear the edge mid-stream, defeating the worker's
+    /// 0→1 wake-coalescing CAS.
+    pub(crate) fn drain_pane_output(&mut self) -> (bool, u8) {
+        let mut needs_draw = false;
+        let mut draw_reason = 0u8;
+        let mut pane_had_output = false;
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            let active_idx = tabs.active_index();
+            for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
+                // Clear the wake edge BEFORE the gen load (clear-before-read).
+                // SOLE clear site — see the fn doc.
+                entry.pane.clear_wake();
+                if entry.pane.drain_output() {
+                    if i == active_idx {
+                        pane_had_output = true;
+                    } else {
+                        entry.info.has_activity = true;
+                        needs_draw = true;
+                        draw_reason = 1;
+                    }
+                }
+            }
+        }
+        if let Some(overlay) = self.top_overlay.as_mut() {
+            overlay.clear_wake(); // clear-before-read (see the tab scan)
+            if overlay.drain_output() {
+                pane_had_output = true;
+            }
+        }
+        if pane_had_output {
+            needs_draw = true;
+            draw_reason = 1;
+            // Echo-latency probe (A-monitor only): this active-pane output is
+            // the agent's echo of the last forwarded keystroke. Measure
+            // forward→echo so we can see the pane round-trip vs render cost.
+            if self.show_activity
+                && let Some(sent) = self.pane_send_at.take()
+            {
+                let us = u64::try_from(sent.elapsed().as_micros()).unwrap_or(u64::MAX);
+                self.activity_echo_peak_us = self.activity_echo_peak_us.max(us);
+            }
+        }
+        // Mark exited tabs AFTER drain so the Closed event has been processed
+        // and `is_closed()` returns true; the "[exited N]" label appears
+        // immediately.
+        if let Some(tabs) = self.pane_tabs.as_mut()
+            && tabs.mark_exited()
+        {
+            needs_draw = true;
+            draw_reason = 3;
+        }
+        (needs_draw, draw_reason)
+    }
 }
