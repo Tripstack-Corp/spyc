@@ -117,7 +117,7 @@ impl App {
             && self.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
             && !pane_has_focus
-            && self.pager.is_none()
+            && self.view.pager.is_none()
         {
             self.state.flash_info(
                 "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",
@@ -145,7 +145,7 @@ impl App {
                 // glyph the bottom-status-bar uses for bg tasks that
                 // exited non-zero.
                 let title = format!("\u{2717} {} — interrupted", capture.title);
-                if let Some(view) = self.pager.as_mut() {
+                if let Some(view) = self.view.pager.as_mut() {
                     view.title = title;
                     view.saveable = true;
                     view.streaming = false;
@@ -179,7 +179,7 @@ impl App {
         if self.overlay_awaiting_dismiss {
             self.top_overlay = None;
             self.overlay_awaiting_dismiss = false;
-            self.needs_full_repaint = true;
+            self.view.needs_full_repaint = true;
             self.state.flash_info("command finished");
             return Ok(Vec::new());
         }
@@ -782,7 +782,7 @@ impl App {
                 }
             }
             self.state.flash_info("claude crash dismissed; tab closed");
-            self.needs_full_repaint = true;
+            self.view.needs_full_repaint = true;
             return Vec::new();
         }
 

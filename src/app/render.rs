@@ -207,14 +207,14 @@ impl App {
         // cue independent of color).
         let rule_style = if is_scrolling {
             Style::default()
-                .fg(self.theme.dir)
+                .fg(self.view.theme.dir)
                 .add_modifier(Modifier::BOLD)
         } else if self.state.pane_focused() {
             Style::default()
-                .fg(self.theme.prompt_prefix)
+                .fg(self.view.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(self.theme.status_suffix)
+            Style::default().fg(self.view.theme.status_suffix)
         };
         // Active tab gets REVERSED modifier (background fill) so it's
         // unambiguously distinct from a background tab with activity
@@ -224,20 +224,20 @@ impl App {
         // reverse, "you are here" registers before glyph parsing.
         let active_tab_style = if is_scrolling {
             Style::default()
-                .fg(self.theme.dir)
+                .fg(self.view.theme.dir)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         } else {
             Style::default()
-                .fg(self.theme.prompt_prefix)
+                .fg(self.view.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED)
         };
-        let inactive_tab_style = Style::default().fg(self.theme.status_suffix);
+        let inactive_tab_style = Style::default().fg(self.view.theme.status_suffix);
 
         let mut spans: Vec<Span> = Vec::new();
         let mut used = 0usize;
 
         let activity_style = Style::default()
-            .fg(self.theme.pick)
+            .fg(self.view.theme.pick)
             .add_modifier(Modifier::BOLD);
 
         // Tab indicators: ─[1*] claude ─[2+] bash, then "── <live cwd>".
@@ -316,9 +316,9 @@ impl App {
         //   `[N\u{25cf}]`  running, quiescent
         //   `[N\u{2713}]`  exited cleanly
         //   `[N\u{2717}]`  non-zero exit / killed / crashed
-        let bg_running_color = self.theme.dir; // soft blue
-        let bg_unread_color = self.theme.take; // teal -- pulls the eye
-        let bg_ok_color = self.theme.exec; // soft green
+        let bg_running_color = self.view.theme.dir; // soft blue
+        let bg_unread_color = self.view.theme.take; // teal -- pulls the eye
+        let bg_ok_color = self.view.theme.exec; // soft green
         let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
         let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
         let mut bg_width = 0usize;
@@ -375,7 +375,7 @@ impl App {
             spans.push(Span::styled(
                 zoom_tag,
                 Style::default()
-                    .fg(self.theme.prompt_prefix)
+                    .fg(self.view.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ));
             used += zoom_tag.len();
@@ -384,7 +384,7 @@ impl App {
             spans.push(Span::styled(
                 scroll_tag,
                 Style::default()
-                    .fg(self.theme.dir)
+                    .fg(self.view.theme.dir)
                     .add_modifier(Modifier::BOLD),
             ));
             used += scroll_tag.len();
@@ -437,7 +437,7 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(Style::default().fg(self.theme.prompt_prefix));
+            .border_style(Style::default().fg(self.view.theme.prompt_prefix));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
 
@@ -460,16 +460,16 @@ impl App {
         if h.slots.is_empty() {
             body_lines.push(Line::from(Span::styled(
                 "  (empty — Ha to harpoon the cursor file/dir)",
-                Style::default().fg(self.theme.status_suffix),
+                Style::default().fg(self.view.theme.status_suffix),
             )));
         } else {
             let cursor_style = Style::default()
                 .fg(Color::Black)
-                .bg(self.theme.prompt_prefix)
+                .bg(self.view.theme.prompt_prefix)
                 .add_modifier(Modifier::BOLD);
-            let normal_style = Style::default().fg(self.theme.status_path);
+            let normal_style = Style::default().fg(self.view.theme.status_path);
             let key_style = Style::default()
-                .fg(self.theme.pick)
+                .fg(self.view.theme.pick)
                 .add_modifier(Modifier::BOLD);
             for (i, path) in h.slots.iter().enumerate() {
                 let on_cursor = i == menu.cursor;
@@ -498,7 +498,7 @@ impl App {
         frame.render_widget(Paragraph::new(body_lines), body_rect);
 
         let footer_style = Style::default()
-            .fg(self.theme.status_suffix)
+            .fg(self.view.theme.status_suffix)
             .add_modifier(Modifier::DIM);
         let footer_text = if menu.delete_armed {
             "   d again = delete · any other key cancels"
@@ -591,7 +591,7 @@ impl App {
                     height: 1,
                 };
                 let style = Style::default()
-                    .fg(self.theme.prompt_prefix)
+                    .fg(self.view.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD);
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
@@ -651,13 +651,14 @@ impl App {
         // pane "jump" back to live-pty / file-list rendering for
         // the lifetime of the help overlay.
         let in_help = self
+            .view
             .pager
             .as_ref()
             .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE);
         let top_pager = if in_help {
-            self.pager_help_stash.as_ref()
+            self.view.pager_help_stash.as_ref()
         } else {
-            self.pager.as_ref()
+            self.view.pager.as_ref()
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
         if top_pager {
@@ -668,12 +669,12 @@ impl App {
                 height: layout.status.height + layout.list.height + layout.prompt.height,
             };
             let underlying = if in_help {
-                self.pager_help_stash.as_ref()
+                self.view.pager_help_stash.as_ref()
             } else {
-                self.pager.as_ref()
+                self.view.pager.as_ref()
             };
             if let Some(view) = underlying {
-                crate::ui::pager::render(frame, top_area, view, &self.theme);
+                crate::ui::pager::render(frame, top_area, view, &self.view.theme);
             }
             // Divider + bottom pane render normally below.
             if let Some(divider_rect) = layout.divider {
@@ -696,8 +697,8 @@ impl App {
             // top of the just-drawn slot before returning. The
             // standard branch's centered-overlay tail (further down)
             // never runs in this path.
-            if in_help && let Some(help) = self.pager.as_ref() {
-                crate::ui::pager::render(frame, frame.area(), help, &self.theme);
+            if in_help && let Some(help) = self.view.pager.as_ref() {
+                crate::ui::pager::render(frame, frame.area(), help, &self.view.theme);
             }
             return;
         }
@@ -716,15 +717,15 @@ impl App {
             suffix: &suffix,
             git_info: self.state.git.info.as_deref(),
             agent_info: agent_info.as_deref(),
-            theme: &self.theme,
+            theme: &self.view.theme,
         }
         .render(frame, layout.status);
 
-        if self.cached_rows_gen != self.state.list_generation {
-            self.cached_rows = self.build_rows();
-            self.cached_rows_gen = self.state.list_generation;
+        if self.view.cached_rows_gen != self.state.list_generation {
+            self.view.cached_rows = self.build_rows();
+            self.view.cached_rows_gen = self.state.list_generation;
         }
-        let rows = &self.cached_rows;
+        let rows = &self.view.cached_rows;
         let list_focused = !self.state.pane_focused();
         // Stabilize view_top ↔ grid.  Skip the expensive multi-round
         // loop when inputs haven't changed since the last frame.
@@ -735,8 +736,8 @@ impl App {
             layout.list.width,
             layout.list.height,
         );
-        if grid_key != self.cached_grid_key {
-            self.cached_grid_key = grid_key;
+        if grid_key != self.view.cached_grid_key {
+            self.view.cached_grid_key = grid_key;
             // The grid depends on view_top (different entries have different
             // name lengths → different column count → different items_per_page),
             // and view_top depends on the grid.
@@ -755,7 +756,7 @@ impl App {
                         view_top: self.state.cursor.view_top,
                         empty_marker: self.state.view == View::Dir,
                         focused: list_focused,
-                        theme: &self.theme,
+                        theme: &self.view.theme,
                     };
                     self.state.grid_dims = probe.grid(layout.list).dims();
                     let old_vt = self.state.cursor.view_top;
@@ -796,7 +797,7 @@ impl App {
                             view_top: self.state.cursor.view_top,
                             empty_marker: self.state.view == View::Dir,
                             focused: list_focused,
-                            theme: &self.theme,
+                            theme: &self.view.theme,
                         };
                         self.state.grid_dims = probe.grid(layout.list).dims();
                         spyc_debug!(
@@ -821,7 +822,7 @@ impl App {
                 }
             }
             // Update cache key in case the stabilization loop changed view_top.
-            self.cached_grid_key = (
+            self.view.cached_grid_key = (
                 self.state.list_generation,
                 self.state.cursor.view_top,
                 self.state.cursor.index,
@@ -837,7 +838,7 @@ impl App {
                 view_top: self.state.cursor.view_top,
                 empty_marker: self.state.view == View::Dir,
                 focused: list_focused,
-                theme: &self.theme,
+                theme: &self.view.theme,
             },
             layout.list,
         );
@@ -854,9 +855,9 @@ impl App {
         // the LowerPane scrollback view stays drawn underneath
         // instead of flickering back to the live pty.
         let bottom_is_pager = if in_help {
-            self.pager_help_stash.as_ref()
+            self.view.pager_help_stash.as_ref()
         } else {
-            self.pager.as_ref()
+            self.view.pager.as_ref()
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
@@ -876,19 +877,19 @@ impl App {
                     // up: the stash's `pending_scroll_to_bottom` was
                     // already cleared on the original first frame.
                     if !in_help
-                        && let Some(view) = self.pager.as_mut()
+                        && let Some(view) = self.view.pager.as_mut()
                         && view.pending_scroll_to_bottom.get()
                     {
                         view.scroll_to_bottom(rect.height);
                         view.pending_scroll_to_bottom.set(false);
                     }
                     let underlying = if in_help {
-                        self.pager_help_stash.as_ref()
+                        self.view.pager_help_stash.as_ref()
                     } else {
-                        self.pager.as_ref()
+                        self.view.pager.as_ref()
                     };
                     if let Some(view) = underlying {
-                        crate::ui::pager::render(frame, rect, view, &self.theme);
+                        crate::ui::pager::render(frame, rect, view, &self.view.theme);
                     }
                 } else {
                     let focused = self.state.pane_focused();
@@ -931,7 +932,7 @@ impl App {
             PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
-                theme: &self.theme,
+                theme: &self.view.theme,
                 cursor_pos: p.editor.as_ref().map(|e| e.cursor),
                 vi_mode: p.editor.as_ref().map(|e| e.mode),
             }
@@ -943,8 +944,8 @@ impl App {
                 widgets::Paragraph,
             };
             let color = match flash.kind {
-                FlashKind::Info => self.theme.take,
-                FlashKind::Error => self.theme.cursor_bg,
+                FlashKind::Info => self.view.theme.take,
+                FlashKind::Error => self.view.theme.cursor_bg,
             };
             let line = Line::from(Span::styled(
                 flash.text.clone(),
@@ -960,7 +961,7 @@ impl App {
             let line = Line::from(Span::styled(
                 pending,
                 Style::default()
-                    .fg(self.theme.prompt_prefix)
+                    .fg(self.view.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ));
             frame.render_widget(Paragraph::new(line), layout.prompt);
@@ -970,10 +971,10 @@ impl App {
         // `LowerPane` and `TopPane` mounts already rendered into
         // their slots above; only `Overlay` mount hits this centered
         // render path.
-        if let Some(view) = &self.pager
+        if let Some(view) = &self.view.pager
             && matches!(view.mount, crate::ui::pager::Mount::Overlay)
         {
-            pager::render(frame, frame.area(), view, &self.theme);
+            pager::render(frame, frame.area(), view, &self.view.theme);
         }
 
         // Harpoon menu overlay — modal, drawn on top of everything
@@ -1027,7 +1028,7 @@ impl App {
             .iter()
             .filter(|t| t.paused)
             .count();
-        let pager_state = match self.pager.as_ref() {
+        let pager_state = match self.view.pager.as_ref() {
             None => "none",
             Some(v) => match v.mount {
                 crate::ui::pager::Mount::Overlay => "overlay",
@@ -1082,9 +1083,9 @@ impl App {
         // block (straight left edge), content right-justified.
         let rows: [(&str, Color); 4] = [
             (l1.as_str(), Color::Yellow),
-            (l2.as_str(), self.theme.take),
-            (l3.as_str(), self.theme.status_user),
-            (l4.as_str(), self.theme.dir),
+            (l2.as_str(), self.view.theme.take),
+            (l3.as_str(), self.view.theme.status_user),
+            (l4.as_str(), self.view.theme.dir),
         ];
         let maxw = rows
             .iter()

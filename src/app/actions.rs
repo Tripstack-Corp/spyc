@@ -248,11 +248,11 @@ impl App {
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
             Action::ReopenLastBuffer => {
-                if let Some(prev) = self.pager_history.pop_back() {
-                    self.pager = Some(prev);
-                    self.needs_full_repaint = true;
+                if let Some(prev) = self.view.pager_history.pop_back() {
+                    self.view.pager = Some(prev);
+                    self.view.needs_full_repaint = true;
                     self.state
-                        .flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+                        .flash_info(format!("buffer ←{}", self.view.pager_history.back_len()));
                 } else {
                     self.state.flash_info("no buffers in history");
                 }
@@ -338,7 +338,7 @@ impl App {
                     self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
             }
             Action::PaneNextTab => {
                 self.stash_scrollback_pager_to_active_tab();
@@ -347,7 +347,7 @@ impl App {
                     self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
             }
             Action::PanePrevTab => {
                 self.stash_scrollback_pager_to_active_tab();
@@ -356,7 +356,7 @@ impl App {
                     self.state.focus = state::Focus::Pane;
                 }
                 self.restore_active_tab_scrollback_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
             }
             Action::PaneLastTab => {
                 self.stash_scrollback_pager_to_active_tab();
@@ -369,7 +369,7 @@ impl App {
                     // means "interact with that tab", so pull focus
                     // into the pane.
                     self.state.focus = state::Focus::Pane;
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                 } else {
                     self.state.flash_info("no previous tab");
                 }
@@ -433,8 +433,8 @@ impl App {
 
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {
-                self.theme = self.theme.toggled();
-                self.state.flash_info(if self.theme.mono {
+                self.view.theme = self.view.theme.toggled();
+                self.state.flash_info(if self.view.theme.mono {
                     "colors off"
                 } else {
                     "colors on"
@@ -451,7 +451,7 @@ impl App {
             }
 
             Action::Redraw => {
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
             }
             Action::Quit => self.request_quit(),
 
