@@ -173,6 +173,7 @@ mod find_picker;
 mod git_state;
 mod grep_session;
 mod key_dispatch;
+mod loop_steps;
 mod pager_handler;
 mod pager_history;
 mod pane_wake;
@@ -1437,15 +1438,8 @@ impl App {
             // need clearing. But don't use terminal.clear() for this — the
             // pager overlay will paint over everything anyway, and the
             // clear causes a visible flash. Just force a draw instead.
-            if self.pager.is_some() && self.pane_tabs.is_some() && !self.pager_was_open {
-                needs_draw = true;
-                draw_reason = 3;
-            }
-            self.pager_was_open = self.pager.is_some();
-            let mut pending_clear = false;
-            if self.needs_full_repaint {
-                self.needs_full_repaint = false;
-                pending_clear = true;
+            let (pager_redraw, pending_clear) = self.step_pager_repaint();
+            if pager_redraw {
                 needs_draw = true;
                 draw_reason = 3;
             }
@@ -1594,21 +1588,10 @@ impl App {
                 draw_reason = 3;
             }
 
-            // MVU Phase 5: snapshot the active pane's routing flags into
-            // the Model, AFTER the drain + `mark_exited` finalized
-            // `is_closed` and BEFORE `recv`. `route_snapshot` reads this
-            // instead of the live host, decoupling key routing from the
-            // Runtime. Behavior-equivalent: the only mutators of these
-            // flags (scroll-mode key handlers / child-exit drain) run
-            // either before this point or strictly after `route_snapshot`,
-            // so the value matches what the old live read observed.
-            self.state.pane_snapshot =
-                self.pane_tabs
-                    .as_ref()
-                    .map_or_else(state::PaneSnapshot::default, |t| state::PaneSnapshot {
-                        is_scrolling: t.active().is_scrolling(),
-                        is_closed: t.active().is_closed(),
-                    });
+            // MVU Phase 5: snapshot the active pane's routing flags into the
+            // Model, AFTER the drain + `mark_exited` finalized `is_closed` and
+            // BEFORE `recv` (see `snapshot_pane_routing`).
+            self.snapshot_pane_routing();
 
             // MVU Phase 2: one clock read for all PRE-recv timers
             // (send_pending_resumes / find_crashed_restore_tab /
@@ -1726,69 +1709,26 @@ impl App {
                 self.context_dirty = true;
                 scheduler.disarm(Deadline::RefreshQuiet);
             }
-            // 1Hz safety net for git state — converges within a second
-            // when FSEvents misses an event (commits replace `.git/index`
-            // via atomic rename, which is the inode-replacement edge
-            // case where FSEvents can drop notifications). Diff-aware:
-            // only repaints when git_info or git_files actually
-            // differ, so idle dps stays at 0. Huge trees back off to
-            // 10 s — the mtime-cache short-circuit in
-            // `refresh_git_state` already makes the idle case cheap,
-            // but the back-off bounds the worst case (e.g. a burst of
-            // legitimate index changes) where the cache misses.
-            let git_poll_interval = if self.state.is_huge_tree {
-                Duration::from_secs(10)
-            } else {
-                Duration::from_secs(1)
-            };
-            if self.state.git.info.is_some()
-                && now_pre.duration_since(last_git_poll) >= git_poll_interval
-            {
-                last_git_poll = now_pre;
-                if self.state.refresh_git_state() {
-                    needs_draw = true;
-                    draw_reason = 3;
-                }
-            }
-            // MVU Phase 2: arm/disarm GitPoll to reflect git_info presence
-            // (advisory — the predicate above fires it against now_pre).
-            if self.state.git.info.is_some() {
-                scheduler.arm(Deadline::GitPoll, last_git_poll + git_poll_interval);
-            } else {
-                scheduler.disarm(Deadline::GitPoll);
-            }
-
-            // Process writable MCP commands from Claude (MVU Phase 3d: the
-            // requests now arrive via Message::Mcp, buffered into mcp_pending
-            // by the recv pre-step; this drain executes + replies). Kept at
-            // its early loop position so a queued request never sits behind a
-            // TUI-tearing ForegroundExec and breaches the client's 5s timeout.
-            // `execute_mcp_command` writes the context file synchronously,
-            // then reply.send — preserving single-connection read-after-write.
-            for req in std::mem::take(&mut mcp_pending) {
-                self.activity_mcp_reqs = self.activity_mcp_reqs.saturating_add(1);
-                let resp = self.execute_mcp_command(req.command);
-                let _ = req.reply.send(resp);
+            // 1 Hz safety-net git poll + GitPoll deadline arming (see
+            // `poll_git_cadence`).
+            if self.poll_git_cadence(now_pre, &mut last_git_poll, &mut scheduler) {
                 needs_draw = true;
                 draw_reason = 3;
             }
 
-            // Drain the git-worker results the recv arm buffered into
-            // `git_pending` (MVU Phase 3a — only the source moved; the body
-            // is unchanged). Stale results (the user navigated past them)
-            // are discarded via the generation counter inside
-            // `ingest_git_result`; matching results refill the raw-status
-            // cache and recompute git_files / git_info against the *current*
-            // listing dir. This is the SOLE apply/count/take site — the recv
-            // arm and coalesce loop only buffer (no double-count/-apply).
-            // Cheap when empty.
-            for result in std::mem::take(&mut git_pending) {
-                if self.ingest_git_result(result) {
-                    needs_draw = true;
-                    draw_reason = 2;
-                    // git_branch / dirty flag may have changed.
-                    self.context_dirty = true;
-                }
+            // Execute writable MCP commands buffered into `mcp_pending` (see
+            // `drain_mcp_pending` — kept at this early loop position for the
+            // 5s read-after-write timeout contract).
+            if self.drain_mcp_pending(&mut mcp_pending) {
+                needs_draw = true;
+                draw_reason = 3;
+            }
+
+            // Drain the git-worker results buffered into `git_pending` — the
+            // SOLE apply/count/take site (see `drain_git_pending`).
+            if self.drain_git_pending(&mut git_pending) {
+                needs_draw = true;
+                draw_reason = 2;
             }
 
             // MVU Phase 3c: the last poll floor is GONE. Every event source
@@ -2104,91 +2044,17 @@ impl App {
             // clock would defer them by up to the full wait).
             let now_post = std::time::Instant::now();
 
-            // Activity monitor: roll over the 1-second window.
-            let mut activity_only_draw = false;
-            if self.show_activity
-                && now_post.duration_since(self.activity_last_tick) >= Duration::from_secs(1)
-            {
-                let new_dps = self.activity_draws;
-                let new_bps = self.activity_bytes;
-                let new_sp = self.activity_reason_pane;
-                let new_se = self.activity_reason_event;
-                let new_so = self.activity_reason_other;
-                let new_we = self.activity_watcher_events;
-                let new_mr = self.activity_mcp_reqs;
-                let new_gr = self.activity_git_results;
-                // Only force a redraw if something changed.
-                if (new_dps != self.activity_dps
-                    || new_bps != self.activity_bps
-                    || new_sp != self.activity_snap_pane
-                    || new_se != self.activity_snap_event
-                    || new_so != self.activity_snap_other
-                    || new_we != self.activity_watcher_events_snap
-                    || new_mr != self.activity_mcp_reqs_snap
-                    || new_gr != self.activity_git_results_snap)
-                    && !needs_draw
-                {
-                    // This draw exists only to refresh the overlay —
-                    // don't count it in the stats or it oscillates.
-                    needs_draw = true;
-                    activity_only_draw = true;
-                }
-                self.activity_dps = new_dps;
-                self.activity_bps = new_bps;
-                self.activity_snap_pane = new_sp;
-                self.activity_snap_event = new_se;
-                self.activity_snap_other = new_so;
-                self.activity_watcher_events_snap = new_we;
-                self.activity_mcp_reqs_snap = new_mr;
-                self.activity_git_results_snap = new_gr;
-                // Snapshot + reset the peak frame time. Not part of the
-                // force-redraw predicate above (it's a passive stat — a
-                // changing peak shouldn't itself drive an overlay redraw).
-                self.activity_frame_peak_snap = self.activity_frame_peak_us;
-                self.activity_frame_peak_us = 0;
-                self.activity_render_peak_snap = self.activity_render_peak_us;
-                self.activity_render_peak_us = 0;
-                self.activity_echo_snap = self.activity_echo_peak_us;
-                self.activity_echo_peak_us = 0;
-                self.activity_draws = 0;
-                self.activity_bytes = 0;
-                self.activity_reason_pane = 0;
-                self.activity_reason_event = 0;
-                self.activity_reason_other = 0;
-                self.activity_watcher_events = 0;
-                self.activity_mcp_reqs = 0;
-                self.activity_git_results = 0;
-                self.activity_last_tick = now_post;
-                // Refresh process stats (RSS / thread count) on the
-                // same 1 s cadence. Hidden inside the A-monitor
-                // tick so callers without it open pay zero cost.
-                self.refresh_process_stats();
+            // Activity monitor: roll over the 1-second window (snapshot +
+            // reset + proc-stat refresh; see `roll_activity_window`). Returns
+            // whether an overlay-only redraw is warranted this tick.
+            let activity_only_draw = self.roll_activity_window(now_post, needs_draw);
+            if activity_only_draw {
+                needs_draw = true;
             }
 
-            // MVU Phase 2: re-arm ActivityRollover from current state
-            // (advisory; the predicate above fires it against now_post).
-            // The activity monitor is a status-area corner overlay (not a
-            // top_overlay pane), so when shown with no pane the floor is
-            // None and this deadline is the only thing waking the rollover.
-            if self.show_activity {
-                scheduler.arm(
-                    Deadline::ActivityRollover,
-                    self.activity_last_tick + Duration::from_secs(1),
-                );
-            } else {
-                scheduler.disarm(Deadline::ActivityRollover);
-            }
-
-            // MVU Phase 3d: ~1 Hz tick for a streaming capture / `:task`
-            // viewer's elapsed-timer title — the duty `MAX_IDLE_CAP` silently
-            // covered until 3d. Armed only while such a view is live; the
-            // pre-recv `drain_pending_capture` / `refresh_task_viewer` rebuild
-            // the title on the tick (redrawing only when the seconds change).
-            if self.capture_tick_should_arm() {
-                scheduler.arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
-            } else {
-                scheduler.disarm(Deadline::CaptureTick);
-            }
+            // Re-arm the post-recv advisory deadlines — ActivityRollover +
+            // CaptureTick (see `arm_post_recv_deadlines`).
+            self.arm_post_recv_deadlines(now_post, &mut scheduler);
 
             // Only redraw when something actually changed.
             // Wrap in DEC 2026 synchronized update so the terminal
