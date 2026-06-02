@@ -2521,9 +2521,9 @@ impl App {
         }
 
         // `:` prompt with no whitespace yet — complete the spyc command
-        // name from `SPYC_COMMANDS` rather than falling through to
-        // filesystem completion (which would try to match a file
-        // starting with "pa" in cwd, almost never useful here).
+        // name from the command registry (`COMMAND_TABLE`) rather than
+        // falling through to filesystem completion (which would try to match
+        // a file starting with "pa" in cwd, almost never useful here).
         if is_command && !buffer.contains(char::is_whitespace) {
             self.tab_complete_spyc_command(&buffer);
             return;
@@ -2668,17 +2668,16 @@ impl App {
         }
     }
 
-    /// Tab-complete a `:` command base name from `SPYC_COMMANDS`.
-    /// Single match: fill the name plus a trailing space (so the user
-    /// can keep typing args, or hit Enter for the no-arg form —
-    /// `dispatch_command` trims). Common-prefix advance: fill the
-    /// shared prefix and flash a count. Otherwise show all matches and
-    /// stage cycle state for repeated Tab.
+    /// Tab-complete a `:` command base name from the command registry
+    /// ([`crate::app::state::COMMAND_TABLE`]). Single match: fill the name
+    /// plus a trailing space (so the user can keep typing args, or hit Enter
+    /// for the no-arg form — `dispatch_command` trims). Common-prefix advance:
+    /// fill the shared prefix and flash a count. Otherwise show all matches
+    /// and stage cycle state for repeated Tab.
     fn tab_complete_spyc_command(&mut self, prefix: &str) {
-        let matches: Vec<String> = crate::app::state::SPYC_COMMANDS
-            .iter()
+        let matches: Vec<String> = crate::app::state::completion_command_names()
             .filter(|c| c.starts_with(prefix))
-            .map(|s| (*s).to_string())
+            .map(str::to_string)
             .collect();
         if matches.is_empty() {
             return;
