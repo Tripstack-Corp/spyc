@@ -396,6 +396,12 @@ impl App {
                     on_ok,
                     err_prefix,
                 } => {
+                    // Echo-latency probe (A-monitor only): stamp when a
+                    // keystroke is forwarded to the active pane; the pre-recv
+                    // pane scan measures forward→echo on the agent's reply.
+                    if self.show_activity && matches!(target, PaneTarget::Active) {
+                        self.pane_send_at = Some(std::time::Instant::now());
+                    }
                     let result = match target {
                         PaneTarget::Active => self
                             .pane_tabs

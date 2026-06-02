@@ -1004,7 +1004,7 @@ impl App {
         // (build + diff + tty emission); `r` is just the render closure (CPU).
         // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
         let l1 = format!(
-            " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms ",
+            " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
             self.activity_dps,
             self.activity_snap_pane,
             self.activity_snap_event,
@@ -1012,6 +1012,10 @@ impl App {
             self.activity_bps,
             self.activity_frame_peak_snap as f64 / 1000.0,
             self.activity_render_peak_snap as f64 / 1000.0,
+            // Peak keystroke→echo round-trip (forward → agent echo → render).
+            // `echo - r` ≈ the agent/pty round-trip (Claude re-rendering its
+            // input box) we don't control; a small `echo` ⇒ spyc isn't the lag.
+            self.activity_echo_snap as f64 / 1000.0,
         );
 
         // Line 2 — internals digest.
