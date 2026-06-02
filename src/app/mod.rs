@@ -109,6 +109,15 @@ enum Message {
     /// single channel without re-touching the enum.
     #[allow(dead_code)]
     Tick(Deadline),
+    /// MVU Phase 6: an off-thread `active_agent_status` resolve landed a result
+    /// in `agent_status_pending`. Like the git/MCP forwarders, the worker must
+    /// WAKE the loop — the event-driven loop blocks on a bare `recv()` at idle,
+    /// so a landed result would otherwise sit unread (and unrendered) until an
+    /// unrelated event. Payloadless: collapses to a Timeout like the other
+    /// re-scan wakes (drop-safe in coalesce). The redraw is driven by the
+    /// pre-recv scan's `agent_status_pending` check, not by this message
+    /// surviving — the actual apply stays in `active_agent_status` (render).
+    AgentStatusReady,
 }
 
 /// How long to wait after spawning a restored Claude pane before
@@ -156,6 +165,7 @@ pub enum PostAction {
 }
 
 mod actions;
+mod agent_status;
 mod capture;
 mod commands;
 mod effect;
@@ -393,6 +403,16 @@ pub struct App {
     /// main-thread CPU. The status string changes essentially
     /// never within a session, so a coarse TTL is fine.
     agent_status_cache: Option<AgentStatusCache>,
+    /// MVU Phase 6: the session short-id resolve (`resolve_short_id` walks
+    /// every `~/.claude/sessions/*.json`) runs OFF the render thread — landing
+    /// slot + in-flight flag, the same pattern as `TabEntry::live_cwd` (#227).
+    /// `active_agent_status` reads `agent_status_cache` immediately and never
+    /// blocks; a background refresh (kicked at most once per `AGENT_STATUS_TTL`,
+    /// or on a pane switch) lands here and is applied on a later frame. Without
+    /// this the walk stalled render once per 30 s — the same class of hitch as
+    /// the `lsof` regression, and it scales with the user's accumulated sessions.
+    agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
+    agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pending_history_pick: Option<LineEditor>,
     /// Snapshot of jump-history entries (newest first) for the popup
     /// opened by `?` on an empty `J` prompt (spy parity), or by
@@ -810,6 +830,8 @@ impl App {
             pending_capture: None,
             background_tasks: BackgroundTasks::new(),
             agent_status_cache: None,
+            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_history_pick: None,
             pending_jump_history: None,
             find_picker: None,
@@ -1452,6 +1474,18 @@ impl App {
                 draw_reason = 3;
             }
 
+            // MVU Phase 6: drain any off-thread agent-status resolve that
+            // landed (it woke us via `Message::AgentStatusReady`). Done HERE,
+            // in the always-run scan — not in `active_agent_status` — because
+            // the status bar (and thus `active_agent_status`) is skipped on the
+            // overlay / top-pager render paths; draining only there would leave
+            // the slot full and this nudge would busy-spin. Applying the result
+            // updates the cache so the next render shows the short-id.
+            if self.apply_landed_agent_status() {
+                needs_draw = true;
+                draw_reason = 3;
+            }
+
             // F-finder: drain any candidate batches the walker
             // worker has pushed since the last tick. Re-rank +
             // re-render only when something changed (or the walk
@@ -1847,17 +1881,24 @@ impl App {
                             Ok(Message::Input(ev))
                         })
                 }
-                // MVU Phase 3d: a grep/finder wake or a reader death-wake —
+                // MVU Phase 3d / Phase 6: a grep/finder wake, a reader
+                // death-wake, or an agent-status-resolved wake — all
                 // payloadless, collapse-to-Timeout. For grep/finder the
                 // pre-recv drains re-run; for ReaderExited the synthesized
                 // Timeout re-enters the loop, where the loop-top reader_done
-                // check exits.
-                Ok(Message::GrepOutput | Message::FindOutput | Message::ReaderExited) => {
-                    coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
-                        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                            Ok(Message::Input(ev))
-                        })
-                }
+                // check exits; for AgentStatusReady the pre-recv scan's
+                // pending-check sets `needs_draw` so render applies the landed
+                // short-id (the worker can't redraw, only wake — see the field
+                // doc on `agent_status_pending`).
+                Ok(
+                    Message::GrepOutput
+                    | Message::FindOutput
+                    | Message::ReaderExited
+                    | Message::AgentStatusReady,
+                ) => coalesce_pending(&msg_rx, &mut fs_pending, &mut git_pending, &mut mcp_pending)
+                    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+                        Ok(Message::Input(ev))
+                    }),
                 other => other,
             };
             match effective {
@@ -2048,7 +2089,8 @@ impl App {
                     | Message::SinkOutput { .. }
                     | Message::GrepOutput
                     | Message::FindOutput
-                    | Message::ReaderExited,
+                    | Message::ReaderExited
+                    | Message::AgentStatusReady,
                 ) => {
                     unreachable!(
                         "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -2320,46 +2362,6 @@ impl App {
     /// Renders as `claude:<8-hex>` / `gemini:<8-hex>` / `codex` (the
     /// short-id resolution for codex is a follow-up — its rollout
     /// filenames encode the UUID but we don't parse them yet).
-    fn active_agent_status(&mut self) -> Option<String> {
-        let tabs = self.pane_tabs.as_ref()?;
-        let active = tabs.active_info();
-        let profile = crate::agent::detect(&active.command);
-        let kind = profile.kind();
-        if kind == AgentKind::Other {
-            return None;
-        }
-        let label = profile.name();
-        // Cache hit: same (kind, cwd, spawn_epoch_secs) within
-        // AGENT_STATUS_TTL → reuse. The underlying resolver scans
-        // every `~/.claude/sessions/*.json` (one `serde_json::Value`
-        // parse per file) and is the dominant per-frame cost on
-        // long-running users with many accumulated sessions —
-        // sample showed ~65% of main-thread CPU here before this
-        // cache.
-        if let Some(cached) = self.agent_status_cache.as_ref()
-            && cached.kind == kind
-            && cached.spawn_epoch_secs == active.spawn_epoch_secs
-            && cached.cwd == active.cwd
-            && cached.computed_at.elapsed() < AGENT_STATUS_TTL
-        {
-            return cached.status.clone();
-        }
-        // Cache miss — pay the file walk once, then memoize.
-        let short_id = profile.resolve_short_id(&active.cwd, active.spawn_epoch_secs);
-        let status = Some(match short_id {
-            Some(id) => format!("{label}:{id}"),
-            None => label.to_string(),
-        });
-        self.agent_status_cache = Some(AgentStatusCache {
-            computed_at: std::time::Instant::now(),
-            kind,
-            cwd: active.cwd.clone(),
-            spawn_epoch_secs: active.spawn_epoch_secs,
-            status: status.clone(),
-        });
-        status
-    }
-
     fn header_parts(&self) -> (String, String) {
         match self.state.view {
             View::Dir => (crate::paths::display_tilde(&self.state.listing.dir), {
@@ -7496,6 +7498,8 @@ impl App {
             pending_capture: None,
             background_tasks: BackgroundTasks::new(),
             agent_status_cache: None,
+            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_history_pick: None,
             pending_jump_history: None,
             find_picker: None,
