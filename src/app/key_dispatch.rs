@@ -321,6 +321,109 @@ impl App {
         Ok(Vec::new())
     }
 
+    /// MVU Phase 6 PR-C: route a bracketed-paste event. Into the active prompt
+    /// buffer/editor when prompting; else to the `V`/`D` top-overlay subprocess
+    /// (unless the bottom pane is explicitly focused); else to the active pane
+    /// (focusing it + tracking the text for `yP`), wrapped in bracketed-paste
+    /// markers; else flash a "nowhere to paste" hint. Verbatim move of the
+    /// loop's `Event::Paste` arm.
+    pub(crate) fn handle_paste(&mut self, text: String) -> Result<()> {
+        if crate::key_trace::is_enabled() {
+            crate::key_trace::log(&format!(
+                "RX paste len={} pane_focused={} mode={:?}",
+                text.len(),
+                self.state.pane_focused(),
+                std::mem::discriminant(&self.state.mode),
+            ));
+        }
+        if let Mode::Prompting(ref mut p) = self.state.mode {
+            // Paste into the active prompt buffer. Strip newlines (prompts
+            // are single-line).
+            let clean = text.replace(['\n', '\r'], " ");
+            if let Some(ed) = p.editor.as_mut() {
+                // Editor present (`!` / `;` / `:`): splice at the cursor so a
+                // mid-line paste lands where the user is, then sync the
+                // canonical buffer from the editor.
+                ed.insert_str(&clean);
+                p.buffer = ed.text();
+            } else {
+                // Simple prompt (search, mkdir, etc.) -- no cursor, append.
+                p.buffer.push_str(&clean);
+            }
+        } else if let Some(overlay) = self
+            .top_overlay
+            .as_mut()
+            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused()))
+        {
+            // `V`/`D` top-overlay is the foreground subprocess (editor or
+            // pager). Route the paste to it rather than the bottom pane — the
+            // bottom pane only wins when explicitly focused (`^a-j`); without
+            // this guard, pasting into a `V`-launched $EDITOR sent the text to
+            // claude *and* yanked focus there. Don't steal focus here.
+            let mut buf = Vec::with_capacity(text.len() + 12);
+            buf.extend_from_slice(b"\x1b[200~");
+            buf.extend_from_slice(text.as_bytes());
+            buf.extend_from_slice(b"\x1b[201~");
+            overlay.send_bytes(&buf)?;
+        } else if self.pane_tabs.is_some() {
+            // Switch focus to the pane — the user clearly intends to interact
+            // with it if they're pasting.
+            if !self.state.pane_focused() {
+                self.set_pane_focus(true);
+            }
+            // Track pasted text for yP (yank last prompt).
+            self.state.pane_prompt_buf.push_str(&text);
+            // Wrap in bracketed paste so the child app (e.g. claude) receives
+            // the block as a single paste, not line-by-line.
+            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
+            let mut buf = Vec::with_capacity(text.len() + 12);
+            buf.extend_from_slice(b"\x1b[200~");
+            buf.extend_from_slice(text.as_bytes());
+            buf.extend_from_slice(b"\x1b[201~");
+            pane.send_bytes(&buf)?;
+        } else {
+            // No prompt and no pane — nowhere sensible to send it. Some
+            // terminals wrap rapid-fire keystrokes in bracketed paste, so
+            // silently dropping could swallow real input; flash a hint.
+            let n = text.chars().count();
+            self.state.flash_info(format!(
+                "paste ignored ({n} chars) — open `:` or `^\\` to paste"
+            ));
+        }
+        Ok(())
+    }
+
+    /// MVU Phase 6 PR-C: handle a terminal resize — immediately resize all pty
+    /// tabs + the top overlay so child shells re-render at the correct width,
+    /// and rebuild the help overlay (its wrap points are baked at open time).
+    /// Verbatim move of the loop's `Event::Resize` arm.
+    pub(crate) fn handle_resize(&mut self, cols: u16, rows: u16) {
+        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+        let pane_pct = self.effective_pane_pct();
+        if let Some(tabs) = self.pane_tabs.as_mut() {
+            let layout = Self::compute_layout(
+                area,
+                true,
+                pane_pct,
+                self.state.config.layout.status_position,
+            );
+            if let Some(pane_rect) = layout.pane {
+                for entry in tabs.tabs_mut() {
+                    let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
+                }
+            }
+        }
+        if let Some(overlay) = self.top_overlay.as_mut() {
+            let (r, c) = Self::top_overlay_size(pane_pct, self.pane_tabs.is_some());
+            let _ = overlay.resize(r, c);
+        }
+        // Help content is baked at open time for the current width (wrap
+        // points, column count). Rebuild so it matches the new dimensions.
+        if self.help_is_open() {
+            self.open_help();
+        }
+    }
+
     /// Dispatch a user-defined binding. Inline-data actions (unix command,
     /// preset pattern, preset path) run through the same machinery as the
     /// built-in prompts but skip the prompt UI.
