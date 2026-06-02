@@ -10,8 +10,105 @@
 //! until a capture/task installs its wake slot in this phase).
 
 use super::{App, TASK_BUFFER_CAP, TaskStatus, eof_marker_line, strip_crlf};
+use crate::pane::pty_host::ExitOutcome;
+
+/// MVU Phase 5 PR8: a child-exit event, finalized by [`App::apply_exit_event`].
+///
+/// **Design B** (chosen over the plan's waiter-thread sketch): the child stays
+/// on the main thread and is reaped *synchronously* in the pre-recv scan via
+/// the bounded [`crate::pane::pty_host::PtyHost::reap_exit`] (EOF ⇒ the child
+/// has already exited, so the reap returns immediately — never speculative).
+/// These are therefore loop-synthesized **synchronous** events, NOT channel
+/// `Message`s: the producer is the loop's own reap, so a channel round-trip
+/// would only add latency + reorder the exit behind a concurrent keystroke.
+/// They realize the plan's `CaptureExit` / `TaskExited`; `PaneExited` (and
+/// `PaneTarget::Sink`) are deferred — both need a pane-stored `SinkId` (which
+/// doesn't exist yet; the id today is only a wake-closure trace label), and a
+/// pane exit has no inline blocking reap to relocate (it's a non-blocking
+/// `try_wait` + a `[exited N]` tab label in `tabs::mark_exited`). Phase 6 can
+/// promote these into the unified `update(&mut Model, Message)` if exits ever
+/// become worker-produced.
+enum ExitEvent {
+    /// The foreground `!` capture's child exited — write the ✓/✗ pager
+    /// title + `[EOF]` frame and clear `pending_capture`.
+    CaptureExit { status: ExitOutcome },
+    /// Background task `id`'s child exited — flash the toast + set its
+    /// terminal `TaskStatus`.
+    TaskExited { id: u32, status: ExitOutcome },
+}
 
 impl App {
+    /// MVU Phase 5 PR8: finalize a child exit. The single handler the two
+    /// streaming drains dispatch into once they've detected `newly_closed`
+    /// and bounded-reaped the status — the update-shaped seam Phase 6 lifts
+    /// into the unified `update`. Each arm reproduces the pre-PR8 inline
+    /// finalize byte-for-byte; only the reap moved a frame upstream.
+    fn apply_exit_event(&mut self, ev: ExitEvent) {
+        match ev {
+            ExitEvent::CaptureExit { status } => {
+                let Some(capture) = self.pending_capture.take() else {
+                    return;
+                };
+                // Status glyph mirrors the bottom-status-bar conventions
+                // (✓ for exit 0, ✗ for everything else) so the pager title
+                // tells the user at a glance whether their command succeeded.
+                let (exit_info, ok) = match status {
+                    ExitOutcome::Exited { code, success } => {
+                        if success {
+                            ("exit 0".to_string(), true)
+                        } else {
+                            (format!("exit {code}"), false)
+                        }
+                    }
+                    ExitOutcome::Errored(e) => (format!("error: {e}"), false),
+                };
+                let glyph = if ok { "\u{2713}" } else { "\u{2717}" }; // ✓ / ✗
+                let title = format!("{glyph} {} — {exit_info}", capture.title);
+                // Final rebuild with stderr included.
+                use ansi_to_tui::IntoText;
+                let normalized = strip_crlf(&capture.buffer);
+                let text = normalized.as_slice().into_text().unwrap_or_default();
+                if let Some(view) = self.pager.as_mut() {
+                    view.title = title;
+                    view.lines = text.lines;
+                    // Anchor an EOF marker to the bottom of content so it's
+                    // visible even when output exceeds viewport_h.
+                    view.lines.push(eof_marker_line(&exit_info));
+                    view.eof_in_content = true;
+                    view.saveable = true;
+                    view.streaming = false;
+                    view.scroll_to_bottom_auto();
+                }
+            }
+            ExitEvent::TaskExited { id, status } => {
+                let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+                    return;
+                };
+                let (status_text, status_val) = match status {
+                    ExitOutcome::Exited { code, success } => {
+                        if success {
+                            ("exit 0".to_string(), TaskStatus::Exited(0))
+                        } else {
+                            #[allow(clippy::cast_possible_wrap)]
+                            let code = code as i32;
+                            (format!("exit {code}"), TaskStatus::Exited(code))
+                        }
+                    }
+                    ExitOutcome::Errored(msg) => {
+                        (format!("error: {msg}"), TaskStatus::Crashed(msg))
+                    }
+                };
+                task.status = status_val;
+                task.finished_at = Some(std::time::Instant::now());
+                let secs = task.started.elapsed().as_secs();
+                let cmd_display = task.cmd_display.clone();
+                self.state.flash_info(format!(
+                    "task #{id}: {cmd_display} — {status_text} ({secs}s)"
+                ));
+            }
+        }
+    }
+
     /// Drain the foreground `!` capture into its pager and finalize on EOF.
     /// Returns whether a redraw is needed. MVU Phase 3c PR3: with the poll
     /// floor gone, this is gated on actual change — new output, the exit
@@ -20,6 +117,9 @@ impl App {
     /// rather than every iteration, and idle draws stay at 0.
     pub(crate) fn drain_pending_capture(&mut self) -> bool {
         let mut redraw = false;
+        // MVU Phase 5 PR8: the reaped exit, dispatched to `apply_exit_event`
+        // after the `&mut self.pending_capture` borrow below ends.
+        let mut exit = None;
         if let Some(capture) = &mut self.pending_capture {
             // MVU Phase 3c: clear-before-read (paired with the reader CAS).
             capture.host.clear_wake_pending();
@@ -84,45 +184,16 @@ impl App {
                 }
             }
             if capture.finished {
-                // Reader thread already saw EOF; capture.host may have already
-                // harvested exit_status during drain. If not (race window),
-                // wait() now — safe because the child has exited.
-                let (exit_info, ok) = if let Some(s) = capture.host.exit_status.as_ref() {
-                    if s.success() {
-                        ("exit 0".to_string(), true)
-                    } else {
-                        (format!("exit {}", s.exit_code()), false)
-                    }
-                } else {
-                    match capture.host.child.wait() {
-                        Ok(s) if s.success() => ("exit 0".to_string(), true),
-                        Ok(s) => (format!("exit {}", s.exit_code()), false),
-                        Err(e) => (format!("error: {e}"), false),
-                    }
-                };
-                // Status glyph mirrors the bottom-status-bar conventions
-                // (✓ for exit 0, ✗ for everything else) so the pager title
-                // tells the user at a glance whether their command succeeded.
-                let glyph = if ok { "\u{2713}" } else { "\u{2717}" }; // ✓ / ✗
-                let title = format!("{glyph} {} — {exit_info}", capture.title);
-                // Final rebuild with stderr included.
-                use ansi_to_tui::IntoText;
-                let normalized = strip_crlf(&capture.buffer);
-                let text = normalized.as_slice().into_text().unwrap_or_default();
-                if let Some(view) = self.pager.as_mut() {
-                    view.title = title;
-                    view.lines = text.lines;
-                    // Anchor an EOF marker to the bottom of content so it's
-                    // visible even when output exceeds viewport_h.
-                    view.lines.push(eof_marker_line(&exit_info));
-                    view.eof_in_content = true;
-                    view.saveable = true;
-                    view.streaming = false;
-                    view.scroll_to_bottom_auto();
-                }
-                self.pending_capture = None;
-                redraw = true; // the exit frame (✓/✗ title + [EOF]) must draw
+                // MVU Phase 5 PR8: bounded reap (the reader already saw EOF,
+                // so this returns immediately — see `PtyHost::reap_exit`).
+                // Defer the ✓/✗ title + [EOF] finalize to `apply_exit_event`
+                // once this `&mut self.pending_capture` borrow ends.
+                exit = Some(capture.host.reap_exit());
             }
+        }
+        if let Some(status) = exit {
+            self.apply_exit_event(ExitEvent::CaptureExit { status });
+            redraw = true; // the exit frame (✓/✗ title + [EOF]) must draw
         }
         redraw
     }
@@ -135,7 +206,9 @@ impl App {
     /// be driven here; further chunks don't change the glyph, so only the
     /// transition redraws (idle draws stay at 0 for a chatty quiet-divider task).
     pub(crate) fn drain_background_tasks(&mut self) -> bool {
-        let mut just_finished: Vec<(u32, String, String, std::time::Duration)> = Vec::new();
+        // MVU Phase 5 PR8: reaped exits, dispatched to `apply_exit_event`
+        // after the `&mut self.background_tasks.tasks` loop borrow ends.
+        let mut exited: Vec<(u32, ExitOutcome)> = Vec::new();
         let mut divider_appeared = false;
         for task in &mut self.background_tasks.tasks {
             if !matches!(task.status, TaskStatus::Running) {
@@ -160,42 +233,19 @@ impl App {
                 divider_appeared = true;
             }
             if drain.newly_closed {
-                // Reader thread observed EOF this tick. Host's drain already
-                // tried try_wait — re-attempt here in case it raced, then
-                // build the status_text + TaskStatus.
-                let exit = task
-                    .host
-                    .exit_status
-                    .take()
-                    .map_or_else(|| task.host.child.wait(), Ok);
-                let (status_text, status_val) = match exit {
-                    Ok(s) if s.success() => ("exit 0".to_string(), TaskStatus::Exited(0)),
-                    #[allow(clippy::cast_possible_wrap)]
-                    Ok(s) => {
-                        let code = s.exit_code() as i32;
-                        (format!("exit {code}"), TaskStatus::Exited(code))
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        (format!("error: {msg}"), TaskStatus::Crashed(msg))
-                    }
-                };
-                task.status = status_val;
-                task.finished_at = Some(std::time::Instant::now());
-                just_finished.push((
-                    task.id,
-                    task.cmd_display.clone(),
-                    status_text,
-                    task.started.elapsed(),
-                ));
+                // MVU Phase 5 PR8: bounded reap now, while the host is
+                // borrowed (the reader saw EOF → the child is gone, so this
+                // returns immediately). The `TaskExited` finalize (flash +
+                // `TaskStatus`) runs after the loop releases the tasks borrow.
+                // The task stays `Running` until then — still within this same
+                // pre-recv scan, before the drain returns — so the subsequent
+                // `refresh_task_viewer` observes the finalized status.
+                exited.push((task.id, task.host.reap_exit()));
             }
         }
-        let finished_any = !just_finished.is_empty();
-        for (id, cmd_display, status_text, elapsed) in just_finished {
-            let secs = elapsed.as_secs();
-            self.state.flash_info(format!(
-                "task #{id}: {cmd_display} — {status_text} ({secs}s)"
-            ));
+        let finished_any = !exited.is_empty();
+        for (id, status) in exited {
+            self.apply_exit_event(ExitEvent::TaskExited { id, status });
         }
         divider_appeared || finished_any
     }

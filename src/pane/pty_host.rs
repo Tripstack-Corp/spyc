@@ -134,6 +134,36 @@ pub struct DrainResult {
     pub newly_closed: bool,
 }
 
+/// MVU Phase 5 PR8: the digested outcome of a bounded exit reap
+/// ([`PtyHost::reap_exit`]). Carries the few facts the capture/task
+/// finalizers need to reproduce their exact status strings.
+#[derive(Debug)]
+pub enum ExitOutcome {
+    /// The child was reaped with a status. `code` is `exit_code()`;
+    /// `success` is `status.success()` (NOT `code == 0` — portable_pty
+    /// maps signal deaths to `success() == false`). Captures hardcode
+    /// `"exit 0"` on `success`.
+    Exited { code: u32, success: bool },
+    /// `wait()` returned `Err` — only the task path renders this
+    /// (`"error: {msg}"` → `TaskStatus::Crashed`).
+    Errored(String),
+}
+
+/// MVU Phase 5 PR8: pure digest of a reaped child status into an
+/// [`ExitOutcome`] — split out of [`PtyHost::reap_exit`] so the code/
+/// success mapping is unit-testable without spawning a subprocess (the
+/// reap itself just supplies the `try_wait`-cached status or one
+/// `wait()`).
+fn digest_exit(reaped: std::io::Result<portable_pty::ExitStatus>) -> ExitOutcome {
+    match reaped {
+        Ok(status) => ExitOutcome::Exited {
+            code: status.exit_code(),
+            success: status.success(),
+        },
+        Err(e) => ExitOutcome::Errored(e.to_string()),
+    }
+}
+
 impl PtyHost {
     /// Spawn `spec.command` in a fresh pty of `spec.rows × spec.cols`.
     /// Same machinery that `Pane::spawn_with_env` and `spawn_capture`
@@ -306,6 +336,25 @@ impl PtyHost {
             }
         }
         DrainResult { newly_closed }
+    }
+
+    /// MVU Phase 5 PR8: the loop's single, bounded exit reap. Call ONLY
+    /// after a drain observed `newly_closed` — the reader saw EOF on the
+    /// pty master, which means every fd to the slave is closed, so the
+    /// direct child has already exited and this returns immediately. It is
+    /// never a speculative `wait()`. Prefers an already-harvested
+    /// `exit_status` (the non-blocking `try_wait` in [`Self::drain`]),
+    /// falling back to one `wait()` for the brief race where `try_wait`
+    /// returned `None` just as the child exited. This is the documented
+    /// Phase-5 "bounded synchronous reap" exception to the
+    /// no-blocking-IO-in-`update` rule (Design B: the child stays on the
+    /// main thread; no per-child waiter thread).
+    pub fn reap_exit(&mut self) -> ExitOutcome {
+        digest_exit(
+            self.exit_status
+                .take()
+                .map_or_else(|| self.child.wait(), Ok),
+        )
     }
 
     /// Tell the pty about a new size. Coalesces redundant calls so
@@ -606,5 +655,57 @@ mod tests {
     fn process_id_is_some_after_spawn() {
         let host = PtyHost::spawn(echo_spec()).expect("spawn echo");
         assert!(host.process_id().is_some());
+    }
+
+    /// MVU Phase 5 PR8: `digest_exit` (the logic `reap_exit` delegates to)
+    /// maps a clean status to `Exited { code: 0, success: true }`. Hermetic
+    /// — constructs `ExitStatus` directly, so it neither spawns through
+    /// `$SHELL -i` nor blocks on a real `wait()` (the spawn path here would
+    /// reintroduce the rc-file coupling the drain tests above deliberately
+    /// dropped).
+    #[test]
+    fn digest_exit_clean() {
+        match digest_exit(Ok(portable_pty::ExitStatus::with_exit_code(0))) {
+            ExitOutcome::Exited { code, success } => {
+                assert_eq!(code, 0);
+                assert!(success);
+            }
+            ExitOutcome::Errored(e) => panic!("expected clean exit, got error: {e}"),
+        }
+    }
+
+    /// A non-zero code digests to `Exited { code, success: false }` — the
+    /// capture path renders `"exit {code}"`, the task path
+    /// `TaskStatus::Exited(code)`.
+    #[test]
+    fn digest_exit_nonzero() {
+        match digest_exit(Ok(portable_pty::ExitStatus::with_exit_code(3))) {
+            ExitOutcome::Exited { code, success } => {
+                assert_eq!(code, 3);
+                assert!(!success);
+            }
+            ExitOutcome::Errored(e) => panic!("expected exit 3, got error: {e}"),
+        }
+    }
+
+    /// A signal death is `success() == false` — so it takes the same
+    /// `"exit {code}"` / `TaskStatus::Exited` branch as a non-zero exit,
+    /// matching the pre-PR8 `s.success()` test.
+    #[test]
+    fn digest_exit_signal_is_failure() {
+        match digest_exit(Ok(portable_pty::ExitStatus::with_signal("SIGKILL"))) {
+            ExitOutcome::Exited { success, .. } => assert!(!success),
+            ExitOutcome::Errored(e) => panic!("expected exited (signal), got error: {e}"),
+        }
+    }
+
+    /// A `wait()` error digests to `Errored` (the task path's
+    /// `TaskStatus::Crashed` / the capture path's `"error: {msg}"`).
+    #[test]
+    fn digest_exit_error() {
+        match digest_exit(Err(std::io::Error::other("boom"))) {
+            ExitOutcome::Errored(msg) => assert_eq!(msg, "boom"),
+            ExitOutcome::Exited { .. } => panic!("expected Errored"),
+        }
     }
 }
