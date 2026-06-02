@@ -345,10 +345,34 @@ struct Runtime {
     /// Git worker → main thread results, generation-gated, applied via
     /// `apply_git_worker_result`. The Phase-3a forwarder thread takes this
     /// once in `run()` and bridges it onto the unified `Message` channel.
-    /// `None` after that take (and in the test harness, which never drives
-    /// `run()`). The Sender half stays on `state.git_worker_tx` (its
-    /// send-site is a `&mut AppState` chdir cache-miss path).
+    /// The Sender half stays on `state.git_worker_tx`.
     git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
+    /// Commands from the MCP server; `run()` `.take()`s it into the forwarder
+    /// thread which re-sends each as `Message::Mcp`.
+    mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
+    /// Clone of the unified-channel sender; pane wake closures clone it to push
+    /// `Message::PaneOutput`. `None` before `run()` / in the test harness.
+    pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
+    /// Monotonic `SinkId` allocator (never reused).
+    next_sink_id: u64,
+    /// Bottom pane tabs (each owns a `PtyHost`).
+    pane_tabs: Option<PaneTabs>,
+    /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`.
+    top_overlay: Option<Pane>,
+    /// In-flight foreground `!` capture (owns a `PtyHost`).
+    pending_capture: Option<PendingCapture>,
+    /// Backgrounded `!` tasks (each owns a `PtyHost`).
+    background_tasks: BackgroundTasks,
+    /// Active F-finder (holds the walker thread's receiver).
+    find_picker: Option<FindPicker>,
+    /// Active `:grep` session (holds the worker receiver).
+    grep_session: Option<GrepSession>,
+    /// Monotonic grep-session id (stale-session guard).
+    next_grep_id: u32,
+    /// Off-render-thread agent-status resolve: the landing slot + in-flight
+    /// flag (see `active_agent_status` / `apply_landed_agent_status`).
+    agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
+    agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
@@ -393,7 +417,6 @@ pub struct App {
     view: ViewState,
 
     // --- UI/terminal state (stays in App for now) ---
-    pane_tabs: Option<PaneTabs>,
     // MVU Phase 5: `harpoon` moved to `AppState` (Model consolidation).
     /// Active harpoon menu overlay (interactive: reorder, delete,
     /// jump). `None` when closed; intercepts keys before normal
@@ -409,11 +432,8 @@ pub struct App {
     graveyard_pending_d: bool,
     /// `gg` arming for the graveyard view (jump to top).
     graveyard_pending_g: bool,
-    top_overlay: Option<Pane>,
     overlay_awaiting_dismiss: bool,
     pending_overlay_close: bool,
-    pending_capture: Option<PendingCapture>,
-    background_tasks: BackgroundTasks,
     /// TTL cache for the active pane's session short-id (used in the
     /// status line as `claude:<8-hex>` / `gemini:<8-hex>`).
     ///
@@ -425,16 +445,6 @@ pub struct App {
     /// main-thread CPU. The status string changes essentially
     /// never within a session, so a coarse TTL is fine.
     agent_status_cache: Option<AgentStatusCache>,
-    /// MVU Phase 6: the session short-id resolve (`resolve_short_id` walks
-    /// every `~/.claude/sessions/*.json`) runs OFF the render thread — landing
-    /// slot + in-flight flag, the same pattern as `TabEntry::live_cwd` (#227).
-    /// `active_agent_status` reads `agent_status_cache` immediately and never
-    /// blocks; a background refresh (kicked at most once per `AGENT_STATUS_TTL`,
-    /// or on a pane switch) lands here and is applied on a later frame. Without
-    /// this the walk stalled render once per 30 s — the same class of hitch as
-    /// the `lsof` regression, and it scales with the user's accumulated sessions.
-    agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
-    agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pending_history_pick: Option<LineEditor>,
     /// Snapshot of jump-history entries (newest first) for the popup
     /// opened by `?` on an empty `J` prompt (spy parity), or by
@@ -443,22 +453,6 @@ pub struct App {
     /// the cursor; `^D` deletes the entry from history and the
     /// snapshot. `None` when no jump-history popup is active.
     pending_jump_history: Option<Vec<String>>,
-    /// Active F-finder state (filename fuzzy picker). When `Some`,
-    /// the pager renders the picker UI and key input is intercepted
-    /// before the normal pager handler -- the user types to filter,
-    /// arrows move selection, Enter chdirs + cursors on the file.
-    find_picker: Option<FindPicker>,
-    /// Active `:grep` session. Holds the receiver for the worker
-    /// thread streaming matches; the tick loop drains pending matches
-    /// onto the matching pager view (identified by `grep_id`). When
-    /// the user closes or replaces that pager, the session is dropped
-    /// and the worker exits on its next send.
-    grep_session: Option<GrepSession>,
-    /// Monotonic id for grep sessions, so a freshly-opened `:grep`
-    /// pager can never accidentally consume matches from a stale
-    /// session (e.g. user runs `:grep foo`, closes it, runs `:grep
-    /// bar` while the foo worker is still draining its tail).
-    next_grep_id: u32,
     history_pending_g: bool,
     /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
     /// jump to file reference.
@@ -550,12 +544,6 @@ pub struct App {
     /// hide it behind the existing snapshot cadence.
     activity_proc_rss_kb: u64,
     activity_proc_threads: u32,
-    /// Commands from the MCP server (writable actions from Claude). MVU
-    /// Phase 3d: `run()` `.take()`s this once and moves it into the MCP
-    /// forwarder thread, which re-sends each request onto the unified channel
-    /// as `Message::Mcp`; the pre-recv drain then executes it + replies.
-    /// `None` after `run()` takes it (and in the test harness).
-    mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
     /// Tab completion / cycle state. Tracks matches from the last Tab
     /// press and supports cycling through them on repeated Tab.
     tab_state: Option<TabState>,
@@ -563,17 +551,9 @@ pub struct App {
     /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
     /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
     scroll_last: Option<(std::time::Instant, KeyCode)>,
-    /// MVU Phase 5: IO-handle cluster (see [`Runtime`]). PR 1 seeds it with
-    /// the git worker-result receiver (formerly `App.git_result_rx`).
+    /// MVU end-state: the IO-handle cluster (channels, PtyHosts, worker
+    /// endpoints, off-thread slots) — see [`Runtime`].
     runtime: Runtime,
-    /// MVU Phase 3b: monotonic `SinkId` allocator (never reused). Bumped by
-    /// `alloc_sink_id` once per pane worker spawn.
-    next_sink_id: u64,
-    /// MVU Phase 3b: a clone of the unified-channel sender, installed at the
-    /// top of `run()`. Pane wake closures (built by `make_pane_wake`) clone
-    /// it to push `Message::PaneOutput`. `None` before `run()` (and in the
-    /// test harness) → `make_pane_wake` returns a no-op.
-    pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -832,24 +812,15 @@ impl App {
                 cached_grid_key: (u64::MAX, 0, 0, 0, 0),
                 last_term_title: None,
             },
-            pane_tabs: None,
             harpoon_menu: None,
             quick_select: None,
             graveyard_pending_d: false,
             graveyard_pending_g: false,
-            top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
-            pending_capture: None,
-            background_tasks: BackgroundTasks::new(),
             agent_status_cache: None,
-            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_history_pick: None,
             pending_jump_history: None,
-            find_picker: None,
-            grep_session: None,
-            next_grep_id: 0,
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
@@ -889,14 +860,25 @@ impl App {
             activity_proc_threads: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
-            mcp_cmd_rx: Some(mcp_cmd_rx),
             tab_state: None,
             scroll_last: None,
             runtime: Runtime {
                 git_result_rx: Some(git_res_rx),
+                mcp_cmd_rx: Some(mcp_cmd_rx),
+                pane_wake_tx: None,
+                next_sink_id: 0,
+                pane_tabs: None,
+                top_overlay: None,
+                pending_capture: None,
+                background_tasks: BackgroundTasks::new(),
+                find_picker: None,
+                grep_session: None,
+                next_grep_id: 0,
+                agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             },
-            next_sink_id: 0,
-            pane_wake_tx: None,
         };
         app.state.rebuild_rows();
         // Evaluate huge-tree status at startup so the first 1 Hz poll
@@ -1083,7 +1065,7 @@ impl App {
         if !self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
             return;
         }
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.active_mut().exit_scroll_mode();
         }
         self.clear_pager();
@@ -1368,7 +1350,7 @@ impl App {
         // socket server (`start_socket_server`) is unchanged and never names
         // `Message`. The request carries its one-shot reply Sender, executed
         // + replied on the main loop (read-after-write preserved).
-        if let Some(mcp_rx) = self.mcp_cmd_rx.take() {
+        if let Some(mcp_rx) = self.runtime.mcp_cmd_rx.take() {
             let mtx = msg_tx.clone();
             std::thread::spawn(move || {
                 while let Ok(req) = mcp_rx.recv() {
@@ -1385,7 +1367,7 @@ impl App {
         // before the loop processes any user action — so every pane spawned
         // during the session (including session-restore tabs) gets a live
         // wake, not the pre-run no-op.
-        self.pane_wake_tx = Some(msg_tx.clone());
+        self.runtime.pane_wake_tx = Some(msg_tx.clone());
 
         // MVU Phase 1: the parkable input reader runs on its own thread
         // and feeds `msg_tx`; the loop `recv_timeout`s on `msg_rx` instead
@@ -1490,7 +1472,7 @@ impl App {
             // re-render only when something changed (or the walk
             // completed -- title flips from "scanning..." to a
             // final count).
-            if let Some(picker) = self.find_picker.as_mut()
+            if let Some(picker) = self.runtime.find_picker.as_mut()
                 && picker.drain_walk()
             {
                 picker.refilter();
@@ -1874,7 +1856,7 @@ impl App {
         // escalate. Without this, quitting spyc with a frontend dev
         // server in a pane would leave the whole node/esbuild/worker
         // tree orphaned and still bound to its port.
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             for entry in tabs.tabs_mut() {
                 entry.pane.shutdown(Duration::from_millis(250));
             }
@@ -1960,11 +1942,11 @@ impl App {
                     // the pane (distinct color, right-aligned). When the
                     // pane is hidden there is no divider, so fall back
                     // to the status-bar suffix here.
-                    let bg_tag = if self.pane_tabs.is_some() {
+                    let bg_tag = if self.runtime.pane_tabs.is_some() {
                         String::new()
                     } else {
-                        let running = self.background_tasks.running_count();
-                        let done = self.background_tasks.done_count();
+                        let running = self.runtime.background_tasks.running_count();
+                        let done = self.runtime.background_tasks.done_count();
                         if running == 0 && done == 0 {
                             String::new()
                         } else if done == 0 {
@@ -2052,9 +2034,9 @@ impl App {
     fn route_snapshot(&self) -> route::RouteSnapshot {
         route::RouteSnapshot {
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
-            has_top_overlay: self.top_overlay.is_some(),
+            has_top_overlay: self.runtime.top_overlay.is_some(),
             pager_mount: self.view.pager.as_ref().map(|v| v.mount),
-            has_pane_tabs: self.pane_tabs.is_some(),
+            has_pane_tabs: self.runtime.pane_tabs.is_some(),
             pane_focused: self.state.pane_focused(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
             // loop-top), not the live host — decouples routing from Runtime.
@@ -2440,13 +2422,15 @@ impl App {
         match prompt.kind {
             PromptKind::ShellCmd => {
                 let expanded = shell::expand_percent(&prompt.buffer, &self.state.selection_paths());
-                let (rows, cols) =
-                    Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+                let (rows, cols) = Self::top_overlay_size(
+                    self.effective_pane_pct(),
+                    self.runtime.pane_tabs.is_some(),
+                );
                 let cwd = self.state.listing.dir.clone();
                 let wake = self.make_pane_wake();
                 match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path, wake) {
                     Ok(p) => {
-                        self.top_overlay = Some(p);
+                        self.runtime.top_overlay = Some(p);
                         self.state.focus = state::Focus::Overlay;
                     }
                     Err(e) => self.state.flash_error(format!("spawn: {e}")),
@@ -2498,7 +2482,7 @@ impl App {
             PromptKind::PaneRenameTab => {
                 let name = prompt.buffer.trim().to_string();
                 if !name.is_empty()
-                    && let Some(tabs) = self.pane_tabs.as_mut()
+                    && let Some(tabs) = self.runtime.pane_tabs.as_mut()
                 {
                     tabs.active_info_mut().label = name;
                 }
@@ -2565,7 +2549,7 @@ impl App {
     /// pane container is now a multi-step intentional act (close
     /// each tab via `^a-x`), not a one-keystroke side effect.
     fn toggle_pane(&mut self) {
-        if self.pane_tabs.is_some() {
+        if self.runtime.pane_tabs.is_some() {
             self.state.pane_hidden = !self.state.pane_hidden;
             self.view.needs_full_repaint = true;
             if self.state.pane_hidden {
@@ -2624,10 +2608,10 @@ impl App {
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry::new(p, TabInfo::new(cmd, cwd));
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.push(entry);
                 } else {
-                    self.pane_tabs = Some(PaneTabs::new(entry));
+                    self.runtime.pane_tabs = Some(PaneTabs::new(entry));
                 }
             }
             Err(e) => self.state.flash_error(format!("pane spawn failed: {e}")),
@@ -2662,8 +2646,8 @@ impl App {
             self.state.flash_error(format!("grep: {e}"));
             return;
         }
-        let id = self.next_grep_id;
-        self.next_grep_id = self.next_grep_id.wrapping_add(1);
+        let id = self.runtime.next_grep_id;
+        self.runtime.next_grep_id = self.runtime.next_grep_id.wrapping_add(1);
         let (tx, rx) = std::sync::mpsc::channel();
         let walk_root = root.clone();
         let pat = pattern.to_string();
@@ -2696,7 +2680,7 @@ impl App {
             self.view.pager_history.push(prev);
         }
         self.set_pager(view);
-        self.grep_session = Some(GrepSession {
+        self.runtime.grep_session = Some(GrepSession {
             id,
             rx,
             count: 0,
@@ -2713,7 +2697,7 @@ impl App {
     /// (matches appended or worker completed) so the caller can
     /// request a redraw.
     fn drain_grep_session(&mut self) -> bool {
-        let Some(session) = self.grep_session.as_mut() else {
+        let Some(session) = self.runtime.grep_session.as_mut() else {
             return false;
         };
         // Drop the session if the matching pager is gone. The user
@@ -2725,7 +2709,7 @@ impl App {
             .as_ref()
             .is_some_and(|p| p.grep_id == Some(session.id));
         if !pager_matches {
-            self.grep_session = None;
+            self.runtime.grep_session = None;
             return false;
         }
         let mut got_any = false;
@@ -2771,7 +2755,7 @@ impl App {
                 }
             }
             if session.complete {
-                self.grep_session = None;
+                self.runtime.grep_session = None;
             }
         }
         got_any
@@ -2807,7 +2791,7 @@ impl App {
             walk_complete: false,
         };
         picker.refilter();
-        self.find_picker = Some(picker);
+        self.runtime.find_picker = Some(picker);
         self.render_find_picker();
         self.view.needs_full_repaint = true;
     }
@@ -2817,7 +2801,7 @@ impl App {
     /// or selection, and after each tick where the streaming walk
     /// produced new candidates (title shows progress).
     fn render_find_picker(&mut self) {
-        let Some(picker) = self.find_picker.as_ref() else {
+        let Some(picker) = self.runtime.find_picker.as_ref() else {
             return;
         };
         let total = picker.candidates.len();
@@ -2862,24 +2846,24 @@ impl App {
     /// Up/Down move selection; printable chars + Backspace edit
     /// the query and re-rank.
     fn handle_find_picker_key(&mut self, key: KeyEvent) -> bool {
-        if self.find_picker.is_none() {
+        if self.runtime.find_picker.is_none() {
             return false;
         }
         match key.code {
             KeyCode::Esc => {
-                self.find_picker = None;
+                self.runtime.find_picker = None;
                 self.clear_pager();
                 self.view.needs_full_repaint = true;
                 true
             }
             KeyCode::Enter => {
-                let target = self.find_picker.as_ref().and_then(|p| {
+                let target = self.runtime.find_picker.as_ref().and_then(|p| {
                     p.filtered
                         .get(p.selected)
                         .cloned()
                         .map(|rel| (p.root.clone(), rel))
                 });
-                self.find_picker = None;
+                self.runtime.find_picker = None;
                 self.clear_pager();
                 self.view.needs_full_repaint = true;
                 if let Some((root, rel)) = target {
@@ -2897,7 +2881,7 @@ impl App {
                 true
             }
             KeyCode::Up => {
-                if let Some(picker) = self.find_picker.as_mut()
+                if let Some(picker) = self.runtime.find_picker.as_mut()
                     && picker.selected > 0
                 {
                     picker.selected -= 1;
@@ -2906,7 +2890,7 @@ impl App {
                 true
             }
             KeyCode::Down => {
-                if let Some(picker) = self.find_picker.as_mut()
+                if let Some(picker) = self.runtime.find_picker.as_mut()
                     && picker.selected + 1 < picker.filtered.len()
                 {
                     picker.selected += 1;
@@ -2915,7 +2899,7 @@ impl App {
                 true
             }
             KeyCode::Backspace => {
-                if let Some(picker) = self.find_picker.as_mut()
+                if let Some(picker) = self.runtime.find_picker.as_mut()
                     && !picker.query.is_empty()
                 {
                     picker.query.pop();
@@ -2928,7 +2912,7 @@ impl App {
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                if let Some(picker) = self.find_picker.as_mut() {
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
                     picker.query.push(c);
                     picker.refilter();
                     self.render_find_picker();
@@ -2961,12 +2945,12 @@ impl App {
             shell::shell_quote(&path.display().to_string()),
         );
         let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
             Ok(p) => {
-                self.top_overlay = Some(p);
+                self.runtime.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
@@ -3234,12 +3218,12 @@ impl App {
             shell::shell_quote(&path.display().to_string()),
         );
         let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
             Ok(p) => {
-                self.top_overlay = Some(p);
+                self.runtime.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
@@ -3267,7 +3251,7 @@ impl App {
                     PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
                 view.streaming = true;
                 self.set_pager(view);
-                self.pending_capture = Some(PendingCapture {
+                self.runtime.pending_capture = Some(PendingCapture {
                     host,
                     buffer: Vec::new(),
                     title,
@@ -3286,12 +3270,12 @@ impl App {
     /// thread (spawned by `spawn_capture`) keeps running, so output
     /// keeps accumulating into the task buffer for later `:fg`.
     fn background_capture(&mut self) {
-        let Some(capture) = self.pending_capture.take() else {
+        let Some(capture) = self.runtime.pending_capture.take() else {
             return;
         };
         let id = capture
             .original_id
-            .unwrap_or_else(|| self.background_tasks.allocate_id());
+            .unwrap_or_else(|| self.runtime.background_tasks.allocate_id());
         let task = BackgroundTask {
             id,
             title: capture.title,
@@ -3305,7 +3289,7 @@ impl App {
             viewed_in_task_viewer: false,
             paused: false,
         };
-        self.background_tasks.tasks.push(task);
+        self.runtime.background_tasks.tasks.push(task);
         self.clear_pager();
         self.view.needs_full_repaint = true;
         self.state
@@ -3326,11 +3310,17 @@ impl App {
     /// targets a specific id. No-op (with flash) if the target is
     /// not Running, doesn't exist, or is already paused.
     fn pause_task(&mut self, target: Option<u32>) -> Vec<Effect> {
-        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+        let Some(id) = target.or_else(|| self.runtime.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
             return Vec::new();
         };
-        let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+        let Some(task) = self
+            .runtime
+            .background_tasks
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+        else {
             self.state.flash_error(format!("no task with id {id}"));
             return Vec::new();
         };
@@ -3366,9 +3356,10 @@ impl App {
     /// bar, etc.). `None` target = most-recent task.
     fn interrupt_task(&self, target: Option<u32>) -> Result<String, String> {
         let id = target
-            .or_else(|| self.background_tasks.most_recent())
+            .or_else(|| self.runtime.background_tasks.most_recent())
             .ok_or_else(|| "no background tasks".to_string())?;
         let task = self
+            .runtime
             .background_tasks
             .tasks
             .iter()
@@ -3392,11 +3383,17 @@ impl App {
 
     /// Resume a paused task with SIGCONT to its process group.
     fn resume_task(&mut self, target: Option<u32>) -> Vec<Effect> {
-        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+        let Some(id) = target.or_else(|| self.runtime.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
             return Vec::new();
         };
-        let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+        let Some(task) = self
+            .runtime
+            .background_tasks
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+        else {
             self.state.flash_error(format!("no task with id {id}"));
             return Vec::new();
         };
@@ -3435,18 +3432,18 @@ impl App {
     /// the new tab. Flash-and-skip; the task stays in the bg
     /// list.
     fn promote_task_to_pane(&mut self, target: Option<u32>) {
-        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+        let Some(id) = target.or_else(|| self.runtime.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
             return;
         };
-        let Some(mut task) = self.background_tasks.take(id) else {
+        let Some(mut task) = self.runtime.background_tasks.take(id) else {
             self.state.flash_error(format!("no task #{id}"));
             return;
         };
         if !matches!(task.status, TaskStatus::Running) {
             // Re-add so :fg still works. flash_error so the user
             // sees this as a non-action rather than silent.
-            self.background_tasks.tasks.push(task);
+            self.runtime.background_tasks.tasks.push(task);
             self.state.flash_error(format!(
                 "task #{id} already exited; :fg to view its output instead"
             ));
@@ -3517,14 +3514,14 @@ impl App {
         let entry = TabEntry::new(pane, info);
 
         self.state.focus = state::Focus::Pane;
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.push(entry);
             // Switch active tab to the promoted one so the user
             // lands looking at it.
             let last = tabs.len().saturating_sub(1);
             tabs.switch_to(last);
         } else {
-            self.pane_tabs = Some(PaneTabs::new(entry));
+            self.runtime.pane_tabs = Some(PaneTabs::new(entry));
         }
         self.view.needs_full_repaint = true;
         self.state.flash_info(format!("task #{id} → tab '{label}'"));
@@ -3544,7 +3541,7 @@ impl App {
     /// is plain text — seeding would erase color. Acceptable;
     /// can revisit if users hit it.
     fn demote_pane_to_task(&mut self) {
-        let Some(tabs) = self.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             self.state.flash_error("no pane to demote");
             return;
         };
@@ -3560,8 +3557,13 @@ impl App {
         // The tab's already been taken, so dropping `pane` here closes it.
         if pane.is_closed() {
             self.state.flash_info("pane already exited — closed it");
-            if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
-                self.pane_tabs = None;
+            if self
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .is_some_and(PaneTabs::is_empty)
+            {
+                self.runtime.pane_tabs = None;
                 self.state.focus = state::Focus::FileList;
             }
             return;
@@ -3578,12 +3580,17 @@ impl App {
         host.fire_wake_now();
         // If we just took the last tab, drop the container so
         // layout / status / focus revert to "no pane open" state.
-        if self.pane_tabs.as_ref().is_some_and(PaneTabs::is_empty) {
-            self.pane_tabs = None;
+        if self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(PaneTabs::is_empty)
+        {
+            self.runtime.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
         }
 
-        let id = self.background_tasks.allocate_id();
+        let id = self.runtime.background_tasks.allocate_id();
         let label = info.label.clone();
         let task = BackgroundTask {
             id,
@@ -3598,7 +3605,7 @@ impl App {
             viewed_in_task_viewer: false,
             paused: false,
         };
-        self.background_tasks.tasks.push(task);
+        self.runtime.background_tasks.tasks.push(task);
         self.view.needs_full_repaint = true;
         self.state.flash_info(format!(
             "tab '{label}' → task #{id} (:fg or :task-to-pane to bring back)"
@@ -3606,16 +3613,16 @@ impl App {
     }
 
     fn foreground_task(&mut self, target: Option<u32>) {
-        if self.pending_capture.is_some() {
+        if self.runtime.pending_capture.is_some() {
             self.state
                 .flash_error("already in a foreground task — ^Z to send to background first");
             return;
         }
-        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+        let Some(id) = target.or_else(|| self.runtime.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
             return;
         };
-        let Some(task) = self.background_tasks.take(id) else {
+        let Some(task) = self.runtime.background_tasks.take(id) else {
             self.state.flash_error(format!("no task #{id}"));
             return;
         };
@@ -3651,7 +3658,7 @@ impl App {
                 view.streaming = true;
                 view.scroll_to_bottom_auto();
                 self.set_pager(view);
-                self.pending_capture = Some(PendingCapture {
+                self.runtime.pending_capture = Some(PendingCapture {
                     host: task.host,
                     buffer: task.buffer,
                     title: task.title,
@@ -3701,7 +3708,12 @@ impl App {
     /// does). The view's `task_id` is set so the main loop can refresh
     /// it from the live buffer while the task is running.
     fn build_task_viewer(&self, id: u32) -> Option<PagerView> {
-        let task = self.background_tasks.tasks.iter().find(|t| t.id == id)?;
+        let task = self
+            .runtime
+            .background_tasks
+            .tasks
+            .iter()
+            .find(|t| t.id == id)?;
         Some(Self::build_task_viewer_for(id, task))
     }
 
@@ -3751,7 +3763,7 @@ impl App {
     /// Pushes the current pager (if any, and not no_history) to buffer
     /// history first so `[b` can walk back.
     fn open_task_viewer(&mut self, target: Option<u32>) {
-        let Some(id) = target.or_else(|| self.background_tasks.most_recent()) else {
+        let Some(id) = target.or_else(|| self.runtime.background_tasks.most_recent()) else {
             self.state.flash_error("no background tasks");
             return;
         };
@@ -3760,7 +3772,13 @@ impl App {
             return;
         };
         // Mark viewed so promotion-to-history can fire on close.
-        if let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) {
+        if let Some(task) = self
+            .runtime
+            .background_tasks
+            .tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+        {
             task.viewed_in_task_viewer = true;
             task.has_unread_output = false;
         }
@@ -3777,7 +3795,7 @@ impl App {
     /// among bg tasks ordered by id. `direction = -1` for prev, `+1`
     /// for next.
     fn cycle_task_viewer(&mut self, direction: i32) {
-        if self.background_tasks.tasks.is_empty() {
+        if self.runtime.background_tasks.tasks.is_empty() {
             self.state.flash_info("no background tasks");
             return;
         }
@@ -3786,22 +3804,28 @@ impl App {
             .pager
             .as_ref()
             .and_then(|v| v.task_id)
-            .and_then(|id| self.background_tasks.tasks.iter().position(|t| t.id == id));
+            .and_then(|id| {
+                self.runtime
+                    .background_tasks
+                    .tasks
+                    .iter()
+                    .position(|t| t.id == id)
+            });
         let next_pos = match current {
             Some(pos) => {
-                let n = self.background_tasks.tasks.len() as i32;
+                let n = self.runtime.background_tasks.tasks.len() as i32;
                 let raw = pos as i32 + direction;
                 ((raw % n + n) % n) as usize
             }
             None => {
                 if direction < 0 {
-                    self.background_tasks.tasks.len() - 1
+                    self.runtime.background_tasks.tasks.len() - 1
                 } else {
                     0
                 }
             }
         };
-        let id = self.background_tasks.tasks[next_pos].id;
+        let id = self.runtime.background_tasks.tasks[next_pos].id;
         self.open_task_viewer(Some(id));
     }
 
@@ -3826,7 +3850,7 @@ impl App {
     /// absorb the typed chars before we tell it to submit.
     fn send_pending_resumes(&mut self, now: std::time::Instant) {
         use crate::pane::tabs::PendingResumeSend;
-        let Some(tabs) = self.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             return;
         };
         for entry in tabs.tabs_mut() {
@@ -3856,7 +3880,7 @@ impl App {
     /// mistaken for a restore failure. Returns the index of the first
     /// crashed tab found, if any.
     fn find_crashed_restore_tab(&mut self, now: std::time::Instant) -> Option<usize> {
-        let tabs = self.pane_tabs.as_mut()?;
+        let tabs = self.runtime.pane_tabs.as_mut()?;
         let window = Duration::from_secs(30);
         let dump_grace = Duration::from_secs(3);
         for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
@@ -4461,11 +4485,11 @@ impl App {
 
     /// ^W x — close the active pane tab.
     fn close_active_tab(&mut self) {
-        if let Some(tabs) = self.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && !tabs.close_active()
         {
             // Last tab removed.
-            self.pane_tabs = None;
+            self.runtime.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
             self.view.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
@@ -4475,16 +4499,16 @@ impl App {
     /// ^a R — restart the active tab's command. Closes the tab and spawns
     /// a fresh one with the same command and working directory.
     fn restart_active_tab(&mut self) {
-        let Some(tabs) = self.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return;
         };
         let cmd = tabs.active_info().command.clone();
         let cwd = tabs.active_info().cwd.clone();
         // Close the old tab first.
-        if let Some(tabs) = self.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && !tabs.close_active()
         {
-            self.pane_tabs = None;
+            self.runtime.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
         }
         // Spawn a replacement with the same command and cwd.
@@ -4494,7 +4518,7 @@ impl App {
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
     fn set_pane_focus(&mut self, want_pane: bool) {
-        if self.pane_tabs.is_none() {
+        if self.runtime.pane_tabs.is_none() {
             return;
         }
         if self.state.pane_focused() == want_pane {
@@ -4506,7 +4530,7 @@ impl App {
         // distinction is carried only for future MVU phases.
         self.state.focus = if want_pane {
             state::Focus::Pane
-        } else if self.top_overlay.is_some() {
+        } else if self.runtime.top_overlay.is_some() {
             state::Focus::Overlay
         } else if let Some(v) = self.view.pager.as_ref() {
             state::Focus::Pager(v.mount)
@@ -4515,6 +4539,7 @@ impl App {
         };
         if self.state.pane_focused() {
             let label = self
+                .runtime
                 .pane_tabs
                 .as_ref()
                 .map_or("pane", |t| t.active_info().label.as_str());
@@ -4524,7 +4549,7 @@ impl App {
             // "non-pane" side is the overlay subprocess, not the file
             // list. Label accordingly so the user can read what just
             // got focus instead of guessing.
-            let label = if self.top_overlay.is_some() {
+            let label = if self.runtime.top_overlay.is_some() {
                 "overlay"
             } else {
                 "spyc"
@@ -4555,7 +4580,7 @@ impl App {
     /// overlays, etc.) is actually reaching our vt100 emulator at
     /// snapshot time.
     fn dump_scrollback_snapshot(&mut self) {
-        let Some(tabs) = self.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             self.state.flash_error("dump-scrollback: no pane open");
             return;
         };
@@ -4604,7 +4629,7 @@ impl App {
             return;
         }
         let view = self.view.pager.take();
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.active_entry_mut().stashed_scrollback_pager = view;
         }
     }
@@ -4620,7 +4645,7 @@ impl App {
         if self.view.pager.is_some() {
             return;
         }
-        if let Some(tabs) = self.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take()
         {
             self.set_pager(view);
@@ -4628,7 +4653,7 @@ impl App {
     }
 
     fn open_pane_scroll_pager(&mut self) {
-        let Some(tabs) = self.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return;
         };
         let active_info = tabs.active_info();
@@ -4672,6 +4697,7 @@ impl App {
         }
 
         let tabs = self
+            .runtime
             .pane_tabs
             .as_mut()
             .expect("pane_tabs presence checked above");
@@ -4714,7 +4740,7 @@ impl App {
     /// (divider cues + key routing flip to the pager) and parks the
     /// view at the bottom on first render.
     fn mount_scroll_pager(&mut self, title: String, lines: Vec<ratatui::text::Line<'static>>) {
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.active_mut().enter_scroll_mode();
         }
         let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
@@ -4747,7 +4773,8 @@ impl App {
             self.scroll_pending_g = false;
             return match key.code {
                 KeyCode::Char('g') => {
-                    self.pane_tabs
+                    self.runtime
+                        .pane_tabs
                         .as_mut()
                         .unwrap()
                         .active_mut()
@@ -4771,7 +4798,7 @@ impl App {
             };
         }
 
-        let pane = self.pane_tabs.as_mut().unwrap().active_mut();
+        let pane = self.runtime.pane_tabs.as_mut().unwrap().active_mut();
         match key.code {
             KeyCode::Char('k') | KeyCode::Up => pane.scroll_up(1),
             KeyCode::Char('j') | KeyCode::Down => pane.scroll_down_or_exit(1),
@@ -4804,7 +4831,7 @@ impl App {
     /// typing without concatenating against the last path. No newline
     /// — let the user decide when to submit.
     fn send_selection_to_pane(&mut self) -> Vec<Effect> {
-        if self.pane_tabs.is_none() {
+        if self.runtime.pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
@@ -4862,7 +4889,7 @@ impl App {
     /// wrapped with a header so the recipient (e.g. Claude) knows what
     /// it's looking at.
     fn pipe_content_to_pane(&mut self, use_inventory: bool) -> Vec<Effect> {
-        if self.pane_tabs.is_none() {
+        if self.runtime.pane_tabs.is_none() {
             self.state.flash_error("no pane open");
             return Vec::new();
         }
@@ -4945,7 +4972,7 @@ impl App {
     /// ^W + / ^W - — change the bottom pane's share of the middle rect
     /// in 5% steps, clamped to [10%, 90%].
     fn resize_pane(&mut self, delta_pct: i32) {
-        if self.pane_tabs.is_none() {
+        if self.runtime.pane_tabs.is_none() {
             return;
         }
         if self.state.pane_zoomed {
@@ -4975,7 +5002,7 @@ impl App {
     /// forced into the pane on zoom-on; the prior focus is restored
     /// on zoom-off. No-op (with a flash) when the pane is closed.
     fn toggle_pane_zoom(&mut self) {
-        if self.pane_tabs.is_none() {
+        if self.runtime.pane_tabs.is_none() {
             self.state.flash_info("no pane open");
             return;
         }
@@ -5006,7 +5033,7 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        if let (Some(pane_rect), Some(tabs)) = (layout.pane, self.pane_tabs.as_mut()) {
+        if let (Some(pane_rect), Some(tabs)) = (layout.pane, self.runtime.pane_tabs.as_mut()) {
             for entry in tabs.tabs_mut() {
                 let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
             }
@@ -5280,7 +5307,7 @@ impl App {
     /// overlay. Bails with a flash if there's nothing pickable.
     fn open_quick_select(&mut self) {
         use crate::pane::quick_select::{QuickSelect, assign_labels, build_patterns, scan};
-        let Some(tabs) = self.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             self.state.flash_error("quick select: pane is closed");
             return;
         };
@@ -5451,7 +5478,11 @@ impl App {
         } else {
             // Resolve against the active pane tab's cwd first, falling
             // back to spyc's listing dir — same precedence `gf` uses.
-            let tab_cwd = self.pane_tabs.as_ref().map(|t| t.active_info().cwd.clone());
+            let tab_cwd = self
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .map(|t| t.active_info().cwd.clone());
             let candidate = tab_cwd.as_ref().map(|c| c.join(&path));
             match candidate {
                 Some(p) if p.exists() => p,
@@ -5725,7 +5756,7 @@ impl App {
 
         // Exit scroll mode and switch focus to the file list so the user
         // sees the navigation result.
-        if let Some(tabs) = self.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && tabs.active().is_scrolling()
         {
             tabs.active_mut().exit_scroll_mode();
@@ -5812,10 +5843,10 @@ impl App {
             self.state.should_quit = true;
         } else {
             self.state.quit_pending = Some(now);
-            let running_panes = self.pane_tabs.as_ref().map_or(0, |tabs| {
+            let running_panes = self.runtime.pane_tabs.as_ref().map_or(0, |tabs| {
                 tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
             });
-            let running_bg = self.background_tasks.running_count();
+            let running_bg = self.runtime.background_tasks.running_count();
             let running = running_panes + running_bg;
             if running > 0 {
                 self.state.flash_info(format!(
@@ -7059,7 +7090,7 @@ impl App {
     /// `App` with **no** terminal, **no** MCP socket server, **no**
     /// git-status worker thread, and **no** real-env cwd — unlike
     /// `App::new`. Drive it with `apply(&Action)` / `handle_key(KeyEvent)`
-    /// and assert on `self.state.*`, `self.pane_tabs`, `self.view.pager`, etc.
+    /// and assert on `self.state.*`, `self.runtime.pane_tabs`, `self.view.pager`, etc.
     ///
     /// Wrap callers in `crate::state::with_state_root(tmp, || …)` so the
     /// history / pager-position / inventory state dir is an isolated temp.
@@ -7086,24 +7117,15 @@ impl App {
                 cached_grid_key: (u64::MAX, 0, 0, 0, 0),
                 last_term_title: None,
             },
-            pane_tabs: None,
             harpoon_menu: None,
             quick_select: None,
             graveyard_pending_d: false,
             graveyard_pending_g: false,
-            top_overlay: None,
             overlay_awaiting_dismiss: false,
             pending_overlay_close: false,
-            pending_capture: None,
-            background_tasks: BackgroundTasks::new(),
             agent_status_cache: None,
-            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_history_pick: None,
             pending_jump_history: None,
-            find_picker: None,
-            grep_session: None,
-            next_grep_id: 0,
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
@@ -7142,14 +7164,25 @@ impl App {
             activity_proc_threads: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
-            mcp_cmd_rx: None,
             tab_state: None,
             scroll_last: None,
             runtime: Runtime {
                 git_result_rx: None,
+                mcp_cmd_rx: None,
+                pane_wake_tx: None,
+                next_sink_id: 0,
+                pane_tabs: None,
+                top_overlay: None,
+                pending_capture: None,
+                background_tasks: BackgroundTasks::new(),
+                find_picker: None,
+                grep_session: None,
+                next_grep_id: 0,
+                agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             },
-            next_sink_id: 0,
-            pane_wake_tx: None,
         };
         app.state.rebuild_rows();
         app
@@ -7196,7 +7229,7 @@ mod harness_tests {
             assert!(!app.state.pane_focused());
             assert!(matches!(app.state.mode, Mode::Normal));
             assert_eq!(app.state.cursor.index, 0);
-            assert!(app.pane_tabs.is_none());
+            assert!(app.runtime.pane_tabs.is_none());
             assert!(app.view.pager.is_none());
             assert!(app.flash_text().is_none());
             assert_eq!(

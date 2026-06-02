@@ -19,7 +19,7 @@ impl App {
         // profile ref (the registry lives forever) plus the spawn-time key —
         // then drop the `pane_tabs` borrow before touching the cache / slot.
         let (profile, kind, label, cwd, spawn) = {
-            let active = self.pane_tabs.as_ref()?.active_info();
+            let active = self.runtime.pane_tabs.as_ref()?.active_info();
             let profile = crate::agent::detect(&active.command);
             let kind = profile.kind();
             if kind == AgentKind::Other {
@@ -61,17 +61,19 @@ impl App {
         // later frame. Same off-thread pattern as `TabEntry::live_cwd` (#227).
         if !fresh
             && !self
+                .runtime
                 .agent_status_refreshing
                 .load(std::sync::atomic::Ordering::Acquire)
         {
-            self.agent_status_refreshing
+            self.runtime
+                .agent_status_refreshing
                 .store(true, std::sync::atomic::Ordering::Release);
-            let pending = std::sync::Arc::clone(&self.agent_status_pending);
-            let refreshing = std::sync::Arc::clone(&self.agent_status_refreshing);
+            let pending = std::sync::Arc::clone(&self.runtime.agent_status_pending);
+            let refreshing = std::sync::Arc::clone(&self.runtime.agent_status_refreshing);
             // Clone of the unified-channel sender so the worker can WAKE the
             // loop on completion (None before `run()` / in the test harness →
             // no wake, which is correct: those paths don't render in a loop).
-            let wake = self.pane_wake_tx.clone();
+            let wake = self.runtime.pane_wake_tx.clone();
             let thread_cwd = cwd;
             std::thread::spawn(move || {
                 let short_id = profile.resolve_short_id(&thread_cwd, spawn);
@@ -120,11 +122,11 @@ impl App {
     /// Returns whether the cache changed (the caller sets `needs_draw`).
     pub(crate) fn apply_landed_agent_status(&mut self) -> bool {
         // Bind the `take()` first so the MutexGuard drops before the body.
-        let landed = self.agent_status_pending.lock().unwrap().take();
+        let landed = self.runtime.agent_status_pending.lock().unwrap().take();
         let Some(result) = landed else {
             return false;
         };
-        let matches = self.pane_tabs.as_ref().is_some_and(|tabs| {
+        let matches = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
             let active = tabs.active_info();
             result.kind == crate::agent::detect(&active.command).kind()
                 && result.cwd == active.cwd

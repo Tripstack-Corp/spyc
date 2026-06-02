@@ -22,8 +22,9 @@ impl App {
         // Force a draw when the pager opens over a live pane (the pane stops
         // rendering, so its stale cells need clearing — via a forced draw, not
         // `terminal.clear()`, which would flash).
-        let pager_just_opened =
-            self.view.pager.is_some() && self.pane_tabs.is_some() && !self.view.pager_was_open;
+        let pager_just_opened = self.view.pager.is_some()
+            && self.runtime.pane_tabs.is_some()
+            && !self.view.pager_was_open;
         self.view.pager_was_open = self.view.pager.is_some();
         // A pending full repaint also requests a screen clear.
         let pending_clear = self.view.needs_full_repaint;
@@ -40,7 +41,8 @@ impl App {
     /// matches what the old live read observed.
     pub(crate) fn snapshot_pane_routing(&mut self) {
         self.state.pane_snapshot =
-            self.pane_tabs
+            self.runtime
+                .pane_tabs
                 .as_ref()
                 .map_or_else(state::PaneSnapshot::default, |t| state::PaneSnapshot {
                     is_scrolling: t.active().is_scrolling(),
@@ -225,13 +227,13 @@ impl App {
         self.send_pending_resumes(now_pre);
         // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
         // all tabs so the wait can wake for it.
-        arm_resume_deadlines(scheduler, self.pane_tabs.as_ref());
+        arm_resume_deadlines(scheduler, self.runtime.pane_tabs.as_ref());
 
         let crash_idx = self.find_crashed_restore_tab(now_pre);
         if let Some(tab_idx) = crash_idx
             && matches!(self.state.mode, Mode::Normal)
         {
-            if let Some(tabs) = self.pane_tabs.as_mut()
+            if let Some(tabs) = self.runtime.pane_tabs.as_mut()
                 && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
             {
                 entry.info.restore_fallback = None;

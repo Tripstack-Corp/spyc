@@ -812,7 +812,12 @@ impl App {
                 // task from the bg list. Running tasks stay in bg.
                 let promote_task: Option<u32> = self.view.pager.as_ref().and_then(|v| {
                     let id = v.task_id?;
-                    let task = self.background_tasks.tasks.iter().find(|t| t.id == id)?;
+                    let task = self
+                        .runtime
+                        .background_tasks
+                        .tasks
+                        .iter()
+                        .find(|t| t.id == id)?;
                     if task.viewed_in_task_viewer && !matches!(task.status, TaskStatus::Running) {
                         Some(id)
                     } else {
@@ -820,7 +825,7 @@ impl App {
                     }
                 });
                 if let Some(id) = promote_task {
-                    if let Some(task) = self.background_tasks.take(id) {
+                    if let Some(task) = self.runtime.background_tasks.take(id) {
                         let mut snapshot = Self::build_task_viewer_for(id, &task);
                         snapshot.task_id = None; // not a live viewer anymore
                         snapshot.no_history = false; // must be eligible for history
@@ -1004,15 +1009,17 @@ impl App {
                         "{editor_cmd} {}",
                         shell::shell_quote(&src.display().to_string())
                     );
-                    let (rows, cols) =
-                        Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+                    let (rows, cols) = Self::top_overlay_size(
+                        self.effective_pane_pct(),
+                        self.runtime.pane_tabs.is_some(),
+                    );
                     let cwd = self.state.listing.dir.clone();
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
                     let wake = self.make_pane_wake();
                     match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
                         Ok(p) => {
-                            self.top_overlay = Some(p);
+                            self.runtime.top_overlay = Some(p);
                             self.state.focus = Focus::Overlay;
                         }
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),

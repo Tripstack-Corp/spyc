@@ -46,7 +46,7 @@ impl App {
     fn apply_exit_event(&mut self, ev: ExitEvent) {
         match ev {
             ExitEvent::CaptureExit { status } => {
-                let Some(capture) = self.pending_capture.take() else {
+                let Some(capture) = self.runtime.pending_capture.take() else {
                     return;
                 };
                 // Status glyph mirrors the bottom-status-bar conventions
@@ -81,7 +81,13 @@ impl App {
                 }
             }
             ExitEvent::TaskExited { id, status } => {
-                let Some(task) = self.background_tasks.tasks.iter_mut().find(|t| t.id == id) else {
+                let Some(task) = self
+                    .runtime
+                    .background_tasks
+                    .tasks
+                    .iter_mut()
+                    .find(|t| t.id == id)
+                else {
                     return;
                 };
                 let (status_text, status_val) = match status {
@@ -118,9 +124,9 @@ impl App {
     pub(crate) fn drain_pending_capture(&mut self) -> bool {
         let mut redraw = false;
         // MVU Phase 5 PR8: the reaped exit, dispatched to `apply_exit_event`
-        // after the `&mut self.pending_capture` borrow below ends.
+        // after the `&mut self.runtime.pending_capture` borrow below ends.
         let mut exit = None;
-        if let Some(capture) = &mut self.pending_capture {
+        if let Some(capture) = &mut self.runtime.pending_capture {
             // MVU Phase 3c: clear-before-read (paired with the reader CAS).
             capture.host.clear_wake_pending();
             let mut got_data = false;
@@ -187,7 +193,7 @@ impl App {
                 // MVU Phase 5 PR8: bounded reap (the reader already saw EOF,
                 // so this returns immediately — see `PtyHost::reap_exit`).
                 // Defer the ✓/✗ title + [EOF] finalize to `apply_exit_event`
-                // once this `&mut self.pending_capture` borrow ends.
+                // once this `&mut self.runtime.pending_capture` borrow ends.
                 exit = Some(capture.host.reap_exit());
             }
         }
@@ -207,10 +213,10 @@ impl App {
     /// transition redraws (idle draws stay at 0 for a chatty quiet-divider task).
     pub(crate) fn drain_background_tasks(&mut self) -> bool {
         // MVU Phase 5 PR8: reaped exits, dispatched to `apply_exit_event`
-        // after the `&mut self.background_tasks.tasks` loop borrow ends.
+        // after the `&mut self.runtime.background_tasks.tasks` loop borrow ends.
         let mut exited: Vec<(u32, ExitOutcome)> = Vec::new();
         let mut divider_appeared = false;
-        for task in &mut self.background_tasks.tasks {
+        for task in &mut self.runtime.background_tasks.tasks {
             if !matches!(task.status, TaskStatus::Running) {
                 continue;
             }
@@ -256,6 +262,7 @@ impl App {
     pub(crate) fn refresh_task_viewer(&mut self) -> bool {
         if let Some(viewer_id) = self.view.pager.as_ref().and_then(|v| v.task_id)
             && let Some(task) = self
+                .runtime
                 .background_tasks
                 .tasks
                 .iter_mut()
@@ -299,7 +306,7 @@ impl App {
         let mut needs_draw = false;
         let mut draw_reason = 0u8;
         let mut pane_had_output = false;
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             let active_idx = tabs.active_index();
             for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 // Clear the wake edge BEFORE the gen load (clear-before-read).
@@ -316,7 +323,7 @@ impl App {
                 }
             }
         }
-        if let Some(overlay) = self.top_overlay.as_mut() {
+        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
             overlay.clear_wake(); // clear-before-read (see the tab scan)
             if overlay.drain_output() {
                 pane_had_output = true;
@@ -338,7 +345,7 @@ impl App {
         // Mark exited tabs AFTER drain so the Closed event has been processed
         // and `is_closed()` returns true; the "[exited N]" label appears
         // immediately.
-        if let Some(tabs) = self.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && tabs.mark_exited()
         {
             needs_draw = true;

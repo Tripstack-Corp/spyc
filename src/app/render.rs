@@ -195,6 +195,7 @@ impl App {
         // redundancy with the [SCROLL] tag — three signals in different
         // parts of the divider make "you've left live view" hard to miss.
         let is_scrolling = self
+            .runtime
             .pane_tabs
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
@@ -244,7 +245,7 @@ impl App {
         // We render the indicators first (immutable iter) and capture
         // the active index, then re-borrow mut to fetch the live cwd.
         let mut active_idx: Option<usize> = None;
-        if let Some(tabs) = &self.pane_tabs {
+        if let Some(tabs) = &self.runtime.pane_tabs {
             for (i, entry) in tabs.tabs().iter().enumerate() {
                 let is_active = i == tabs.active_index();
                 if is_active {
@@ -279,7 +280,7 @@ impl App {
             }
         }
 
-        if let (Some(idx), Some(tabs)) = (active_idx, self.pane_tabs.as_mut()) {
+        if let (Some(idx), Some(tabs)) = (active_idx, self.runtime.pane_tabs.as_mut()) {
             let entry = &mut tabs.tabs_mut()[idx];
             let live = entry.live_cwd().to_path_buf();
             let cwd_display = crate::paths::display_tilde(&live);
@@ -331,7 +332,7 @@ impl App {
         let tag_len = zoom_tag.len() + scroll_tag.len();
         // Reserve room for at least 4 dashes + the tag(s).
         let bg_budget = width.saturating_sub(used + tag_len + 4);
-        for task in self.background_tasks.tasks.iter().rev() {
+        for task in self.runtime.background_tasks.tasks.iter().rev() {
             let (glyph, color) = if task.paused && matches!(task.status, TaskStatus::Running) {
                 // Pause glyph trumps the running/unread variants:
                 // user explicitly paused, that's the headline state.
@@ -537,7 +538,7 @@ impl App {
             // layout purposes — file list reclaims the full middle
             // region. The pty stays alive in `pane_tabs`; just no
             // rect for it this frame.
-            self.pane_tabs.is_some() && !self.state.pane_hidden,
+            self.runtime.pane_tabs.is_some() && !self.state.pane_hidden,
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
@@ -545,7 +546,7 @@ impl App {
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
-        if let Some(overlay) = self.top_overlay.as_mut() {
+        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
             // The overlay occupies status + list + prompt area.
             let overlay_area = ratatui::layout::Rect {
                 x: layout.status.x,
@@ -607,7 +608,7 @@ impl App {
                 self.render_pane_status_line(frame, divider_rect);
             }
             let bottom_pane_rect: Option<ratatui::layout::Rect> =
-                if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+                if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
                     let _ = tabs.active_mut().resize(rect.height, rect.width);
                     tabs.drain_all();
                     let focused = self.state.pane_focused();
@@ -680,7 +681,7 @@ impl App {
             if let Some(divider_rect) = layout.divider {
                 self.render_pane_status_line(frame, divider_rect);
             }
-            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
                 let focused = self.state.pane_focused();
@@ -861,7 +862,7 @@ impl App {
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
-            if let (Some(tabs), Some(rect)) = (self.pane_tabs.as_mut(), layout.pane) {
+            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
                 let _ = tabs.active_mut().resize(rect.height, rect.width);
                 tabs.drain_all();
                 if bottom_is_pager {
@@ -1020,9 +1021,10 @@ impl App {
         );
 
         // Line 2 — internals digest.
-        let bg_running = self.background_tasks.running_count();
-        let bg_done = self.background_tasks.done_count();
+        let bg_running = self.runtime.background_tasks.running_count();
+        let bg_done = self.runtime.background_tasks.done_count();
         let bg_paused = self
+            .runtime
             .background_tasks
             .tasks
             .iter()
@@ -1059,7 +1061,11 @@ impl App {
         // Line 3 — process stats (PID for `sample`/lldb, RSS, threads).
         let pid = std::process::id();
         let uptime_str = format_uptime(self.started_at.elapsed().as_secs());
-        let pane_count = self.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        let pane_count = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map_or(0, |t| t.tabs().len());
         let rss_mb = self.activity_proc_rss_kb / 1024;
         let l3 = format!(
             " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",

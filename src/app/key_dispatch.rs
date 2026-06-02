@@ -111,10 +111,10 @@ impl App {
         //    sees the spyc-list flash on the *background* status
         //    bar while looking at the pager — wrong screen for the
         //    notice.
-        let pane_has_focus = self.pane_tabs.is_some() && self.state.pane_focused();
+        let pane_has_focus = self.runtime.pane_tabs.is_some() && self.state.pane_focused();
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.pending_capture.is_none()
+            && self.runtime.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
             && !pane_has_focus
             && self.view.pager.is_none()
@@ -132,7 +132,7 @@ impl App {
         // child's tty driver can deliver SIGINT (matches a normal
         // terminal's behavior, and lets sudo cancel its prompt
         // cleanly).
-        if let Some(capture) = &mut self.pending_capture {
+        if let Some(capture) = &mut self.runtime.pending_capture {
             use std::io::Write as _;
             // Hard-kill escape: Ctrl+\ tears the child down even if
             // it has somehow detached from the controlling tty.
@@ -155,7 +155,7 @@ impl App {
                 // None slot rather than spuriously waking the loop for a
                 // capture that's already gone.
                 capture.host.clear_wake_slot();
-                self.pending_capture = None;
+                self.runtime.pending_capture = None;
                 return Ok(Vec::new());
             }
             // ^Z: send to background. Reader thread keeps draining; the
@@ -177,7 +177,7 @@ impl App {
         // Top overlay: once the subprocess exits, hold the screen until
         // any key so short-lived commands (`;ls`) don't flash and vanish.
         if self.overlay_awaiting_dismiss {
-            self.top_overlay = None;
+            self.runtime.top_overlay = None;
             self.overlay_awaiting_dismiss = false;
             self.view.needs_full_repaint = true;
             self.state.flash_info("command finished");
@@ -351,9 +351,10 @@ impl App {
                 p.buffer.push_str(&clean);
             }
         } else if let Some(overlay) = self
+            .runtime
             .top_overlay
             .as_mut()
-            .filter(|_| !(self.pane_tabs.is_some() && self.state.pane_focused()))
+            .filter(|_| !(self.runtime.pane_tabs.is_some() && self.state.pane_focused()))
         {
             // `V`/`D` top-overlay is the foreground subprocess (editor or
             // pager). Route the paste to it rather than the bottom pane — the
@@ -365,7 +366,7 @@ impl App {
             buf.extend_from_slice(text.as_bytes());
             buf.extend_from_slice(b"\x1b[201~");
             overlay.send_bytes(&buf)?;
-        } else if self.pane_tabs.is_some() {
+        } else if self.runtime.pane_tabs.is_some() {
             // Switch focus to the pane — the user clearly intends to interact
             // with it if they're pasting.
             if !self.state.pane_focused() {
@@ -375,7 +376,7 @@ impl App {
             self.state.pane_prompt_buf.push_str(&text);
             // Wrap in bracketed paste so the child app (e.g. claude) receives
             // the block as a single paste, not line-by-line.
-            let pane = self.pane_tabs.as_mut().unwrap().active_mut();
+            let pane = self.runtime.pane_tabs.as_mut().unwrap().active_mut();
             let mut buf = Vec::with_capacity(text.len() + 12);
             buf.extend_from_slice(b"\x1b[200~");
             buf.extend_from_slice(text.as_bytes());
@@ -400,7 +401,7 @@ impl App {
     pub(crate) fn handle_resize(&mut self, cols: u16, rows: u16) {
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let pane_pct = self.effective_pane_pct();
-        if let Some(tabs) = self.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             let layout = Self::compute_layout(
                 area,
                 true,
@@ -413,8 +414,8 @@ impl App {
                 }
             }
         }
-        if let Some(overlay) = self.top_overlay.as_mut() {
-            let (r, c) = Self::top_overlay_size(pane_pct, self.pane_tabs.is_some());
+        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+            let (r, c) = Self::top_overlay_size(pane_pct, self.runtime.pane_tabs.is_some());
             let _ = overlay.resize(r, c);
         }
         // Help content is baked at open time for the current width (wrap
@@ -761,7 +762,7 @@ impl App {
         // Snapshot cwd + fallback from the tab and best-effort kill the
         // child (bunfs claude is often still alive post-crash; an
         // already-closed pane errors here, ignored).
-        let Some((cwd, fallback)) = self.pane_tabs.as_mut().and_then(|tabs| {
+        let Some((cwd, fallback)) = self.runtime.pane_tabs.as_mut().and_then(|tabs| {
             let entry = tabs.tabs_mut().get_mut(tab_idx)?;
             entry.pane.try_kill();
             let fallback = entry
@@ -775,10 +776,10 @@ impl App {
         };
 
         if !confirmed {
-            if let Some(tabs) = self.pane_tabs.as_mut() {
+            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                 let still_have_tabs = tabs.remove_at(tab_idx);
                 if !still_have_tabs {
-                    self.pane_tabs = None;
+                    self.runtime.pane_tabs = None;
                 }
             }
             self.state.flash_info("claude crash dismissed; tab closed");
@@ -794,7 +795,7 @@ impl App {
         match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &self.context_path, &[], wake) {
             Ok(p) => {
                 let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.replace_at(tab_idx, entry);
                 }
                 self.state
