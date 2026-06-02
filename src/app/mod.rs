@@ -635,7 +635,12 @@ impl Draw {
 /// thread; `RunCtx` — and thus the watcher — must drop AFTER that join, so
 /// `run()` declares `ctx` BEFORE `reader_handle`). The git/MCP forwarder
 /// threads are detached (no handle kept) and self-terminate on channel drop.
-struct RunCtx {
+///
+/// `pub` only because the `pub(crate)` loop-step methods name it in their
+/// signatures (`fn …(&mut self, ctx: &mut RunCtx)`); its fields stay
+/// module-private (the `app` module itself is private, so this is
+/// crate-internal in practice — matching `ViewState`/`App`).
+pub struct RunCtx {
     fs_watcher: Option<notify::RecommendedWatcher>,
     /// Listing dir currently watched; on chdir we unwatch it and watch the new one.
     watched_listing: Option<PathBuf>,
@@ -655,6 +660,31 @@ struct RunCtx {
     /// Last keypress instant — suppresses the MCP context-write for 300ms after a keystroke.
     last_input_at: Option<std::time::Instant>,
     draw: Draw,
+}
+
+#[cfg(test)]
+impl RunCtx {
+    /// Build a `RunCtx` with no fs watcher (the loop-step unit tests never
+    /// spawn one) and fresh empty scratch — so the step methods, which now
+    /// take `&mut RunCtx`, can be driven from tests.
+    fn for_test() -> Self {
+        Self {
+            fs_watcher: None,
+            watched_listing: None,
+            watched_git: None,
+            scheduler: Scheduler::new(),
+            fs_pending: Vec::new(),
+            git_pending: Vec::new(),
+            mcp_pending: Vec::new(),
+            last_context_write: std::time::Instant::now(),
+            last_refresh: std::time::Instant::now(),
+            last_git_poll: std::time::Instant::now(),
+            last_event_at: None,
+            first_event_after_refresh: None,
+            last_input_at: None,
+            draw: Draw::default(),
+        }
+    }
 }
 
 impl App {
@@ -1531,38 +1561,31 @@ impl App {
 
             // Session-restore: deferred `/resume` sends + crash-recovery prompt
             // (see `handle_restore_resumes`).
-            if self.handle_restore_resumes(now_pre, &mut ctx.scheduler) {
+            if self.handle_restore_resumes(now_pre, &mut ctx) {
                 ctx.draw.mark(3);
             }
 
             // Drain buffered FsEvents + run the trailing-debounce listing
             // refresh (see `ingest_fs_and_maybe_refresh`).
-            if self.ingest_fs_and_maybe_refresh(
-                now_pre,
-                &mut ctx.scheduler,
-                &mut ctx.fs_pending,
-                &mut ctx.last_event_at,
-                &mut ctx.first_event_after_refresh,
-                &mut ctx.last_refresh,
-            ) {
+            if self.ingest_fs_and_maybe_refresh(now_pre, &mut ctx) {
                 ctx.draw.mark(3);
             }
             // 1 Hz safety-net git poll + GitPoll deadline arming (see
             // `poll_git_cadence`).
-            if self.poll_git_cadence(now_pre, &mut ctx.last_git_poll, &mut ctx.scheduler) {
+            if self.poll_git_cadence(now_pre, &mut ctx) {
                 ctx.draw.mark(3);
             }
 
             // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).
-            if self.drain_mcp_pending(&mut ctx.mcp_pending) {
+            if self.drain_mcp_pending(&mut ctx) {
                 ctx.draw.mark(3);
             }
 
             // Drain the git-worker results buffered into `ctx.git_pending` — the
             // SOLE apply/count/take site (see `drain_git_pending`).
-            if self.drain_git_pending(&mut ctx.git_pending) {
+            if self.drain_git_pending(&mut ctx) {
                 ctx.draw.mark(2);
             }
 
@@ -1810,7 +1833,7 @@ impl App {
 
             // Re-arm the post-recv advisory deadlines — ActivityRollover +
             // CaptureTick (see `arm_post_recv_deadlines`).
-            self.arm_post_recv_deadlines(now_post, &mut ctx.scheduler);
+            self.arm_post_recv_deadlines(now_post, &mut ctx);
 
             // Only redraw when something actually changed.
             // Wrap in DEC 2026 synchronized update so the terminal
@@ -1877,12 +1900,7 @@ impl App {
             // Event-driven MCP context-file write — debounced + typing-burst
             // suppressed, with ContextWrite deadline arming (see
             // `maybe_write_context`).
-            self.maybe_write_context(
-                now_post,
-                ctx.last_input_at,
-                &mut ctx.last_context_write,
-                &mut ctx.scheduler,
-            );
+            self.maybe_write_context(now_post, &mut ctx);
         }
         // Clean up the context file on exit.
         crate::context::remove_context_file(&self.view.context_path);

@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Deadline, Mode, Prompt, PromptKind, Scheduler, arm_resume_deadlines, state};
+use super::{App, Deadline, Mode, Prompt, PromptKind, RunCtx, arm_resume_deadlines, state};
 
 impl App {
     /// One-shot full-repaint bookkeeping at the top of each iteration.
@@ -55,12 +55,7 @@ impl App {
     /// Diff-aware (`refresh_git_state` only repaints on a real change, so idle
     /// dps stays 0). Also arms/disarms the advisory `GitPoll` deadline.
     /// Returns whether a redraw is needed.
-    pub(crate) fn poll_git_cadence(
-        &mut self,
-        now_pre: Instant,
-        last_git_poll: &mut Instant,
-        scheduler: &mut Scheduler,
-    ) -> bool {
+    pub(crate) fn poll_git_cadence(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
         let git_poll_interval = if self.state.is_huge_tree {
             Duration::from_secs(10)
@@ -68,9 +63,9 @@ impl App {
             Duration::from_secs(1)
         };
         if self.state.git.info.is_some()
-            && now_pre.duration_since(*last_git_poll) >= git_poll_interval
+            && now_pre.duration_since(ctx.last_git_poll) >= git_poll_interval
         {
-            *last_git_poll = now_pre;
+            ctx.last_git_poll = now_pre;
             if self.state.refresh_git_state() {
                 needs_draw = true;
             }
@@ -78,9 +73,10 @@ impl App {
         // Arm/disarm GitPoll to reflect git_info presence (advisory — the
         // predicate above fires it against now_pre).
         if self.state.git.info.is_some() {
-            scheduler.arm(Deadline::GitPoll, *last_git_poll + git_poll_interval);
+            ctx.scheduler
+                .arm(Deadline::GitPoll, ctx.last_git_poll + git_poll_interval);
         } else {
-            scheduler.disarm(Deadline::GitPoll);
+            ctx.scheduler.disarm(Deadline::GitPoll);
         }
         needs_draw
     }
@@ -91,12 +87,9 @@ impl App {
     /// breaches the client's 5 s timeout. `execute_mcp_command` writes the
     /// context file synchronously, then `reply.send` — preserving
     /// single-connection read-after-write. Returns whether a redraw is needed.
-    pub(crate) fn drain_mcp_pending(
-        &mut self,
-        mcp_pending: &mut Vec<crate::mcp_cmd::McpRequest>,
-    ) -> bool {
+    pub(crate) fn drain_mcp_pending(&mut self, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
-        for req in std::mem::take(mcp_pending) {
+        for req in std::mem::take(&mut ctx.mcp_pending) {
             self.view.activity_mcp_reqs = self.view.activity_mcp_reqs.saturating_add(1);
             let resp = self.execute_mcp_command(req.command);
             let _ = req.reply.send(resp);
@@ -112,12 +105,9 @@ impl App {
     /// *current* listing dir. SOLE apply/count/take site. Sets `context_dirty`
     /// when a result lands (git_branch / dirty flag may have changed). Returns
     /// whether a redraw is needed (the caller uses `draw_reason = 2`).
-    pub(crate) fn drain_git_pending(
-        &mut self,
-        git_pending: &mut Vec<state::GitWorkerResult>,
-    ) -> bool {
+    pub(crate) fn drain_git_pending(&mut self, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
-        for result in std::mem::take(git_pending) {
+        for result in std::mem::take(&mut ctx.git_pending) {
             if self.ingest_git_result(result) {
                 needs_draw = true;
                 self.view.context_dirty = true;
@@ -198,19 +188,20 @@ impl App {
     /// floor is None and this deadline is the only thing waking the rollover)
     /// and CaptureTick (the ~1 Hz elapsed-timer tick for a streaming capture /
     /// `:task` viewer).
-    pub(crate) fn arm_post_recv_deadlines(&self, now_post: Instant, scheduler: &mut Scheduler) {
+    pub(crate) fn arm_post_recv_deadlines(&self, now_post: Instant, ctx: &mut RunCtx) {
         if self.view.show_activity {
-            scheduler.arm(
+            ctx.scheduler.arm(
                 Deadline::ActivityRollover,
                 self.view.activity_last_tick + Duration::from_secs(1),
             );
         } else {
-            scheduler.disarm(Deadline::ActivityRollover);
+            ctx.scheduler.disarm(Deadline::ActivityRollover);
         }
         if self.capture_tick_should_arm() {
-            scheduler.arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
+            ctx.scheduler
+                .arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
         } else {
-            scheduler.disarm(Deadline::CaptureTick);
+            ctx.scheduler.disarm(Deadline::CaptureTick);
         }
     }
 
@@ -219,15 +210,11 @@ impl App {
     /// RestoreSettle/ResumeEnter deadlines, and — if a restored claude tab
     /// looks crashed (bad exit / crash dump) while in Normal mode — open the
     /// crash-recovery prompt. Returns whether a redraw is needed (the prompt).
-    pub(crate) fn handle_restore_resumes(
-        &mut self,
-        now_pre: Instant,
-        scheduler: &mut Scheduler,
-    ) -> bool {
+    pub(crate) fn handle_restore_resumes(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
         self.send_pending_resumes(now_pre);
         // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
         // all tabs so the wait can wake for it.
-        arm_resume_deadlines(scheduler, self.runtime.pane_tabs.as_ref());
+        arm_resume_deadlines(&mut ctx.scheduler, self.runtime.pane_tabs.as_ref());
 
         let crash_idx = self.find_crashed_restore_tab(now_pre);
         if let Some(tab_idx) = crash_idx
@@ -253,33 +240,30 @@ impl App {
     /// yanked by an mtime change mid-keystroke). Also arms/disarms the advisory
     /// `ContextWrite` deadline at the predicate edge. No redraw (the write is
     /// invisible).
-    pub(crate) fn maybe_write_context(
-        &mut self,
-        now_post: Instant,
-        last_input_at: Option<Instant>,
-        last_context_write: &mut Instant,
-        scheduler: &mut Scheduler,
-    ) {
-        let typing_burst =
-            last_input_at.is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
+    pub(crate) fn maybe_write_context(&mut self, now_post: Instant, ctx: &mut RunCtx) {
+        let typing_burst = ctx
+            .last_input_at
+            .is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
         if self.view.context_dirty
             && !typing_burst
-            && now_post.duration_since(*last_context_write) >= Duration::from_millis(150)
+            && now_post.duration_since(ctx.last_context_write) >= Duration::from_millis(150)
         {
             self.write_context();
-            *last_context_write = now_post;
+            ctx.last_context_write = now_post;
             self.view.context_dirty = false;
-            scheduler.disarm(Deadline::ContextWrite);
+            ctx.scheduler.disarm(Deadline::ContextWrite);
         }
         // Arm ContextWrite at the predicate edge (the later of the 150 ms
         // min-interval and the 300 ms typing-burst suppressor) while dirty;
         // disarm once written.
         if self.view.context_dirty {
-            let edge = (*last_context_write + Duration::from_millis(150))
-                .max(last_input_at.map_or(*last_context_write, |t| t + Duration::from_millis(300)));
-            scheduler.arm(Deadline::ContextWrite, edge);
+            let edge = (ctx.last_context_write + Duration::from_millis(150)).max(
+                ctx.last_input_at
+                    .map_or(ctx.last_context_write, |t| t + Duration::from_millis(300)),
+            );
+            ctx.scheduler.arm(Deadline::ContextWrite, edge);
         } else {
-            scheduler.disarm(Deadline::ContextWrite);
+            ctx.scheduler.disarm(Deadline::ContextWrite);
         }
     }
 }
@@ -360,11 +344,10 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             assert!(app.state.git.info.is_none(), "tmpdir is not a git repo");
-            let mut sched = Scheduler::new();
-            let mut last_git_poll = Instant::now();
-            let needs = app.poll_git_cadence(Instant::now(), &mut last_git_poll, &mut sched);
+            let mut ctx = RunCtx::for_test();
+            let needs = app.poll_git_cadence(Instant::now(), &mut ctx);
             assert!(!needs, "no git → no redraw");
-            assert!(sched.next().is_none(), "no git → GitPoll disarmed");
+            assert!(ctx.scheduler.next().is_none(), "no git → GitPoll disarmed");
         });
     }
 }
