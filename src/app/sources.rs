@@ -99,7 +99,7 @@ impl App {
         last_event_at: &mut Option<std::time::Instant>,
         first_event_after_refresh: &mut Option<std::time::Instant>,
     ) {
-        self.activity_watcher_events = self.activity_watcher_events.saturating_add(1);
+        self.view.activity_watcher_events = self.view.activity_watcher_events.saturating_add(1);
         for p in &ev.paths {
             let listing = self.is_listing_path(p);
             let config = self.is_config_path(p);
@@ -191,7 +191,7 @@ impl App {
             needs_draw = true;
             // Listing changed via fs watcher (not a keystroke path) —
             // `cursor_file` / `git_branch` in the context may have shifted.
-            self.context_dirty = true;
+            self.view.context_dirty = true;
             scheduler.disarm(Deadline::RefreshQuiet);
         }
         needs_draw
@@ -230,11 +230,11 @@ impl App {
     /// Extracted verbatim from the old pre-recv `git_result_rx.try_recv()`
     /// drain.
     pub fn ingest_git_result(&mut self, result: state::GitWorkerResult) -> bool {
-        self.activity_git_results = self.activity_git_results.saturating_add(1);
+        self.view.activity_git_results = self.view.activity_git_results.saturating_add(1);
         // Roundtrip duration: when the request was sent (set by
         // `git_file_statuses_cached`) vs. now.
         if let Some(sent) = self.state.last_git_request_at.take() {
-            self.activity_git_last_ms =
+            self.view.activity_git_last_ms =
                 u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
         }
         self.apply_git_worker_result(result)
@@ -449,7 +449,7 @@ mod tests {
 
             // Counted once per event (not per path), stamped at `now_pre`,
             // and the max-defer anchor fixed at the FIRST event.
-            assert_eq!(app.activity_watcher_events, 3);
+            assert_eq!(app.view.activity_watcher_events, 3);
             assert_eq!(last_event_at, Some(base));
             assert_eq!(first, Some(base));
             assert!(!needs_reload); // not a config path
@@ -491,7 +491,7 @@ mod tests {
             // counted per delivery (activity is "results seen", not "applied").
             assert!(!app.ingest_git_result(git_result(99)));
             assert!(!app.ingest_git_result(git_result(99)));
-            assert_eq!(app.activity_git_results, 2);
+            assert_eq!(app.view.activity_git_results, 2);
         });
     }
 

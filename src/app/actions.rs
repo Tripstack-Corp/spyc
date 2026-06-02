@@ -58,7 +58,7 @@ impl App {
         self.state.harpoon = want.map(Harpoon::load);
         // Close the menu if it's open — its cursor referenced the old
         // list and would point at stale rows.
-        self.harpoon_menu = None;
+        self.view.harpoon_menu = None;
         self.sync_harpoon_filter_set();
         // If `=h` was active, the now-stale set may render an empty
         // list silently; rebuild rows so the user sees the new state.
@@ -443,8 +443,8 @@ impl App {
             }
 
             Action::ToggleActivity => {
-                self.show_activity = !self.show_activity;
-                self.state.flash_info(if self.show_activity {
+                self.view.show_activity = !self.view.show_activity;
+                self.state.flash_info(if self.view.show_activity {
                     "activity monitor on"
                 } else {
                     "activity monitor off"

@@ -406,7 +406,7 @@ impl App {
             text::{Line, Span},
             widgets::{Block, Borders, Clear, Paragraph},
         };
-        let Some(menu) = self.harpoon_menu.as_ref() else {
+        let Some(menu) = self.view.harpoon_menu.as_ref() else {
             return;
         };
         let Some(h) = self.state.harpoon.as_ref() else {
@@ -556,15 +556,15 @@ impl App {
             };
             let _ = overlay.resize(overlay_area.height, overlay_area.width);
             overlay.drain_output();
-            if overlay.is_closed() && !self.overlay_awaiting_dismiss {
-                self.overlay_awaiting_dismiss = true;
+            if overlay.is_closed() && !self.view.overlay_awaiting_dismiss {
+                self.view.overlay_awaiting_dismiss = true;
             }
             // Visual focus tracks `state.pane_focused`: false ⇒
             // overlay focused (cursor block, full color); true ⇒
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
             let overlay_focused = !self.state.pane_focused();
-            let want_overlay_cursor = overlay_focused && !self.overlay_awaiting_dismiss;
+            let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
             overlay.with_screen(|screen| {
                 frame.render_widget(
                     PaneWidget {
@@ -578,7 +578,7 @@ impl App {
                 }
             });
             // Show a dismiss prompt when the subprocess has exited.
-            if self.overlay_awaiting_dismiss && overlay_area.height > 0 {
+            if self.view.overlay_awaiting_dismiss && overlay_area.height > 0 {
                 use ratatui::{
                     style::{Modifier, Style},
                     text::{Line, Span},
@@ -618,7 +618,7 @@ impl App {
                     // two can't produce a cursor that's ahead of the
                     // rendered grid (off-by-one tearing in claude
                     // backspace was the symptom).
-                    let want_cursor = focused && !self.overlay_awaiting_dismiss;
+                    let want_cursor = focused && !self.view.overlay_awaiting_dismiss;
                     tabs.active().with_screen(|screen| {
                         frame.render_widget(PaneWidget { screen, focused }, rect);
                         if want_cursor {
@@ -912,7 +912,7 @@ impl App {
                 // Quick Select labels paint *over* the pane widget so
                 // the user keeps the live output as context. Render
                 // here, after the pane, before the divider.
-                if self.quick_select.is_some() && !bottom_is_pager {
+                if self.view.quick_select.is_some() && !bottom_is_pager {
                     self.render_quick_select_overlay(frame, rect);
                 }
                 Some(rect)
@@ -980,7 +980,7 @@ impl App {
 
         // Harpoon menu overlay — modal, drawn on top of everything
         // except the activity monitor.
-        if self.harpoon_menu.is_some() {
+        if self.view.harpoon_menu.is_some() {
             self.render_harpoon_menu(frame);
         }
     }
@@ -995,7 +995,7 @@ impl App {
     /// (lavender), and a build + terminal-caps footer (blue). No-op unless the
     /// monitor is toggled on.
     fn render_activity_hud(&self, frame: &mut Frame, frame_area: ratatui::layout::Rect) {
-        if !self.show_activity {
+        if !self.view.show_activity {
             return;
         }
         use ratatui::style::{Color, Style};
@@ -1007,17 +1007,17 @@ impl App {
         // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
         let l1 = format!(
             " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
-            self.activity_dps,
-            self.activity_snap_pane,
-            self.activity_snap_event,
-            self.activity_snap_other,
-            self.activity_bps,
-            self.activity_frame_peak_snap as f64 / 1000.0,
-            self.activity_render_peak_snap as f64 / 1000.0,
+            self.view.activity_dps,
+            self.view.activity_snap_pane,
+            self.view.activity_snap_event,
+            self.view.activity_snap_other,
+            self.view.activity_bps,
+            self.view.activity_frame_peak_snap as f64 / 1000.0,
+            self.view.activity_render_peak_snap as f64 / 1000.0,
             // Peak keystroke→echo round-trip (forward → agent echo → render).
             // `echo - r` ≈ the agent/pty round-trip (Claude re-rendering its
             // input box) we don't control; a small `echo` ⇒ spyc isn't the lag.
-            self.activity_echo_snap as f64 / 1000.0,
+            self.view.activity_echo_snap as f64 / 1000.0,
         );
 
         // Line 2 — internals digest.
@@ -1038,10 +1038,10 @@ impl App {
                 crate::ui::pager::Mount::LowerPane => "lower",
             },
         };
-        let git_last = if self.activity_git_last_ms == 0 {
+        let git_last = if self.view.activity_git_last_ms == 0 {
             "—".to_string()
         } else {
-            format!("{}ms", self.activity_git_last_ms)
+            format!("{}ms", self.view.activity_git_last_ms)
         };
         let l2 = format!(
             " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
@@ -1050,26 +1050,26 @@ impl App {
             } else {
                 String::new()
             },
-            self.activity_git_results_snap,
+            self.view.activity_git_results_snap,
             git_last,
-            self.activity_watcher_events_snap,
-            self.activity_mcp_reqs_snap,
+            self.view.activity_watcher_events_snap,
+            self.view.activity_mcp_reqs_snap,
             self.state.listing.entries.len(),
             pager_state,
         );
 
         // Line 3 — process stats (PID for `sample`/lldb, RSS, threads).
         let pid = std::process::id();
-        let uptime_str = format_uptime(self.started_at.elapsed().as_secs());
+        let uptime_str = format_uptime(self.view.started_at.elapsed().as_secs());
         let pane_count = self
             .runtime
             .pane_tabs
             .as_ref()
             .map_or(0, |t| t.tabs().len());
-        let rss_mb = self.activity_proc_rss_kb / 1024;
+        let rss_mb = self.view.activity_proc_rss_kb / 1024;
         let l3 = format!(
             " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
-            self.activity_proc_threads,
+            self.view.activity_proc_threads,
         );
 
         // Line 4 — build identity + terminal capabilities.

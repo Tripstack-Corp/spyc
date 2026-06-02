@@ -335,11 +335,11 @@ impl App {
             // Echo-latency probe (A-monitor only): this active-pane output is
             // the agent's echo of the last forwarded keystroke. Measure
             // forward→echo so we can see the pane round-trip vs render cost.
-            if self.show_activity
-                && let Some(sent) = self.pane_send_at.take()
+            if self.view.show_activity
+                && let Some(sent) = self.view.pane_send_at.take()
             {
                 let us = u64::try_from(sent.elapsed().as_micros()).unwrap_or(u64::MAX);
-                self.activity_echo_peak_us = self.activity_echo_peak_us.max(us);
+                self.view.activity_echo_peak_us = self.view.activity_echo_peak_us.max(us);
             }
         }
         // Mark exited tabs AFTER drain so the Closed event has been processed
