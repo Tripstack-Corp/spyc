@@ -1503,89 +1503,13 @@ impl App {
                 draw_reason = 3;
             }
 
-            // Pre-drain pane output so we know if anything arrived.
-            // All tabs are drained (correctness). Active-tab output
-            // drives the smooth-streaming poll rate; background-tab
-            // output flips the `has_activity` flag so the divider
-            // gets a `+` glyph and triggers a redraw so the user sees
-            // it promptly. Previously the render-path `drain_all` was
-            // responsible for the flag, but pre-drain runs first and
-            // empties the queue — so background activity was silently
-            // swallowed until the next foreground keypress
-            // (`sleep 10 && echo "hello"` on a background tab never
-            // surfaced).
-            // v1.50.84 moved vt100 parsing to a per-Pane worker
-            // thread, so `drain_output` is now an Acquire-load on an
-            // AtomicU64 generation counter — there's no per-iteration
-            // parse cost on the main thread to throttle. The
-            // v1.50.83 defer-during-typing-burst hack is therefore
-            // removed: it was suppressing the gen check for ~100 ms
-            // during typing, which delayed the moment the main
-            // thread noticed the worker had parsed claude's echo
-            // (visible as an off-by-one lag between keystroke and
-            // visible echo). Now every iteration polls the gen and
-            // schedules a redraw the same tick the worker finishes.
-            let mut pane_had_output = false;
-            if let Some(tabs) = self.pane_tabs.as_mut() {
-                let active_idx = tabs.active_index();
-                for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-                    // MVU Phase 3b: clear the wake edge flag BEFORE the gen
-                    // load (clear-before-read). This is the SOLE clear site —
-                    // it must not move into `drain_output`, which render's
-                    // `drain_all` also calls every frame and would re-clear
-                    // the flag mid-stream, defeating the worker CAS coalescer.
-                    entry.pane.clear_wake();
-                    // `drain_output` is itself just an Acquire-load on
-                    // the worker's generation counter, so it is the
-                    // cheap check — no separate fast-path gate needed.
-                    if entry.pane.drain_output() {
-                        if i == active_idx {
-                            pane_had_output = true;
-                        } else {
-                            entry.info.has_activity = true;
-                            needs_draw = true;
-                            draw_reason = 1;
-                        }
-                    }
-                }
-            }
-            if let Some(overlay) = self.top_overlay.as_mut() {
-                overlay.clear_wake(); // clear-before-read (see the tab scan)
-                if overlay.drain_output() {
-                    pane_had_output = true;
-                }
-            }
-            if pane_had_output {
-                // v1.50.82 capped pane-driven renders to ~30 dps
-                // during typing on the theory that the ratatui diff
-                // emission was the per-iteration cost. With
-                // v1.50.84 the parse runs on a worker thread and
-                // emission is the *only* main-thread render cost
-                // (already small) — capping it just delayed the
-                // visible echo behind the user's keystroke
-                // (^d-to-end-of-line in claude vi mode was the
-                // visible symptom). Removed.
+            // Pre-recv pane-output scan: drain every tab + overlay, flip the
+            // background-tab divider glyph, mark exited tabs (see
+            // `drain_pane_output` — clear_wake/drain_output CAS lives there).
+            let (pane_draw, pane_reason) = self.drain_pane_output();
+            if pane_draw {
                 needs_draw = true;
-                draw_reason = 1;
-                // Echo-latency probe (A-monitor only): this active-pane output
-                // is the agent's echo of the last forwarded keystroke. Measure
-                // forward→echo so we can see the pane round-trip vs render cost.
-                if self.show_activity
-                    && let Some(sent) = self.pane_send_at.take()
-                {
-                    let us = u64::try_from(sent.elapsed().as_micros()).unwrap_or(u64::MAX);
-                    self.activity_echo_peak_us = self.activity_echo_peak_us.max(us);
-                }
-            }
-
-            // Mark exited tabs AFTER drain so the Closed event has been
-            // processed and is_closed() returns true. Trigger a redraw
-            // so the "[exited N]" label appears immediately.
-            if let Some(tabs) = self.pane_tabs.as_mut()
-                && tabs.mark_exited()
-            {
-                needs_draw = true;
-                draw_reason = 3;
+                draw_reason = pane_reason;
             }
 
             // MVU Phase 5: snapshot the active pane's routing flags into the
