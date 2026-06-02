@@ -57,6 +57,11 @@ pub fn coalesce_pending(
             | Message::GrepOutput
             | Message::FindOutput
             | Message::ReaderExited
+            // MVU Phase 6: agent-status-resolved is a payloadless wake. Safe to
+            // drop while coalescing — the loop still iterates, and the pre-recv
+            // scan's pending-check (not this wake surviving) is what forces the
+            // redraw that applies the landed short-id.
+            | Message::AgentStatusReady
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
