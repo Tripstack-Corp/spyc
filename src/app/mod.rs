@@ -592,6 +592,35 @@ pub struct RowData {
     pub kind: EntryKind,
 }
 
+/// Per-iteration draw accumulator for the event loop. `dirty` is an OR
+/// across every step in an iteration; `reason` is last-writer-wins,
+/// matching the old `draw_reason = N` overwrite semantics. Reset by the
+/// render block each iteration.
+///
+/// `reason` codes: 0 = none, 1 = pane output, 2 = input/git, 3 = other
+/// (refresh / config / repaint / activity).
+#[derive(Default)]
+struct Draw {
+    dirty: bool,
+    reason: u8,
+}
+
+impl Draw {
+    /// Mark the frame dirty and set the reason (last writer wins).
+    const fn mark(&mut self, reason: u8) {
+        self.dirty = true;
+        self.reason = reason;
+    }
+
+    /// Mark dirty WITHOUT touching `reason` — for the activity-only
+    /// rollover redraw, which must not bump a real `draw_reason` (the
+    /// render-stats block reads `reason` and skips counting activity-only
+    /// frames).
+    const fn set_dirty(&mut self) {
+        self.dirty = true;
+    }
+}
+
 impl App {
     pub fn new(resume: bool, mcp_takeover_allowed: bool) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
@@ -1356,9 +1385,11 @@ impl App {
         // the worker had finished an echo, which manifested as
         // off-by-one input lag. Removed.)
 
-        let mut needs_draw = true; // draw at least once on startup
-        // 0=none, 1=pane output, 2=input event, 3=other (refresh/config/repaint/activity)
-        let mut draw_reason: u8 = 3;
+        // Draw at least once on startup (dirty: true, reason: 3 = other).
+        let mut draw = Draw {
+            dirty: true,
+            reason: 3,
+        };
 
         while !self.state.should_quit {
             // MVU Phase 3d: authoritative reader-death exit. With the poll
@@ -1380,8 +1411,7 @@ impl App {
             // clear causes a visible flash. Just force a draw instead.
             let (pager_redraw, pending_clear) = self.step_pager_repaint();
             if pager_redraw {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
             // NOTE: periodic ^L to Claude pane tabs was removed — it clears
             // any draft prompt the user has typed, even when focus is on the
@@ -1396,16 +1426,13 @@ impl App {
             // poll floor still backstops them this PR; PR3 deletes it once
             // these wake the channel.
             if self.drain_pending_capture() {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
             if self.drain_background_tasks() {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
             if self.refresh_task_viewer() {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // MVU Phase 6: drain any off-thread agent-status resolve that
@@ -1416,8 +1443,7 @@ impl App {
             // the slot full and this nudge would busy-spin. Applying the result
             // updates the cache so the next render shows the short-id.
             if self.apply_landed_agent_status() {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // F-finder: drain any candidate batches the walker
@@ -1430,8 +1456,7 @@ impl App {
             {
                 picker.refilter();
                 self.render_find_picker();
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // :grep session: drain match batches into the active
@@ -1439,8 +1464,7 @@ impl App {
             // results land directly in the pager body instead of
             // being re-ranked.
             if self.drain_grep_session() {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // Pre-recv pane-output scan: drain every tab + overlay, flip the
@@ -1448,8 +1472,7 @@ impl App {
             // `drain_pane_output` — clear_wake/drain_output CAS lives there).
             let (pane_draw, pane_reason) = self.drain_pane_output();
             if pane_draw {
-                needs_draw = true;
-                draw_reason = pane_reason;
+                draw.mark(pane_reason);
             }
 
             // MVU Phase 5: snapshot the active pane's routing flags into the
@@ -1467,8 +1490,7 @@ impl App {
             // Session-restore: deferred `/resume` sends + crash-recovery prompt
             // (see `handle_restore_resumes`).
             if self.handle_restore_resumes(now_pre, &mut scheduler) {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // Drain buffered FsEvents + run the trailing-debounce listing
@@ -1481,29 +1503,25 @@ impl App {
                 &mut first_event_after_refresh,
                 &mut last_refresh,
             ) {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
             // 1 Hz safety-net git poll + GitPoll deadline arming (see
             // `poll_git_cadence`).
             if self.poll_git_cadence(now_pre, &mut last_git_poll, &mut scheduler) {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // Execute writable MCP commands buffered into `mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).
             if self.drain_mcp_pending(&mut mcp_pending) {
-                needs_draw = true;
-                draw_reason = 3;
+                draw.mark(3);
             }
 
             // Drain the git-worker results buffered into `git_pending` — the
             // SOLE apply/count/take site (see `drain_git_pending`).
             if self.drain_git_pending(&mut git_pending) {
-                needs_draw = true;
-                draw_reason = 2;
+                draw.mark(2);
             }
 
             // MVU Phase 3c: the last poll floor is GONE. Every event source
@@ -1524,7 +1542,7 @@ impl App {
             // iteration. Blocking here delayed already-drained pane output
             // (e.g. a keystroke echo) until the next message/deadline arrived,
             // a visible per-keystroke render lag. (Draw-before-you-block.)
-            let wait = if needs_draw {
+            let wait = if draw.dirty {
                 Some(Duration::ZERO)
             } else {
                 scheduler.next().map(|when| {
@@ -1602,7 +1620,7 @@ impl App {
                 // pre-recv drains re-run; for ReaderExited the synthesized
                 // Timeout re-enters the loop, where the loop-top reader_done
                 // check exits; for AgentStatusReady the pre-recv scan's
-                // pending-check sets `needs_draw` so render applies the landed
+                // pending-check marks the frame dirty so render applies the landed
                 // short-id (the worker can't redraw, only wake — see the field
                 // doc on `agent_status_pending`).
                 Ok(
@@ -1618,8 +1636,7 @@ impl App {
             };
             match effective {
                 Ok(Message::Input(ev)) => {
-                    needs_draw = true;
-                    draw_reason = 2;
+                    draw.mark(2);
                     match ev {
                         Event::Key(key)
                             if key.kind == KeyEventKind::Press
@@ -1719,9 +1736,9 @@ impl App {
             // Activity monitor: roll over the 1-second window (snapshot +
             // reset + proc-stat refresh; see `roll_activity_window`). Returns
             // whether an overlay-only redraw is warranted this tick.
-            let activity_only_draw = self.roll_activity_window(now_post, needs_draw);
+            let activity_only_draw = self.roll_activity_window(now_post, draw.dirty);
             if activity_only_draw {
-                needs_draw = true;
+                draw.set_dirty();
             }
 
             // Re-arm the post-recv advisory deadlines — ActivityRollover +
@@ -1733,8 +1750,8 @@ impl App {
             // emulator (iTerm2, etc.) buffers the entire frame and
             // paints it atomically — eliminates tearing and reduces
             // terminal-side CPU.
-            if needs_draw {
-                needs_draw = false;
+            if draw.dirty {
+                draw.dirty = false;
                 // Title compose + dedup stay loop-side; only the
                 // `term_title::set` IO runs through the sole executor.
                 let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
@@ -1770,13 +1787,13 @@ impl App {
                     self.view.activity_draws += 1;
                     self.view.activity_bytes +=
                         u64::from(frame_area.width) * u64::from(frame_area.height);
-                    match draw_reason {
+                    match draw.reason {
                         1 => self.view.activity_reason_pane += 1,
                         2 => self.view.activity_reason_event += 1,
                         _ => self.view.activity_reason_other += 1,
                     }
                 }
-                draw_reason = 0;
+                draw.reason = 0;
             }
 
             // Only re-sync the filesystem watcher when the cwd actually changed.
