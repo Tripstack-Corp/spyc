@@ -351,27 +351,48 @@ struct Runtime {
     git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
 }
 
+/// MVU end-state: the **ViewState** cluster — render ephemerals + derived
+/// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
+/// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
+/// field; handlers reach it via `self.view.…`. Fields migrate in over the
+/// physical-split PRs (D1: the pager group + render caches).
+pub struct ViewState {
+    pub pager: Option<PagerView>,
+    pub pager_history: PagerHistory,
+    pub pager_pending_bracket: Option<char>,
+    pub pager_was_open: bool,
+    pub pager_jump_buf: Option<String>,
+    /// Stash for the pager that was active when `?` opened the
+    /// pager-help overlay. Restored verbatim on Esc/q dismissal so
+    /// the user lands back in the same view. Separate from
+    /// `pager_history` because the latter silently drops
+    /// `no_history=true` views — going through history would lose them.
+    pub pager_help_stash: Option<PagerView>,
+    /// Per-file scroll memory for the pager (loaded once at startup;
+    /// see [`state::pager_positions`]).
+    pub pager_positions: crate::state::pager_positions::PagerPositions,
+    /// Color/style overrides.
+    pub theme: Theme,
+    /// One-shot full buffer clear/redraw request.
+    pub needs_full_repaint: bool,
+    /// Cached `build_rows()` output; invalidated by `list_generation`.
+    pub cached_rows: Vec<Row>,
+    pub cached_rows_gen: u64,
+    /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
+    pub cached_grid_key: (u64, usize, usize, u16, u16),
+    /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
+    /// a re-emit on next draw.
+    pub last_term_title: Option<String>,
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct App {
     /// Domain state — navigation, selection, filtering, config, etc.
     pub state: state::AppState,
+    /// Render ephemerals + caches (see [`ViewState`]).
+    view: ViewState,
 
-    // --- UI/terminal state (stays in App) ---
-    pager: Option<PagerView>,
-    pager_history: PagerHistory,
-    pager_pending_bracket: Option<char>,
-    pager_was_open: bool,
-    pager_jump_buf: Option<String>,
-    /// Stash for the pager that was active when `?` opened the
-    /// pager-help overlay. Restored verbatim on Esc/q dismissal so
-    /// the user lands back in the same view (same content, same
-    /// mount). Separate from `pager_history` because the latter
-    /// silently drops `no_history=true` views (used by `^a-v`
-    /// scrollback and `D` in-app pager — both v1.5 mounts) — going
-    /// through history would lose them and pop a stale
-    /// file-viewer instead. Always single-slotted; nested `?` is
-    /// undefined territory the user can't reach.
-    pager_help_stash: Option<PagerView>,
+    // --- UI/terminal state (stays in App for now) ---
     pane_tabs: Option<PaneTabs>,
     // MVU Phase 5: `harpoon` moved to `AppState` (Model consolidation).
     /// Active harpoon menu overlay (interactive: reorder, delete,
@@ -443,8 +464,6 @@ pub struct App {
     /// jump to file reference.
     scroll_pending_g: bool,
     pending_pager_return: Option<PagerReturn>,
-    needs_full_repaint: bool,
-    theme: Theme,
     /// Path to the `.spyc-context.json` file (project root).
     /// Written each loop iteration so the MCP server can read it.
     context_path: PathBuf,
@@ -531,11 +550,6 @@ pub struct App {
     /// hide it behind the existing snapshot cadence.
     activity_proc_rss_kb: u64,
     activity_proc_threads: u32,
-    /// Cached `build_rows()` output; invalidated by `list_generation`.
-    cached_rows: Vec<Row>,
-    cached_rows_gen: u64,
-    /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
-    cached_grid_key: (u64, usize, usize, u16, u16),
     /// Commands from the MCP server (writable actions from Claude). MVU
     /// Phase 3d: `run()` `.take()`s this once and moves it into the MCP
     /// forwarder thread, which re-sends each request onto the unified channel
@@ -549,11 +563,6 @@ pub struct App {
     /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
     /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
     scroll_last: Option<(std::time::Instant, KeyCode)>,
-    /// Last terminal-window title we emitted; used to skip redundant
-    /// OSC 2 writes when project / session / cwd haven't changed.
-    /// `None` forces an emit on next draw (used after a child process
-    /// like vim may have clobbered the title).
-    last_term_title: Option<String>,
     /// MVU Phase 5: IO-handle cluster (see [`Runtime`]). PR 1 seeds it with
     /// the git worker-result receiver (formerly `App.git_result_rx`).
     runtime: Runtime,
@@ -565,12 +574,6 @@ pub struct App {
     /// it to push `Message::PaneOutput`. `None` before `run()` (and in the
     /// test harness) → `make_pane_wake` returns a no-op.
     pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
-    /// Per-file scroll memory for the pager. Loaded once at startup;
-    /// updated whenever a file-backed pager view is closed or swapped
-    /// out (and also when spyc itself exits). Restores the user's
-    /// last reading position when they reopen the same file. See
-    /// [`state::pager_positions`].
-    pager_positions: crate::state::pager_positions::PagerPositions,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -814,12 +817,21 @@ impl App {
         app_state.git_worker_tx = Some(git_req_tx);
         let mut app = Self {
             state: app_state,
-            pager: None,
-            pager_history: PagerHistory::new(),
-            pager_pending_bracket: None,
-            pager_was_open: false,
-            pager_help_stash: None,
-            pager_jump_buf: None,
+            view: ViewState {
+                pager: None,
+                pager_history: PagerHistory::new(),
+                pager_pending_bracket: None,
+                pager_was_open: false,
+                pager_help_stash: None,
+                pager_jump_buf: None,
+                pager_positions: crate::state::pager_positions::PagerPositions::load(),
+                theme,
+                needs_full_repaint: false,
+                cached_rows: Vec::new(),
+                cached_rows_gen: u64::MAX, // force first build
+                cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+                last_term_title: None,
+            },
             pane_tabs: None,
             harpoon_menu: None,
             quick_select: None,
@@ -841,8 +853,6 @@ impl App {
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
-            needs_full_repaint: false,
-            theme,
             context_path,
             last_context_json: String::new(),
             // Write once on startup so claude sees initial state.
@@ -879,19 +889,14 @@ impl App {
             activity_proc_threads: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
-            cached_rows: Vec::new(),
-            cached_rows_gen: u64::MAX, // force first build
-            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             mcp_cmd_rx: Some(mcp_cmd_rx),
             tab_state: None,
             scroll_last: None,
-            last_term_title: None,
             runtime: Runtime {
                 git_result_rx: Some(git_res_rx),
             },
             next_sink_id: 0,
             pane_wake_tx: None,
-            pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
         // Evaluate huge-tree status at startup so the first 1 Hz poll
@@ -1046,16 +1051,16 @@ impl App {
     /// the MCP server thread forwards to Claude.
     /// Persist the current pager's scroll position to disk if it's a
     /// file-backed view (`source_path` is set). Call before any
-    /// assignment that drops or replaces `self.pager` so the user's
+    /// assignment that drops or replaces `self.view.pager` so the user's
     /// reading position survives close + reopen. No-op for command
     /// output, help, picker UIs, etc. — those views intentionally
     /// don't carry a `source_path`.
     fn remember_pager_position(&mut self) {
-        if let Some(view) = self.pager.as_ref()
+        if let Some(view) = self.view.pager.as_ref()
             && let Some(path) = view.source_path.clone()
         {
             let scroll = view.scroll;
-            self.pager_positions.record(&path, scroll);
+            self.view.pager_positions.record(&path, scroll);
         }
     }
 
@@ -1065,7 +1070,7 @@ impl App {
     /// + reopen.
     fn clear_pager(&mut self) {
         self.remember_pager_position();
-        self.pager = None;
+        self.view.pager = None;
     }
 
     /// Tear down a `^a-v` scrollback pager: snap the pty back to
@@ -1075,14 +1080,14 @@ impl App {
     /// when no pane_scroll pager is open — safe to call from
     /// `Action::PaneFocusUp` / `PaneFocusDown` unconditionally.
     fn close_pane_scroll_pager(&mut self) {
-        if !self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+        if !self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
             return;
         }
         if let Some(tabs) = self.pane_tabs.as_mut() {
             tabs.active_mut().exit_scroll_mode();
         }
         self.clear_pager();
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
         self.state.flash_info("scroll: off");
     }
 
@@ -1093,7 +1098,7 @@ impl App {
     /// another, then later wants to come back to the first one.
     fn set_pager(&mut self, view: PagerView) {
         self.remember_pager_position();
-        self.pager = Some(view);
+        self.view.pager = Some(view);
     }
 
     /// Apply a git-worker result if it's still relevant — matching
@@ -1203,7 +1208,7 @@ impl App {
         match Config::load_default(&self.state.listing.dir) {
             Ok(new_config) => {
                 self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
-                self.theme = Theme::default().with_overrides(&new_config.colors);
+                self.view.theme = Theme::default().with_overrides(&new_config.colors);
                 // Reset to built-in mask defaults first, then apply config
                 // overrides — so removing `[[ignore_masks]]` entries from
                 // the rc file reverts the group to defaults on reload.
@@ -2048,7 +2053,7 @@ impl App {
         route::RouteSnapshot {
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             has_top_overlay: self.top_overlay.is_some(),
-            pager_mount: self.pager.as_ref().map(|v| v.mount),
+            pager_mount: self.view.pager.as_ref().map(|v| v.mount),
             has_pane_tabs: self.pane_tabs.is_some(),
             pane_focused: self.state.pane_focused(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
@@ -2562,7 +2567,7 @@ impl App {
     fn toggle_pane(&mut self) {
         if self.pane_tabs.is_some() {
             self.state.pane_hidden = !self.state.pane_hidden;
-            self.needs_full_repaint = true;
+            self.view.needs_full_repaint = true;
             if self.state.pane_hidden {
                 // Park focus on the list while hidden. Keystrokes
                 // can't drive an off-screen pane sensibly. Zoom is
@@ -2687,8 +2692,8 @@ impl App {
         // user can `:bprev` to it. Save its scroll first so the
         // position survives a crash before the user `:bprev`s back.
         self.remember_pager_position();
-        if let Some(prev) = self.pager.take() {
-            self.pager_history.push(prev);
+        if let Some(prev) = self.view.pager.take() {
+            self.view.pager_history.push(prev);
         }
         self.set_pager(view);
         self.grep_session = Some(GrepSession {
@@ -2700,7 +2705,7 @@ impl App {
             pattern: pat,
             root,
         });
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Drain any pending grep matches into the active pager. Called
@@ -2715,6 +2720,7 @@ impl App {
         // closed/replaced it; the worker keeps running but will exit
         // on its next send when our rx is dropped.
         let pager_matches = self
+            .view
             .pager
             .as_ref()
             .is_some_and(|p| p.grep_id == Some(session.id));
@@ -2726,7 +2732,7 @@ impl App {
         loop {
             match session.rx.try_recv() {
                 Ok(batch) => {
-                    if let Some(view) = self.pager.as_mut() {
+                    if let Some(view) = self.view.pager.as_mut() {
                         for m in &batch {
                             view.lines.push(ratatui::text::Line::from(m.render()));
                         }
@@ -2758,7 +2764,7 @@ impl App {
             };
             let root_label = crate::paths::display_tilde(&session.root);
             let new_title = format!("grep — \"{}\" — {root_label}{suffix}", session.pattern);
-            if let Some(view) = self.pager.as_mut() {
+            if let Some(view) = self.view.pager.as_mut() {
                 view.title = new_title;
                 if session.complete {
                     view.streaming = false;
@@ -2803,7 +2809,7 @@ impl App {
         picker.refilter();
         self.find_picker = Some(picker);
         self.render_find_picker();
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Rebuild the pager view from current `find_picker` state.
@@ -2863,7 +2869,7 @@ impl App {
             KeyCode::Esc => {
                 self.find_picker = None;
                 self.clear_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 true
             }
             KeyCode::Enter => {
@@ -2875,7 +2881,7 @@ impl App {
                 });
                 self.find_picker = None;
                 self.clear_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 if let Some((root, rel)) = target {
                     let abs = root.join(&rel);
                     if let Some(parent) = abs.parent() {
@@ -3014,7 +3020,7 @@ impl App {
         view.no_history = true;
         self.set_pager(view);
         self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Build a `PagerView` from a file on disk. Handles text (with
@@ -3133,7 +3139,8 @@ impl App {
                 let source_line_count = content.lines().count().max(1);
                 let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
                 let pager_w = body_w.saturating_sub(2 + gutter_w);
-                let rendered = crate::ui::markdown::render(&content, &self.theme, Some(pager_w));
+                let rendered =
+                    crate::ui::markdown::render(&content, &self.view.theme, Some(pager_w));
                 if self.state.config.markdown.open_as_rendered {
                     let mut v = PagerView::new_styled(name, rendered);
                     v.alt_lines = Some(source_lines);
@@ -3163,7 +3170,7 @@ impl App {
                     // hatch so the user knows the cap fired and what
                     // to do.
                     let warn_style = ratatui::style::Style::default()
-                        .fg(self.theme.pick)
+                        .fg(self.view.theme.pick)
                         .add_modifier(ratatui::style::Modifier::BOLD);
                     v.lines.push(ratatui::text::Line::from(""));
                     v.lines
@@ -3190,14 +3197,14 @@ impl App {
             // any). Clamp to `lines.len() - 1` so a saved row that's
             // now past the end (file shrank) lands at the new last
             // line rather than blanking the viewport.
-            if let Some(saved) = self.pager_positions.get(path) {
+            if let Some(saved) = self.view.pager_positions.get(path) {
                 let last = view.lines.len().saturating_sub(1);
                 view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
             }
             Some(view)
         } else {
             // Binary file: hex dump via pretty-hex.
-            match fs::ops::hex_dump_lines(path, &self.theme) {
+            match fs::ops::hex_dump_lines(path, &self.view.theme) {
                 Ok(lines) => {
                     let mut view = PagerView::new_plain(format!("{name} [hex]"), Vec::new());
                     view.lines = lines;
@@ -3300,7 +3307,7 @@ impl App {
         };
         self.background_tasks.tasks.push(task);
         self.clear_pager();
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
         self.state
             .flash_info(format!("task #{id} backgrounded — :fg to resume"));
     }
@@ -3481,7 +3488,12 @@ impl App {
         // If the task viewer was open on this task, close it —
         // the task no longer exists in `background_tasks`, so the
         // viewer's task_id is stale.
-        if self.pager.as_ref().is_some_and(|v| v.task_id == Some(id)) {
+        if self
+            .view
+            .pager
+            .as_ref()
+            .is_some_and(|v| v.task_id == Some(id))
+        {
             self.clear_pager();
         }
 
@@ -3514,7 +3526,7 @@ impl App {
         } else {
             self.pane_tabs = Some(PaneTabs::new(entry));
         }
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
         self.state.flash_info(format!("task #{id} → tab '{label}'"));
     }
 
@@ -3587,7 +3599,7 @@ impl App {
             paused: false,
         };
         self.background_tasks.tasks.push(task);
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
         self.state.flash_info(format!(
             "tab '{label}' → task #{id} (:fg or :task-to-pane to bring back)"
         ));
@@ -3681,7 +3693,7 @@ impl App {
                 self.set_pager(view);
             }
         }
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Build a "task viewer" pager view -- a peek into a backgrounded
@@ -3754,11 +3766,11 @@ impl App {
         }
         // Push the prior pager (if any, eligible) so `[b` can walk back.
         self.remember_pager_position();
-        if let Some(prev) = self.pager.take() {
-            self.pager_history.push(prev);
+        if let Some(prev) = self.view.pager.take() {
+            self.view.pager_history.push(prev);
         }
         self.set_pager(view);
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// `[t`/`]t` chord while a pager is open. Cycles the task viewer
@@ -3770,6 +3782,7 @@ impl App {
             return;
         }
         let current = self
+            .view
             .pager
             .as_ref()
             .and_then(|v| v.task_id)
@@ -3885,10 +3898,10 @@ impl App {
             self.state.session_name.as_deref(),
             &self.state.listing.dir,
         );
-        if self.last_term_title.as_deref() == Some(&title) {
+        if self.view.last_term_title.as_deref() == Some(&title) {
             return None;
         }
-        self.last_term_title = Some(title.clone());
+        self.view.last_term_title = Some(title.clone());
         Some(Effect::SetTerminalTitle { title })
     }
 }
@@ -4454,7 +4467,7 @@ impl App {
             // Last tab removed.
             self.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
-            self.needs_full_repaint = true;
+            self.view.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
         }
     }
@@ -4495,7 +4508,7 @@ impl App {
             state::Focus::Pane
         } else if self.top_overlay.is_some() {
             state::Focus::Overlay
-        } else if let Some(v) = self.pager.as_ref() {
+        } else if let Some(v) = self.view.pager.as_ref() {
             state::Focus::Pager(v.mount)
         } else {
             state::Focus::FileList
@@ -4587,24 +4600,24 @@ impl App {
     /// Content-bound pagers (Overlay file viewer, TopPane Markdown,
     /// etc.) are App-level and persist across tab switches.
     fn stash_scrollback_pager_to_active_tab(&mut self) {
-        if !self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+        if !self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
             return;
         }
-        let view = self.pager.take();
+        let view = self.view.pager.take();
         if let Some(tabs) = self.pane_tabs.as_mut() {
             tabs.active_entry_mut().stashed_scrollback_pager = view;
         }
     }
 
     /// Restore the active tab's stashed scrollback pager into
-    /// `self.pager` if one is stashed AND no other pager is currently
+    /// `self.view.pager` if one is stashed AND no other pager is currently
     /// displayed. A non-scrollback pager (Overlay file viewer, etc.)
     /// up at the time of the tab switch is left alone; the stash
     /// surfaces on the next switch back where no overlay is in the
     /// way. See `stash_scrollback_pager_to_active_tab` for the
     /// outgoing half of the pair.
     fn restore_active_tab_scrollback_pager(&mut self) {
-        if self.pager.is_some() {
+        if self.view.pager.is_some() {
             return;
         }
         if let Some(tabs) = self.pane_tabs.as_mut()
@@ -4645,7 +4658,7 @@ impl App {
             };
             if enabled {
                 if let Some(path) = (spec.resolve)(cwd.as_path(), spawn) {
-                    let lines = (spec.render)(path.as_path(), &self.theme);
+                    let lines = (spec.render)(path.as_path(), &self.view.theme);
                     if !lines.is_empty() {
                         self.mount_scroll_pager(format!(" {label} (transcript)"), lines);
                         return;
@@ -4720,7 +4733,7 @@ impl App {
         view.pending_scroll_to_bottom.set(true);
         self.set_pager(view);
         self.state.focus = state::Focus::Pane;
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
         self.state
             .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
     }
@@ -4998,7 +5011,7 @@ impl App {
                 let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
             }
         }
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     // ---- Harpoon -----------------------------------------------------------
@@ -5150,7 +5163,7 @@ impl App {
             cursor: 0,
             delete_armed: false,
         });
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Key handler for the harpoon menu overlay. Owns all input
@@ -5170,7 +5183,7 @@ impl App {
         };
         let Some(h) = self.state.harpoon.as_mut() else {
             self.harpoon_menu = None;
-            self.needs_full_repaint = true;
+            self.view.needs_full_repaint = true;
             return Vec::new();
         };
         let len = h.slots.len();
@@ -5188,7 +5201,7 @@ impl App {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.harpoon_menu = None;
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
             }
             KeyCode::Char('j') | KeyCode::Down if len > 0 => {
                 menu.cursor = (menu.cursor + 1).min(len - 1);
@@ -5205,13 +5218,13 @@ impl App {
             KeyCode::Char(c @ '1'..='9') => {
                 let slot = c as u8 - b'0';
                 self.harpoon_menu = None;
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 self.harpoon_jump(slot);
             }
             KeyCode::Enter if len > 0 => {
                 let slot = (menu.cursor + 1) as u8;
                 self.harpoon_menu = None;
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 self.harpoon_jump(slot);
             }
             KeyCode::Char('K') if menu.cursor > 0 && len > 1 => {
@@ -5289,7 +5302,7 @@ impl App {
             all_two_letter,
             open_intent: false,
         });
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// Key handler for the Quick Select overlay. Owns input until
@@ -5310,7 +5323,7 @@ impl App {
 
         let close = |this: &mut Self| {
             this.quick_select = None;
-            this.needs_full_repaint = true;
+            this.view.needs_full_repaint = true;
         };
 
         let c = match key.code {
@@ -5467,7 +5480,7 @@ impl App {
         }
         self.state.focus = state::Focus::FileList;
         self.state.rebuild_rows();
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     /// `git show <sha>` into the pager. Uppercase action for a
@@ -5481,7 +5494,7 @@ impl App {
         {
             Ok(out) if out.status.success() && !out.stdout.is_empty() => {
                 let title = format!("git show {sha}");
-                self.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
+                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
             }
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -5505,11 +5518,11 @@ impl App {
         };
         let label_style = Style::default()
             .fg(Color::Black)
-            .bg(self.theme.pick)
+            .bg(self.view.theme.pick)
             .add_modifier(Modifier::BOLD);
         let pending_style = Style::default()
             .fg(Color::Black)
-            .bg(self.theme.prompt_prefix)
+            .bg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
         for m in &qs.matches {
             // Skip labels that would render outside the pane rect.
@@ -5526,7 +5539,7 @@ impl App {
                 if m.label.starts_with(first) {
                     pending_style
                 } else {
-                    Style::default().fg(self.theme.status_suffix)
+                    Style::default().fg(self.view.theme.status_suffix)
                 }
             } else {
                 label_style
@@ -5625,7 +5638,7 @@ impl App {
         } else {
             "git diff HEAD (+ new)"
         };
-        self.pager = Some(pager::PagerView::new_ansi(label, &combined));
+        self.view.pager = Some(pager::PagerView::new_ansi(label, &combined));
     }
 
     /// g b — `git blame` on the cursor file. Selection is ignored
@@ -5648,7 +5661,7 @@ impl App {
         {
             Ok(out) if out.status.success() && !out.stdout.is_empty() => {
                 let title = format!("git blame {}", row.display);
-                self.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
+                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
             }
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -5718,7 +5731,7 @@ impl App {
             tabs.active_mut().exit_scroll_mode();
         }
         self.state.focus = state::Focus::FileList;
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
 
         // Navigate: if it's a directory, chdir there; if a file, chdir to
         // its parent and focus on it.
@@ -5822,7 +5835,7 @@ impl App {
     /// Updates the LineEditor content and the display line.
     fn sync_history_editor_to_cursor(&mut self) {
         Self::sync_hist_editor(
-            &mut self.pager,
+            &mut self.view.pager,
             &mut self.pending_history_pick,
             &self.state.history,
         );
@@ -5878,7 +5891,7 @@ impl App {
         view.wrap = false;
         self.pending_jump_history = Some(snapshot);
         self.set_pager(view);
-        self.needs_full_repaint = true;
+        self.view.needs_full_repaint = true;
     }
 
     fn show_history_popup(&mut self) {
@@ -5997,7 +6010,7 @@ impl App {
             2
         };
         let col_w = pager::centered_col_width(term_w, ncols) as usize;
-        let lines = help::build_lines(&self.theme, &self.state.user_keymap, col_w);
+        let lines = help::build_lines(&self.view.theme, &self.state.user_keymap, col_w);
         let mut view = pager::PagerView::new_styled(Self::HELP_TITLE, lines);
         view.columns = ncols as u8;
         view.no_history = true;
@@ -6006,7 +6019,8 @@ impl App {
 
     /// True when the help pager is the currently-open pager view.
     fn help_is_open(&self) -> bool {
-        self.pager
+        self.view
+            .pager
             .as_ref()
             .is_some_and(|v| v.title == Self::HELP_TITLE)
     }
@@ -7045,7 +7059,7 @@ impl App {
     /// `App` with **no** terminal, **no** MCP socket server, **no**
     /// git-status worker thread, and **no** real-env cwd — unlike
     /// `App::new`. Drive it with `apply(&Action)` / `handle_key(KeyEvent)`
-    /// and assert on `self.state.*`, `self.pane_tabs`, `self.pager`, etc.
+    /// and assert on `self.state.*`, `self.pane_tabs`, `self.view.pager`, etc.
     ///
     /// Wrap callers in `crate::state::with_state_root(tmp, || …)` so the
     /// history / pager-position / inventory state dir is an isolated temp.
@@ -7057,12 +7071,21 @@ impl App {
         let context_path = crate::context::context_path(&cwd);
         let mut app = Self {
             state: state::AppState::test_default(cwd),
-            pager: None,
-            pager_history: PagerHistory::new(),
-            pager_pending_bracket: None,
-            pager_was_open: false,
-            pager_help_stash: None,
-            pager_jump_buf: None,
+            view: ViewState {
+                pager: None,
+                pager_history: PagerHistory::new(),
+                pager_pending_bracket: None,
+                pager_was_open: false,
+                pager_help_stash: None,
+                pager_jump_buf: None,
+                pager_positions: crate::state::pager_positions::PagerPositions::load(),
+                theme: Theme::default(),
+                needs_full_repaint: false,
+                cached_rows: Vec::new(),
+                cached_rows_gen: u64::MAX,
+                cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+                last_term_title: None,
+            },
             pane_tabs: None,
             harpoon_menu: None,
             quick_select: None,
@@ -7084,8 +7107,6 @@ impl App {
             history_pending_g: false,
             scroll_pending_g: false,
             pending_pager_return: None,
-            needs_full_repaint: false,
-            theme: Theme::default(),
             context_path,
             last_context_json: String::new(),
             context_dirty: false,
@@ -7121,19 +7142,14 @@ impl App {
             activity_proc_threads: 0,
             activity_snap_event: 0,
             activity_snap_other: 0,
-            cached_rows: Vec::new(),
-            cached_rows_gen: u64::MAX,
-            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             mcp_cmd_rx: None,
             tab_state: None,
             scroll_last: None,
-            last_term_title: None,
             runtime: Runtime {
                 git_result_rx: None,
             },
             next_sink_id: 0,
             pane_wake_tx: None,
-            pager_positions: crate::state::pager_positions::PagerPositions::load(),
         };
         app.state.rebuild_rows();
         app
@@ -7181,7 +7197,7 @@ mod harness_tests {
             assert!(matches!(app.state.mode, Mode::Normal));
             assert_eq!(app.state.cursor.index, 0);
             assert!(app.pane_tabs.is_none());
-            assert!(app.pager.is_none());
+            assert!(app.view.pager.is_none());
             assert!(app.flash_text().is_none());
             assert_eq!(
                 app.state.listing.dir,
@@ -7325,13 +7341,13 @@ mod harness_tests {
             let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
             app.seed_rows(&["a", "b", "c"]);
             let lines: Vec<String> = (0..50).map(|i| format!("line {i}")).collect();
-            app.pager = Some(PagerView::new_plain("t", lines));
+            app.view.pager = Some(PagerView::new_plain("t", lines));
             app.handle_key(key('j')).unwrap();
             assert_eq!(
                 app.state.cursor.index, 0,
                 "list cursor must not move with a pager open"
             );
-            assert!(app.pager.is_some(), "pager stays open on j");
+            assert!(app.view.pager.is_some(), "pager stays open on j");
         });
     }
 
@@ -7341,9 +7357,9 @@ mod harness_tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
-            app.pager = Some(PagerView::new_plain("t", vec!["a".to_string()]));
+            app.view.pager = Some(PagerView::new_plain("t", vec!["a".to_string()]));
             app.handle_key(esc()).unwrap();
-            assert!(app.pager.is_none(), "Esc should close the pager");
+            assert!(app.view.pager.is_none(), "Esc should close the pager");
         });
     }
 }

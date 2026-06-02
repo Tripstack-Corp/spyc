@@ -209,7 +209,8 @@ impl App {
         if self.pending_capture.is_some() {
             return true;
         }
-        self.pager
+        self.view
+            .pager
             .as_ref()
             .and_then(|v| v.task_id)
             .is_some_and(|id| {
@@ -476,7 +477,7 @@ mod tests {
             // the tick (no task id 1 exists → the strongest negative).
             let mut view = crate::ui::pager::PagerView::new_plain("task", vec![]);
             view.task_id = Some(1);
-            app.pager = Some(view);
+            app.view.pager = Some(view);
             assert!(!app.capture_tick_should_arm());
         });
     }

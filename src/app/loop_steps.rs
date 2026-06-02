@@ -23,11 +23,11 @@ impl App {
         // rendering, so its stale cells need clearing — via a forced draw, not
         // `terminal.clear()`, which would flash).
         let pager_just_opened =
-            self.pager.is_some() && self.pane_tabs.is_some() && !self.pager_was_open;
-        self.pager_was_open = self.pager.is_some();
+            self.view.pager.is_some() && self.pane_tabs.is_some() && !self.view.pager_was_open;
+        self.view.pager_was_open = self.view.pager.is_some();
         // A pending full repaint also requests a screen clear.
-        let pending_clear = self.needs_full_repaint;
-        self.needs_full_repaint = false;
+        let pending_clear = self.view.needs_full_repaint;
+        self.view.needs_full_repaint = false;
         (pager_just_opened || pending_clear, pending_clear)
     }
 

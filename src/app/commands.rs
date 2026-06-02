@@ -28,7 +28,7 @@ impl App {
         match self.state.dispatch_command(input) {
             CommandResult::Handled => return Vec::new(),
             CommandResult::OpenPager { title, lines } => {
-                self.pager = Some(PagerView::new_plain(title, lines));
+                self.view.pager = Some(PagerView::new_plain(title, lines));
                 return Vec::new();
             }
             CommandResult::Quit => {
@@ -271,44 +271,44 @@ impl App {
 
         // :bprev / :bnext — pager buffer history
         if input == "bprev" {
-            if let Some(current) = self.pager.take() {
-                match self.pager_history.go_back(current) {
+            if let Some(current) = self.view.pager.take() {
+                match self.view.pager_history.go_back(current) {
                     Ok(prev) => {
-                        self.pager = Some(prev);
-                        self.needs_full_repaint = true;
-                        let back = self.pager_history.back_len();
-                        let fwd = self.pager_history.forward_len();
+                        self.view.pager = Some(prev);
+                        self.view.needs_full_repaint = true;
+                        let back = self.view.pager_history.back_len();
+                        let fwd = self.view.pager_history.forward_len();
                         self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                     }
                     Err(current) => {
                         // At the start of history -- keep the current
                         // pager visible instead of closing it.
-                        self.pager = Some(current);
+                        self.view.pager = Some(current);
                         self.state.flash_info("no older buffers");
                     }
                 }
-            } else if let Some(prev) = self.pager_history.pop_back() {
-                self.pager = Some(prev);
-                self.needs_full_repaint = true;
+            } else if let Some(prev) = self.view.pager_history.pop_back() {
+                self.view.pager = Some(prev);
+                self.view.needs_full_repaint = true;
                 self.state
-                    .flash_info(format!("buffer ←{}", self.pager_history.back_len()));
+                    .flash_info(format!("buffer ←{}", self.view.pager_history.back_len()));
             } else {
                 self.state.flash_info("no buffers in history");
             }
             return Vec::new();
         }
         if input == "bnext" {
-            if let Some(current) = self.pager.take() {
-                match self.pager_history.go_forward(current) {
+            if let Some(current) = self.view.pager.take() {
+                match self.view.pager_history.go_forward(current) {
                     Ok(next) => {
-                        self.pager = Some(next);
-                        self.needs_full_repaint = true;
-                        let back = self.pager_history.back_len();
-                        let fwd = self.pager_history.forward_len();
+                        self.view.pager = Some(next);
+                        self.view.needs_full_repaint = true;
+                        let back = self.view.pager_history.back_len();
+                        let fwd = self.view.pager_history.forward_len();
                         self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                     }
                     Err(current) => {
-                        self.pager = Some(current);
+                        self.view.pager = Some(current);
                         self.state.flash_info("no newer buffers");
                     }
                 }

@@ -21,7 +21,7 @@ impl App {
     /// Route a key to the pager overlay. Also uses vi-like motion so the
     /// pager feels native to the rest of the UI.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let Some(view) = &mut self.pager else {
+        let Some(view) = &mut self.view.pager else {
             return Vec::new();
         };
         // Clear any one-shot flash message from the previous keypress.
@@ -44,12 +44,12 @@ impl App {
             if let Some(id) = view.task_id {
                 match self.interrupt_task(Some(id)) {
                     Ok(msg) | Err(msg) => {
-                        if let Some(v) = self.pager.as_mut() {
+                        if let Some(v) = self.view.pager.as_mut() {
                             v.flash = Some(msg);
                         }
                     }
                 }
-            } else if let Some(v) = self.pager.as_mut() {
+            } else if let Some(v) = self.view.pager.as_mut() {
                 v.flash = Some("press Esc or q to close pager".into());
             }
             return Vec::new();
@@ -124,7 +124,7 @@ impl App {
         }
 
         // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
-        if let Some(ref mut buf) = self.pager_jump_buf {
+        if let Some(ref mut buf) = self.view.pager_jump_buf {
             match key.code {
                 KeyCode::Char(c @ '0'..='9') => {
                     buf.push(c);
@@ -132,7 +132,7 @@ impl App {
                 }
                 KeyCode::Backspace => {
                     if buf.pop().is_none() {
-                        self.pager_jump_buf = None;
+                        self.view.pager_jump_buf = None;
                         view.jump_buf = None;
                     } else {
                         view.jump_buf = Some(buf.clone());
@@ -156,14 +156,14 @@ impl App {
                         }
                     }
                     view.jump_buf = None;
-                    self.pager_jump_buf = None;
+                    self.view.pager_jump_buf = None;
                     if self.pending_history_pick.is_some() {
                         self.sync_history_editor_to_cursor();
                     }
                 }
                 _ => {
                     // Esc or non-digit cancels.
-                    self.pager_jump_buf = None;
+                    self.view.pager_jump_buf = None;
                     view.jump_buf = None;
                 }
             }
@@ -172,38 +172,38 @@ impl App {
 
         // [b / ]b — pager buffer history navigation (two-key sequence).
         // [t / ]t — task viewer cycle (peek through backgrounded tasks).
-        if let Some(bracket) = self.pager_pending_bracket.take() {
+        if let Some(bracket) = self.view.pager_pending_bracket.take() {
             if key.code == KeyCode::Char('b') {
                 match bracket {
                     '[' => {
-                        if let Some(current) = self.pager.take() {
-                            match self.pager_history.go_back(current) {
+                        if let Some(current) = self.view.pager.take() {
+                            match self.view.pager_history.go_back(current) {
                                 Ok(prev) => {
-                                    self.pager = Some(prev);
-                                    self.needs_full_repaint = true;
-                                    let back = self.pager_history.back_len();
-                                    let fwd = self.pager_history.forward_len();
+                                    self.view.pager = Some(prev);
+                                    self.view.needs_full_repaint = true;
+                                    let back = self.view.pager_history.back_len();
+                                    let fwd = self.view.pager_history.forward_len();
                                     self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                                 }
                                 Err(current) => {
-                                    self.pager = Some(current);
+                                    self.view.pager = Some(current);
                                     self.state.flash_info("no older buffers");
                                 }
                             }
                         }
                     }
                     ']' => {
-                        if let Some(current) = self.pager.take() {
-                            match self.pager_history.go_forward(current) {
+                        if let Some(current) = self.view.pager.take() {
+                            match self.view.pager_history.go_forward(current) {
                                 Ok(next) => {
-                                    self.pager = Some(next);
-                                    self.needs_full_repaint = true;
-                                    let back = self.pager_history.back_len();
-                                    let fwd = self.pager_history.forward_len();
+                                    self.view.pager = Some(next);
+                                    self.view.needs_full_repaint = true;
+                                    let back = self.view.pager_history.back_len();
+                                    let fwd = self.view.pager_history.forward_len();
                                     self.state.flash_info(format!("buffer ←{back} →{fwd}"));
                                 }
                                 Err(current) => {
-                                    self.pager = Some(current);
+                                    self.view.pager = Some(current);
                                     self.state.flash_info("no newer buffers");
                                 }
                             }
@@ -241,7 +241,7 @@ impl App {
                     let cursor = view.picker_cursor.unwrap_or(0);
                     let snapshot = self.pending_jump_history.take().unwrap();
                     self.clear_pager();
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                     if let Some(path_str) = snapshot.get(cursor) {
                         let path = crate::paths::expand(path_str);
                         match self.state.chdir(&path) {
@@ -276,7 +276,7 @@ impl App {
                         if snapshot.is_empty() {
                             self.pending_jump_history = None;
                             self.clear_pager();
-                            self.needs_full_repaint = true;
+                            self.view.needs_full_repaint = true;
                             self.state.flash_info("jump history empty");
                             return Vec::new();
                         }
@@ -308,7 +308,7 @@ impl App {
             if let Some(path) = worktrees.get(idx).cloned() {
                 self.clear_pager();
                 self.state.pending_worktrees = None;
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 if let Err(e) = self.state.chdir(&path) {
                     self.state.flash_error(format!("chdir: {e}"));
                     return Vec::new();
@@ -356,13 +356,13 @@ impl App {
                     if self.state.history.entries().is_empty() {
                         self.clear_pager();
                         self.pending_history_pick = None;
-                        self.needs_full_repaint = true;
+                        self.view.needs_full_repaint = true;
                         self.state.flash_info("history is empty");
                         return Vec::new();
                     }
                     let old_cursor = cursor;
                     self.show_history_popup();
-                    if let Some(ref mut v) = self.pager {
+                    if let Some(ref mut v) = self.view.pager {
                         let max = (v.line_count() as usize).saturating_sub(1);
                         v.picker_cursor = Some(old_cursor.min(max));
                         let new_cur = v.picker_cursor.unwrap_or(0);
@@ -456,7 +456,7 @@ impl App {
                     }
                     KeyCode::Char(':') => {
                         self.history_pending_g = false;
-                        self.pager_jump_buf = Some(String::new());
+                        self.view.pager_jump_buf = Some(String::new());
                         view.jump_buf = Some(String::new());
                         true
                     }
@@ -485,7 +485,7 @@ impl App {
                     let cmd = editor.text();
                     self.clear_pager();
                     self.pending_history_pick = None;
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                     if cmd.trim().is_empty() {
                         return Vec::new();
                     }
@@ -501,7 +501,7 @@ impl App {
                     // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
                     self.clear_pager();
                     self.pending_history_pick = None;
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                 }
                 EditResult::HistoryPrev | EditResult::HistoryNext => {
                     // Up/Down in Insert mode → move between lines.
@@ -546,7 +546,7 @@ impl App {
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
                         self.clear_pager();
-                        self.needs_full_repaint = true;
+                        self.view.needs_full_repaint = true;
                         self.restore_session(&session);
                         return Vec::new();
                     }
@@ -558,7 +558,7 @@ impl App {
                     if cursor < 2 {
                         // "New session" header.
                         self.clear_pager();
-                        self.needs_full_repaint = true;
+                        self.view.needs_full_repaint = true;
                         self.state.flash_info("new session");
                         return Vec::new();
                     }
@@ -566,7 +566,7 @@ impl App {
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
                         self.clear_pager();
-                        self.needs_full_repaint = true;
+                        self.view.needs_full_repaint = true;
                         self.restore_session(&session);
                         return Vec::new();
                     }
@@ -575,7 +575,7 @@ impl App {
                 KeyCode::Char('n' | 'N') => {
                     self.clear_pager();
                     self.state.pending_sessions = None;
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                     self.state.flash_info("new session");
                     return Vec::new();
                 }
@@ -782,7 +782,7 @@ impl App {
                 // back to live and clear the divider's [SCROLL]
                 // indicator. The pager is closed in the regular
                 // path below.
-                if self.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+                if self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
                     self.close_pane_scroll_pager();
                     return Vec::new();
                 }
@@ -795,21 +795,22 @@ impl App {
                 // the v1.5 mount mounts (filtered by `no_history`)
                 // and pop a stale file-viewer instead.
                 if self
+                    .view
                     .pager
                     .as_ref()
                     .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
                 {
-                    self.pager = self.pager_help_stash.take();
-                    self.pager_jump_buf = None;
-                    self.pager_pending_bracket = None;
-                    self.needs_full_repaint = true;
+                    self.view.pager = self.view.pager_help_stash.take();
+                    self.view.pager_jump_buf = None;
+                    self.view.pager_pending_bracket = None;
+                    self.view.needs_full_repaint = true;
                     return Vec::new();
                 }
                 // Task viewer special close: if the viewed task has
                 // exited (and the user has seen it), promote -- snapshot
                 // its rendered view into buffer history and drop the
                 // task from the bg list. Running tasks stay in bg.
-                let promote_task: Option<u32> = self.pager.as_ref().and_then(|v| {
+                let promote_task: Option<u32> = self.view.pager.as_ref().and_then(|v| {
                     let id = v.task_id?;
                     let task = self.background_tasks.tasks.iter().find(|t| t.id == id)?;
                     if task.viewed_in_task_viewer && !matches!(task.status, TaskStatus::Running) {
@@ -823,7 +824,7 @@ impl App {
                         let mut snapshot = Self::build_task_viewer_for(id, &task);
                         snapshot.task_id = None; // not a live viewer anymore
                         snapshot.no_history = false; // must be eligible for history
-                        self.pager_history.push(snapshot);
+                        self.view.pager_history.push(snapshot);
                         // Reap the child handle if still around (already
                         // wait()'d when EOF arrived; this is just to drop
                         // the writer/rx). Implicit via task drop.
@@ -837,20 +838,20 @@ impl App {
                         || self.state.pending_sessions.is_some()
                         || self.pending_history_pick.is_some();
                     if !is_picker
-                        && let Some(ref v) = self.pager
+                        && let Some(ref v) = self.view.pager
                         && v.picker_cursor.is_none()
                         && !v.streaming
                     {
                         // Persist scroll BEFORE the take —
-                        // otherwise the take leaves self.pager
+                        // otherwise the take leaves self.view.pager
                         // None and the trailing clear_pager's
                         // save call is a no-op. Without this,
                         // file pagers closed via Esc/q never
                         // got their scroll position saved to
                         // disk (memory only, via history).
                         self.remember_pager_position();
-                        if let Some(v) = self.pager.take() {
-                            self.pager_history.push(v);
+                        if let Some(v) = self.view.pager.take() {
+                            self.view.pager_history.push(v);
                         }
                     }
                     self.clear_pager();
@@ -859,20 +860,20 @@ impl App {
                 self.state.pending_sessions = None;
                 self.pending_history_pick = None;
                 self.pending_jump_history = None;
-                self.pager_jump_buf = None;
-                self.pager_pending_bracket = None;
-                self.needs_full_repaint = true;
+                self.view.pager_jump_buf = None;
+                self.view.pager_pending_bracket = None;
+                self.view.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
             KeyCode::Char('n') => view.search_next(viewport),
             KeyCode::Char('N') => view.search_prev(viewport),
             KeyCode::Char(':') => {
-                self.pager_jump_buf = Some(String::new());
+                self.view.pager_jump_buf = Some(String::new());
                 view.jump_buf = Some(String::new());
             }
             KeyCode::Char('[' | ']') => {
                 if let KeyCode::Char(c) = key.code {
-                    self.pager_pending_bracket = Some(c);
+                    self.view.pager_pending_bracket = Some(c);
                 }
             }
             KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
@@ -968,7 +969,7 @@ impl App {
                 let pager_cmd = argv.join(" ");
                 let path_quoted = shell::shell_quote(&src.display().to_string());
                 self.clear_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 return sh_c(&format!("{pager_cmd} {path_quoted}"), false);
             }
             KeyCode::Char('s') if view.saveable => match view.save_to_file() {
@@ -1007,7 +1008,7 @@ impl App {
                         Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
                     let cwd = self.state.listing.dir.clone();
                     self.clear_pager();
-                    self.needs_full_repaint = true;
+                    self.view.needs_full_repaint = true;
                     let wake = self.make_pane_wake();
                     match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
                         Ok(p) => {
@@ -1051,7 +1052,7 @@ impl App {
                 };
                 self.pending_pager_return = Some(pager_return);
                 self.clear_pager();
-                self.needs_full_repaint = true;
+                self.view.needs_full_repaint = true;
                 return sh_c(
                     &format!(
                         "{editor_cmd} {}",
@@ -1070,11 +1071,11 @@ impl App {
                 // `D` set, intentionally) — so the help would
                 // dismiss to either nothing or a stale older
                 // file-viewer pulled off the back stack.
-                if let Some(current) = self.pager.take() {
-                    self.pager_help_stash = Some(current);
+                if let Some(current) = self.view.pager.take() {
+                    self.view.pager_help_stash = Some(current);
                 }
-                self.pager = Some(crate::ui::pager::build_pager_help(&self.theme));
-                self.needs_full_repaint = true;
+                self.view.pager = Some(crate::ui::pager::build_pager_help(&self.view.theme));
+                self.view.needs_full_repaint = true;
             }
             _ => {}
         }

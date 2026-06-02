@@ -68,7 +68,7 @@ impl App {
                 use ansi_to_tui::IntoText;
                 let normalized = strip_crlf(&capture.buffer);
                 let text = normalized.as_slice().into_text().unwrap_or_default();
-                if let Some(view) = self.pager.as_mut() {
+                if let Some(view) = self.view.pager.as_mut() {
                     view.title = title;
                     view.lines = text.lines;
                     // Anchor an EOF marker to the bottom of content so it's
@@ -151,7 +151,7 @@ impl App {
                     format!("{elapsed}s")
                 };
                 let timer_title = format!("\u{23f3} {} — running... ({human_time})", capture.title);
-                if let Some(view) = self.pager.as_mut() {
+                if let Some(view) = self.view.pager.as_mut() {
                     if view.title != timer_title {
                         redraw = true;
                     }
@@ -169,14 +169,14 @@ impl App {
                 // leave the top half of the pager showing content with `~`
                 // markers filling the rest until the user manually scrolled.
                 // last_viewport_h is set by the renderer on every frame.
-                let at_bottom = self.pager.as_ref().is_some_and(|v| {
+                let at_bottom = self.view.pager.as_ref().is_some_and(|v| {
                     let h = v.last_viewport_h.get();
                     let h = if h == 0 { 40 } else { h };
                     let total = v.line_count();
                     let page = v.page_lines(h);
                     v.scroll >= total.saturating_sub(page)
                 });
-                if let Some(view) = self.pager.as_mut() {
+                if let Some(view) = self.view.pager.as_mut() {
                     view.lines = text.lines;
                     if at_bottom {
                         view.scroll_to_bottom_auto();
@@ -254,7 +254,7 @@ impl App {
     /// buffer (the bg drain above may have updated it this tick). Returns
     /// `true` when it rebuilt.
     pub(crate) fn refresh_task_viewer(&mut self) -> bool {
-        if let Some(viewer_id) = self.pager.as_ref().and_then(|v| v.task_id)
+        if let Some(viewer_id) = self.view.pager.as_ref().and_then(|v| v.task_id)
             && let Some(task) = self
                 .background_tasks
                 .tasks
@@ -266,13 +266,13 @@ impl App {
             // [EOF] marker keep up with reality. Drop has_unread_output even
             // on status-only refreshes so the divider `+` clears.
             let task_running = matches!(task.status, TaskStatus::Running);
-            let viewer_streaming = self.pager.as_ref().is_some_and(|v| v.streaming);
+            let viewer_streaming = self.view.pager.as_ref().is_some_and(|v| v.streaming);
             let status_changed = task_running != viewer_streaming;
             if task.has_unread_output || status_changed {
                 task.has_unread_output = false;
                 task.viewed_in_task_viewer = true;
                 let new_view = Self::build_task_viewer_for(viewer_id, task);
-                if let Some(view) = self.pager.as_mut() {
+                if let Some(view) = self.view.pager.as_mut() {
                     view.lines = new_view.lines;
                     view.title = new_view.title;
                     view.streaming = new_view.streaming;

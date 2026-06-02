@@ -481,7 +481,7 @@ impl App {
                     // former `if let PostAction::Spawn` call site) ---
                     // Child may have clobbered our title; force a
                     // re-emit on next draw.
-                    self.last_term_title = None;
+                    self.view.last_term_title = None;
                     // The listing may have changed (mv, rm, chmod, etc).
                     self.state.refresh_listing();
                     // If we were editing a pager buffer, restore it.

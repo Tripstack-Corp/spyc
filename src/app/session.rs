@@ -340,6 +340,6 @@ impl App {
                 lines.push(format!("  {}", crate::paths::display_tilde(src)));
             }
         }
-        self.pager = Some(PagerView::new_plain("session info", lines));
+        self.view.pager = Some(PagerView::new_plain("session info", lines));
     }
 }
