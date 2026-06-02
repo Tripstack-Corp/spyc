@@ -621,6 +621,23 @@ impl Draw {
     }
 }
 
+/// Outcome of dispatching one coalesced `effective` message (the result of
+/// `App::dispatch_effective`). Lets the dispatch logic live in a method while
+/// the loop keeps owning the actual control flow:
+/// - `Continue` → re-enter the loop top immediately (the scroll-throttle
+///   early-out), skipping this iteration's post-recv timers / render /
+///   context-write — exactly what the old inline `continue;` did.
+/// - `Proceed` → fall through to the post-recv timers + render.
+/// - `Exit(_)` → return from `run()` with this result: reader death, where
+///   `take_reader_result` distinguishes a clean stop (`Ok`) from a recorded
+///   fatal read error (`Err`). Kept distinct from `?`-propagated handler
+///   errors (which exit via the method's own `Result`).
+enum DispatchFlow {
+    Continue,
+    Proceed,
+    Exit(Result<()>),
+}
+
 /// Run()-scoped scratch for the event loop. Ephemeral: built by
 /// `App::run_setup`, dropped when `run()` returns. Deliberately NOT
 /// persistent App state (kept off `ViewState`/`Runtime`) so non-loop paths
@@ -1411,6 +1428,119 @@ impl App {
         }
     }
 
+    /// Dispatch one coalesced `effective` message. Extracted verbatim from
+    /// the loop's `match effective { … }` (the Key/Paste/Resize input arm, the
+    /// Tick/Timeout reader-death gate, the Disconnected fallback, and the
+    /// `unreachable!` for buffered variants). Returns a [`DispatchFlow`] so the
+    /// loop keeps the actual control flow: the scroll-throttle early-out maps
+    /// to `Continue` (AFTER recording `last_input_at` + `context_dirty`, H3),
+    /// reader death maps to `Exit(take_reader_result(..))` (H4), and handler
+    /// `?`-errors propagate through this method's own `Result` (H5).
+    fn dispatch_effective(
+        &mut self,
+        effective: Result<Message, std::sync::mpsc::RecvTimeoutError>,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+        reader_done: &std::sync::atomic::AtomicBool,
+        read_err: &std::sync::Mutex<Option<std::io::Error>>,
+        ctx: &mut RunCtx,
+    ) -> Result<DispatchFlow> {
+        match effective {
+            Ok(Message::Input(ev)) => {
+                ctx.draw.mark(2);
+                match ev {
+                    Event::Key(key)
+                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
+                    {
+                        // Arm the typing-burst window — see the poll-ms
+                        // computation above. Cheap; just stores an
+                        // Instant.
+                        ctx.last_input_at = Some(std::time::Instant::now());
+                        // Mark the context file dirty: every keypress
+                        // is potentially a state-mutating action
+                        // (cursor move, pick toggle, chdir, etc.).
+                        // The end-of-iteration write is debounced and
+                        // serializes-then-skips when JSON is unchanged,
+                        // so a no-op keystroke (e.g. pressing keys in
+                        // a chord prefix) won't actually touch disk.
+                        self.view.context_dirty = true;
+                        // Throttle rapid-fire arrow keys from trackpad scroll
+                        // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
+                        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+                            && key.modifiers.is_empty()
+                        {
+                            let now = std::time::Instant::now();
+                            if let Some((prev, dir)) = self.view.scroll_last
+                                && dir == key.code
+                                && now.duration_since(prev).as_millis() < 40
+                            {
+                                // Early-out: skip the rest of this iteration
+                                // (the old inline `continue;`).
+                                return Ok(DispatchFlow::Continue);
+                            }
+                            self.view.scroll_last = Some((now, key.code));
+                        } else {
+                            self.view.scroll_last = None;
+                        }
+                        // MVU Phase 4: the handler returns a list of
+                        // effects; `run_effects` is the sole executor
+                        // (the ForegroundExec arm carries the former
+                        // inline spawn + its after-work).
+                        let effects = self.handle_key(key)?;
+                        self.run_effects(effects, terminal, foreground_exec)?;
+                    }
+                    Event::Paste(text) => self.handle_paste(text)?,
+                    Event::Resize(cols, rows) => self.handle_resize(cols, rows),
+                    _ => {}
+                }
+            }
+            // No input this tick: re-poll the still-polled sources; no redraw
+            // (matches the old `event::poll(...) == false`). The loop never
+            // sends itself a Tick (the scheduler is advisory) so Tick is
+            // identical to Timeout; the variant exists for later
+            // subscriptions. This arm is also where a buffer-only coalesce
+            // lands (it synthesizes Timeout) and where a dead reader is
+            // detected every ~wait — see the reader_done gate.
+            Ok(Message::Tick(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // MVU Phase 3a: the watcher closure + git forwarder each
+                // hold a `msg_tx` clone, so the channel stays Connected
+                // after the input reader dies — the `Disconnected` arm
+                // below no longer fires on reader death (it would spin on
+                // Timeout forever and never surface the fatal read error).
+                // Detect reader death here instead, preserving the prior
+                // `event::read()?` contract: propagate a recorded fatal
+                // error, else exit cleanly.
+                if reader_done.load(std::sync::atomic::Ordering::Acquire) {
+                    return Ok(DispatchFlow::Exit(take_reader_result(read_err)));
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // Defensive fallback: every `msg_tx` clone dropped (no
+                // watcher, no forwarder, reader gone). Same contract —
+                // propagate a recorded fatal error; else a clean stop.
+                return Ok(DispatchFlow::Exit(take_reader_result(read_err)));
+            }
+            // Phase 3a: FsEvent/GitResult are buffered + coalesced in the
+            // pre-step above, never surfaced as `effective`.
+            Ok(
+                Message::FsEvent(_)
+                | Message::GitResult(_)
+                | Message::Mcp(_)
+                | Message::PaneOutput { .. }
+                | Message::SinkOutput { .. }
+                | Message::GrepOutput
+                | Message::FindOutput
+                | Message::ReaderExited
+                | Message::AgentStatusReady,
+            ) => {
+                unreachable!(
+                    "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
+                )
+            }
+        }
+        Ok(DispatchFlow::Proceed)
+    }
+
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         use std::sync::mpsc;
 
@@ -1632,97 +1762,21 @@ impl App {
             // Disconnected) to the dispatch match below. See `coalesce_recv`
             // (in sources.rs, next to `coalesce_pending`).
             let effective = coalesce_recv(recvd, &msg_rx, &mut ctx);
-            match effective {
-                Ok(Message::Input(ev)) => {
-                    ctx.draw.mark(2);
-                    match ev {
-                        Event::Key(key)
-                            if key.kind == KeyEventKind::Press
-                                || key.kind == KeyEventKind::Repeat =>
-                        {
-                            // Arm the typing-burst window — see the poll-ms
-                            // computation above. Cheap; just stores an
-                            // Instant.
-                            ctx.last_input_at = Some(std::time::Instant::now());
-                            // Mark the context file dirty: every keypress
-                            // is potentially a state-mutating action
-                            // (cursor move, pick toggle, chdir, etc.).
-                            // The end-of-iteration write is debounced and
-                            // serializes-then-skips when JSON is unchanged,
-                            // so a no-op keystroke (e.g. pressing keys in
-                            // a chord prefix) won't actually touch disk.
-                            self.view.context_dirty = true;
-                            // Throttle rapid-fire arrow keys from trackpad scroll
-                            // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
-                            if matches!(key.code, KeyCode::Up | KeyCode::Down)
-                                && key.modifiers.is_empty()
-                            {
-                                let now = std::time::Instant::now();
-                                if let Some((prev, dir)) = self.view.scroll_last
-                                    && dir == key.code
-                                    && now.duration_since(prev).as_millis() < 40
-                                {
-                                    continue;
-                                }
-                                self.view.scroll_last = Some((now, key.code));
-                            } else {
-                                self.view.scroll_last = None;
-                            }
-                            // MVU Phase 4: the handler returns a list of
-                            // effects; `run_effects` is the sole executor
-                            // (the ForegroundExec arm carries the former
-                            // inline spawn + its after-work).
-                            let effects = self.handle_key(key)?;
-                            self.run_effects(effects, terminal, &foreground_exec)?;
-                        }
-                        Event::Paste(text) => self.handle_paste(text)?,
-                        Event::Resize(cols, rows) => self.handle_resize(cols, rows),
-                        _ => {}
-                    }
-                }
-                // No input this tick: re-poll the still-polled sources; no
-                // ctx.draw (matches the old `event::poll(...) == false`). The
-                // loop never sends itself a Tick (the ctx.scheduler is advisory)
-                // so Tick is identical to Timeout; the variant exists for
-                // later subscriptions. This arm is also where a buffer-only
-                // coalesce lands (it synthesizes Timeout) and where a dead
-                // reader is detected every ~wait — see the reader_done gate.
-                Ok(Message::Tick(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // MVU Phase 3a: the watcher closure + git forwarder each
-                    // hold a `msg_tx` clone, so the channel stays Connected
-                    // after the input reader dies — the `Disconnected` arm
-                    // below no longer fires on reader death (it would spin on
-                    // Timeout forever and never surface the fatal read error).
-                    // Detect reader death here instead, preserving the prior
-                    // `event::read()?` contract: propagate a recorded fatal
-                    // error, else exit cleanly.
-                    if reader_done.load(std::sync::atomic::Ordering::Acquire) {
-                        return take_reader_result(&read_err);
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    // Defensive fallback: every `msg_tx` clone dropped (no
-                    // watcher, no forwarder, reader gone). Same contract —
-                    // propagate a recorded fatal error; else a clean stop.
-                    return take_reader_result(&read_err);
-                }
-                // Phase 3a: FsEvent/GitResult are buffered + coalesced in the
-                // pre-step above, never surfaced as `effective`.
-                Ok(
-                    Message::FsEvent(_)
-                    | Message::GitResult(_)
-                    | Message::Mcp(_)
-                    | Message::PaneOutput { .. }
-                    | Message::SinkOutput { .. }
-                    | Message::GrepOutput
-                    | Message::FindOutput
-                    | Message::ReaderExited
-                    | Message::AgentStatusReady,
-                ) => {
-                    unreachable!(
-                        "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
-                    )
-                }
+            // Dispatch the coalesced message (Input → Key/Paste/Resize, or a
+            // Tick/Timeout/Disconnected reader-death check). The returned
+            // DispatchFlow keeps control flow loop-side: Continue is the
+            // scroll-throttle early-out, Exit is reader death.
+            match self.dispatch_effective(
+                effective,
+                terminal,
+                &foreground_exec,
+                &reader_done,
+                &read_err,
+                &mut ctx,
+            )? {
+                DispatchFlow::Continue => continue,
+                DispatchFlow::Exit(result) => return result,
+                DispatchFlow::Proceed => {}
             }
 
             // MVU Phase 2: clock for POST-recv timers (activity rollover,
