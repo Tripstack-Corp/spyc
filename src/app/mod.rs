@@ -4290,28 +4290,6 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
-    /// `git show <sha>` into the pager. Uppercase action for a
-    /// matched git SHA — the value of the picker for a
-    /// commit-discussion workflow.
-    fn open_git_show_pager(&mut self, sha: &str) {
-        match std::process::Command::new("git")
-            .args(["show", "--color=always", sha])
-            .current_dir(&self.state.listing.dir)
-            .output()
-        {
-            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
-                let title = format!("git show {sha}");
-                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let msg = stderr.lines().next().unwrap_or("no output").trim();
-                self.state.flash_error(format!("git show: {msg}"));
-            }
-            Err(e) => self.state.flash_error(format!("git show: {e}")),
-        }
-    }
-
     /// Render label overlay on top of the pane. Drawn after the
     /// pane widget so labels paint over the live vt100 grid; small
     /// inverted-color cells next to each match's start position.
@@ -4379,103 +4357,6 @@ impl App {
                 Paragraph::new(ratatui::text::Span::styled(text, style)),
                 label_rect,
             );
-        }
-    }
-
-    // ---- Git diff (M12) ----------------------------------------------------
-
-    /// g d / g D — run `git diff` on selection and show in pager.
-    ///
-    /// `gd` (cached=false) also surfaces *untracked* files in the
-    /// selection — without this, the cursor sitting on a `?`/`~`-flagged
-    /// new file gives empty diff output and looks broken. We synthesize
-    /// an "added" diff per untracked file via `git diff --no-index
-    /// /dev/null <file>`, which exits 1 but still produces the diff bytes
-    /// we want to render.
-    fn open_git_diff(&mut self, cached: bool) {
-        let paths = self.state.selection_paths();
-        if paths.is_empty() {
-            return;
-        }
-        let cwd = &self.state.listing.dir;
-        let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-
-        // `gd` shows diff-vs-HEAD (staged + unstaged) so it matches the
-        // `~` marker semantics — `~` flags anything different from HEAD,
-        // and a user pressing `gd` to see "what's the change" expects
-        // the same scope. Pre-1.41.7 ran bare `git diff` which only
-        // showed unstaged work, so `git add` followed by `gd` produced
-        // a confusing "no unstaged changes" flash on a row that was
-        // visibly marked dirty. `gD` (`--cached`) keeps the
-        // staged-only "what would commit" view.
-        let mut args: Vec<&str> = vec!["diff", "--color=always"];
-        if cached {
-            args.push("--cached");
-        } else {
-            args.push("HEAD");
-        }
-        args.push("--");
-        for s in &path_strings {
-            args.push(s);
-        }
-        let modified_out = match std::process::Command::new("git")
-            .args(&args)
-            .current_dir(cwd)
-            .output()
-        {
-            Ok(o) => o.stdout,
-            Err(e) => {
-                self.state.flash_error(format!("git diff: {e}"));
-                return;
-            }
-        };
-
-        let mut combined = modified_out;
-        if !cached {
-            combined.extend(untracked_diff_bytes(cwd, &path_strings));
-        }
-
-        if combined.is_empty() {
-            let label = if cached { "staged" } else { "uncommitted" };
-            self.state.flash_info(format!("no {label} changes"));
-            return;
-        }
-        let label = if cached {
-            "git diff --cached"
-        } else {
-            "git diff HEAD (+ new)"
-        };
-        self.view.pager = Some(pager::PagerView::new_ansi(label, &combined));
-    }
-
-    /// g b — `git blame` on the cursor file. Selection is ignored
-    /// (blame on multiple files / a directory is meaningless).
-    fn open_git_blame(&mut self) {
-        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
-            self.state.flash_error("git blame: no cursor file");
-            return;
-        };
-        let path = row.path.clone();
-        if path.is_dir() {
-            self.state.flash_error("git blame: cursor is a directory");
-            return;
-        }
-        let path_str = path.display().to_string();
-        match std::process::Command::new("git")
-            .args(["blame", "--color-lines", "--", &path_str])
-            .current_dir(&self.state.listing.dir)
-            .output()
-        {
-            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
-                let title = format!("git blame {}", row.display);
-                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let msg = stderr.lines().next().unwrap_or("no output").trim();
-                self.state.flash_error(format!("git blame: {msg}"));
-            }
-            Err(e) => self.state.flash_error(format!("git blame: {e}")),
         }
     }
 
@@ -4730,45 +4611,6 @@ impl App {
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.view.pending_history_pick = Some(editor);
         self.set_pager(view);
-    }
-
-    // ---- Git worktree (M11) -------------------------------------------------
-
-    /// W l — list worktrees in a pager; digit keys 1-9 select.
-    fn worktree_list(&mut self) {
-        match crate::sysinfo::git_worktree_list(&self.state.listing.dir) {
-            Some(worktrees) => {
-                self.state.pending_worktrees =
-                    Some(worktrees.iter().map(|w| w.path.clone()).collect());
-                let lines: Vec<String> = worktrees
-                    .iter()
-                    .enumerate()
-                    .map(|(i, wt)| {
-                        let current = if wt.path == self.state.listing.dir {
-                            " ← current"
-                        } else {
-                            ""
-                        };
-                        format!(
-                            "  [{}]  {:<30} {:>8}  {}{}",
-                            i + 1,
-                            wt.branch,
-                            wt.head,
-                            wt.path.display(),
-                            current,
-                        )
-                    })
-                    .collect();
-                let view = pager::PagerView::new_plain(
-                    "git worktrees — press 1-9 to switch, q to close",
-                    lines,
-                );
-                self.set_pager(view);
-            }
-            None => self
-                .state
-                .flash_error("not in a git repository (or no worktrees)"),
-        }
     }
 
     /// Compute the (rows, cols) the bottom pane will occupy.
