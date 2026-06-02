@@ -1770,10 +1770,19 @@ impl App {
             // 10s wait). Fresh clock JUST before recv so a deadline-driven
             // sleep lands on the deadline, not deadline + body-cost.
             let wait_now = std::time::Instant::now();
-            let wait = scheduler.next().map(|when| {
-                when.saturating_duration_since(wait_now)
-                    .max(Duration::from_millis(1))
-            });
+            // If the pre-recv drains already dirtied the frame, DON'T block —
+            // a zero-timeout recv falls straight through to the draw this
+            // iteration. Blocking here delayed already-drained pane output
+            // (e.g. a keystroke echo) until the next message/deadline arrived,
+            // a visible per-keystroke render lag. (Draw-before-you-block.)
+            let wait = if needs_draw {
+                Some(Duration::ZERO)
+            } else {
+                scheduler.next().map(|when| {
+                    when.saturating_duration_since(wait_now)
+                        .max(Duration::from_millis(1))
+                })
+            };
             let recvd = match wait {
                 // Deadline armed → bounded wait.
                 Some(d) => msg_rx.recv_timeout(d),
