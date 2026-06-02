@@ -1541,6 +1541,86 @@ impl App {
         Ok(DispatchFlow::Proceed)
     }
 
+    /// Render one frame iff the accumulator is dirty (extracted verbatim from
+    /// the loop's `if ctx.draw.dirty { … }` block). Composes the term-title
+    /// effect, wraps the draw in a DEC 2026 synchronized update, honors the
+    /// per-iteration `pending_clear`, times the build/whole-frame for the
+    /// activity monitor, and counts the draw (skipping `activity_only` frames
+    /// so the stats don't oscillate — H6). Resets `ctx.draw` for the next
+    /// iteration. `?`-propagates `run_effects` / `terminal.draw` / `clear`.
+    fn render_frame(
+        &mut self,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+        pending_clear: bool,
+        activity_only: bool,
+        ctx: &mut RunCtx,
+    ) -> Result<()> {
+        // Only redraw when something actually changed.
+        if !ctx.draw.dirty {
+            return Ok(());
+        }
+        ctx.draw.dirty = false;
+        // Title compose + dedup stay loop-side; only the
+        // `term_title::set` IO runs through the sole executor.
+        let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
+        self.run_effects(title_fx, terminal, foreground_exec)?;
+        // Wrap in DEC 2026 synchronized update so the terminal emulator
+        // (iTerm2, etc.) buffers the entire frame and paints it atomically —
+        // eliminates tearing and reduces terminal-side CPU.
+        use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+        let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
+        if pending_clear {
+            terminal.clear()?;
+        }
+        let draw_start = std::time::Instant::now();
+        let frame_area = terminal
+            .draw(|frame| {
+                // Time just the buffer build (CPU) so we can separate
+                // it from the diff + tty emission measured below.
+                let render_start = std::time::Instant::now();
+                self.render(frame);
+                if self.view.show_activity {
+                    let us = u64::try_from(render_start.elapsed().as_micros()).unwrap_or(u64::MAX);
+                    self.view.activity_render_peak_us = self.view.activity_render_peak_us.max(us);
+                }
+            })?
+            .area;
+        // Whole-frame peak (build + diff + emission) = the full
+        // main-thread render stall. `frame - render` ≈ diff + emission.
+        if self.view.show_activity {
+            let us = u64::try_from(draw_start.elapsed().as_micros()).unwrap_or(u64::MAX);
+            self.view.activity_frame_peak_us = self.view.activity_frame_peak_us.max(us);
+        }
+        let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+        if self.view.show_activity && !activity_only {
+            self.view.activity_draws += 1;
+            self.view.activity_bytes += u64::from(frame_area.width) * u64::from(frame_area.height);
+            match ctx.draw.reason {
+                1 => self.view.activity_reason_pane += 1,
+                2 => self.view.activity_reason_event += 1,
+                _ => self.view.activity_reason_other += 1,
+            }
+        }
+        ctx.draw.reason = 0;
+        Ok(())
+    }
+
+    /// Loop teardown (extracted verbatim from the tail of `run()`): remove the
+    /// MCP context file, then SIGTERM-grace every pane child tree before `App`
+    /// is dropped (the per-Pane `Drop` is a SIGKILL safety net; going through
+    /// `shutdown` first gives well-behaved children — `vite`, `npm run dev`,
+    /// anything that catches SIGTERM — 250ms to flush before we escalate, so
+    /// quitting with a dev server in a pane doesn't orphan its process tree).
+    fn run_teardown(&mut self) {
+        crate::context::remove_context_file(&self.view.context_path);
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+            for entry in tabs.tabs_mut() {
+                entry.pane.shutdown(Duration::from_millis(250));
+            }
+        }
+    }
+
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         use std::sync::mpsc;
 
@@ -1797,56 +1877,16 @@ impl App {
             // CaptureTick (see `arm_post_recv_deadlines`).
             self.arm_post_recv_deadlines(now_post, &mut ctx);
 
-            // Only redraw when something actually changed.
-            // Wrap in DEC 2026 synchronized update so the terminal
-            // emulator (iTerm2, etc.) buffers the entire frame and
-            // paints it atomically — eliminates tearing and reduces
-            // terminal-side CPU.
-            if ctx.draw.dirty {
-                ctx.draw.dirty = false;
-                // Title compose + dedup stay loop-side; only the
-                // `term_title::set` IO runs through the sole executor.
-                let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
-                self.run_effects(title_fx, terminal, &foreground_exec)?;
-                use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
-                let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
-                if pending_clear {
-                    terminal.clear()?;
-                }
-                let draw_start = std::time::Instant::now();
-                let frame_area = terminal
-                    .draw(|frame| {
-                        // Time just the buffer build (CPU) so we can separate
-                        // it from the diff + tty emission measured below.
-                        let render_start = std::time::Instant::now();
-                        self.render(frame);
-                        if self.view.show_activity {
-                            let us = u64::try_from(render_start.elapsed().as_micros())
-                                .unwrap_or(u64::MAX);
-                            self.view.activity_render_peak_us =
-                                self.view.activity_render_peak_us.max(us);
-                        }
-                    })?
-                    .area;
-                // Whole-frame peak (build + diff + emission) = the full
-                // main-thread render stall. `frame - render` ≈ diff + emission.
-                if self.view.show_activity {
-                    let us = u64::try_from(draw_start.elapsed().as_micros()).unwrap_or(u64::MAX);
-                    self.view.activity_frame_peak_us = self.view.activity_frame_peak_us.max(us);
-                }
-                let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
-                if self.view.show_activity && !activity_only_draw {
-                    self.view.activity_draws += 1;
-                    self.view.activity_bytes +=
-                        u64::from(frame_area.width) * u64::from(frame_area.height);
-                    match ctx.draw.reason {
-                        1 => self.view.activity_reason_pane += 1,
-                        2 => self.view.activity_reason_event += 1,
-                        _ => self.view.activity_reason_other += 1,
-                    }
-                }
-                ctx.draw.reason = 0;
-            }
+            // Render the frame iff dirty (see `render_frame`): title effect,
+            // DEC 2026 synchronized-update wrap, optional clear, the timed
+            // draw, and the activity stats.
+            self.render_frame(
+                terminal,
+                &foreground_exec,
+                pending_clear,
+                activity_only_draw,
+                &mut ctx,
+            )?;
 
             // Only re-sync the filesystem watcher when the cwd actually changed.
             if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
@@ -1864,21 +1904,7 @@ impl App {
             // `maybe_write_context`).
             self.maybe_write_context(now_post, &mut ctx);
         }
-        // Clean up the context file on exit.
-        crate::context::remove_context_file(&self.view.context_path);
-        // Tear down every pane child tree before App is dropped.
-        // The per-Pane Drop is a SIGKILL safety net; going through
-        // `shutdown` here first sends SIGTERM with a 250ms grace, so
-        // well-behaved children (`vite`, `npm run dev`, anything that
-        // catches SIGTERM) get a chance to flush state before we
-        // escalate. Without this, quitting spyc with a frontend dev
-        // server in a pane would leave the whole node/esbuild/worker
-        // tree orphaned and still bound to its port.
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-            for entry in tabs.tabs_mut() {
-                entry.pane.shutdown(Duration::from_millis(250));
-            }
-        }
+        self.run_teardown();
         Ok(())
     }
 
