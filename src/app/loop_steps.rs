@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Deadline, Scheduler, state};
+use super::{App, Deadline, Mode, Prompt, PromptKind, Scheduler, arm_resume_deadlines, state};
 
 impl App {
     /// One-shot full-repaint bookkeeping at the top of each iteration.
@@ -209,6 +209,75 @@ impl App {
             scheduler.arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
         } else {
             scheduler.disarm(Deadline::CaptureTick);
+        }
+    }
+
+    /// MVU Phase 6 PR-C: pre-recv session-restore handling. Send any deferred
+    /// `/resume <sid>` for restored tabs whose banner has settled, arm the
+    /// RestoreSettle/ResumeEnter deadlines, and — if a restored claude tab
+    /// looks crashed (bad exit / crash dump) while in Normal mode — open the
+    /// crash-recovery prompt. Returns whether a redraw is needed (the prompt).
+    pub(crate) fn handle_restore_resumes(
+        &mut self,
+        now_pre: Instant,
+        scheduler: &mut Scheduler,
+    ) -> bool {
+        self.send_pending_resumes(now_pre);
+        // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
+        // all tabs so the wait can wake for it.
+        arm_resume_deadlines(scheduler, self.pane_tabs.as_ref());
+
+        let crash_idx = self.find_crashed_restore_tab(now_pre);
+        if let Some(tab_idx) = crash_idx
+            && matches!(self.state.mode, Mode::Normal)
+        {
+            if let Some(tabs) = self.pane_tabs.as_mut()
+                && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
+            {
+                entry.info.restore_fallback = None;
+            }
+            self.state.mode = Mode::Prompting(Prompt::simple(
+                PromptKind::ClaudeCrashRecover { tab_idx },
+                "claude crash detected — start fresh and recover with /resume? [Y/n] ",
+            ));
+            return true;
+        }
+        false
+    }
+
+    /// MVU Phase 6 PR-C: post-recv MCP context-file write. Event-driven via
+    /// `context_dirty`, throttled by a 150 ms min-interval and SUPPRESSED
+    /// during the 300 ms typing-burst window (so claude's input echo isn't
+    /// yanked by an mtime change mid-keystroke). Also arms/disarms the advisory
+    /// `ContextWrite` deadline at the predicate edge. No redraw (the write is
+    /// invisible).
+    pub(crate) fn maybe_write_context(
+        &mut self,
+        now_post: Instant,
+        last_input_at: Option<Instant>,
+        last_context_write: &mut Instant,
+        scheduler: &mut Scheduler,
+    ) {
+        let typing_burst =
+            last_input_at.is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
+        if self.context_dirty
+            && !typing_burst
+            && now_post.duration_since(*last_context_write) >= Duration::from_millis(150)
+        {
+            self.write_context();
+            *last_context_write = now_post;
+            self.context_dirty = false;
+            scheduler.disarm(Deadline::ContextWrite);
+        }
+        // Arm ContextWrite at the predicate edge (the later of the 150 ms
+        // min-interval and the 300 ms typing-burst suppressor) while dirty;
+        // disarm once written.
+        if self.context_dirty {
+            let edge = (*last_context_write + Duration::from_millis(150))
+                .max(last_input_at.map_or(*last_context_write, |t| t + Duration::from_millis(300)));
+            scheduler.arm(Deadline::ContextWrite, edge);
+        } else {
+            scheduler.disarm(Deadline::ContextWrite);
         }
     }
 }
