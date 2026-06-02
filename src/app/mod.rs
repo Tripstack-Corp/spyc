@@ -1524,33 +1524,9 @@ impl App {
             // context-write) use `now_post` captured after recv returns.
             let now_pre = std::time::Instant::now();
 
-            // For tabs spawned by session restore that need a deferred
-            // `/resume <sid>` (we avoid the `--resume` CLI flag because
-            // of a known crash regression), wait ~1.5s for claude's
-            // banner to render then send the slash command.
-            self.send_pending_resumes(now_pre);
-            // Arm RestoreSettle/ResumeEnter at the earliest pending
-            // resume across all tabs so the wait can wake for it (the
-            // floor dominates when a pane is present — see the wait calc).
-            arm_resume_deadlines(&mut scheduler, self.pane_tabs.as_ref());
-
-            // If a restored claude tab looks broken (bad exit / crash
-            // dump), prompt to respawn. See `pane_has_crash_marker` for
-            // the signature; the 30s window auto-disarms once a resume
-            // is clearly working.
-            let crash_idx = self.find_crashed_restore_tab(now_pre);
-            if let Some(tab_idx) = crash_idx
-                && matches!(self.state.mode, Mode::Normal)
-            {
-                if let Some(tabs) = self.pane_tabs.as_mut()
-                    && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
-                {
-                    entry.info.restore_fallback = None;
-                }
-                self.state.mode = Mode::Prompting(Prompt::simple(
-                    PromptKind::ClaudeCrashRecover { tab_idx },
-                    "claude crash detected — start fresh and recover with /resume? [Y/n] ",
-                ));
+            // Session-restore: deferred `/resume` sends + crash-recovery prompt
+            // (see `handle_restore_resumes`).
+            if self.handle_restore_resumes(now_pre, &mut scheduler) {
                 needs_draw = true;
                 draw_reason = 3;
             }
@@ -1976,37 +1952,15 @@ impl App {
                 );
             }
 
-            // Update the MCP context file when state has actually
-            // changed (event-driven via `context_dirty`). Throttled
-            // by a small debounce so a rapid burst of cursor moves
-            // doesn't thrash the file. Suppressed during the typing-
-            // burst window so claude's input echo isn't yanked by an
-            // mtime change while the user is mid-keystroke.
-            let typing_burst = last_input_at
-                .is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
-            if self.context_dirty
-                && !typing_burst
-                && now_post.duration_since(last_context_write) >= Duration::from_millis(150)
-            {
-                self.write_context();
-                last_context_write = now_post;
-                self.context_dirty = false;
-                scheduler.disarm(Deadline::ContextWrite);
-            }
-            // MVU Phase 2: arm ContextWrite at the predicate edge (the
-            // later of the 150ms min-interval and the 300ms typing-burst
-            // suppressor) while dirty; disarm once written. Recomputed
-            // every iteration so a no-pane dirty (fs/git) with no recent
-            // input is still covered. Advisory — the predicate above fires
-            // it against now_post; MAX_IDLE_CAP is the floor-of-last-resort.
-            if self.context_dirty {
-                let edge = (last_context_write + Duration::from_millis(150)).max(
-                    last_input_at.map_or(last_context_write, |t| t + Duration::from_millis(300)),
-                );
-                scheduler.arm(Deadline::ContextWrite, edge);
-            } else {
-                scheduler.disarm(Deadline::ContextWrite);
-            }
+            // Event-driven MCP context-file write — debounced + typing-burst
+            // suppressed, with ContextWrite deadline arming (see
+            // `maybe_write_context`).
+            self.maybe_write_context(
+                now_post,
+                last_input_at,
+                &mut last_context_write,
+                &mut scheduler,
+            );
         }
         // Clean up the context file on exit.
         crate::context::remove_context_file(&self.context_path);
