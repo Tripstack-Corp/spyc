@@ -89,7 +89,7 @@ impl App {
                 Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
             let cwd = self.state.listing.dir.clone();
             let wake = self.make_pane_wake();
-            match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path, wake) {
+            match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
                 Ok(p) => {
                     self.runtime.top_overlay = Some(p);
                     // Initial focus is on the new overlay so the user

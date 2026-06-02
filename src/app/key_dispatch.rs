@@ -61,7 +61,7 @@ impl App {
         // 60 ms covers system-key-repeat (~30-50 ms) and kitty-keyboard
         // Repeat events without affecting deliberate double-taps.
         if is_post_chord_bounce(
-            self.focus_chord_completed,
+            self.view.focus_chord_completed,
             key,
             self.state.resolver.is_pending(),
         ) {
@@ -71,10 +71,11 @@ impl App {
         // Expire the stamp once its window has passed so it can't
         // suppress a deliberate same-key press later.
         if self
+            .view
             .focus_chord_completed
             .is_some_and(|(at, _)| at.elapsed() >= POST_CHORD_BOUNCE_WINDOW)
         {
-            self.focus_chord_completed = None;
+            self.view.focus_chord_completed = None;
         }
 
         // Any keypress clears a lingering flash message.
@@ -176,9 +177,9 @@ impl App {
 
         // Top overlay: once the subprocess exits, hold the screen until
         // any key so short-lived commands (`;ls`) don't flash and vanish.
-        if self.overlay_awaiting_dismiss {
+        if self.view.overlay_awaiting_dismiss {
             self.runtime.top_overlay = None;
-            self.overlay_awaiting_dismiss = false;
+            self.view.overlay_awaiting_dismiss = false;
             self.view.needs_full_repaint = true;
             self.state.flash_info("command finished");
             return Ok(Vec::new());
@@ -187,12 +188,12 @@ impl App {
         // Quick Select picker eats all keys until dismissed.
         // Earlier than the harpoon menu so it'll never collide
         // with chord state.
-        if self.quick_select.is_some() {
+        if self.view.quick_select.is_some() {
             return Ok(self.handle_quick_select_key(key));
         }
 
         // Harpoon menu eats all keys until dismissed (Esc/q).
-        if self.harpoon_menu.is_some() {
+        if self.view.harpoon_menu.is_some() {
             return Ok(self.handle_harpoon_menu_key(key));
         }
 
@@ -311,7 +312,7 @@ impl App {
                 // ~60 ms suppresses a same-key Repeat or bouncy second
                 // Press from leaking into the now-focused pane.
                 if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
-                    self.focus_chord_completed = Some((std::time::Instant::now(), key.code));
+                    self.view.focus_chord_completed = Some((std::time::Instant::now(), key.code));
                 }
                 return self.apply(&action);
             }
@@ -553,7 +554,7 @@ impl App {
             }
             return Vec::new();
         }
-        self.tab_state = None;
+        self.view.tab_state = None;
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
@@ -792,7 +793,15 @@ impl App {
             self.state.config.layout.status_position,
         );
         let wake = self.make_pane_wake();
-        match Pane::spawn_with_env(&fallback, rows, cols, &cwd, &self.context_path, &[], wake) {
+        match Pane::spawn_with_env(
+            &fallback,
+            rows,
+            cols,
+            &cwd,
+            &self.view.context_path,
+            &[],
+            wake,
+        ) {
             Ok(p) => {
                 let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
@@ -867,7 +876,7 @@ impl App {
             return Vec::new();
         }
         // Non-Tab clears double-Tab state.
-        self.tab_state = None;
+        self.view.tab_state = None;
 
         // ^C in any prompt cancels and returns to normal mode --
         // vi muscle memory. Distinct from Esc only in keystroke,

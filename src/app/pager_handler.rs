@@ -97,7 +97,7 @@ impl App {
                         // file-list status bar -- the user is looking
                         // at the pager, the message belongs there.
                         view.flash = Some("no matches".into());
-                    } else if let Some(ref mut editor) = self.pending_history_pick {
+                    } else if let Some(ref mut editor) = self.view.pending_history_pick {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
@@ -143,7 +143,7 @@ impl App {
                         && n > 0
                     {
                         let target = n.saturating_sub(1);
-                        if self.pending_history_pick.is_some() {
+                        if self.view.pending_history_pick.is_some() {
                             // History editor: jump to entry N.
                             let max = view.lines.len().saturating_sub(1);
                             let clamped = target.min(max);
@@ -157,7 +157,7 @@ impl App {
                     }
                     view.jump_buf = None;
                     self.view.pager_jump_buf = None;
-                    if self.pending_history_pick.is_some() {
+                    if self.view.pending_history_pick.is_some() {
                         self.sync_history_editor_to_cursor();
                     }
                 }
@@ -227,7 +227,7 @@ impl App {
         // dispatch doesn't have a generic picker-move arm; each
         // popup type wires its own (matches how the session picker
         // and history editor do it).
-        if self.pending_jump_history.is_some() {
+        if self.view.pending_jump_history.is_some() {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
@@ -239,7 +239,7 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let snapshot = self.pending_jump_history.take().unwrap();
+                    let snapshot = self.view.pending_jump_history.take().unwrap();
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
                     if let Some(path_str) = snapshot.get(cursor) {
@@ -264,7 +264,7 @@ impl App {
                     // taken; the jump popup has no editor so `x` is
                     // unambiguously "delete entry."
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let snapshot = self.pending_jump_history.as_mut().unwrap();
+                    let snapshot = self.view.pending_jump_history.as_mut().unwrap();
                     if let Some(path_str) = snapshot.get(cursor).cloned() {
                         // Remove from real history (find by content,
                         // since snapshot indices are reverse-ordered).
@@ -274,7 +274,7 @@ impl App {
                         }
                         snapshot.remove(cursor);
                         if snapshot.is_empty() {
-                            self.pending_jump_history = None;
+                            self.view.pending_jump_history = None;
                             self.clear_pager();
                             self.view.needs_full_repaint = true;
                             self.state.flash_info("jump history empty");
@@ -342,7 +342,7 @@ impl App {
         }
 
         // History editor: vi-edit highlighted line, Enter runs, d/x deletes.
-        if let Some(ref mut editor) = self.pending_history_pick {
+        if let Some(ref mut editor) = self.view.pending_history_pick {
             use crate::ui::line_edit::EditResult;
             let editor_is_normal = editor.mode == crate::ui::line_edit::Mode::Normal;
 
@@ -355,7 +355,7 @@ impl App {
                     self.state.history.remove(hist_idx);
                     if self.state.history.entries().is_empty() {
                         self.clear_pager();
-                        self.pending_history_pick = None;
+                        self.view.pending_history_pick = None;
                         self.view.needs_full_repaint = true;
                         self.state.flash_info("history is empty");
                         return Vec::new();
@@ -368,7 +368,7 @@ impl App {
                         let new_cur = v.picker_cursor.unwrap_or(0);
                         let entries = self.state.history.entries();
                         let hist_idx = entries.len().saturating_sub(1 + new_cur);
-                        if let Some(ref mut ed) = self.pending_history_pick {
+                        if let Some(ref mut ed) = self.view.pending_history_pick {
                             if let Some(cmd) = entries.get(hist_idx) {
                                 ed.set_content_keep_mode(cmd);
                             }
@@ -401,19 +401,19 @@ impl App {
             if editor_is_normal {
                 let handled = match key.code {
                     KeyCode::Char('j') | KeyCode::Down => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         view.picker_move(1, viewport);
                         sync_editor!(view, editor, self.state.history);
                         true
                     }
                     KeyCode::Char('k') | KeyCode::Up => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         view.picker_move(-1, viewport);
                         sync_editor!(view, editor, self.state.history);
                         true
                     }
                     KeyCode::Char('G') => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         let last = view.lines.len().saturating_sub(1);
                         let delta = last as isize - view.picker_cursor.unwrap_or(0) as isize;
                         view.picker_move(delta, viewport);
@@ -421,23 +421,23 @@ impl App {
                         true
                     }
                     KeyCode::Char('g') => {
-                        if self.history_pending_g {
-                            self.history_pending_g = false;
+                        if self.view.history_pending_g {
+                            self.view.history_pending_g = false;
                             let delta = -(view.picker_cursor.unwrap_or(0) as isize);
                             view.picker_move(delta, viewport);
                             sync_editor!(view, editor, self.state.history);
                         } else {
-                            self.history_pending_g = true;
+                            self.view.history_pending_g = true;
                         }
                         true
                     }
                     KeyCode::Char('/') => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         view.begin_search();
                         true
                     }
                     KeyCode::Char('n') => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         view.search_next(viewport);
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
@@ -446,7 +446,7 @@ impl App {
                         true
                     }
                     KeyCode::Char('N') => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         view.search_prev(viewport);
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
@@ -455,7 +455,7 @@ impl App {
                         true
                     }
                     KeyCode::Char(':') => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         self.view.pager_jump_buf = Some(String::new());
                         view.jump_buf = Some(String::new());
                         true
@@ -463,7 +463,7 @@ impl App {
                     // Disable pager keys that don't make sense here.
                     KeyCode::Char('l' | 'v') => true,
                     _ => {
-                        self.history_pending_g = false;
+                        self.view.history_pending_g = false;
                         false
                     }
                 };
@@ -484,7 +484,7 @@ impl App {
                 EditResult::Submit => {
                     let cmd = editor.text();
                     self.clear_pager();
-                    self.pending_history_pick = None;
+                    self.view.pending_history_pick = None;
                     self.view.needs_full_repaint = true;
                     if cmd.trim().is_empty() {
                         return Vec::new();
@@ -500,7 +500,7 @@ impl App {
                     // Esc in Insert → Normal (handled by editor, returns Continue).
                     // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
                     self.clear_pager();
-                    self.pending_history_pick = None;
+                    self.view.pending_history_pick = None;
                     self.view.needs_full_repaint = true;
                 }
                 EditResult::HistoryPrev | EditResult::HistoryNext => {
@@ -841,7 +841,7 @@ impl App {
                     // Save eligible pagers to history before closing.
                     let is_picker = self.state.pending_worktrees.is_some()
                         || self.state.pending_sessions.is_some()
-                        || self.pending_history_pick.is_some();
+                        || self.view.pending_history_pick.is_some();
                     if !is_picker
                         && let Some(ref v) = self.view.pager
                         && v.picker_cursor.is_none()
@@ -863,8 +863,8 @@ impl App {
                 }
                 self.state.pending_worktrees = None;
                 self.state.pending_sessions = None;
-                self.pending_history_pick = None;
-                self.pending_jump_history = None;
+                self.view.pending_history_pick = None;
+                self.view.pending_jump_history = None;
                 self.view.pager_jump_buf = None;
                 self.view.pager_pending_bracket = None;
                 self.view.needs_full_repaint = true;
@@ -1017,7 +1017,7 @@ impl App {
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
                     let wake = self.make_pane_wake();
-                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
+                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
                         Ok(p) => {
                             self.runtime.top_overlay = Some(p);
                             self.state.focus = Focus::Overlay;
@@ -1057,7 +1057,7 @@ impl App {
                         }
                     }
                 };
-                self.pending_pager_return = Some(pager_return);
+                self.view.pending_pager_return = Some(pager_return);
                 self.clear_pager();
                 self.view.needs_full_repaint = true;
                 return sh_c(

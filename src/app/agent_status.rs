@@ -44,11 +44,13 @@ impl App {
 
         // Is the cached short-id for the CURRENT active pane, and still fresh?
         let cache_matches = self
+            .view
             .agent_status_cache
             .as_ref()
             .is_some_and(|c| c.kind == kind && c.cwd == cwd && c.spawn_epoch_secs == spawn);
         let fresh = cache_matches
             && self
+                .view
                 .agent_status_cache
                 .as_ref()
                 .is_some_and(|c| c.computed_at.elapsed() < AGENT_STATUS_TTL);
@@ -103,7 +105,8 @@ impl App {
         // same-pane 30 s refresh updates the cache in place, so the steady
         // state never flickers.
         if cache_matches {
-            self.agent_status_cache
+            self.view
+                .agent_status_cache
                 .as_ref()
                 .and_then(|c| c.status.clone())
         } else {
@@ -133,7 +136,7 @@ impl App {
                 && result.spawn_epoch_secs == active.spawn_epoch_secs
         });
         if matches {
-            self.agent_status_cache = Some(result);
+            self.view.agent_status_cache = Some(result);
         }
         matches
     }

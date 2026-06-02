@@ -399,8 +399,8 @@ impl App {
                     // Echo-latency probe (A-monitor only): stamp when a
                     // keystroke is forwarded to the active pane; the pre-recv
                     // pane scan measures forward→echo on the agent's reply.
-                    if self.show_activity && matches!(target, PaneTarget::Active) {
-                        self.pane_send_at = Some(std::time::Instant::now());
+                    if self.view.show_activity && matches!(target, PaneTarget::Active) {
+                        self.view.pane_send_at = Some(std::time::Instant::now());
                     }
                     let result = match target {
                         PaneTarget::Active => self
@@ -489,7 +489,7 @@ impl App {
                     // The listing may have changed (mv, rm, chmod, etc).
                     self.state.refresh_listing();
                     // If we were editing a pager buffer, restore it.
-                    if let Some(ret) = self.pending_pager_return.take() {
+                    if let Some(ret) = self.view.pending_pager_return.take() {
                         match ret {
                             PagerReturn::TempFile {
                                 path,

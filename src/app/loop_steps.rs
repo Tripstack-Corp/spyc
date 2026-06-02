@@ -97,7 +97,7 @@ impl App {
     ) -> bool {
         let mut needs_draw = false;
         for req in std::mem::take(mcp_pending) {
-            self.activity_mcp_reqs = self.activity_mcp_reqs.saturating_add(1);
+            self.view.activity_mcp_reqs = self.view.activity_mcp_reqs.saturating_add(1);
             let resp = self.execute_mcp_command(req.command);
             let _ = req.reply.send(resp);
             needs_draw = true;
@@ -120,7 +120,7 @@ impl App {
         for result in std::mem::take(git_pending) {
             if self.ingest_git_result(result) {
                 needs_draw = true;
-                self.context_dirty = true;
+                self.view.context_dirty = true;
             }
         }
         needs_draw
@@ -133,58 +133,58 @@ impl App {
     /// stats (which would oscillate). The caller folds it into `needs_draw`.
     pub(crate) fn roll_activity_window(&mut self, now_post: Instant, needs_draw: bool) -> bool {
         let mut activity_only_draw = false;
-        if self.show_activity
-            && now_post.duration_since(self.activity_last_tick) >= Duration::from_secs(1)
+        if self.view.show_activity
+            && now_post.duration_since(self.view.activity_last_tick) >= Duration::from_secs(1)
         {
-            let new_dps = self.activity_draws;
-            let new_bps = self.activity_bytes;
-            let new_sp = self.activity_reason_pane;
-            let new_se = self.activity_reason_event;
-            let new_so = self.activity_reason_other;
-            let new_we = self.activity_watcher_events;
-            let new_mr = self.activity_mcp_reqs;
-            let new_gr = self.activity_git_results;
+            let new_dps = self.view.activity_draws;
+            let new_bps = self.view.activity_bytes;
+            let new_sp = self.view.activity_reason_pane;
+            let new_se = self.view.activity_reason_event;
+            let new_so = self.view.activity_reason_other;
+            let new_we = self.view.activity_watcher_events;
+            let new_mr = self.view.activity_mcp_reqs;
+            let new_gr = self.view.activity_git_results;
             // Only force a redraw if something changed.
-            if (new_dps != self.activity_dps
-                || new_bps != self.activity_bps
-                || new_sp != self.activity_snap_pane
-                || new_se != self.activity_snap_event
-                || new_so != self.activity_snap_other
-                || new_we != self.activity_watcher_events_snap
-                || new_mr != self.activity_mcp_reqs_snap
-                || new_gr != self.activity_git_results_snap)
+            if (new_dps != self.view.activity_dps
+                || new_bps != self.view.activity_bps
+                || new_sp != self.view.activity_snap_pane
+                || new_se != self.view.activity_snap_event
+                || new_so != self.view.activity_snap_other
+                || new_we != self.view.activity_watcher_events_snap
+                || new_mr != self.view.activity_mcp_reqs_snap
+                || new_gr != self.view.activity_git_results_snap)
                 && !needs_draw
             {
                 // This draw exists only to refresh the overlay —
                 // don't count it in the stats or it oscillates.
                 activity_only_draw = true;
             }
-            self.activity_dps = new_dps;
-            self.activity_bps = new_bps;
-            self.activity_snap_pane = new_sp;
-            self.activity_snap_event = new_se;
-            self.activity_snap_other = new_so;
-            self.activity_watcher_events_snap = new_we;
-            self.activity_mcp_reqs_snap = new_mr;
-            self.activity_git_results_snap = new_gr;
+            self.view.activity_dps = new_dps;
+            self.view.activity_bps = new_bps;
+            self.view.activity_snap_pane = new_sp;
+            self.view.activity_snap_event = new_se;
+            self.view.activity_snap_other = new_so;
+            self.view.activity_watcher_events_snap = new_we;
+            self.view.activity_mcp_reqs_snap = new_mr;
+            self.view.activity_git_results_snap = new_gr;
             // Snapshot + reset the peak frame time. Not part of the
             // force-redraw predicate above (it's a passive stat — a
             // changing peak shouldn't itself drive an overlay redraw).
-            self.activity_frame_peak_snap = self.activity_frame_peak_us;
-            self.activity_frame_peak_us = 0;
-            self.activity_render_peak_snap = self.activity_render_peak_us;
-            self.activity_render_peak_us = 0;
-            self.activity_echo_snap = self.activity_echo_peak_us;
-            self.activity_echo_peak_us = 0;
-            self.activity_draws = 0;
-            self.activity_bytes = 0;
-            self.activity_reason_pane = 0;
-            self.activity_reason_event = 0;
-            self.activity_reason_other = 0;
-            self.activity_watcher_events = 0;
-            self.activity_mcp_reqs = 0;
-            self.activity_git_results = 0;
-            self.activity_last_tick = now_post;
+            self.view.activity_frame_peak_snap = self.view.activity_frame_peak_us;
+            self.view.activity_frame_peak_us = 0;
+            self.view.activity_render_peak_snap = self.view.activity_render_peak_us;
+            self.view.activity_render_peak_us = 0;
+            self.view.activity_echo_snap = self.view.activity_echo_peak_us;
+            self.view.activity_echo_peak_us = 0;
+            self.view.activity_draws = 0;
+            self.view.activity_bytes = 0;
+            self.view.activity_reason_pane = 0;
+            self.view.activity_reason_event = 0;
+            self.view.activity_reason_other = 0;
+            self.view.activity_watcher_events = 0;
+            self.view.activity_mcp_reqs = 0;
+            self.view.activity_git_results = 0;
+            self.view.activity_last_tick = now_post;
             // Refresh process stats (RSS / thread count) on the same 1 s
             // cadence. Hidden inside the A-monitor tick so callers without it
             // open pay zero cost.
@@ -199,10 +199,10 @@ impl App {
     /// and CaptureTick (the ~1 Hz elapsed-timer tick for a streaming capture /
     /// `:task` viewer).
     pub(crate) fn arm_post_recv_deadlines(&self, now_post: Instant, scheduler: &mut Scheduler) {
-        if self.show_activity {
+        if self.view.show_activity {
             scheduler.arm(
                 Deadline::ActivityRollover,
-                self.activity_last_tick + Duration::from_secs(1),
+                self.view.activity_last_tick + Duration::from_secs(1),
             );
         } else {
             scheduler.disarm(Deadline::ActivityRollover);
@@ -262,19 +262,19 @@ impl App {
     ) {
         let typing_burst =
             last_input_at.is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
-        if self.context_dirty
+        if self.view.context_dirty
             && !typing_burst
             && now_post.duration_since(*last_context_write) >= Duration::from_millis(150)
         {
             self.write_context();
             *last_context_write = now_post;
-            self.context_dirty = false;
+            self.view.context_dirty = false;
             scheduler.disarm(Deadline::ContextWrite);
         }
         // Arm ContextWrite at the predicate edge (the later of the 150 ms
         // min-interval and the 300 ms typing-burst suppressor) while dirty;
         // disarm once written.
-        if self.context_dirty {
+        if self.view.context_dirty {
             let edge = (*last_context_write + Duration::from_millis(150))
                 .max(last_input_at.map_or(*last_context_write, |t| t + Duration::from_millis(300)));
             scheduler.arm(Deadline::ContextWrite, edge);
@@ -295,12 +295,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.show_activity = false;
-            app.activity_draws = 7;
-            app.activity_last_tick = Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
+            app.view.show_activity = false;
+            app.view.activity_draws = 7;
+            app.view.activity_last_tick =
+                Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
             let only = app.roll_activity_window(Instant::now(), false);
             assert!(!only);
-            assert_eq!(app.activity_draws, 7, "monitor off → counters untouched");
+            assert_eq!(
+                app.view.activity_draws, 7,
+                "monitor off → counters untouched"
+            );
         });
     }
 
@@ -311,16 +315,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.show_activity = true;
-            app.activity_draws = 5; // differs from activity_dps (0) → changed
-            app.activity_last_tick = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
+            app.view.show_activity = true;
+            app.view.activity_draws = 5; // differs from activity_dps (0) → changed
+            app.view.activity_last_tick =
+                Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
             let only = app.roll_activity_window(Instant::now(), false);
             assert!(
                 only,
                 "changed counter + not already dirty → overlay-only draw"
             );
-            assert_eq!(app.activity_draws, 0, "accumulators reset");
-            assert_eq!(app.activity_dps, 5, "snapshot captured the window value");
+            assert_eq!(app.view.activity_draws, 0, "accumulators reset");
+            assert_eq!(
+                app.view.activity_dps, 5,
+                "snapshot captured the window value"
+            );
         });
     }
 
@@ -331,13 +339,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.show_activity = true;
-            app.activity_draws = 5;
-            app.activity_last_tick = Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
+            app.view.show_activity = true;
+            app.view.activity_draws = 5;
+            app.view.activity_last_tick =
+                Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
             let only = app.roll_activity_window(Instant::now(), true);
             assert!(!only);
             assert_eq!(
-                app.activity_draws, 0,
+                app.view.activity_draws, 0,
                 "rollover resets even when already dirty"
             );
         });

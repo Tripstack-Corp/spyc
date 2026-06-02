@@ -378,8 +378,8 @@ struct Runtime {
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
 /// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
 /// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
-/// field; handlers reach it via `self.view.…`. Fields migrate in over the
-/// physical-split PRs (D1: the pager group + render caches).
+/// field; handlers reach it via `self.view.…`.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ViewState {
     pub pager: Option<PagerView>,
     pub pager_history: PagerHistory,
@@ -407,153 +407,167 @@ pub struct ViewState {
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub last_term_title: Option<String>,
+    // --- D3: the remaining UI-layer ephemerals + activity counters ---
+    /// Active harpoon menu overlay (interactive: reorder, delete, jump).
+    // Module-private (type `HarpoonMenu` is module-private).
+    harpoon_menu: Option<HarpoonMenu>,
+    /// Active Quick Select picker (`^a u`).
+    pub quick_select: Option<crate::pane::quick_select::QuickSelect>,
+    /// `dd` arming for the graveyard view (first `d` arms, second deletes).
+    pub graveyard_pending_d: bool,
+    /// `gg` arming for the graveyard view (jump to top).
+    pub graveyard_pending_g: bool,
+    pub overlay_awaiting_dismiss: bool,
+    pub pending_overlay_close: bool,
+    /// TTL cache for the active pane's status-line session short-id.
+    // Module-private (type `AgentStatusCache` is module-private); the
+    // `app::*` descendant modules still reach it via `self.view.…`.
+    agent_status_cache: Option<AgentStatusCache>,
+    pub pending_history_pick: Option<LineEditor>,
+    /// Snapshot of jump-history entries for the `J`-prompt popup.
+    pub pending_jump_history: Option<Vec<String>>,
+    pub history_pending_g: bool,
+    /// Pending `g` in pane scroll mode (`gg`/`gf`/`gF`).
+    pub scroll_pending_g: bool,
+    // Module-private (type `PagerReturn` is module-private).
+    pending_pager_return: Option<PagerReturn>,
+    /// Path to the `.spyc-context.json` file (written each loop for MCP).
+    pub context_path: PathBuf,
+    /// Last serialized context JSON — skip the disk write when unchanged.
+    pub last_context_json: String,
+    /// `.spyc-context.json` is stale and should be rewritten (debounced +
+    /// typing-burst-guarded).
+    pub context_dirty: bool,
+    /// Whether the MCP socket server is running.
+    pub mcp_running: bool,
+    /// When a focus-switch chord just completed: (when, completing key) —
+    /// the next dispatch drops a Press/Repeat of that key within ~60 ms.
+    pub focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
+    /// Activity monitor (`A`): draws/sec, bytes/sec overlay toggle + counters.
+    pub show_activity: bool,
+    pub activity_draws: u32,
+    pub activity_bytes: u64,
+    pub activity_last_tick: std::time::Instant,
+    pub activity_dps: u32,
+    pub activity_bps: u64,
+    pub activity_reason_pane: u32,
+    pub activity_reason_event: u32,
+    pub activity_reason_other: u32,
+    pub activity_snap_pane: u32,
+    pub activity_snap_event: u32,
+    pub activity_snap_other: u32,
+    /// Peak frame/render time (µs) over the window + snapshots.
+    pub activity_frame_peak_us: u64,
+    pub activity_frame_peak_snap: u64,
+    pub activity_render_peak_us: u64,
+    pub activity_render_peak_snap: u64,
+    /// Peak keystroke→echo latency (µs) + snapshot; `pane_send_at` is the
+    /// forward timestamp measured against the next active-pane output.
+    pub activity_echo_peak_us: u64,
+    pub activity_echo_snap: u64,
+    pub pane_send_at: Option<std::time::Instant>,
+    pub activity_watcher_events: u32,
+    pub activity_watcher_events_snap: u32,
+    pub activity_mcp_reqs: u32,
+    pub activity_mcp_reqs_snap: u32,
+    pub activity_git_results: u32,
+    pub activity_git_results_snap: u32,
+    /// Roundtrip (ms) of the most recent git worker request.
+    pub activity_git_last_ms: u32,
+    /// `App::run` process start (activity-monitor uptime).
+    pub started_at: std::time::Instant,
+    /// Cached proc stats refreshed once per 1 s A-monitor tick.
+    pub activity_proc_rss_kb: u64,
+    pub activity_proc_threads: u32,
+    /// Tab-completion / cycle state.
+    // Module-private (type `TabState` is module-private).
+    tab_state: Option<TabState>,
+    /// Scroll throttle: timestamp + direction of last processed arrow key.
+    pub scroll_last: Option<(std::time::Instant, KeyCode)>,
 }
 
-#[allow(clippy::struct_excessive_bools)]
+impl ViewState {
+    /// Build the initial ViewState. `theme`/`context_path` are the only
+    /// caller-specific values; `context_dirty` (write-context-on-startup) and
+    /// `mcp_running` differ between the live app (`true` / actual) and the test
+    /// harness (`false` / `false`). Everything else starts empty.
+    fn new(theme: Theme, context_path: PathBuf, context_dirty: bool, mcp_running: bool) -> Self {
+        Self {
+            pager: None,
+            pager_history: PagerHistory::new(),
+            pager_pending_bracket: None,
+            pager_was_open: false,
+            pager_jump_buf: None,
+            pager_help_stash: None,
+            pager_positions: crate::state::pager_positions::PagerPositions::load(),
+            theme,
+            needs_full_repaint: false,
+            cached_rows: Vec::new(),
+            cached_rows_gen: u64::MAX, // force first build
+            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            last_term_title: None,
+            harpoon_menu: None,
+            quick_select: None,
+            graveyard_pending_d: false,
+            graveyard_pending_g: false,
+            overlay_awaiting_dismiss: false,
+            pending_overlay_close: false,
+            agent_status_cache: None,
+            pending_history_pick: None,
+            pending_jump_history: None,
+            history_pending_g: false,
+            scroll_pending_g: false,
+            pending_pager_return: None,
+            context_path,
+            last_context_json: String::new(),
+            context_dirty,
+            mcp_running,
+            focus_chord_completed: None,
+            show_activity: false,
+            activity_draws: 0,
+            activity_bytes: 0,
+            activity_last_tick: std::time::Instant::now(),
+            activity_dps: 0,
+            activity_bps: 0,
+            activity_reason_pane: 0,
+            activity_reason_event: 0,
+            activity_reason_other: 0,
+            activity_snap_pane: 0,
+            activity_snap_event: 0,
+            activity_snap_other: 0,
+            activity_frame_peak_us: 0,
+            activity_frame_peak_snap: 0,
+            activity_render_peak_us: 0,
+            activity_render_peak_snap: 0,
+            activity_echo_peak_us: 0,
+            activity_echo_snap: 0,
+            pane_send_at: None,
+            activity_watcher_events: 0,
+            activity_watcher_events_snap: 0,
+            activity_mcp_reqs: 0,
+            activity_mcp_reqs_snap: 0,
+            activity_git_results: 0,
+            activity_git_results_snap: 0,
+            activity_git_last_ms: 0,
+            started_at: std::time::Instant::now(),
+            activity_proc_rss_kb: 0,
+            activity_proc_threads: 0,
+            tab_state: None,
+            scroll_last: None,
+        }
+    }
+}
+
 pub struct App {
     /// Domain state — navigation, selection, filtering, config, etc.
     pub state: state::AppState,
     /// Render ephemerals + caches (see [`ViewState`]).
     view: ViewState,
-
-    // --- UI/terminal state (stays in App for now) ---
-    // MVU Phase 5: `harpoon` moved to `AppState` (Model consolidation).
-    /// Active harpoon menu overlay (interactive: reorder, delete,
-    /// jump). `None` when closed; intercepts keys before normal
-    /// dispatch when open.
-    harpoon_menu: Option<HarpoonMenu>,
-    /// Active Quick Select picker (`^a u`). `None` when closed;
-    /// intercepts keys before normal dispatch while open. See
-    /// `pane::quick_select` for the model.
-    quick_select: Option<crate::pane::quick_select::QuickSelect>,
-    /// `dd` arming for the graveyard view: first `d` arms, second
-    /// `d` deletes (cascades to system trash). Any other key
-    /// disarms. False whenever the graveyard view is closed.
-    graveyard_pending_d: bool,
-    /// `gg` arming for the graveyard view (jump to top).
-    graveyard_pending_g: bool,
-    overlay_awaiting_dismiss: bool,
-    pending_overlay_close: bool,
-    /// TTL cache for the active pane's session short-id (used in the
-    /// status line as `claude:<8-hex>` / `gemini:<8-hex>`).
-    ///
-    /// Without this, `active_agent_status` runs on every render. Its
-    /// implementation walks every `~/.claude/sessions/*.json` (one
-    /// `serde_json::Value` parse each) and may then parse a whole
-    /// session's `*.jsonl`. On a long-running user with hundreds of
-    /// accumulated sessions, sample showed that path at ~65% of
-    /// main-thread CPU. The status string changes essentially
-    /// never within a session, so a coarse TTL is fine.
-    agent_status_cache: Option<AgentStatusCache>,
-    pending_history_pick: Option<LineEditor>,
-    /// Snapshot of jump-history entries (newest first) for the popup
-    /// opened by `?` on an empty `J` prompt (spy parity), or by
-    /// `<Space>` while the `J` editor is in Normal mode. While
-    /// `Some`, an `Enter` on the active pager chdirs to the entry at
-    /// the cursor; `^D` deletes the entry from history and the
-    /// snapshot. `None` when no jump-history popup is active.
-    pending_jump_history: Option<Vec<String>>,
-    history_pending_g: bool,
-    /// Pending `g` in pane scroll mode — `gg` scrolls to top, `gf`/`gF`
-    /// jump to file reference.
-    scroll_pending_g: bool,
-    pending_pager_return: Option<PagerReturn>,
-    /// Path to the `.spyc-context.json` file (project root).
-    /// Written each loop iteration so the MCP server can read it.
-    context_path: PathBuf,
-    /// Last serialized context JSON — skip disk write when unchanged.
-    last_context_json: String,
-    /// When set, `.spyc-context.json` is stale and should be
-    /// rewritten on the next loop tick (subject to a small debounce
-    /// and a typing-burst guard). Replaces the old 1 Hz polling
-    /// write: claude's HUD plugin watches the file's mtime and
-    /// re-reads on every change, so unconditional 1 Hz writes were
-    /// yanking claude's main loop and starving its user-space input
-    /// echo. Now we only touch the file when an event source has
-    /// actually changed context-bearing state, and we defer writes
-    /// during active typing.
-    context_dirty: bool,
-    /// Whether the MCP socket server is running.
-    mcp_running: bool,
-    /// Summary printed to stdout after the TUI exits.
-    pub exit_summary: Option<String>,
-    // MVU Phase 5: `pane_prompt_buf` moved to `AppState`.
-    /// When a focus-switch chord (^a-j / ^a-k) just completed, this
-    /// captures (when, the key that completed it). The next dispatch
-    /// drops any Press/Repeat of the same key within ~60 ms — without
-    /// this guard, fast typing of `^a-j-...` produced a stray `j` byte
-    /// to the now-focused pane child (the `j` Press completes the
-    /// chord, but a brief OS-level Repeat or a too-quick second Press
-    /// arrives just after, with the new focus already in effect).
-    focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
-    // MVU Phase 5: `last_pane_prompt` moved to `AppState`.
-    /// Activity monitor: draws/sec, bytes/sec overlay.
-    show_activity: bool,
-    activity_draws: u32,
-    activity_bytes: u64,
-    activity_last_tick: std::time::Instant,
-    /// Snapshot from last 1-second window.
-    activity_dps: u32,
-    activity_bps: u64,
-    /// Draw reason counters for the current window.
-    activity_reason_pane: u32,
-    activity_reason_event: u32,
-    activity_reason_other: u32,
-    /// Snapshot reasons.
-    activity_snap_pane: u32,
-    activity_snap_event: u32,
-    activity_snap_other: u32,
-    /// Peak single-frame time (microseconds) over the current window, and
-    /// the snapshot from the previous one. `frame` covers the whole
-    /// `terminal.draw` (buffer build + diff + tty emission); `render` covers
-    /// only the `self.render` closure (buffer build = CPU). `frame - render`
-    /// ≈ the diff+emission (I/O). Splitting them says whether pane-typing
-    /// jank is CPU-bound (heavy widgets) or emission-bound (repaints / slow tty).
-    activity_frame_peak_us: u64,
-    activity_frame_peak_snap: u64,
-    activity_render_peak_us: u64,
-    activity_render_peak_snap: u64,
-    /// Peak keystroke→echo latency (microseconds) over the window, + snapshot.
-    /// Set `pane_send_at` when a keystroke is forwarded to the active pane;
-    /// measured on the next active-pane output (Claude's echo). Isolates the
-    /// pane round-trip (forward → agent echo → parse → render) from render
-    /// cost — `echo - r` ≈ the agent/pty round-trip we don't control.
-    activity_echo_peak_us: u64,
-    activity_echo_snap: u64,
-    pane_send_at: Option<std::time::Instant>,
-    /// Extended activity counters surfaced on the second status line.
-    /// All `_events` / `_reqs` counters tick during the 1 s window;
-    /// `_snap` holds the snapshot from the previous window.
-    activity_watcher_events: u32,
-    activity_watcher_events_snap: u32,
-    activity_mcp_reqs: u32,
-    activity_mcp_reqs_snap: u32,
-    activity_git_results: u32,
-    activity_git_results_snap: u32,
-    /// Roundtrip duration (ms) of the most recently completed git
-    /// worker request — set by `apply_git_worker_result`, read by
-    /// the activity overlay.
-    activity_git_last_ms: u32,
-    /// Time at which `App::run` started, for the activity-monitor
-    /// uptime field. Distinct from the spyc session's *session*
-    /// start (which can survive across restores) — this is the
-    /// current process's wall-clock lifetime.
-    started_at: std::time::Instant,
-    /// Cached process stats refreshed once per 1 s A-monitor tick.
-    /// `ps -o rss=,thcount= -p <pid>` is one ~5 ms syscall so we
-    /// hide it behind the existing snapshot cadence.
-    activity_proc_rss_kb: u64,
-    activity_proc_threads: u32,
-    /// Tab completion / cycle state. Tracks matches from the last Tab
-    /// press and supports cycling through them on repeated Tab.
-    tab_state: Option<TabState>,
-    /// Scroll throttle: timestamp + direction of last processed arrow key.
-    /// DEC 1007 alternate-scroll turns trackpad into arrow keys at 60+ Hz;
-    /// we rate-limit to ~25/sec (40ms gap) so inertia doesn't fly.
-    scroll_last: Option<(std::time::Instant, KeyCode)>,
-    /// MVU end-state: the IO-handle cluster (channels, PtyHosts, worker
-    /// endpoints, off-thread slots) — see [`Runtime`].
+    /// IO-handle cluster (channels, PtyHosts, worker endpoints, off-thread
+    /// slots) — see [`Runtime`].
     runtime: Runtime,
+    /// Summary printed to stdout after the TUI exits (read by `main`).
+    pub exit_summary: Option<String>,
 }
 
 /// State for Tab-completion cycling. Tracks the original buffer, the
@@ -797,71 +811,10 @@ impl App {
         app_state.git_worker_tx = Some(git_req_tx);
         let mut app = Self {
             state: app_state,
-            view: ViewState {
-                pager: None,
-                pager_history: PagerHistory::new(),
-                pager_pending_bracket: None,
-                pager_was_open: false,
-                pager_help_stash: None,
-                pager_jump_buf: None,
-                pager_positions: crate::state::pager_positions::PagerPositions::load(),
-                theme,
-                needs_full_repaint: false,
-                cached_rows: Vec::new(),
-                cached_rows_gen: u64::MAX, // force first build
-                cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-                last_term_title: None,
-            },
-            harpoon_menu: None,
-            quick_select: None,
-            graveyard_pending_d: false,
-            graveyard_pending_g: false,
-            overlay_awaiting_dismiss: false,
-            pending_overlay_close: false,
-            agent_status_cache: None,
-            pending_history_pick: None,
-            pending_jump_history: None,
-            history_pending_g: false,
-            scroll_pending_g: false,
-            pending_pager_return: None,
-            context_path,
-            last_context_json: String::new(),
-            // Write once on startup so claude sees initial state.
-            context_dirty: true,
-            mcp_running,
+            // Write context once on startup so claude sees initial state
+            // (context_dirty: true).
+            view: ViewState::new(theme, context_path, true, mcp_running),
             exit_summary: None,
-            focus_chord_completed: None,
-            show_activity: false,
-            activity_draws: 0,
-            activity_bytes: 0,
-            activity_last_tick: std::time::Instant::now(),
-            activity_dps: 0,
-            activity_bps: 0,
-            activity_reason_pane: 0,
-            activity_reason_event: 0,
-            activity_reason_other: 0,
-            activity_snap_pane: 0,
-            activity_frame_peak_us: 0,
-            activity_frame_peak_snap: 0,
-            activity_render_peak_us: 0,
-            activity_render_peak_snap: 0,
-            activity_echo_peak_us: 0,
-            activity_echo_snap: 0,
-            pane_send_at: None,
-            activity_watcher_events: 0,
-            activity_watcher_events_snap: 0,
-            activity_mcp_reqs: 0,
-            activity_mcp_reqs_snap: 0,
-            activity_git_results: 0,
-            activity_git_results_snap: 0,
-            activity_git_last_ms: 0,
-            started_at: std::time::Instant::now(),
-            activity_proc_rss_kb: 0,
-            activity_proc_threads: 0,
-            activity_snap_event: 0,
-            activity_snap_other: 0,
-            tab_state: None,
-            scroll_last: None,
             runtime: Runtime {
                 git_result_rx: Some(git_res_rx),
                 mcp_cmd_rx: Some(mcp_cmd_rx),
@@ -924,7 +877,7 @@ impl App {
         }
         // Write .mcp.json so Claude Code spawns `spyc --mcp` (stdio),
         // which proxies to our Unix socket.
-        if app.mcp_running {
+        if app.view.mcp_running {
             app.ensure_mcp_config(mcp_takeover_allowed);
         }
         app
@@ -987,8 +940,8 @@ impl App {
     /// machinery #227 added for the slow `ps` spawn is no longer needed).
     fn refresh_process_stats(&mut self) {
         if let Some((rss, threads)) = crate::sysinfo::proc_rss_threads() {
-            self.activity_proc_rss_kb = rss;
-            self.activity_proc_threads = threads;
+            self.view.activity_proc_rss_kb = rss;
+            self.view.activity_proc_threads = threads;
         }
     }
 
@@ -1015,7 +968,7 @@ impl App {
     fn write_context(&mut self) {
         let ctx = self.snapshot_context();
         let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
-        if json == self.last_context_json {
+        if json == self.view.last_context_json {
             return;
         }
         // MVU Phase 3d: only advance the dedup cache when the write actually
@@ -1023,8 +976,8 @@ impl App {
         // behind disk, so a later identical-state mutation still writes
         // instead of dedup-skipping into a stale file. (The 500ms cap used to
         // mask this by re-running the debounced writer; it's gone now.)
-        if crate::context::write_context_file(&self.context_path, &ctx).is_ok() {
-            self.last_context_json = json;
+        if crate::context::write_context_file(&self.view.context_path, &ctx).is_ok() {
+            self.view.last_context_json = json;
         }
     }
 
@@ -1173,7 +1126,7 @@ impl App {
                 }
             }
             McpCommand::Disconnected { new_pid } => {
-                self.mcp_running = false;
+                self.view.mcp_running = false;
                 self.state.flash_error(format!(
                     "MCP taken over by spyc PID {new_pid} — Claude is connected to that instance"
                 ));
@@ -1436,7 +1389,7 @@ impl App {
 
             // pending_overlay_close is no longer used — the overlay stays
             // visible until Enter via overlay_awaiting_dismiss.
-            let _ = self.pending_overlay_close;
+            let _ = self.view.pending_overlay_close;
 
             // MVU Phase 3c: drain the streaming pull sources (extracted to
             // streaming.rs). Each returns whether it needs a redraw. The
@@ -1683,22 +1636,22 @@ impl App {
                             // serializes-then-skips when JSON is unchanged,
                             // so a no-op keystroke (e.g. pressing keys in
                             // a chord prefix) won't actually touch disk.
-                            self.context_dirty = true;
+                            self.view.context_dirty = true;
                             // Throttle rapid-fire arrow keys from trackpad scroll
                             // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
                             if matches!(key.code, KeyCode::Up | KeyCode::Down)
                                 && key.modifiers.is_empty()
                             {
                                 let now = std::time::Instant::now();
-                                if let Some((prev, dir)) = self.scroll_last
+                                if let Some((prev, dir)) = self.view.scroll_last
                                     && dir == key.code
                                     && now.duration_since(prev).as_millis() < 40
                                 {
                                     continue;
                                 }
-                                self.scroll_last = Some((now, key.code));
+                                self.view.scroll_last = Some((now, key.code));
                             } else {
-                                self.scroll_last = None;
+                                self.view.scroll_last = None;
                             }
                             // MVU Phase 4: the handler returns a list of
                             // effects; `run_effects` is the sole executor
@@ -1798,28 +1751,29 @@ impl App {
                         // it from the diff + tty emission measured below.
                         let render_start = std::time::Instant::now();
                         self.render(frame);
-                        if self.show_activity {
+                        if self.view.show_activity {
                             let us = u64::try_from(render_start.elapsed().as_micros())
                                 .unwrap_or(u64::MAX);
-                            self.activity_render_peak_us = self.activity_render_peak_us.max(us);
+                            self.view.activity_render_peak_us =
+                                self.view.activity_render_peak_us.max(us);
                         }
                     })?
                     .area;
                 // Whole-frame peak (build + diff + emission) = the full
                 // main-thread render stall. `frame - render` ≈ diff + emission.
-                if self.show_activity {
+                if self.view.show_activity {
                     let us = u64::try_from(draw_start.elapsed().as_micros()).unwrap_or(u64::MAX);
-                    self.activity_frame_peak_us = self.activity_frame_peak_us.max(us);
+                    self.view.activity_frame_peak_us = self.view.activity_frame_peak_us.max(us);
                 }
                 let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
-                if self.show_activity && !activity_only_draw {
-                    self.activity_draws += 1;
-                    self.activity_bytes +=
+                if self.view.show_activity && !activity_only_draw {
+                    self.view.activity_draws += 1;
+                    self.view.activity_bytes +=
                         u64::from(frame_area.width) * u64::from(frame_area.height);
                     match draw_reason {
-                        1 => self.activity_reason_pane += 1,
-                        2 => self.activity_reason_event += 1,
-                        _ => self.activity_reason_other += 1,
+                        1 => self.view.activity_reason_pane += 1,
+                        2 => self.view.activity_reason_event += 1,
+                        _ => self.view.activity_reason_other += 1,
                     }
                 }
                 draw_reason = 0;
@@ -1847,7 +1801,7 @@ impl App {
             );
         }
         // Clean up the context file on exit.
-        crate::context::remove_context_file(&self.context_path);
+        crate::context::remove_context_file(&self.view.context_path);
         // Tear down every pane child tree before App is dropped.
         // The per-Pane Drop is a SIGKILL safety net; going through
         // `shutdown` here first sends SIGTERM with a 250ms grace, so
@@ -2065,7 +2019,7 @@ impl App {
 
         // Repeated Tab with active cycle state: cycle through matches
         // or re-flash the list for local dirs.
-        if let Some(ref mut ts) = self.tab_state
+        if let Some(ref mut ts) = self.view.tab_state
             && (ts.original_buf == buffer || ts.cycle_index > 0)
             && ts.matches.len() > 1
         {
@@ -2196,7 +2150,7 @@ impl App {
                 let Mode::Prompting(ref prompt) = self.state.mode else {
                     return;
                 };
-                self.tab_state = Some(TabState {
+                self.view.tab_state = Some(TabState {
                     original_buf: prompt.buffer.clone(),
                     buf_prefix: buf_prefix.clone(),
                     word_base,
@@ -2221,7 +2175,7 @@ impl App {
         // Store cycle state for multi-match (common prefix advanced but
         // further Tabs should still be able to cycle).
         if matches.len() > 1 {
-            self.tab_state = Some(TabState {
+            self.view.tab_state = Some(TabState {
                 original_buf: prompt.buffer.clone(),
                 buf_prefix,
                 word_base,
@@ -2229,7 +2183,7 @@ impl App {
                 cycle_index: 0,
             });
         } else {
-            self.tab_state = None;
+            self.view.tab_state = None;
         }
     }
 
@@ -2257,7 +2211,7 @@ impl App {
                 ed.set_content(&buffer);
             }
             prompt.buffer = buffer;
-            self.tab_state = None;
+            self.view.tab_state = None;
             return;
         }
 
@@ -2283,7 +2237,7 @@ impl App {
                 ed.set_content(&common);
             }
             prompt.buffer = common;
-            self.tab_state = Some(TabState {
+            self.view.tab_state = Some(TabState {
                 original_buf: prompt.buffer.clone(),
                 buf_prefix: String::new(),
                 word_base: String::new(),
@@ -2308,7 +2262,7 @@ impl App {
             display.join("  ")
         };
         self.state.flash_info(format!("{shown}  — Tab to cycle"));
-        self.tab_state = Some(TabState {
+        self.view.tab_state = Some(TabState {
             original_buf: prefix.to_string(),
             buf_prefix: String::new(),
             word_base: String::new(),
@@ -2342,7 +2296,7 @@ impl App {
             if let Some(ed) = prompt.editor.as_mut() {
                 ed.set_content(&prompt.buffer);
             }
-            self.tab_state = None;
+            self.view.tab_state = None;
         } else {
             // Multiple frecency matches — fill best, set up cycling.
             let completed = format!("{buf_prefix}{}", names[0]);
@@ -2356,7 +2310,7 @@ impl App {
             if let Some(ed) = prompt.editor.as_mut() {
                 ed.set_content(&prompt.buffer);
             }
-            self.tab_state = Some(TabState {
+            self.view.tab_state = Some(TabState {
                 original_buf: original,
                 buf_prefix: buf_prefix.to_string(),
                 word_base: String::new(),
@@ -2381,7 +2335,7 @@ impl App {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }
-        self.tab_state = None;
+        self.view.tab_state = None;
         // Clear any stashed state from the two-step new-tab prompt.
         self.state.pending_new_tab_cmd = None;
     }
@@ -2399,7 +2353,7 @@ impl App {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }
-        self.tab_state = None;
+        self.view.tab_state = None;
 
         // Try the pure-domain handler first.
         match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
@@ -2428,7 +2382,7 @@ impl App {
                 );
                 let cwd = self.state.listing.dir.clone();
                 let wake = self.make_pane_wake();
-                match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path, wake) {
+                match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
                     Ok(p) => {
                         self.runtime.top_overlay = Some(p);
                         self.state.focus = state::Focus::Overlay;
@@ -2602,7 +2556,7 @@ impl App {
             self.state.config.layout.status_position,
         );
         let wake = self.make_pane_wake();
-        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.context_path, &[], wake) {
+        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.view.context_path, &[], wake) {
             Ok(p) => {
                 self.state.focus = state::Focus::Pane;
                 self.state
@@ -2948,7 +2902,7 @@ impl App {
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
         let wake = self.make_pane_wake();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
                 self.runtime.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
@@ -3221,7 +3175,7 @@ impl App {
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
         let cwd = self.state.listing.dir.clone();
         let wake = self.make_pane_wake();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.context_path, wake) {
+        match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
                 self.runtime.top_overlay = Some(p);
                 self.state.focus = state::Focus::Overlay;
@@ -4341,8 +4295,8 @@ impl App {
                 // overlay coexists fine with the underlying
                 // graveyard view — Esc on the help returns to the
                 // same cursor position.
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 self.open_help();
             }
             KeyCode::Esc => {
@@ -4359,56 +4313,56 @@ impl App {
                     .cursor_move_vertical(-1, rpc, self.state.rows.len());
             }
             KeyCode::Char('g') => {
-                self.graveyard_pending_d = false;
-                if self.graveyard_pending_g {
+                self.view.graveyard_pending_d = false;
+                if self.view.graveyard_pending_g {
                     self.state.cursor.index = 0;
-                    self.graveyard_pending_g = false;
+                    self.view.graveyard_pending_g = false;
                 } else {
-                    self.graveyard_pending_g = true;
+                    self.view.graveyard_pending_g = true;
                 }
             }
             KeyCode::Char('G') => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 if !self.state.rows.is_empty() {
                     self.state.cursor.index = self.state.rows.len() - 1;
                 }
             }
             KeyCode::Char('p') => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 self.graveyard_restore(false);
             }
             KeyCode::Char('P') => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 self.graveyard_restore(true);
             }
             KeyCode::Char('x') => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 self.graveyard_purge_cursor_entry();
             }
             KeyCode::Char('d') => {
-                self.graveyard_pending_g = false;
-                if self.graveyard_pending_d {
-                    self.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
+                if self.view.graveyard_pending_d {
+                    self.view.graveyard_pending_d = false;
                     self.graveyard_purge_cursor_entry();
                 } else {
-                    self.graveyard_pending_d = true;
+                    self.view.graveyard_pending_d = true;
                 }
             }
             KeyCode::Char('Z') => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 self.state.mode = Mode::Prompting(Prompt::simple(
                     PromptKind::GraveyardPurgeAllConfirm,
                     "purge ALL graveyard entries to system trash? (y/N): ",
                 ));
             }
             _ => {
-                self.graveyard_pending_d = false;
-                self.graveyard_pending_g = false;
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
             }
         }
         Vec::new()
@@ -4769,8 +4723,8 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         // Handle pending `g` prefix: gg = scroll top, gf/gF = goto file.
-        if self.scroll_pending_g {
-            self.scroll_pending_g = false;
+        if self.view.scroll_pending_g {
+            self.view.scroll_pending_g = false;
             return match key.code {
                 KeyCode::Char('g') => {
                     self.runtime
@@ -4807,7 +4761,7 @@ impl App {
             KeyCode::PageDown | KeyCode::Char('f') if ctrl => pane.scroll_down_or_exit(20),
             KeyCode::Char('d') if ctrl => pane.scroll_down_or_exit(10),
             KeyCode::Char('g') => {
-                self.scroll_pending_g = true;
+                self.view.scroll_pending_g = true;
             }
             KeyCode::Char('G') => pane.scroll_to_bottom(),
             KeyCode::Char('s') => match pane.save_to_file() {
@@ -5186,7 +5140,7 @@ impl App {
                 .flash_error("harpoon: set PROJECT_HOME first (gP)");
             return;
         }
-        self.harpoon_menu = Some(HarpoonMenu {
+        self.view.harpoon_menu = Some(HarpoonMenu {
             cursor: 0,
             delete_armed: false,
         });
@@ -5205,11 +5159,11 @@ impl App {
     ///   `Esc`/`q` — close menu
     fn handle_harpoon_menu_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
         use crossterm::event::KeyCode;
-        let Some(menu) = self.harpoon_menu.as_mut() else {
+        let Some(menu) = self.view.harpoon_menu.as_mut() else {
             return Vec::new();
         };
         let Some(h) = self.state.harpoon.as_mut() else {
-            self.harpoon_menu = None;
+            self.view.harpoon_menu = None;
             self.view.needs_full_repaint = true;
             return Vec::new();
         };
@@ -5227,7 +5181,7 @@ impl App {
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
-                self.harpoon_menu = None;
+                self.view.harpoon_menu = None;
                 self.view.needs_full_repaint = true;
             }
             KeyCode::Char('j') | KeyCode::Down if len > 0 => {
@@ -5244,13 +5198,13 @@ impl App {
             }
             KeyCode::Char(c @ '1'..='9') => {
                 let slot = c as u8 - b'0';
-                self.harpoon_menu = None;
+                self.view.harpoon_menu = None;
                 self.view.needs_full_repaint = true;
                 self.harpoon_jump(slot);
             }
             KeyCode::Enter if len > 0 => {
                 let slot = (menu.cursor + 1) as u8;
-                self.harpoon_menu = None;
+                self.view.harpoon_menu = None;
                 self.view.needs_full_repaint = true;
                 self.harpoon_jump(slot);
             }
@@ -5282,7 +5236,7 @@ impl App {
                         self.state.rebuild_rows();
                     }
                     // Re-fetch menu since filter sync invalidates `menu` borrow
-                    if let Some(m) = self.harpoon_menu.as_mut() {
+                    if let Some(m) = self.view.harpoon_menu.as_mut() {
                         let new_len = self.state.harpoon.as_ref().map_or(0, |hh| hh.slots.len());
                         if new_len == 0 {
                             m.cursor = 0;
@@ -5290,7 +5244,7 @@ impl App {
                             m.cursor = removed_idx.min(new_len - 1);
                         }
                     }
-                } else if let Some(m) = self.harpoon_menu.as_mut() {
+                } else if let Some(m) = self.view.harpoon_menu.as_mut() {
                     m.delete_armed = true;
                 }
             }
@@ -5323,7 +5277,7 @@ impl App {
             return;
         }
         let all_two_letter = assign_labels(&mut matches);
-        self.quick_select = Some(QuickSelect {
+        self.view.quick_select = Some(QuickSelect {
             matches,
             pending_first: None,
             all_two_letter,
@@ -5344,12 +5298,12 @@ impl App {
     ///                            user; they can still type a label)
     fn handle_quick_select_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
         use crossterm::event::KeyCode;
-        let Some(qs) = self.quick_select.as_mut() else {
+        let Some(qs) = self.view.quick_select.as_mut() else {
             return Vec::new();
         };
 
         let close = |this: &mut Self| {
-            this.quick_select = None;
+            this.view.quick_select = None;
             this.view.needs_full_repaint = true;
         };
 
@@ -5544,7 +5498,7 @@ impl App {
             style::{Color, Modifier, Style},
             widgets::Paragraph,
         };
-        let Some(qs) = self.quick_select.as_ref() else {
+        let Some(qs) = self.view.quick_select.as_ref() else {
             return;
         };
         let label_style = Style::default()
@@ -5867,7 +5821,7 @@ impl App {
     fn sync_history_editor_to_cursor(&mut self) {
         Self::sync_hist_editor(
             &mut self.view.pager,
-            &mut self.pending_history_pick,
+            &mut self.view.pending_history_pick,
             &self.state.history,
         );
     }
@@ -5920,7 +5874,7 @@ impl App {
         view.no_history = true;
         view.show_line_numbers = false;
         view.wrap = false;
-        self.pending_jump_history = Some(snapshot);
+        self.view.pending_jump_history = Some(snapshot);
         self.set_pager(view);
         self.view.needs_full_repaint = true;
     }
@@ -5952,7 +5906,7 @@ impl App {
         );
         view.picker_cursor = Some(0);
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
-        self.pending_history_pick = Some(editor);
+        self.view.pending_history_pick = Some(editor);
         self.set_pager(view);
     }
 
@@ -7102,70 +7056,8 @@ impl App {
         let context_path = crate::context::context_path(&cwd);
         let mut app = Self {
             state: state::AppState::test_default(cwd),
-            view: ViewState {
-                pager: None,
-                pager_history: PagerHistory::new(),
-                pager_pending_bracket: None,
-                pager_was_open: false,
-                pager_help_stash: None,
-                pager_jump_buf: None,
-                pager_positions: crate::state::pager_positions::PagerPositions::load(),
-                theme: Theme::default(),
-                needs_full_repaint: false,
-                cached_rows: Vec::new(),
-                cached_rows_gen: u64::MAX,
-                cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-                last_term_title: None,
-            },
-            harpoon_menu: None,
-            quick_select: None,
-            graveyard_pending_d: false,
-            graveyard_pending_g: false,
-            overlay_awaiting_dismiss: false,
-            pending_overlay_close: false,
-            agent_status_cache: None,
-            pending_history_pick: None,
-            pending_jump_history: None,
-            history_pending_g: false,
-            scroll_pending_g: false,
-            pending_pager_return: None,
-            context_path,
-            last_context_json: String::new(),
-            context_dirty: false,
-            mcp_running: false,
+            view: ViewState::new(Theme::default(), context_path, false, false),
             exit_summary: None,
-            focus_chord_completed: None,
-            show_activity: false,
-            activity_draws: 0,
-            activity_bytes: 0,
-            activity_last_tick: std::time::Instant::now(),
-            activity_dps: 0,
-            activity_bps: 0,
-            activity_reason_pane: 0,
-            activity_reason_event: 0,
-            activity_reason_other: 0,
-            activity_snap_pane: 0,
-            activity_frame_peak_us: 0,
-            activity_frame_peak_snap: 0,
-            activity_render_peak_us: 0,
-            activity_render_peak_snap: 0,
-            activity_echo_peak_us: 0,
-            activity_echo_snap: 0,
-            pane_send_at: None,
-            activity_watcher_events: 0,
-            activity_watcher_events_snap: 0,
-            activity_mcp_reqs: 0,
-            activity_mcp_reqs_snap: 0,
-            activity_git_results: 0,
-            activity_git_results_snap: 0,
-            activity_git_last_ms: 0,
-            started_at: std::time::Instant::now(),
-            activity_proc_rss_kb: 0,
-            activity_proc_threads: 0,
-            activity_snap_event: 0,
-            activity_snap_other: 0,
-            tab_state: None,
-            scroll_last: None,
             runtime: Runtime {
                 git_result_rx: None,
                 mcp_cmd_rx: None,
