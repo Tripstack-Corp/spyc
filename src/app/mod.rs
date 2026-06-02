@@ -1631,83 +1631,18 @@ impl App {
                 draw_reason = 3;
             }
 
-            // Drain any pending watcher events. Refresh listing / reload
-            // config at most once per poll iteration, and debounce
-            // listing refreshes to avoid spawning git subprocesses on
-            // every rapid-fire .git/index change.
-            let mut needs_reload = false;
-            // MVU Phase 3a: drain the FsEvents the recv arm buffered into
-            // `fs_pending` (this iteration and during the recv sleep). The
-            // body — stamping the trailing-debounce against `now_pre` — is
-            // unchanged from the old `rx.try_recv()` drain; only the *source*
-            // moved to the unified channel. An event that arrived mid-sleep
-            // is stamped here at this iteration's `now_pre`, exactly as the
-            // old poll stamped it at the next `now_pre`. `last_event_at`
-            // carries over from previous iterations when the debounce timer
-            // hadn't elapsed yet.
-            for ev in std::mem::take(&mut fs_pending) {
-                self.ingest_fs_event(
-                    &ev,
-                    now_pre,
-                    &mut needs_reload,
-                    &mut last_event_at,
-                    &mut first_event_after_refresh,
-                );
-            }
-            if needs_reload {
-                self.reload_config();
-                needs_draw = true;
-                draw_reason = 3;
-            }
-            // Adaptive cadence: small trees get tight latency
-            // (500 ms debounce, 1 s poll); huge trees back off so
-            // `git status` doesn't dominate idle CPU. The huge-tree
-            // flag is set on chdir by `count_subdirs_capped`.
-            let refresh_quiet = if self.state.is_huge_tree {
-                Duration::from_secs(3)
-            } else {
-                Duration::from_millis(500)
-            };
-            // Fire when the watcher quiets down OR the max-defer cap
-            // bites — see `should_fire_refresh`. Continuous fs activity
-            // (cargo writing `target/`, claude streaming files) used to
-            // keep bumping `last_event_at` and starve the trailing
-            // debounce indefinitely; the cap forces a refresh at least
-            // every `max_refresh_defer` so per-file markers can't go
-            // stale forever during a busy stretch.
-            let max_refresh_defer = refresh_quiet * 2;
-            // MVU Phase 2: arm RefreshQuiet at the exact instant
-            // should_fire_refresh can first return true (the predicate
-            // edge), so the wait can wake for it without spinning; disarm
-            // when no refresh stretch is open. Advisory — the predicate
-            // below still decides firing, against `now_pre`.
-            match (last_event_at, first_event_after_refresh) {
-                (Some(at), Some(first)) => scheduler.arm(
-                    Deadline::RefreshQuiet,
-                    (last_refresh + refresh_quiet)
-                        .max((at + refresh_quiet).min(first + max_refresh_defer)),
-                ),
-                _ => scheduler.disarm(Deadline::RefreshQuiet),
-            }
-            if should_fire_refresh(
-                last_event_at,
-                last_refresh,
-                first_event_after_refresh,
+            // Drain buffered FsEvents + run the trailing-debounce listing
+            // refresh (see `ingest_fs_and_maybe_refresh`).
+            if self.ingest_fs_and_maybe_refresh(
                 now_pre,
-                refresh_quiet,
-                max_refresh_defer,
+                &mut scheduler,
+                &mut fs_pending,
+                &mut last_event_at,
+                &mut first_event_after_refresh,
+                &mut last_refresh,
             ) {
-                last_event_at = None;
-                first_event_after_refresh = None;
-                self.state.refresh_listing();
-                last_refresh = now_pre;
                 needs_draw = true;
                 draw_reason = 3;
-                // Listing changed via fs watcher (not a keystroke
-                // path) — `cursor_file` and `git_branch` in the
-                // context may have shifted.
-                self.context_dirty = true;
-                scheduler.disarm(Deadline::RefreshQuiet);
             }
             // 1 Hz safety-net git poll + GitPoll deadline arming (see
             // `poll_git_cadence`).

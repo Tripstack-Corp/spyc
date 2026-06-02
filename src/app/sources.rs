@@ -26,7 +26,7 @@ use crossterm::event::Event;
 
 use crate::spyc_debug;
 
-use super::{App, Message, TaskStatus, state};
+use super::{App, Deadline, Message, Scheduler, TaskStatus, state};
 
 /// MVU Phase 3a: drain every immediately-available message into the
 /// pending buffers, returning the FIRST `Input` encountered (if any).
@@ -121,6 +121,80 @@ impl App {
                 *last_event_at = Some(now_pre);
             }
         }
+    }
+
+    /// MVU Phase 6 PR-C: the pre-recv filesystem step — drain the buffered
+    /// `fs_pending` FsEvents (via `ingest_fs_event`), reload config on a config
+    /// hit, then run the trailing-debounce/max-defer listing refresh
+    /// (`should_fire_refresh`) and keep the advisory `RefreshQuiet` deadline
+    /// armed at the predicate edge. Verbatim move of the old inline block; the
+    /// debounce state (`last_event_at` / `first_event_after_refresh` /
+    /// `last_refresh`) is threaded as `&mut` so it persists across iterations.
+    /// Returns whether a redraw is needed (the caller uses `draw_reason = 3`).
+    pub(crate) fn ingest_fs_and_maybe_refresh(
+        &mut self,
+        now_pre: std::time::Instant,
+        scheduler: &mut Scheduler,
+        fs_pending: &mut Vec<notify::Event>,
+        last_event_at: &mut Option<std::time::Instant>,
+        first_event_after_refresh: &mut Option<std::time::Instant>,
+        last_refresh: &mut std::time::Instant,
+    ) -> bool {
+        let mut needs_draw = false;
+        let mut needs_reload = false;
+        for ev in std::mem::take(fs_pending) {
+            self.ingest_fs_event(
+                &ev,
+                now_pre,
+                &mut needs_reload,
+                last_event_at,
+                first_event_after_refresh,
+            );
+        }
+        if needs_reload {
+            self.reload_config();
+            needs_draw = true;
+        }
+        // Adaptive cadence: small trees get tight latency (500 ms debounce);
+        // huge trees back off (3 s) so `git status` doesn't dominate idle CPU.
+        let refresh_quiet = if self.state.is_huge_tree {
+            std::time::Duration::from_secs(3)
+        } else {
+            std::time::Duration::from_millis(500)
+        };
+        // Fire when the watcher quiets down OR the max-defer cap bites (see
+        // `should_fire_refresh`) — continuous fs activity can't starve the
+        // trailing debounce forever.
+        let max_refresh_defer = refresh_quiet * 2;
+        // Arm RefreshQuiet at the exact instant should_fire_refresh can first
+        // return true (advisory — the predicate below still decides firing).
+        match (*last_event_at, *first_event_after_refresh) {
+            (Some(at), Some(first)) => scheduler.arm(
+                Deadline::RefreshQuiet,
+                (*last_refresh + refresh_quiet)
+                    .max((at + refresh_quiet).min(first + max_refresh_defer)),
+            ),
+            _ => scheduler.disarm(Deadline::RefreshQuiet),
+        }
+        if super::should_fire_refresh(
+            *last_event_at,
+            *last_refresh,
+            *first_event_after_refresh,
+            now_pre,
+            refresh_quiet,
+            max_refresh_defer,
+        ) {
+            *last_event_at = None;
+            *first_event_after_refresh = None;
+            self.state.refresh_listing();
+            *last_refresh = now_pre;
+            needs_draw = true;
+            // Listing changed via fs watcher (not a keystroke path) —
+            // `cursor_file` / `git_branch` in the context may have shifted.
+            self.context_dirty = true;
+            scheduler.disarm(Deadline::RefreshQuiet);
+        }
+        needs_draw
     }
 
     /// MVU Phase 3d: whether the ~1 Hz `CaptureTick` deadline should be armed
