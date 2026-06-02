@@ -129,40 +129,96 @@ pub struct GitStatusRawCache {
 }
 
 /// Canonical list of `:` command base names, used by the prompt's
-/// Tab-completion path. Keep in sync with the matchers in
-/// `dispatch_command` here and in `App::dispatch_command`. Sorted for
-/// deterministic completion output.
+/// Which dispatch layer owns a named `:command`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CmdLayer {
+    /// Resolved entirely by `AppState::dispatch_command` (pure-domain —
+    /// `Handled` / `OpenPager` / `Quit` / `Post`).
+    Pure,
+    /// `AppState::dispatch_command` returns `NotHandled`; the terminal-
+    /// touching arm lives in `App::dispatch_command`.
+    App,
+}
+
+/// A registered `:command` base name.
 ///
-/// Special prefixes (`!`, `;`) that take free-form shell arguments
-/// are intentionally omitted — they're typed as one keystroke each
-/// and don't benefit from name-completion.
-pub const SPYC_COMMANDS: &[&str] = &[
-    "bnext",
-    "bprev",
-    "cd",
-    "date",
-    "dump-scrollback",
-    "fg",
-    "graveyard",
-    "grep",
-    "limit",
-    "marks",
-    "name",
-    "pane-to-task",
-    "pause",
-    "project",
-    "q",
-    "quit",
-    "resume",
-    "set",
-    "sort",
-    "startdir",
-    "task",
-    "task-to-pane",
-    "undo",
-    "version",
-    "whoami",
+/// **THE single source of truth for the `:command` surface** (MVU Phase 6).
+/// Replaces the former hand-synced trio that bred the "unknown command"
+/// footgun (bit `:undo` in v1.41.1, `:limit`): the `NotHandled` allowlist in
+/// [`AppState::dispatch_command`], the matchers in `App::dispatch_command`,
+/// and the old `SPYC_COMMANDS` completion list. Now the `NotHandled` routing
+/// and tab-completion both DERIVE from this table. `command_table_*` (tests)
+/// catch the two failure modes reachable from `AppState`: a `Pure` entry whose
+/// arm is missing (would flash "unknown command"), and a layer misclassified
+/// vs how `dispatch_command` routes it. (The existence of an `App`-layer arm in
+/// `App::dispatch_command` isn't unit-tested — that needs a live terminal — so
+/// it stays covered by the manual smoke; the registry just guarantees the name
+/// is *routed* to the App layer rather than silently dropped.)
+///
+/// Special prefixes `!` / `;` (free-form shell args) are intentionally absent:
+/// they're symbol-dispatched in both layers and don't name-complete.
+pub struct CommandSpec {
+    pub name: &'static str,
+    pub layer: CmdLayer,
+    /// Offered in `:`-command tab-completion. (Every command is today; the
+    /// flag lets a future internal-only command opt out without a 2nd list.)
+    pub completion: bool,
+}
+
+const fn cmd(name: &'static str, layer: CmdLayer) -> CommandSpec {
+    CommandSpec {
+        name,
+        layer,
+        completion: true,
+    }
+}
+
+/// The command registry. Sorted by `name` for deterministic completion
+/// output (enforced by `command_table_is_sorted_and_unique`).
+pub const COMMAND_TABLE: &[CommandSpec] = &[
+    cmd("bnext", CmdLayer::App),
+    cmd("bprev", CmdLayer::App),
+    cmd("cd", CmdLayer::Pure),
+    cmd("date", CmdLayer::App),
+    cmd("dump-scrollback", CmdLayer::App),
+    cmd("fg", CmdLayer::App),
+    cmd("graveyard", CmdLayer::App),
+    cmd("grep", CmdLayer::App),
+    cmd("limit", CmdLayer::Pure),
+    cmd("marks", CmdLayer::Pure),
+    cmd("name", CmdLayer::Pure),
+    cmd("pane-to-task", CmdLayer::App),
+    cmd("pause", CmdLayer::App),
+    cmd("project", CmdLayer::Pure),
+    cmd("q", CmdLayer::Pure),
+    cmd("quit", CmdLayer::Pure),
+    cmd("resume", CmdLayer::App),
+    cmd("set", CmdLayer::Pure),
+    cmd("sort", CmdLayer::Pure),
+    cmd("startdir", CmdLayer::Pure),
+    cmd("task", CmdLayer::App),
+    cmd("task-to-pane", CmdLayer::App),
+    cmd("undo", CmdLayer::App),
+    cmd("version", CmdLayer::Pure),
+    cmd("whoami", CmdLayer::Pure),
 ];
+
+/// The layer owning `name` (the first whitespace-delimited word of a typed
+/// `:command`), or `None` if `name` is not registered.
+pub fn command_layer(name: &str) -> Option<CmdLayer> {
+    COMMAND_TABLE
+        .iter()
+        .find(|c| c.name == name)
+        .map(|c| c.layer)
+}
+
+/// Completion-visible command names, in table (sorted) order.
+pub fn completion_command_names() -> impl Iterator<Item = &'static str> {
+    COMMAND_TABLE
+        .iter()
+        .filter(|c| c.completion)
+        .map(|c| c.name)
+}
 
 /// Which surface owns the keyboard — the single focus axis that replaces
 /// the scattered `pane_focused: bool` writes. In Phase 0 the only
@@ -1765,8 +1821,9 @@ impl AppState {
 
     /// Handle the pure-domain arms of `:` commands.
     ///
-    /// (See `SPYC_COMMANDS` for the canonical list of base names —
-    /// kept right next to the dispatcher so the two stay in sync.)
+    /// (See [`COMMAND_TABLE`] for the canonical registry of base names — the
+    /// `NotHandled` routing at the bottom of this fn derives from it, so the
+    /// two can't drift.)
     ///
     /// Returns `CommandResult::Handled` when the command was fully processed,
     /// `CommandResult::OpenPager` when the caller should open the pager with
@@ -2003,36 +2060,22 @@ impl AppState {
             return CommandResult::Handled;
         }
 
-        // Commands that need terminal/pager/overlay: :!cmd, :!!, :;cmd,
-        // :bprev, :bnext, :fg [N], :task [N], :grep <pattern>,
-        // :pause [N], :resume [N]
-        if input.starts_with('!')
-            || input.starts_with(';')
-            || input == "bprev"
-            || input == "bnext"
-            || input == "fg"
-            || input.starts_with("fg ")
-            || input == "task"
-            || input.starts_with("task ")
-            || input == "task-to-pane"
-            || input.starts_with("task-to-pane ")
-            || input == "pane-to-task"
-            || input.starts_with("pane-to-task ")
-            || input == "grep"
-            || input.starts_with("grep ")
-            || input == "pause"
-            || input.starts_with("pause ")
-            || input == "resume"
-            || input.starts_with("resume ")
-            || input == "undo"
-            || input == "graveyard"
-            || input == "date"
-            || input == "dump-scrollback"
-        {
+        // Symbol-prefixed shell commands (free-form args) are App-handled;
+        // they don't name-complete and aren't in the registry.
+        if input.starts_with('!') || input.starts_with(';') {
             return CommandResult::NotHandled;
         }
 
-        // Unknown command
+        // Named commands: the registry decides (MVU Phase 6 — replaces the
+        // former hand-maintained allowlist). An `App`-layer name passes
+        // through for `App::dispatch_command`; a `Pure`-layer name matched
+        // its arm above and already returned, so it can't reach here.
+        // Anything not in the table is genuinely unknown.
+        let name = input.split_whitespace().next().unwrap_or("");
+        if matches!(command_layer(name), Some(CmdLayer::App)) {
+            return CommandResult::NotHandled;
+        }
+
         self.flash_error(format!("unknown command: {input}"));
         CommandResult::Handled
     }
@@ -3638,45 +3681,57 @@ mod tests {
         assert_eq!(s.cursor.index, 1); // clamped to last valid
     }
 
-    // ── SPYC_COMMANDS sanity ──────────────────────────────────────
+    // ── COMMAND_TABLE registry sanity (MVU Phase 6) ───────────────
 
     #[test]
-    fn spyc_commands_is_sorted_and_unique() {
-        let mut sorted = super::SPYC_COMMANDS.to_vec();
+    fn command_table_is_sorted_and_unique() {
+        let names: Vec<&str> = super::COMMAND_TABLE.iter().map(|c| c.name).collect();
+        let mut sorted = names.clone();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(
-            sorted.as_slice(),
-            super::SPYC_COMMANDS,
-            "SPYC_COMMANDS must be sorted and free of duplicates so \
+            sorted, names,
+            "COMMAND_TABLE must be sorted by name and free of duplicates so \
              tab-completion produces deterministic output",
         );
     }
 
     #[test]
-    fn spyc_commands_covers_every_arm_of_dispatch() {
-        // Every literal we list as a `:` command must be reachable
-        // through one of the dispatch_command arms (here in state.rs
-        // or in App::dispatch_command). This test guards against
-        // drift: if you add a new `:foo` command and forget to list
-        // it here, completion silently won't offer it.
-        let mut s = state_with_rows(&[]);
-        for cmd in super::SPYC_COMMANDS {
-            // Bare-word dispatch shouldn't flash "unknown command:" —
-            // it should either be Handled by AppState (no-arg form) or
-            // NotHandled (passes through to App for terminal-owning
-            // commands like :grep, :task-to-pane, …). The "unknown"
-            // flash only fires from the catch-all at the bottom of
-            // state.rs::dispatch_command.
+    fn command_table_dispatches_without_unknown() {
+        // The registry is the single source of truth: every registered
+        // command must dispatch (no silent "unknown command" flash), AND its
+        // declared layer must match how `AppState::dispatch_command` routes
+        // the bare name — `Pure` resolves here (not NotHandled), `App` passes
+        // through (NotHandled). This is the guard that turns the old
+        // four-list-desync footgun (e.g. forgetting the NotHandled allowlist,
+        // which bit `:undo`) into a test failure instead of a runtime flash.
+        for spec in super::COMMAND_TABLE {
+            let mut s = state_with_rows(&[]);
             s.flash = None;
-            s.dispatch_command(cmd);
+            let result = s.dispatch_command(spec.name);
+
             if let Some(ref f) = s.flash {
                 assert!(
                     !f.text.starts_with("unknown command:"),
-                    "SPYC_COMMANDS lists `{cmd}` but dispatch_command \
-                     reports it as unknown — either add the arm, or \
-                     drop the entry from SPYC_COMMANDS",
+                    "COMMAND_TABLE registers `{}` but dispatch_command reports \
+                     it as unknown — add its arm (or drop the entry)",
+                    spec.name,
                 );
+            }
+
+            match spec.layer {
+                super::CmdLayer::App => assert!(
+                    matches!(result, CommandResult::NotHandled),
+                    "`{}` is registered as CmdLayer::App but AppState did not \
+                     return NotHandled — fix the layer or the arm",
+                    spec.name,
+                ),
+                super::CmdLayer::Pure => assert!(
+                    !matches!(result, CommandResult::NotHandled),
+                    "`{}` is registered as CmdLayer::Pure but AppState returned \
+                     NotHandled — fix the layer or add the pure arm",
+                    spec.name,
+                ),
             }
         }
     }
