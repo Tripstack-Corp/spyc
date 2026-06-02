@@ -29,8 +29,11 @@ impl App {
     /// or demoted pane carries a stale id that simply matches nothing, so
     /// it self-discards (the loop re-scans all live panes regardless).
     const fn alloc_sink_id(&mut self) -> SinkId {
-        self.next_sink_id = self.next_sink_id.saturating_add(1);
-        SinkId(NonZeroU64::new(self.next_sink_id).expect("next_sink_id is >= 1 after increment"))
+        self.runtime.next_sink_id = self.runtime.next_sink_id.saturating_add(1);
+        SinkId(
+            NonZeroU64::new(self.runtime.next_sink_id)
+                .expect("next_sink_id is >= 1 after increment"),
+        )
     }
 
     /// Mint a `SinkId` and build the pane's wake closure: a cheap
@@ -40,7 +43,7 @@ impl App {
     /// floor (or, post-PR2, `MAX_IDLE_CAP`) still services such panes.
     pub(crate) fn make_pane_wake(&mut self) -> PaneWake {
         let tab = self.alloc_sink_id();
-        match &self.pane_wake_tx {
+        match &self.runtime.pane_wake_tx {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
@@ -59,7 +62,7 @@ impl App {
     /// sender (the floor / `MAX_IDLE_CAP` still services such hosts).
     pub(crate) fn make_sink_wake(&mut self) -> crate::pane::pty_host::Wake {
         let sink = self.alloc_sink_id();
-        let fire: PaneWake = match &self.pane_wake_tx {
+        let fire: PaneWake = match &self.runtime.pane_wake_tx {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
@@ -79,7 +82,7 @@ impl App {
     /// re-drains via `drain_grep_session`). Wrapped around the worker's data
     /// `Sender` by a `WakingSender`. No-op before `run()` installs the sender.
     pub(crate) fn make_grep_wake(&self) -> PaneWake {
-        match &self.pane_wake_tx {
+        match &self.runtime.pane_wake_tx {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
@@ -94,7 +97,7 @@ impl App {
     /// `Message::FindOutput` send (the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk`). No-op before `run()` installs the sender.
     pub(crate) fn make_find_wake(&self) -> PaneWake {
-        match &self.pane_wake_tx {
+        match &self.runtime.pane_wake_tx {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
@@ -130,7 +133,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             let (tx, rx) = std::sync::mpsc::channel::<Message>();
-            app.pane_wake_tx = Some(tx);
+            app.runtime.pane_wake_tx = Some(tx);
             let wake = app.make_pane_wake();
             wake();
             match rx.try_recv() {
@@ -146,7 +149,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             let (tx, rx) = std::sync::mpsc::channel::<Message>();
-            app.pane_wake_tx = Some(tx);
+            app.runtime.pane_wake_tx = Some(tx);
             let wake = app.make_sink_wake();
             (wake.fire)();
             match rx.try_recv() {

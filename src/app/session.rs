@@ -33,6 +33,7 @@ impl App {
         // conversation at restore.
         let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
         let tabs: Vec<SavedTab> = self
+            .runtime
             .pane_tabs
             .as_mut()
             .map(|pt| {
@@ -102,7 +103,11 @@ impl App {
             epoch_secs,
             cwd: session_cwd.clone(),
             tabs,
-            active_tab: self.pane_tabs.as_ref().map_or(0, PaneTabs::active_index),
+            active_tab: self
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .map_or(0, PaneTabs::active_index),
             pane_height_pct: self.state.pane_height_pct,
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
@@ -252,7 +257,7 @@ impl App {
         // Restore pane layout.
         self.state.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
-            self.pane_tabs = None;
+            self.runtime.pane_tabs = None;
             for tab in &session.tabs {
                 let cwd = if tab.cwd.is_dir() {
                     &tab.cwd
@@ -278,7 +283,7 @@ impl App {
                 );
                 self.open_pane_tab_in(&plan.command, cwd);
                 if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume
-                    && let Some(tabs) = self.pane_tabs.as_mut()
+                    && let Some(tabs) = self.runtime.pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()
                 {
                     entry.info.pending_resume_send =
@@ -289,7 +294,7 @@ impl App {
                 }
             }
             // Restore active tab.
-            if let Some(tabs) = self.pane_tabs.as_mut() {
+            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                 tabs.switch_to(session.active_tab);
                 // Restore custom labels. Defensive strip of any
                 // `[exited N]` suffix so older session files

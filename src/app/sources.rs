@@ -206,7 +206,7 @@ impl App {
     /// instant the capture finishes / the viewed task exits, so idle draws
     /// stay at 0.
     pub(crate) fn capture_tick_should_arm(&self) -> bool {
-        if self.pending_capture.is_some() {
+        if self.runtime.pending_capture.is_some() {
             return true;
         }
         self.view
@@ -214,7 +214,7 @@ impl App {
             .as_ref()
             .and_then(|v| v.task_id)
             .is_some_and(|id| {
-                self.background_tasks.tasks.iter().any(|t| {
+                self.runtime.background_tasks.tasks.iter().any(|t| {
                     t.id == id && matches!(t.status, TaskStatus::Running) && !t.host.closed
                 })
             })

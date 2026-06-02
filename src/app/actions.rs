@@ -312,7 +312,7 @@ impl App {
                 self.open_pane_scroll_pager();
             }
             Action::PaneScrollSave => {
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     match tabs.active_mut().save_to_file() {
                         Ok(path) => {
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -327,7 +327,7 @@ impl App {
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
                     // Switching tabs implies "I want to interact
                     // with this other tab" — pull focus into the
@@ -342,7 +342,7 @@ impl App {
             }
             Action::PaneNextTab => {
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.next();
                     self.state.focus = state::Focus::Pane;
                 }
@@ -351,7 +351,7 @@ impl App {
             }
             Action::PanePrevTab => {
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.prev();
                     self.state.focus = state::Focus::Pane;
                 }
@@ -361,6 +361,7 @@ impl App {
             Action::PaneLastTab => {
                 self.stash_scrollback_pager_to_active_tab();
                 let jumped = self
+                    .runtime
                     .pane_tabs
                     .as_mut()
                     .is_some_and(PaneTabs::switch_to_last);
@@ -379,7 +380,7 @@ impl App {
                 self.restore_active_tab_scrollback_pager();
             }
             Action::PaneRenameTab => {
-                if let Some(tabs) = self.pane_tabs.as_ref() {
+                if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
                     let current = tabs.active_info().label.clone();
                     let mut p = Prompt::shell(PromptKind::PaneRenameTab, "tab name: ");
                     p.buffer.clone_from(&current);

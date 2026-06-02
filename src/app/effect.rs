@@ -334,7 +334,7 @@ impl App {
                 // behind one borrow that ends before we flash / copy / navigate
                 // — byte-identical flash strings, same `Event::Key` tick.
                 Effect::ReadPaneText { kind, then } => {
-                    let Some((lines, pane_cwd)) = self.pane_tabs.as_mut().map(|tabs| {
+                    let Some((lines, pane_cwd)) = self.runtime.pane_tabs.as_mut().map(|tabs| {
                         let lines = match kind {
                             PaneTextKind::Visible => tabs.active_mut().visible_lines(),
                             PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
@@ -404,12 +404,15 @@ impl App {
                     }
                     let result = match target {
                         PaneTarget::Active => self
+                            .runtime
                             .pane_tabs
                             .as_mut()
                             .map(|t| input.send_to(t.active_mut())),
-                        PaneTarget::Overlay => {
-                            self.top_overlay.as_mut().map(|ov| input.send_to(ov))
-                        }
+                        PaneTarget::Overlay => self
+                            .runtime
+                            .top_overlay
+                            .as_mut()
+                            .map(|ov| input.send_to(ov)),
                     };
                     match result {
                         Some(Ok(())) => {
@@ -460,6 +463,7 @@ impl App {
                         // Re-find the task by id (same tick, so still
                         // present) and toggle its paused flag, then flash.
                         if let Some(t) = self
+                            .runtime
                             .background_tasks
                             .tasks
                             .iter_mut()

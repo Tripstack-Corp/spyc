@@ -86,12 +86,12 @@ impl App {
             }
             let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
             let (rows, cols) =
-                Self::top_overlay_size(self.effective_pane_pct(), self.pane_tabs.is_some());
+                Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
             let cwd = self.state.listing.dir.clone();
             let wake = self.make_pane_wake();
             match Pane::spawn(&expanded, rows, cols, &cwd, &self.context_path, wake) {
                 Ok(p) => {
-                    self.top_overlay = Some(p);
+                    self.runtime.top_overlay = Some(p);
                     // Initial focus is on the new overlay so the user
                     // can drive the subprocess directly. ^a-j hands
                     // focus to the bottom pane (when one is open).
@@ -188,12 +188,12 @@ impl App {
             match arg.trim().parse::<usize>() {
                 Ok(n) if n >= 1 => {
                     let idx = n - 1;
-                    let len = self.pane_tabs.as_ref().map_or(0, PaneTabs::len);
+                    let len = self.runtime.pane_tabs.as_ref().map_or(0, PaneTabs::len);
                     if idx >= len {
                         self.state
                             .flash_error(format!("pane-to-task: no tab #{n} (have {len})"));
                     } else {
-                        if let Some(tabs) = self.pane_tabs.as_mut() {
+                        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                             tabs.switch_to(idx);
                         }
                         self.demote_pane_to_task();
