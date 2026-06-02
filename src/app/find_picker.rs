@@ -4,11 +4,18 @@
 //! walker progresses. Re-rank runs on every keystroke and on every
 //! fresh batch arrival (cheap: ~1us per candidate).
 //!
-//! Extracted verbatim from `app/mod.rs` (REFACTOR_PLAN Phase 1). Fields
-//! are `pub` because the picker is built via a struct literal and its
-//! state is read back in the picker key/render handlers in `app`.
+//! Extracted from `app/mod.rs` (REFACTOR_PLAN Phase 1 + the impl-extraction
+//! sweep). Fields are `pub` (built via a struct literal). The `F` open /
+//! render / key-handler `impl App` methods live here too (`pub`, called from
+//! `actions` / `key_dispatch` / the run loop).
 
 use std::path::PathBuf;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::ui::pager;
+
+use super::App;
 
 pub struct FindPicker {
     /// Repo-relative paths accumulated from the walk so far.
@@ -73,5 +80,174 @@ impl FindPicker {
             }
         }
         got_any
+    }
+}
+
+impl App {
+    /// Open the F-finder. Spawns the walker on a worker thread so
+    /// the picker is interactive immediately (typing filters the
+    /// already-arrived candidates while the walker keeps streaming
+    /// in the background). Closing the picker drops the receiver,
+    /// which makes the walker exit on its next `tx.send`.
+    pub fn open_find_picker(&mut self) {
+        let root = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.listing.dir.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let walk_root = root.clone();
+        // MVU Phase 3d: wake the loop on each candidate batch (via
+        // WakingSender) and once more after the walk returns — that final
+        // wake drives the last drain_walk, which sees the rx disconnect and
+        // flips `walk_complete` (title → final count) without the poll floor.
+        let wake = self.make_find_wake();
+        let final_wake = std::sync::Arc::clone(&wake);
+        let tx = crate::fs::WakingSender::new(tx, wake);
+        std::thread::spawn(move || {
+            crate::fs::finder::walk_streaming(&walk_root, tx);
+            final_wake();
+        });
+        let mut picker = FindPicker {
+            candidates: Vec::new(),
+            root,
+            query: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            limit: 200,
+            walk_rx: Some(rx),
+            walk_complete: false,
+        };
+        picker.refilter();
+        self.runtime.find_picker = Some(picker);
+        self.render_find_picker();
+        self.view.needs_full_repaint = true;
+    }
+
+    /// Rebuild the pager view from current `find_picker` state.
+    /// Called on open, after each keystroke that mutates the query
+    /// or selection, and after each tick where the streaming walk
+    /// produced new candidates (title shows progress).
+    pub fn render_find_picker(&mut self) {
+        let Some(picker) = self.runtime.find_picker.as_ref() else {
+            return;
+        };
+        let total = picker.candidates.len();
+        let shown = picker.filtered.len();
+        let pos = if shown == 0 { 0 } else { picker.selected + 1 };
+        let scan_suffix = if picker.walk_complete {
+            String::new()
+        } else {
+            " — scanning…".to_string()
+        };
+        let title = format!(
+            "find — \"{}\" — {pos}/{shown} of {total}{scan_suffix}",
+            picker.query
+        );
+        let lines: Vec<String> = picker
+            .filtered
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let mut view = pager::PagerView::new_plain(title, lines);
+        view.show_line_numbers = false;
+        view.no_history = true;
+        // Picker rows must map 1:1 to source lines so the cursor +
+        // selection math stays correct -- wrap would split a long
+        // path across multiple visual rows and break that.
+        view.wrap = false;
+        view.picker_cursor = if shown == 0 {
+            None
+        } else {
+            Some(picker.selected)
+        };
+        // While the walker is still streaming, suppress [EOF] /
+        // tilde markers since the candidate list is still growing.
+        view.streaming = !picker.walk_complete;
+        self.set_pager(view);
+    }
+
+    /// Intercept keys when the F-finder is open. Returns true when
+    /// the key was consumed by the picker (so the caller skips
+    /// normal pager / file-list dispatch). Esc closes; Enter chdirs
+    /// to the matched file's parent and places the cursor on it;
+    /// Up/Down move selection; printable chars + Backspace edit
+    /// the query and re-rank.
+    pub fn handle_find_picker_key(&mut self, key: KeyEvent) -> bool {
+        if self.runtime.find_picker.is_none() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.runtime.find_picker = None;
+                self.clear_pager();
+                self.view.needs_full_repaint = true;
+                true
+            }
+            KeyCode::Enter => {
+                let target = self.runtime.find_picker.as_ref().and_then(|p| {
+                    p.filtered
+                        .get(p.selected)
+                        .cloned()
+                        .map(|rel| (p.root.clone(), rel))
+                });
+                self.runtime.find_picker = None;
+                self.clear_pager();
+                self.view.needs_full_repaint = true;
+                if let Some((root, rel)) = target {
+                    let abs = root.join(&rel);
+                    if let Some(parent) = abs.parent() {
+                        if let Err(e) = self.state.chdir(parent) {
+                            self.state.flash_error(format!("chdir: {e}"));
+                        } else if let Some(idx) = self.state.rows.iter().position(|r| r.path == abs)
+                        {
+                            self.state.cursor.index = idx;
+                            self.state.cursor.clamp(self.state.rows.len());
+                        }
+                    }
+                }
+                true
+            }
+            KeyCode::Up => {
+                if let Some(picker) = self.runtime.find_picker.as_mut()
+                    && picker.selected > 0
+                {
+                    picker.selected -= 1;
+                    self.render_find_picker();
+                }
+                true
+            }
+            KeyCode::Down => {
+                if let Some(picker) = self.runtime.find_picker.as_mut()
+                    && picker.selected + 1 < picker.filtered.len()
+                {
+                    picker.selected += 1;
+                    self.render_find_picker();
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                if let Some(picker) = self.runtime.find_picker.as_mut()
+                    && !picker.query.is_empty()
+                {
+                    picker.query.pop();
+                    picker.refilter();
+                    self.render_find_picker();
+                }
+                true
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
+                    picker.query.push(c);
+                    picker.refilter();
+                    self.render_find_picker();
+                }
+                true
+            }
+            _ => true, // Swallow other keys while picker is open.
+        }
     }
 }
