@@ -1,0 +1,27 @@
+---
+source: src/app/render.rs
+expression: "render_to_string(&mut app, 80, 24)"
+---
+ 🌶️   /projects/demo  [picks:0 inv:0 m1:on m2:on hidden:0 sort:name]           
+  file-110.txt    file-132.txt    file-154.txt    file-176.txt    file-198.txt  
+  file-111.txt    file-133.txt    file-155.txt    file-177.txt    file-199.txt  
+  file-112.txt    file-134.txt    file-156.txt    file-178.txt                  
+  file-113.txt    file-135.txt    file-157.txt    file-179.txt                  
+  file-114.txt    file-136.txt    file-158.txt    file-180.txt                  
+  file-115.txt    file-137.txt    file-159.txt    file-181.txt                  
+  file-116.txt    file-138.txt    file-160.txt    file-182.txt                  
+  file-117.txt    file-139.txt    file-161.txt    file-183.txt                  
+  file-118.txt    file-140.txt    file-162.txt    file-184.txt                  
+  file-119.txt    file-141.txt    file-163.txt    file-185.txt                  
+  file-120.txt    file-142.txt    file-164.txt    file-186.txt                  
+  file-121.txt    file-143.txt    file-165.txt    file-187.txt                  
+  file-122.txt    file-144.txt    file-166.txt    file-188.txt                  
+  file-123.txt    file-145.txt    file-167.txt    file-189.txt                  
+  file-124.txt    file-146.txt    file-168.txt    file-190.txt                  
+  file-125.txt    file-147.txt    file-169.txt    file-191.txt                  
+  file-126.txt    file-148.txt    file-170.txt    file-192.txt                  
+  file-127.txt    file-149.txt    file-171.txt    file-193.txt                  
+  file-128.txt    file-150.txt    file-172.txt    file-194.txt                  
+  file-129.txt    file-151.txt    file-173.txt    file-195.txt                  
+  file-130.txt    file-152.txt    file-174.txt    file-196.txt                  
+  file-131.txt    file-153.txt    file-175.txt    file-197.txt
