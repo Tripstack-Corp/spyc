@@ -38,35 +38,45 @@ same pattern: spawn a worker, push a typed message into a channel,
 drop stale messages by generation. See `ROADMAP.md`'s "Background
 directory loading" entry.
 
-## Update model: Elm-architecture, in progress
+## Update model: Elm-architecture (MVU)
 
-The Update half of MVU is essentially done: `AppState::apply(action)`
-returns an `ApplyResult` enum (`Handled`, `OpenPager`, `Post(PostAction)`)
-with no terminal access. State transitions are pure-ish and unit-
-testable without a TUI.
+spyc follows the Elm/Model-View-Update pattern. The structural migration
+(see the decision logs in `REFACTOR_PLAN.md` / `docs/MVU_PLAN.md`) has landed;
+a final purity pass is in progress (tracked in the roadmap). The shape today:
 
-The View half has been pulled out of `app/mod.rs` into `src/app/render.rs`
-(the `render` pass + `compute_layout`), alongside the rest of the Phase 1–2
-decomposition (`key_dispatch`, `pager_handler`, `commands`, `actions`,
-`session` — see `AGENTS.md` for the full module index and `REFACTOR_PLAN.md`
-for the staged plan). What remains fused in `mod.rs` is the **event loop**:
-`App::run` still open-codes `event::poll` with manual timeout math and reads
-from several independent sources rather than one message channel. Target
-shape for the rest:
+- **Three-type state split.** `App` owns three disjoint fields
+  (`src/app/mod.rs`): `state: AppState` (the **Model** — pure domain:
+  listing, cursor, picks, marks, filter, mode, config, `focus`, git display
+  state; holds no OS handles), `runtime: Runtime` (OS handles + channels +
+  worker endpoints + the `PtyHost` registry — never seen by domain logic),
+  and `view: ViewState` (render ephemerals + caches: pager group, overlay
+  metadata, dirty flags, theme, cached rows / grid keys).
+- **Single message channel.** One `mpsc::Receiver<Message>` feeds the loop.
+  A parkable crossterm reader, the `notify` watcher, the per-pane parser
+  workers, capture / task readers, the MCP forwarder, the git worker, and
+  finder / grep all push `Message` variants into the same receiver. `App::run`
+  is **event-driven**: it blocks on `recv` / `recv_timeout` (0 wakes at idle
+  when no deadline is armed) — there is no `event::poll`, no adaptive
+  busy-poll. Timers are `Message::Tick(Deadline)`s armed against a scheduler.
+- **Update.** `AppState::apply(action) -> ApplyResult` (and the siblings
+  `dispatch_command` / `dispatch_prompt`) are the pure-domain transitions: no
+  terminal access, unit-testable without a TUI. They return effects as data.
+- **Effects.** Side effects are a `#[non_exhaustive] enum Effect`
+  (`src/app/effect.rs`) — `ForegroundExec`, `CopyToClipboard`, `SignalGroup`,
+  `SendToPane`, `SetTerminalTitle`, `ReadPaneText`, `ChangeDir`. `run_effects`
+  is the **sole** executor; handlers return `Vec<Effect>` and never touch the
+  OS directly. This makes "forgot to clear `pending_X`" and inline-IO bug
+  classes structurally hard.
+- **View.** Rendering lives in `src/app/render.rs` (the `render` pass +
+  `compute_layout`); it reads the Model / ViewState and the live vt100 grids
+  through a shared `&runtime` borrow.
 
-1. **View** — push `render.rs` the rest of the way: from `impl App`
-   methods to pure functions in `src/ui/` taking `&AppState`, so the
-   render path collapses to `ui::render(terminal, &state)`. Snapshot
-   tests extend mechanically.
-2. **Single message channel** — one `mpsc::Receiver<Message>` for
-   the loop. The crossterm event reader, file watcher, pane capture
-   readers, MCP thread, and timer ticks all push `Message` variants
-   into the same receiver. The loop blocks on `recv` instead of
-   open-coding `event::poll` with manual timeout math.
-3. **`App::run`** reduces to ~100 lines: `loop { recv → update →
-   render }`.
-
-Done incrementally alongside feature work — not a standalone rewrite.
+**Remaining last-mile work** (in progress, tracked in the roadmap — not yet
+landed): collapsing the three update entry points (`ApplyResult` /
+`CommandResult` / `PromptResult`) into one `update(&mut Model, &mut ViewState,
+msg, now) -> Vec<Effect>`; moving the last inline side-effects behind effects;
+and making the render pass mutation-free (a pre-frame `prepare` step) behind a
+ratatui `TestBackend` snapshot net. See `docs/MVU_PLAN.md` and the roadmap.
 
 ## Repaint strategy: event-driven, dirty-frame
 
