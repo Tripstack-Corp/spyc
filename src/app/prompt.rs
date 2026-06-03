@@ -287,13 +287,13 @@ impl App {
     }
 
     /// Tab-complete a `:` command base name from the command registry
-    /// ([`crate::app::state::COMMAND_TABLE`]). Single match: fill the name
+    /// ([`crate::app::command_table::COMMAND_TABLE`]). Single match: fill the name
     /// plus a trailing space (so the user can keep typing args, or hit Enter
     /// for the no-arg form — `dispatch_command` trims). Common-prefix advance:
     /// fill the shared prefix and flash a count. Otherwise show all matches
     /// and stage cycle state for repeated Tab.
     fn tab_complete_spyc_command(&mut self, prefix: &str) {
-        let matches: Vec<String> = crate::app::state::completion_command_names()
+        let matches: Vec<String> = crate::app::command_table::completion_command_names()
             .filter(|c| c.starts_with(prefix))
             .map(str::to_string)
             .collect();
