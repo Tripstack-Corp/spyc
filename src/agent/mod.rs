@@ -162,7 +162,7 @@ impl AgentProfile for ClaudeProfile {
         spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
-        crate::app::App::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
+        resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_resume(cmd)
@@ -275,7 +275,7 @@ impl AgentProfile for GeminiProfile {
         spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
-        crate::app::App::resolve_gemini_resume_target(cwd, spawn_epoch_secs, claimed)
+        resume::resolve_gemini_resume_target(cwd, spawn_epoch_secs, claimed)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_gemini_resume(cmd)
@@ -286,7 +286,7 @@ impl AgentProfile for GeminiProfile {
         // not a UUID; recompute it synchronously. Fall back to bare on
         // lookup failure (binary missing, session pruned, format drift).
         let command = match sid {
-            Some(uuid) => match crate::app::App::gemini_resume_index_for(cwd, uuid) {
+            Some(uuid) => match resume::gemini_resume_index_for(cwd, uuid) {
                 Some(idx) => format!("{base} --resume {idx}"),
                 None => base,
             },
