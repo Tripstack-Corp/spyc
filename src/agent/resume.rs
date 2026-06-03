@@ -173,6 +173,140 @@ pub fn command_without_agy_resume(cmd: &str) -> String {
     }
 }
 
+// ── resume-target resolution ──────────────────────────────────────
+// These do fs / subprocess work (not pure like the strippers above) but
+// take no `App` state — they read a pane's scrollback, walk the agent's
+// session dirs, or shell out, all via args. They lived as associated fns on
+// `App` purely by inertia; they belong with the profiles that call them.
+
+/// Resolve the `claude --resume <token>` target to use on session save.
+///
+/// Multi-pane safety: when several Claude tabs share a cwd, we
+/// can't blindly use "most-recent JSONL for this cwd" — they'd
+/// all save the same ID and collapse onto a single conversation
+/// at restore. The caller threads `pane_spawn_epoch_secs` and a
+/// `claimed` set; the resolver picks a unique session record per
+/// pane by matching `startedAt` to the pane's spawn time.
+///
+/// Strategy, in order:
+/// 1. Read the exit-banner token from pane scrollback. If it's a
+///    UUID, verify a JSONL exists for it under
+///    `~/.claude/projects/<slug>/`. Claude sometimes prints the
+///    banner with a session ID it never persisted (e.g. user
+///    `/clear`'d or `/resume`'d before exit), so an unconditional
+///    trust leads to "No conversation found …" on restore. The
+///    banner is unambiguously this pane, so it bypasses `claimed`.
+/// 2. Walk `~/.claude/sessions/` records matching the cwd, skip
+///    any already in `claimed`, pick the one whose `startedAt` is
+///    closest to this pane's spawn time, verify JSONL on disk.
+/// 3. Last-ditch: most-recently-modified JSONL in the project
+///    slug, but only if it isn't already in `claimed`. Without
+///    the claimed-check this is what was producing the bug.
+pub fn resolve_claude_resume_target(
+    pane: &crate::pane::Pane,
+    cwd: &std::path::Path,
+    pane_spawn_epoch_secs: u64,
+    claimed: &std::collections::HashSet<String>,
+) -> (Option<String>, Option<String>) {
+    use crate::state::sessions as s;
+
+    let resolved: (Option<String>, Option<String>) = (|| {
+        let banner_lines = pane.recent_lines(200);
+        if let Some(tok) = s::extract_claude_resume_token(&banner_lines) {
+            if s::is_uuid(&tok) {
+                if s::claude_jsonl_exists(cwd, &tok) {
+                    let name = s::find_claude_session_name_public(&tok);
+                    return (Some(tok), name);
+                }
+                // Banner UUID has no JSONL — fall through.
+            } else {
+                // Named sessions: claude resolves names itself, trust it.
+                return (Some(tok.clone()), Some(tok));
+            }
+        }
+
+        // Step 2: pick the per-pane match by spawn-time proximity.
+        // Filter to JSONL-on-disk first so the picker only sees
+        // resumable candidates.
+        let candidates: Vec<_> = s::find_claude_sessions(cwd)
+            .into_iter()
+            .filter(|c| s::claude_jsonl_exists(cwd, &c.session_id))
+            .collect();
+        if let Some(c) =
+            s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
+        {
+            return (Some(c.session_id), c.name);
+        }
+
+        // Step 3: final fallback. Most-recent JSONL — but only if
+        // unclaimed; otherwise leave this pane unresumable rather
+        // than collapse it onto another pane's conversation.
+        if let Some(id) = s::most_recent_jsonl_for_cwd(cwd)
+            && !claimed.contains(&id)
+        {
+            let name = s::find_claude_session_name_public(&id);
+            return (Some(id), name);
+        }
+        (None, None)
+    })();
+
+    if let (Some(id), _) = &resolved
+        && s::is_uuid(id)
+        && !s::claude_jsonl_exists(cwd, id)
+    {
+        crate::spyc_debug!(
+            "resolve_claude_resume_target: dropping ghost id {} (no JSONL under {})",
+            id,
+            cwd.display()
+        );
+        return (None, None);
+    }
+    resolved
+}
+
+/// Resolve the Gemini resume target to save for a pane.
+///
+/// Gemini's CLI doesn't print an exit banner with a resume token,
+/// so we pull the candidate set from
+/// `~/.gemini/tmp/<project>/chats/*.jsonl` (each file's first line
+/// is JSON metadata with `sessionId` and `startTime`) and pick the
+/// unclaimed record whose start time is closest to this pane's
+/// `spawn_epoch_secs`. Multi-pane safety: the `claimed` set
+/// prevents two panes in the same project from collapsing onto
+/// one conversation. Returns the UUID; Gemini doesn't expose a
+/// human-readable session name from the CLI, so the second slot
+/// is always `None`.
+pub fn resolve_gemini_resume_target(
+    cwd: &std::path::Path,
+    pane_spawn_epoch_secs: u64,
+    claimed: &std::collections::HashSet<String>,
+) -> (Option<String>, Option<String>) {
+    use crate::state::sessions as s;
+    let candidates = s::find_gemini_sessions(cwd);
+    s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
+        .map_or((None, None), |c| (Some(c.session_id), None))
+}
+
+/// At restore time, translate a saved Gemini session UUID into
+/// the index `gemini --resume <N>` consumes. Runs `gemini
+/// --list-sessions` synchronously in `cwd` and delegates parsing
+/// to `parse_gemini_list_sessions_for_uuid`. Returns `None` when
+/// the binary errors, the UUID isn't in the listing, or the
+/// output format drifts. Failure is recoverable: the caller falls
+/// back to spawning `gemini` bare and lets the user pick.
+pub fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32> {
+    let out = std::process::Command::new("gemini")
+        .arg("--list-sessions")
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = std::str::from_utf8(&out.stdout).ok()?;
+    parse_gemini_list_sessions_for_uuid(text, uuid)
+}
+
 #[cfg(test)]
 mod gemini_helpers_tests {
     use super::{command_without_gemini_resume, parse_gemini_list_sessions_for_uuid};
