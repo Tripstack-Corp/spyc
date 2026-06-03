@@ -193,6 +193,7 @@ mod sources;
 pub mod state;
 mod streaming;
 mod tasks;
+mod update;
 
 use capture::PendingCapture;
 #[cfg(unix)]

@@ -25,6 +25,7 @@ use crate::spyc_debug;
 use crate::state::History;
 
 use super::route;
+use super::update::UiMsg;
 use super::{
     App, Effect, HistoryBucket, Mode, POST_CHORD_BOUNCE_WINDOW, PaneInput, PaneTarget, Prompt,
     PromptKind, View, history_bucket_for, is_path_prompt_kind, is_post_chord_bounce, sh_c,
@@ -314,9 +315,9 @@ impl App {
                 if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
                     self.view.focus_chord_completed = Some((std::time::Instant::now(), key.code));
                 }
-                return self.apply(&action);
+                return self.update(UiMsg::Action(action));
             }
-            ResolverOutcome::User(bound) => return self.apply_user(&bound),
+            ResolverOutcome::User(bound) => return self.update(UiMsg::Bound(bound)),
             ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
         }
         Ok(Vec::new())
@@ -429,7 +430,7 @@ impl App {
     /// Dispatch a user-defined binding. Inline-data actions (unix command,
     /// preset pattern, preset path) run through the same machinery as the
     /// built-in prompts but skip the prompt UI.
-    fn apply_user(&mut self, bound: &BoundAction) -> Result<Vec<Effect>> {
+    pub(super) fn apply_user(&mut self, bound: &BoundAction) -> Result<Vec<Effect>> {
         match bound {
             BoundAction::Plain(action) => return self.apply(action),
             BoundAction::UnixCmd(template) => {
@@ -513,7 +514,8 @@ impl App {
             let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal) else {
                 return Vec::new();
             };
-            return self.dispatch_prompt(p);
+            // Prompt submission is infallible (update wraps it in Ok).
+            return self.update(UiMsg::Prompt(p)).unwrap_or_default();
         }
 
         // (J's history Up/Down used to live here; v1.33.0 promoted
@@ -988,7 +990,8 @@ impl App {
                     hist.push(p.buffer.trim());
                 }
                 hist.reset_nav();
-                return self.dispatch_prompt(p);
+                // Prompt submission is infallible (update wraps it in Ok).
+                return self.update(UiMsg::Prompt(p)).unwrap_or_default();
             }
             EditResult::Cancel => {
                 self.history_for_prompt().reset_nav();
