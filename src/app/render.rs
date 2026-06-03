@@ -1235,3 +1235,92 @@ impl App {
 const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
+
+#[cfg(test)]
+mod render_tests {
+    //! Full-frame render snapshots (ratatui `TestBackend` + `insta`).
+    //!
+    //! These pin the *composed* paneless frame — status bar + file list +
+    //! prompt and their layout — at a fixed geometry, so the upcoming
+    //! `prepare_frame` extraction (moving the rows-cache + grid-stabilization
+    //! settle out of the draw path) and the eventual `&self` render flip can
+    //! be proven behavior-equivalent: a regression that shifts a glyph makes
+    //! the `.snap` diff. Pane *content* is intentionally not snapshotted — it
+    //! needs a live `PtyHost`; these cover the file-list surface, which is
+    //! exactly what `prepare_frame` touches.
+    use super::*;
+    use crate::app::prompt::{Prompt, PromptKind};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    /// A paneless App with a fixed listing dir (keeps the status-bar path
+    /// deterministic across machines — a real cwd would otherwise leak into
+    /// the snapshot) and seeded rows. Forces the render-side rows cache to
+    /// rebuild so the seeded rows actually paint (`seed_rows` sets `rows`
+    /// without bumping `list_generation`, which the cache is keyed on).
+    fn demo_app(names: &[&str]) -> App {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.listing.dir = PathBuf::from("/projects/demo");
+        app.seed_rows(names);
+        app.view.cached_rows_gen = app.state.list_generation.wrapping_sub(1);
+        app
+    }
+
+    /// Draw one frame into a `TestBackend` and dump the glyphs (no styling),
+    /// trailing whitespace trimmed — same shape as the `ui::*` widget tests.
+    fn render_to_string(app: &mut App, w: u16, h: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf.cell((x, y)).map_or(" ", |c| c.symbol()));
+            }
+            out.push('\n');
+        }
+        out.trim_end().to_string()
+    }
+
+    fn files() -> [&'static str; 6] {
+        ["README.md", "Cargo.toml", "src", "tests", "docs", "BUGS.md"]
+    }
+
+    #[test]
+    fn snapshot_frame_list_top_status() {
+        let mut app = demo_app(&files());
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    #[test]
+    fn snapshot_frame_status_bottom() {
+        let mut app = demo_app(&files());
+        app.state.config.layout.status_position = StatusPosition::Bottom;
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    #[test]
+    fn snapshot_frame_list_scrolled() {
+        // A list long enough to overflow the multi-column grid (spyc lays
+        // files out in columns), with the cursor deep in it → forces the
+        // `view_top` grid-stabilization that `prepare_frame` will own.
+        let names: Vec<String> = (0..200).map(|i| format!("file-{i:03}.txt")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut app = demo_app(&refs);
+        app.state.cursor.index = 180;
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    #[test]
+    fn snapshot_frame_prompting_command() {
+        let mut app = demo_app(&files());
+        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    #[test]
+    fn snapshot_frame_flash() {
+        let mut app = demo_app(&files());
+        app.state.flash_info("yanked 3 paths");
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+}

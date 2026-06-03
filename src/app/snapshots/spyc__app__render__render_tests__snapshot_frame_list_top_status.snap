@@ -1,0 +1,11 @@
+---
+source: src/app/render.rs
+expression: "render_to_string(&mut app, 80, 24)"
+---
+ 🌶️   /projects/demo  [picks:0 inv:0 m1:on m2:on hidden:0 sort:name]           
+  README.md                                                                     
+  Cargo.toml                                                                    
+  src                                                                           
+  tests                                                                         
+  docs                                                                          
+  BUGS.md
