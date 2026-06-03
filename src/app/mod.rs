@@ -166,6 +166,7 @@ mod actions;
 mod agent_status;
 mod capture;
 mod clipboard;
+pub mod command_table;
 mod commands;
 mod config;
 mod effect;
