@@ -241,19 +241,17 @@ impl App {
         if self.state.pane_focused() == want_pane {
             return; // already there — no-op
         }
-        // Branch order is arbitrary in Phase 0: every non-Pane arm yields
-        // `pane_focused() == false`, so it is invisible to all current
-        // consumers (router, render DIM, flash, ^C gate). The Overlay/Pager
-        // distinction is carried only for future MVU phases.
-        self.state.focus = if want_pane {
-            state::Focus::Pane
-        } else if self.runtime.top_overlay.is_some() {
-            state::Focus::Overlay
-        } else if let Some(v) = self.view.pager.as_ref() {
-            state::Focus::Pager(v.mount)
-        } else {
-            state::Focus::FileList
-        };
+        // The focus decision is a pure fn of these two bits (see
+        // `super::focus::decide_focus`); the branch-order contract — every
+        // non-Pane arm collapses to `pane_focused() == false` — is pinned by
+        // tests there.
+        self.state.focus = super::focus::decide_focus(
+            super::focus::FocusSnapshot {
+                has_top_overlay: self.runtime.top_overlay.is_some(),
+                pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+            },
+            want_pane,
+        );
         if self.state.pane_focused() {
             let label = self
                 .runtime

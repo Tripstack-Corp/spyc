@@ -171,6 +171,7 @@ mod commands;
 mod config;
 mod effect;
 mod find_picker;
+mod focus;
 mod git_state;
 mod graveyard;
 mod grep_session;
