@@ -574,6 +574,98 @@ impl App {
                 .into()
             }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
+            // Jump / MakeDir / Worktree do unbounded blocking IO (chdir,
+            // create_dir_all, git shell-outs), so the pure-domain
+            // `AppState::dispatch_prompt` punts them here (MVU Stage 3 de-IO).
+            // Each reconciles harpoon afterward — they used to return
+            // `Handled`, whose App-side path called `reconcile_harpoon`; the
+            // worktree arms re-anchor `project_home`, so the reconcile must
+            // still run.
+            PromptKind::Jump => {
+                let trimmed = prompt.buffer.trim();
+                if !trimmed.is_empty() {
+                    let _ = self.state.jump_to(trimmed);
+                }
+                self.reconcile_harpoon();
+                Vec::new()
+            }
+            PromptKind::MakeDir => {
+                let name = prompt.buffer.trim();
+                if !name.is_empty() {
+                    let target = crate::paths::expand(name);
+                    let resolved = if target.is_absolute() {
+                        target
+                    } else {
+                        self.state.listing.dir.join(&target)
+                    };
+                    match std::fs::create_dir_all(&resolved) {
+                        Ok(()) => self
+                            .state
+                            .flash_info(format!("created {}", resolved.display())),
+                        Err(e) => self.state.flash_error(format!("error: {e}")),
+                    }
+                    self.state.refresh_listing();
+                }
+                self.reconcile_harpoon();
+                Vec::new()
+            }
+            PromptKind::WorktreeNewBranch => {
+                let branch = prompt.buffer.trim();
+                if branch.is_empty() {
+                    return Vec::new();
+                }
+                match crate::sysinfo::git_worktree_add(&self.state.listing.dir, branch) {
+                    Ok(path) => {
+                        self.state
+                            .flash_info(format!("created worktree: {}", path.display()));
+                        if let Err(e) = self.state.chdir(&path) {
+                            self.state.flash_error(format!("chdir: {e}"));
+                        } else {
+                            // Re-anchor PROJECT_HOME on the new worktree
+                            // (harpoon / grep / MCP context want the worktree
+                            // root, not the parent repo); reconcile_harpoon
+                            // below reloads the per-project harpoon list.
+                            self.state.project_home = Some(self.state.listing.dir.clone());
+                        }
+                    }
+                    Err(e) => self.state.flash_error(format!("worktree add: {e}")),
+                }
+                self.reconcile_harpoon();
+                Vec::new()
+            }
+            PromptKind::WorktreeDeleteConfirm => {
+                let confirmed = prompt.buffer.trim().eq_ignore_ascii_case("y");
+                if !confirmed {
+                    return Vec::new();
+                }
+                let dir = self.state.listing.dir.clone();
+                // Capture the main repo path *before* removing — once the
+                // worktree's directory is gone we can't `git worktree list`
+                // from inside it, and the chdir-to-parent below lands in a
+                // non-git dir, so PROJECT_HOME would have nothing to reanchor
+                // on. The main worktree is the first `git worktree list
+                // --porcelain` entry.
+                let main_repo = crate::sysinfo::git_worktree_list(&dir)
+                    .and_then(|wts| wts.into_iter().next().map(|wt| wt.path));
+                match crate::sysinfo::git_worktree_remove(&dir) {
+                    Ok(()) => {
+                        self.state
+                            .flash_info(format!("removed worktree: {}", dir.display()));
+                        if let Some(parent) = dir.parent() {
+                            let _ = self.state.chdir(parent);
+                        }
+                        // Re-anchor PROJECT_HOME on the main repo so harpoon /
+                        // MCP context / `gh` don't keep pointing at the
+                        // just-deleted directory. The chdir target stays the
+                        // parent (the user may be browsing sibling worktrees);
+                        // listing.dir and project_home can differ, that's normal.
+                        self.state.project_home = main_repo;
+                    }
+                    Err(e) => self.state.flash_error(format!("worktree remove: {e}")),
+                }
+                self.reconcile_harpoon();
+                Vec::new()
+            }
             // These should have been handled by AppState — unreachable in practice.
             _ => Vec::new(),
         }

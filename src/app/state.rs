@@ -2111,30 +2111,6 @@ impl AppState {
                 }
                 PromptResult::Handled
             }
-            PromptKind::Jump => {
-                let trimmed = buffer.trim();
-                if !trimmed.is_empty() {
-                    let _ = self.jump_to(trimmed);
-                }
-                PromptResult::Handled
-            }
-            PromptKind::MakeDir => {
-                let name = buffer.trim();
-                if !name.is_empty() {
-                    let target = crate::paths::expand(name);
-                    let resolved = if target.is_absolute() {
-                        target
-                    } else {
-                        self.listing.dir.join(&target)
-                    };
-                    match std::fs::create_dir_all(&resolved) {
-                        Ok(()) => self.flash_info(format!("created {}", resolved.display())),
-                        Err(e) => self.flash_error(format!("error: {e}")),
-                    }
-                    self.refresh_listing();
-                }
-                PromptResult::Handled
-            }
             PromptKind::SetEnv => {
                 let line = buffer.trim();
                 if let Some((name, value)) = line.split_once('=') {
@@ -2186,72 +2162,6 @@ impl AppState {
                 self.rebuild_rows();
                 PromptResult::Handled
             }
-            PromptKind::WorktreeNewBranch => {
-                let branch = buffer.trim();
-                if branch.is_empty() {
-                    return PromptResult::Handled;
-                }
-                match crate::sysinfo::git_worktree_add(&self.listing.dir, branch) {
-                    Ok(path) => {
-                        self.flash_info(format!("created worktree: {}", path.display()));
-                        if let Err(e) = self.chdir(&path) {
-                            self.flash_error(format!("chdir: {e}"));
-                        } else {
-                            // Re-anchor PROJECT_HOME on the new
-                            // worktree — same reasoning as the
-                            // `W l` picker (see
-                            // `App::handle_pager_key`):
-                            // harpoon / grep / MCP context all
-                            // want the worktree root, not the
-                            // parent repo. App-side
-                            // `reconcile_harpoon` runs on the
-                            // next `apply`/`dispatch_prompt`
-                            // boundary and reloads the per-project
-                            // harpoon list.
-                            self.project_home = Some(self.listing.dir.clone());
-                        }
-                    }
-                    Err(e) => self.flash_error(format!("worktree add: {e}")),
-                }
-                PromptResult::Handled
-            }
-            PromptKind::WorktreeDeleteConfirm => {
-                let confirmed = buffer.trim().eq_ignore_ascii_case("y");
-                if !confirmed {
-                    return PromptResult::Handled;
-                }
-                let dir = self.listing.dir.clone();
-                // Capture the main repo path *before* removing — once the
-                // worktree's directory is gone we can't `git worktree
-                // list` from inside it anymore, and the chdir-to-parent
-                // below typically lands in a non-git directory
-                // (`~/src/spyc-worktrees/`) so PROJECT_HOME would have
-                // no home to reanchor on. The main worktree is always
-                // the first entry of `git worktree list --porcelain`.
-                let main_repo = crate::sysinfo::git_worktree_list(&dir)
-                    .and_then(|wts| wts.into_iter().next().map(|wt| wt.path));
-                match crate::sysinfo::git_worktree_remove(&dir) {
-                    Ok(()) => {
-                        self.flash_info(format!("removed worktree: {}", dir.display()));
-                        if let Some(parent) = dir.parent() {
-                            let _ = self.chdir(parent);
-                        }
-                        // Re-anchor PROJECT_HOME on the main repo so
-                        // harpoon / MCP context / `gh` don't keep
-                        // pointing at the just-deleted directory. The
-                        // chdir target stays the parent (existing
-                        // behavior — the user might be browsing other
-                        // sibling worktrees there); listing.dir and
-                        // project_home can differ, that's normal.
-                        // App::dispatch_prompt's Handled arm reloads
-                        // harpoon for whatever project_home points
-                        // at after this returns.
-                        self.project_home = main_repo;
-                    }
-                    Err(e) => self.flash_error(format!("worktree remove: {e}")),
-                }
-                PromptResult::Handled
-            }
             PromptKind::PaneNewTabCmd => {
                 let cmd = buffer.trim().to_string();
                 if cmd.is_empty() {
@@ -2271,6 +2181,11 @@ impl AppState {
             | PromptKind::ClaudeCrashRecover { .. }
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.
+            // Terminal-touching — handled by `App::dispatch_prompt`.
+            // Jump / MakeDir / Worktree* do unbounded blocking IO (chdir,
+            // create_dir_all, git shell-outs); keeping them out of this
+            // pure-domain producer is the Stage-3 de-IO. The rest spawn
+            // panes / pagers / editors.
             PromptKind::NewFile
             | PromptKind::ShellCmd
             | PromptKind::ShellCmdCaptured
@@ -2278,7 +2193,11 @@ impl AppState {
             | PromptKind::MoveTo
             | PromptKind::PaneNewTabCwd
             | PromptKind::PaneRenameTab
-            | PromptKind::Command => PromptResult::NotHandled,
+            | PromptKind::Command
+            | PromptKind::Jump
+            | PromptKind::MakeDir
+            | PromptKind::WorktreeNewBranch
+            | PromptKind::WorktreeDeleteConfirm => PromptResult::NotHandled,
         }
     }
 
