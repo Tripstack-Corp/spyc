@@ -352,8 +352,12 @@ struct Runtime {
     /// Git worker → main thread results, generation-gated, applied via
     /// `apply_git_worker_result`. The Phase-3a forwarder thread takes this
     /// once in `run()` and bridges it onto the unified `Message` channel.
-    /// The Sender half stays on `state.git_worker_tx`.
     git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
+    /// Main thread → git worker requests. The Model records desired
+    /// requests in `state.pending_git_requests` (it owns no channel); the
+    /// run loop drains that outbox through this sender via
+    /// `flush_git_requests`. `None` in the test harness.
+    git_worker_tx: Option<std::sync::mpsc::Sender<state::GitWorkerRequest>>,
     /// Commands from the MCP server; `run()` `.take()`s it into the forwarder
     /// thread which re-sends each as `Message::Mcp`.
     mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
@@ -839,7 +843,8 @@ impl App {
             current_repo_root: None,
             current_gitdir: None,
             git_status_raw_cache: None,
-            git_worker_tx: None,
+            git_worker_available: false,
+            pending_git_requests: Vec::new(),
             git_generation: 0,
             last_git_invalidation: None,
             last_git_request_at: None,
@@ -890,10 +895,12 @@ impl App {
         // Background git-status worker. Owns the spawn of
         // `git status --porcelain` on cache miss so the chdir UI
         // returns immediately. Lives for the lifetime of the
-        // process; the OS reaps the thread on exit. We hold the
-        // sender on `state.git_worker_tx` and the receiver on
-        // `runtime.git_result_rx`. See `state::GitWorkerRequest` /
-        // `state::GitWorkerResult` for the contract.
+        // process; the OS reaps the thread on exit. Both channel ends
+        // live on the Runtime (`runtime.git_worker_tx` sender,
+        // `runtime.git_result_rx` receiver); the Model holds no channel —
+        // it records desired requests in `state.pending_git_requests`,
+        // which the run loop flushes to the worker via `flush_git_requests`.
+        // See `state::GitWorkerRequest` / `state::GitWorkerResult`.
         let (git_req_tx, git_req_rx) = std::sync::mpsc::channel::<state::GitWorkerRequest>();
         let (git_res_tx, git_res_rx) = std::sync::mpsc::channel::<state::GitWorkerResult>();
         std::thread::spawn(move || {
@@ -927,7 +934,7 @@ impl App {
             }
         });
         let mut app_state = app_state;
-        app_state.git_worker_tx = Some(git_req_tx);
+        app_state.git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state
@@ -936,6 +943,7 @@ impl App {
             exit_summary: None,
             runtime: Runtime {
                 git_result_rx: Some(git_res_rx),
+                git_worker_tx: Some(git_req_tx),
                 mcp_cmd_rx: Some(mcp_cmd_rx),
                 pane_wake_tx: None,
                 next_sink_id: 0,
@@ -967,6 +975,11 @@ impl App {
         // flag wait for the worker.
         app.state.git.info = app.state.compute_git_info_fast();
         let _ = app.state.git_file_statuses_cached(&initial_cwd);
+        // The bootstrap cache-miss queued a request into the Model's
+        // outbox (git_worker_available is now true); flush it onto the
+        // worker channel so the first per-file markers land as early as
+        // they did when the send was inline.
+        app.flush_git_requests();
         if let Some(msg) = load_note {
             app.state.flash_info(msg);
         }
@@ -1517,6 +1530,16 @@ impl App {
             if self.drain_git_pending(&mut ctx) {
                 ctx.draw.mark(2);
             }
+
+            // Flush the Model's git-request outbox onto the worker channel
+            // before the loop blocks on `recv`. The pure-domain refresh paths
+            // (refresh_listing / refresh_git_state / chdir) only *record*
+            // requests in `state.pending_git_requests` — the Model owns no
+            // channel — so this is where they're actually dispatched. Placed
+            // after every pre-recv refresh (and after the prior iteration's
+            // message dispatch) so a cache-miss reaches the worker without
+            // waiting for the next event.
+            self.flush_git_requests();
 
             // MVU Phase 3c: the last poll floor is GONE. Every event source
             // now wakes the channel — panes via `PaneOutput`, captures/tasks
@@ -2844,6 +2867,7 @@ impl App {
             exit_summary: None,
             runtime: Runtime {
                 git_result_rx: None,
+                git_worker_tx: None,
                 mcp_cmd_rx: None,
                 pane_wake_tx: None,
                 next_sink_id: 0,

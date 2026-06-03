@@ -9,6 +9,26 @@ use crate::ui::pager;
 use super::{App, state};
 
 impl App {
+    /// Drain the Model's git-request outbox onto the Runtime's worker
+    /// channel. The Model records cache-miss requests in
+    /// `state.pending_git_requests` (it owns no `Sender`); this sends each
+    /// over the Runtime-owned `git_worker_tx`. Called once per loop
+    /// iteration just before `recv`, and once after the `App::new`
+    /// bootstrap request, so a queued request reaches the worker before the
+    /// loop next blocks. With no worker wired (the test harness) the outbox
+    /// stays empty because `git_worker_available` gates the push, so this is
+    /// a no-op; the defensive `clear` only guards the can't-happen case of a
+    /// queued request with no sender.
+    pub(super) fn flush_git_requests(&mut self) {
+        let Some(tx) = self.runtime.git_worker_tx.as_ref() else {
+            self.state.pending_git_requests.clear();
+            return;
+        };
+        for req in self.state.pending_git_requests.drain(..) {
+            let _ = tx.send(req);
+        }
+    }
+
     /// Apply a git worker result to domain state, returning whether the
     /// displayed git info/files changed (so the loop can redraw). Honors
     /// the generation + repo-root drop gates. Moved verbatim from the run
