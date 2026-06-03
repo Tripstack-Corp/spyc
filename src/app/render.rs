@@ -11,12 +11,14 @@
 //! and stay private. `FrameLayout` stays in `app` because callers on
 //! both sides of the split construct and read it.
 
+use std::path::PathBuf;
+
 use ratatui::Frame;
 
 use crate::config::StatusPosition;
 use crate::pane::PaneWidget;
 use crate::spyc_debug;
-use crate::ui::list_view::ListView;
+use crate::ui::list_view::{ListView, Row};
 use crate::ui::pager;
 use crate::ui::prompt::PromptLine;
 use crate::ui::status::StatusBar;
@@ -1124,4 +1126,112 @@ impl App {
             );
         }
     }
+
+    /// Status-bar header: the left (path / view name) and right
+    /// (status tags) halves of the top line, per current view.
+    fn header_parts(&self) -> (String, String) {
+        match self.state.view {
+            View::Dir => (crate::paths::display_tilde(&self.state.listing.dir), {
+                let filter_tag = match &self.state.temp_filter {
+                    Some(f) if f == "!" => " limit:picks".to_string(),
+                    Some(f) => format!(" limit:{f}"),
+                    None => String::new(),
+                };
+                {
+                    let total = self.state.listing.entries.len();
+                    let shown = self.state.rows.len();
+                    let hidden = total.saturating_sub(shown);
+                    let hidden_tag = format!(" hidden:{hidden}");
+                    // Bg tasks normally render in the divider line above
+                    // the pane (distinct color, right-aligned). When the
+                    // pane is hidden there is no divider, so fall back
+                    // to the status-bar suffix here.
+                    let bg_tag = if self.runtime.pane_tabs.is_some() {
+                        String::new()
+                    } else {
+                        let running = self.runtime.background_tasks.running_count();
+                        let done = self.runtime.background_tasks.done_count();
+                        if running == 0 && done == 0 {
+                            String::new()
+                        } else if done == 0 {
+                            format!(" bg:{running}\u{25cf}")
+                        } else {
+                            format!(" bg:{running}\u{25cf}{done}\u{2713}")
+                        }
+                    };
+                    let sort_tag = format!(
+                        " sort:{}{}",
+                        self.state.sort_order,
+                        if self.state.sort_reversed {
+                            "\u{2191}"
+                        } else {
+                            ""
+                        },
+                    );
+                    format!(
+                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}]",
+                        self.state.picks.len(),
+                        self.state.inventory.len(),
+                        on_off(self.state.masks.mask1.enabled),
+                        on_off(self.state.masks.mask2.enabled),
+                        filter_tag,
+                        hidden_tag,
+                        sort_tag,
+                        bg_tag,
+                    )
+                }
+            }),
+            View::Inventory => (
+                "<INVENTORY>".to_string(),
+                format!(
+                    "[{} items{}]  (t: tag, p: put, x: remove, ESC: return)",
+                    self.state.inventory.len(),
+                    if self.state.inventory.picks.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} tagged", self.state.inventory.picks.len())
+                    }
+                ),
+            ),
+            View::Graveyard => (
+                "<GRAVEYARD>".to_string(),
+                format!(
+                    "[{} item(s)]  (p: put cwd, P: restore orig, dd/x: trash, Z: trash all, ESC: return)",
+                    self.state.graveyard.len()
+                ),
+            ),
+        }
+    }
+
+    fn build_rows(&self) -> Vec<Row> {
+        use crate::ui::list_view::GitFileStatus;
+        let delete_preview: Option<&Vec<PathBuf>> = self.state.pending_delete_preview.as_ref();
+        self.state
+            .rows
+            .iter()
+            .map(|rd| {
+                let git_status = self
+                    .state
+                    .git
+                    .files
+                    .get(&rd.display)
+                    .copied()
+                    .unwrap_or_else(GitFileStatus::clean);
+                let pending_delete =
+                    delete_preview.is_some_and(|v| v.iter().any(|p| p == &rd.path));
+                Row {
+                    display: rd.display.clone(),
+                    kind: rd.kind,
+                    picked: self.state.view == View::Dir && self.state.picks.contains(&rd.path),
+                    taken: self.state.inventory.contains(&rd.path),
+                    git_status,
+                    pending_delete,
+                }
+            })
+            .collect()
+    }
+}
+
+const fn on_off(b: bool) -> &'static str {
+    if b { "on" } else { "off" }
 }

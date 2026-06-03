@@ -22,6 +22,8 @@ use crossterm::event::KeyEvent;
 
 use crate::ui::pager::Mount;
 
+use super::{App, Mode};
+
 /// Where an incoming key event should be dispatched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum KeyDestination {
@@ -138,6 +140,25 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
 
     // 7. Default: chord resolver / file-list navigation.
     KeyDestination::Resolver
+}
+
+impl App {
+    /// Build the routing snapshot used by `route::route_key`.
+    /// Pure read of the fields the router cares about.
+    pub(super) fn route_snapshot(&self) -> RouteSnapshot {
+        RouteSnapshot {
+            is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
+            has_top_overlay: self.runtime.top_overlay.is_some(),
+            pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+            has_pane_tabs: self.runtime.pane_tabs.is_some(),
+            pane_focused: self.state.pane_focused(),
+            // MVU Phase 5: read from the Model snapshot (refreshed at
+            // loop-top), not the live host — decouples routing from Runtime.
+            pane_scrolling: self.state.pane_snapshot.is_scrolling,
+            pane_closed: self.state.pane_snapshot.is_closed,
+            resolver_pending: self.state.resolver.is_pending(),
+        }
+    }
 }
 
 #[cfg(test)]
