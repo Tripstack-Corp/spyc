@@ -12,6 +12,8 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod resume;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -163,13 +165,13 @@ impl AgentProfile for ClaudeProfile {
         crate::app::App::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
-        crate::app::command_without_resume(cmd)
+        resume::command_without_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
         // Claude always spawns fresh; the `/resume <sid>` stdin dance is
         // armed by the event loop when a session id is present.
         RestorePlan {
-            command: crate::app::command_without_resume(cmd),
+            command: resume::command_without_resume(cmd),
             resume: match sid {
                 Some(s) => ResumeAction::ClaudeStdin {
                     session_id: s.to_string(),
@@ -228,10 +230,10 @@ impl AgentProfile for CodexProfile {
         (id, None)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
-        crate::app::command_without_codex_resume(cmd)
+        resume::command_without_codex_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
-        let base = crate::app::command_without_codex_resume(cmd);
+        let base = resume::command_without_codex_resume(cmd);
         let command = match sid {
             Some(s) => format!("{base} resume {s}"),
             None => format!("{base} resume --last"),
@@ -276,10 +278,10 @@ impl AgentProfile for GeminiProfile {
         crate::app::App::resolve_gemini_resume_target(cwd, spawn_epoch_secs, claimed)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
-        crate::app::command_without_gemini_resume(cmd)
+        resume::command_without_gemini_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
-        let base = crate::app::command_without_gemini_resume(cmd);
+        let base = resume::command_without_gemini_resume(cmd);
         // Gemini's `--resume` consumes an *index* into `--list-sessions`,
         // not a UUID; recompute it synchronously. Fall back to bare on
         // lookup failure (binary missing, session pruned, format drift).
@@ -329,10 +331,10 @@ impl AgentProfile for AgyProfile {
         (id, None)
     }
     fn command_without_resume(&self, cmd: &str) -> String {
-        crate::app::command_without_agy_resume(cmd)
+        resume::command_without_agy_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
-        let base = crate::app::command_without_agy_resume(cmd);
+        let base = resume::command_without_agy_resume(cmd);
         let command = match sid {
             Some(s) => format!("{base} --conversation {s}"),
             None => format!("{base} --continue"),
