@@ -186,7 +186,7 @@ impl App {
 
     /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
     /// Replaces the old plain-rule divider.
-    fn render_pane_status_line(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_pane_status_line(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
@@ -282,9 +282,9 @@ impl App {
             }
         }
 
-        if let (Some(idx), Some(tabs)) = (active_idx, self.runtime.pane_tabs.as_mut()) {
-            let entry = &mut tabs.tabs_mut()[idx];
-            let live = entry.live_cwd().to_path_buf();
+        if let (Some(idx), Some(tabs)) = (active_idx, self.runtime.pane_tabs.as_ref()) {
+            let entry = &tabs.tabs()[idx];
+            let live = entry.live_cwd();
             let cwd_display = crate::paths::display_tilde(&live);
             // Mark when the live cwd has drifted from the spawn cwd
             // (e.g. user `cd`'d in a bash tab). Helps spot the case
@@ -746,14 +746,14 @@ impl App {
         } // end grid cache guard
     }
 
-    fn render_inner(&mut self, frame: &mut Frame, layout: FrameLayout) {
+    fn render_inner(&self, frame: &mut Frame, layout: FrameLayout) {
         // `layout` and the list rows/grid are settled by `prepare_frame`
         // before this draw pass; this method only paints.
 
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
-        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+        if let Some(overlay) = self.runtime.top_overlay.as_ref() {
             // The overlay occupies status + list + prompt area.
             let overlay_area = ratatui::layout::Rect {
                 x: layout.status.x,
@@ -812,7 +812,7 @@ impl App {
                 self.render_pane_status_line(frame, divider_rect);
             }
             let bottom_pane_rect: Option<ratatui::layout::Rect> =
-                if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
+                if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
                     // Pane resize/drain settled in `prepare_panes`.
                     let focused = self.state.pane_focused();
                     // Single lock window: render the pane AND place
@@ -884,7 +884,7 @@ impl App {
             if let Some(divider_rect) = layout.divider {
                 self.render_pane_status_line(frame, divider_rect);
             }
-            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
+            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
                 // Pane resize/drain + output_dirty clear settled in
                 // `prepare_panes`.
                 let focused = self.state.pane_focused();
@@ -959,7 +959,7 @@ impl App {
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
-            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
+            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
                 // Pane resize/drain + output_dirty clear settled in
                 // `prepare_panes`.
                 if bottom_is_pager {
