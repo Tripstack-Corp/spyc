@@ -127,15 +127,21 @@ impl App {
             return Ok(self.yank_paths_to_clipboard());
         }
 
-        // Try pure-domain dispatch first.
-        match self.state.apply(action) {
-            state::ApplyResult::Handled => {
+        // Try pure-domain dispatch first, normalized to the unified `Update`
+        // (MVU Stage 3C — `Handled` and `Post` collapse into `Handled(fx)`).
+        match state::Update::from(self.state.apply(action)) {
+            state::Update::Handled(post) => {
                 // Yolo mode: `[delete] confirm = false` opts out of
                 // the y/N prompt. The pure-domain dispatch set up
                 // the prompt and `pending_delete_preview` as
                 // normal; synthesize the `y` keystroke here so the
                 // deletion fires in the same tick — no warning
-                // highlight ever paints.
+                // highlight ever paints. The check is gated on
+                // `mode == Prompting(RemoveConfirm)`, which only the
+                // delete action (old `Handled`, empty `post`) sets —
+                // so merging old `Handled`+`Post` here is safe: a
+                // `Post` result never has that mode and falls to
+                // `Ok(post)` unchanged.
                 if !self.state.config.delete.confirm
                     && matches!(
                         self.state.mode,
@@ -148,10 +154,9 @@ impl App {
                     );
                     return Ok(self.handle_remove_confirm_key(synthetic));
                 }
-                return Ok(Vec::new());
+                return Ok(post);
             }
-            state::ApplyResult::Post(post) => return Ok(post),
-            state::ApplyResult::OpenPager(req) => {
+            state::Update::OpenPager(req) => {
                 let view = match req.lines {
                     state::PagerLines::Plain(lines) => {
                         let mut v = PagerView::new_plain(req.title, lines);
@@ -167,7 +172,14 @@ impl App {
                 self.set_pager(view);
                 return Ok(Vec::new());
             }
-            state::ApplyResult::NotHandled => {}
+            state::Update::Quit => {
+                // `ApplyResult` has no `Quit` variant, so this is
+                // unreachable today; handle defensively (no panic on a
+                // daily-driver path) in case a future Action maps to it.
+                self.request_quit();
+                return Ok(Vec::new());
+            }
+            state::Update::Defer => {}
         }
 
         // Terminal-touching arms that must stay in App. Most arms mutate

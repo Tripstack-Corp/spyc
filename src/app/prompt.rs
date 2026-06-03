@@ -445,7 +445,7 @@ impl App {
     /// terminal-touching arms (shell, pager, overlay, copy/move) stay here.
     #[allow(clippy::needless_pass_by_value)]
     pub fn dispatch_prompt(&mut self, prompt: Prompt) -> Vec<Effect> {
-        use state::PromptResult;
+        use state::Update;
 
         // Clear any Tab-applied filter before dispatching.
         if self.state.temp_filter.is_some() {
@@ -454,21 +454,23 @@ impl App {
         }
         self.view.tab_state = None;
 
-        // Try the pure-domain handler first.
-        match self.state.dispatch_prompt(&prompt.kind, &prompt.buffer) {
-            PromptResult::Handled => {
-                // Some pure-domain prompts shift PROJECT_HOME (e.g.
-                // `WorktreeNewBranch` chdirs into the new worktree
-                // and re-anchors). `apply`'s post-action
-                // reconciliation only fires for `Action` dispatches,
-                // not prompt submissions — call directly so harpoon
-                // reloads on prompts that move us between project
-                // roots. The call is cheap when project_home is
-                // unchanged (compares paths and returns early).
+        // Try the pure-domain handler first, normalized to the unified
+        // `Update` (MVU Stage 3C).
+        match Update::from(self.state.dispatch_prompt(&prompt.kind, &prompt.buffer)) {
+            Update::Handled(_) => {
+                // Some pure-domain prompts can shift PROJECT_HOME; `apply`'s
+                // post-action reconcile only fires for `Action` dispatches, so
+                // reconcile here too (a cheap no-op when project_home is
+                // unchanged). `PromptResult` carries no effects, so the
+                // `Handled` payload is always empty.
                 self.reconcile_harpoon();
                 return Vec::new();
             }
-            PromptResult::NotHandled => {}
+            // `PromptResult` only maps to `Handled`/`Defer`; `OpenPager`/`Quit`
+            // are unreachable here — handle defensively (no panic on the input
+            // path) should the producer's result type ever widen.
+            Update::OpenPager(_) | Update::Quit => return Vec::new(),
+            Update::Defer => {}
         }
 
         // --- Terminal-touching arms ---
