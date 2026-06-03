@@ -12,6 +12,7 @@
 
 use crate::pane::PaneTabs;
 use crate::state::sessions::AgentKind;
+use crate::ui::line_edit::LineEditor;
 use crate::ui::pager::{self, PagerView};
 
 use super::state::Focus;
@@ -346,5 +347,141 @@ impl App {
             }
         }
         self.view.pager = Some(PagerView::new_plain("session info", lines));
+    }
+
+    /// Run the canonical quit lifecycle: first call arms a 2-second
+    /// confirm window (and flashes any running-process count); a
+    /// second call inside that window persists the session and sets
+    /// `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
+    /// and the `:q` / `:quit` command — both paths must save and warn
+    /// identically.
+    pub fn request_quit(&mut self) {
+        let now = std::time::Instant::now();
+        if self
+            .state
+            .quit_pending
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
+        {
+            // If a file pager is open, capture its scroll before
+            // shutdown so reopening the file in the next session
+            // resumes where we left off. Bypassed close paths
+            // (typically session save → quit, no Esc) would
+            // otherwise drop the in-memory scroll on the floor.
+            self.remember_pager_position();
+            self.save_session();
+            self.state.should_quit = true;
+        } else {
+            self.state.quit_pending = Some(now);
+            let running_panes = self.runtime.pane_tabs.as_ref().map_or(0, |tabs| {
+                tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
+            });
+            let running_bg = self.runtime.background_tasks.running_count();
+            let running = running_panes + running_bg;
+            if running > 0 {
+                self.state.flash_info(format!(
+                    "{running} running process{} — press again to quit",
+                    if running == 1 { "" } else { "es" }
+                ));
+            } else {
+                self.state.flash_info("press again to quit");
+            }
+        }
+    }
+
+    /// Prefix width for history editor lines: "  NNN  " = 7 chars.
+    pub const HIST_PREFIX_W: usize = 7;
+
+    /// Sync the history editor after moving the picker cursor to a new line.
+    /// Updates the LineEditor content and the display line.
+    pub fn sync_history_editor_to_cursor(&mut self) {
+        Self::sync_hist_editor(
+            &mut self.view.pager,
+            &mut self.view.pending_history_pick,
+            &self.state.history,
+        );
+    }
+
+    fn sync_hist_editor(
+        pager: &mut Option<pager::PagerView>,
+        editor_opt: &mut Option<LineEditor>,
+        history: &crate::state::history::History,
+    ) {
+        let Some(view) = pager else { return };
+        let Some(editor) = editor_opt else { return };
+        let new_cursor = view.picker_cursor.unwrap_or(0);
+        let entries = history.entries();
+        let hist_idx = entries.len().saturating_sub(1 + new_cursor);
+        if let Some(cmd) = entries.get(hist_idx) {
+            editor.set_content_keep_mode(cmd);
+        }
+        let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
+        view.lines[new_cursor] = ratatui::text::Line::from(text);
+        view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
+    }
+
+    /// Open a popup listing every entry in `jump_history`, newest at
+    /// the top. j/k navigate, Enter chdirs to the cursored path,
+    /// ^D deletes the entry from history, q/Esc closes. Two triggers:
+    /// `?` on an empty `J` prompt (spy parity, the short reflex), or
+    /// `<Space>` while the `J` line editor is in Normal mode
+    /// (a vi-style alternative for users already exploring the
+    /// prompt's editor).
+    pub fn show_jump_history_popup(&mut self) {
+        let entries = self.state.jump_history.entries();
+        if entries.is_empty() {
+            self.state.flash_info("jump history is empty");
+            return;
+        }
+        // Snapshot newest-first paths into pending_jump_history so
+        // index ↔ entry mapping stays stable even if the live history
+        // is mutated (e.g. by another running spyc).
+        let snapshot: Vec<String> = entries.iter().rev().cloned().collect();
+        let lines: Vec<String> = snapshot
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("  {:>3}  {}", i + 1, p))
+            .collect();
+        let mut view = pager::PagerView::new_plain(
+            "jump history — j/k move, Enter cd, x delete, q close",
+            lines,
+        );
+        view.picker_cursor = Some(0);
+        view.no_history = true;
+        view.show_line_numbers = false;
+        view.wrap = false;
+        self.view.pending_jump_history = Some(snapshot);
+        self.set_pager(view);
+        self.view.needs_full_repaint = true;
+    }
+
+    pub fn show_history_popup(&mut self) {
+        let entries = self.state.history.entries();
+        if entries.is_empty() {
+            self.state.flash_info("history is empty");
+            return;
+        }
+        // Show newest-first, numbered from 1.
+        let lines: Vec<String> = entries
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(i, cmd)| format!("  {:>3}  {}", i + 1, cmd))
+            .collect();
+        // Create a line editor loaded with the newest entry, Normal mode.
+        let newest = entries.last().unwrap();
+        let mut editor = LineEditor::new();
+        editor.set_content(newest);
+        editor.mode = crate::ui::line_edit::Mode::Normal;
+        if !editor.buf.is_empty() {
+            editor.cursor = editor.buf.len() - 1;
+        }
+        let mut view = pager::PagerView::new_plain(
+            "history — j/k move, i edit, Enter run, ^D delete, q close",
+            lines,
+        );
+        view.picker_cursor = Some(0);
+        view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
+        self.view.pending_history_pick = Some(editor);
+        self.set_pager(view);
     }
 }

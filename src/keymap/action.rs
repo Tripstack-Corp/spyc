@@ -15,8 +15,8 @@ pub enum Action {
     GotoLast,
 
     // Navigation.
-    EnterOrDisplay, // d / <Enter> — dir: chdir; text file: pager
-    EnterOrEdit,    // e / v       — dir: chdir; file: editor
+    EnterOrDisplay, // <Enter> — dir: chdir; text file: pager
+    EnterOrEdit,    // e / v   — dir: chdir; file: editor
     Climb,          // u / -
     Home,           // H / ~
 
