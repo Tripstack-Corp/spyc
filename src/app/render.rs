@@ -552,7 +552,81 @@ impl App {
         if self.runtime.top_overlay.is_none() {
             self.settle_list_grid(&layout);
         }
+        self.prepare_panes(&layout);
         layout
+    }
+
+    /// Settle the Runtime-owned pane/overlay state for this frame BEFORE the
+    /// draw: resize the panes/overlay to their laid-out rects, drain pending
+    /// output, clear the per-pane `output_dirty`, flag overlay dismissal, and
+    /// run the LowerPane pager's first-frame scroll snap. Relocated out of
+    /// `render_inner` (MVU Stage 2) so the draw path performs no mutations.
+    ///
+    /// Behavior-equivalent to the old in-draw calls: `prepare_frame` runs
+    /// immediately before `render_inner` with nothing between them, so the
+    /// resize → drain → (clear/snap) → draw ordering each branch relied on is
+    /// preserved. The conditions mirror `render_inner`'s branches — the bottom
+    /// pane resize+drain is uniform across all of them (always to
+    /// `layout.pane`); `output_dirty` is cleared only on the non-overlay draw
+    /// paths (the overlay path leaves it set); the snap is the LowerPane,
+    /// not-in-help, pending-only case. Uses `drain_all` only — never
+    /// `clear_wake`, which stays owned by the pre-recv loop scan (the
+    /// lost-wakeup CAS hazard); `drain_output`/`drain_all` are generation-gated
+    /// so the second drain per frame is a no-op when nothing changed.
+    fn prepare_panes(&mut self, layout: &FrameLayout) {
+        let overlay_active = self.runtime.top_overlay.is_some();
+
+        // Top overlay (`;cmd`/`V`/`D`): resize to the spyc area, drain, and
+        // flag dismissal once the child exits.
+        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+            let h = layout.status.height + layout.list.height + layout.prompt.height;
+            let w = layout.status.width;
+            let _ = overlay.resize(h, w);
+            overlay.drain_output();
+            if overlay.is_closed() && !self.view.overlay_awaiting_dismiss {
+                self.view.overlay_awaiting_dismiss = true;
+            }
+        }
+
+        // Bottom pane: resize to its rect + drain (uniform across the overlay,
+        // TopPane-pager, and default draw paths). `output_dirty` is cleared
+        // only on the non-overlay paths, matching `render_inner`.
+        if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
+            let _ = tabs.active_mut().resize(rect.height, rect.width);
+            tabs.drain_all();
+            if !overlay_active {
+                tabs.active_mut().output_dirty = false;
+            }
+        }
+
+        // LowerPane pager first-frame snap (default draw path only): the
+        // opener can't know the viewport height, so it sets
+        // `pending_scroll_to_bottom` and the snap happens here, before the
+        // draw — so the user never sees a jump frame. Skipped under an
+        // overlay and while the help overlay is up (the stash's pending flag
+        // was already cleared on the original first frame).
+        if !overlay_active {
+            let in_help = self
+                .view
+                .pager
+                .as_ref()
+                .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE);
+            let bottom_is_pager = if in_help {
+                self.view.pager_help_stash.as_ref()
+            } else {
+                self.view.pager.as_ref()
+            }
+            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
+            if bottom_is_pager
+                && !in_help
+                && let Some(rect) = layout.pane
+                && let Some(view) = self.view.pager.as_mut()
+                && view.pending_scroll_to_bottom.get()
+            {
+                view.scroll_to_bottom(rect.height);
+                view.pending_scroll_to_bottom.set(false);
+            }
+        }
     }
 
     /// Rebuild the list-rows cache and run the `view_top`↔grid stabilization.
@@ -687,11 +761,8 @@ impl App {
                 width: layout.status.width,
                 height: layout.status.height + layout.list.height + layout.prompt.height,
             };
-            let _ = overlay.resize(overlay_area.height, overlay_area.width);
-            overlay.drain_output();
-            if overlay.is_closed() && !self.view.overlay_awaiting_dismiss {
-                self.view.overlay_awaiting_dismiss = true;
-            }
+            // Overlay resize/drain + the dismissal flag are settled in
+            // `prepare_panes` before this draw (MVU Stage 2).
             // Visual focus tracks `state.pane_focused`: false ⇒
             // overlay focused (cursor block, full color); true ⇒
             // bottom pane focused (overlay dims to half-lightness via
@@ -742,8 +813,7 @@ impl App {
             }
             let bottom_pane_rect: Option<ratatui::layout::Rect> =
                 if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
-                    let _ = tabs.active_mut().resize(rect.height, rect.width);
-                    tabs.drain_all();
+                    // Pane resize/drain settled in `prepare_panes`.
                     let focused = self.state.pane_focused();
                     // Single lock window: render the pane AND place
                     // the OS cursor under the same screen snapshot,
@@ -815,8 +885,8 @@ impl App {
                 self.render_pane_status_line(frame, divider_rect);
             }
             if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
-                let _ = tabs.active_mut().resize(rect.height, rect.width);
-                tabs.drain_all();
+                // Pane resize/drain + output_dirty clear settled in
+                // `prepare_panes`.
                 let focused = self.state.pane_focused();
                 tabs.active().with_screen(|screen| {
                     frame.render_widget(PaneWidget { screen, focused }, rect);
@@ -824,7 +894,6 @@ impl App {
                         place_pty_cursor_from_screen(frame, screen, rect);
                     }
                 });
-                tabs.active_mut().output_dirty = false;
             }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
@@ -891,27 +960,12 @@ impl App {
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
         let bottom_pane_rect: Option<ratatui::layout::Rect> =
             if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
-                let _ = tabs.active_mut().resize(rect.height, rect.width);
-                tabs.drain_all();
+                // Pane resize/drain + output_dirty clear settled in
+                // `prepare_panes`.
                 if bottom_is_pager {
                     // Skip the pty widget — the pager owns this rect now.
-                    // First-frame snap: ^a-v opens the pager wanting to
-                    // see *recent* output. We can't compute the right
-                    // scroll value at construction time (no viewport
-                    // height yet), so the opener sets
-                    // `pending_scroll_to_bottom` and the renderer here
-                    // — which now knows the actual rect — does the
-                    // snap before drawing, so the user never sees a
-                    // jump frame. Skipped while the help overlay is
-                    // up: the stash's `pending_scroll_to_bottom` was
-                    // already cleared on the original first frame.
-                    if !in_help
-                        && let Some(view) = self.view.pager.as_mut()
-                        && view.pending_scroll_to_bottom.get()
-                    {
-                        view.scroll_to_bottom(rect.height);
-                        view.pending_scroll_to_bottom.set(false);
-                    }
+                    // The LowerPane first-frame scroll snap (the pending
+                    // case) is settled in `prepare_panes`, before this draw.
                     let underlying = if in_help {
                         self.view.pager_help_stash.as_ref()
                     } else {
@@ -936,7 +990,7 @@ impl App {
                         }
                     });
                 }
-                tabs.active_mut().output_dirty = false;
+                // output_dirty cleared in `prepare_panes`.
                 // Quick Select labels paint *over* the pane widget so
                 // the user keeps the live output as context. Render
                 // here, after the pane, before the divider.
