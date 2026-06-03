@@ -4,6 +4,7 @@ pub mod entry;
 pub mod finder;
 pub mod grep;
 pub mod listing;
+pub mod long_listing;
 pub mod ops;
 pub mod waking_sender;
 
