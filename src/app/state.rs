@@ -69,6 +69,70 @@ pub enum ApplyResult {
     NotHandled,
 }
 
+/// MVU Stage 3: the unified result of any pure-domain producer
+/// (`apply` / `dispatch_command` / `dispatch_prompt`). Collapses the three
+/// per-producer result enums above so the single `App::update` entry point
+/// (Stage 3C) can handle every transition uniformly:
+/// - `Handled(effects)` carries the former `Post` effects (empty `Vec` for the
+///   old plain `Handled` — the App side runs whatever's there);
+/// - `OpenPager` / `Quit` stay typed (App-only capability + a compile-time
+///   wiring guard — dropping the arm is a build error, not a silent regress);
+/// - `Defer` is the old `NotHandled` — the App-side executor takes over.
+///
+/// The `From` impls are the single, tested mapping site; producers keep their
+/// own result enums until 3C routes everything through `Update`.
+// `dead_code` until Stage 3C routes the bridges through `App::update`, which
+// is the next PR; the `From` impls below are exercised by unit tests now so
+// the mapping is locked before the keystone wiring lands.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum Update {
+    Handled(Vec<Effect>),
+    OpenPager(PagerRequest),
+    Quit,
+    Defer,
+}
+
+impl From<ApplyResult> for Update {
+    fn from(r: ApplyResult) -> Self {
+        match r {
+            ApplyResult::Handled => Self::Handled(Vec::new()),
+            ApplyResult::OpenPager(req) => Self::OpenPager(req),
+            ApplyResult::Post(fx) => Self::Handled(fx),
+            ApplyResult::NotHandled => Self::Defer,
+        }
+    }
+}
+
+impl From<CommandResult> for Update {
+    fn from(r: CommandResult) -> Self {
+        match r {
+            CommandResult::Handled => Self::Handled(Vec::new()),
+            // Normalize the marks-view shape to a PagerRequest matching the
+            // command path's old `PagerView::new_plain(title, lines)` (columns
+            // = 1, no fit-to-content — `new_plain` defaults).
+            CommandResult::OpenPager { title, lines } => Self::OpenPager(PagerRequest {
+                title,
+                lines: PagerLines::Plain(lines),
+                columns: 1,
+                fit_to_content: false,
+            }),
+            CommandResult::Quit => Self::Quit,
+            CommandResult::Post(fx) => Self::Handled(fx),
+            CommandResult::NotHandled => Self::Defer,
+        }
+    }
+}
+
+impl From<PromptResult> for Update {
+    fn from(r: PromptResult) -> Self {
+        match r {
+            PromptResult::Handled => Self::Handled(Vec::new()),
+            PromptResult::NotHandled => Self::Defer,
+        }
+    }
+}
+
 /// Description of a pager to open, without importing UI types.
 #[derive(Debug)]
 pub struct PagerRequest {
@@ -2418,6 +2482,82 @@ mod tests {
     use super::*;
     use crate::fs::entry::EntryKind;
     use crate::fs::listing::SortMode;
+
+    // ── MVU Stage 3: Update conversions (the single mapping site) ──
+    // Lock the variant mapping that the unified `App::update` (3C) relies on.
+
+    #[test]
+    fn apply_result_into_update() {
+        assert!(
+            matches!(Update::from(ApplyResult::Handled), Update::Handled(ref fx) if fx.is_empty())
+        );
+        assert!(matches!(
+            Update::from(ApplyResult::NotHandled),
+            Update::Defer
+        ));
+        // Post carries its effects through unchanged (count preserved).
+        let fx = vec![Effect::SetTerminalTitle { title: "x".into() }];
+        assert!(
+            matches!(Update::from(ApplyResult::Post(fx)), Update::Handled(ref f) if f.len() == 1)
+        );
+        // OpenPager passes the request through verbatim.
+        let req = PagerRequest {
+            title: "T".into(),
+            lines: PagerLines::Plain(vec!["a".into()]),
+            columns: 2,
+            fit_to_content: true,
+        };
+        assert!(matches!(
+            Update::from(ApplyResult::OpenPager(req)),
+            Update::OpenPager(r) if r.title == "T" && r.columns == 2 && r.fit_to_content
+        ));
+    }
+
+    #[test]
+    fn command_result_into_update() {
+        assert!(
+            matches!(Update::from(CommandResult::Handled), Update::Handled(ref fx) if fx.is_empty())
+        );
+        assert!(matches!(
+            Update::from(CommandResult::NotHandled),
+            Update::Defer
+        ));
+        assert!(matches!(Update::from(CommandResult::Quit), Update::Quit));
+        let fx = vec![Effect::SetTerminalTitle { title: "x".into() }];
+        assert!(
+            matches!(Update::from(CommandResult::Post(fx)), Update::Handled(ref f) if f.len() == 1)
+        );
+        // OpenPager{title,lines} normalizes to the `new_plain`-equivalent
+        // PagerRequest (columns = 1, no fit-to-content).
+        let u = Update::from(CommandResult::OpenPager {
+            title: "marks".into(),
+            lines: vec!["m1".into(), "m2".into()],
+        });
+        match u {
+            Update::OpenPager(r) => {
+                assert_eq!(r.title, "marks");
+                assert_eq!(
+                    r.columns, 1,
+                    "command-path pager keeps new_plain's 1-column default"
+                );
+                assert!(!r.fit_to_content);
+                let PagerLines::Plain(lines) = r.lines;
+                assert_eq!(lines, vec!["m1".to_string(), "m2".to_string()]);
+            }
+            _ => panic!("expected OpenPager"),
+        }
+    }
+
+    #[test]
+    fn prompt_result_into_update() {
+        assert!(
+            matches!(Update::from(PromptResult::Handled), Update::Handled(ref fx) if fx.is_empty())
+        );
+        assert!(matches!(
+            Update::from(PromptResult::NotHandled),
+            Update::Defer
+        ));
+    }
 
     /// Build a minimal `AppState` for testing. Uses an empty listing
     /// and sensible defaults — no disk I/O, no terminal.
