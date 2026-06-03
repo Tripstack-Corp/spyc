@@ -22,30 +22,31 @@ impl App {
     /// Pure-domain arms are handled by `AppState::dispatch_command`;
     /// terminal-touching arms (shell, pager, overlay) stay here.
     pub fn dispatch_command(&mut self, input: &str) -> Vec<Effect> {
-        use super::state::CommandResult;
+        use super::state::{PagerLines, Update};
 
-        // Try the pure-domain handler first.
-        match self.state.dispatch_command(input) {
-            CommandResult::Handled => return Vec::new(),
-            CommandResult::OpenPager { title, lines } => {
-                self.view.pager = Some(PagerView::new_plain(title, lines));
+        // Try the pure-domain handler first, normalized to the unified
+        // `Update` (MVU Stage 3C). `Handled`/`Post` collapse into
+        // `Handled(effects)` (the run loop executes whatever's there).
+        match Update::from(self.state.dispatch_command(input)) {
+            Update::Handled(effects) => return effects,
+            Update::OpenPager(req) => {
+                // Command-path pagers (`:marks`) assigned `self.view.pager`
+                // directly via `new_plain` — preserve that exactly (no
+                // `set_pager` / `remember_pager_position`), rebuilt from the
+                // normalized request (columns 1, no fit = `new_plain`
+                // defaults, so byte-identical to the old call).
+                let PagerLines::Plain(lines) = req.lines;
+                self.view.pager = Some(PagerView::new_plain(req.title, lines));
                 return Vec::new();
             }
-            CommandResult::Quit => {
-                // Same lifecycle as the Q keybinding: double-tap
-                // confirm, running-process warning, save_session on
-                // confirm. The typed variant means removing this
-                // arm is a compile error — the wiring can't silently
-                // regress to "unknown command".
+            Update::Quit => {
+                // Same lifecycle as the Q keybinding (double-tap confirm,
+                // running-process warning, save_session on confirm). The
+                // typed variant keeps the wiring a compile-time check.
                 self.request_quit();
                 return Vec::new();
             }
-            // MVU Phase 5 PR9: the pure-domain command emitted effects (e.g.
-            // `:cd` → `Effect::ChangeDir`); hand them straight to the run loop,
-            // which executes them via `run_effects` (the same path that runs
-            // the `apply()` arms' effects).
-            CommandResult::Post(effects) => return effects,
-            CommandResult::NotHandled => {}
+            Update::Defer => {}
         }
 
         // --- Terminal-touching arms (shell/pager/overlay) ---

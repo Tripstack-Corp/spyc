@@ -81,10 +81,11 @@ pub enum ApplyResult {
 ///
 /// The `From` impls are the single, tested mapping site; producers keep their
 /// own result enums until 3C routes everything through `Update`.
-// `dead_code` until Stage 3C routes the bridges through `App::update`, which
-// is the next PR; the `From` impls below are exercised by unit tests now so
-// the mapping is locked before the keystone wiring lands.
-#[allow(dead_code)]
+/// The three App-side bridges (`apply_inner` / `dispatch_command` /
+/// `dispatch_prompt`) normalize their producer's result into this via `From`
+/// and match it uniformly (MVU Stage 3C). The producers still return their own
+/// enums for now; Stage 3D switches them to return `Update` directly and
+/// deletes the three, and adds the single `App::update(msg)` entry point.
 #[derive(Debug)]
 pub enum Update {
     Handled(Vec<Effect>),
