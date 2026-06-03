@@ -1657,7 +1657,7 @@ impl AppState {
                 } else {
                     self.selection_paths()
                 };
-                let lines = fs::ops::format_long_listing(&paths);
+                let lines = fs::long_listing::format_long_listing(&paths);
                 let title = format!("long listing — {}", self.listing.dir.display());
                 self.cursor.clamp(self.rows.len());
                 return ApplyResult::OpenPager(PagerRequest {
