@@ -3688,7 +3688,7 @@ mod tests {
                 );
             }
 
-            match spec.layer {
+            match spec.layer() {
                 CmdLayer::App => assert!(
                     matches!(result, CommandResult::NotHandled),
                     "`{}` is registered as CmdLayer::App but AppState did not \
