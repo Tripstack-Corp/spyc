@@ -426,13 +426,21 @@ pub struct AppState {
     /// and skips the spawn entirely; only the per-listing-dir
     /// prefix re-parse is paid.
     pub git_status_raw_cache: Option<GitStatusRawCache>,
-    /// Sender to the background git-status worker. `None` in tests
-    /// or when the worker thread hasn't been initialized yet (the
-    /// AppState constructor runs before the App-level worker spawn).
-    /// `chdir` cache-miss paths enqueue requests; results arrive
-    /// back via the App's `git_result_rx` and are gated on
+    /// Whether a background git-status worker is wired. Set by `App::new`
+    /// once the worker thread spawns; `false` in tests and during the
+    /// AppState bootstrap before the worker exists. When `true`, a
+    /// cache-miss in `git_file_statuses_cached` enqueues a request into
+    /// `pending_git_requests` — the Model holds no channel, so the App run
+    /// loop flushes that outbox to the Runtime-owned `git_worker_tx`. When
+    /// `false`, the synchronous `git status` spawn path runs inline.
+    pub git_worker_available: bool,
+    /// Outbox of git-status worker requests the Model wants dispatched.
+    /// `git_file_statuses_cached` pushes here on a cache miss; the App run
+    /// loop drains it via `flush_git_requests` (sending each over the
+    /// Runtime-owned `git_worker_tx`) before it next blocks on `recv`.
+    /// Results arrive back via the App's `git_result_rx`, gated on
     /// `git_generation` to discard stale ones.
-    pub git_worker_tx: Option<std::sync::mpsc::Sender<GitWorkerRequest>>,
+    pub pending_git_requests: Vec<GitWorkerRequest>,
     /// Monotonic counter bumped on every chdir-that-issues-a-git-
     /// request. The worker echoes the counter back in its result;
     /// the App event loop discards results whose generation doesn't
@@ -1103,9 +1111,9 @@ impl AppState {
             // will fill in real markers when the worker posts its
             // result (matched against `git_generation` so navigating
             // away mid-spawn discards the stale result).
-            if let Some(tx) = self.git_worker_tx.as_ref() {
+            if self.git_worker_available {
                 self.git_generation = self.git_generation.wrapping_add(1);
-                let _ = tx.send(GitWorkerRequest {
+                self.pending_git_requests.push(GitWorkerRequest {
                     generation: self.git_generation,
                     canonical: canonical.to_path_buf(),
                     repo_root,
@@ -2454,7 +2462,8 @@ impl AppState {
             current_repo_root: None,
             current_gitdir: None,
             git_status_raw_cache: None,
-            git_worker_tx: None,
+            git_worker_available: false,
+            pending_git_requests: Vec::new(),
             git_generation: 0,
             last_git_invalidation: None,
             last_git_request_at: None,
@@ -3781,7 +3790,7 @@ mod tests {
     /// → `git_file_statuses_cached` → `git status --porcelain` path on a
     /// throwaway temp repo, so a regression in any of those (or in the
     /// raw-cache / mtime-cache / row-rebuild plumbing) shows up here.
-    /// `git_worker_tx` is unset, so the sync spawn path runs — no
+    /// `git_worker_available` is false, so the sync spawn path runs — no
     /// timing dependency, no real fs watcher.
     #[test]
     fn refresh_listing_picks_up_edit_and_clears_after_commit() {
@@ -3847,6 +3856,81 @@ mod tests {
             !s.git.files.contains_key("file.txt"),
             "expected marker to clear after commit; got {:?}",
             s.git.files
+        );
+    }
+
+    /// With a background worker wired (`git_worker_available = true`), a
+    /// cache-miss in the git-status path must NOT spawn `git status` inline.
+    /// It bumps the generation, enqueues exactly one request into the outbox
+    /// (`pending_git_requests`), stamps `last_git_request_at`, and returns an
+    /// empty map for this frame — the real markers arrive later via
+    /// `git_result_rx`. Locks the outbox contract `flush_git_requests`
+    /// (and the run loop) depend on after git_worker_tx moved to the Runtime.
+    #[test]
+    fn git_worker_available_enqueues_request_instead_of_spawning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        let run_git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@x")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@x")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("spawn git");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        run_git(&["init", "-q", "--initial-branch=main"]);
+        std::fs::write(root.join("file.txt"), "v1\n").unwrap();
+        run_git(&["add", "file.txt"]);
+        run_git(&["commit", "-q", "-m", "v1"]);
+
+        let mut s = test_state();
+        s.listing.dir = root.clone();
+        s.start_dir = root.clone();
+        s.update_huge_tree(&root); // sets current_repo_root
+
+        // Wire the "worker" and force a clean cache-miss baseline so the
+        // asserted call takes the enqueue branch deterministically.
+        s.git_worker_available = true;
+        s.git_status_raw_cache = None;
+        s.pending_git_requests.clear();
+        let gen_before = s.git_generation;
+
+        let map = s.git_file_statuses_cached(&root);
+
+        assert!(
+            map.is_empty(),
+            "worker path returns an empty map this frame (markers arrive async)"
+        );
+        assert_eq!(
+            s.pending_git_requests.len(),
+            1,
+            "exactly one request enqueued for the run loop to flush"
+        );
+        let req = &s.pending_git_requests[0];
+        assert_eq!(req.canonical, root, "request targets the queried dir");
+        assert_eq!(
+            s.current_repo_root.as_deref(),
+            Some(req.repo_root.as_path()),
+            "request carries the current repo root"
+        );
+        assert_eq!(
+            s.git_generation,
+            gen_before.wrapping_add(1),
+            "generation bumped once"
+        );
+        assert_eq!(
+            req.generation, s.git_generation,
+            "enqueued request stamped with the bumped generation"
+        );
+        assert!(
+            s.last_git_request_at.is_some(),
+            "request-sent timestamp stamped for the activity overlay"
         );
     }
 }
