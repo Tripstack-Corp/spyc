@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Added `CLAUDE.md` (architectural contract) + refreshed `AGENTS.md` /
+  `ARCHITECTURE.md`.** New top-level `CLAUDE.md` states the MVU invariants and
+  the maintenance rules (≤800-LoC files, module-organization patterns,
+  compile-checked `:command`s) to keep going forward. The architecture docs were
+  freshened to match the landed reality: `app/mod.rs` is down to ~1k (event
+  loop, constructor, process I/O, leaf helpers, and all tests now sibling
+  modules), the MVU last-mile is complete (single `update()` entry,
+  mutation-free render behind snapshots), and the `:command` "unknown command"
+  footgun is closed (handlers are compile-checked via `COMMAND_TABLE`).
 - **Started the `app/mod.rs` decomposition** (REFACTOR_PLAN Phase 1) —
   the road-to-2.0 maintainability track. First extraction: the
   pager back/forward history (`PagerHistory`) moved verbatim to
