@@ -41,8 +41,8 @@ directory loading" entry.
 ## Update model: Elm-architecture (MVU)
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration
-(see the decision logs in `REFACTOR_PLAN.md` / `docs/MVU_PLAN.md`) has landed;
-a final purity pass is in progress (tracked in the roadmap). The shape today:
+**and** the last-mile purity pass have landed (decision logs in
+`REFACTOR_PLAN.md` / `docs/MVU_PLAN.md`). The shape today:
 
 - **Three-type state split.** `App` owns three disjoint fields
   (`src/app/mod.rs`): `state: AppState` (the **Model** — pure domain:
@@ -58,25 +58,28 @@ a final purity pass is in progress (tracked in the roadmap). The shape today:
   is **event-driven**: it blocks on `recv` / `recv_timeout` (0 wakes at idle
   when no deadline is armed) — there is no `event::poll`, no adaptive
   busy-poll. Timers are `Message::Tick(Deadline)`s armed against a scheduler.
-- **Update.** `AppState::apply(action) -> ApplyResult` (and the siblings
-  `dispatch_command` / `dispatch_prompt`) are the pure-domain transitions: no
-  terminal access, unit-testable without a TUI. They return effects as data.
+- **Update.** All input funnels through a single `App::update(msg)` entry
+  (`src/app/update.rs`). The pure-domain transitions it dispatches to —
+  `AppState::apply` and the siblings `dispatch_command` / `dispatch_prompt` —
+  take the Model, do no terminal access, are unit-testable without a TUI, and
+  return effects as data.
 - **Effects.** Side effects are a `#[non_exhaustive] enum Effect`
   (`src/app/effect.rs`) — `ForegroundExec`, `CopyToClipboard`, `SignalGroup`,
   `SendToPane`, `SetTerminalTitle`, `ReadPaneText`, `ChangeDir`. `run_effects`
   is the **sole** executor; handlers return `Vec<Effect>` and never touch the
   OS directly. This makes "forgot to clear `pending_X`" and inline-IO bug
   classes structurally hard.
-- **View.** Rendering lives in `src/app/render.rs` (the `render` pass +
-  `compute_layout`); it reads the Model / ViewState and the live vt100 grids
-  through a shared `&runtime` borrow.
+- **View.** Rendering lives in `src/app/render.rs`. The draw pass is
+  **mutation-free** (`&self`): any pre-frame state settling happens in
+  `prepare_frame` *before* the draw, and the output is pinned by a ratatui
+  `TestBackend` + `insta` snapshot net. It reads the Model / ViewState and the
+  live vt100 grids through a shared `&runtime` borrow.
 
-**Remaining last-mile work** (in progress, tracked in the roadmap — not yet
-landed): collapsing the three update entry points (`ApplyResult` /
-`CommandResult` / `PromptResult`) into one `update(&mut Model, &mut ViewState,
-msg, now) -> Vec<Effect>`; moving the last inline side-effects behind effects;
-and making the render pass mutation-free (a pre-frame `prepare` step) behind a
-ratatui `TestBackend` snapshot net. See `docs/MVU_PLAN.md` and the roadmap.
+The last-mile purity pass is **done**: the single `App::update` entry above
+(the former `ApplyResult` / `CommandResult` / `PromptResult` split collapsed into
+one `Update`), the mutation-free render behind snapshots, the `:command` surface
+compile-checked via `COMMAND_TABLE` handler fn-pointers, and a one-way
+`app → agent` dependency. See `docs/MVU_PLAN.md` for the decision logs.
 
 ## Repaint strategy: event-driven, dirty-frame
 
