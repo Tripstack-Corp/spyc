@@ -30,6 +30,27 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 unicode-width = "0.2"
 libc = "0.2"
 ignore = "0.4"
+# Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default
+# compression backend now; no C, no `*-sys`, so static musl builds stay
+# clean). Replaces the `git` subprocess shell-outs behind the `src/git/`
+# facade, one domain at a time. `default-features = false` + a trimmed set
+# (status / diff / blame / discovery, plus `parallel` for the
+# multi-threaded status walk that keeps huge-tree refreshes cheap);
+# networking, credentials, worktree archive/stream, progress reporting,
+# and ~40 other default features stay off. `worktree-mutation` gets added
+# when worktree create/remove migrates (PR 6).
+gix = { version = "0.84", default-features = false, features = [
+    "sha1",
+    "status",
+    "dirwalk",
+    "blame",
+    "blob-diff",
+    "revision",
+    "index",
+    "attributes",
+    "excludes",
+    "parallel",
+] }
 nucleo-matcher = "0.3"
 grep-searcher = "0.1"
 grep-regex = "0.1"
