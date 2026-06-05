@@ -143,7 +143,7 @@ impl App {
             huge_tree_decisions: std::collections::HashMap::new(),
             current_repo_root: None,
             current_gitdir: None,
-            git_status_raw_cache: None,
+            git_status_cache: None,
             git_worker_available: false,
             pending_git_requests: Vec::new(),
             git_generation: 0,
@@ -224,11 +224,12 @@ impl App {
                             .ok();
                         (i, h)
                     });
-                let raw = crate::git::status::porcelain_raw(&req.canonical);
+                let entries =
+                    crate::git::status::repo_status_entries(&req.repo_root, &req.canonical);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
-                    raw,
+                    entries,
                     index_mtime,
                     head_mtime,
                 });

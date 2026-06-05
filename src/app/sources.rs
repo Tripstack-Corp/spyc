@@ -447,7 +447,7 @@ mod tests {
         state::GitWorkerResult {
             generation,
             repo_root: PathBuf::from("/no/such/repo"),
-            raw: None,
+            entries: None,
             index_mtime: None,
             head_mtime: None,
         }

@@ -15,9 +15,11 @@
 //!    consumes (strip prefix, basename for in-dir files, aggregate deep files
 //!    onto their parent dir).
 //!
-//! `sysinfo::parse_porcelain_statuses` is now just `decode_porcelain` +
-//! `map_to_listing` — the live status path is unchanged and still authoritative
-//! (PR 4 is a parity *spike*; nothing is flipped to gix yet).
+//! The live status path (the background git worker, `bootstrap.rs`) runs
+//! [`repo_status_entries`] — gix by default, or the subprocess backend when
+//! `SPYC_GIT_BACKEND=subprocess` is set (a one-cycle escape hatch). The
+//! result `Vec<StatusEntry>` is cached repo-wide and re-filtered per listing
+//! dir via [`map_to_listing`] on each chdir.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -236,11 +238,6 @@ pub fn porcelain_raw(dir: &Path) -> Option<String> {
 ///   a delete + add pair instead of a single `R`.
 /// * default `head_tree` (HEAD) — compared against the index for the staged
 ///   column.
-// PR 4 is a parity *spike*: this backend runs only from the parity tests, not
-// the live status path (still the subprocess + `parse_porcelain_statuses`).
-// PR 5 flips the hot path here and removes this allow. Scoped to this fn so a
-// genuinely-dead helper elsewhere still trips the lint.
-#[allow(dead_code)]
 #[must_use]
 pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
     use gix::bstr::ByteSlice;
@@ -359,6 +356,178 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
     }
 
     Some(by_path.into_values().collect())
+}
+
+/// Compute the repo's status entries for the live path, honoring the
+/// `SPYC_GIT_BACKEND` escape hatch. gix ([`repo_status`]) is the default;
+/// setting `SPYC_GIT_BACKEND=subprocess` forces the legacy
+/// `git status --porcelain` path (decoded to the same `Vec<StatusEntry>`)
+/// — a one-release-cycle safety valve so a field regression in the gix
+/// flip is a flag flip, not a code restore. Removed in PR 9.
+///
+/// Both backends report repo-relative paths, so the result is independent
+/// of `listing_dir` (it's only the cwd the subprocess runs from). `None`
+/// on failure → "no markers", same as before.
+#[must_use]
+pub fn repo_status_entries(repo_root: &Path, listing_dir: &Path) -> Option<Vec<StatusEntry>> {
+    if subprocess_backend() {
+        porcelain_raw(listing_dir).map(|raw| decode_porcelain(&raw))
+    } else {
+        repo_status(repo_root)
+    }
+}
+
+/// True when `SPYC_GIT_BACKEND=subprocess` is set — the escape hatch that
+/// reverts the status hot path to the legacy subprocess backend. Reading
+/// the env var is safe (only `set_var` is racy); this is a cheap, rare
+/// call (one per status walk, off the UI thread).
+fn subprocess_backend() -> bool {
+    std::env::var_os("SPYC_GIT_BACKEND").is_some_and(|v| v == "subprocess")
+}
+
+#[cfg(test)]
+mod map_tests {
+    //! Path-mapping rules: `decode_porcelain` → `map_to_listing`. Relocated
+    //! from `sysinfo::tests` when the porcelain parser was split into the
+    //! shared decode + map stages (gix flip, PR 5). These pin the
+    //! prefix/basename/parent-dir-aggregation behavior that both backends
+    //! share.
+    use super::{decode_porcelain, map_to_listing};
+    use crate::ui::list_view::{GitChange, GitFileStatus};
+    use std::collections::HashMap;
+
+    /// The production decode→map composition the old `parse_porcelain_statuses`
+    /// performed, so the test bodies read unchanged.
+    fn parse(porcelain: &str, prefix: &str) -> HashMap<String, GitFileStatus> {
+        map_to_listing(&decode_porcelain(porcelain), prefix)
+    }
+
+    #[test]
+    fn deep_modification_does_not_dirty_same_basename_at_root() {
+        // Regression: a root listing of `git status` showing
+        // `content-acquisition/AGENTS.md` modified must NOT mark a
+        // separate root-level `AGENTS.md` as modified.
+        let porcelain = " M content-acquisition/AGENTS.md\n";
+        let map = parse(porcelain, "");
+        // The deep file's basename is NOT a root entry.
+        assert!(!map.contains_key("AGENTS.md"));
+        // The parent dir IS marked dirty (unstaged-Modified).
+        let dir_status = map.get("content-acquisition/").unwrap();
+        assert_eq!(dir_status.unstaged, Some(GitChange::Modified));
+        assert!(dir_status.staged.is_none());
+        assert!(!dir_status.untracked);
+    }
+
+    #[test]
+    fn root_modification_marks_basename() {
+        // ` M` = unstaged-only modify.
+        let map = parse(" M AGENTS.md\n", "");
+        let s = map.get("AGENTS.md").unwrap();
+        assert_eq!(s.unstaged, Some(GitChange::Modified));
+        assert!(s.staged.is_none());
+        assert!(!s.untracked);
+    }
+
+    #[test]
+    fn root_and_deep_same_basename_uses_root_status() {
+        // Both a root file and a sibling-named deep file are dirty.
+        // The root entry must reflect the root file's actual status,
+        // not the deep file's.
+        let porcelain = "?? new.md\n M sub/new.md\n";
+        let map = parse(porcelain, "");
+        let new_md = map.get("new.md").unwrap();
+        assert!(new_md.untracked);
+        assert!(new_md.staged.is_none() && new_md.unstaged.is_none());
+        assert_eq!(map.get("sub/").unwrap().unstaged, Some(GitChange::Modified));
+    }
+
+    #[test]
+    fn prefix_strips_listing_dir() {
+        // Listing `sub/` under a repo root: only entries under `sub/`
+        // contribute, and they're keyed relative to the listing dir.
+        let porcelain = " M sub/foo.txt\n M other/bar.txt\n";
+        let map = parse(porcelain, "sub");
+        assert_eq!(
+            map.get("foo.txt").unwrap().unstaged,
+            Some(GitChange::Modified)
+        );
+        assert!(!map.contains_key("bar.txt"));
+    }
+
+    #[test]
+    fn untracked_surfaces_in_subdirectory_listing() {
+        // Regression for the `-uno` huge-tree suppression: viewing
+        // `docs/` with untracked files in it must surface them as
+        // basename-keyed untracked entries.
+        let porcelain = "?? docs/PATH_HANDOFF_PLAN.md\n?? docs/TEST_IMPROVEMENT_PLAN.md\n";
+        let map = parse(porcelain, "docs");
+        let a = map.get("PATH_HANDOFF_PLAN.md").unwrap();
+        assert!(a.untracked);
+        assert!(a.staged.is_none() && a.unstaged.is_none());
+        assert!(map.get("TEST_IMPROVEMENT_PLAN.md").unwrap().untracked);
+    }
+
+    #[test]
+    fn untracked_only_subdir_collapses_to_untracked_dir() {
+        // A subtree whose only change is untracked content marks the
+        // intermediate directory `?` (untracked), not `~` (modified).
+        let map = parse("?? docs/drafts/notes.md\n", "docs");
+        let dir = map.get("drafts/").unwrap();
+        assert!(dir.untracked);
+        assert!(dir.staged.is_none() && dir.unstaged.is_none());
+        assert!(!map.contains_key("notes.md"));
+    }
+
+    #[test]
+    fn mixed_subdir_prefers_modified_over_untracked() {
+        // A dir containing both a tracked modification and an untracked
+        // file reads as changed (`~`), regardless of which row git
+        // emits first — tracked outranks untracked and never downgrades.
+        let untracked_first = parse("?? sub/new.md\n M sub/old.md\n", "");
+        let modified_first = parse(" M sub/old.md\n?? sub/new.md\n", "");
+        for map in [untracked_first, modified_first] {
+            let dir = map.get("sub/").unwrap();
+            assert_eq!(dir.unstaged, Some(GitChange::Modified));
+            assert!(!dir.untracked);
+        }
+    }
+
+    #[test]
+    fn rename_takes_new_name() {
+        // `R ` = staged rename, working tree clean.
+        let porcelain = "R  old.md -> new.md\n";
+        let map = parse(porcelain, "");
+        let s = map.get("new.md").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Renamed));
+        assert!(s.unstaged.is_none());
+        assert!(!map.contains_key("old.md"));
+    }
+
+    #[test]
+    fn staged_only_modify() {
+        let map = parse("M  foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Modified));
+        assert!(s.unstaged.is_none());
+    }
+
+    #[test]
+    fn partially_staged_modify() {
+        // `MM` — staged modify + further unstaged edits. Both halves set.
+        let map = parse("MM foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Modified));
+        assert_eq!(s.unstaged, Some(GitChange::Modified));
+    }
+
+    #[test]
+    fn conflict_marks_both_halves() {
+        // `UU` — both sides unmerged. We collapse to Conflicted on both.
+        let map = parse("UU foo.rs\n", "");
+        let s = map.get("foo.rs").unwrap();
+        assert_eq!(s.staged, Some(GitChange::Conflicted));
+        assert_eq!(s.unstaged, Some(GitChange::Conflicted));
+    }
 }
 
 #[cfg(test)]
