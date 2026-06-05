@@ -1131,8 +1131,8 @@ impl AppState {
     /// `git status --porcelain` (with `-unormal`, walking every
     /// untracked file on the 110k-file tree) per chdir.
     ///
-    /// - Branch comes from `.git/HEAD` (or the gitfile pointer for
-    ///   worktrees/submodules) — pure file IO.
+    /// - Branch comes from gix (`head_name` / `head_id`), which resolves
+    ///   worktree/submodule gitlinks, packed refs, and detached HEAD.
     /// - Dirty flag comes from the raw porcelain we already cached
     ///   in [`Self::git_file_statuses_cached`]. Empty raw output ⇒
     ///   clean. Non-empty ⇒ dirty.
@@ -1141,8 +1141,7 @@ impl AppState {
     /// the old `sysinfo::git_status` contract.
     pub fn compute_git_info_fast(&self) -> Option<String> {
         let repo_root = self.current_repo_root.as_ref()?;
-        let gitdir = crate::sysinfo::resolve_gitdir(repo_root)?;
-        let branch = crate::sysinfo::read_head_branch(&gitdir)?;
+        let branch = crate::git::discovery::head_branch(repo_root)?;
         // Only trust the raw cache for the dirty marker if it was
         // captured for *this* repo. Without the `c.repo_root` filter,
         // a worktree switch left the top-bar showing the previous
@@ -1157,13 +1156,12 @@ impl AppState {
         Some(if dirty { format!("{branch}*") } else { branch })
     }
 
-    /// Stat `.git/index` and `.git/HEAD` against the cached repo
-    /// root — the no-subprocess version of `git_mtime_key`. Used
-    /// to seed `git_poll_cache` on chdir without spawning
-    /// `git rev-parse --git-dir`.
+    /// Stat `index` and `HEAD` in the cached gitdir — the hot-path
+    /// (1 Hz poll) freshness key. Reads the `current_gitdir` resolved
+    /// once at chdir (`set_repo_root`), so this never opens gix or
+    /// re-resolves the gitdir; it's pure `lstat` + `modified()`.
     fn compute_git_mtime_key_fast(&self) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
-        let repo_root = self.current_repo_root.as_ref()?;
-        let gitdir = crate::sysinfo::resolve_gitdir(repo_root)?;
+        let gitdir = self.current_gitdir.as_ref()?;
         let index_mt = std::fs::metadata(gitdir.join("index"))
             .and_then(|m| m.modified())
             .ok()?;
@@ -1174,12 +1172,18 @@ impl AppState {
     }
 
     /// Set `current_repo_root` and the derived `current_gitdir` together
-    /// so they never drift. The gitdir resolution follows a linked
+    /// so they never drift. The gitdir resolution (gix) follows a linked
     /// worktree's `.git` *file* to its real gitdir.
+    ///
+    /// Early-returns when the repo root is unchanged — this runs on every
+    /// chdir (incl. within-repo navigation), so the gix repo-open only
+    /// fires when actually crossing into a different repo. The cached
+    /// `current_gitdir` is then reused by the 1 Hz mtime poll with no gix.
     fn set_repo_root(&mut self, repo_root: Option<std::path::PathBuf>) {
-        self.current_gitdir = repo_root
-            .as_deref()
-            .and_then(crate::sysinfo::resolve_gitdir);
+        if self.current_repo_root == repo_root {
+            return;
+        }
+        self.current_gitdir = repo_root.as_deref().and_then(crate::git::discovery::gitdir);
         self.current_repo_root = repo_root;
     }
 

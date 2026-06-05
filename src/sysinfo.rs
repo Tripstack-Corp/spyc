@@ -22,59 +22,6 @@ pub fn epoch_nanos() -> u128 {
     secs * 1_000_000_000 + subsec
 }
 
-/// Resolve `<repo_root>/.git` to the actual gitdir on disk. For a
-/// normal repo this is just `<repo_root>/.git`; for a worktree or
-/// submodule, `.git` is a *file* whose content is `gitdir: <path>`
-/// — we follow that pointer.
-///
-/// Returns `None` if `.git` is missing or the gitfile is malformed.
-/// Pure filesystem (no subprocess); used to bypass
-/// `git rev-parse --git-dir` on every chdir.
-pub fn resolve_gitdir(repo_root: &std::path::Path) -> Option<std::path::PathBuf> {
-    let dot_git = repo_root.join(".git");
-    let meta = std::fs::symlink_metadata(&dot_git).ok()?;
-    if meta.is_dir() {
-        return Some(dot_git);
-    }
-    // gitfile: `gitdir: /abs/or/rel/path\n`
-    let contents = std::fs::read_to_string(&dot_git).ok()?;
-    let line = contents.lines().find(|l| l.starts_with("gitdir:"))?;
-    let path_str = line.trim_start_matches("gitdir:").trim();
-    let p = std::path::PathBuf::from(path_str);
-    Some(if p.is_absolute() {
-        p
-    } else {
-        repo_root.join(p)
-    })
-}
-
-/// Read `<gitdir>/HEAD` and return a branch display string —
-/// `main` for an attached branch, `abc1234` for a detached HEAD
-/// (short hash), or `None` if HEAD can't be read. Pure filesystem;
-/// replaces `git rev-parse --abbrev-ref HEAD` on the chdir hot
-/// path.
-pub fn read_head_branch(gitdir: &std::path::Path) -> Option<String> {
-    let contents = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
-    let trimmed = contents.trim();
-    if let Some(rest) = trimmed.strip_prefix("ref: ") {
-        // `refs/heads/main` → `main`. For non-heads refs (e.g.
-        // `refs/remotes/origin/foo` from a weird checkout) just
-        // strip the longest known prefix we recognize, else show
-        // the bare ref name.
-        let name = rest
-            .strip_prefix("refs/heads/")
-            .or_else(|| rest.strip_prefix("refs/"))
-            .unwrap_or(rest);
-        Some(name.to_string())
-    } else if trimmed.len() >= 7 {
-        // Detached HEAD — raw commit hash. Show first 7 chars,
-        // matching `git rev-parse --short` default.
-        Some(trimmed[..7].to_string())
-    } else {
-        None
-    }
-}
-
 /// Pure-parser half of [`git_file_statuses`]: turns raw `git status
 /// --porcelain` output (plus the dir-relative prefix) into the
 /// basename-keyed map the list view consumes. Split out so we can unit
@@ -444,51 +391,5 @@ mod tests {
         let s = map.get("foo.rs").unwrap();
         assert_eq!(s.staged, Some(GitChange::Conflicted));
         assert_eq!(s.unstaged, Some(GitChange::Conflicted));
-    }
-
-    #[test]
-    fn resolve_gitdir_normal_repo_uses_dot_git_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(tmp.path().join(".git")).unwrap();
-        assert_eq!(resolve_gitdir(tmp.path()).unwrap(), tmp.path().join(".git"));
-    }
-
-    #[test]
-    fn resolve_gitdir_worktree_follows_absolute_gitfile() {
-        // A linked worktree's `.git` is a *file*: `gitdir: <path>`
-        // pointing at `<main>/.git/worktrees/<name>/`. The old
-        // `is_dir()` check missed this entirely, so the worktree's
-        // real index/HEAD were never watched and markers went stale.
-        let tmp = tempfile::tempdir().unwrap();
-        let real_gitdir = tmp.path().join("main/.git/worktrees/feature");
-        std::fs::create_dir_all(&real_gitdir).unwrap();
-        let wt = tmp.path().join("feature");
-        std::fs::create_dir_all(&wt).unwrap();
-        std::fs::write(
-            wt.join(".git"),
-            format!("gitdir: {}\n", real_gitdir.display()),
-        )
-        .unwrap();
-        assert_eq!(resolve_gitdir(&wt).unwrap(), real_gitdir);
-    }
-
-    #[test]
-    fn resolve_gitdir_worktree_relative_gitfile_resolves_against_root() {
-        // Some git versions write a *relative* gitdir path; it resolves
-        // against the worktree root.
-        let tmp = tempfile::tempdir().unwrap();
-        let wt = tmp.path().join("feature");
-        std::fs::create_dir_all(&wt).unwrap();
-        std::fs::write(wt.join(".git"), "gitdir: ../main/.git/worktrees/feature\n").unwrap();
-        assert_eq!(
-            resolve_gitdir(&wt).unwrap(),
-            wt.join("../main/.git/worktrees/feature")
-        );
-    }
-
-    #[test]
-    fn resolve_gitdir_none_outside_repo() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert!(resolve_gitdir(tmp.path()).is_none());
     }
 }
