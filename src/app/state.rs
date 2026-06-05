@@ -1098,7 +1098,7 @@ impl AppState {
             // No worker (tests, App::new bootstrap) — fall through
             // to the synchronous spawn path below.
             self.git_status_raw_cache = None;
-            if let Some(raw) = crate::sysinfo::git_status_porcelain_raw(canonical)
+            if let Some(raw) = crate::git::status::porcelain_raw(canonical)
                 && let Some((index_mtime, head_mtime)) = mtimes
             {
                 self.git_status_raw_cache = Some(GitStatusRawCache {

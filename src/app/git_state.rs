@@ -88,11 +88,7 @@ impl App {
     /// matched git SHA — the value of the picker for a
     /// commit-discussion workflow.
     pub fn open_git_show_pager(&mut self, sha: &str) {
-        match std::process::Command::new("git")
-            .args(["show", "--color=always", sha])
-            .current_dir(&self.state.listing.dir)
-            .output()
-        {
+        match crate::git::diff::show(&self.state.listing.dir, sha) {
             Ok(out) if out.status.success() && !out.stdout.is_empty() => {
                 let title = format!("git show {sha}");
                 self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
@@ -130,22 +126,8 @@ impl App {
         // a confusing "no unstaged changes" flash on a row that was
         // visibly marked dirty. `gD` (`--cached`) keeps the
         // staged-only "what would commit" view.
-        let mut args: Vec<&str> = vec!["diff", "--color=always"];
-        if cached {
-            args.push("--cached");
-        } else {
-            args.push("HEAD");
-        }
-        args.push("--");
-        for s in &path_strings {
-            args.push(s);
-        }
-        let modified_out = match std::process::Command::new("git")
-            .args(&args)
-            .current_dir(cwd)
-            .output()
-        {
-            Ok(o) => o.stdout,
+        let modified_out = match crate::git::diff::working(cwd, &path_strings, cached) {
+            Ok(o) => o,
             Err(e) => {
                 self.state.flash_error(format!("git diff: {e}"));
                 return;
@@ -154,7 +136,7 @@ impl App {
 
         let mut combined = modified_out;
         if !cached {
-            combined.extend(super::untracked_diff_bytes(cwd, &path_strings));
+            combined.extend(crate::git::diff::untracked_bytes(cwd, &path_strings));
         }
 
         if combined.is_empty() {
@@ -183,11 +165,7 @@ impl App {
             return;
         }
         let path_str = path.display().to_string();
-        match std::process::Command::new("git")
-            .args(["blame", "--color-lines", "--", &path_str])
-            .current_dir(&self.state.listing.dir)
-            .output()
-        {
+        match crate::git::diff::blame(&self.state.listing.dir, &path_str) {
             Ok(out) if out.status.success() && !out.stdout.is_empty() => {
                 let title = format!("git blame {}", row.display);
                 self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
@@ -203,7 +181,7 @@ impl App {
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
     pub fn worktree_list(&mut self) {
-        match crate::sysinfo::git_worktree_list(&self.state.listing.dir) {
+        match crate::git::worktree::list(&self.state.listing.dir) {
             Some(worktrees) => {
                 self.state.pending_worktrees =
                     Some(worktrees.iter().map(|w| w.path.clone()).collect());

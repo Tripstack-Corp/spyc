@@ -616,7 +616,7 @@ impl App {
                 if branch.is_empty() {
                     return Vec::new();
                 }
-                match crate::sysinfo::git_worktree_add(&self.state.listing.dir, branch) {
+                match crate::git::worktree::add(&self.state.listing.dir, branch) {
                     Ok(path) => {
                         self.state
                             .flash_info(format!("created worktree: {}", path.display()));
@@ -647,9 +647,9 @@ impl App {
                 // non-git dir, so PROJECT_HOME would have nothing to reanchor
                 // on. The main worktree is the first `git worktree list
                 // --porcelain` entry.
-                let main_repo = crate::sysinfo::git_worktree_list(&dir)
+                let main_repo = crate::git::worktree::list(&dir)
                     .and_then(|wts| wts.into_iter().next().map(|wt| wt.path));
-                match crate::sysinfo::git_worktree_remove(&dir) {
+                match crate::git::worktree::remove(&dir) {
                     Ok(()) => {
                         self.state
                             .flash_info(format!("removed worktree: {}", dir.display()));

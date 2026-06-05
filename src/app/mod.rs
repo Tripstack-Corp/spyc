@@ -222,7 +222,7 @@ use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 use util::kill_pg;
 use util::{
     count_subdirs_capped, eof_marker_line, format_uptime, path_basename_display,
-    strip_ansi_escapes, strip_crlf, untracked_diff_bytes, user_host_string,
+    strip_ansi_escapes, strip_crlf, user_host_string,
 };
 
 /// Which collection the user is looking at.
