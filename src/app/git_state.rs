@@ -45,35 +45,35 @@ impl App {
         if self.state.current_repo_root.as_deref() != Some(result.repo_root.as_path()) {
             return false;
         }
-        let Some(raw) = result.raw else {
-            // `git status` failed (not in a repo by the time the
-            // worker spawned, or git missing). Leave existing state.
+        let Some(entries) = result.entries else {
+            // The status walk failed (not in a repo by the time the
+            // worker ran, etc.). Leave existing state.
             return false;
         };
         let (Some(index_mtime), Some(head_mtime)) = (result.index_mtime, result.head_mtime) else {
             return false;
         };
-        self.state.git_status_raw_cache = Some(state::GitStatusRawCache {
+        self.state.git_status_cache = Some(state::GitStatusCache {
             repo_root: result.repo_root.clone(),
             index_mtime,
             head_mtime,
-            raw,
+            entries,
         });
         // Seed the 1 Hz poll cache too — without this the next safety
-        // poll would observe a None cache and re-fire `git status`.
+        // poll would observe a None cache and re-fire the status walk.
         self.state.git_poll_cache = Some((index_mtime, head_mtime));
-        // Reparse against the current listing dir's prefix and refresh
+        // Re-filter against the current listing dir's prefix and refresh
         // the display string. `compute_git_info_fast` reads the cache
         // we just stored for its dirty flag.
         let listing_dir = self.state.listing.dir.clone();
         let new_files = {
-            let cache = self.state.git_status_raw_cache.as_ref().unwrap();
+            let cache = self.state.git_status_cache.as_ref().unwrap();
             let prefix = listing_dir
                 .strip_prefix(&cache.repo_root)
                 .unwrap_or(std::path::Path::new(""))
                 .to_string_lossy()
                 .into_owned();
-            crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
+            crate::git::status::map_to_listing(&cache.entries, &prefix)
         };
         let new_info = self.state.compute_git_info_fast();
         let changed = new_files != self.state.git.files || new_info != self.state.git.info;

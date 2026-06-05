@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Git status now uses gix (gitoxide) instead of shelling out to `git
+  status`.** The background git worker computes file-status markers and the
+  branch/dirty indicator in-process via gix — no `git` subprocess on the
+  status hot path. Output is validated byte-for-byte against
+  `git status --porcelain` across a parity corpus, so markers are unchanged.
+  Safety valve for the rollout: set `SPYC_GIT_BACKEND=subprocess` to revert
+  the status backend to the legacy `git` subprocess (a temporary escape hatch;
+  it will be removed once gix status has soaked). Part of the ongoing
+  git → gix migration (diff/show/blame/worktree still use `git` for now).
 - **Added `CLAUDE.md` (architectural contract) + refreshed `AGENTS.md` /
   `ARCHITECTURE.md`.** New top-level `CLAUDE.md` states the MVU invariants and
   the maintenance rules (≤800-LoC files, module-organization patterns,

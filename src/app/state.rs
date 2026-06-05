@@ -156,9 +156,9 @@ pub enum PagerLines {
 
 /// Off-main-thread git-status work item. The chdir hot path sends
 /// these to a background worker on cache miss so the UI returns
-/// immediately; the worker spawns `git status --porcelain` (the
-/// 200-500 ms operation on a ~110k-file index) and echoes results
-/// back via `GitWorkerResult`.
+/// immediately; the worker computes the repo's status via gix
+/// (`git::status::repo_status`) — the heavy index/worktree walk on a
+/// ~110k-file repo — and echoes results back via `GitWorkerResult`.
 #[derive(Debug)]
 pub struct GitWorkerRequest {
     pub generation: u64,
@@ -167,31 +167,32 @@ pub struct GitWorkerRequest {
 }
 
 /// Worker reply. `generation` lets the main thread discard results
-/// whose source chdir has been superseded. `raw` is `None` when the
-/// `git status` spawn failed (not in a repo, git missing, etc.) —
-/// the App treats that as "no markers" rather than a hard error.
+/// whose source chdir has been superseded. `entries` is the structured
+/// repo-relative status (`git::status::StatusEntry`s), or `None` when
+/// the status walk failed (not in a repo, etc.) — the App treats that
+/// as "no markers" rather than a hard error.
 #[derive(Debug)]
 pub struct GitWorkerResult {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
-    pub raw: Option<String>,
+    pub entries: Option<Vec<crate::git::status::StatusEntry>>,
     pub index_mtime: Option<std::time::SystemTime>,
     pub head_mtime: Option<std::time::SystemTime>,
 }
 
-/// Cached raw `git status --porcelain` output, keyed by repo root +
-/// `.git/index` / `.git/HEAD` mtimes. The status text doesn't depend
-/// on the current listing dir — only on the repo state — so once we
-/// have it, every chdir to a sibling/child path within the same repo
-/// can re-parse it locally with a freshly-computed prefix instead of
-/// spawning `git status` again. On a ~110k-file index that spawn is
-/// 200-500 ms, dominating drill-in latency.
+/// Cached repo status (structured `StatusEntry`s), keyed by repo root +
+/// `.git/index` / `.git/HEAD` mtimes. The status doesn't depend on the
+/// current listing dir — only on the repo state — so once we have it,
+/// every chdir to a sibling/child path within the same repo re-filters
+/// it locally (`git::status::map_to_listing` with a freshly-computed
+/// prefix) instead of walking the repo again. On a ~110k-file repo that
+/// walk dominates drill-in latency.
 #[derive(Debug, Clone)]
-pub struct GitStatusRawCache {
+pub struct GitStatusCache {
     pub repo_root: PathBuf,
     pub index_mtime: std::time::SystemTime,
     pub head_mtime: std::time::SystemTime,
-    pub raw: String,
+    pub entries: Vec<crate::git::status::StatusEntry>,
 }
 
 /// Which surface owns the keyboard — the single focus axis that replaces
@@ -380,7 +381,7 @@ pub struct AppState {
     /// `update_huge_tree`. Used to compute the
     /// `git status --porcelain` prefix without spawning
     /// `git rev-parse --show-toplevel`, and as the cache key for
-    /// `git_status_raw_cache`.
+    /// `git_status_cache`.
     pub current_repo_root: Option<std::path::PathBuf>,
     /// The active repo's *resolved* gitdir — `<root>/.git` for a normal
     /// repo, or `<main>/.git/worktrees/<name>/` for a linked worktree
@@ -399,7 +400,7 @@ pub struct AppState {
     /// cache (provided `.git/index` and `.git/HEAD` mtimes match)
     /// and skips the spawn entirely; only the per-listing-dir
     /// prefix re-parse is paid.
-    pub git_status_raw_cache: Option<GitStatusRawCache>,
+    pub git_status_cache: Option<GitStatusCache>,
     /// Whether a background git-status worker is wired. Set by `App::new`
     /// once the worker thread spawns; `false` in tests and during the
     /// AppState bootstrap before the worker exists. When `true`, a
@@ -976,7 +977,7 @@ impl AppState {
                     .last_git_invalidation
                     .is_none_or(|t| t.elapsed() >= throttle);
                 if should_invalidate {
-                    self.git_status_raw_cache = None;
+                    self.git_status_cache = None;
                     self.last_git_invalidation = Some(std::time::Instant::now());
                 }
                 let dir = self.listing.dir.clone();
@@ -1036,7 +1037,7 @@ impl AppState {
         // mtime moved — invalidate the raw-status cache before going
         // through `git_file_statuses_cached`, which will re-spawn and
         // refill it on this dir.
-        self.git_status_raw_cache = None;
+        self.git_status_cache = None;
         let listing_dir = self.listing.dir.clone();
         let new_git_files = self.git_file_statuses_cached(&listing_dir);
         let new_git_info = self.compute_git_info_fast();
@@ -1073,7 +1074,7 @@ impl AppState {
         };
         let mtimes = self.compute_git_mtime_key_fast();
         // Decide whether to reuse the cached raw output.
-        let reuse = self.git_status_raw_cache.as_ref().is_some_and(|c| {
+        let reuse = self.git_status_cache.as_ref().is_some_and(|c| {
             c.repo_root == repo_root
                 && mtimes.is_some_and(|(idx, head)| idx == c.index_mtime && head == c.head_mtime)
         });
@@ -1096,23 +1097,23 @@ impl AppState {
                 return std::collections::HashMap::new();
             }
             // No worker (tests, App::new bootstrap) — fall through
-            // to the synchronous spawn path below.
-            self.git_status_raw_cache = None;
-            if let Some(raw) = crate::git::status::porcelain_raw(canonical)
+            // to the synchronous walk path below.
+            self.git_status_cache = None;
+            if let Some(entries) = crate::git::status::repo_status_entries(&repo_root, canonical)
                 && let Some((index_mtime, head_mtime)) = mtimes
             {
-                self.git_status_raw_cache = Some(GitStatusRawCache {
+                self.git_status_cache = Some(GitStatusCache {
                     repo_root,
                     index_mtime,
                     head_mtime,
-                    raw,
+                    entries,
                 });
             }
         }
-        // Parse with the prefix derived from the listing dir relative
-        // to the repo root — no `git rev-parse --show-toplevel`
-        // subprocess needed.
-        let Some(cache) = self.git_status_raw_cache.as_ref() else {
+        // Re-filter the cached repo-wide entries to this listing dir's
+        // prefix — no repo re-walk needed (the cache survives chdir
+        // within the repo).
+        let Some(cache) = self.git_status_cache.as_ref() else {
             return std::collections::HashMap::new();
         };
         let prefix = canonical
@@ -1120,7 +1121,7 @@ impl AppState {
             .unwrap_or(Path::new(""))
             .to_string_lossy()
             .into_owned();
-        crate::sysinfo::parse_porcelain_statuses(&cache.raw, &prefix)
+        crate::git::status::map_to_listing(&cache.entries, &prefix)
     }
 
     /// Compute the `git_info` display string (`main`, `main*`,
@@ -1149,10 +1150,10 @@ impl AppState {
         // worker filled the new cache) — reported by Spencer as
         // "stale markers" after switching worktrees.
         let dirty = self
-            .git_status_raw_cache
+            .git_status_cache
             .as_ref()
             .filter(|c| &c.repo_root == repo_root)
-            .is_some_and(|c| !c.raw.is_empty());
+            .is_some_and(|c| !c.entries.is_empty());
         Some(if dirty { format!("{branch}*") } else { branch })
     }
 
@@ -1238,10 +1239,10 @@ impl AppState {
         // satisfy `repo_root.is_some()` here, so the cache lives
         // on for re-entry.
         if let Some(new_root) = repo_root.as_ref()
-            && let Some(c) = self.git_status_raw_cache.as_ref()
+            && let Some(c) = self.git_status_cache.as_ref()
             && &c.repo_root != new_root
         {
-            self.git_status_raw_cache = None;
+            self.git_status_cache = None;
         }
         self.set_repo_root(repo_root);
         if self.is_huge_tree && !was_huge {
@@ -2358,7 +2359,7 @@ impl AppState {
             huge_tree_decisions: std::collections::HashMap::new(),
             current_repo_root: None,
             current_gitdir: None,
-            git_status_raw_cache: None,
+            git_status_cache: None,
             git_worker_available: false,
             pending_git_requests: Vec::new(),
             git_generation: 0,
@@ -3861,7 +3862,7 @@ mod tests {
         // Wire the "worker" and force a clean cache-miss baseline so the
         // asserted call takes the enqueue branch deterministically.
         s.git_worker_available = true;
-        s.git_status_raw_cache = None;
+        s.git_status_cache = None;
         s.pending_git_requests.clear();
         let gen_before = s.git_generation;
 
