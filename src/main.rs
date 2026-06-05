@@ -8,6 +8,7 @@ mod context;
 mod debug_log;
 mod envset;
 mod fs;
+mod git;
 mod key_trace;
 mod keymap;
 mod mcp;

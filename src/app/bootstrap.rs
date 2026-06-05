@@ -224,7 +224,7 @@ impl App {
                             .ok();
                         (i, h)
                     });
-                let raw = crate::sysinfo::git_status_porcelain_raw(&req.canonical);
+                let raw = crate::git::status::porcelain_raw(&req.canonical);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
