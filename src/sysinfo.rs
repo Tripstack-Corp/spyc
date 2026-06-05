@@ -26,118 +26,18 @@ pub fn epoch_nanos() -> u128 {
 /// --porcelain` output (plus the dir-relative prefix) into the
 /// basename-keyed map the list view consumes. Split out so we can unit
 /// test the path-mapping rules without spawning `git`.
+///
+/// This is now a thin composition of the two shared stages in
+/// [`crate::git::status`]: decode the porcelain text into per-path
+/// [`StatusEntry`](crate::git::status::StatusEntry)s, then map those onto
+/// the listing dir. The gix backend produces the same intermediate, so both
+/// paths share the path-mapping logic (`map_to_listing`).
 pub fn parse_porcelain_statuses(
     porcelain: &str,
     prefix: &str,
 ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
-    use crate::ui::list_view::{GitChange, GitFileStatus};
-    /// Decode one porcelain XY half (X = index/staged, Y = working tree)
-    /// into a `GitChange`. ` ` (and `?`/`!`) yield None — those are
-    /// handled by the caller via the special-case markers.
-    const fn decode_half(c: char) -> Option<GitChange> {
-        match c {
-            'M' | 'T' => Some(GitChange::Modified),
-            'A' => Some(GitChange::Added),
-            'D' => Some(GitChange::Deleted),
-            'R' | 'C' => Some(GitChange::Renamed),
-            'U' => Some(GitChange::Conflicted),
-            _ => None,
-        }
-    }
-    let mut map = std::collections::HashMap::new();
-    for line in porcelain.lines() {
-        if line.len() < 4 {
-            continue;
-        }
-        let xy = &line[..2];
-        let path_str = &line[3..];
-        // For renames ("R  old -> new"), take the new name.
-        let raw_path = path_str.rsplit(" -> ").next().unwrap_or(path_str);
-        // Strip the directory prefix to get a path relative to the
-        // current listing dir (git status gives repo-relative paths).
-        let filename = if prefix.is_empty() {
-            raw_path
-        } else {
-            let pfx = if prefix.ends_with('/') {
-                prefix.to_string()
-            } else {
-                format!("{prefix}/")
-            };
-            match raw_path.strip_prefix(&pfx) {
-                Some(rest) => rest,
-                None => continue, // not under this directory
-            }
-        };
-        let name = std::path::Path::new(filename)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        // Top component relative to THIS directory.
-        let top_component = filename.split('/').next().unwrap_or(filename).to_string();
-        let in_this_dir = top_component == filename;
-        // Build a structured status. Both halves are decoded
-        // independently; a porcelain like `MM` means staged-modified
-        // AND further-modified-unstaged. Conflicts (`UU`, `DD`, `AA`)
-        // collapse to Conflicted on both halves so the marker reads
-        // `!!` and stands out.
-        let status = if xy == "??" {
-            GitFileStatus {
-                untracked: true,
-                ..GitFileStatus::clean()
-            }
-        } else if xy == "!!" {
-            continue; // ignored
-        } else if xy.contains('U') || xy == "DD" || xy == "AA" {
-            GitFileStatus {
-                staged: Some(GitChange::Conflicted),
-                unstaged: Some(GitChange::Conflicted),
-                untracked: false,
-            }
-        } else {
-            let mut chars = xy.chars();
-            let x = chars.next().unwrap_or(' ');
-            let y = chars.next().unwrap_or(' ');
-            GitFileStatus {
-                staged: decode_half(x),
-                unstaged: decode_half(y),
-                untracked: false,
-            }
-        };
-        // Only file rows in THIS directory get a basename entry.
-        // Otherwise a deep entry like `content-acquisition/AGENTS.md`
-        // would write `AGENTS.md → Modified` and dirty the unrelated
-        // root-level `AGENTS.md` row.
-        if in_this_dir && !name.is_empty() {
-            map.entry(name).or_insert(status);
-        }
-        // Mark the parent directory as dirty for entries in subtrees.
-        // Directories don't have a meaningful per-half staging concept,
-        // so we collapse to one of two shapes:
-        //   - untracked (`?`) when the subtree's changes are *only*
-        //     untracked content, and
-        //   - unstaged-Modified (`~`) for any tracked change.
-        // Tracked outranks untracked: a dir with both a modified file
-        // and a new file reads as changed (`~`), not untracked. Because
-        // siblings arrive in arbitrary order, an untracked flag set by
-        // an earlier sibling is upgraded to `~` when a tracked sibling
-        // shows up; the reverse never downgrades.
-        if !in_this_dir && !top_component.is_empty() {
-            let dir = map
-                .entry(format!("{top_component}/"))
-                .or_insert_with(GitFileStatus::clean);
-            if status.untracked {
-                if dir.is_clean() {
-                    dir.untracked = true;
-                }
-            } else {
-                // Overwrite wholesale: a tracked change supersedes any
-                // untracked flag a prior sibling set, and dirs carry no
-                // per-half staging detail.
-                *dir = GitFileStatus::unstaged(GitChange::Modified);
-            }
-        }
-    }
-    map
+    let entries = crate::git::status::decode_porcelain(porcelain);
+    crate::git::status::map_to_listing(&entries, prefix)
 }
 
 /// Resident set size in kilobytes, or None if we can't determine it.
