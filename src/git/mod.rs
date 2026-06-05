@@ -13,5 +13,6 @@
 //! dependency rule).
 
 pub mod diff;
+pub mod discovery;
 pub mod status;
 pub mod worktree;

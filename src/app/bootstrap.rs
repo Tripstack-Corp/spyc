@@ -214,7 +214,7 @@ impl App {
                 // the 1 Hz poll short-circuit on a stale snapshot
                 // forever, hiding staged/working changes until an
                 // unrelated later write moved the mtime.
-                let (index_mtime, head_mtime) = crate::sysinfo::resolve_gitdir(&req.repo_root)
+                let (index_mtime, head_mtime) = crate::git::discovery::gitdir(&req.repo_root)
                     .map_or((None, None), |gd| {
                         let i = std::fs::metadata(gd.join("index"))
                             .and_then(|m| m.modified())
