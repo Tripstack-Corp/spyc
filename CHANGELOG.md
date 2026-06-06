@@ -14,7 +14,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   Safety valve for the rollout: set `SPYC_GIT_BACKEND=subprocess` to revert
   the status backend to the legacy `git` subprocess (a temporary escape hatch;
   it will be removed once gix status has soaked). Part of the ongoing
-  git → gix migration (diff/show/blame/worktree still use `git` for now).
+  git → gix migration (diff/show/blame still use `git` for now).
+- **Git worktree list/create/remove now use gix instead of `git worktree`.**
+  `W l` lists, `W n` creates, and `W d` removes linked worktrees in-process
+  (create/remove are hand-rolled on gix plumbing — admin files, branch ref,
+  checkout — since gix has no high-level worktree-add; the result is verified
+  to be a worktree real `git` accepts). `W d` still refuses a dirty worktree,
+  as before. Part of the git → gix migration.
 - **Added `CLAUDE.md` (architectural contract) + refreshed `AGENTS.md` /
   `ARCHITECTURE.md`.** New top-level `CLAUDE.md` states the MVU invariants and
   the maintenance rules (≤800-LoC files, module-organization patterns,
