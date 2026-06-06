@@ -88,14 +88,30 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 # and its comment/complexity rules are tuned in `.aislop/` to respect spyc's
 # deliberate choices (dense "why" docs, allowed-long MVU dispatch fns, the
 # in-progress 800-LoC decomposition). Run it to triage genuine slop, not as a
-# pass/fail gate. `aislop --json scan .` / `aislop ci .` give machine output.
+# pass/fail gate.
+#
+# `make aislop` runs through scripts/aislop-baseline.py, which subtracts the
+# accepted findings recorded in .aislop/baseline.json (per-rule, per-file
+# counts) and reports only NET-NEW slop — aislop 0.10.2 has no native
+# baseline, and its comment engine over-fires on spyc's style, so the raw
+# scan is mostly false positives. After intentionally accepting new findings,
+# refresh the snapshot with `make aislop-baseline`. Raw output is still
+# `aislop scan .` / `aislop --json scan .` / `aislop ci .`.
 .PHONY: aislop
-aislop: ## Advisory AI-slop / quality scan (not a gate; see .aislop/ config)
+aislop: ## Advisory AI-slop scan vs .aislop/baseline.json (net-new only)
 	@command -v aislop >/dev/null 2>&1 || { \
 		echo "aislop not found — install with: npm i -g aislop"; \
 		exit 1; \
 	}
-	aislop scan .
+	@python3 scripts/aislop-baseline.py check
+
+.PHONY: aislop-baseline
+aislop-baseline: ## Regenerate .aislop/baseline.json from the current scan
+	@command -v aislop >/dev/null 2>&1 || { \
+		echo "aislop not found — install with: npm i -g aislop"; \
+		exit 1; \
+	}
+	@python3 scripts/aislop-baseline.py update
 
 # ---------- Release builds ---------------------------------------------------
 

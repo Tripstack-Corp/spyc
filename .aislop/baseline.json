@@ -1,0 +1,59 @@
+{
+  "_comment": "Accepted aislop findings as per-(rule, file) counts. `make aislop` fails only when a bucket grows beyond its count here. Regenerate with `make aislop-baseline`. See scripts/aislop-baseline.py for why counts (not lines) are the key.",
+  "counts": {
+    "ai-slop/meta-comment": {
+      "src/agent/resume.rs": 1,
+      "src/app/pane_tabs.rs": 1,
+      "src/app/prompt.rs": 1
+    },
+    "ai-slop/narrative-comment": {
+      "src/agent/resume.rs": 2,
+      "src/app/commands.rs": 1,
+      "src/app/key_dispatch.rs": 1,
+      "src/app/mod.rs": 1,
+      "src/app/navigate.rs": 1,
+      "src/app/prompt.rs": 1,
+      "src/app/route.rs": 1,
+      "src/app/state.rs": 4,
+      "src/fs/ops.rs": 2,
+      "src/git/status.rs": 1,
+      "src/mcp.rs": 1,
+      "src/pane/mod.rs": 1,
+      "src/state/harpoon.rs": 1,
+      "src/state/inventory.rs": 11,
+      "src/state/sessions.rs": 5,
+      "src/ui/line_edit.rs": 3,
+      "src/ui/pager.rs": 3
+    },
+    "ai-slop/rust-non-test-unwrap": {
+      "src/state/health.rs": 9
+    },
+    "ai-slop/trivial-comment": {
+      "src/app/actions.rs": 1,
+      "src/app/key_dispatch.rs": 1,
+      "src/app/pager_handler.rs": 1,
+      "src/app/prompt.rs": 1,
+      "src/app/session.rs": 1,
+      "src/app/state.rs": 1,
+      "src/config/mod.rs": 1,
+      "src/git/diff_model/mod.rs": 1,
+      "src/git/worktree.rs": 1,
+      "src/keymap/user.rs": 1,
+      "src/mcp.rs": 5,
+      "src/state/harpoon.rs": 1,
+      "src/state/health.rs": 1,
+      "src/state/ignore.rs": 1,
+      "src/ui/line_edit.rs": 1,
+      "src/ui/markdown.rs": 1
+    },
+    "complexity/file-too-large": {
+      "src/app/state.rs": 1,
+      "src/ui/pager.rs": 1
+    },
+    "complexity/function-too-long": {
+      "src/app/actions.rs": 1,
+      "src/app/render.rs": 2,
+      "src/fs/ops.rs": 1
+    }
+  }
+}

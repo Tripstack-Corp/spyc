@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **`make aislop` is now a baseline'd regression gate** rather than a raw
+  scan. aislop 0.10.2 has no native baseline and its comment engine
+  over-fires on spyc's mandated dense "why" docs (plus it misreads `.unwrap()`
+  inside large test modules), so the raw scan was ~78 accepted/false-positive
+  findings drowning ~2 real ones. `scripts/aislop-baseline.py` records the
+  accepted findings as per-(rule, file) counts in `.aislop/baseline.json` and
+  reports only NET-NEW slop; counts (not line numbers) are the key so moved or
+  reflowed comments don't resurface. Refresh the snapshot with `make
+  aislop-baseline`. Also reworded two genuine meta-comments that narrated
+  removed/historical state instead of current behavior.
 - **Upgraded ratatui to 0.30.1** and **deduplicated crossterm onto 0.29** (we
   pinned 0.28 directly while ratatui pulled 0.29, so the dependency tree
   carried two copies). ratatui 0.30.1 brings an allocation-free buffer-flush
