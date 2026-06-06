@@ -12,9 +12,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   structured diff/blame model with gix (gitoxide) off-thread and renders it
   itself, so **code in diffs is syntax-highlighted** (the +/- tint is overlaid
   on the language colors) and diffs open **side-by-side** (old left, new
-  right) by default. Press **`|`** in the pager to toggle between side-by-side
-  and the classic unified view; narrow terminals fall back to unified
-  automatically. Blame gets a per-commit-colored author/date gutter. Large
+  right) by default. Modified lines get **word-level highlighting** — the whole
+  line gets a dim wash and the actually-changed tokens a brighter tint, so you
+  can see *what* changed at a glance. Press **`|`** in the pager to toggle
+  between side-by-side and the classic unified view; narrow terminals fall back
+  to unified automatically. Blame gets a per-commit-colored author/date gutter. Large
   diffs build off-thread (a brief "computing…" pager) so the UI never blocks.
   Diff colors are themeable via `[colors]` (`diff_add_fg` / `diff_del_bg` / …).
   Part of the git → gix migration; the `git` binary is no longer used for

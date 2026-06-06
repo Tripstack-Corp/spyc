@@ -20,6 +20,8 @@
 //! Pure: `model + &Theme → lines`, no IO, no gix, no `&mut self`. Wired into
 //! the pager by PR 8b (via the git-view session in `app/git_view_session.rs`).
 
+use std::ops::Range;
+
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
@@ -150,16 +152,23 @@ fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'stati
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in hunks {
         out.push(hunk_header_line(h, theme));
-        for line in &h.lines {
+        let intra = compute_intra(&h.lines);
+        for (j, line) in h.lines.iter().enumerate() {
             let row = match line.origin {
                 LineOrigin::Context => {
-                    let content = pick(new_ref, ni, &line.text, theme, None);
+                    let content =
+                        styled_content(pick(new_ref, ni, &line.text, theme, None), None, None);
                     ni += 1;
                     oi += 1;
                     unified_row(' ', Style::default(), None, content)
                 }
                 LineOrigin::Add => {
-                    let content = pick(new_ref, ni, &line.text, theme, Some(true));
+                    let word = word_hl(intra[j].as_ref(), theme.diff_word_bg(true));
+                    let content = styled_content(
+                        pick(new_ref, ni, &line.text, theme, Some(true)),
+                        theme.diff_row_bg(true),
+                        word,
+                    );
                     ni += 1;
                     unified_row(
                         '+',
@@ -169,7 +178,12 @@ fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'stati
                     )
                 }
                 LineOrigin::Remove => {
-                    let content = pick(old_ref, oi, &line.text, theme, Some(false));
+                    let word = word_hl(intra[j].as_ref(), theme.diff_word_bg(false));
+                    let content = styled_content(
+                        pick(old_ref, oi, &line.text, theme, Some(false)),
+                        theme.diff_row_bg(false),
+                        word,
+                    );
                     oi += 1;
                     unified_row(
                         '-',
@@ -184,8 +198,8 @@ fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'stati
     }
 }
 
-/// One unified row: a `marker` gutter glyph + the (already highlighted)
-/// content spans, with `row_bg` overlaid on every span.
+/// One unified row: a `marker` gutter glyph (in `row_bg`) + the already-styled
+/// content spans (wash + word highlight applied by [`styled_content`]).
 fn unified_row(
     marker: char,
     gutter_style: Style,
@@ -197,10 +211,7 @@ fn unified_row(
         marker.to_string(),
         apply_bg(gutter_style, row_bg),
     ));
-    for mut sp in content {
-        sp.style = apply_bg(sp.style, row_bg);
-        spans.push(sp);
-    }
+    spans.extend(content);
     Line::from(spans)
 }
 
@@ -232,6 +243,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in hunks {
         out.push(hunk_header_line(h, theme));
+        let intra = compute_intra(&h.lines);
         let mut old_no = h.old_start;
         let mut new_no = h.new_start;
         let lines = &h.lines;
@@ -242,14 +254,14 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     theme,
                     Some(old_no),
                     LineOrigin::Context,
-                    &pick(old_ref, oi, &lines[i].text, theme, None),
+                    styled_content(pick(old_ref, oi, &lines[i].text, theme, None), None, None),
                     col_w,
                 );
                 let right = split_cell(
                     theme,
                     Some(new_no),
                     LineOrigin::Context,
-                    &pick(new_ref, ni, &lines[i].text, theme, None),
+                    styled_content(pick(new_ref, ni, &lines[i].text, theme, None), None, None),
                     col_w,
                 );
                 out.push(split_row(left, right, theme));
@@ -262,7 +274,8 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
             }
             // A change region: the run of consecutive removes, then the run of
             // consecutive adds (PR 7 always emits removes before adds within a
-            // region). Pair them row-for-row, padding the shorter side blank.
+            // region). Pair them row-for-row, padding the shorter side blank;
+            // paired lines get the word-level highlight from `intra`.
             let r_lo = i;
             while i < lines.len() && lines[i].origin == LineOrigin::Remove {
                 i += 1;
@@ -276,13 +289,13 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
             let rows = (r_hi - r_lo).max(a_hi - a_lo);
             for k in 0..rows {
                 let left = if r_lo + k < r_hi {
-                    let cell = split_cell(
-                        theme,
-                        Some(old_no),
-                        LineOrigin::Remove,
-                        &pick(old_ref, oi, &lines[r_lo + k].text, theme, Some(false)),
-                        col_w,
+                    let word = word_hl(intra[r_lo + k].as_ref(), theme.diff_word_bg(false));
+                    let content = styled_content(
+                        pick(old_ref, oi, &lines[r_lo + k].text, theme, Some(false)),
+                        theme.diff_row_bg(false),
+                        word,
                     );
+                    let cell = split_cell(theme, Some(old_no), LineOrigin::Remove, content, col_w);
                     old_no += 1;
                     oi += 1;
                     cell
@@ -290,13 +303,13 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     blank_cell(col_w)
                 };
                 let right = if a_lo + k < a_hi {
-                    let cell = split_cell(
-                        theme,
-                        Some(new_no),
-                        LineOrigin::Add,
-                        &pick(new_ref, ni, &lines[a_lo + k].text, theme, Some(true)),
-                        col_w,
+                    let word = word_hl(intra[a_lo + k].as_ref(), theme.diff_word_bg(true));
+                    let content = styled_content(
+                        pick(new_ref, ni, &lines[a_lo + k].text, theme, Some(true)),
+                        theme.diff_row_bg(true),
+                        word,
                     );
+                    let cell = split_cell(theme, Some(new_no), LineOrigin::Add, content, col_w);
                     new_no += 1;
                     ni += 1;
                     cell
@@ -310,12 +323,13 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
 }
 
 /// One side-by-side cell: `[lnum][space][marker][content…]`, padded/truncated
-/// to exactly `col_w` columns, with the origin's row-background overlaid.
+/// to exactly `col_w` columns. `content` is already styled (wash + word
+/// highlight via [`styled_content`]); the prefix + padding carry `row_bg`.
 fn split_cell(
     theme: &Theme,
     lnum: Option<u32>,
     origin: LineOrigin,
-    content: &[Span<'static>],
+    content: Vec<Span<'static>>,
     col_w: usize,
 ) -> Vec<Span<'static>> {
     let (marker, row_bg, gutter_style) = match origin {
@@ -339,7 +353,7 @@ fn split_cell(
         marker.to_string(),
         apply_bg(gutter_style, row_bg),
     ));
-    spans.extend(fit_spans(content, content_w, row_bg));
+    spans.extend(fit_spans(&content, content_w, row_bg));
     spans
 }
 
@@ -406,10 +420,12 @@ fn pick(
     vec![Span::styled(fallback.to_string(), style)]
 }
 
-/// Truncate `spans` to at most `width` display columns and pad to exactly
-/// `width` with trailing spaces, overlaying `bg` on everything. Keeps every
-/// side-by-side cell the same width so columns stay aligned.
-fn fit_spans(spans: &[Span<'static>], width: usize, bg: Option<Color>) -> Vec<Span<'static>> {
+/// Truncate the (already-styled) `spans` to at most `width` display columns and
+/// pad to exactly `width` with trailing spaces in `pad_bg`. Content span styles
+/// are preserved verbatim (they already carry the row wash + any word
+/// highlight); only the padding gets `pad_bg`. Keeps every side-by-side cell
+/// the same width so columns stay aligned.
+fn fit_spans(spans: &[Span<'static>], width: usize, pad_bg: Option<Color>) -> Vec<Span<'static>> {
     let mut out = Vec::new();
     let mut used = 0usize;
     for sp in spans {
@@ -419,19 +435,19 @@ fn fit_spans(spans: &[Span<'static>], width: usize, bg: Option<Color>) -> Vec<Sp
         let content = sp.content.as_ref();
         let w = display_width(content);
         if used + w <= width {
-            out.push(Span::styled(content.to_string(), apply_bg(sp.style, bg)));
+            out.push(sp.clone());
             used += w;
         } else {
             let trunc = display_truncate(content, width - used);
             used += display_width(trunc);
-            out.push(Span::styled(trunc.to_string(), apply_bg(sp.style, bg)));
+            out.push(Span::styled(trunc.to_string(), sp.style));
             break;
         }
     }
     if used < width {
         out.push(Span::styled(
             " ".repeat(width - used),
-            bg.map_or_else(Style::default, |c| Style::default().bg(c)),
+            pad_bg.map_or_else(Style::default, |c| Style::default().bg(c)),
         ));
     }
     out
@@ -441,6 +457,150 @@ fn fit_spans(spans: &[Span<'static>], width: usize, bg: Option<Color>) -> Vec<Sp
 /// `fg`, so language colors survive). No-op when `bg` is `None`.
 fn apply_bg(style: Style, bg: Option<Color>) -> Style {
     bg.map_or(style, |c| style.bg(c))
+}
+
+/// Style a line's content spans for display: overlay the dim `row_bg` wash on
+/// every span, then (for a modified line) overlay the brighter `word` bg on the
+/// changed byte range. The caller prepends the gutter / line-number prefix.
+fn styled_content(
+    content: Vec<Span<'static>>,
+    row_bg: Option<Color>,
+    word: Option<(Range<usize>, Color)>,
+) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = content
+        .into_iter()
+        .map(|mut sp| {
+            sp.style = apply_bg(sp.style, row_bg);
+            sp
+        })
+        .collect();
+    if let Some((range, bg)) = word {
+        spans = overlay_range_bg(spans, &range, bg);
+    }
+    spans
+}
+
+/// Overlay background `bg` on the byte sub-`range` of a styled span run,
+/// splitting spans at the range boundaries. `range` must be on char
+/// boundaries (it comes from [`intra_change_range`], which trims on chars).
+fn overlay_range_bg(
+    spans: Vec<Span<'static>>,
+    range: &Range<usize>,
+    bg: Color,
+) -> Vec<Span<'static>> {
+    if range.is_empty() {
+        return spans;
+    }
+    let mut out = Vec::with_capacity(spans.len());
+    let mut pos = 0usize;
+    for sp in spans {
+        let Span { content, style } = sp;
+        let text = content.into_owned();
+        let (start, end) = (pos, pos + text.len());
+        pos = end;
+        let lo = range.start.max(start);
+        let hi = range.end.min(end);
+        if lo >= hi {
+            out.push(Span::styled(text, style));
+            continue;
+        }
+        let (rl, rh) = (lo - start, hi - start);
+        if rl > 0 {
+            out.push(Span::styled(text[..rl].to_string(), style));
+        }
+        out.push(Span::styled(text[rl..rh].to_string(), style.bg(bg)));
+        if rh < text.len() {
+            out.push(Span::styled(text[rh..].to_string(), style));
+        }
+    }
+    out
+}
+
+/// Pair a changed-range with a word-highlight color into the `word` arg
+/// `styled_content` wants — `Some` only when both are present (no range, or
+/// `mono` dropping the color, yields `None`).
+fn word_hl(range: Option<&Range<usize>>, bg: Option<Color>) -> Option<(Range<usize>, Color)> {
+    match (range, bg) {
+        (Some(r), Some(c)) => Some((r.clone(), c)),
+        _ => None,
+    }
+}
+
+/// Per-line changed byte-ranges for a hunk: for each modified line (a removed
+/// line paired with its added counterpart within a change region), the byte
+/// range of the differing middle in *that line's own text*. Context and
+/// unpaired add/remove lines get `None`. Drives the word-level highlight.
+fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Option<Range<usize>>> {
+    let mut out = vec![None; lines.len()];
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].origin == LineOrigin::Context {
+            i += 1;
+            continue;
+        }
+        let r_lo = i;
+        while i < lines.len() && lines[i].origin == LineOrigin::Remove {
+            i += 1;
+        }
+        let r_hi = i;
+        let a_lo = i;
+        while i < lines.len() && lines[i].origin == LineOrigin::Add {
+            i += 1;
+        }
+        let a_hi = i;
+        // Pair removes with adds 1:1; only paired lines get a word range.
+        for k in 0..(r_hi - r_lo).min(a_hi - a_lo) {
+            if let Some((old_r, new_r)) =
+                intra_change_range(&lines[r_lo + k].text, &lines[a_lo + k].text)
+            {
+                out[r_lo + k] = Some(old_r);
+                out[a_lo + k] = Some(new_r);
+            }
+        }
+    }
+    out
+}
+
+/// The changed byte-ranges between a removed line `old` and its added
+/// counterpart `new`: trim the longest common char prefix + suffix; the middle
+/// is what changed. `None` when the lines are identical or share no
+/// prefix/suffix at all (a uniform brighter line adds nothing over the wash).
+fn intra_change_range(old: &str, new: &str) -> Option<(Range<usize>, Range<usize>)> {
+    if old == new {
+        return None;
+    }
+    let prefix = common_prefix_len(old, new);
+    let suffix = common_suffix_len(&old[prefix..], &new[prefix..]);
+    if prefix == 0 && suffix == 0 {
+        return None;
+    }
+    let old_hi = (old.len() - suffix).max(prefix);
+    let new_hi = (new.len() - suffix).max(prefix);
+    Some((prefix..old_hi, prefix..new_hi))
+}
+
+/// Byte length of the longest common char prefix of `a` and `b`.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    let mut len = 0;
+    for (ca, cb) in a.char_indices().zip(b.char_indices()) {
+        if ca.1 != cb.1 {
+            break;
+        }
+        len = ca.0 + ca.1.len_utf8();
+    }
+    len
+}
+
+/// Byte length of the longest common char suffix of `a` and `b`.
+fn common_suffix_len(a: &str, b: &str) -> usize {
+    let mut len = 0;
+    for (ca, cb) in a.chars().rev().zip(b.chars().rev()) {
+        if ca != cb {
+            break;
+        }
+        len += ca.len_utf8();
+    }
+    len
 }
 
 /// The path to use for syntax detection: the new path, else the old.
@@ -795,6 +955,69 @@ mod tests {
                 assert!(w <= width, "row width {w} exceeds {width}: {line:?}");
             }
         }
+    }
+
+    #[test]
+    fn intra_change_range_trims_common_prefix_and_suffix() {
+        // Only the digit differs; prefix "let x = " + suffix ";" are shared.
+        let (old_r, new_r) = super::intra_change_range("let x = 1;", "let x = 2;").unwrap();
+        assert_eq!(&"let x = 1;"[old_r], "1");
+        assert_eq!(&"let x = 2;"[new_r], "2");
+    }
+
+    #[test]
+    fn intra_change_range_pure_insertion_is_empty_on_old_side() {
+        // "ab" → "aXb": shared prefix "a" + suffix "b"; "X" inserted.
+        let (old_r, new_r) = super::intra_change_range("ab", "aXb").unwrap();
+        assert!(old_r.is_empty());
+        assert_eq!(&"aXb"[new_r], "X");
+    }
+
+    #[test]
+    fn intra_change_range_none_when_identical_or_disjoint() {
+        assert!(super::intra_change_range("same", "same").is_none());
+        // No shared prefix or suffix → uniform wash, no word highlight.
+        assert!(super::intra_change_range("abc", "xyz").is_none());
+    }
+
+    #[test]
+    fn word_highlight_brightens_only_the_changed_token() {
+        let theme = Theme::default();
+        let model = single_file(
+            FileStatus::Modified,
+            DiffKind::Text(vec![Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+                lines: vec![rem("let x = 1;"), add("let x = 2;")],
+            }]),
+            Some("f.rs"),
+            Some("f.rs"),
+        );
+        let out = render_diff(&model, &theme, DiffLayout::Unified, 80);
+        let add_row = out.iter().find(|l| row_text(l).starts_with('+')).unwrap();
+        let rem_row = out.iter().find(|l| row_text(l).starts_with('-')).unwrap();
+        // The changed token carries the bright word bg…
+        let add_word = add_row
+            .spans
+            .iter()
+            .find(|s| s.style.bg == Some(theme.diff_add_word_bg))
+            .expect("add row highlights the changed token");
+        assert_eq!(add_word.content.as_ref(), "2");
+        let rem_word = rem_row
+            .spans
+            .iter()
+            .find(|s| s.style.bg == Some(theme.diff_del_word_bg))
+            .expect("remove row highlights the changed token");
+        assert_eq!(rem_word.content.as_ref(), "1");
+        // …while the unchanged part keeps the dim wash.
+        assert!(
+            add_row
+                .spans
+                .iter()
+                .any(|s| s.style.bg == Some(theme.diff_add_bg))
+        );
     }
 
     #[test]

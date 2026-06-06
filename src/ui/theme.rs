@@ -44,10 +44,18 @@ pub struct Theme {
     /// Foreground for removed (`-`) lines in the diff/show renderer.
     pub diff_del_fg: Color,
     /// Row background tint behind added lines (overlaid on the syntect fg, so
-    /// language colors survive). Dropped in `mono`.
+    /// language colors survive). A dim wash — the brighter `diff_add_word_bg`
+    /// marks the actually-changed tokens. Dropped in `mono`.
     pub diff_add_bg: Color,
     /// Row background tint behind removed lines. Dropped in `mono`.
     pub diff_del_bg: Color,
+    /// Brighter background for the *changed tokens* within a modified added
+    /// line (word-level highlight over the dim `diff_add_bg` wash). Dropped in
+    /// `mono`.
+    pub diff_add_word_bg: Color,
+    /// Brighter background for the changed tokens within a modified removed
+    /// line. Dropped in `mono`.
+    pub diff_del_word_bg: Color,
     /// Foreground for hunk headers (`@@ -a,b +c,d @@`).
     pub diff_hunk_fg: Color,
     /// Foreground for per-file headers (the `status  path` line).
@@ -82,8 +90,10 @@ impl Default for Theme {
             delete_warning: Color::Rgb(0x80, 0x1e, 0x1e), // deep crimson
             diff_add_fg: Color::Rgb(0x9e, 0xce, 0x6a),    // green (matches exec)
             diff_del_fg: Color::Rgb(0xf7, 0x76, 0x8e),    // soft red
-            diff_add_bg: Color::Rgb(0x20, 0x30, 0x20),    // dark green tint
-            diff_del_bg: Color::Rgb(0x37, 0x22, 0x28),    // dark red tint
+            diff_add_bg: Color::Rgb(0x12, 0x26, 0x19),    // dim green line wash
+            diff_del_bg: Color::Rgb(0x2a, 0x16, 0x1b),    // dim red line wash
+            diff_add_word_bg: Color::Rgb(0x2b, 0x60, 0x3a), // bright green changed-token
+            diff_del_word_bg: Color::Rgb(0x6b, 0x27, 0x33), // bright red changed-token
             diff_hunk_fg: Color::Rgb(0x7d, 0xcf, 0xff),   // cyan
             diff_file_fg: Color::Rgb(0x7a, 0xa2, 0xf7),   // soft blue
             diff_meta_fg: Color::Rgb(0x56, 0x5f, 0x89),   // dim slate
@@ -131,6 +141,8 @@ impl Theme {
         apply!(diff_del_fg);
         apply!(diff_add_bg);
         apply!(diff_del_bg);
+        apply!(diff_add_word_bg);
+        apply!(diff_del_word_bg);
         apply!(diff_hunk_fg);
         apply!(diff_file_fg);
         apply!(diff_meta_fg);
@@ -254,6 +266,19 @@ impl Theme {
             Some(self.diff_add_bg)
         } else {
             Some(self.diff_del_bg)
+        }
+    }
+
+    /// Brighter background for the changed tokens within a modified added
+    /// (`is_add`) or removed line — the word-level highlight over the dim
+    /// [`Self::diff_row_bg`] wash. `None` in `mono` (no word highlight).
+    pub const fn diff_word_bg(&self, is_add: bool) -> Option<Color> {
+        if self.mono {
+            None
+        } else if is_add {
+            Some(self.diff_add_word_bg)
+        } else {
+            Some(self.diff_del_word_bg)
         }
     }
 
