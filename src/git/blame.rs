@@ -7,8 +7,8 @@
 //! current `HEAD` commit (matching plain `git blame <file>`).
 //!
 //! Wired into the live UI by PR 8b (`app/git_view_session.rs` builds this
-//! model off-thread and renders it in-house); PR 9 deletes the subprocess body
-//! in [`crate::git::diff::blame`].
+//! model off-thread and renders it in-house via [`crate::ui::blame_render`]);
+//! the old `git blame` subprocess path was deleted in PR 9.
 
 use crate::git::model::{BlameLine, BlameModel};
 use std::collections::HashMap;

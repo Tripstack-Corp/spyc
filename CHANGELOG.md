@@ -5,7 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.56.0] - 2026-06-06
+
 ### Changed
+- **spyc no longer runs the `git` binary at all.** The git → gix (gitoxide)
+  migration is complete: repo discovery, status, diff, show, blame, and
+  worktree create/list/remove all run in-process via the pure-Rust `gix`
+  crate — no more `git` subprocess spawns, fragile porcelain parsing, or
+  dependency on a `git` install at runtime. A guard test enforces zero
+  `git`-subprocess usages in production code. (The `git` binary is still used
+  to build fixtures when running spyc's own test suite.)
 - **Git diff / show / blame now render in-house with syntax highlighting,
   defaulting to a side-by-side view.** `gd` / `gD` (diff), `g` show, and `gb`
   (blame) no longer shell out to `git --color=always`; spyc builds a
@@ -26,10 +35,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   branch/dirty indicator in-process via gix — no `git` subprocess on the
   status hot path. Output is validated byte-for-byte against
   `git status --porcelain` across a parity corpus, so markers are unchanged.
-  Safety valve for the rollout: set `SPYC_GIT_BACKEND=subprocess` to revert
-  the status backend to the legacy `git` subprocess (a temporary escape hatch;
-  it will be removed once gix status has soaked). Part of the ongoing
-  git → gix migration (diff/show/blame still use `git` for now).
 - **Git worktree list/create/remove now use gix instead of `git worktree`.**
   `W l` lists, `W n` creates, and `W d` removes linked worktrees in-process
   (create/remove are hand-rolled on gix plumbing — admin files, branch ref,
