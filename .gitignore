@@ -63,3 +63,7 @@ Cargo.lock.bak
 # Antigravity (agy) CLI local state — a symlink farm into ~/.gemini;
 # machine-specific, must never be committed.
 .antigravitycli/
+
+# aislop local trend log (written on every `make aislop`); the baseline
+# (.aislop/baseline.json) IS committed, this churn log is not.
+.aislop/history.jsonl

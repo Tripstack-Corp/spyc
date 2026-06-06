@@ -3,11 +3,15 @@
 # (the real gate), and the complexity limits below are tuned to spyc's own
 # conventions so the scan surfaces actionable slop, not noise.
 #
-# Note: aislop 0.10.2 has no per-rule severity switch, so `ai-slop/
-# narrative-comment` still fires on spyc's intentional dense "why" doc comments
-# + section dividers (mandated by CLAUDE.md / AGENTS.md) — treat those as
-# expected false-positives. Comment *staleness* is handled separately by a
-# periodic semantic comment-audit, not by this pattern rule.
+# Note: aislop 0.10.2 has no per-rule severity switch AND no native baseline,
+# so the comment engine (narrative-/trivial-/meta-comment) still fires on
+# spyc's intentional dense "why" doc comments + section dividers (mandated by
+# CLAUDE.md / AGENTS.md), and its Rust test-detection misreads unwraps inside
+# large `#[cfg(test)]` blocks. Those accepted false-positives are recorded as
+# per-(rule, file) counts in `.aislop/baseline.json`; `make aislop` runs
+# through scripts/aislop-baseline.py and reports only NET-NEW findings.
+# Regenerate the snapshot with `make aislop-baseline`. Comment *staleness* is
+# handled separately by a periodic semantic comment-audit, not by these rules.
 version: 1
 engines:
   format: true

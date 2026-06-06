@@ -59,16 +59,15 @@ impl App {
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
 
-        // Always anchor PROJECT_HOME on the launch dir. Previously
-        // this was gated on `cwd.join(".git").exists()`, which meant
-        // launching spyc one level above the actual repo (e.g. from
+        // Always anchor PROJECT_HOME on the launch dir. Gating this on
+        // `cwd.join(".git").exists()` would leave `project_home` None
+        // when spyc launches one level above the actual repo (e.g. from
         // `~/src/workspace` containing a Java monorepo at
-        // `~/src/workspace/inner-repo`) left `project_home` None —
-        // and downstream code (session save, harpoon, MCP context)
-        // had no project anchor at all. Honoring the launch dir
-        // gives every spyc invocation a project anchor; users who
-        // want a different anchor can override with `:project <path>`
-        // or `gP`. Cleared with `:project clear`.
+        // `~/src/workspace/inner-repo`), starving downstream code
+        // (session save, harpoon, MCP context) of any project anchor.
+        // Honoring the launch dir gives every spyc invocation a project
+        // anchor; users who want a different anchor can override with
+        // `:project <path>` or `gP`. Cleared with `:project clear`.
         let project_home = Some(cwd.clone());
         let session_name = Some(crate::state::session_names::generate());
 
