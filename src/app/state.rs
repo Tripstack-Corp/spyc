@@ -334,15 +334,11 @@ pub struct AppState {
     pub git_poll_cache: Option<(std::time::SystemTime, std::time::SystemTime)>,
     /// Set at `chdir` when the new project root has more than
     /// `HUGE_TREE_SUBDIR_THRESHOLD` subdirs (measured with the
-    /// bounded-DFS `count_subdirs_capped`). Drives three adaptive
+    /// bounded-DFS `count_subdirs_capped`). Drives two adaptive
     /// behaviors in the event loop:
     ///
     /// - Slower poll cadence: `REFRESH_QUIET` 500 ms → 3 s,
     ///   `GIT_POLL_INTERVAL` 1 s → 10 s.
-    /// - Cheaper `git status`: `-uno` (skip untracked enumeration)
-    ///   instead of `-unormal` — trade is no `?` markers for
-    ///   untracked files on huge trees, in exchange for not
-    ///   walking the entire working tree to enumerate them.
     /// - Initial flash on first detection so the user sees the
     ///   trade.
     ///
@@ -391,14 +387,13 @@ pub struct AppState {
     /// tree — were never watched and markers went stale until the next
     /// poll.
     pub current_gitdir: Option<std::path::PathBuf>,
-    /// Cached raw output of `git status --porcelain`. On a huge
-    /// working tree the subprocess walks every tracked file in the
-    /// index — even with `-uno`, that's 200-500 ms per spawn on a
-    /// ~110k-file repo. After the first chdir into a project,
-    /// every subsequent chdir within that project's tree hits this
-    /// cache (provided `.git/index` and `.git/HEAD` mtimes match)
-    /// and skips the spawn entirely; only the per-listing-dir
-    /// prefix re-parse is paid.
+    /// Cached structured repo-status (`Vec<StatusEntry>`). On a huge
+    /// working tree the gix status walk traverses every tracked file in
+    /// the index — 200-500 ms on a ~110k-file repo. After the first
+    /// chdir into a project, every subsequent chdir within that
+    /// project's tree hits this cache (provided `.git/index` and
+    /// `.git/HEAD` mtimes match) and skips the walk; only the
+    /// per-listing-dir prefix re-parse is paid.
     pub git_status_cache: Option<GitStatusCache>,
     /// Whether a background git-status worker is wired. Set by `App::new`
     /// once the worker thread spawns; `false` in tests and during the
@@ -1013,8 +1008,8 @@ impl AppState {
     /// target: when nothing changed, we don't bump `list_generation`
     /// or request a repaint.
     ///
-    /// **Mtime short-circuit.** Before spawning the two `git`
-    /// subprocesses, stat `.git/index` + `.git/HEAD` and compare
+    /// **Mtime short-circuit.** Before running the gix status walk +
+    /// branch read, stat `.git/index` + `.git/HEAD` and compare
     /// against the cache from the last successful call. When both
     /// mtimes match, the inputs to `git status` are bit-identical
     /// and we return false immediately. On a 100k-file working

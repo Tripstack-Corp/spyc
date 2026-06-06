@@ -60,7 +60,7 @@ impl App {
     pub fn is_listing_path(&self, path: &Path) -> bool {
         // Ignore our own context file writes -- they land in the
         // listing directory and would otherwise trigger a self-
-        // perpetuating refresh_listing → git subprocess → redraw cycle.
+        // perpetuating refresh_listing → git-status → redraw cycle.
         if let Some(name) = path.file_name().and_then(|n| n.to_str())
             && name.starts_with(".spyc-context-")
         {
@@ -96,7 +96,7 @@ impl App {
         // Anywhere at or below the listing dir (recursive watch) --
         // accept. The 500ms trailing debounce + git-status's index-
         // cache mean even noisy subtrees don't produce unbounded
-        // refresh subprocesses.
+        // refresh/status work.
         path.starts_with(dir)
     }
 }

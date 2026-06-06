@@ -6,8 +6,8 @@
 //! visual-mode range yank, line numbers — over pane history
 //! instead of vt100's flat scroll-mode buffer.
 //!
-//! Phase 2 just lays the adapter; Phase 3 wires it into
-//! `App::handle_action(Action::PaneScrollEnter)`.
+//! The adapter is consumed by `App::open_pane_scroll_pager`
+//! (src/app/pane_scroll.rs) for the `^a-v` scroll-mode pager.
 //!
 //! ## Algorithm
 //!

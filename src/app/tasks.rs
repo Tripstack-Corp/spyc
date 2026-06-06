@@ -183,10 +183,6 @@ impl App {
             .flash_info(format!("task #{id} backgrounded — :fg to resume"));
     }
 
-    /// `:fg` (no arg) or `:fg N`. Bring a backgrounded task to the
-    /// foreground. Still-running tasks resume as a streaming pager
-    /// seeded with the buffer; already-exited tasks open as a static
-    /// pager and are removed from the background list (one-shot view).
     /// Pause a backgrounded task by sending SIGSTOP to its process
     /// group. portable-pty children are session/group leaders by
     /// default, so `kill(-pid, SIGSTOP)` halts the whole subprocess
@@ -499,6 +495,10 @@ impl App {
         ));
     }
 
+    /// `:fg` (no arg) or `:fg N`. Bring a backgrounded task to the
+    /// foreground. Still-running tasks resume as a streaming pager
+    /// seeded with the buffer; already-exited tasks open as a static
+    /// pager and are removed from the background list (one-shot view).
     pub fn foreground_task(&mut self, target: Option<u32>) {
         if self.runtime.pending_capture.is_some() {
             self.state

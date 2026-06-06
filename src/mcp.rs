@@ -1323,7 +1323,6 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
     )
 }
 
-/// Read the cwd from the context file (for resolving relative paths).
 /// Pick the search root: prefer `project_home` from the context
 /// file (the spyc-blessed project root), fall back to `cwd`.
 /// Used by `search_paths` and `search_content` so the MCP tools
@@ -1418,6 +1417,7 @@ fn grep_matches_to_json(hits: &[crate::fs::grep::GrepMatch]) -> Value {
     Value::Array(arr)
 }
 
+/// Read the cwd from the context file (for resolving relative paths).
 fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
     if let Ok(text) = std::fs::read_to_string(ctx_path)
         && let Ok(v) = serde_json::from_str::<Value>(&text)

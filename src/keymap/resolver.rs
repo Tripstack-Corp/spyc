@@ -345,7 +345,7 @@ impl Resolver {
             self.reset();
             return ResolverOutcome::Action(Action::TogglePane);
         }
-        // F11 opens the pane with `claude --resume` to continue the last
+        // F9 opens the pane with `claude --resume` to continue the last
         // conversation.
         if matches!(ev.code, KeyCode::F(9)) {
             self.reset();

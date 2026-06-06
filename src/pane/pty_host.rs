@@ -239,11 +239,6 @@ impl PtyHost {
         })
     }
 
-    /// Drain all pending events, dispatching byte chunks to
-    /// `on_bytes` and updating `closed` / `exit_status` when the
-    /// reader thread observes EOF. Mirrors what `Pane::drain_output`
-    /// did pre-refactor — extracted here so `BackgroundTask` can
-    /// reuse the same lifecycle.
     /// Take the byte-event receiver out of the host so a worker
     /// thread can drain it directly (Pane's parser thread, v1.50.84).
     /// After this call, [`Self::drain`] becomes a no-op — callers
@@ -303,6 +298,11 @@ impl PtyHost {
         }
     }
 
+    /// Drain all pending events, dispatching byte chunks to
+    /// `on_bytes` and updating `closed` / `exit_status` when the
+    /// reader thread observes EOF. Mirrors what `Pane::drain_output`
+    /// did pre-refactor — extracted here so `BackgroundTask` can
+    /// reuse the same lifecycle.
     pub fn drain<F: FnMut(&[u8])>(&mut self, mut on_bytes: F) -> DrainResult {
         let mut newly_closed = false;
         let Some(rx) = self.event_rx.as_ref() else {

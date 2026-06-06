@@ -24,10 +24,9 @@ use std::path::Path;
 use crate::ui::list_view::{GitChange, GitFileStatus};
 
 /// One changed repo-relative path, fully decoded into both porcelain halves.
-/// This is the shared intermediate between the subprocess and gix backends:
-/// each backend produces a `Vec<StatusEntry>`, and [`map_to_listing`] turns
-/// that into the per-listing basename map regardless of which backend produced
-/// it.
+/// Produced by the gix `repo_status` walk in production (and by the test-only
+/// `decode_porcelain` for the parity tests), and is the input to
+/// [`map_to_listing`], which turns it into the per-listing basename map.
 ///
 /// `rela_path` is repo-root-relative with forward slashes. For a rename it is
 /// the *destination* (new) path — matching git porcelain, which keys a rename
@@ -178,13 +177,14 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
     map
 }
 
-/// gix backend (PR 4 parity spike): produce the same `Vec<StatusEntry>` as
-/// [`decode_porcelain`] does for `git status --porcelain -unormal`, but without
-/// shelling out — walking the index/worktree/tree diffs via gix directly.
+/// The live status backend (run by the background git worker, bootstrap.rs):
+/// produce the same `Vec<StatusEntry>` as [`decode_porcelain`] does for
+/// `git status --porcelain -unormal`, but without shelling out — walking the
+/// index/worktree/tree diffs via gix directly.
 ///
 /// Returns `None` if `repo_root` can't be opened as a repository or the status
-/// walk errors. NOT yet wired into the live path; validated against the
-/// subprocess truth by the parity tests below.
+/// walk errors. The `#[cfg(test)]` parity tests below cross-check it against
+/// `git status --porcelain -unormal`.
 ///
 /// ## Platform config (matching `git status --porcelain -unormal`)
 ///
@@ -478,7 +478,8 @@ mod parity_tests {
     /// Run `git` in `dir` with a hermetic config (no user/system gitconfig) so
     /// tests are reproducible. Mirrors `discovery::tests::run_git`. `git` is a
     /// test-only fixture dependency — production status is pure gix
-    /// (`repo_status`) plus the legacy subprocess (`porcelain_raw`).
+    /// (`repo_status`); the parity tests cross-check it against the test-only
+    /// `porcelain` helper.
     fn run_git(dir: &Path, args: &[&str]) {
         let out = std::process::Command::new("git")
             .args(args)

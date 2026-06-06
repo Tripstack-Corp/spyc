@@ -566,9 +566,10 @@ impl<'t> Renderer<'t> {
 
     /// Render the collected `TableBuilder` into `self.lines` as an
     /// ASCII-aligned table with box-drawing borders. Column widths
-    /// are computed from natural cell widths, capped per-column at
-    /// `TABLE_MAX_COL_WIDTH` and trimmed proportionally so the
-    /// total fits inside `CONTENT_WIDTH`. Cells longer than the
+    /// are computed from natural cell widths, capped per-column
+    /// (TABLE_MAX_COL_WIDTH_FALLBACK..TABLE_MAX_COL_WIDTH_CEILING,
+    /// scaled by the table-width budget) and trimmed proportionally so
+    /// the total fits inside `self.table_width`. Cells longer than the
     /// allotted column width are truncated with `…`. Header cells
     /// render bold; borders render in dim slate (theme.status_suffix).
     fn end_table(&mut self) {

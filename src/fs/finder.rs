@@ -16,11 +16,11 @@
 //!   path is reconstructed by the caller via `root.join(rel)`.
 //!
 //! Performance: walking + scoring on a 30K-file repo is well under
-//! 100ms cold, and matching is ~1us per candidate, so per-keystroke
-//! re-rank stays interactive without a worker thread. If a user
-//! ever hits the cap or a slow walk, we can add a background-walk
-//! worker later (the `nucleo` crate, parent of `nucleo-matcher`,
-//! ships exactly that, but for v1 the synchronous path is plenty).
+//! 100ms cold, and matching is ~1us per candidate. The walk runs on a
+//! background thread via `walk_streaming` (spawned in
+//! app/find_picker.rs), streaming batches to the picker so it stays
+//! live on a large monorepo; only the per-keystroke re-rank (`rank`)
+//! is synchronous.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

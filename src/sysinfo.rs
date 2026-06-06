@@ -59,10 +59,12 @@ pub fn rss_kb() -> Option<u64> {
     }
 }
 
-/// `(rss_kb, thread_count)` for the current process via `ps` — macOS
-/// `thcount`, Linux `nlwp`. Best-effort; `None` on any failure or
-/// unsupported platform. Spawns a subprocess (a fork-exec), so call it
-/// OFF the main/render thread (see `App::refresh_process_stats`).
+/// `(rss_kb, thread_count)` for the current process, read in-process:
+/// RSS via the `sysinfo` crate, thread count via `libproc`
+/// `proc_pidinfo` on macOS / `tasks()` on Linux. Best-effort; `None`/0
+/// on failure or unsupported platform. The sysinfo/libproc refresh
+/// isn't free, so call it OFF the main/render thread (see
+/// `App::refresh_process_stats`).
 pub fn proc_rss_threads() -> Option<(u64, u32)> {
     use sysinfo_crate::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pid = Pid::from_u32(std::process::id());

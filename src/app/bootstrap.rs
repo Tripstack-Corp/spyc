@@ -193,9 +193,9 @@ impl App {
                 },
                 |()| true,
             );
-        // Background git-status worker. Owns the spawn of
-        // `git status --porcelain` on cache miss so the chdir UI
-        // returns immediately. Lives for the lifetime of the
+        // Background git-status worker. Owns the in-process gix
+        // status read (status::repo_status) on cache miss so the chdir
+        // UI returns immediately. Lives for the lifetime of the
         // process; the OS reaps the thread on exit. Both channel ends
         // live on the Runtime (`runtime.git_worker_tx` sender,
         // `runtime.git_result_rx` receiver); the Model holds no channel —
@@ -273,9 +273,9 @@ impl App {
         app.state.update_huge_tree(&initial_cwd);
         // Now that the worker is wired and we know is_huge_tree,
         // kick off the first git read in the background. The branch
-        // string is computed sync from `.git/HEAD` so it's available
-        // on the first paint; only the per-file markers and dirty
-        // flag wait for the worker.
+        // string is computed sync via gix (compute_git_info_fast ->
+        // discovery::head_branch) so it's available on the first paint;
+        // only the per-file markers and dirty flag wait for the worker.
         app.state.git.info = app.state.compute_git_info_fast();
         let _ = app.state.git_file_statuses_cached(&initial_cwd);
         // The bootstrap cache-miss queued a request into the Model's

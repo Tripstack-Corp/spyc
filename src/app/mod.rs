@@ -372,9 +372,7 @@ const AGENT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30)
 /// endpoints, pty hosts, threads) held disjointly from the domain Model
 /// (`App.state`) and the render/derived `ViewState`. Fields migrate in
 /// over Phase-5 PRs; PR 1 seeds it with the git worker-result receiver
-/// (the App-side half of the previously-torn git channel). The `App::split()`
-/// three-borrow helper arrives in PR 4, where the first multi-cluster site
-/// (`route_snapshot`) needs the three clusters borrowed at once.
+/// (the App-side half of the previously-torn git channel).
 struct Runtime {
     /// Git worker → main thread results, generation-gated, applied via
     /// `apply_git_worker_result`. The Phase-3a forwarder thread takes this
@@ -827,10 +825,6 @@ impl Matcher {
     }
 }
 
-/// Point the FS watcher at `new_dir`, unwatching the previously-watched
-/// listing dir if any. No-op when the watcher failed to initialize or
-/// when the same dir is already being watched.
-/// Keys we intercept even when the pane is focused.
 /// Place the OS terminal cursor at the focused pty pane's vt100
 /// cursor position so alt-screen TUIs (nvim, less, htop, lazygit)
 /// render a visible cursor. Without this they show no cursor at
@@ -925,6 +919,7 @@ fn should_fire_refresh(
     (trailing_quiet || max_wait_exceeded) && rate_ok
 }
 
+/// Keys we intercept even when the pane is focused.
 const fn is_spyc_meta_when_pane_focused(
     key: crossterm::event::KeyEvent,
     resolver_pending: bool,

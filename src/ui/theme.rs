@@ -206,12 +206,12 @@ impl Theme {
     }
 }
 
-/// Diff / show / blame renderer styles. In their own impl block so the whole
-/// group can carry `#[allow(dead_code)]` until PR 8b wires the renderer into
-/// the pager (the `src/ui/diff_render.rs` consumer). All mono-aware: in `mono`
-/// the +/- distinction is carried by the gutter glyph + BOLD rather than
-/// color, and row backgrounds are dropped (honoring the `C` colortoggle).
-#[allow(dead_code)] // wired into the pager by PR 8b
+/// Diff / show / blame renderer styles. In their own impl block grouping the
+/// diff-view color logic; consumed by `src/ui/diff_render.rs` and
+/// `src/ui/blame_render.rs` (driven into the pager by the git-view session).
+/// All mono-aware: in `mono` the +/- distinction is carried by the gutter
+/// glyph + BOLD rather than color, and row backgrounds are dropped (honoring
+/// the `C` colortoggle).
 impl Theme {
     /// Style for a per-file header line (`status  path`).
     pub fn diff_file_style(&self) -> Style {

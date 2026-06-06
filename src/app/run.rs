@@ -2,8 +2,8 @@
 //!
 //! `run()` plus its scratch-builder `run_setup`, the per-iteration
 //! `dispatch_effective` / `render_frame`, `run_teardown`, and the
-//! `term_title_effect` helper. Moved verbatim from `app/mod.rs` (800-LoC
-//! campaign); `App::new` (the constructor) stays in mod.rs for now.
+//! `term_title_effect` helper. `App::new` (the constructor) lives in
+//! `bootstrap.rs`.
 
 use super::sources::{coalesce_recv, sync_listing_watch, take_reader_result};
 use super::{

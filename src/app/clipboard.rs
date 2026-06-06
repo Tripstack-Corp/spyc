@@ -1,8 +1,7 @@
 //! Clipboard / selection plumbing: yank paths or the last pane prompt to the
 //! system clipboard, put inventory items to cwd, send/pipe the selection into
-//! the active pane, and the copy/move file-op runner. Extracted verbatim from
-//! `app/mod.rs` (the impl-extraction sweep), same child-module `impl App`
-//! pattern. All entry points are `pub` — called from `actions`/`key_dispatch`.
+//! the active pane, and the copy/move file-op runner. All entry points are
+//! `pub` — called from `actions`/`key_dispatch`.
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};

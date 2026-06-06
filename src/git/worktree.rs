@@ -374,8 +374,9 @@ mod tests {
                 .arg(dir_str)
                 .args(args)
                 // Stable, never-deleted startup cwd; `-C <dir_str>` then
-                // moves git to the operation dir. See `git_read` for why the
-                // inherited cwd can't be trusted under the parallel suite.
+                // moves git to the operation dir. See the
+                // `discovery::tests::run_git` note (referenced above) for why
+                // the inherited cwd can't be trusted under the parallel suite.
                 .current_dir(std::env::temp_dir())
                 .env("GIT_AUTHOR_NAME", "t")
                 .env("GIT_AUTHOR_EMAIL", "t@x")

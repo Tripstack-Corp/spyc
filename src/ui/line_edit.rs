@@ -22,8 +22,9 @@ pub enum EditResult {
     Continue,
     /// User pressed Enter — submit the buffer.
     Submit,
-    /// User cancelled (Backspace on empty in Insert, or Esc+Esc quickly,
-    /// or ^C).
+    /// User cancelled — `^C` from either mode, or `Esc` while in Normal
+    /// mode. (Backspace-on-empty cancellation is handled by the caller,
+    /// not here.)
     Cancel,
     /// Request previous history entry.
     HistoryPrev,

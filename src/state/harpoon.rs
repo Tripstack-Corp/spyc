@@ -78,8 +78,9 @@ impl Harpoon {
     }
 
     /// Append a path to the list. Idempotent (already-harpooned paths
-    /// are no-ops). Returns the slot number assigned (1-based) or
-    /// `None` if the list was full and the path was new.
+    /// are no-ops). Returns `Added(slot)` with the 1-based slot number
+    /// on success, `AlreadyPresent` if the path was already harpooned,
+    /// or `Full` if all slots are taken.
     pub fn append(&mut self, path: PathBuf) -> AppendResult {
         if self.contains(&path) {
             return AppendResult::AlreadyPresent;

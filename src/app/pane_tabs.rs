@@ -1,9 +1,7 @@
 //! Bottom-pane / tab lifecycle: create / hide / close / restart tabs,
 //! directional focus, resize + zoom, the pane/overlay sizing helpers,
 //! the session-restore resume driver + crashed-restore detection, and
-//! the `:dump-scrollback` diagnostic. Extracted verbatim from
-//! `app/mod.rs` (the impl-extraction sweep), merging the two pane
-//! method clusters that had drifted apart in the file. Every method
+//! the `:dump-scrollback` diagnostic. Every method
 //! here is called from at least one sibling module (`actions`,
 //! `key_dispatch`, `commands`, `tasks`, `render`, `pager_handler`,
 //! `loop_steps`, `session`), so all are `pub`.

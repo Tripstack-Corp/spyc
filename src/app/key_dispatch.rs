@@ -7,8 +7,9 @@
 //! Extracted from `app/mod.rs` (REFACTOR_PLAN Phase 2), same child-module
 //! `impl App` pattern as render / pager_handler / commands: methods read
 //! App's private state via the descendant-module rule. Three are `pub` —
-//! the run loop calls `handle_key`, mod.rs's synthetic-key path calls
-//! `handle_remove_confirm_key`, and `commands` calls `undo_last_remove`;
+//! the run loop calls `handle_key`, the `apply` action path in actions.rs
+//! calls `handle_remove_confirm_key` via a synthetic `y` key, and
+//! `commands` calls `undo_last_remove`;
 //! the rest stay private. The tab-completion helpers these delegate to
 //! (`tab_complete_path` etc.) stay in `app` and resolve via the same rule.
 

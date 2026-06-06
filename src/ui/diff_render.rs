@@ -2,8 +2,9 @@
 //!
 //! This is the in-house replacement for piping `git diff --color=always`
 //! bytes through the pager. It produces `Vec<Line<'static>>` from the
-//! structured model PR 7 built — so search, wrap, line-numbers, and
-//! visual-yank all work, and (crucially) we can lay the same model out
+//! structured `DiffModel` (`crate::git::model`) — so search, wrap,
+//! line-numbers, and visual-yank all work, and (crucially) we can lay the
+//! same model out
 //! either **unified** or **side-by-side**, which colored-byte output can't.
 //!
 //! Two layouts over the same model:
@@ -18,7 +19,7 @@
 //! tint overlaid (syntect sets only `fg`, so language colors survive).
 //!
 //! Pure: `model + &Theme → lines`, no IO, no gix, no `&mut self`. Wired into
-//! the pager by PR 8b (via the git-view session in `app/git_view_session.rs`).
+//! the pager via the git-view session in `app/git_view_session.rs`.
 
 use std::ops::Range;
 
