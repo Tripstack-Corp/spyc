@@ -37,6 +37,24 @@ pub struct Theme {
     /// exactly which files the next `y` keystroke will affect.
     /// Drawn over cursor / pick / mark styling.
     pub delete_warning: Color,
+    /// Foreground for added (`+`) lines in the diff/show renderer (the
+    /// gutter glyph + the unknown-language fallback text). Syntax-highlighted
+    /// lines keep their language colors; only the row background is tinted.
+    pub diff_add_fg: Color,
+    /// Foreground for removed (`-`) lines in the diff/show renderer.
+    pub diff_del_fg: Color,
+    /// Row background tint behind added lines (overlaid on the syntect fg, so
+    /// language colors survive). Dropped in `mono`.
+    pub diff_add_bg: Color,
+    /// Row background tint behind removed lines. Dropped in `mono`.
+    pub diff_del_bg: Color,
+    /// Foreground for hunk headers (`@@ -a,b +c,d @@`).
+    pub diff_hunk_fg: Color,
+    /// Foreground for per-file headers (the `status  path` line).
+    pub diff_file_fg: Color,
+    /// Foreground for low-emphasis metadata (binary/submodule notes, the
+    /// `show` commit header's Author/Date labels, truncation banner).
+    pub diff_meta_fg: Color,
     /// When true, all colors fall back to terminal defaults. Used by the
     /// `C` (colortoggle) action — the cursor row falls back to reverse
     /// video so the selection is still visible.
@@ -62,6 +80,13 @@ impl Default for Theme {
             prompt_prefix: Color::Rgb(0xe0, 0xaf, 0x68),
             empty_marker: Color::Rgb(0x56, 0x5f, 0x89),
             delete_warning: Color::Rgb(0x80, 0x1e, 0x1e), // deep crimson
+            diff_add_fg: Color::Rgb(0x9e, 0xce, 0x6a),    // green (matches exec)
+            diff_del_fg: Color::Rgb(0xf7, 0x76, 0x8e),    // soft red
+            diff_add_bg: Color::Rgb(0x20, 0x30, 0x20),    // dark green tint
+            diff_del_bg: Color::Rgb(0x37, 0x22, 0x28),    // dark red tint
+            diff_hunk_fg: Color::Rgb(0x7d, 0xcf, 0xff),   // cyan
+            diff_file_fg: Color::Rgb(0x7a, 0xa2, 0xf7),   // soft blue
+            diff_meta_fg: Color::Rgb(0x56, 0x5f, 0x89),   // dim slate
             mono: false,
         }
     }
@@ -102,6 +127,13 @@ impl Theme {
         apply!(status_suffix);
         apply!(prompt_prefix);
         apply!(delete_warning);
+        apply!(diff_add_fg);
+        apply!(diff_del_fg);
+        apply!(diff_add_bg);
+        apply!(diff_del_bg);
+        apply!(diff_hunk_fg);
+        apply!(diff_file_fg);
+        apply!(diff_meta_fg);
         self
     }
 
@@ -158,6 +190,85 @@ impl Theme {
             Style::default().add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.take).add_modifier(Modifier::BOLD)
+        }
+    }
+}
+
+/// Diff / show / blame renderer styles. In their own impl block so the whole
+/// group can carry `#[allow(dead_code)]` until PR 8b wires the renderer into
+/// the pager (the `src/ui/diff_render.rs` consumer). All mono-aware: in `mono`
+/// the +/- distinction is carried by the gutter glyph + BOLD rather than
+/// color, and row backgrounds are dropped (honoring the `C` colortoggle).
+#[allow(dead_code)] // wired into the pager by PR 8b
+impl Theme {
+    /// Style for a per-file header line (`status  path`).
+    pub fn diff_file_style(&self) -> Style {
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(self.diff_file_fg)
+                .add_modifier(Modifier::BOLD)
+        }
+    }
+
+    /// Style for a hunk header (`@@ -a,b +c,d @@`).
+    pub fn diff_hunk_style(&self) -> Style {
+        if self.mono {
+            Style::default().add_modifier(Modifier::DIM)
+        } else {
+            Style::default().fg(self.diff_hunk_fg)
+        }
+    }
+
+    /// Style for low-emphasis metadata (binary/submodule notes, the `show`
+    /// commit header's Author/Date labels, the truncation banner).
+    pub fn diff_meta_style(&self) -> Style {
+        if self.mono {
+            Style::default().add_modifier(Modifier::DIM)
+        } else {
+            Style::default().fg(self.diff_meta_fg)
+        }
+    }
+
+    /// Gutter-glyph style for an added (`is_add`) or removed line. The glyph
+    /// carries the meaning in `mono`; in color it also gets the +/- color.
+    pub fn diff_gutter_style(&self, is_add: bool) -> Style {
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(if is_add {
+                self.diff_add_fg
+            } else {
+                self.diff_del_fg
+            })
+        }
+    }
+
+    /// Row-background tint for an added (`is_add`) or removed line, or `None`
+    /// in `mono` (where the gutter glyph carries the distinction).
+    pub const fn diff_row_bg(&self, is_add: bool) -> Option<Color> {
+        if self.mono {
+            None
+        } else if is_add {
+            Some(self.diff_add_bg)
+        } else {
+            Some(self.diff_del_bg)
+        }
+    }
+
+    /// Fallback text style for a +/- line when syntax highlighting is
+    /// unavailable (unknown language). Context falls back to the terminal
+    /// default (`Style::default()`).
+    pub fn diff_text_style(&self, is_add: bool) -> Style {
+        if self.mono {
+            Style::default()
+        } else {
+            Style::default().fg(if is_add {
+                self.diff_add_fg
+            } else {
+                self.diff_del_fg
+            })
         }
     }
 }

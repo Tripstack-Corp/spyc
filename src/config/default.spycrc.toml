@@ -84,6 +84,17 @@
 # status_path    = "#7dcfff"
 # status_suffix  = "#565f89"
 # prompt_prefix  = "#ff9e64"
+# Diff / show / blame renderer (the in-house syntax-highlighted view).
+# *_fg are foregrounds; *_bg are the row-background tints behind +/- lines
+# (dropped in mono / colortoggle). Syntax-highlighted code keeps its own
+# colors — only the row background is tinted.
+# diff_add_fg    = "#9ece6a"
+# diff_del_fg    = "#f7768e"
+# diff_add_bg    = "#203020"
+# diff_del_bg    = "#372228"
+# diff_hunk_fg   = "#7dcfff"
+# diff_file_fg   = "#7aa2f7"
+# diff_meta_fg   = "#565f89"
 
 # ── ignore masks ──────────────────────────────────────────────────────
 # Defining any mask here REPLACES the built-ins wholesale. Group 1 is

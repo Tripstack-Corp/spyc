@@ -6,6 +6,8 @@
 
 use unicode_width::UnicodeWidthStr;
 
+pub mod blame_render;
+pub mod diff_render;
 pub mod help;
 pub mod json;
 #[allow(
