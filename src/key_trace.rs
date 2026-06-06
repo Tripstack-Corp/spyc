@@ -42,7 +42,7 @@ pub fn init(flag: bool) -> Option<String> {
         .open(&path)
         .ok()?;
     {
-        let mut slot = TRACE.lock().unwrap();
+        let mut slot = TRACE.lock().expect("key-trace mutex poisoned");
         *slot = Some(TraceState {
             file,
             start: std::time::Instant::now(),

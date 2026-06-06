@@ -1,0 +1,50 @@
+# aislop config — consumed by `make aislop` (advisory only; see the Makefile).
+# NOT a CI gate: format/lint/security duplicate `make check`'s rustfmt+clippy
+# (the real gate), and the complexity limits below are tuned to spyc's own
+# conventions so the scan surfaces actionable slop, not noise.
+#
+# Note: aislop 0.10.2 has no per-rule severity switch, so `ai-slop/
+# narrative-comment` still fires on spyc's intentional dense "why" doc comments
+# + section dividers (mandated by CLAUDE.md / AGENTS.md) — treat those as
+# expected false-positives. Comment *staleness* is handled separately by a
+# periodic semantic comment-audit, not by this pattern rule.
+version: 1
+engines:
+  format: true
+  lint: true
+  code-quality: true
+  ai-slop: true
+  architecture: true
+  security: true
+quality:
+  # Match spyc's own limits, not aislop's stricter defaults. The hard rule is
+  # <=800 LoC/file (CLAUDE.md; the 800-LoC decomposition campaign owns the
+  # current over-budget files). Function length stays at 120 — it surfaces
+  # outliers, and the long MVU dispatch fns are a known, allowed exception
+  # (Cargo.toml `too_many_lines = "allow"`).
+  maxFunctionLoc: 120
+  maxFileLoc: 800
+  maxNesting: 5
+  maxParams: 7
+lint:
+  typecheck: true
+security:
+  audit: true
+  auditTimeout: 25000
+scoring:
+  weights:
+    format: 0.3
+    lint: 0.6
+    code-quality: 0.8
+    ai-slop: 2.5
+    architecture: 1
+    security: 1.5
+  thresholds:
+    good: 75
+    ok: 50
+  smoothing: 20
+ci:
+  failBelow: 85
+  format: json
+telemetry:
+  enabled: false

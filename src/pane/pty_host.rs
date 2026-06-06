@@ -290,7 +290,7 @@ impl PtyHost {
         let pending = self
             .wake
             .lock()
-            .unwrap()
+            .expect("wake mutex poisoned")
             .as_ref()
             .map(|w| Arc::clone(&w.pending));
         if let Some(p) = pending {

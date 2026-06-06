@@ -69,7 +69,11 @@ impl App {
         // we just stored for its dirty flag.
         let listing_dir = self.state.listing.dir.clone();
         let new_files = {
-            let cache = self.state.git_status_cache.as_ref().unwrap();
+            let cache = self
+                .state
+                .git_status_cache
+                .as_ref()
+                .expect("git_status_cache set just above");
             let prefix = listing_dir
                 .strip_prefix(&cache.repo_root)
                 .unwrap_or(std::path::Path::new(""))

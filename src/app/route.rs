@@ -6,7 +6,7 @@
 //! swallowed in TopPane pager (#78); chord swallowed in LowerPane
 //! pager (#80); exited-tab dropped on `^a` (#81); plus the original
 //! V-key bug that motivated the `top_overlay` meta-escape in the
-//! first place). The TODO filed in v1.50.25 calls for centralizing
+//! first place). The cleanup filed in v1.50.25 called for centralizing
 //! these into one place — this is that place.
 //!
 //! The routing is a **pure function** of a small `RouteSnapshot` —
