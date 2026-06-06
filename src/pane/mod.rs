@@ -4,9 +4,8 @@
 //! 2D cell grid we render directly. Input keystrokes are encoded as ANSI
 //! and written to the master side of the pty.
 //!
-//! This is the foundation for M8: eventually the subprocess will default
-//! to `claude`, and spyc will be able to pipe its selection into the
-//! pane's stdin. For the spike it is intentionally generic.
+//! The pane is deliberately a generic pty host; agent-specific defaults
+//! (claude, send-selection) live in higher layers.
 
 pub mod input;
 pub mod pathref;
@@ -349,7 +348,6 @@ impl Pane {
     }
 
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
-    #[allow(dead_code)] // wired into the S-key handler in the next step
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         if crate::key_trace::is_enabled() {
             crate::key_trace::log_tx(&format!(

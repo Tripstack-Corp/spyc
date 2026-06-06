@@ -46,7 +46,7 @@ use crate::app::App;
 #[derive(Parser)]
 #[command(name = "spyc", version, about = "vi-keyboard-driven file commander")]
 struct Cli {
-    /// Open pane with `claude --resume`
+    /// Open the saved-session restore picker on startup
     #[arg(short, long)]
     resume: bool,
 

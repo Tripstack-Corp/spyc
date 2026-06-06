@@ -3,7 +3,7 @@
 //! These used to be applied with `unsafe { std::env::set_var }`, but
 //! mutating the process environment is unsound once spyc has worker
 //! threads (the per-pane vt100 parsers, the git-status worker — which
-//! itself spawns `git`, reading env): another thread calling `getenv`
+//! runs gix in-process): another thread calling `getenv`
 //! concurrently with `setenv` is undefined behavior.
 //!
 //! Instead we keep the overrides in a thread-safe map and layer them

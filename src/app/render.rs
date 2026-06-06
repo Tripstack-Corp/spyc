@@ -1321,10 +1321,10 @@ mod render_tests {
     //! Full-frame render snapshots (ratatui `TestBackend` + `insta`).
     //!
     //! These pin the *composed* paneless frame — status bar + file list +
-    //! prompt and their layout — at a fixed geometry, so the upcoming
-    //! `prepare_frame` extraction (moving the rows-cache + grid-stabilization
-    //! settle out of the draw path) and the eventual `&self` render flip can
-    //! be proven behavior-equivalent: a regression that shifts a glyph makes
+    //! prompt and their layout — at a fixed geometry, so the
+    //! `prepare_frame` extraction (rows-cache + grid-stabilization settle
+    //! moved out of the draw path) and the `&self` `render_inner` stay
+    //! behavior-equivalent: a regression that shifts a glyph makes
     //! the `.snap` diff. Pane *content* is intentionally not snapshotted — it
     //! needs a live `PtyHost`; these cover the file-list surface, which is
     //! exactly what `prepare_frame` touches.

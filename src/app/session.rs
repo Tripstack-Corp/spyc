@@ -1,14 +1,16 @@
 //! Session save / restore and the session UI: `save_session` (serialize
 //! tabs + agent session ids on quit), `restore_session` (rebuild tabs +
 //! cwd from a saved `Session`), `show_session_picker` (the `-r` picker
-//! pager), and `show_session_info` (the session-info overlay).
+//! pager), `show_session_info` (the session-info overlay), `request_quit`
+//! (the quit lifecycle), and the history-popup helpers
+//! (`show_history_popup` / `show_jump_history_popup` /
+//! `sync_history_editor_to_cursor` + `HIST_PREFIX_W`).
 //!
-//! Extracted from `app/mod.rs` (REFACTOR_PLAN Phase 2 tidy-up). Same
-//! child-module `impl App` pattern: reads App's private state via the
-//! descendant-module rule. All four are `pub` — called from the run
-//! loop / `commands` / `key_dispatch` / `pager_handler` / `actions`. The
-//! history-popup, worktree, and pane-sizing helpers that were interleaved
-//! between them in mod.rs stay there.
+//! Same child-module `impl App` pattern: reads App's private state via the
+//! descendant-module rule. These are all `pub`, called from the run
+//! loop / `commands` / `key_dispatch` / `pager_handler` / `actions`.
+//! Worktree helpers moved to `git_state.rs` and pane-sizing helpers to
+//! `pane_tabs.rs`.
 
 use crate::pane::PaneTabs;
 use crate::state::sessions::AgentKind;

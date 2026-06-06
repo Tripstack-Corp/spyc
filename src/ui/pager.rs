@@ -288,8 +288,6 @@ pub struct PagerView {
 }
 
 impl PagerView {
-    /// Build a pager from plain strings. Each string becomes one
-    /// unstyled line.
     /// Build a pager from pre-styled lines (e.g. the help overlay).
     pub fn new_styled(title: impl Into<String>, lines: Vec<Line<'static>>) -> Self {
         Self {
@@ -329,6 +327,8 @@ impl PagerView {
         }
     }
 
+    /// Build a pager from plain strings. Each string becomes one
+    /// unstyled line.
     pub fn new_plain(title: impl Into<String>, lines: Vec<String>) -> Self {
         Self {
             title: title.into(),
@@ -1599,22 +1599,6 @@ fn paint_block_selection(
     Line::from(new_spans)
 }
 
-/// Split a styled line into 1+ visual rows, each at most `width`
-/// columns wide. Hard-break at width if no whitespace boundary is
-/// nearby (paths, long single tokens). Preserves per-span styling
-/// across the break by splitting the span at the chosen byte
-/// offset. Width is in unicode display columns, so wide CJK
-/// characters and emoji count as 2 — same units ratatui uses for
-/// layout.
-/// Count the number of visual rows `line` will occupy when wrapped
-/// at `width`. Mirrors `wrap_line`'s greedy hard-break policy
-/// (cells are filled left-to-right, breaks happen at the first
-/// char that would overflow), but doesn't allocate — used by
-/// `scroll_max` on every keystroke.
-///
-/// Empty lines render as one visual row (a blank line); this
-/// matches the renderer's behavior so the math is symmetric.
-/// `width == 0` yields one row to match `wrap_line`'s short-circuit.
 /// Vi `w`-style word class: alphanumeric + `_`. Whitespace and
 /// punctuation each form their own class — a transition between
 /// any two of {word, punct, whitespace} counts as a word
@@ -1694,6 +1678,15 @@ fn last_word_start(chars: &[char]) -> Option<usize> {
     Some(i)
 }
 
+/// Count the number of visual rows `line` will occupy when wrapped
+/// at `width`. Mirrors `wrap_line`'s greedy hard-break policy
+/// (cells are filled left-to-right, breaks happen at the first
+/// char that would overflow), but doesn't allocate — used by
+/// `scroll_max` on every keystroke.
+///
+/// Empty lines render as one visual row (a blank line); this
+/// matches the renderer's behavior so the math is symmetric.
+/// `width == 0` yields one row to match `wrap_line`'s short-circuit.
 fn visual_rows(line: &Line<'_>, width: usize) -> usize {
     if width == 0 {
         return 1;
@@ -1710,6 +1703,13 @@ fn visual_rows(line: &Line<'_>, width: usize) -> usize {
     total.div_ceil(width)
 }
 
+/// Split a styled line into 1+ visual rows, each at most `width`
+/// columns wide. Hard-break at width if no whitespace boundary is
+/// nearby (paths, long single tokens). Preserves per-span styling
+/// across the break by splitting the span at the chosen byte
+/// offset. Width is in unicode display columns, so wide CJK
+/// characters and emoji count as 2 — same units ratatui uses for
+/// layout.
 fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![line.clone()];

@@ -1,9 +1,9 @@
 //! Structured diff/show model builders on gix (no `git` subprocess).
 //!
 //! These produce a pure-data [`DiffModel`](crate::git::model) /
-//! [`CommitMeta`](crate::git::model::CommitMeta) straight from gix, the
-//! foundation for the in-house renderer (PR 8). They sit alongside the
-//! subprocess byte-producers in [`crate::git::diff`] (still the live path).
+//! [`CommitMeta`](crate::git::model::CommitMeta) straight from gix and feed
+//! the in-house renderer in [`crate::ui::diff_render`]. They are the live
+//! diff/show path — production no longer shells out to git.
 //!
 //! Three scopes mirror spyc's git keys:
 //! * [`diff_head_to_worktree`] — `gd`: `HEAD` vs the working tree
@@ -19,9 +19,8 @@
 //! hunks with `CONTEXT_LINES` of context. Per-change → `FileDiff` translation
 //! lives in [`build`].
 //!
-//! Wired into the live UI by PR 8b (`app/git_view_session.rs` builds these
-//! models off-thread and renders them in-house). PR 9 removes the subprocess
-//! producers in [`crate::git::diff`].
+//! `app/git_view_session.rs` builds these models off-thread and renders
+//! them in-house.
 
 mod blob;
 mod build;

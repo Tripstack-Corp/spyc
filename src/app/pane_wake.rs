@@ -3,8 +3,9 @@
 //! `SinkId` is a runtime-only, monotonically-allocated pane identifier
 //! carried by [`super::Message::PaneOutput`]. In 3b it only *labels* the
 //! wake — the loop re-scans every live pane on any `PaneOutput` rather than
-//! targeting by id — but it is the shared identity 3c (`TaskOutput { id }`)
-//! and Phase 5 (`ReassignSink`) build on, so it is introduced here.
+//! targeting by id — but it is the shared identity that 3c's
+//! `SinkOutput { sink }` (capture/task drains) and the later
+//! sink-reassignment work build on, so it is introduced here.
 //!
 //! The wake closure is built here (in `crate::app`, where `Message` is in
 //! scope) and handed to `Pane::adopt` as an opaque [`crate::pane::PaneWake`]

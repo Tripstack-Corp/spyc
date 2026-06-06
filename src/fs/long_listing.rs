@@ -59,7 +59,7 @@ impl LongRow {
 
 /// Produce a tabular `ls -l`-on-steroids listing: one header row plus one
 /// data row per path. Columns: inode, mode (symbolic), octal mode, links,
-/// owner and group (resolved via `getpwuid_r`/`getgrgid_r`), size (human),
+/// owner and group (resolved via `uzers`), size (human),
 /// bytes, 512B blocks, mtime, atime, ctime, birth, name. Symlinks render
 /// as `name -> target` in the NAME column. Column widths are computed once
 /// across all rows so everything aligns. Unreadable paths render as

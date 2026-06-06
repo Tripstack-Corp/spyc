@@ -577,7 +577,8 @@ impl App {
             }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
             // Jump / MakeDir / Worktree do unbounded blocking IO (chdir,
-            // create_dir_all, git shell-outs), so the pure-domain
+            // create_dir_all, in-process gix worktree ops — repo opens +
+            // checkout writes), so the pure-domain
             // `AppState::dispatch_prompt` punts them here (MVU Stage 3 de-IO).
             // Each reconciles harpoon afterward — they used to return
             // `Handled`, whose App-side path called `reconcile_harpoon`; the

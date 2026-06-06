@@ -1,7 +1,7 @@
 //! Agent profile registry.
 //!
 //! Each AI coding agent spyc can host in the pane (claude/codex/gemini/
-//! agy) is described by an [`AgentProfile`] impl. The registry plus
+//! agy/zot) is described by an [`AgentProfile`] impl. The registry plus
 //! [`detect`] / [`profile_for`] replace what used to be ~10
 //! `match AgentKind` dispatch sites scattered across `app`, `state`,
 //! and `config`. Adding an agent is a new impl + one `REGISTRY` entry —
@@ -25,8 +25,8 @@ use crate::ui::theme::Theme;
 
 /// How a restored pane re-establishes its conversation.
 pub enum ResumeAction {
-    /// Resume is baked into the spawned command (codex/gemini/agy) or
-    /// there's nothing to resume (Other).
+    /// Resume is baked into the spawned command (codex/gemini/agy/zot)
+    /// or there's nothing to resume (Other).
     None,
     /// Claude: spawn fresh, then type `/resume <sid>` into stdin once
     /// the banner settles (the `--resume` CLI flag has a mount-crash

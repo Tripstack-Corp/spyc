@@ -1,6 +1,5 @@
-//! MVU Phase 5: git worker-result application, extracted from the event
-//! loop (`mod.rs`) to buy anti-monolith headroom and decouple the git
-//! result path ahead of the GitState reunion (PR 1/2). `impl App` in a
+//! Git worker-result application (`impl App`), extracted from the event
+//! loop so the git result path is decoupled from `mod.rs`. `impl App` in a
 //! child module — reads App's private `self.state` via the
 //! descendant-module rule, same pattern as `effect` / `actions`.
 
