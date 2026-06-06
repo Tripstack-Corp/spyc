@@ -20,7 +20,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
   (create/remove are hand-rolled on gix plumbing — admin files, branch ref,
   checkout — since gix has no high-level worktree-add; the result is verified
   to be a worktree real `git` accepts). `W d` still refuses a dirty worktree,
-  as before. Part of the git → gix migration.
+  as before. **`W n` now groups worktrees under a per-repo
+  `<repo>.worktrees/<branch>` dir** (e.g. `~/src/foo.worktrees/feature`)
+  instead of a bare `<repo_parent>/<branch>` sibling — no more cluttering the
+  parent dir or colliding with unrelated same-named dirs. Part of the
+  git → gix migration.
 - **Added `CLAUDE.md` (architectural contract) + refreshed `AGENTS.md` /
   `ARCHITECTURE.md`.** New top-level `CLAUDE.md` states the MVU invariants and
   the maintenance rules (≤800-LoC files, module-organization patterns,

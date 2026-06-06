@@ -100,9 +100,9 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
     }
 }
 
-/// Create a new worktree as a sibling of the repo's working-tree root,
-/// replicating `git worktree add <target> <branch>`: use an EXISTING
-/// branch `<branch>` if present, else create it at the current HEAD.
+/// Create a new worktree under a per-repo `<repo>.worktrees/` dir next to
+/// the working-tree root (`<repo_parent>/<repo>.worktrees/<branch>`): use an
+/// EXISTING branch `<branch>` if present, else create it at the current HEAD.
 /// Returns the new worktree's path.
 pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
     let repo = gix::open(dir).map_err(|e| std::io::Error::other(format!("open repo: {e}")))?;
@@ -121,10 +121,14 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
     )?;
     let common_dir = std::fs::canonicalize(repo.common_dir())?;
 
-    // Target = sibling of the working-tree root, named after the branch
-    // (matching the prior subprocess behavior).
+    // Group worktrees under a per-repo sibling dir, so they don't clutter the
+    // repo's parent or collide with unrelated dirs:
+    //   <repo_parent>/<repo>.worktrees/<branch>
+    // (The old subprocess path put a bare `<repo_parent>/<branch>`, which
+    // collided with same-named siblings like an existing `~/src/test`.)
     let parent = root.parent().unwrap_or(&root);
-    let target = parent.join(branch);
+    let repo_name = root.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+    let target = parent.join(format!("{repo_name}.worktrees")).join(branch);
 
     if target.exists() && std::fs::read_dir(&target).is_ok_and(|mut d| d.next().is_some()) {
         return Err(std::io::Error::other(format!(
@@ -471,6 +475,17 @@ mod tests {
             Path::new(admin).is_absolute(),
             Path::new(admin).is_dir(),
             std::env::current_dir(),
+        );
+
+        // Worktrees are grouped under `<repo>.worktrees/` (a sibling of the
+        // repo), not bare in the repo's parent.
+        assert_eq!(
+            target
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str()),
+            Some("repo.worktrees"),
+            "worktree should be grouped under <repo>.worktrees/, got {target:?}"
         );
 
         // (a) The target exists with the committed files checked out.
