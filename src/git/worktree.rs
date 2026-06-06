@@ -26,8 +26,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use gix::refs::transaction::PreviousValue;
-
 /// A parsed git worktree entry.
 pub struct Worktree {
     pub path: PathBuf,
@@ -137,7 +135,7 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
 
     // Resolve / create the branch ref, yielding the commit to check out.
     let full_ref = format!("refs/heads/{branch}");
-    let commit_id = resolve_or_create_branch(&repo, &full_ref, branch)?;
+    let commit_id = resolve_or_create_branch(&repo, &common_dir, &full_ref, branch)?;
 
     // Refuse if the branch is already checked out in another worktree
     // (matches `git worktree add`).
@@ -206,30 +204,41 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id, creating the
 /// branch at the current HEAD commit if it doesn't exist yet (replicating
-/// `git worktree add` with vs without `-b`).
+/// `git worktree add` with vs without `-b`). `common_dir` is the absolute
+/// shared git dir the loose ref is written under.
 fn resolve_or_create_branch(
     repo: &gix::Repository,
+    common_dir: &Path,
     full_ref: &str,
     branch: &str,
 ) -> std::io::Result<gix::ObjectId> {
+    // `find_reference` checks both loose and packed refs.
     if let Ok(mut existing) = repo.find_reference(full_ref) {
         return existing
             .peel_to_id()
             .map(gix::Id::detach)
             .map_err(|e| std::io::Error::other(format!("peel branch '{branch}': {e}")));
     }
-    // Create the branch at the current HEAD commit.
+    // Validate the ref name via gix (rejects path-traversal / invalid names)
+    // before writing the loose ref by hand.
+    gix::refs::FullName::try_from(full_ref)
+        .map_err(|e| std::io::Error::other(format!("invalid branch name '{branch}': {e}")))?;
     let head_commit = repo
         .head_id()
         .map_err(|e| std::io::Error::other(format!("resolve HEAD: {e}")))?
         .detach();
-    repo.reference(
-        full_ref,
-        head_commit,
-        PreviousValue::MustNotExist,
-        format!("worktree: create branch {branch}"),
-    )
-    .map_err(|e| std::io::Error::other(format!("create branch '{branch}': {e}")))?;
+    // Write the loose ref directly (`<common_dir>/refs/heads/<branch>` = the
+    // 40-hex commit + newline). We bypass gix's `repo.reference()` because it
+    // writes a reflog with `force_create_reflog: false`, which fails to
+    // *create* the new branch's reflog in some environments ("the reflog
+    // could not be created or updated" — hit on CI but not locally). A loose
+    // ref is just a file git + gix both read; the (optional) reflog is the
+    // only thing skipped, and git recreates it on the next update.
+    let ref_path = common_dir.join(full_ref);
+    if let Some(parent) = ref_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&ref_path, format!("{}\n", head_commit.to_hex()))?;
     Ok(head_commit)
 }
 
