@@ -12,7 +12,10 @@
 //! `app` depends on `git` and never the reverse (the CLAUDE.md one-way
 //! dependency rule).
 
+pub mod blame;
 pub mod diff;
+pub mod diff_model;
 pub mod discovery;
+pub mod model;
 pub mod status;
 pub mod worktree;

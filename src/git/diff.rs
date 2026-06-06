@@ -2,9 +2,10 @@
 //!
 //! These pipe git's own `--color=always` output straight through; the
 //! caller (`app/git_state.rs`) mounts the bytes in the pager via
-//! `PagerView::new_ansi`. The in-house renderer (PR 7/8) replaces this
-//! whole module with a structured `DiffModel`/`BlameModel` + styled
-//! lines, at which point the subprocess bodies are deleted (PR 9).
+//! `PagerView::new_ansi`. The structured-model counterparts (built straight
+//! from gix, for the in-house renderer) live in the sibling
+//! [`crate::git::diff_model`] (diff/show) and [`crate::git::blame`] (blame);
+//! PR 9 deletes these subprocess bodies once the renderer consumes the model.
 
 use std::path::Path;
 use std::process::{Command, Output};
