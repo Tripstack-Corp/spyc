@@ -1,14 +1,13 @@
-//! Git status queries: the legacy subprocess backend (`porcelain_raw`), the
-//! gix backend (`repo_status`), and the shared path-mapping layer both feed.
+//! Git status queries — gix only (no subprocess).
 //!
 //! ## Two-stage pipeline
 //!
 //! Status flows through two decoupled stages:
 //!
 //! 1. **Decode** — produce one [`StatusEntry`] per changed *repo-relative*
-//!    path. Two backends produce these: the subprocess one decodes
-//!    `git status --porcelain` text ([`decode_porcelain`]); the gix one walks
-//!    the index/worktree/tree diffs ([`repo_status`]).
+//!    path. [`repo_status`] walks the index/worktree/tree diffs in-process via
+//!    gix. (A porcelain-text decoder survives as `#[cfg(test)]` scaffolding for
+//!    the parity tests, which cross-check `repo_status` against `git`.)
 //! 2. **Map to listing** — [`map_to_listing`] takes the decoded entries plus a
 //!    dir-relative `prefix` and produces the basename-keyed
 //!    [`GitFileStatus`](crate::ui::list_view::GitFileStatus) map the list view
@@ -16,10 +15,8 @@
 //!    onto their parent dir).
 //!
 //! The live status path (the background git worker, `bootstrap.rs`) runs
-//! [`repo_status_entries`] — gix by default, or the subprocess backend when
-//! `SPYC_GIT_BACKEND=subprocess` is set (a one-cycle escape hatch). The
-//! result `Vec<StatusEntry>` is cached repo-wide and re-filtered per listing
-//! dir via [`map_to_listing`] on each chdir.
+//! [`repo_status`]; the result `Vec<StatusEntry>` is cached repo-wide and
+//! re-filtered per listing dir via [`map_to_listing`] on each chdir.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -45,7 +42,9 @@ pub struct StatusEntry {
 
 /// Decode one porcelain XY half (X = index/staged, Y = working tree) into a
 /// `GitChange`. ` ` (and `?`/`!`) yield None — those are handled by the caller
-/// via the special-case markers.
+/// via the special-case markers. Test-only scaffolding (paired with
+/// [`decode_porcelain`]); production status is gix.
+#[cfg(test)]
 const fn decode_half(c: char) -> Option<GitChange> {
     match c {
         'M' | 'T' => Some(GitChange::Modified),
@@ -58,15 +57,12 @@ const fn decode_half(c: char) -> Option<GitChange> {
 }
 
 /// Decode raw `git status --porcelain` text into one [`StatusEntry`] per
-/// changed path (repo-relative). This is the subprocess backend's stage-1
-/// decode, factored out of `parse_porcelain_statuses` so both the live path
-/// and the parity tests share it.
-///
-/// `pub` so the parity tests (and `sysinfo`) can call it; it carries no
-/// path-mapping logic — that lives in [`map_to_listing`]. (`pub`, not
-/// `pub(crate)`: the enclosing `git` module is private, so clippy's
-/// `redundant_pub_crate` treats `pub(crate)` here as redundant.)
-pub fn decode_porcelain(porcelain: &str) -> Vec<StatusEntry> {
+/// changed path (repo-relative). Production status runs entirely on gix
+/// ([`repo_status`]); this porcelain decoder survives only as **test
+/// scaffolding** — the parity tests cross-check `repo_status` against
+/// `decode_porcelain(git status --porcelain)`. Hence `#[cfg(test)]`.
+#[cfg(test)]
+fn decode_porcelain(porcelain: &str) -> Vec<StatusEntry> {
     let mut entries = Vec::new();
     for line in porcelain.lines() {
         if line.len() < 4 {
@@ -180,35 +176,6 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
         }
     }
     map
-}
-
-/// Spawn `git status --porcelain` and return the raw stdout. Split out so
-/// callers (e.g. the chdir path) can cache the raw text across navigations
-/// within the same repo — the index walk is the expensive part of the spawn
-/// and produces identical output for every dir under one repo root.
-///
-/// Returns `None` if the spawn fails or git exits non-zero.
-///
-/// Always requests untracked files (`-unormal`). We used to switch to `-uno`
-/// on "huge" trees, but the huge-tree flag counts *on-disk* subdirs (dominated
-/// by gitignored build dirs like `target/`), while git's untracked scan skips
-/// gitignored dirs entirely — so `-unormal` is ~as cheap as `-uno` for the
-/// repos that tripped the heuristic, and `-uno` was silently hiding the `?`
-/// untracked markers. The cost of `-unormal` on a genuinely large *non-ignored*
-/// tree is absorbed by the background git worker (off the UI thread) and the
-/// 10 s huge-tree poll throttle.
-pub fn porcelain_raw(dir: &Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["status", "--porcelain", "-unormal"])
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout).ok()
 }
 
 /// gix backend (PR 4 parity spike): produce the same `Vec<StatusEntry>` as
@@ -356,33 +323,6 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
     }
 
     Some(by_path.into_values().collect())
-}
-
-/// Compute the repo's status entries for the live path, honoring the
-/// `SPYC_GIT_BACKEND` escape hatch. gix ([`repo_status`]) is the default;
-/// setting `SPYC_GIT_BACKEND=subprocess` forces the legacy
-/// `git status --porcelain` path (decoded to the same `Vec<StatusEntry>`)
-/// — a one-release-cycle safety valve so a field regression in the gix
-/// flip is a flag flip, not a code restore. Removed in PR 9.
-///
-/// Both backends report repo-relative paths, so the result is independent
-/// of `listing_dir` (it's only the cwd the subprocess runs from). `None`
-/// on failure → "no markers", same as before.
-#[must_use]
-pub fn repo_status_entries(repo_root: &Path, listing_dir: &Path) -> Option<Vec<StatusEntry>> {
-    if subprocess_backend() {
-        porcelain_raw(listing_dir).map(|raw| decode_porcelain(&raw))
-    } else {
-        repo_status(repo_root)
-    }
-}
-
-/// True when `SPYC_GIT_BACKEND=subprocess` is set — the escape hatch that
-/// reverts the status hot path to the legacy subprocess backend. Reading
-/// the env var is safe (only `set_var` is racy); this is a cheap, rare
-/// call (one per status walk, off the UI thread).
-fn subprocess_backend() -> bool {
-    std::env::var_os("SPYC_GIT_BACKEND").is_some_and(|v| v == "subprocess")
 }
 
 #[cfg(test)]

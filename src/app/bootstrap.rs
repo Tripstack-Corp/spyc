@@ -224,8 +224,7 @@ impl App {
                             .ok();
                         (i, h)
                     });
-                let entries =
-                    crate::git::status::repo_status_entries(&req.repo_root, &req.canonical);
+                let entries = crate::git::status::repo_status(&req.repo_root);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,

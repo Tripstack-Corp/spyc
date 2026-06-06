@@ -4,8 +4,6 @@
 //! overkill — long listings, file contents, captured `!` output, version
 //! info. Arbitrary terminal-output viewing lives here too, with ANSI
 //! colors preserved via `ansi-to-tui`.
-
-use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -340,54 +338,6 @@ impl PagerView {
             show_line_numbers: true,
             show_whitespace: false,
             saveable: false,
-            full_width: false,
-            fit_to_content: false,
-            no_history: false,
-            task_id: None,
-            grep_id: None,
-            git_view_id: None,
-            columns: 1,
-            source_path: None,
-            picker_cursor: None,
-            picker_edit_cursor: None,
-            streaming: false,
-            eof_in_content: false,
-            wrap: true,
-            alt_lines: None,
-            markdown_rendered: false,
-            saved_alt_scroll: None,
-            line_count_hint: None,
-            jump_buf: None,
-            flash: None,
-            last_viewport_h: std::cell::Cell::new(0),
-            last_body_w: std::cell::Cell::new(0),
-            visual: None,
-            placement: None,
-            mount: Mount::Overlay,
-            pane_scroll: false,
-            pending_scroll_to_bottom: std::cell::Cell::new(false),
-        }
-    }
-
-    /// Build a pager from raw bytes that may contain ANSI escape
-    /// sequences. Colors, bold, underline etc. are preserved.
-    /// Saveable by default (command output).
-    ///
-    /// PR 8b retired the last caller (the `git --color=always` diff/show/blame
-    /// path now builds structured models rendered in-house). Kept compiled —
-    /// still test-covered — until PR 9 decides its fate alongside the
-    /// subprocess producers in [`crate::git::diff`].
-    #[allow(dead_code)] // last non-test caller removed in PR 8b; see PR 9
-    pub fn new_ansi(title: impl Into<String>, bytes: &[u8]) -> Self {
-        let text = bytes.into_text().unwrap_or_default();
-        Self {
-            title: title.into(),
-            lines: text.lines,
-            scroll: 0,
-            search: Search::Off,
-            show_line_numbers: true,
-            show_whitespace: false,
-            saveable: true,
             full_width: false,
             fit_to_content: false,
             no_history: false,
@@ -2852,18 +2802,6 @@ mod tests {
             .join("\n")
             .trim_end()
             .to_string()
-    }
-
-    #[test]
-    fn snapshot_pager_ansi() {
-        // ANSI escapes are parsed into styled spans; the snapshot
-        // captures glyphs, so this is mostly a layout/structure check
-        // that ANSI input doesn't bleed escape bytes into the buffer.
-        let bytes = b"\x1b[31mred line\x1b[0m\n\x1b[1;32mbold green\x1b[0m\nplain\n";
-        let mut view = PagerView::new_ansi("ansi.txt", bytes);
-        view.full_width = true;
-        let out = render_pager_to_string(&view, 60, 8);
-        insta::assert_snapshot!(out);
     }
 
     #[test]

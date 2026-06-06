@@ -162,7 +162,6 @@ pub enum PagerLines {
 #[derive(Debug)]
 pub struct GitWorkerRequest {
     pub generation: u64,
-    pub canonical: std::path::PathBuf,
     pub repo_root: std::path::PathBuf,
 }
 
@@ -1090,7 +1089,6 @@ impl AppState {
                 self.git_generation = self.git_generation.wrapping_add(1);
                 self.pending_git_requests.push(GitWorkerRequest {
                     generation: self.git_generation,
-                    canonical: canonical.to_path_buf(),
                     repo_root,
                 });
                 self.last_git_request_at = Some(std::time::Instant::now());
@@ -1099,7 +1097,7 @@ impl AppState {
             // No worker (tests, App::new bootstrap) — fall through
             // to the synchronous walk path below.
             self.git_status_cache = None;
-            if let Some(entries) = crate::git::status::repo_status_entries(&repo_root, canonical)
+            if let Some(entries) = crate::git::status::repo_status(&repo_root)
                 && let Some((index_mtime, head_mtime)) = mtimes
             {
                 self.git_status_cache = Some(GitStatusCache {
@@ -3878,7 +3876,6 @@ mod tests {
             "exactly one request enqueued for the run loop to flush"
         );
         let req = &s.pending_git_requests[0];
-        assert_eq!(req.canonical, root, "request targets the queried dir");
         assert_eq!(
             s.current_repo_root.as_deref(),
             Some(req.repo_root.as_path()),

@@ -1,19 +1,16 @@
 //! Pure, owned data model for git diff / show / blame.
 //!
-//! These types are the structured foundation the in-house renderer (PR 8)
-//! styles into pager lines, replacing the colored-bytes-from-`git`
-//! subprocess path in [`crate::git::diff`]. They are deliberately free of any
-//! gix types: every field is an owned `String` / number / plain enum, so the
-//! model is `Send`, comparable in tests, and carries no borrow back into the
-//! repository. The builders that populate them live in
-//! [`crate::git::diff`] (diff/show) and [`crate::git::blame`].
-//!
-//! Wired into the UI by PR 8; the builders are `#[allow(dead_code)]` until
-//! then (same staging pattern PR 4 used for `repo_status`).
+//! These types are the structured foundation the in-house renderer
+//! ([`crate::ui::diff_render`] / [`crate::ui::blame_render`]) styles into pager
+//! lines, replacing the colored-bytes-from-`git` subprocess path (deleted in
+//! PR 9). They are deliberately free of any gix types: every field is an owned
+//! `String` / number / plain enum, so the model is `Send`, comparable in
+//! tests, and carries no borrow back into the repository. The builders that
+//! populate them live in [`crate::git::diff_model`] (diff/show) and
+//! [`crate::git::blame`].
 
 /// A whole diff: the per-file changes plus a flag for whether we stopped
-/// early because the diff exceeded the line cap (see
-/// [`crate::git::diff::MAX_DIFF_LINES`]).
+/// early because the diff exceeded the builder's line cap.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiffModel {
     /// One entry per changed path, in the order gix produced them.
