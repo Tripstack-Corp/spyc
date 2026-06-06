@@ -778,6 +778,26 @@ mod tests {
     }
 
     #[test]
+    fn side_by_side_rows_never_exceed_width() {
+        // The pager must not wrap side-by-side rows — so every rendered row's
+        // display width must be ≤ the width it was rendered for. (A row wider
+        // than the pager body wraps, and the wrapped padding tail shows as a
+        // stray tinted bar — the bug this guards against.)
+        let theme = Theme::default();
+        for width in [40usize, 60, 80, 81, 100, 137] {
+            let out = render_diff(&modify_model(), &theme, DiffLayout::SideBySide, width);
+            for line in &out {
+                let w: usize = line
+                    .spans
+                    .iter()
+                    .map(|s| crate::ui::display_width(s.content.as_ref()))
+                    .sum();
+                assert!(w <= width, "row width {w} exceeds {width}: {line:?}");
+            }
+        }
+    }
+
+    #[test]
     fn show_renders_commit_header_then_diff() {
         let theme = Theme::default();
         let meta = CommitMeta {

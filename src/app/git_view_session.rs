@@ -118,33 +118,58 @@ const fn effective_layout(layout: DiffLayout, width: usize) -> DiffLayout {
     }
 }
 
-/// Render a retained model into pager lines at the given `width`/`layout`.
-/// Returns the lines and whether the pager should show line numbers (false
-/// for diff/show — they carry their own gutters; true for blame).
-fn render_model(
-    model: &GitViewModel,
-    theme: &Theme,
-    layout: DiffLayout,
-    width: usize,
-) -> (Vec<ratatui::text::Line<'static>>, bool) {
+/// What rendering a model produced: the styled lines, whether the pager should
+/// show its line-number gutter (off for diff/show — they carry their own; on
+/// for blame), and whether the pager should wrap long lines (off for the
+/// fixed-width side-by-side rows + blame gutter; on for unified, where long
+/// source lines should wrap rather than clip).
+struct Rendered {
+    lines: Vec<ratatui::text::Line<'static>>,
+    line_numbers: bool,
+    wrap: bool,
+}
+
+/// Render a retained model at the given `width`/`layout`. The side-by-side rows
+/// are sized to exactly `width`, so `width` MUST be the pager's true text-body
+/// width (see [`git_view_body_width`]) or the rows wrap into stray tinted bars.
+fn render_model(model: &GitViewModel, theme: &Theme, layout: DiffLayout, width: usize) -> Rendered {
     match model {
-        GitViewModel::Diff(m) => (
-            diff_render::render_diff(m, theme, effective_layout(layout, width), width),
-            false,
-        ),
-        GitViewModel::Show(b) => (
-            diff_render::render_show(&b.0, &b.1, theme, effective_layout(layout, width), width),
-            false,
-        ),
-        GitViewModel::Blame(m) => (blame_render::render_blame(m, theme), true),
+        GitViewModel::Diff(m) => {
+            let eff = effective_layout(layout, width);
+            Rendered {
+                lines: diff_render::render_diff(m, theme, eff, width),
+                line_numbers: false,
+                wrap: matches!(eff, DiffLayout::Unified),
+            }
+        }
+        GitViewModel::Show(b) => {
+            let eff = effective_layout(layout, width);
+            Rendered {
+                lines: diff_render::render_show(&b.0, &b.1, theme, eff, width),
+                line_numbers: false,
+                wrap: matches!(eff, DiffLayout::Unified),
+            }
+        }
+        GitViewModel::Blame(m) => Rendered {
+            lines: blame_render::render_blame(m, theme),
+            line_numbers: true,
+            wrap: false,
+        },
     }
 }
 
-/// Total viewport width for the renderer, derived from the terminal size minus
-/// a small border margin (the pager's outer block).
-fn render_width() -> usize {
+/// The pager's true text-body width for a git-view, matching the render path:
+/// the full terminal width when `full_width`, else the centered overlay's body
+/// (90% − borders, via [`pager::centered_body_width`]). Sizing the side-by-side
+/// columns to anything wider makes every row wrap.
+fn git_view_body_width(full_width: bool) -> usize {
     let (cols, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    (cols as usize).saturating_sub(2)
+    let w = if full_width {
+        cols
+    } else {
+        pager::centered_body_width(cols)
+    };
+    w as usize
 }
 
 impl App {
@@ -268,7 +293,10 @@ impl App {
     /// drops that borrow before mutating `self.view.pager`. This avoids holding
     /// `&self.runtime.git_view_session` and `&mut self.view.pager` at once.
     fn render_git_view_into_pager(&mut self) {
-        let width = render_width();
+        // Width must match the pager's real text body (depends on full_width),
+        // else the fixed-width side-by-side rows wrap into stray tinted bars.
+        let full_width = self.view.pager.as_ref().is_some_and(|p| p.full_width);
+        let width = git_view_body_width(full_width);
         let theme = &self.view.theme;
         let Some(session) = self.runtime.git_view_session.as_ref() else {
             return;
@@ -276,12 +304,13 @@ impl App {
         let Some(model) = session.model.as_ref() else {
             return;
         };
-        let (lines, show_line_numbers) = render_model(model, theme, session.layout, width);
+        let rendered = render_model(model, theme, session.layout, width);
         let title = session.title.clone();
         // The immutable session borrow ends here; now mutate the pager.
         if let Some(view) = self.view.pager.as_mut() {
-            view.lines = lines;
-            view.show_line_numbers = show_line_numbers;
+            view.lines = rendered.lines;
+            view.show_line_numbers = rendered.line_numbers;
+            view.wrap = rendered.wrap;
             view.streaming = false;
             view.title = title;
         }
