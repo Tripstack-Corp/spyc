@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Upgraded ratatui to 0.30.1** and **deduplicated crossterm onto 0.29** (we
+  pinned 0.28 directly while ratatui pulled 0.29, so the dependency tree
+  carried two copies). ratatui 0.30.1 brings an allocation-free buffer-flush
+  diff (less heap churn per frame), a CJK half-width katakana width fix, and
+  fixes to `Clear` (no longer panics when its area is outside the buffer),
+  `Scrollbar` (consistent thumb size while scrolling), and inline-viewport
+  resizing — all on widgets spyc already uses. No behavior change beyond those
+  upstream fixes; the render-output snapshot tests are unchanged.
+
 ## [1.56.0] - 2026-06-06
 
 ### Changed
