@@ -37,8 +37,8 @@ ignore = "0.4"
 # (status / diff / blame / discovery, plus `parallel` for the
 # multi-threaded status walk that keeps huge-tree refreshes cheap);
 # networking, credentials, worktree archive/stream, progress reporting,
-# and ~40 other default features stay off. `worktree-mutation` gets added
-# when worktree create/remove migrates (PR 6).
+# and ~40 other default features stay off. `worktree-mutation` is on for
+# the hand-rolled worktree create/remove (gix-worktree-state checkout).
 gix = { version = "0.84", default-features = false, features = [
     "sha1",
     "status",
@@ -50,6 +50,7 @@ gix = { version = "0.84", default-features = false, features = [
     "attributes",
     "excludes",
     "parallel",
+    "worktree-mutation",
 ] }
 nucleo-matcher = "0.3"
 grep-searcher = "0.1"
