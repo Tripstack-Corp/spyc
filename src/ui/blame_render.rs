@@ -7,9 +7,8 @@
 //! share a color (mirroring `git blame --color-lines`, making churn visible at
 //! a glance). Line numbers come free from the pager's own line-number toggle.
 //!
-//! Pure: `model + &Theme → lines`, no IO, no gix. NOT yet mounted — PR 8b
-//! wires it via `Effect::RequestGitView`. `#[allow(dead_code)]` until then.
-#![allow(dead_code)] // wired into the pager by PR 8b
+//! Pure: `model + &Theme → lines`, no IO, no gix. Wired into the pager by
+//! PR 8b (via the git-view session in `app/git_view_session.rs`).
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

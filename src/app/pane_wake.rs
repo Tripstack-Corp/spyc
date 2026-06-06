@@ -93,6 +93,23 @@ impl App {
         }
     }
 
+    /// PR 8b: build the git-view worker's wake — a payloadless
+    /// `Message::GitViewOutput` send (the built model rides
+    /// `GitViewSession.rx`; the loop re-drains via `drain_git_view_session`).
+    /// Wrapped around the worker's data `Sender` by a `WakingSender`. No-op
+    /// before `run()` installs the sender.
+    pub(crate) fn make_git_view_wake(&self) -> PaneWake {
+        match &self.runtime.pane_wake_tx {
+            Some(tx) => {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Message::GitViewOutput);
+                })
+            }
+            None => Arc::new(|| {}),
+        }
+    }
+
     /// MVU Phase 3d: build the F-finder walker's wake — a payloadless
     /// `Message::FindOutput` send (the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk`). No-op before `run()` installs the sender.

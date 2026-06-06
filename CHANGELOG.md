@@ -6,6 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- **Git diff / show / blame now render in-house with syntax highlighting,
+  defaulting to a side-by-side view.** `gd` / `gD` (diff), `g` show, and `gb`
+  (blame) no longer shell out to `git --color=always`; spyc builds a
+  structured diff/blame model with gix (gitoxide) off-thread and renders it
+  itself, so **code in diffs is syntax-highlighted** (the +/- tint is overlaid
+  on the language colors) and diffs open **side-by-side** (old left, new
+  right) by default. Press **`|`** in the pager to toggle between side-by-side
+  and the classic unified view; narrow terminals fall back to unified
+  automatically. Blame gets a per-commit-colored author/date gutter. Large
+  diffs build off-thread (a brief "computing…" pager) so the UI never blocks.
+  Diff colors are themeable via `[colors]` (`diff_add_fg` / `diff_del_bg` / …).
+  Part of the git → gix migration; the `git` binary is no longer used for
+  diff/show/blame.
 - **Git status now uses gix (gitoxide) instead of shelling out to `git
   status`.** The background git worker computes file-status markers and the
   branch/dirty indicator in-process via gix — no `git` subprocess on the

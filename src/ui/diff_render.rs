@@ -17,10 +17,8 @@
 //! each line gets its `+`/`-` gutter and a non-destructive row-background
 //! tint overlaid (syntect sets only `fg`, so language colors survive).
 //!
-//! Pure: `model + &Theme → lines`, no IO, no gix, no `&mut self`. NOT yet
-//! mounted in the pager — PR 8b wires it via `Effect::RequestGitView`. The
-//! whole module is `#[allow(dead_code)]` until then.
-#![allow(dead_code)] // wired into the pager by PR 8b
+//! Pure: `model + &Theme → lines`, no IO, no gix, no `&mut self`. Wired into
+//! the pager by PR 8b (via the git-view session in `app/git_view_session.rs`).
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};

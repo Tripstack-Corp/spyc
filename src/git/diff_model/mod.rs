@@ -19,10 +19,9 @@
 //! hunks with `CONTEXT_LINES` of context. Per-change → `FileDiff` translation
 //! lives in [`build`].
 //!
-//! NOT yet wired into the live UI (`git_state.rs` still shells out via
-//! [`crate::git::diff`]); marked `#[allow(dead_code)]` ("wired by PR 8", the
-//! staging pattern PR 4 used for `repo_status`). PR 9 removes the subprocess
-//! producers once the renderer consumes this model.
+//! Wired into the live UI by PR 8b (`app/git_view_session.rs` builds these
+//! models off-thread and renders them in-house). PR 9 removes the subprocess
+//! producers in [`crate::git::diff`].
 
 mod blob;
 mod build;
@@ -46,7 +45,6 @@ use build::{
 ///
 /// `paths` (repo-relative, forward-slash) optionally restricts the result to
 /// matching files/subtrees; empty means "everything".
-#[allow(dead_code)] // wired into the UI by PR 8
 pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
     let repo = gix::open(repo_root).ok()?;
     let workdir = repo.workdir()?.to_path_buf();
@@ -105,7 +103,6 @@ pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffM
 /// Uses `tree_index_status` (HEAD tree diffed against the current worktree
 /// index) with git's default rename detection (50%), then runs a blob diff
 /// per change. `paths` restricts the result as in [`diff_head_to_worktree`].
-#[allow(dead_code)] // wired into the UI by PR 8
 pub fn diff_cached(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
     let repo = gix::open(repo_root).ok()?;
     // The HEAD tree id (empty tree on an unborn HEAD → everything staged is an
@@ -161,7 +158,6 @@ pub fn diff_cached(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
 /// first-parent tree (root commit → vs the empty tree, so every line is an
 /// addition), and return the commit metadata alongside the structured diff.
 /// `None` if `repo_root` can't be opened or `rev` can't be resolved.
-#[allow(dead_code)] // wired into the UI by PR 8
 pub fn show_model(
     repo_root: &Path,
     rev: &str,

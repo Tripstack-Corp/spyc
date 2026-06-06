@@ -904,6 +904,13 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
             KeyCode::Char('l') => view.toggle_line_numbers(),
+            KeyCode::Char('|') => {
+                // git-view diff/show: flip unified ⇄ side-by-side and
+                // re-render from the retained model. A no-op for blame /
+                // non-git-view pagers (toggle returns false). Re-borrows
+                // `self` (the `view` borrow above is not used in this arm).
+                self.toggle_git_view_layout();
+            }
             KeyCode::Char('w') => view.toggle_whitespace(),
             KeyCode::Char('W') => view.toggle_wrap(),
             KeyCode::Char('m') if !view.toggle_markdown() => {

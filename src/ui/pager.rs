@@ -173,6 +173,11 @@ pub struct PagerView {
     /// or its id is cleared, the worker is dropped and the view
     /// freezes at whatever was collected.
     pub grep_id: Option<u32>,
+    /// When set, this pager view is backed by a git-view session (diff /
+    /// show / blame). The main tick loop renders the bounded model into
+    /// `lines` once the worker reports, and the `|` layout toggle re-renders
+    /// from the retained model while the id matches the active session.
+    pub git_view_id: Option<u32>,
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,
@@ -302,6 +307,7 @@ impl PagerView {
             no_history: false,
             task_id: None,
             grep_id: None,
+            git_view_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -339,6 +345,7 @@ impl PagerView {
             no_history: false,
             task_id: None,
             grep_id: None,
+            git_view_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -365,6 +372,12 @@ impl PagerView {
     /// Build a pager from raw bytes that may contain ANSI escape
     /// sequences. Colors, bold, underline etc. are preserved.
     /// Saveable by default (command output).
+    ///
+    /// PR 8b retired the last caller (the `git --color=always` diff/show/blame
+    /// path now builds structured models rendered in-house). Kept compiled —
+    /// still test-covered — until PR 9 decides its fate alongside the
+    /// subprocess producers in [`crate::git::diff`].
+    #[allow(dead_code)] // last non-test caller removed in PR 8b; see PR 9
     pub fn new_ansi(title: impl Into<String>, bytes: &[u8]) -> Self {
         let text = bytes.into_text().unwrap_or_default();
         Self {
@@ -380,6 +393,7 @@ impl PagerView {
             no_history: false,
             task_id: None,
             grep_id: None,
+            git_view_id: None,
             columns: 1,
             source_path: None,
             picker_cursor: None,
@@ -2066,6 +2080,7 @@ pub fn build_pager_help(theme: &super::theme::Theme) -> PagerView {
             "Display",
             &[
                 ("l", "toggle line numbers"),
+                ("|", "toggle diff layout (unified ⇄ side-by-side)"),
                 ("w", "toggle whitespace markers (·, ↲, $)"),
                 ("W", "toggle line wrap (default on for content pagers)"),
                 (
