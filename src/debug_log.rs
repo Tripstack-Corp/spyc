@@ -35,7 +35,7 @@ pub fn init(flag: bool) -> Option<String> {
     }
     let path = make_path();
     if let Ok(f) = OpenOptions::new().create(true).append(true).open(&path) {
-        let mut state = LOG.lock().unwrap();
+        let mut state = LOG.lock().expect("debug log mutex poisoned");
         state.file = Some(f);
         state.path = Some(path.clone());
         drop(state);
@@ -47,7 +47,7 @@ pub fn init(flag: bool) -> Option<String> {
 
 #[doc(hidden)]
 pub fn log(msg: &str) {
-    if let Some(f) = LOG.lock().unwrap().file.as_mut() {
+    if let Some(f) = LOG.lock().expect("debug log mutex poisoned").file.as_mut() {
         let _ = writeln!(f, "{msg}");
     }
 }

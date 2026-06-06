@@ -98,7 +98,6 @@ impl Inventory {
             timestamp: now_secs(),
             size: meta.len(),
         };
-        // Write content + metadata.
         let _ = std::fs::create_dir_all(&dir);
         let dat_path = dir.join(format!("{id}.dat"));
         let json_path = dir.join(format!("{id}.json"));

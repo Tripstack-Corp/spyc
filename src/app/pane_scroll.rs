@@ -174,7 +174,7 @@ impl App {
                     self.runtime
                         .pane_tabs
                         .as_mut()
-                        .unwrap()
+                        .expect("pane_tabs presence checked by key routing")
                         .active_mut()
                         .scroll_to_top();
                     Vec::new()
@@ -196,7 +196,12 @@ impl App {
             };
         }
 
-        let pane = self.runtime.pane_tabs.as_mut().unwrap().active_mut();
+        let pane = self
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .expect("pane_tabs presence checked by key routing")
+            .active_mut();
         match key.code {
             KeyCode::Char('k') | KeyCode::Up => pane.scroll_up(1),
             KeyCode::Char('j') | KeyCode::Down => pane.scroll_down_or_exit(1),

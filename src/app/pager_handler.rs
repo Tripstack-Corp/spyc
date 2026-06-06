@@ -243,7 +243,11 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let snapshot = self.view.pending_jump_history.take().unwrap();
+                    let snapshot = self
+                        .view
+                        .pending_jump_history
+                        .take()
+                        .expect("guarded by is_some check above");
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
                     if let Some(path_str) = snapshot.get(cursor) {
@@ -558,7 +562,11 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let sessions = self.state.pending_sessions.take().unwrap();
+                    let sessions = self
+                        .state
+                        .pending_sessions
+                        .take()
+                        .expect("guarded by is_some check above");
                     if cursor < 2 {
                         // "New session" header.
                         self.clear_pager();

@@ -94,7 +94,6 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
             }
             last_was_blank = false;
         } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
-            // Check for direct textual content
             if let Some(content) = val["content"].as_str()
                 && !content.is_empty()
             {

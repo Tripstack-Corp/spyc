@@ -135,7 +135,10 @@ impl App {
             MatchKind::Path => self.jump_to_pane_path(&text),
             MatchKind::GitSha => self.open_git_show_pager(&text),
             MatchKind::Custom { url_template, .. } if url_template.is_some() => {
-                let url = url_template.as_ref().unwrap().replace("{}", &text);
+                let url = url_template
+                    .as_ref()
+                    .expect("guarded by is_some in match arm")
+                    .replace("{}", &text);
                 self.open_url_or_flash(&url);
             }
             // IPv4 and template-less Custom: fall back to yank with a

@@ -167,7 +167,6 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
     let name = unique_admin_name(&worktrees_root, branch);
     let admin_dir = worktrees_root.join(&name);
 
-    // Create the worktree dir and admin dir.
     std::fs::create_dir_all(&target)?;
     std::fs::create_dir_all(&admin_dir)?;
 
@@ -320,7 +319,6 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
         _ => {}
     }
 
-    // Remove the checkout dir, then prune the admin dir.
     if path.exists() {
         std::fs::remove_dir_all(path)?;
     }

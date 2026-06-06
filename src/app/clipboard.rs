@@ -63,7 +63,8 @@ impl App {
             self.state.flash_error("inventory is empty");
             return Vec::new();
         }
-        // TODO: confirmation for large puts (>10 items)
+        // Puts are unconditional today; large puts (>10 items) could
+        // grow a confirmation prompt if the unguarded put ever bites.
         let (count, _, err) = self.state.inventory.put_to(&dest);
         self.state.rebuild_rows();
         if count > 0 {

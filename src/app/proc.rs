@@ -109,7 +109,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                                 }
                             }
                             Err(e) => {
-                                *read_err.lock().unwrap() = Some(e);
+                                *read_err.lock().expect("read_err mutex poisoned") = Some(e);
                                 reader_done.store(true, Release);
                                 // MVU Phase 3d death-wake: store THEN send, so
                                 // the loop-top Acquire-load sees the error. With
@@ -120,7 +120,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                         },
                         Ok(false) => {} // poll timeout — re-check stop/park
                         Err(e) => {
-                            *read_err.lock().unwrap() = Some(e);
+                            *read_err.lock().expect("read_err mutex poisoned") = Some(e);
                             reader_done.store(true, Release);
                             let _ = tx.send(Message::ReaderExited); // death-wake (see above)
                             return;

@@ -83,6 +83,20 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 	}
 	cargo deny --all-features check
 
+# Advisory AI-slop / code-quality scan. Deliberately NOT part of `check`: its
+# format/lint/security engines duplicate clippy+rustfmt (already in `check`),
+# and its comment/complexity rules are tuned in `.aislop/` to respect spyc's
+# deliberate choices (dense "why" docs, allowed-long MVU dispatch fns, the
+# in-progress 800-LoC decomposition). Run it to triage genuine slop, not as a
+# pass/fail gate. `aislop --json scan .` / `aislop ci .` give machine output.
+.PHONY: aislop
+aislop: ## Advisory AI-slop / quality scan (not a gate; see .aislop/ config)
+	@command -v aislop >/dev/null 2>&1 || { \
+		echo "aislop not found — install with: npm i -g aislop"; \
+		exit 1; \
+	}
+	aislop scan .
+
 # ---------- Release builds ---------------------------------------------------
 
 .PHONY: release

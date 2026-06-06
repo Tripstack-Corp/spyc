@@ -1749,7 +1749,7 @@ fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
             if !chunk.is_empty() {
                 pieces
                     .last_mut()
-                    .unwrap()
+                    .expect("pieces seeded with one element, never emptied")
                     .push(Span::styled(chunk, span.style));
                 current_w += visual;
             }

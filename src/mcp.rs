@@ -683,7 +683,8 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
                 match servers {
                     Some(map) => {
                         map.insert("spyc".to_string(), spyc_entry);
-                        serde_json::to_string_pretty(&parsed).unwrap()
+                        serde_json::to_string_pretty(&parsed)
+                            .expect("serializing a serde_json::Value cannot fail")
                     }
                     None => fresh(),
                 }

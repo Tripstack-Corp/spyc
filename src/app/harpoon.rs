@@ -39,7 +39,11 @@ impl App {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let h = self.state.harpoon.as_mut().unwrap();
+        let h = self
+            .state
+            .harpoon
+            .as_mut()
+            .expect("guarded by is_none check above");
         match h.append(path) {
             crate::state::harpoon::AppendResult::Added(slot) => {
                 if let Err(e) = h.save() {
@@ -81,7 +85,11 @@ impl App {
             || path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        let h = self.state.harpoon.as_mut().unwrap();
+        let h = self
+            .state
+            .harpoon
+            .as_mut()
+            .expect("guarded by is_none check above");
         match h.remove(&path) {
             Some(slot) => {
                 if let Err(e) = h.save() {
