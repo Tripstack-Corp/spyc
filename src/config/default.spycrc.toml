@@ -90,8 +90,10 @@
 # colors — only the row background is tinted.
 # diff_add_fg    = "#9ece6a"
 # diff_del_fg    = "#f7768e"
-# diff_add_bg    = "#203020"
-# diff_del_bg    = "#372228"
+# diff_add_bg      = "#122619"  # dim line wash
+# diff_del_bg      = "#2a161b"
+# diff_add_word_bg = "#2b603a"  # brighter, marks the changed tokens
+# diff_del_word_bg = "#6b2733"
 # diff_hunk_fg   = "#7dcfff"
 # diff_file_fg   = "#7aa2f7"
 # diff_meta_fg   = "#565f89"

@@ -247,6 +247,8 @@ pub struct ColorOverrides {
     pub diff_del_fg: Option<String>,
     pub diff_add_bg: Option<String>,
     pub diff_del_bg: Option<String>,
+    pub diff_add_word_bg: Option<String>,
+    pub diff_del_word_bg: Option<String>,
     pub diff_hunk_fg: Option<String>,
     pub diff_file_fg: Option<String>,
     pub diff_meta_fg: Option<String>,
@@ -365,6 +367,14 @@ impl Config {
         merge_color(&mut self.colors.diff_del_fg, file.colors.diff_del_fg);
         merge_color(&mut self.colors.diff_add_bg, file.colors.diff_add_bg);
         merge_color(&mut self.colors.diff_del_bg, file.colors.diff_del_bg);
+        merge_color(
+            &mut self.colors.diff_add_word_bg,
+            file.colors.diff_add_word_bg,
+        );
+        merge_color(
+            &mut self.colors.diff_del_word_bg,
+            file.colors.diff_del_word_bg,
+        );
         merge_color(&mut self.colors.diff_hunk_fg, file.colors.diff_hunk_fg);
         merge_color(&mut self.colors.diff_file_fg, file.colors.diff_file_fg);
         merge_color(&mut self.colors.diff_meta_fg, file.colors.diff_meta_fg);

@@ -37,6 +37,8 @@ impl App {
                 find_picker: None,
                 grep_session: None,
                 next_grep_id: 0,
+                git_view_session: None,
+                next_git_view_id: 0,
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,

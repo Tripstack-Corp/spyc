@@ -76,6 +76,13 @@ enum Message {
     /// `grep_id`, so a wake for a replaced/closed session self-discards).
     /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
     GrepOutput,
+    /// PR 8b: a git-view worker (diff / show / blame) finished building its
+    /// bounded model. Payloadless wake — the built `GitViewPayload` rides
+    /// `GitViewSession.rx`, re-drained by `drain_git_view_session` (which
+    /// id-gates against the live pager's `git_view_id`, so a wake for a
+    /// replaced/closed session self-discards). Collapsed in the coalesce
+    /// pre-step; never surfaced as `Input`.
+    GitViewOutput,
     /// MVU Phase 3d: the F-finder walker produced a candidate batch or
     /// completed. Payloadless wake — the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk` (a wake after the picker closed no-ops at
@@ -173,6 +180,7 @@ mod effect;
 mod find_picker;
 mod focus;
 mod git_state;
+mod git_view_session;
 mod graveyard;
 mod grep_session;
 #[cfg(test)]
@@ -211,6 +219,7 @@ use capture::PendingCapture;
 pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
+use git_view_session::GitViewSession;
 use grep_session::GrepSession;
 use pager_history::PagerHistory;
 use pane_wake::SinkId;
@@ -398,6 +407,11 @@ struct Runtime {
     grep_session: Option<GrepSession>,
     /// Monotonic grep-session id (stale-session guard).
     next_grep_id: u32,
+    /// Active git-view session (diff / show / blame): holds the worker
+    /// receiver plus the retained model that backs the `|` layout toggle.
+    git_view_session: Option<GitViewSession>,
+    /// Monotonic git-view-session id (stale-session guard).
+    next_git_view_id: u32,
     /// Off-render-thread agent-status resolve: the landing slot + in-flight
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,

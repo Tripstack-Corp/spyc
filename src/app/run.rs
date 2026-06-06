@@ -258,6 +258,7 @@ impl App {
                 | Message::PaneOutput { .. }
                 | Message::SinkOutput { .. }
                 | Message::GrepOutput
+                | Message::GitViewOutput
                 | Message::FindOutput
                 | Message::ReaderExited
                 | Message::AgentStatusReady,
@@ -475,6 +476,14 @@ impl App {
             // results land directly in the pager body instead of
             // being re-ranked.
             if self.drain_grep_session() {
+                ctx.draw.mark(3);
+            }
+
+            // PR 8b: git-view session: the worker builds one bounded
+            // diff/show/blame model off-thread and reports once; this
+            // renders it into the matching pager (and the session stays
+            // alive to back the `|` layout toggle).
+            if self.drain_git_view_session() {
                 ctx.draw.mark(3);
             }
 

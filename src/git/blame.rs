@@ -6,10 +6,9 @@
 //! date of the commit that introduced it. The blame is taken against the
 //! current `HEAD` commit (matching plain `git blame <file>`).
 //!
-//! NOT yet wired into the live UI — the live blame view still shells out via
-//! [`crate::git::diff::blame`]. Marked `#[allow(dead_code)]` ("wired by PR 8",
-//! same staging pattern PR 4 used for `repo_status`); PR 8 mounts this in the
-//! pager and PR 9 deletes the subprocess body.
+//! Wired into the live UI by PR 8b (`app/git_view_session.rs` builds this
+//! model off-thread and renders it in-house); PR 9 deletes the subprocess body
+//! in [`crate::git::diff::blame`].
 
 use crate::git::model::{BlameLine, BlameModel};
 use std::collections::HashMap;
@@ -19,7 +18,6 @@ use std::path::Path;
 /// `repo_root`, against the current `HEAD`. Returns one entry per line in file
 /// order, or `None` if the repo can't be opened, `HEAD` can't be resolved, or
 /// the blame fails (e.g. the path isn't tracked at `HEAD`).
-#[allow(dead_code)] // wired into the UI by PR 8
 pub fn blame(repo_root: &Path, path: &str) -> Option<BlameModel> {
     use gix::bstr::{BStr, ByteSlice};
 

@@ -55,6 +55,7 @@ pub fn coalesce_pending(
             Message::PaneOutput { .. }
             | Message::SinkOutput { .. }
             | Message::GrepOutput
+            | Message::GitViewOutput
             | Message::FindOutput
             | Message::ReaderExited
             // MVU Phase 6: agent-status-resolved is a payloadless wake. Safe to
@@ -161,6 +162,7 @@ pub fn coalesce_recv(
         // doc on `agent_status_pending`).
         Ok(
             Message::GrepOutput
+            | Message::GitViewOutput
             | Message::FindOutput
             | Message::ReaderExited
             | Message::AgentStatusReady,

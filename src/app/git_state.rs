@@ -4,8 +4,11 @@
 //! child module — reads App's private `self.state` via the
 //! descendant-module rule, same pattern as `effect` / `actions`.
 
+use std::path::Path;
+
 use crate::ui::pager;
 
+use super::git_view_session::GitViewKind;
 use super::{App, state};
 
 impl App {
@@ -86,74 +89,65 @@ impl App {
 
     /// `git show <sha>` into the pager. Uppercase action for a
     /// matched git SHA — the value of the picker for a
-    /// commit-discussion workflow.
+    /// commit-discussion workflow. PR 8b: builds the structured model
+    /// off-thread (gix) and renders it in-house via the git-view session.
     pub fn open_git_show_pager(&mut self, sha: &str) {
-        match crate::git::diff::show(&self.state.listing.dir, sha) {
-            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
-                let title = format!("git show {sha}");
-                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let msg = stderr.lines().next().unwrap_or("no output").trim();
-                self.state.flash_error(format!("git show: {msg}"));
-            }
-            Err(e) => self.state.flash_error(format!("git show: {e}")),
-        }
+        let Some(root) = self.state.current_repo_root.clone() else {
+            self.state.flash_error("git show: not a git repository");
+            return;
+        };
+        self.open_git_view(
+            GitViewKind::Show {
+                repo_root: root,
+                rev: sha.to_string(),
+            },
+            format!("git show {sha}"),
+        );
     }
 
     /// g d / g D — run `git diff` on selection and show in pager.
     ///
-    /// `gd` (cached=false) also surfaces *untracked* files in the
-    /// selection — without this, the cursor sitting on a `?`/`~`-flagged
-    /// new file gives empty diff output and looks broken. We synthesize
-    /// an "added" diff per untracked file via `git diff --no-index
-    /// /dev/null <file>`, which exits 1 but still produces the diff bytes
-    /// we want to render.
+    /// `gd` (cached=false) shows diff-vs-HEAD (staged + unstaged) so it
+    /// matches the `~` marker semantics — `~` flags anything different from
+    /// HEAD. `gD` (`--cached`) keeps the staged-only "what would commit"
+    /// view. PR 8b: builds the structured model off-thread (gix) and renders
+    /// it in-house; the gix diff already surfaces untracked files, so the
+    /// old `untracked_bytes` synthesis is gone.
     pub fn open_git_diff(&mut self, cached: bool) {
         let paths = self.state.selection_paths();
         if paths.is_empty() {
             return;
         }
-        let cwd = &self.state.listing.dir;
-        let path_strings: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-
-        // `gd` shows diff-vs-HEAD (staged + unstaged) so it matches the
-        // `~` marker semantics — `~` flags anything different from HEAD,
-        // and a user pressing `gd` to see "what's the change" expects
-        // the same scope. Pre-1.41.7 ran bare `git diff` which only
-        // showed unstaged work, so `git add` followed by `gd` produced
-        // a confusing "no unstaged changes" flash on a row that was
-        // visibly marked dirty. `gD` (`--cached`) keeps the
-        // staged-only "what would commit" view.
-        let modified_out = match crate::git::diff::working(cwd, &path_strings, cached) {
-            Ok(o) => o,
-            Err(e) => {
-                self.state.flash_error(format!("git diff: {e}"));
-                return;
-            }
-        };
-
-        let mut combined = modified_out;
-        if !cached {
-            combined.extend(crate::git::diff::untracked_bytes(cwd, &path_strings));
-        }
-
-        if combined.is_empty() {
-            let label = if cached { "staged" } else { "uncommitted" };
-            self.state.flash_info(format!("no {label} changes"));
+        let Some(root) = self.state.current_repo_root.clone() else {
+            self.state.flash_error("git diff: not a git repository");
             return;
-        }
-        let label = if cached {
+        };
+        // Relativize each selected absolute path to a repo-relative,
+        // forward-slash path (mirroring the status path-mapping's
+        // `strip_prefix(&repo_root)`). Paths not under the repo root are
+        // skipped — they can't appear in this repo's diff.
+        let rel: Vec<String> = paths
+            .iter()
+            .filter_map(|p| repo_relative(p, &root))
+            .collect();
+        let title = if cached {
             "git diff --cached"
         } else {
             "git diff HEAD (+ new)"
         };
-        self.view.pager = Some(pager::PagerView::new_ansi(label, &combined));
+        self.open_git_view(
+            GitViewKind::Diff {
+                repo_root: root,
+                paths: rel,
+                cached,
+            },
+            title.to_string(),
+        );
     }
 
     /// g b — `git blame` on the cursor file. Selection is ignored
-    /// (blame on multiple files / a directory is meaningless).
+    /// (blame on multiple files / a directory is meaningless). PR 8b:
+    /// builds the blame model off-thread (gix) and renders it in-house.
     pub fn open_git_blame(&mut self) {
         let Some(row) = self.state.rows.get(self.state.cursor.index) else {
             self.state.flash_error("git blame: no cursor file");
@@ -164,19 +158,23 @@ impl App {
             self.state.flash_error("git blame: cursor is a directory");
             return;
         }
-        let path_str = path.display().to_string();
-        match crate::git::diff::blame(&self.state.listing.dir, &path_str) {
-            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
-                let title = format!("git blame {}", row.display);
-                self.view.pager = Some(pager::PagerView::new_ansi(title, &out.stdout));
-            }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let msg = stderr.lines().next().unwrap_or("no output").trim();
-                self.state.flash_error(format!("git blame: {msg}"));
-            }
-            Err(e) => self.state.flash_error(format!("git blame: {e}")),
-        }
+        let Some(root) = self.state.current_repo_root.clone() else {
+            self.state.flash_error("git blame: not a git repository");
+            return;
+        };
+        let Some(rel) = repo_relative(&path, &root) else {
+            self.state
+                .flash_error("git blame: file is outside the repository");
+            return;
+        };
+        let title = format!("git blame {}", row.display);
+        self.open_git_view(
+            GitViewKind::Blame {
+                repo_root: root,
+                path: rel,
+            },
+            title,
+        );
     }
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
@@ -214,5 +212,57 @@ impl App {
                 .state
                 .flash_error("not in a git repository (or no worktrees)"),
         }
+    }
+}
+
+/// Relativize an absolute `path` to a repo-relative, forward-slash path under
+/// `repo_root` (the gix builders want repo-relative paths). Mirrors the status
+/// path-mapping's `strip_prefix(&repo_root)`. Returns `None` when `path` is not
+/// under `repo_root` (it can't appear in this repo's diff/blame) or when the
+/// path is the repo root itself (empty relative path).
+fn repo_relative(path: &Path, repo_root: &Path) -> Option<String> {
+    let rel = path.strip_prefix(repo_root).ok()?;
+    let s = rel.to_string_lossy();
+    if s.is_empty() {
+        return None;
+    }
+    // On the target platform separators are already '/', but normalize
+    // defensively so the gix path spec matches regardless of host.
+    Some(s.replace(std::path::MAIN_SEPARATOR, "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::repo_relative;
+    use std::path::Path;
+
+    #[test]
+    fn repo_relative_strips_root_prefix() {
+        let root = Path::new("/home/u/proj");
+        assert_eq!(
+            repo_relative(Path::new("/home/u/proj/src/main.rs"), root).as_deref(),
+            Some("src/main.rs")
+        );
+    }
+
+    #[test]
+    fn repo_relative_top_level_file() {
+        let root = Path::new("/home/u/proj");
+        assert_eq!(
+            repo_relative(Path::new("/home/u/proj/README.md"), root).as_deref(),
+            Some("README.md")
+        );
+    }
+
+    #[test]
+    fn repo_relative_outside_root_is_none() {
+        let root = Path::new("/home/u/proj");
+        assert!(repo_relative(Path::new("/home/u/other/x"), root).is_none());
+    }
+
+    #[test]
+    fn repo_relative_root_itself_is_none() {
+        let root = Path::new("/home/u/proj");
+        assert!(repo_relative(Path::new("/home/u/proj"), root).is_none());
     }
 }
