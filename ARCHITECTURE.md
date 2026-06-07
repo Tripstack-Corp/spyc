@@ -69,7 +69,7 @@ spyc follows the Elm/Model-View-Update pattern. The structural migration
   is the **sole** executor; handlers return `Vec<Effect>` and never touch the
   OS directly. This makes "forgot to clear `pending_X`" and inline-IO bug
   classes structurally hard.
-- **View.** Rendering lives in `src/app/render.rs`. The draw pass is
+- **View.** Rendering lives in `src/app/render/`. The draw pass is
   **mutation-free** (`&self`): any pre-frame state settling happens in
   `prepare_frame` *before* the draw, and the output is pinned by a ratatui
   `TestBackend` + `insta` snapshot net. It reads the Model / ViewState and the
