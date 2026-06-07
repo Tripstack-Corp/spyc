@@ -23,7 +23,9 @@ use super::{App, Effect, EntryKind, PagerReturn, PagerView, TaskStatus, sh_c, st
 
 impl App {
     /// Route a key to the pager overlay. Also uses vi-like motion so the
-    /// pager feels native to the rest of the UI.
+    /// pager feels native to the rest of the UI. Delegates each input
+    /// context to a sub-handler (returning `Some` when it consumes the key,
+    /// `None` to fall through); the final motion handler always consumes.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let Some(view) = &mut self.view.pager else {
             return Vec::new();
@@ -31,6 +33,68 @@ impl App {
         // Clear any one-shot flash message from the previous keypress.
         view.flash = None;
 
+        if let Some(r) = self.handle_pager_ctrl_c(key) {
+            return r;
+        }
+
+        let viewport = self.pager_viewport();
+
+        if let Some(r) = self.handle_pager_search_typing(key, viewport) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_jump_buf(key) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_bracket(key) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_jump_history(key, viewport) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_worktree_pick(key) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_history_editor(key, viewport) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_session_pick(key, viewport) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_placement(key, viewport) {
+            return r;
+        }
+        if let Some(r) = self.handle_pager_visual(key, viewport) {
+            return r;
+        }
+        self.handle_pager_motion(key, viewport)
+    }
+
+    /// The pager's content viewport height (body rows). Prefers the
+    /// renderer's cached `last_viewport_h`; falls back to the centered-
+    /// overlay heuristic only before the first frame has run.
+    fn pager_viewport(&self) -> u16 {
+        let Some(view) = self.view.pager.as_ref() else {
+            return 2;
+        };
+        {
+            let cached = view.last_viewport_h.get();
+            if cached >= 2 {
+                cached
+            } else {
+                let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let pager_h = if view.full_width {
+                    term_h
+                } else {
+                    (u32::from(term_h) * 92 / 100) as u16
+                };
+                pager_h.saturating_sub(2).max(2)
+            }
+        }
+    }
+
+    /// Contextual `^C`: interrupt a viewed task, else flash an in-pager hint.
+    fn handle_pager_ctrl_c(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // ^C inside the pager is contextual:
         //   - Task viewer + task running → SIGINT to the process group
         //     (mirrors a real ^C in the captured task's tty), flash
@@ -56,40 +120,15 @@ impl App {
             } else if let Some(v) = self.view.pager.as_mut() {
                 v.flash = Some("press Esc or q to close pager".into());
             }
-            return Vec::new();
+            return Some(Vec::new());
         }
 
-        // Compute the pager's actual viewport from the terminal size.
-        // Compute the pager's actual content viewport. Prefer the
-        // renderer's cached `last_viewport_h` — it's the real
-        // body-area row count from the most recent frame and is
-        // correct for every mount (Overlay / TopPane / LowerPane).
-        // Fall back to the centered-overlay heuristic only on the
-        // very first key event (renderer hasn't run yet).
-        //
-        // Bug this fixes: `Mount::LowerPane` (`^a-v`) renders into
-        // the lower-pane slot (~40 % of terminal height), but the
-        // old heuristic always used `term_h * 92 / 100 - 2` —
-        // viewport-too-tall, so `scroll_by`'s clamp via
-        // `scroll_max(viewport)` returned a value smaller than the
-        // real maximum. After the first `k` keypress, `scroll`
-        // capped well above the snapshot's last lines (the HUD)
-        // and the pager looked like it had truncated the bottom.
-        let viewport = {
-            let cached = view.last_viewport_h.get();
-            if cached >= 2 {
-                cached
-            } else {
-                let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
-                let pager_h = if view.full_width {
-                    term_h
-                } else {
-                    (u32::from(term_h) * 92 / 100) as u16
-                };
-                pager_h.saturating_sub(2).max(2)
-            }
-        };
+        None
+    }
 
+    /// While typing a `/` search query, most keys feed the buffer.
+    fn handle_pager_search_typing(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // While typing a search query, most keys feed the buffer.
         if view.is_typing_search() {
             match key.code {
@@ -124,9 +163,15 @@ impl App {
                 }
                 _ => {}
             }
-            return Vec::new();
+            return Some(Vec::new());
         }
 
+        None
+    }
+
+    /// Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
+    fn handle_pager_jump_buf(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
         if let Some(ref mut buf) = self.view.pager_jump_buf {
             match key.code {
@@ -171,9 +216,14 @@ impl App {
                     view.jump_buf = None;
                 }
             }
-            return Vec::new();
+            return Some(Vec::new());
         }
 
+        None
+    }
+
+    /// `[b`/`]b` buffer-history nav and `[t`/`]t` task-viewer cycle (chord follow-up).
+    fn handle_pager_bracket(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         // [b / ]b — pager buffer history navigation (two-key sequence).
         // [t / ]t — task viewer cycle (peek through backgrounded tasks).
         if let Some(bracket) = self.view.pager_pending_bracket.take() {
@@ -215,17 +265,23 @@ impl App {
                     }
                     _ => {}
                 }
-                return Vec::new();
+                return Some(Vec::new());
             }
             if key.code == KeyCode::Char('t') {
                 let direction = if bracket == '[' { -1 } else { 1 };
                 self.cycle_task_viewer(direction);
-                return Vec::new();
+                return Some(Vec::new());
             }
             // Unrecognized chord follow-up -- swallow it.
-            return Vec::new();
+            return Some(Vec::new());
         }
 
+        None
+    }
+
+    /// Jump-history popup: j/k navigate, Enter chdirs, x deletes, q/Esc closes.
+    fn handle_pager_jump_history(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // Jump-history popup: j/k navigate, Enter chdirs, x deletes,
         // q/Esc closes. Per-popup j/k handling because the pager
         // dispatch doesn't have a generic picker-move arm; each
@@ -235,11 +291,11 @@ impl App {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.picker_move(-1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Enter => {
                     let cursor = view.picker_cursor.unwrap_or(0);
@@ -262,7 +318,7 @@ impl App {
                             Err(e) => self.state.flash_error(format!("cd: {e}")),
                         }
                     }
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('x') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     // `x` deletes the entry at the cursor. Matches
@@ -286,7 +342,7 @@ impl App {
                             self.clear_pager();
                             self.view.needs_full_repaint = true;
                             self.state.flash_info("jump history empty");
-                            return Vec::new();
+                            return Some(Vec::new());
                         }
                         // Rebuild the pager line list from the snapshot.
                         let lines: Vec<ratatui::text::Line<'static>> = snapshot
@@ -300,13 +356,18 @@ impl App {
                         if cursor >= view.lines.len() {
                             view.picker_cursor = Some(view.lines.len() - 1);
                         }
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                 }
                 _ => {}
             }
         }
 
+        None
+    }
+
+    /// Worktree picker: 1-9 selects a worktree, chdirs, re-anchors PROJECT_HOME.
+    fn handle_pager_worktree_pick(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         // Worktree picker: 1-9 selects a worktree, chdirs, and
         // re-anchors PROJECT_HOME on the worktree root.
         if let Some(ref worktrees) = self.state.pending_worktrees
@@ -319,7 +380,7 @@ impl App {
                 self.view.needs_full_repaint = true;
                 if let Err(e) = self.state.chdir(&path) {
                     self.state.flash_error(format!("chdir: {e}"));
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 // Worktrees are independent project roots — point
                 // PROJECT_HOME at the worktree so harpoon, MCP
@@ -345,10 +406,16 @@ impl App {
                     "worktree: {} (PROJECT_HOME updated)",
                     crate::paths::display_tilde(&new_home),
                 ));
-                return Vec::new();
+                return Some(Vec::new());
             }
         }
 
+        None
+    }
+
+    /// History editor: vi-edit the highlighted line, Enter runs, Ctrl+D deletes.
+    fn handle_pager_history_editor(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // History editor: vi-edit highlighted line, Enter runs, d/x deletes.
         if let Some(ref mut editor) = self.view.pending_history_pick {
             use crate::ui::line_edit::EditResult;
@@ -366,7 +433,7 @@ impl App {
                         self.view.pending_history_pick = None;
                         self.view.needs_full_repaint = true;
                         self.state.flash_info("history is empty");
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                     let old_cursor = cursor;
                     self.show_history_popup();
@@ -386,7 +453,7 @@ impl App {
                         }
                     }
                 }
-                return Vec::new();
+                return Some(Vec::new());
             }
 
             // Inline sync: update editor from the current picker line.
@@ -476,7 +543,7 @@ impl App {
                     }
                 };
                 if handled {
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
             }
 
@@ -495,7 +562,7 @@ impl App {
                     self.view.pending_history_pick = None;
                     self.view.needs_full_repaint = true;
                     if cmd.trim().is_empty() {
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                     // Execute the (possibly edited) command directly.
                     self.state.last_captured_cmd = Some(cmd.clone());
@@ -533,19 +600,25 @@ impl App {
                 }
                 EditResult::TabComplete | EditResult::Continue => {}
             }
-            return Vec::new();
+            return Some(Vec::new());
         }
 
+        None
+    }
+
+    /// Session picker: j/k navigate, Enter/1-9 select, n new.
+    fn handle_pager_session_pick(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // Session picker: j/k navigate, Enter/1-9 select, n new.
         if self.state.pending_sessions.is_some() {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.picker_move(-1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char(c @ '1'..='9') => {
                     // Direct selection — index into sessions (offset by 2 header lines).
@@ -556,7 +629,7 @@ impl App {
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
                         self.restore_session(&session);
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                     self.state.pending_sessions = Some(sessions);
                 }
@@ -572,7 +645,7 @@ impl App {
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
                         self.state.flash_info("new session");
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                     let idx = cursor - 2;
                     if let Some(session) = sessions.get(idx) {
@@ -580,7 +653,7 @@ impl App {
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
                         self.restore_session(&session);
-                        return Vec::new();
+                        return Some(Vec::new());
                     }
                     self.state.pending_sessions = Some(sessions);
                 }
@@ -589,12 +662,18 @@ impl App {
                     self.state.pending_sessions = None;
                     self.view.needs_full_repaint = true;
                     self.state.flash_info("new session");
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 _ => {}
             }
         }
 
+        None
+    }
+
+    /// Placement mode: pre-visual-block cursor positioning via vi motions.
+    fn handle_pager_placement(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // Placement mode: pre-visual-block cursor positioning.
         // First `^v` enters this state; vi motions move the cursor
         // without defining a selection yet. Second `^v` commits to
@@ -606,71 +685,77 @@ impl App {
                 KeyCode::Esc => {
                     view.cancel_placement();
                     view.flash = Some("placement: cancelled".into());
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.commit_placement_to_visual_block();
                     view.flash = Some("visual block".into());
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('V') => {
                     view.commit_placement_to_visual_line();
                     view.flash = Some("visual line".into());
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('h') | KeyCode::Left => {
                     view.placement_move(0, -1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('l') | KeyCode::Right => {
                     view.placement_move(0, 1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.placement_move(1, 0, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.placement_move(-1, 0, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('0') | KeyCode::Home => {
                     view.placement_line_start();
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('$') | KeyCode::End => {
                     view.placement_line_end();
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('w') => {
                     view.placement_word_forward();
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('b') => {
                     view.placement_word_backward();
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('g') => {
                     // Single `g` jumps to top (no `gg` two-key required —
                     // simpler than reusing the pager's pending-g state
                     // machine, and placement is short-lived anyway).
                     view.placement_jump_to(0, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('G') => {
                     let last = view.lines.len().saturating_sub(1);
                     view.placement_jump_to(last, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 _ => {
                     // Anything else: swallow. Keeps the user from
                     // accidentally scrolling or yanking while in
                     // placement.
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
             }
         }
 
+        None
+    }
+
+    /// Visual mode (Line/Block): motion keys move the selection; `y` yanks.
+    fn handle_pager_visual(&mut self, key: KeyEvent, viewport: u16) -> Option<Vec<Effect>> {
+        let view = self.view.pager.as_mut()?;
         // Visual mode: Line (`V`) or Block (`^v`). Intercept first
         // so motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move
         // the selection cursor instead of the scroll position, and
@@ -689,7 +774,7 @@ impl App {
             // and ^v from Line upgrades. Esc cancels either.
             if matches!(key.code, KeyCode::Esc) {
                 view.cancel_visual();
-                return Vec::new();
+                return Some(Vec::new());
             }
             if matches!(key.code, KeyCode::Char('V'))
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -702,7 +787,7 @@ impl App {
                 } else {
                     view.cancel_visual();
                 }
-                return Vec::new();
+                return Some(Vec::new());
             }
             if matches!(key.code, KeyCode::Char('v'))
                 && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -712,7 +797,7 @@ impl App {
                 } else {
                     view.enter_visual_block();
                 }
-                return Vec::new();
+                return Some(Vec::new());
             }
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
@@ -727,67 +812,75 @@ impl App {
                         }
                         Err(e) => view.flash = Some(format!("yank failed: {e}")),
                     }
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.visual_move(1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
                     view.visual_move(-1, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('h') | KeyCode::Left if in_block => {
                     view.visual_col_move(-1);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('l') | KeyCode::Right if in_block => {
                     view.visual_col_move(1);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(half_page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(-half_page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     view.visual_move(-page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::PageDown | KeyCode::Char(' ') => {
                     view.visual_move(page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::PageUp | KeyCode::Char('b') => {
                     view.visual_move(-page as isize, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('g') | KeyCode::Home => {
                     view.visual_jump_to(0, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 KeyCode::Char('G') | KeyCode::End => {
                     let last = view.lines.len().saturating_sub(1);
                     view.visual_jump_to(last, viewport);
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
                 _ => {
                     // Unknown key while in visual mode — ignore so a
                     // stray `/` or `:` doesn't silently trigger a
                     // search/jump that the visual selection wasn't
                     // expecting. User must Esc out first.
-                    return Vec::new();
+                    return Some(Vec::new());
                 }
             }
         }
 
+        None
+    }
+
+    /// Fall-through: scroll / vi-motion / toggles / close / editor handoff.
+    fn handle_pager_motion(&mut self, key: KeyEvent, viewport: u16) -> Vec<Effect> {
+        let Some(view) = self.view.pager.as_mut() else {
+            return Vec::new();
+        };
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                 // v1.5 pane-scroll pager: snap the underlying pty
