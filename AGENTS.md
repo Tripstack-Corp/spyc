@@ -47,7 +47,7 @@ per-module navigation index.
   - **`effect.rs`** — the `Effect` enum + `run_effects`, the **sole** side-effect executor (clipboard, signals, send-to-pane, terminal title, foreground exec, pane-text reads, chdir). Handlers return `Vec<Effect>`; only this runs them.
   - **`render.rs`** — the `render` pass + `compute_layout` (status bar, list, divider, pane status line, harpoon menu). The View half.
   - **`sources.rs`** / **`loop_steps.rs`** / **`streaming.rs`** / **`pane_wake.rs`** / **`scheduler.rs`** — the event-loop machinery: channel coalescing + per-source ingest (`sources.rs`), the pre-recv drain/refresh steps (`loop_steps.rs`), streaming pull-source drains (`streaming.rs`), pane wake plumbing, and the timer/deadline scheduler.
-  - **`key_dispatch.rs`** — `handle_key` top-level router + mode sub-handlers (prompt / vi-prompt editors, remove / graveyard-purge / Claude-crash-recover confirm handlers).
+  - **`key_dispatch/`** — `handle_key` top-level router + `apply_user` (`mod`), the prompt / vi-prompt editors (`prompts`), and the remove / graveyard-purge / Claude-crash-recover confirm handlers (`confirms`).
   - **`pager_handler.rs`** — `handle_pager_key`, the vi-style key router for the in-app pager overlay.
   - **`commands.rs`** — `App::dispatch_command`, the terminal-touching half of `:` command dispatch (the pure-domain half is `AppState::dispatch_command`).
   - **`actions.rs`** — `apply` / `apply_inner`, the `Action` dispatcher, plus post-action harpoon reconcilers.
