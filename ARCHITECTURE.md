@@ -153,7 +153,7 @@ corrupt JSON.
 
 ## MCP server
 
-`src/mcp.rs` runs a JSON-RPC server on a PID-scoped Unix domain
+`src/mcp/` runs a JSON-RPC server on a PID-scoped Unix domain
 socket so multiple spyc instances coexist. Two transports share
 the same dispatch:
 

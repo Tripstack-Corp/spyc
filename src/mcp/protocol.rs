@@ -1,0 +1,505 @@
+//! MCP JSON-RPC dispatch, request handlers, and framing helpers.
+//! Split out of mcp.rs verbatim during the 800-LoC decomposition.
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
+
+use super::readers::{
+    grep_matches_to_json, read_context_or_empty, read_cwd_from_context, read_file_content,
+    read_inventory_from_context, read_picks_from_context, search_root,
+};
+use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION};
+pub(super) fn dispatch(
+    w: &mut impl Write,
+    msg: &str,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+) -> io::Result<()> {
+    let parsed: Value = match serde_json::from_str(msg) {
+        Ok(v) => v,
+        Err(_) => return send_error(w, Value::Null, -32700, "Parse error"),
+    };
+
+    // Notifications (no "id") — no response, but some have side effects.
+    if parsed.get("id").is_none() {
+        let method = parsed["method"].as_str().unwrap_or("");
+        if method == "spyc/disconnected"
+            && let Some(tx) = cmd_tx
+        {
+            let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
+            let (reply_tx, _) = std::sync::mpsc::channel();
+            let _ = tx.send(McpRequest {
+                command: McpCommand::Disconnected { new_pid },
+                reply: reply_tx,
+            });
+        }
+        return Ok(());
+    }
+
+    let id = parsed["id"].clone();
+    let method = parsed["method"].as_str().unwrap_or("");
+
+    match method {
+        "initialize" => handle_initialize(w, &id, &parsed["params"]),
+        "resources/list" => handle_resources_list(w, &id),
+        "resources/read" => handle_resources_read(w, &id, &parsed["params"], ctx_path),
+        "tools/list" => handle_tools_list(w, &id),
+        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx),
+        "ping" => send_result(w, &id, json!({})),
+        _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
+    }
+}
+
+// ── Stdio transport (spyc --mcp) ────────────────────────────────
+//
+// Proxies JSON-RPC from stdin/stdout to the running spyc instance's
+// Unix domain socket. Falls back to read-only local dispatch if the
+// socket isn't available (no running spyc).
+
+/// Resolve context path from env var or project root.
+fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Result<()> {
+    send_result(
+        w,
+        id,
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {
+                "resources": {},
+                "tools": {}
+            },
+            "serverInfo": {
+                "name": SERVER_NAME,
+                "version": SERVER_VERSION
+            }
+        }),
+    )
+}
+
+fn handle_resources_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
+    send_result(
+        w,
+        id,
+        json!({
+            "resources": [
+                {
+                    "uri": CONTEXT_URI,
+                    "name": "spyc context",
+                    "description": "Current spyc state: working directory, cursor position, picks, inventory, filter, git branch, project home, session name.",
+                    "mimeType": "application/json"
+                }
+            ]
+        }),
+    )
+}
+
+fn handle_resources_read(
+    w: &mut impl Write,
+    id: &Value,
+    params: &Value,
+    ctx_path: &Path,
+) -> io::Result<()> {
+    let uri = params["uri"].as_str().unwrap_or("");
+    if uri != CONTEXT_URI {
+        return send_error(w, id.clone(), -32602, &format!("Unknown resource: {uri}"));
+    }
+
+    let text = read_context_or_empty(ctx_path);
+    send_result(
+        w,
+        id,
+        json!({
+            "contents": [
+                {
+                    "uri": CONTEXT_URI,
+                    "mimeType": "application/json",
+                    "text": text
+                }
+            ]
+        }),
+    )
+}
+
+fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
+    send_result(
+        w,
+        id,
+        json!({
+            "tools": [
+                {
+                    "name": "get_spyc_context",
+                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), and session_name. Use this to understand what the user is looking at in their file manager.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "navigate_to",
+                    "description": "Navigate spyc to a directory or file. If the path is a directory, changes to it. If a file, navigates to its parent directory and places the cursor on it.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute or relative path. Relative paths resolved against spyc's cwd. Supports ~ and $VAR expansion."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "set_filter",
+                    "description": "Set or clear the file listing filter. When set, only files matching the glob pattern are shown. Pass null or empty string to clear.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": ["string", "null"],
+                                "description": "Glob pattern (e.g. '*.rs', 'test_*'), or null/empty to clear the filter."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "pick_files",
+                    "description": "Select (pick) files in the current directory matching glob patterns. Picks are additive. Use clear_picks first for a clean selection.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "patterns": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Glob patterns to match against filenames (e.g. ['*.rs', 'Cargo.*'])."
+                            }
+                        },
+                        "required": ["patterns"]
+                    }
+                },
+                {
+                    "name": "clear_picks",
+                    "description": "Clear all picked (selected) files in spyc.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "get_file_content",
+                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute or relative path to the file."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "search_paths",
+                    "description": "Project-wide fuzzy filename search. Walks PROJECT_HOME (or cwd if no project root) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Fuzzy-match query. Empty string returns natural walk order."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum results to return. Default 100, max 1000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "search_content",
+                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks PROJECT_HOME (or cwd). Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case: lowercase pattern matches case-insensitively, mixed-case is sensitive."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches to return. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                },
+                {
+                    "name": "search_picks",
+                    "description": "Search content within ONLY the user's currently-picked files (multi-select state). Picks are spyc UI state Claude can't see directly, so this is the only way to grep the user's intended subset. Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case applied."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                },
+                {
+                    "name": "search_inventory",
+                    "description": "Search content within the user's persistent inventory cache (yanked-into-cache files that survive across sessions). Like search_picks but spans sessions, so it's the way to grep accumulated 'interesting files'. Returns a JSON array of {path, line, col, text} match objects.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern. Smart-case applied."
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum matches. Default 200, max 5000.",
+                                "minimum": 1
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                }
+            ]
+        }),
+    )
+}
+
+fn handle_tools_call(
+    w: &mut impl Write,
+    id: &Value,
+    params: &Value,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+) -> io::Result<()> {
+    let name = params["name"].as_str().unwrap_or("");
+    let args = &params["arguments"];
+
+    match name {
+        "get_spyc_context" => {
+            let text = read_context_or_empty(ctx_path);
+            send_tool_result(w, id, &text)
+        }
+        "get_file_content" => {
+            // Read-only — handled inline, no command channel needed.
+            let path_str = args["path"].as_str().unwrap_or("");
+            if path_str.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: path");
+            }
+            // Resolve relative paths against the cwd from the context file.
+            let cwd = read_cwd_from_context(ctx_path);
+            let resolved = if Path::new(path_str).is_absolute() {
+                PathBuf::from(path_str)
+            } else {
+                cwd.join(path_str)
+            };
+            // Canonicalize to resolve symlinks and ".." components, then
+            // verify the path is under the working directory to prevent
+            // directory traversal attacks.
+            let canonical = match std::fs::canonicalize(&resolved) {
+                Ok(p) => p,
+                Err(e) => return send_tool_error(w, id, &format!("{}: {e}", resolved.display())),
+            };
+            let canonical_cwd = match std::fs::canonicalize(&cwd) {
+                Ok(p) => p,
+                Err(e) => return send_tool_error(w, id, &format!("cwd: {e}")),
+            };
+            if !canonical.starts_with(&canonical_cwd) {
+                return send_tool_error(w, id, "path is outside the working directory");
+            }
+            match read_file_content(&canonical) {
+                Ok(content) => send_tool_result(w, id, &content),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_paths" => {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let limit = args["limit"].as_u64().map_or(100, |n| n.min(1000) as usize);
+            let root = search_root(ctx_path);
+            let paths = crate::fs::finder::find_paths(&root, &query, limit);
+            let arr: Vec<Value> = paths
+                .iter()
+                .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                .collect();
+            send_tool_result(w, id, &Value::Array(arr).to_string())
+        }
+        "search_content" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let root = search_root(ctx_path);
+            match crate::fs::grep::search_to_vec(&root, pattern, limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_picks" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let (files, root) = read_picks_from_context(ctx_path);
+            match crate::fs::grep::search_files(&files, pattern, root.as_deref(), limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "search_inventory" => {
+            let pattern = args["pattern"].as_str().unwrap_or("");
+            if pattern.is_empty() {
+                return send_tool_error(w, id, "missing required parameter: pattern");
+            }
+            let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
+            let files = read_inventory_from_context(ctx_path);
+            // Inventory paths are absolute (cache files); display
+            // root is None so we report absolute paths to Claude.
+            match crate::fs::grep::search_files(&files, pattern, None, limit) {
+                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" => {
+            let Some(tx) = cmd_tx else {
+                return send_tool_error(w, id, "writable actions not available in stdio mode");
+            };
+            let command = match name {
+                "navigate_to" => {
+                    let path = args["path"].as_str().unwrap_or("").to_string();
+                    if path.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: path");
+                    }
+                    McpCommand::NavigateTo { path }
+                }
+                "set_filter" => {
+                    let pattern = args["pattern"].as_str().map(String::from);
+                    McpCommand::SetFilter { pattern }
+                }
+                "pick_files" => {
+                    let patterns: Vec<String> = args["patterns"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if patterns.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: patterns");
+                    }
+                    McpCommand::PickFiles { patterns }
+                }
+                "clear_picks" => McpCommand::ClearPicks,
+                _ => unreachable!(),
+            };
+
+            // Send command and block for reply with timeout.
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            if tx
+                .send(McpRequest {
+                    command,
+                    reply: reply_tx,
+                })
+                .is_err()
+            {
+                return send_tool_error(w, id, "spyc is not running");
+            }
+            match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(McpResponse::Ok { message }) => send_tool_result(w, id, &message),
+                Ok(McpResponse::Error { message }) => send_tool_error(w, id, &message),
+                Err(_) => send_tool_error(w, id, "spyc did not respond within 5 seconds"),
+            }
+        }
+        _ => send_tool_error(w, id, &format!("unknown tool: {name}")),
+    }
+}
+
+/// Helper: send a successful tool result.
+fn send_tool_result(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()> {
+    send_result(w, id, json!({"content": [{"type": "text", "text": text}]}))
+}
+
+/// Helper: send a tool error.
+fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()> {
+    send_result(
+        w,
+        id,
+        json!({"isError": true, "content": [{"type": "text", "text": text}]}),
+    )
+}
+
+/// Pick the search root: prefer `project_home` from the context
+/// file (the spyc-blessed project root), fall back to `cwd`.
+/// Used by `search_paths` and `search_content` so the MCP tools
+/// scope themselves the same way the in-TUI `F` and `:grep`
+/// commands do.
+pub(super) fn read_lsp_message(reader: &mut impl BufRead) -> io::Result<String> {
+    let mut content_length: Option<usize> = None;
+    let mut header = String::new();
+    loop {
+        header.clear();
+        let n = reader.read_line(&mut header)?;
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "stdin closed"));
+        }
+        let trimmed = header.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some(val) = trimmed.strip_prefix("Content-Length:") {
+            content_length = val.trim().parse().ok();
+        }
+    }
+
+    let len = content_length
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
+
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf)?;
+    String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+pub(super) fn send_message(w: &mut impl Write, body: &str) -> io::Result<()> {
+    write!(w, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+    w.flush()
+}
+
+fn send_result(w: &mut impl Write, id: &Value, result: Value) -> io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    });
+    send_message(w, &msg.to_string())
+}
+
+fn send_error(w: &mut impl Write, id: Value, code: i32, message: &str) -> io::Result<()> {
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    });
+    send_message(w, &msg.to_string())
+}

@@ -1,0 +1,384 @@
+//! Unix-socket transport: discovery, the listener/serve loop, the stdio
+//! proxy, and connection handling. Split out of mcp.rs verbatim.
+
+use std::io::{self, BufRead, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use serde_json::{Value, json};
+
+use crate::mcp_cmd::McpRequest;
+
+use super::protocol::{dispatch, read_lsp_message, send_message};
+use super::{PROXY_IO_TIMEOUT, mcp_log, resolve_context_path, socket_path, socket_path_for};
+
+/// Project-scoped discovery: walk `caller_cwd` upward looking for any
+/// `.spyc-context-<pid>.json` markers (each is written by a running
+/// spyc rooted at that directory — see `context::context_path`).
+/// The first ancestor with at least one marker is the "project
+/// boundary"; only those PIDs become candidates. We never aggregate
+/// across levels: a parent-dir spyc shouldn't shadow a child-dir spyc
+/// when both exist.
+///
+/// Why this shape: prior to this fix, discovery scanned every socket
+/// in `~/.local/state/spyc/` and returned the first connectable one,
+/// happily attaching a claude in project A to a spyc running in
+/// project B (or even another user's spyc, depending on `$HOME`
+/// scoping). Project-scoped discovery rules that out while keeping
+/// the "claude launched outside the pane just works" ergonomic — as
+/// long as it's launched somewhere inside the spyc instance's tree.
+pub(super) fn discover_live_socket(caller_cwd: &Path) -> Option<UnixStream> {
+    let candidates = collect_project_pids(caller_cwd);
+    if candidates.is_empty() {
+        mcp_log(&format!(
+            "stdio: discover: no .spyc-context-*.json found in {} or ancestors",
+            caller_cwd.display(),
+        ));
+        return None;
+    }
+    mcp_log(&format!(
+        "stdio: discover: {} project-scoped candidate(s) for {}",
+        candidates.len(),
+        caller_cwd.display(),
+    ));
+    for pid in candidates {
+        let sock = socket_path_for(pid);
+        mcp_log(&format!("stdio: discover trying {}", sock.display()));
+        match UnixStream::connect(&sock) {
+            Ok(stream) => {
+                mcp_log(&format!(
+                    "stdio: discovered live socket {} (pid {})",
+                    sock.display(),
+                    pid,
+                ));
+                return Some(stream);
+            }
+            Err(e) => {
+                // Only delete on "no peer there" errors — connect
+                // can also fail under transient resource pressure
+                // (EAGAIN, EMFILE) where a live peer's socket
+                // would survive the next attempt. Pruning on those
+                // would race-delete a healthy peer.
+                let stale = matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound,
+                );
+                if stale {
+                    let _ = std::fs::remove_file(&sock);
+                }
+                mcp_log(&format!(
+                    "stdio: discover skip {}: {} (stale={stale})",
+                    sock.display(),
+                    e.kind(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Walk `start` toward the filesystem root looking for
+/// `.spyc-context-<pid>.json` markers. Returns the PIDs from the
+/// first ancestor that has any matches; empty Vec otherwise.
+pub(super) fn collect_project_pids(start: &Path) -> Vec<u32> {
+    let mut here: &Path = start;
+    loop {
+        let pids = read_context_pids_in_dir(here);
+        if !pids.is_empty() {
+            return pids;
+        }
+        let Some(parent) = here.parent() else {
+            return Vec::new();
+        };
+        if parent == here {
+            return Vec::new();
+        }
+        here = parent;
+    }
+}
+
+/// Read `.spyc-context-<pid>.json` filenames in `dir`, returning the
+/// PIDs parsed out of them. Order is unspecified (matches `read_dir`),
+/// which is fine because the caller tries each candidate in turn.
+pub(super) fn read_context_pids_in_dir(dir: &Path) -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut pids = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let Some(rest) = name_str.strip_prefix(".spyc-context-") else {
+            continue;
+        };
+        let Some(pid_str) = rest.strip_suffix(".json") else {
+            continue;
+        };
+        if let Ok(pid) = pid_str.parse::<u32>() {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
+/// Direct JSONL stdio server — no socket proxy.
+#[allow(clippy::significant_drop_tightening)]
+pub(super) fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
+    let context_path = resolve_context_path(&project_root);
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                mcp_log("direct: stdin closed");
+                break;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                mcp_log(&format!("direct: stdin read error: {e}"));
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break;
+                }
+                return Err(e.into());
+            }
+        }
+        let msg = line.trim();
+        if msg.is_empty() {
+            continue;
+        }
+        mcp_log(&format!("direct: recv ({} bytes)", msg.len()));
+
+        // Dispatch writes Content-Length framed output. We need to
+        // capture it and re-emit as JSONL.
+        let mut buf = Vec::new();
+        dispatch(&mut buf, msg, &context_path, None)?;
+
+        // Extract the JSON body from Content-Length framing.
+        let framed = String::from_utf8_lossy(&buf);
+        if let Some(pos) = framed.find("\r\n\r\n") {
+            let json_body = &framed[pos + 4..];
+            if !json_body.is_empty() {
+                mcp_log(&format!("direct: send ({} bytes)", json_body.len()));
+                writeln!(writer, "{json_body}")?;
+                writer.flush()?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Proxy stdin/stdout ↔ Unix socket. Messages use Content-Length
+/// framing on both sides.
+#[allow(clippy::significant_drop_tightening)]
+pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut stdin_reader = stdin.lock();
+    let mut stdout_writer = stdout.lock();
+    let sock_clone = match stream.try_clone() {
+        Ok(c) => c,
+        Err(e) => {
+            mcp_log(&format!("proxy: stream clone failed: {e}"));
+            return Err(e.into());
+        }
+    };
+    // Bound socket IO (see `PROXY_IO_TIMEOUT`) so a wedged server can't hang
+    // the agent forever — `read_lsp_message` below would otherwise block
+    // indefinitely on a silent server thread.
+    let _ = sock_clone.set_read_timeout(Some(PROXY_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
+    let mut sock_reader = io::BufReader::new(sock_clone);
+    let mut sock_writer = stream;
+    mcp_log("proxy: ready, waiting for stdin");
+
+    loop {
+        // Read a JSON-RPC message from stdin. Claude Code uses newline-
+        // delimited JSON (one JSON object per line), not Content-Length
+        // framing.
+        let mut line = String::new();
+        match stdin_reader.read_line(&mut line) {
+            Ok(0) => {
+                mcp_log("proxy: stdin closed");
+                break;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                mcp_log(&format!("proxy: stdin read error: {e}"));
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break;
+                }
+                return Err(e.into());
+            }
+        }
+        let msg = line.trim();
+        if msg.is_empty() {
+            continue; // skip blank lines
+        }
+        mcp_log(&format!(
+            "proxy: stdin → socket ({} bytes): {}",
+            msg.len(),
+            msg
+        ));
+
+        // Check if this is a request (has "id") or notification (no "id").
+        let is_request = serde_json::from_str::<Value>(msg).map_or(true, |v| v.get("id").is_some()); // assume request if parse fails
+
+        // Forward to socket (Content-Length framed for the socket server).
+        send_message(&mut sock_writer, msg)?;
+
+        // Only read a response for requests (notifications get no reply).
+        if is_request {
+            let response = match read_lsp_message(&mut sock_reader) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Timeout or socket error waiting for the server. Reply to
+                    // the agent with a JSON-RPC error (reusing the request id
+                    // so the client matches it) so its tool call returns an
+                    // error instead of hanging, then end the proxy cleanly —
+                    // a late reply would desync the stream framing.
+                    mcp_log(&format!("proxy: socket read error/timeout: {e}"));
+                    let id = serde_json::from_str::<Value>(msg)
+                        .ok()
+                        .and_then(|v| v.get("id").cloned())
+                        .unwrap_or(Value::Null);
+                    let err = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32000,
+                            "message": format!("spyc MCP server did not respond ({e})"),
+                        }
+                    });
+                    let _ = writeln!(stdout_writer, "{err}");
+                    let _ = stdout_writer.flush();
+                    break;
+                }
+            };
+            mcp_log(&format!(
+                "proxy: socket → stdout ({} bytes): {}",
+                response.len(),
+                response
+            ));
+            // Write back as newline-delimited JSON (what Claude Code expects).
+            writeln!(stdout_writer, "{response}")?;
+            stdout_writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
+// ── Unix socket server (background thread) ──────────────────────
+
+/// Start the MCP server on a Unix domain socket. The socket path is
+/// `~/.local/state/spyc/mcp-<PID>.sock`. The server runs on a
+/// background thread and reads context from `ctx_path`. `cmd_tx` is the
+/// write end of the command channel — writable actions go through it to
+/// the main event loop.
+pub fn start_socket_server(
+    ctx_path: PathBuf,
+    cmd_tx: std::sync::mpsc::Sender<McpRequest>,
+) -> anyhow::Result<()> {
+    let sock = socket_path();
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = sock.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Remove stale socket from a previous run.
+    let _ = std::fs::remove_file(&sock);
+
+    // Restrict socket permissions to owner-only (0o700) so other users
+    // on a shared machine cannot connect and read files or mutate the TUI.
+    let old_umask = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o077));
+    let bind_result = UnixListener::bind(&sock);
+    rustix::process::umask(old_umask);
+    let listener = bind_result?;
+    let ctx_path = Arc::new(ctx_path);
+    let cmd_tx = Arc::new(cmd_tx);
+
+    mcp_log(&format!("socket: listening on {}", sock.display()));
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            mcp_log("socket: accepted connection");
+            let ctx = Arc::clone(&ctx_path);
+            let tx = Arc::clone(&cmd_tx);
+            std::thread::spawn(move || {
+                if let Err(e) = handle_socket_connection(stream, &ctx, &tx) {
+                    mcp_log(&format!("socket: connection error: {e}"));
+                }
+            });
+        }
+    });
+
+    Ok(())
+}
+
+/// Clean up the socket file on shutdown.
+pub fn cleanup_socket() {
+    let sock = socket_path();
+    let _ = std::fs::remove_file(&sock);
+}
+
+/// Status of MCP configuration for this directory.
+pub(super) fn pid_from_sock_path(path: &str) -> Option<u32> {
+    let fname = Path::new(path).file_name()?.to_str()?;
+    let stripped = fname.strip_prefix("mcp-")?.strip_suffix(".sock")?;
+    stripped.parse().ok()
+}
+
+/// Try to send a `spyc/disconnected` notification to the old instance's
+/// socket. Best-effort — if it fails, we proceed with takeover anyway.
+pub(super) fn notify_disconnect(old_sock: &Path, new_pid: u32) {
+    let Ok(mut stream) = UnixStream::connect(old_sock) else {
+        return;
+    };
+    let notification = json!({
+        "jsonrpc": "2.0",
+        "method": "spyc/disconnected",
+        "params": { "new_pid": new_pid }
+    });
+    let _ = send_message(&mut stream, &notification.to_string());
+    mcp_log(&format!("sent spyc/disconnected to {}", old_sock.display()));
+}
+
+/// Ensure `.mcp.json` has the spyc entry using stdio transport.
+/// Checks enterprise policy first. If another spyc instance owns
+/// the entry, sends it a disconnect notification and takes over.
+/// Handle a single Unix socket connection. Uses the same Content-Length
+/// framing as the stdio transport.
+pub(super) fn handle_socket_connection(
+    stream: UnixStream,
+    ctx_path: &Path,
+    cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> io::Result<()> {
+    let mut reader = io::BufReader::new(stream.try_clone()?);
+    // Bound writes so a stalled client (proxy) can't wedge this server thread
+    // indefinitely. The read is intentionally left blocking — the loop waits
+    // for the next request, which is idle for minutes between agent calls.
+    let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
+    let mut writer = stream;
+
+    loop {
+        let msg = match read_lsp_message(&mut reader) {
+            Ok(msg) => msg,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break; // Connection closed.
+                }
+                return Err(e);
+            }
+        };
+        dispatch(&mut writer, &msg, ctx_path, Some(cmd_tx))?;
+    }
+    Ok(())
+}
+
+// ── Protocol handlers ────────────────────────────────────────────
