@@ -171,3 +171,35 @@ Provenance:
 - key_dispatch.rs origin: 64be4d3 (2026-05-30); mcp.rs origin: a31c3b8 (2026-04-18) — superseded single files
 
 <!-- Entry-ID: 01KTMMN1CSG84TPZ4ZEFN9K62B -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:42.567025+00:00
+Role: scribe
+Type: Note
+Title: PR #307–308: state.rs — sub-structs then the 3907-line Model split (campaign close)
+
+Spec: scribe
+
+tags: #history #module-decomposition
+
+Moment: module-decomposition — Reconstructed: the campaign closes on its largest single target — the 3907-line `src/app/state.rs` (the MVU Model). PR #307 first groups loose git-cache + pane fields into sub-structs (an API-touching prep step), then PR #308 splits the file into a `state/` directory module (apply/dispatch/git/listing/navigation/selection + a partitioned tests tree).   [kind: refactor]
+When: 2026-06-08 · PR #307, #308 (refactor/state-substructs, refactor/decompose-state) · commits 93d155ed, 34e2e01d
+Recorded rationale: "decompose state.rs into a directory module" / "group loose git-cache + pane fields into sub-structs" — pre-squash subjects (commits 423aab0, e7610b0). Governed by CLAUDE.md's ~800-line ceiling (PR #282); state.rs at 3907 lines was the worst offender left.
+Inferred intent: #307 is the only non-verbatim step in the slice — it touches 15 files with small balanced edits (+225/-229 across bootstrap, git_state, pane_tabs, render, etc.), the field-regrouping that has to ripple to every reader before the file can be cleanly cut. #308 is then the large verbatim directory conversion: state.rs -3907, eleven new state/*.rs files +4009, plus a 14-line `git/mod.rs` edit. The two-PR shape (prep refactor, then mechanical split) reads as the campaign's answer to a file too coupled to move in one verbatim pass. confidence: high
+Supersedes: `src/app/state.rs` was created by the AppState extraction (commit 488ae17, 2026-04-17, "Extract AppState from App: 23 domain methods now testable without a terminal" — the seed of the MVU Model; see history-seg-refactor-mvu) and grew to 3907 lines as MVU concentrated domain logic there. This moment is its final decomposition.
+
+Reconstructed: the two cuts:
++ #307 sub-structs → `state.rs` internal regroup (+314/-... across 15 files; loose git-cache/pane fields gathered into named structs so the directory split has clean seams)
++ #308 decompose → `state/{mod,apply,dispatch,git,listing,navigation,selection}.rs` + `state/tests/{mod,apply,dispatch,navigation}.rs`; production `mod.rs` 707 lines, the rest split by concern.
+PR #308 also carries the campaign's last convention edit: `src/git/mod.rs`'s `no_subprocess_git_in_production` scan gains a test-file skip — "The campaign's convention: `tests.rs`, `*_tests.rs`, or any file under a `tests/` directory" (git/mod.rs, commit 34e2e01d) — because the new whole-file test modules carry no in-file `#[cfg(test)]` marker the old heuristic relied on. This makes explicit the test-extraction convention every prior decompose PR had been following implicitly.
+
+With state.rs decomposed, the slice ends with no `src/app/` file over the guard ceiling and the per-subsystem layout (`app/{key_dispatch,pager_handler,render,state}`, `git/diff_model`, `ui/{diff_render,markdown,pager}`, `state/sessions`, `mcp/`, `keymap/resolver/`) matching the present `src/` tree.
+
+Provenance:
+- 34e2e01d (PR #308 refactor/decompose-state, 2026-06-08) — `src/app/state.rs` -3907; eleven state/*.rs +4009; git/mod.rs +14 (test-file skip)
+- 93d155ed (PR #307 refactor/state-substructs, 2026-06-08) — 15-file sub-struct regroup, +225/-229
+- 423aab0 / e7610b0 (pre-squash, bitbucket/refactor/decompose-state, -state-substructs) — the two-step subjects
+- 488ae17 (2026-04-17) — origin of `src/app/state.rs` (AppState extraction; superseded single file)
+- git/mod.rs (commit 34e2e01d) — the quoted test-file naming convention
+
+<!-- Entry-ID: 01KTMMPARGNTSQB2Z67G6KBKQ0 -->

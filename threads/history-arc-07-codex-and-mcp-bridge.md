@@ -518,3 +518,36 @@ Provenance:
 - `history-arc-06-input-and-overlays` story-tail = 01KR2GYQPQRX08SV980SPHHZ80 (parallel-pickers pattern at input-dispatch layer; arc 07 sees the same shape at three new layers).
 
 <!-- Entry-ID: 01KR2JM67RTQHQYN0223GTKH1V -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:44.857771+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): hardcoded peers → declarative agent registry
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: this appends the #38–#311 continuation to arc-07; the thesis is unchanged but tested at a new scale   [kind: segment-topology]
+When: 2026-05-10 → 2026-06-01 · PRs #68,#70,#109,#142,#145,#146,#147,#149,#152,#153,#172,#173,#174,#175,#176,#177,#228
+Recorded rationale: "isn't just 'a file manager with Claude in a pane.' It's a file manager that Claude can query" — `ROADMAP.md:6` charter, quoted at arc-07 head entry 0 (01KR2HYMMHAH…)
+Inferred intent: this segment is where the single-peer (claude+codex) MCP bridge that arc-07's head four PRs built generalizes into a multi-agent surface (gemini, agy/antigravity, zot) plus a declarative agent-profile registry — evidence: arc-07 tail (01KR2JM67RTQ…) ended on exactly the open seam this segment closes
+                  confidence: high
+Supersedes: (none — appends to the arc; the tail's open question is answered by the #176 moment below)
+
+The arc-07 head (entries 0–6) reconstructed PRs #18, #19, #21, #37 — the claude+codex MCP-bridge origin. Its tail (01KR2JM67RTQ…) closed on a precise, deferred question. Quoting it verbatim: the substrate generalized (one socket, peer-agnostic discovery walk, peer-agnostic context file) "while staying parallel at the registration layer (two `ensure_*` functions, two parsers, two command-strippers, side-by-side in `src/mcp.rs`)." The tail named the test a future reader should run: "A reader expecting the arc to ship a `trait MCPRegistrationFile` doesn't find one. A reader checking whether the architecture *could* support a third peer cheaply finds: yes, by adding a third `ensure_*_config` function alongside the existing two [...] Cheap, but not free; cheap, but not parametric."
+
+This segment is where that parallel-per-peer shape gets pushed past two peers and then collapsed into a registry. The throughline, stated up front so the moments below can refer back to it: **hardcoded peers → declarative agent registry.** Gemini arrives as the third `AgentKind` (#68) carrying a fourth, fifth, sixth `match`-able peer-specific function each. Transcript scrollback lands per-agent (`codex_transcript.rs` #146, `claude_transcript.rs` #147, `agy_transcript.rs` #175) — three near-identical files. The status bar grows an agent segment (#70) that branches by kind. Resume save/restore branches by kind. By #176 there are "~10 per-agent `match AgentKind` dispatch sites" (commit, CHANGELOG, verbatim below), and adding agy as a fourth peer required touching every one of them. #176 `refactor/agent-profile-registry` is the supersession that answers the tail's question: it ships the `src/agent/` module with an `AgentProfile` trait + `REGISTRY` the tail predicted would *not* exist, generalizing the per-peer dispatch so the next agent is "one impl + one `REGISTRY` entry rather than a tree-wide sweep." #177 zot is the proof: "First agent added under the new `AgentProfile` registry — one impl + one registry line, no dispatch-site edits."
+
+The charter sentence the tail tracked ("a file manager that Claude can query") now reads, in `AGENTS.md:9` current-state, "a single MCP server backs every supported agent" — Claude, codex, gemini, antigravity, zot. The substrate stayed singular (one socket); the *peer set* went from singular to plural-by-registry. Alongside the expansion, this segment hardens the MCP transport itself: context-freshness (#152), codex-resolver hygiene (#153), socket timeouts (#228), and a claude resume race (#109). Cross-reference `history-seg-refactor-mvu`: PR #234 (`refactor/mvu-phase6-pr-b-agent-status-offthread`, 2026-06-02, sha 1458a37) later moves agent-status resolution off the render thread — downstream of the status-bar agent segment this segment introduces in #70.
+
+Moment budget for this segment: ~10–12 moments below, chronological.
+
+Provenance:
+- arc-07 head entry 0 = 01KR2HYMMHAH… (framing, charter quote, `ROADMAP.md:6`).
+- arc-07 tail = 01KR2JM67RTQ… (the parallel-per-peer "no `trait MCPRegistrationFile`" open seam this segment closes).
+- `AGENTS.md:9` (current state, read 2026-06-08) — "a single MCP server backs every supported agent."
+- `git log main --grep='pull request #' ` (run 2026-06-08) — 17-PR slice chronology.
+
+<!-- Entry-ID: 01KTMMPRDQ4Y8Q0D5AD9ZND5SA -->
