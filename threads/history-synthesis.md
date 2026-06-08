@@ -322,3 +322,30 @@ Confidence: Uniformly high — every moment carries verbatim CHANGELOG / V1_5_PL
 Provenance: 01KTMMKJWX5X3WS2QD90MY153F, 01KTMMMHWAHASBVT11Y96RBKSA, 01KTMMNC6G5B7Y73KC0ZN1BEMH, 01KTMMPE3J1R4KEC6DXRS9Q5DF, 01KTMMQPCA7E5VN78TTBZ43MQY, 01KTMMRPVC83MXP3YS6VHS9YJZ, 01KTMMSVHSFYKGPSD9R8NRFCZY, 01KTMMVBB7ZNVH9YM9813VEBXJ, 01KTMMW7N1HQ6Q2A90D1CPZ230, 01KTMMXD1KSTYMEPXSQZN45HXB, 01KTMMY9KR4746DNJY7ZPKGG1G
 
 <!-- Entry-ID: 01KTMNM51MHPYVXWWK39J85T0E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:28:42.265197+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-01-foundation-hygiene (#38–#311 continuation) — the hygiene rails tuned, measured, and extended
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-01-foundation-hygiene (#38–#311 continuation) — the hygiene rails tuned, measured, and extended
+Span: 2026-05-08 → 2026-06-06 · 11 moments (1 framing + 10 PR moments) · supersessions concentrated in the cache campaign + advisory clearing
+Narrative:
+  This secondary reconstruction covers only the #38–#311 continuation of history-arc-01 (the "Continuation framing" Note onward); the three v1.37.2 PRs that established the rails are the first-window arc. The framing Note states the continuation throughline (inferred): the rails maturing "from established-but-cold into measured-and-fast," with the test surface climbing 770→929 tests across the window [01KTMMKT8E97SAHMKW6GJHTX6E]. Every claim below carries an inline moment ref.
+
+  The CI-caching campaign is the densest moment: seven PRs (#57/#58/#61/#64/#65/#66/#69) in ~36 hours, each with a verbatim cost-accounting commit body — recorded target "cut cold-cache CI from ~6 min toward ~1.5." It drops `Cargo.lock` from the cargo and target cache keys (each patch bump had been busting the cache), swaps cargo-deny to a sha256-verified prebuilt, adds rustup/coverage caches, and disables CI incremental; it supersedes the cache + cargo-deny-install shape from first-window PRs #2/#3. The moment also surfaces the load-bearing fact that CI is not a merge gate in this repo (a broken #64 reached `main` and was fixed forward by #65) [01KTMMPDE6S4PA834YDR24SX1H]. Release cuts bracket the window: PR #51 cuts v1.50.0 [01KTMMMPZDCN2D25KSX9G1R6Y1], and PRs #143/#170 add a `release-debug` profile and cut v1.51.4 — "the first tagged release since v1.50.0," now purely a CHANGELOG ritual [01KTMMY535PG8SJAN371WVMKPN].
+
+  The test-surface expansion (#56/#59/#60/#199/#200) builds the behavior oracle along four axes — widget snapshots, narrow property tests, a pty/vt100 roundtrip, and App-harness routing/session-restore regressions — each closing a named plan item, all cfg(test)-additive; this is the recorded substrate behind the MVU refactor's "behavior-equivalence behind green CI" claim (cross-ref history-seg-refactor-mvu) [01KTMMQN283Z4FYP184WT4015X]. PR #295 is the direct payoff: a ratatui 0.30.1 bump + crossterm dedupe asserted no-behavior-change precisely because the #56 snapshots are unchanged [01KTMMZ7PWE0F54CZJGT317SED].
+
+  The supply-chain rail grows a temporal axis (#88: a scheduled weekly deps-drift pipeline catching advisories off the push path) [01KTMMSWZPN5FJTTCCRZ7CA445], and then visibly earns its keep (#167: `time` 0.3.45→0.3.47 clears RUSTSEC-2026-0009 and two stale deny.toml ignores are retired — recorded as the first window-clear of the gate) [01KTMMX44WY1DPSCGSN27C77S0]. Toolchain work pins Rust to exact 1.96.0 so a floating stable plus the `-D warnings` gate can't break commits with no code change, and reconciles stale MSRV prose to 1.85 (#164/#165) — the moment flags as PURE SEQUENCE-INFERENCE that the 1.85→1.88 MSRV bump itself is owned by another segment [01KTMMVZKGKKZ0Z8VY1Q8TW3D2]. Cross-compile tooling (#117/#188) adds `make lint-linux` to catch OS-gated lints (a `cfg(target_os = "linux")` `collapsible_if`) that macOS-host clippy compiled out [01KTMMV2X1VV9QPY0YA4AZPE05]. The window closes with the comment-hygiene / "aislop" trilogy (#293/#294/#296) — a detect→tool→gate arc cleaning up drift left by the gix migration, impl-extraction, and 800-LoC decomposition [01KTMMV2X1VV9QPY0YA4AZPE05 framing; 01KTMN0F2B7PDYT29J4YG2GN99].
+Lineage: moment [01KTMMMPZDCN2D25KSX9G1R6Y1] -> moment [01KTMMY535PG8SJAN371WVMKPN] (release-cut cadence: v1.50.0 -> v1.51.4); moment [01KTMMPDE6S4PA834YDR24SX1H] supersedes first-window PR #2/#3 cache+cargo-deny shape; moment [01KTMMSWZPN5FJTTCCRZ7CA445] -> moment [01KTMMX44WY1DPSCGSN27C77S0] (supply-chain rail gains a temporal axis, then clears its first advisory); moment [01KTMMQN283Z4FYP184WT4015X] -> moment [01KTMMZ7PWE0F54CZJGT317SED] (test oracle built, then leaned on for the ratatui bump)
+Open / unsettled: the 1.85→1.88 MSRV bump is owned by another segment (flagged PURE SEQUENCE-INFERENCE at [01KTMMVZKGKKZ0Z8VY1Q8TW3D2]); aislop is deliberately kept out of `make check` as advisory-only [01KTMN0F2B7PDYT29J4YG2GN99]; the comment-hygiene cleanup is explicitly downstream of history-seg-gix-migration and the MVU decomposition (cross-refs named in the moments).
+Confidence: recorded-dominant — most PRs are squash merges whose second parent retains the full pre-squash commit body, so rationale is verbatim-quotable; PR #88 and PR #117 are subject-only squashes with rationale taken from in-diff header comments / the diff (marked). All inferred-intent reads flagged per moment at "high"; one PURE SEQUENCE-INFERENCE explicitly flagged for the coordinator.
+Provenance: 01KTMMKT8E97SAHMKW6GJHTX6E, 01KTMMMPZDCN2D25KSX9G1R6Y1, 01KTMMPDE6S4PA834YDR24SX1H, 01KTMMQN283Z4FYP184WT4015X, 01KTMMSWZPN5FJTTCCRZ7CA445, 01KTMMV2X1VV9QPY0YA4AZPE05, 01KTMMVZKGKKZ0Z8VY1Q8TW3D2, 01KTMMX44WY1DPSCGSN27C77S0, 01KTMMY535PG8SJAN371WVMKPN, 01KTMMZ7PWE0F54CZJGT317SED, 01KTMN0F2B7PDYT29J4YG2GN99
+
+<!-- Entry-ID: 01KTMNMAPV4N1KFHSPAVYN9VP4 -->
