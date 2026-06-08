@@ -1019,3 +1019,41 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M; document #1 = 01KTMTPYARF1GDCQHMMF9YN5J1.
 
 <!-- Entry-ID: 01KTMTSTYW0ZAF94QBA9NPH340 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:59:48.567263+00:00
+Role: critic
+Type: Note
+Title: Window-2 Documents #4 and #5: V1_60_PLAN (CounterTop, same-day recursive→siblings rewrite #76→#77) and V1_70_PLAN (Mise en Place) — both filed, both "plan, not yet implemented" at #311; the plan-churn-before-code shape
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+Two forward-architecture plan documents, both filed in this window, both **"plan, not yet implemented"** on disk at #311. Their trajectory disposition is the inverse of documents #1/#3: these are plans whose *authoring* is the in-window event and whose *execution* lies beyond the window — a distinct disposition that window-1 had only one instance of (the v2.0 framing).
+
+**Document #4 — `docs/V1_60_PLAN.md` ("CounterTop").** Stated-plan content lives in the same-day plan-churn that `history-seg-docs-planning` reconstructs (entry 01KTMMMQ1VY8ZERQ3NQAF89DN4). The trajectory *within the plan document itself* is the notable shape:
+
+- **PR #76** (commit ddd2194, 2026-05-12) files the doc on a **recursive-composition** thesis: *"spyc panes already host any program; spyc happens to be a program; therefore spyc panes already host spyc… each workspace is a child spyc process running in a pane tab of the master."*
+- **PR #77** (commit 27c6467, ~4.5h later) REWRITES it to **siblings + mirror**: *"The architectural choice is siblings + mirror, not recursive composition. Each spyc owns its own pty and lives in its own terminal window… The hub is a peer that happens to be a client of every other peer's MCP socket."* The CHANGELOG records the reversal explicitly: *"Design discussion with the user reframed the architecture… The recursive-composition route from yesterday's plan is recorded as considered-and-rejected."*
+- **PR #79** (commit 27f8d83) hardens it with a capability-negotiation Compatibility section ("an older peer is visible but degraded, never invisible").
+
+So the document's *internal* trajectory is a same-day considered-and-rejected reversal (recursive → siblings) — a stated-plan supersession that happened entirely inside the planning layer, before any code. The document's *execution* trajectory: NOT LANDED WITHIN WINDOW — status header verified on disk reads "plan, not yet implemented." But its primitives feed forward: V1_70_PLAN says *"the MCP socket that V1_60 used informally for peer discovery becomes a formal typed surface in V1_70,"* and *"Peer subscription (V1_60's `subscribe_frames`) becomes one order shape among many."* Disposition: AUTHORED-AND-INTERNALLY-REVERSED; EXECUTION DEFERRED BEYOND WINDOW.
+
+**Document #5 — `docs/V1_70_PLAN.md` ("Mise en Place").** Stated-plan content (seg entry 01KTMMSRJ3DEDE2S4VWY5JHEND): reframe the MCP socket from V1_60's informal peer-discovery channel into a formal typed daemon protocol — *"one protocol, three clients"* (CLI / SDK / MCP), kitchen vocabulary (Station / Plate / Order / Bell), seven phases. Added PR #114 (commit 94aa3fb, 2026-05-21). Status header verified on disk: *"Status: plan, not yet implemented."* Disposition: AUTHORED; EXECUTION DEFERRED BEYOND WINDOW.
+
+**One in-window dependency the plan declared, and its partial satisfaction.** V1_70_PLAN sequences a crate split *before* the protocol work — *"Crate split happens before the protocol work… can't split a 12k-line monolith."* The roadmap-reorg (document #10, #179) re-quotes this rationale verbatim and promotes the `app/mod.rs` decomposition onto the 2.0 path to unblock it. The decomposition (document #2) DID land in-window; the protocol work it unblocks did NOT. So V1_70's *prerequisite* executed near-exactly while V1_70 *itself* sits unstarted — the plan's enabling seam was built; the building on top of it was not yet begun. This is a cleaner stated-dependency-satisfaction trace than window-1 had for any document.
+
+**Trajectory disposition: AUTHORED-NOT-EXECUTED (both), with V1_60 carrying an internal same-day reversal and V1_70 carrying a satisfied-in-window prerequisite.** Neither is a divergence — there is no landed code that contradicts either plan; there is simply no landed code executing either plan's headline. This is the window-2 analogue of window-1's v2.0 framing (document #6: "not landed within window; pre-staging visible"). The pre-staging here is stronger and more specific: V1_60's `subscribe_frames`/`send_input` primitives are named as feeding V1_70; V1_70's crate-split prerequisite is the decomposition that did land.
+
+**Boundary with `insight-emergent-properties`.** Whether "forward-architecture plans accumulate as authored-but-deferred documents while the foundation work they need executes first" is a property of the project's planning-vs-execution dynamic is tier-4 and reserved. The trajectory thread states: V1_60 and V1_70 were authored in-window; neither executed in-window; V1_60 underwent a same-day internal reversal; V1_70's crate-split prerequisite (the decomposition) did execute in-window.
+
+Provenance:
+- ddd2194 (PR #76)/27c6467 (PR #77)/27f8d83 (PR #79) — V1_60_PLAN.md file + same-day recursive→siblings rewrite + compat; `history-seg-docs-planning` entry = 01KTMMMQ1VY8ZERQ3NQAF89DN4.
+- 94aa3fb (PR #114) — V1_70_PLAN.md "Mise en Place"; `history-seg-docs-planning` entry = 01KTMMSRJ3DEDE2S4VWY5JHEND.
+- docs/V1_60_PLAN.md + docs/V1_70_PLAN.md status headers ("plan, not yet implemented") — verified on disk at #311.
+- roadmap-reorg crate-split prerequisite quote = `history-seg-docs-planning` #179 entry = 01KTMMWRE9YX58H2RXKYY58QVH; the satisfying decomposition = window-2 document #2 = 01KTMTR9XYV5ZW49ENMMP4CMBE.
+- window-1 document #6 (v2.0 not-landed-within-window) = 01KR3F1TDZQGAQNZYEYYMFAGCE (the deferred-plan contrast).
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
+
+<!-- Entry-ID: 01KTMTV4HNBFHZGZ5HF895YFYS -->
