@@ -1,0 +1,38 @@
+{
+  "history-seg-docs-planning": {
+    "reactions": {},
+    "tags": [
+      "has_decisions"
+    ],
+    "flags": [],
+    "xrefs": [],
+    "pinned": false,
+    "last_touched": "2026-06-08T22:26:07.186316+00:00",
+    "vote_score": 0
+  },
+  "01KTMMPA6HBDB91KMZPTBPNHX3": {
+    "reactions": {},
+    "tags": [
+      "decision_extracted"
+    ],
+    "flags": [],
+    "xrefs": [
+      "01KTMNFKER3C9W6A6MZET6CQXA"
+    ],
+    "pinned": false,
+    "last_touched": "2026-06-08T22:26:07.186316+00:00",
+    "vote_score": 0
+  },
+  "01KTMNFKER3C9W6A6MZET6CQXA": {
+    "reactions": {},
+    "tags": [],
+    "flags": [],
+    "xrefs": [
+      "01KTMMPA6HBDB91KMZPTBPNHX3"
+    ],
+    "pinned": false,
+    "last_touched": "2026-06-08T22:26:07.186316+00:00",
+    "vote_score": 0
+  },
+  "_ann_size": 897
+}

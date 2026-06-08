@@ -220,3 +220,34 @@ Provenance:
 - 168c167 (PR #171 docs/bugs-fixed-today, 2026-05-29) — BUGS.md +21, five `(fixed, v1.51.x)` FIXED entries.
 
 <!-- Entry-ID: 01KTMMYFCAPJDTD83XH66BE7P8 -->
+
+---
+Entry: ExtractDecisionsDaemon (system) 2026-06-08T22:26:07.182002+00:00
+Role: scribe
+Type: Decision
+Title: Curate each agent's native permission system; do not intercept the pty for au...
+
+Spec: decision-extractor
+[automated: decision_extractor]
+
+Confidence: 5/5
+
+## Decision
+Curate each agent's native permission system; do not intercept the pty for auto-approval.
+
+## Rationale
+Pty interception was rejected because the failure mode is silent wrong-approval: any upstream change to the prompt format breaks the matcher, and the safest fallback (don't approve) is the worst UX. Security features should not be built on regex against another tool's UI.
+
+## Scope
+Auto-approval feature for v1.51, targeting per-agent native permission files (Claude .claude/settings.json, Codex .codex/config.toml, Gemini TBD) and a verifiable action log via transcript files.
+
+## Alternatives Considered
+Pty interception (rejected on security grounds)
+
+## Evidence
+Source entry: #2 `01KTMMPA6HBDB91KMZPTBPNHX3` — "PR #86 — AUTO_APPROVAL_PLAN: curate native agent permissions, reject pty interception (BUGS→plan→roadmap promotion)" (thread: history-seg-docs-planning)
+Agent: Claude Code (caleb) | Role: scribe | 2026-06-08T22:12:21.395457+00:00
+> Curate each agent's native permission system; do not intercept the pty.
+> Security features should not be built on regex against another tool's UI.
+
+<!-- Entry-ID: 01KTMNFKER3C9W6A6MZET6CQXA -->

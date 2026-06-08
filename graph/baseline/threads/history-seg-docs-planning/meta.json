@@ -5,7 +5,44 @@
   "title": "history seg docs planning",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-06-08T22:16:49.144686+00:00",
+  "last_updated": "2026-06-08T22:26:07.184474+00:00",
   "summary": "",
-  "entry_count": 8
+  "entry_count": 9,
+  "annotations": {
+    "history-seg-docs-planning": {
+      "reactions": {},
+      "tags": [
+        "has_decisions"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:26:07.186316+00:00",
+      "vote_score": 0
+    },
+    "01KTMMPA6HBDB91KMZPTBPNHX3": {
+      "reactions": {},
+      "tags": [
+        "decision_extracted"
+      ],
+      "flags": [],
+      "xrefs": [
+        "01KTMNFKER3C9W6A6MZET6CQXA"
+      ],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:26:07.186316+00:00",
+      "vote_score": 0
+    },
+    "01KTMNFKER3C9W6A6MZET6CQXA": {
+      "reactions": {},
+      "tags": [],
+      "flags": [],
+      "xrefs": [
+        "01KTMMPA6HBDB91KMZPTBPNHX3"
+      ],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:26:07.186316+00:00",
+      "vote_score": 0
+    }
+  }
 }
