@@ -178,3 +178,44 @@ Provenance:
 - prior entry 01KTMKXA7ZKKR421NTPRJ9EQ3M (this thread, Phase 1 channel) — supplies the receiver this phase computes timeouts against.
 
 <!-- Entry-ID: 01KTMKY262M6Y6GH25DYKBY33H -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T21:59:39.509379+00:00
+Role: scribe
+Type: Note
+Title: PR #203–#212 — Phase 3: every async source migrated onto the channel as wakeups (add-wake / delete-floor)
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: across sub-phases 3a–3d, each independent async source (fs watcher, git worker, per-pane PTY, captures/tasks, grep, finder, MCP) is converted to push a `Message` wakeup into the unified channel; the adaptive poll floor and `MAX_IDLE_CAP` are then deleted source-by-source, leaving a fully event-driven loop with 0 idle wakes.   [kind: refactor]
+When: 2026-05-31 · PR #203–#212 (refactor/mvu-phase-3a…3d-*) · commits 9dc2773 (3a) … a219d1b (3d remove-cap)
+Recorded rationale: "Phase 3 DONE: every event source wakes the unified channel; the run loop is fully event-driven (0 idle wakes when no deadline is armed)… each sub-phase split add-the-wake / delete-the-floor so the floor backstopped every wake migration before its poll was removed." — docs/MVU_PLAN.md (Phase 3). And the lost-wakeup safety: "keep the monotonic `AtomicU64 parser_gen`… The worker bumps it and, only on a `wake_pending` 0→1 CAS, sends one `PaneOutput{tab}`. The main loop, on `PaneOutput{tab}`, clears `wake_pending` first, then calls `drain_output()`… at worst one redundant wakeup, never a lost tail/final echo." — docs/MVU_PLAN.md (Message)
+Inferred intent: the recurring "add wake (both paths live) → delete floor" split makes every migration independently revertable with the poll as a backstop. Verified across the slice: #205 and #208 are both literally "delete the … poll floor" PRs that supersede the wake-add PRs immediately preceding them; #212 removes `MAX_IDLE_CAP` entirely. Pickaxe `git log -S 'MAX_IDLE_CAP'` shows it introduced earlier and removed at "MVU Phase 3d PR4 — remove MAX_IDLE_CAP; loop is fully event-driven."   confidence: high
+Supersedes: the busy-poll drain model (adaptive `poll_ms`, the 16ms typing-burst hack, the 100ms idle-pane floor, `MAX_IDLE_CAP`) — all named in MVU_PLAN.md's "Current state" and removed by this phase. The loop ends blocking on `recv()`, kicked on reader death by a new `ReaderExited` wake. (verified: `MAX_IDLE_CAP` deleted, `ReaderExited` added in #212 diff)
+
+Reconstructed — the per-source migration, folded:
++ #203 (3a) fs watcher → `FsEvent`, git worker → `GitResult` (generation-drop kept); adds `src/app/sources.rs` (+354).
++ #204 (3b PR1) pane PTY: introduces the `SinkId`-keyed wake slot; parser-worker emits coalesced `PaneOutput{tab}` via the lost-wakeup-safe clear-then-read dirty bit (both paths live; `src/pane/mod.rs` +216).
++ #205 (3b PR2) deletes the pane component of the poll floor — supersedes #204's "both paths live."
++ #206 (3c PR1) `PtyHost` runtime wake slot (plumbing, no behavior change — the demote/promote/`:fg`/`^Z` swap needs a slot, not a spawn-time closure).
++ #207 (3c PR2) captures + tasks wake the channel (floor still present).
++ #208 (3c PR3) deletes the last (streaming) poll floor — supersedes #207.
++ #209 (3d PR1) grep worker wakes the channel (cap still present).
++ #210 (3d PR2) F-finder walker wakes the channel.
++ #211 (3d PR3) MCP requests wake the channel via a git-style forwarder (reply + synchronous `write_context` stay adjacent for single-connection read-after-write).
++ #212 (3d PR4) removes `MAX_IDLE_CAP`; loop blocks on `recv()`; `ReaderExited` death-wake + loop-top check replaces the cap's reader-death-latency role; a 1Hz `CaptureTick` ticks the streaming elapsed-timer the cap used to drive.
+
+The plan notes the design subtlety that data stays on the per-source channels (finder/grep send payloadless `FindOutput`/`GrepOutput` wakes via a `WakingSender`); the literal `{matches}` payload is deferred to Phase 5's ReassignSink. Ten PRs, one folded moment — the throughline is uniform (each source → wake), and the only decisions are the per-source add/delete split already captured.
+
+Provenance:
+- 9dc2773 (PR #203, 2026-05-31) — `src/app/sources.rs` +354; fs/git onto the channel.
+- 2e696e5/239ed44 (PR #204/#205) — pane wake + pane-floor deletion; `src/pane/mod.rs` +216.
+- 89a6941/bfa8e24/d404577 (PR #206–#208) — wake slot, capture/task wake, streaming-floor deletion.
+- 57abd94/94beed8/ed0d0a8 (PR #209–#211) — grep/finder/MCP wakes.
+- a219d1b (PR #212, 2026-05-31) — removes `MAX_IDLE_CAP`, adds `ReaderExited`/`CaptureTick`; loop blocks on `recv()`.
+- docs/MVU_PLAN.md — Phase 3 (3a–3d) + Message (lost-wakeup coalescing) sections (quoted).
+- prior entry 01KTMKY262M6Y6GH25DYKBY33H (this thread, Phase 2) — supplied the pane floor this phase finally deletes.
+
+<!-- Entry-ID: 01KTMKZ502R8JYARTMFMKSGB72 -->
