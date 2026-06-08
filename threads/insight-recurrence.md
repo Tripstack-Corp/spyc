@@ -661,3 +661,40 @@ Provenance:
 - `insight-recurrence` convergence tail = 01KR3DJ9KJY1T9FFP8KDEPTBJ1.
 
 <!-- Entry-ID: 01KR3DM9DBRV6MBA4D516KRR12 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:56:04.702064+00:00
+Role: critic
+Type: Note
+Title: Framing (window-2): #38–#311 continuation opens — six second-window recurrence shapes named, strangler-fig is the window's dominant new shape, tier-2 register and insight-drift boundary carried unchanged
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+This entry opens the **second-window continuation** of `insight-recurrence`. Window-1 (entries above, framing = 01KR3CSQ2YHQ2TD8EAE6DJCTS3) catalogued six event-shape patterns across PRs #1–#37 (the first 22 days). This continuation reads the **#38–#311 substrate** — the next ~32 days, ~273 PRs, reconstructed into seven extended arc threads plus six new `history-seg-*` segment threads, with a Phase-3 readable-arc layer in `history-synthesis` (opener = 01KTMNAVSB3410Y59S3FDMZCHQ) and a second-window spine in `history-overview` (framing = 01KTMN7X7FV45E8E05DN1RV719; segment map = 01KTMN9MRB31A0C8ZWSXX5M5ZQ). The window is ~7.4× the PR volume of window-1, and the recurrence shapes it carries are correspondingly larger-grained: where window-1's recurrences were per-PR shapes counted across single-digit instances, window-2's dominant recurrences are *campaign-scale* — a single migration shape instantiated twice at scale, a phase-numbered train of a dozen same-shape PRs, a verbatim-cut shape recurring ~45×.
+
+**Register and boundary — carried unchanged.** The tier-2 job is unchanged: count instances, name the shape they share, cite real moment entry_ids, do not interpret *why* (tier-4, `insight-emergent-properties`), do not predict (tier-5), never attribute motive to the maintainer. The boundary with `insight-drift` holds: a recurrence is also a drift only if it carries a misnaming-at-the-moment-of-merge aspect. None of the six window-2 shapes below qualify as drift — they are project-working-pattern recurrences, not per-PR descriptive lies — so this continuation is recurrence-only, with no cross-thread re-litigation needed (the window-2 drift fuel the segmentation flagged — the v1.60 same-day #76→#77 reversal, the #139/#140 throttles vestigialized by #141, the markdown #103→#108 width churn — is description-vs-diff material for a drift continuation, not recurrence material). One contrast worth stating up front: window-1 had **no migration-shape pattern at all**; the strangler-fig (Pattern 1 below) is genuinely new to window-2, not an evolution of anything window-1 named.
+
+**The six second-window shapes named, with instance-count claims to verify per entry.**
+
+- **1. Strangler-fig migration (NEW — the window's dominant recurrence).** Grow-alongside → parity → flip → drop, instantiated twice at campaign scale: the MVU runtime (`history-seg-refactor-mvu`, grown behind green CI alongside the old `App::run` loop) and the gix backend (`history-seg-gix-migration`, behind a `SPYC_GIT_BACKEND` escape hatch). *Two instances; window-1 had no equivalent shape.*
+- **2. Phase-numbered PR-train (EVOLUTION of window-1 Pattern 6).** A long ordered train of small same-shape PRs under one named campaign, with explicit phase numbers: MVU phase −1..6 + Phases D/E + last-mile; mod-extract pr1..12; decompose-mod-* waves. *Window-1 Pattern 6 (implicit-machinery-chain) was the consumer-not-naming-the-establisher shape; window-2 makes the chain explicit, numbered, and plan-anchored. Two-to-three canonical campaign-trains to verify.*
+- **3. Verbatim-relocation recurrence.** The behavior-identical file-split move (`+N/-N` near-balanced diff, `git mv` + `mod…;use…;`, "no behavior change") recurs ~45× across module-decomposition and MVU leaf/handler extraction. *A single micro-shape recurring at the highest instance count in either window.*
+- **4. Per-X-repetition-then-generalize.** Do the per-instance work N times, then collapse it into a registry/abstraction: per-agent dispatch repeated (claude/codex/gemini/agy) then collapsed into the `AgentProfile` registry at #176; per-source pager session-skeletons repeated then collapsed into `PagerStream` at #309–#311. *Two surfaces; the abstraction's payoff measured in both (zot at +18min; three sources migrated).*
+- **5. Plan-doc-then-execute.** A committed plan doc lands in `history-seg-docs-planning`, then a segment executes it: MVU_PLAN.md (#196) → seg-refactor-mvu; PANE_RECOVERY_PLAN/STARTUP_TABS (#92/#93) → arc-03; V1_5_PLAN → arc-05; AUTO_APPROVAL_PLAN (#86). *Recurs across the window; the plan-as-recorded-rationale spine of the whole reconstruction.*
+- **6. Patch-corridor release cadence (EVOLUTION of window-1 Pattern 5).** Window-1 Pattern 5 caught the v1.41.x corridor at 24 patches; window-2 extends that same corridor to v1.41.37, then opens a *longer* v1.50.x corridor (50.0 → 50.82), then v1.51.4, then v1.56.0 at the gix close. *The patch-under-one-minor shape recurs at larger scale; minor cuts stay rare.*
+
+**Methodology — unchanged from window-1.** Each entry states the shape, enumerates instances against the new history substrate (citing the per-moment ULIDs the synthesis arcs carry inline), names the verified count, flags sub-shapes and boundary questions, and contrasts with the window-1 pattern where illuminating. Where a window-2 shape is an evolution of a window-1 pattern, the entry says which and how the shape changed. Two tails follow the closure: a convergence tail (PRs/threads at the intersection of multiple window-2 shapes) and a legibility tail (how the per-moment + synthesis layers made the cumulative reading possible at this volume).
+
+**What this continuation is NOT for** — unchanged: not motive attribution (the most acute temptation here is *why* the maintainer chose strangler-fig twice, or *why* the phase-train is numbered — forbidden at every tier); not emergent-property naming (*the strangler-fig recurs* is tier-2; *it recurs because parity-tests-behind-a-flag is this maintainer's risk-management property* is tier-4); not trajectory-against-plans (the plan-doc-then-execute recurrence correlates heavily with stated plans — that correlation is tier-3, `insight-trajectory`'s; this thread counts the execute-after-plan shape, not whether the moves track the plan); not prediction.
+
+Provenance:
+- `insight-recurrence` window-1 framing = 01KR3CSQ2YHQ2TD8EAE6DJCTS3; window-1 closure = 01KR3DFHA7FRV3BXEH2Z8SFJQN (six-pattern window-1 catalogue this continuation extends).
+- `insight-recurrence` window-1 Pattern 5 (v1.41.x cadence) = 01KR3D8RH5DNYC37WSGFVETXT3; Pattern 6 (implicit-machinery-chain) = 01KR3DC7E4B0JC1NN212PYVT56 (the two window-1 patterns Patterns 6 and 2 below evolve from).
+- `history-overview` second-window framing = 01KTMN7X7FV45E8E05DN1RV719; segment map = 01KTMN9MRB31A0C8ZWSXX5M5ZQ (7 extended arcs + 6 new seg threads, ~123 moments, partition-strict routing).
+- `history-synthesis` opener = 01KTMNAVSB3410Y59S3FDMZCHQ (the readable-arc layer this continuation reads for inline moment ULIDs).
+- Window-2 substrate threads read for evidence: history-seg-refactor-mvu, -module-decomposition, -gix-migration, -performance, -markdown-rendering, -docs-planning; history-synthesis arcs for arc-01/03/04/05/06/07/08 continuations.
+- Release ledger verified by `git log main --format='%s' | grep -oiE 'v1\.[0-9]+\.[0-9]+'`: v1.41.x runs to .37, v1.50.x to .82, plus v1.51.4 and v1.56.0; minor cuts v1.41.0 and v1.50.0 only across the span.
+
+<!-- Entry-ID: 01KTMTMAB6G8JJAFFQF29XVZGB -->
