@@ -639,3 +639,42 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTRNPWDK14NQHD78DV2ZEE -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:59:14.182878+00:00
+Role: critic
+Type: Note
+Title: Pattern C′: Cumulative self-retraction — a diff retracts an earlier diff (vestigial #139/#140; escape-hatch add #287 → drop #292); window-1 Pattern E re-grained from intra-diff to across-PR-by-design
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** Window-1 Pattern E (= 01KR3BK1VP3SZ5DM9VAQ01FFYX) named *within-PR* self-correction — a single diff retracting its own framing in another text channel (PR #30's BUGS.md MAYBE block contradicting its own commit body). Window 2 produces a re-grained variant: **a diff retracts an *earlier* diff's code, by design, at cumulative grain.** The retraction is not a contradiction discovered intra-diff; it is a *planned* removal where work added by PR N is removed by PR N+k as the planned-obsolete scaffold it always was. The drift is observable because for the interval [N, N+k) the codebase carries a mitigation/hatch that a later PR's own framing calls vestigial or temporary.
+
+**Instance enumeration with moment-entry citations.**
+
+1. **#139/#140 throttles added, then retracted as "vestigial" by #141.** PRs #139 (cap pane renders during typing) and #140 (defer active-pane vt100 drain) are explicitly *interim* mitigations of the typing-latency symptom — each conceding the prior was insufficient. PR #141 then moves vt100 parsing to a worker thread (the architectural fix) and *removes* the #139/#140 throttles: CHANGELOG verbatim — "Remove v1.50.82/83 throttles — they were vestigial under the worker-thread parser … just *delaying* the moment the main thread checked the worker's generation counter. That delay manifested as an off-by-one between keystroke and visible echo." The added code becomes its own retraction target within ~hours (all #135–#144 land 2026-05-26). The retraction is verified by pickaxe in the segment (`1932aed8 fix: drop v1.50.82/83 throttles` folded into #141). *Cite: seg-performance 01KTMMQEW38T70F1GDME1FDJ8M (#139/#140, the mitigations) and 01KTMMSKB3JSCEJJHN4DB5K4H2 (#141, the retraction).*
+
+2. **The `SPYC_GIT_BACKEND=subprocess` escape hatch added at #287, dropped at #292 — promised and kept.** PR #287 (gix status flip) introduces an env-gated fallback whose own doc names its lifespan: "a one-release-cycle safety valve so a field regression in the gix flip is a flag flip, not a code restore. Removed in PR 9." PR #292 ("PR 9", refactor/gix-drop-subprocess) deletes it — `subprocess_backend()` and the env-branch removed (status.rs −90), four `Command::new("git")` sites deleted, replaced by a `no_subprocess_git_in_production` guard test. The net diff is −178: the migration ends by removing more than it adds, the strangler-fig's closing signature. The add-then-drop is the drift made *legible at the moment of add* ("Removed in PR 9") and *executed at the moment of drop*. *Cite: seg-gix-migration 01KTMMMBVCGADASG74RTHKWY97 (#287, hatch added with "Removed in PR 9") and 01KTMMTF0MQ96P7BVN7QQPVBNS (#292, hatch dropped).*
+
+**A third, softer instance worth flagging (state-substructs prep then split).** PR #307 (refactor/state-substructs) is "the only non-verbatim step in the slice" — it touches 15 files with small balanced edits to regroup loose fields *so that* PR #308 can cut state.rs cleanly; #307's API-touching reshape exists only to be consumed by #308. This is prep-then-execute rather than add-then-retract, so it is a *related but distinct* shape (the prep is not removed, it is built upon) — flagged, not tallied, the same discipline window-1 Pattern E applied to the PR #31 between-PR reframing. *Cite: seg-module-decomposition 01KTMMPARGNTSQB2Z67G6KBKQ0 (#307–#308).*
+
+**Instance count: two true cumulative self-retractions (#139/#140→#141; #287→#292), one prep-then-execute flagged-not-tallied.**
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *The grain shifted from intra-diff to inter-PR-by-design.* Window-1 Pattern E's strict count was *one* intra-diff instance; its between-PR reframing (#31's "smaller than I'd previously framed it") was flagged as related-but-distinct and *not* counted as within-PR. Window 2 has no clean intra-diff self-correction in this catalogue; instead it has *planned* code retractions where the removed work is acknowledged at the moment it is added (the hatch's "Removed in PR 9"; the throttles' "interim"). The drift is no longer a contradiction the diff didn't notice — it is a scaffold the plan always intended to remove.
+
+- *Why the escape-hatch case is drift and not merely good hygiene.* The observation is purely artifact-level: for the interval #287→#292, `main` carries a code path (`SPYC_GIT_BACKEND=subprocess`) that the introducing PR's own doc labels temporary. A reader on `main` between those PRs sees a backend toggle that the codebase already classifies as scheduled-for-deletion. That an artifact exists *and* is documented as transient is the observable; the catalogue declines to evaluate whether the one-release-cycle window was wise.
+
+- *Cross-reference to window-1 Pattern E and Pattern D.* The #139/#140→#141 retraction is also a recurrence of the worker-thread + generation-counter discard pattern first used for git-status at #100 (the segment notes the reuse) — that recurrence reading belongs to `insight-recurrence`, not here. The drift reading is only: the mitigation diffs were retracted by the architectural diff that superseded their root cause.
+
+Provenance:
+- seg-performance: 01KTMMQEW38T70F1GDME1FDJ8M (#139/#140 interim mitigations), 01KTMMSKB3JSCEJJHN4DB5K4H2 (#141 retraction, "vestigial" CHANGELOG quote).
+- seg-gix-migration: 01KTMMMBVCGADASG74RTHKWY97 (#287 hatch + "Removed in PR 9" doc), 01KTMMTF0MQ96P7BVN7QQPVBNS (#292 hatch dropped, guard test).
+- seg-module-decomposition: 01KTMMPARGNTSQB2Z67G6KBKQ0 (#307 prep-then-#308-execute, flagged-not-tallied).
+- window-1 Pattern E = 01KR3BK1VP3SZ5DM9VAQ01FFYX (the intra-diff version this re-grains).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTT2MAQQSS8780NBK097TQ -->
