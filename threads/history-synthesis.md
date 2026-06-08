@@ -241,3 +241,30 @@ Confidence: High across the window; one moment (#142 activity monitor) is med on
 Provenance: 01KTMMPRDQ4Y8Q0D5AD9ZND5SA, 01KTMMR37MMRBBRMQK58RFN6R2, 01KTMMRZ2K1RSQN8HNSHZS03E1, 01KTMMT76DJR9MACFF973R44PK, 01KTMMVJ6RR8RM6WNZ9HKQC5C8, 01KTMMWZXSEMHKYCD0GGNSNR3E, 01KTMMY8R53BC7BJPEHKVWTRD0, 01KTMMZWBVK4X3QJP7SJW3ZEG2, 01KTMN0ZW93D5P7TPZCVMCWC0B, 01KTMN1TSVDFN7SWK34QF2SWY5, 01KTMN2RJ3V39M24PWFHXJ3R7K
 
 <!-- Entry-ID: 01KTMNJRT9FD74NGXQXHH78A3B -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:27:55.677888+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-08-recoverability-and-deps (#38–#311 continuation) — staying correct and alive under adversarial/edge conditions
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-08-recoverability-and-deps (#38–#311 continuation) — staying correct and alive under adversarial/edge conditions
+Span: 2026-05-08 → 2026-05-28 · 8 moments (1 framing + 7 PR moments) · 4 supersessions
+Narrative:
+  This secondary reconstruction covers only the #38–#311 continuation window of history-arc-08 (the "Continuation framing" Note onward); the baseline recoverability PRs are the first-window arc. The framing Note declares the continuation extends the same theme across eleven later PRs and lists its sub-throughlines [01KTMMNZGF280TRX1M7C616KGM]. Every claim below carries an inline moment ref.
+
+  The security spine is the "shrink the unsafe surface" pair. PR #83 cuts unsafe sites 36→2 via a per-thread `with_state_root` test override, `rustix` safe wrappers, and parameter-passing instead of env mutation; it names the two residuals as `:setenv` ("user-driven, intentional") and `install_signal_handlers`, and records a mechanism-level rejection of a `signal-hook` migration that broke the `tcsetpgrp` restore path with `EINTR` [01KTMMRWF583H2AY49TF7M6WQT]. PR #154 supersedes that characterization: `:s` stops calling `unsafe { std::env::set_var }` (recorded as undefined behavior "now that spyc runs worker threads") and routes overrides through a thread-safe `crate::envset` store merged into child spawns, taking unsafe-env-mutation to zero and leaving only the signal-handler block [01KTMN1PMZRV0KVHN1H6FB48B1].
+
+  The path-anchoring spine converges `project_home` into the single anchor across three same-week PRs (#91/#101/#102): worktree entry/exit re-anchors PROJECT_HOME, session save anchors on it (init "no longer requires a literal `.git`... defaults to the launch dir unconditionally"), and selection-paste sends paths relative to it; this supersedes the prior cwd-relative defaulting [01KTMMWD5MCGJ5DM208DS27HRK]. Alongside, PR #98 reconciles `:q`/`:quit` with `Q`'s save lifecycle via a typed `CommandResult::Quit`, superseding the handler that merely flipped `should_quit` — recorded symptom: "long-time `:q` users could quit thousands of times and still see 'no saved sessions'" [01KTMMYVX1S3K0GPJPWNN3NXQ0].
+
+  Huge-tree resilience continues: PR #87 caps the listing watcher's recursive subdir walk at 256, "same shape as the `MAX_ENTRIES` cap" from the first-window PR #28, with rationale living in source doc-comments (the PR carried no CHANGELOG) [01KTMMTRQ21DMSTBQ38W9SYSQB]. Three edge-case fixes round out the slice: PR #55 advertises `COLORTERM=truecolor` to spawned panes, the one moment attributed to an automated (Gemini) reviewer [01KTMMPY4VXGTWWXW21RF6XYV2]; PR #97 makes Linux clipboard yank work via a new `src/clipboard.rs` fallback chain (wl-copy→xclip→xsel), deduping two inline `pbcopy` sites and closing public issue #2 [01KTMMY020Q2946BB69FEVR4QN]; PR #127 lets Enter and the `D`/`v` guards follow symlinks-to-directories via `target_is_dir` while `R`/picks intentionally still act on the symlink itself [01KTMN0NXJW02PGHZ3N0XFDFXF]. PR #124 makes the graveyard recovery surface from first-window PR #13 discoverable (`?` opens help, entry-hint flash) — additive, not corrective [01KTMMZTVFPNJ14QHF15EVA3MA].
+Lineage: moment [01KTMMRWF583H2AY49TF7M6WQT] -> moment [01KTMN1PMZRV0KVHN1H6FB48B1] (unsafe-surface spine: #154 removes the `:setenv` residual #83 named); moment [01KTMMWD5MCGJ5DM208DS27HRK] is the PROJECT_HOME convergence superseding cwd-relative path ops; cross-window, [01KTMMTRQ21DMSTBQ38W9SYSQB] extends first-window PR #28's cap and [01KTMMZTVFPNJ14QHF15EVA3MA] extends first-window PR #13's graveyard viewer
+Open / unsettled: one intentional unsafe site remains — `install_signal_handlers` on raw `libc`, kept after the `signal-hook` rejection [01KTMMRWF583H2AY49TF7M6WQT]/[01KTMN1PMZRV0KVHN1H6FB48B1]. The huge-tree cap accepts up-to-one-second marker staleness by design [01KTMMTRQ21DMSTBQ38W9SYSQB]. Several moments name pre-existing bug threads (bug-q-command-skips-session-save, bug-listing-watcher-recursive-hang, bug-yank-clipboard-pbcopy-linux) as their tracking context.
+Confidence: predominantly recorded — most PRs carry rich CHANGELOG rationale (verbatim-quoted, diff/pickaxe-verified). Recorded-via-source-doc rather than CHANGELOG for PR #87 (marked). All inferred-intent reads flagged per moment at "high" confidence; recorded-dominant ratio carried up.
+Provenance: 01KTMMNZGF280TRX1M7C616KGM, 01KTMMPY4VXGTWWXW21RF6XYV2, 01KTMMRWF583H2AY49TF7M6WQT, 01KTMMTRQ21DMSTBQ38W9SYSQB, 01KTMMWD5MCGJ5DM208DS27HRK, 01KTMMY020Q2946BB69FEVR4QN, 01KTMMYVX1S3K0GPJPWNN3NXQ0, 01KTMMZTVFPNJ14QHF15EVA3MA, 01KTMN0NXJW02PGHZ3N0XFDFXF, 01KTMN1PMZRV0KVHN1H6FB48B1
+
+<!-- Entry-ID: 01KTMNJVN84AEGVJXXK0B769H1 -->
