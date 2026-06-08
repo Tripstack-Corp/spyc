@@ -28,3 +28,28 @@ Provenance:
 - src/git/mod.rs (module doc) — quoted boundary/one-way-dependency rationale
 
 <!-- Entry-ID: 01KTMMHJ879C24FY2WYYT9F1SF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:15.522732+00:00
+Role: scribe
+Type: Note
+Title: PR #284 — add the gix (gitoxide) dependency, lean/pure-Rust/C-free
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: the `gix` crate (v0.84) is added to Cargo.toml with `default-features = false` and a hand-trimmed feature set; ~40 default features and all networking/credentials stay off. [kind: new-capability]
+When: 2026-06-05 · PR #284 (feat/gix-dependency) · commit 70db0671 (squash); feature-branch commit b122b812
+Recorded rationale: "feat(git): add gix (gitoxide) dependency — lean, pure-Rust, C-free" — commit b122b812, 2026-06-05. The Cargo.toml comment block is the verbatim design rationale: "Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default compression backend now; no C, no `*-sys`, so static musl builds stay clean). Replaces the `git` subprocess shell-outs behind the `src/git/` facade, one domain at a time. `default-features = false` + a trimmed set (status / diff / blame / discovery, plus `parallel` for the multi-threaded status walk that keeps huge-tree refreshes cheap); networking, credentials, worktree archive/stream, progress reporting, and ~40 other default features stay off. `worktree-mutation` gets added when worktree create/remove migrates (PR 6)."
+Inferred intent: the C-free / static-musl motivation reads as a packaging concern — a pure-Rust git lib removes the runtime dependency on a `git` install and keeps static builds clean, which a subprocess approach cannot. The feature trimming pre-plans the migration order (status/diff/blame/discovery now; worktree-mutation deferred to "PR 6"). Evidence: Cargo.toml:42 enabled features [sha1, status, dirwalk, blame, blob-diff, revision, index, attributes, excludes, parallel]; Cargo.lock +994 lines. confidence: high
+Supersedes: (none) — additive; this only makes the backend available. The facade call sites still run subprocess git at this point.
+
+The dependency add is pure plumbing with zero call-site change (only Cargo.toml +21 and Cargo.lock +994). The Cargo.toml comment is unusually explicit forward planning: it names the exact PR ("PR 6") where `worktree-mutation` will be enabled, which matches the eventual worktree PR #288. `parallel` is justified by the status hot path ("multi-threaded status walk that keeps huge-tree refreshes cheap"), connecting to the existing background git worker.
+
+Provenance:
+- 70db0671 (PR #284 feat/gix-dependency, 2026-06-05) — squash merge; Cargo.toml +21, Cargo.lock +994
+- b122b812 (feature-branch commit, 2026-06-05) — pre-squash subject "add gix (gitoxide) dependency — lean, pure-Rust, C-free"
+- Cargo.toml:30-52 (at 70db0671) — quoted gix dependency comment block
+
+<!-- Entry-ID: 01KTMMJB955RF16D842WFFEBYP -->
