@@ -100,3 +100,31 @@ Provenance:
 - 662e744 — earlier commit "docs: add MVU migration plan (REFACTOR_PLAN Phase 3 detailed design)" confirming the doc's pre-squash provenance.
 
 <!-- Entry-ID: 01KTMKVE85DEBMBWYCXY7YHP5E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T21:58:11.596857+00:00
+Role: scribe
+Type: Note
+Title: PR #197–#198 — Phase 0/−1: Focus as one Model value + test-fixture re-baseline
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the MVU work bootstraps with the lowest-risk phase first — a single `Focus` enum field replaces ~8 scattered booleans / ~10 copy-pasted `pane_focused = false` sites — paired with a fixture re-baseline so future additive field growth touches one line.   [kind: new-capability]
+When: 2026-05-30 · PR #197 (refactor/mvu-phase-0-focus) commit 0d78b74; PR #198 (refactor/mvu-phase-1-fixtures) commit 7052f56
+Recorded rationale: "Phase 0 — Focus as one Model value (lands first). Highest bug-leverage, lowest risk, zero loop change… Add `Focus` + `focus` field; replace the ~10 copy-pasted `pane_focused = false` sites with one transition point; reimplement `route_snapshot()` to project the focus-axis inputs from `model.focus`… Make `pane_focused` a thin accessor so the compiler flags every writer." — docs/MVU_PLAN.md (Phase 0). Fixtures: "`test_state()` and its derivatives become a single base + struct-update builder (`AppState { focus: …, ..base() }`)… so future field additions touch one fixture line. No assertion changes." — docs/MVU_PLAN.md (Phase −1)
+Inferred intent: Phase 0 is shipped ahead of the loop work as a standalone daily-driver bug fix (the focus-axis paste-to-wrong-surface / V-editor `^a-c` class). The diff confirms the design: `src/app/state.rs` gains `pub enum Focus { FileList, Pane(SinkId-less variant), Overlay, Pager(crate::ui::pager::Mount) }` and `pub focus: Focus`, with `pane_focused()` reduced to `matches!(self.focus, Focus::Pane)`; `src/app/route.rs` (+18) reprojects the focus-axis inputs; render DIM cue in `src/app/render.rs` derives from focus.   confidence: high
+Supersedes: the ~10 inline `pane_focused = false` mutation sites and ~8 focus booleans named in MVU_PLAN.md's bug-class table — collapsed to one writer path. (verified: Focus enum first appears in this PR's `src/app/state.rs` diff)
+
+Reconstructed: this realizes the first row of the MVU bug-class table — "Phase 0: one `Focus` enum field with a single writer path; route.rs's focus-axis inputs, the render DIM cue, and `^C` signal-delivery all derive from it, so on the focus axis the dimmed half, input target, and paste target can't disagree." The done-criterion was `grep 'self.state.pane_focused\s*='` showing zero matches outside the single transition fn. Touches span actions.rs, commands.rs, key_dispatch.rs, pager_handler.rs, render.rs, route.rs, session.rs, state.rs (mod.rs +66/−... net).
+
+Phase −1 (#198, +175 in mod.rs, state.rs reshaped) re-baselined `test_state()` into a base + struct-update builder mirroring route.rs's `..idle()` pattern — the absolutist "zero test edits" invariant was relaxed to "no assertion/expected-value edits; mechanical fixture/constructor churn for added or relocated fields is permitted" after it "was falsified against `test_state()` — an exhaustive `AppState` literal with no `Default` tail" (MVU_PLAN.md, Phases preamble). This unblocks every later phase that adds Model fields.
+
+Provenance:
+- 0d78b74 (PR #197 refactor/mvu-phase-0-focus, 2026-05-30) — adds `enum Focus` + `focus` field in `src/app/state.rs` (+58); reprojects `route.rs` (+18); 9 files, +138/−43.
+- 7052f56 (PR #198 refactor/mvu-phase-1-fixtures, 2026-05-30) — `src/app/mod.rs` +175 fixture builder, `state.rs` reshaped; no assertion edits.
+- docs/MVU_PLAN.md — Phase 0 and Phase −1 sections + bug-class table row 1 (quoted).
+- prior entry 01KTMKVE85DEBMBWYCXY7YHP5E (this thread, MVU_PLAN moment) — the plan these PRs execute.
+
+<!-- Entry-ID: 01KTMKWF071QA1Y5MD5TMMRGHC -->
