@@ -944,3 +944,39 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
 
 <!-- Entry-ID: 01KTMTPYARF1GDCQHMMF9YN5J1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:58:16.834463+00:00
+Role: critic
+Type: Note
+Title: Window-2 Document #2: REFACTOR_PLAN.md — Phases 1–2 executed; the ~1500-line target SUPERSEDED by CLAUDE.md's ~800-line ceiling (PR #282); Phase 3 delegated wholesale to MVU_PLAN
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+**Stated-plan content.** `REFACTOR_PLAN.md` is the parent plan whose Phase 3 *is* the MVU rewrite (document #1). Its stated decomposition target, verbatim at line 30: *"No file in `src/app/` over ~1500 lines."* Its current status header (verified on disk): *"Status (2026-05-30): Phases 1 & 2 COMPLETE… The MVU rewrite (Phase 3) is now a pre-2.0 / road-to-2.0 track — see the detailed design in `docs/MVU_PLAN.md`. This reverses the earlier 'hold the MVU rewrite until 2.0 + ~2 weeks' gate."* Phase 3's own section now reads: *"superseded by the strangler-fig design in `docs/MVU_PLAN.md`."*
+
+**Per-component trajectory disposition (verified against `history-seg-refactor-mvu` + `history-seg-module-decomposition`).**
+
+- **Phases 1–2 (leaf + handler extractions)** — EXECUTED. #180–#185 lifted six leaf structs; #187–#194 moved the larger handlers via the child-module `impl App` pattern; mod.rs went 12,450 → 8,427 lines (seg entry 01KTMKTBHT9G2VBZNJZFY5EJM4). The plan's done-criteria are honored *with the plan recording its own miss-and-correct*: "⚠️ `wc -l src/app/mod.rs ≤ 4500` is not met (8,427). That number was estimated off a ~7.4k baseline; the real pre-refactor file was ~12.5k." The criterion was wrong; the plan said so. Disposition: EXECUTED-with-recorded-criterion-correction.
+
+- **Phase 3 (the deep MVU rewrite)** — DELEGATED, not divergent. REFACTOR_PLAN's original "block-out-a-week big-bang" framing was superseded by MVU_PLAN's strangler-fig design (document #1), which executed near-exactly. So Phase 3's trajectory is: *plan-document hand-off, then execution against the successor document.* The parent plan's Phase 3 did not land in modified shape; it was replaced by a more detailed child plan that landed near-exactly.
+
+- **The ~1500-line target** — SUPERSEDED. PR #282 (commit f5c2b4aa, docs/claude-md-architecture, 2026-06-04) adds a new `CLAUDE.md` "architectural contract" stating verbatim: *"No `.rs` over ~800 lines without a solid reason. Oversized files make diffs impossible to reason about… A module root holding its own core type definitions is a legitimate 'solid reason'; a pile of helpers is not."* This is a **tightening supersession**: the ceiling drops from ~1500 (src/app/-scoped) to ~800 (repo-wide). The seg-decomposition thread verifies the consequence — the per-subsystem wave (#297–#308) reaches into `ui/`, `mcp/`, `keymap/`, `state/`, `git/`, splitting `ui/pager.rs` (2954 lines), `src/mcp.rs` (2190), `keymap/resolver.rs` (1878), and `src/app/state.rs` (3907, the MVU Model) into directory modules. (seg decision entry 01KTMMJVZMX3SJCBSK8YF896YP)
+
+**Trajectory disposition: EXECUTED-AND-TIGHTENED.** Unlike window-1's three ROADMAP additions (zero exactly-as-specified), REFACTOR_PLAN's decomposition mandate not only executed but was *strengthened mid-window* — the line target moved down, not abandoned, and a standing guard test (`mod_rs_stays_decomposed`, ceiling first 8500 then 4000) was added to make the invariant self-policing. This is a positive recommendation that landed AND hardened. The one nuance: the *specific number* in REFACTOR_PLAN (~1500) was never the landed ceiling — the landed ceiling is CLAUDE.md's ~800 — so at the literal-number grain the original target was not met-as-written; at the direction grain the decomposition went further than specified. Both readings hold; the supersession is the honest framing (the number changed because a stricter document replaced it).
+
+**Cross-document note.** The decomposition's promotion onto the 2.0 critical path is the roadmap-reorg moment (document #10, PR #179): "Decomposition also unblocks the 2.x crate split (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith." So REFACTOR_PLAN's execution is the enabling seam the v1.70 plan (document #5, still pending) declared it needs — the decomposition landed; the protocol work it unblocks has not.
+
+**Boundary with `insight-emergent-properties`.** Whether "a stated line-target gets tightened-and-guarded rather than abandoned" reflects a property of how the project treats its own structural plans is tier-4 and reserved. The trajectory thread states: Phases 1–2 executed; the ~1500 target was superseded downward to ~800 (PR #282); Phase 3 was delegated to MVU_PLAN and executed there.
+
+Provenance:
+- REFACTOR_PLAN.md — line 30 (~1500 target), status header (Phases 1&2 COMPLETE; Phase 3 pre-2.0), Phase 3 "superseded by docs/MVU_PLAN.md" — verified on disk.
+- f5c2b4aa (PR #282 docs/claude-md-architecture, 2026-06-04) — adds CLAUDE.md ~800-line ceiling; module index in AGENTS.md.
+- `history-seg-refactor-mvu` Phase 1–2 entry = 01KTMKTBHT9G2VBZNJZFY5EJM4 (mod.rs 12,450→8,427; the wc-l miss-and-correct).
+- `history-seg-module-decomposition` CLAUDE.md ceiling decision = 01KTMMJVZMX3SJCBSK8YF896YP; the mod-extract wave = 01KTMMGZWER9304EZM82KTEZMQ; the 800-LoC campaign = 01KTMMHZCN03GA638EHKKCY50E; subsystem split = 01KTMMM1322W32NGAH5H7MWYEP + 01KTMMN1CSG84TPZ4ZEFN9K62B; state.rs close = 01KTMMPARGNTSQB2Z67G6KBKQ0.
+- window-1 document #3 = 01KR3EW3166JZ59TDR8PYMGN4T (the zero-exact ROADMAP additions this contrasts against).
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M; window-2 document #1 = 01KTMTPYARF1GDCQHMMF9YN5J1.
+
+<!-- Entry-ID: 01KTMTR9XYV5ZW49ENMMP4CMBE -->
