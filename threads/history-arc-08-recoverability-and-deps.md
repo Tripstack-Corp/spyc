@@ -824,3 +824,33 @@ Provenance:
 - `git diff f2b1f5b^1 f2b1f5b -- CHANGELOG.md` — verbatim rationale quoted above; "Closes Tripstack-Corp/spyc#2".
 
 <!-- Entry-ID: 01KTMMY020Q2946BB69FEVR4QN -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:59.507692+00:00
+Role: scribe
+Type: Note
+Title: PR #98 (fix/q-command-session-save): :q / :quit reconciled with Q's save lifecycle via a typed CommandResult::Quit variant
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: session-save-correctness — Reconstructed: `:q` / `:quit` stop merely flipping `should_quit` and instead return a typed `CommandResult::Quit` that the App routes through a shared `App::request_quit()` helper, so the colon-command quit path now runs the same save-session + running-process-warning lifecycle as the `Q` keybinding   [kind: supersession]
+When: 2026-05-19 · PR #98 (fix/q-command-session-save) · merge e347152 (squash; subject "Fix/q command session save")
+Recorded rationale: "`:q` / `:quit` now save the session and warn about running processes, matching the `Q` keybinding. Previously the two quit surfaces diverged: `Action::Quit` (bound to `Q` / `^D`) ran the full lifecycle … while the `:q` colon command in `AppState::dispatch_command` just flipped `should_quit = true`, skipping persistence *and* the warning. … explained why long-time `:q` users could quit thousands of times and still see 'no saved sessions' from `spyc -r`." — CHANGELOG.md (PR #98)
+Inferred intent: collapse two divergent quit surfaces into one lifecycle, made non-regressable by typing the dispatch result — evidence: src/app/state.rs returns `CommandResult::Quit` for `:q`/`:quit`; src/app/mod.rs adds `App::request_quit()` shared with `Action::Quit` and matches the variant exhaustively. confidence: high
+Supersedes: the prior `:q`/`:quit` handler that set `should_quit = true` directly in `AppState::dispatch_command`, bypassing `save_session()` and the running-process confirm
+
+This is the session-save quit fix; the directly relevant pre-existing thread is `bug-q-command-skips-session-save`. The bug is a divergence between two quit surfaces that the user-facing contract had already promised were equivalent — the CHANGELOG cites the reserve-`q` flash at `src/app/state.rs:1120` verbatim: `"q reserved for future macro recording — Q or :q to quit"`. Yet `Q`/`^D` (`Action::Quit`) ran "double-tap confirm, running-process count, `save_session()` on the second press" while `:q` just set `should_quit = true`. The observable symptom the CHANGELOG names: "long-time `:q` users could quit thousands of times and still see 'no saved sessions' from `spyc -r`."
+
+The fix's design note is the load-bearing detail. Rather than duplicate the lifecycle into the colon-command arm, the pure-domain dispatch returns "a typed `CommandResult::Quit` variant," and the App-side exhaustive match routes it through a new `App::request_quit()` shared with `Action::Quit`. The CHANGELOG records the reasoning for the type: "The typed variant means a future refactor that drops the App arm is a compile error rather than a silent regression to 'unknown command'." This is the same pure-domain-dispatch / App-terminal-half split the original arc 08 PR #14 entry described for the `:undo` punt-list bug — here the fix is to make the dispatch return value carry intent through the type system rather than leaving routing implicit. The branch this checkout sits on (`fix/q-command-session-save`) and the recent commits ("fix(quit): typed CommandResult::Quit variant") corroborate the typed-variant approach as the landed shape.
+
+Squash merge; the CHANGELOG `### Fixed` block carries the full rationale — recorded.
+
+Provenance:
+- e347152 (PR #98 fix/q-command-session-save, 2026-05-19) — squash; subject "Fix/q command session save".
+- `git diff e347152^1 e347152 -- src/app/state.rs` — `:q`/`:quit` return `CommandResult::Quit` (+35/-... ); `git diff … -- src/app/mod.rs` — `App::request_quit()` shared helper + exhaustive match (+69/-... ).
+- `git diff e347152^1 e347152 -- CHANGELOG.md` — verbatim rationale + the `src/app/state.rs:1120` reserve-`q` flash quote.
+- Local: branch `fix/q-command-session-save`, commit 27012a6 "fix(quit): typed CommandResult::Quit variant (review follow-up)".
+
+<!-- Entry-ID: 01KTMMYVX1S3K0GPJPWNN3NXQ0 -->

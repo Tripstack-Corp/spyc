@@ -696,3 +696,35 @@ Provenance:
 - 84fe380 (PR #153 fix/codex-resolver-hygiene, 2026-05-27) — `src/state/codex_transcript.rs` 26 lines changed (net -6), `src/state/sessions.rs` ±1 (share `parse_iso8601_to_epoch_secs`). Clean squash.
 
 <!-- Entry-ID: 01KTMMWZXSEMHKYCD0GGNSNR3E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:57.689376+00:00
+Role: scribe
+Type: Note
+Title: PR #172 (+#173,#174,#175) — Antigravity (agy): the fourth peer, added the expensive way (last time)
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: agy/antigravity onboards as the fourth agent across four PRs in one day — session-resume, two repo-hygiene chores, and a third parallel transcript file — the last agent added before the registry refactor   [kind: new-capability]
+When: 2026-05-29 · PRs #172 (feat/agy-session-resume, 16d36fd), #175 (feat/agy-transcript-scrollback, da4a6e1) · folds #173, #174
+Recorded rationale: "Antigravity CLI (`agy`) agent support. Spyc now detects `agy` spawned in the lower pane. Closing the pane and running `spyc -r` later automatically resumes the conversation (`agy --conversation <UUID>`). The spyc status bar also reports the live `agy` short ID" — CHANGELOG.md (added PR #172)
+Inferred intent: agy is added with the full per-peer playbook — detection, resume, status short-id, then a separate transcript file — and the breadth of the change (sessions.rs +78, app/mod.rs +127, then a +179 transcript file) is what makes the case for #176, which lands hours later the same day — evidence: #172 + #175 touch the same set of per-agent dispatch sites #176 then consolidates; #176 merges 2026-05-29 23:41, #175 at 21:37, #172 at 16:08
+                  confidence: high
+Supersedes: (none — additive; agy is the last agent onboarded under the pre-registry per-peer pattern)
+
+Agy's resume mechanic is its own shape again: "`agy --conversation <UUID>`" (CHANGELOG #172), distinct from claude's flag, codex's UUID-in-filename, gemini's list-index. The breadth of #172 is the tell — `src/app/mod.rs` +127 and `src/state/sessions.rs` +78 — the same spawn/restore/status surfaces every prior agent edited. Hours later #175 adds the transcript: "Agent-aware scrollback for `agy`. `^a v` on an Antigravity pane now renders agy's on-disk conversation transcript [...] same `(transcript)` treatment as codex. The session is located by matching the pane's cwd + spawn time against agy's `history.jsonl`. On by default; toggle with `[pane] agy_transcript_scrollback = false`" (CHANGELOG #175). That ships `src/state/agy_transcript.rs` +179 — the third parallel transcript file (see the transcript-surface moment, 01KTMMVJ…).
+
+The throughline crystallizes here: onboarding agy required touching detection, resume save/restore, status short-id, config toggles, *and* a new transcript file — a "tree-wide sweep" in #176's later words. The chronology makes the motivation almost legible as cause-and-effect (sequence, not stated intent): agy's full per-peer onboarding (#172 16:08, #175 21:37) immediately precedes the registry refactor (#176 23:41) on the same day. The diff shape suggests the cost of adding the fourth peer the old way is what the registry is reacting to.
+
+Folded into this moment (agy repo hygiene, same day):
++ #173 chore/gitignore-antigravitycli (1831585, 2026-05-29) — `.gitignore` +4; "untrack `.antigravitycli/` and gitignore it" (second-parent subject). A stray agy state dir had been tracked.
++ #174 chore/remove-antigravitycli-symlink (2b10643, 2026-05-29) — removes one tracked file, `.antigravitycli/f72fae82-…-7df2a99398c7.json` (-1 line); "actually remove the `.antigravitycli/` symlink" (second-parent subject). The follow-through #173 missed. No code/decision; pure repo hygiene from dogfooding agy locally.
+
+Provenance:
+- 16d36fd (PR #172 feat/agy-session-resume, 2026-05-29 16:08) — `src/app/mod.rs` +127, `src/state/sessions.rs` +78, README/FEATURES; also added `docs/PATH_HANDOFF_PLAN.md` +205 and `docs/TEST_IMPROVEMENT_PLAN.md` +195 (planning docs, not agy-specific — bundled).
+- da4a6e1 (PR #175 feat/agy-transcript-scrollback, 2026-05-29 21:37) — `src/state/agy_transcript.rs` +179, `src/config/mod.rs` +19, `src/state/sessions.rs` +77. second-parent: "feat: agent-aware scrollback for agy (transcript view)".
+- 1831585 (PR #173, 2026-05-29 16:23) — `.gitignore` +4. 2b10643 (PR #174, 2026-05-29 16:28) — `.antigravitycli/*.json` -1.
+
+<!-- Entry-ID: 01KTMMY8R53BC7BJPEHKVWTRD0 -->

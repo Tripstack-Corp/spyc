@@ -23,3 +23,5 @@
 {"source":"entry:01KTMMT76DJR9MACFF973R44PK","target":"entry:01KTMMVJ6RR8RM6WNZ9HKQC5C8","type":"followed_by"}
 {"source":"thread:history-arc-07-codex-and-mcp-bridge","target":"entry:01KTMMWZXSEMHKYCD0GGNSNR3E","type":"contains"}
 {"source":"entry:01KTMMVJ6RR8RM6WNZ9HKQC5C8","target":"entry:01KTMMWZXSEMHKYCD0GGNSNR3E","type":"followed_by"}
+{"source":"thread:history-arc-07-codex-and-mcp-bridge","target":"entry:01KTMMY8R53BC7BJPEHKVWTRD0","type":"contains"}
+{"source":"entry:01KTMMWZXSEMHKYCD0GGNSNR3E","target":"entry:01KTMMY8R53BC7BJPEHKVWTRD0","type":"followed_by"}
