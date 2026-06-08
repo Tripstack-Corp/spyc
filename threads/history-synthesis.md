@@ -106,3 +106,30 @@ Confidence: every moment is marked recorded (rich CHANGELOG/commit rationale, ve
 Provenance: 01KTMMHXYR7E0PYD7AZTHFAR8E, 01KTMMK08N55944H24EY4RM81E, 01KTMMKR90HM2V9VZYSDFS1WCZ, 01KTMMMSG4DXNDQZ66KVXXBE93, 01KTMMP87YEBGTXTHDPH0BJJY0, 01KTMMQEW38T70F1GDME1FDJ8M, 01KTMMSKB3JSCEJJHN4DB5K4H2, 01KTMMTSMP1F44C1ZPY2PP8J7M, 01KTMMW22XTS48TGVY3DS1HPPA
 
 <!-- Entry-ID: 01KTMNG8WCGXX9SXWPXA84YY91 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:26:53.845301+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-seg-module-decomposition — verbatim cuts shrink every oversized file under a codified ~800-line ceiling
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-seg-module-decomposition — verbatim cuts shrink every oversized file under a codified ~800-line ceiling
+Span: 2026-06-02 → 2026-06-08 · 6 moments · 5 supersessions
+Narrative:
+  The segment runs as one decomposition campaign in distinct waves, each a near-perfect insertion/deletion balance — the verbatim-move signature. It opens with a twelve-PR wave (one cut per PR) relocating self-contained concerns out of `src/app/mod.rs` into sibling `src/app/*.rs` files, governed by the recorded `REFACTOR_PLAN.md` Phase-1 convention "verbatim move + a `mod ...; use ...;` import — no behavior change, no API change. Each was one PR" [01KTMMGZWER9304EZM82KTEZMQ]. The diffs (#248 +541/-502, #257 +431/-429, #258 +514/-501) align with that verbatim signature. A second wave — the recorded "800-LoC campaign" — then carves the structural core REFACTOR_PLAN.md had deliberately left in mod.rs (the run event loop → `run.rs`, `App::new` → `bootstrap.rs`, process I/O → `proc.rs`, leaf helpers → `util.rs`), pushing mod.rs below the Phase-2 floor and seeding the test-extraction convention via a guard test `mod_rs_stays_decomposed` ("If you hit this: extract a module, don't bump the ceiling") [01KTMMHZCN03GA638EHKKCY50E].
+
+  The campaign's governing rule is then codified as a typed Decision: a new `CLAUDE.md` "architectural contract" writes the standing invariant verbatim — "No `.rs` over ~800 lines without a solid reason. Oversized files make diffs impossible to reason about … A module root holding its own core *type definitions* is a legitimate 'solid reason'; a pile of helpers is not" [01KTMMJVZMX3SJCBSK8YF896YP]. This supersedes the earlier ~1500-line `src/app/`-scoped target with a ~800 ceiling that applies repo-wide, which (inferred) is why the subsequent waves reach into `ui/`, `mcp/`, `keymap/`, `state/`, and `git/`. AGENTS.md and ARCHITECTURE.md are refreshed to record the campaign by name and flip the MVU narrative from "in progress" to "done" (cross-ref history-seg-refactor-mvu).
+
+  Under the new ceiling the per-subsystem waves convert oversized single files into directory modules (`foo.rs` → `foo/{mod, …}`). The render subsystems go first: markdown, diff-render, render, pager-handler, and the campaign's single biggest file `ui/pager.rs` (~2954 lines → six pager/*.rs), with snapshot `.snap` fixtures `git mv`'d into new `snapshots/` subdirs so the insta/TestBackend net stays intact [01KTMMM1322W32NGAH5H7MWYEP]. The non-render core follows — the 2190-line `src/mcp.rs` and 1878-line `keymap/resolver.rs` are the headline cuts, split into protocol/server/config/readers and thematically-partitioned test trees, with key-dispatch, sessions, and pane following the same pattern; the sessions/resolver/pane cuts are predominantly test-extraction, confirming the secondary convention that large `#[cfg(test)]` modules move to dedicated `tests.rs`/`tests/` trees [01KTMMN1CSG84TPZ4ZEFN9K62B].
+
+  The campaign closes on its largest single target, the 3907-line `src/app/state.rs` (the MVU Model). It takes two PRs: a non-verbatim prep step that groups loose git-cache and pane fields into sub-structs so the split has clean seams — the only API-touching, non-mechanical edit in the slice (inferred from its 15-file +225/-229 ripple) — then the large verbatim directory conversion into `state/{mod,apply,dispatch,git,listing,navigation,selection}.rs` plus a partitioned tests tree [01KTMMPARGNTSQB2Z67G6KBKQ0]. That close also carries the campaign's last convention edit: the `no_subprocess_git_in_production` scan gains a test-file skip recognizing "`tests.rs`, `*_tests.rs`, or any file under a `tests/` directory," making explicit the test-extraction convention every prior decompose PR had followed implicitly. The slice ends with no `src/app/` file over the guard ceiling and the per-subsystem layout matching the present `src/` tree.
+Lineage: moment [01KTMMGZWER9304EZM82KTEZMQ] -> [01KTMMHZCN03GA638EHKKCY50E] -> [01KTMMJVZMX3SJCBSK8YF896YP] -> [01KTMMM1322W32NGAH5H7MWYEP] -> [01KTMMN1CSG84TPZ4ZEFN9K62B] -> [01KTMMPARGNTSQB2Z67G6KBKQ0]
+Open / unsettled: The closing moment records the slice as complete — no `src/app/` file over the guard ceiling, the layout matching the present tree — and names no deferred item. The ~800-line ceiling and the test-file naming convention persist as standing, executable invariants (the guard test fails CI on regression) rather than open work.
+Confidence: High recorded-rationale density. Each moment quotes verbatim from CLAUDE.md, AGENTS.md, REFACTOR_PLAN.md, git/mod.rs, or pre-squash subjects; all six carry "confidence: high." Inferred reads are confined to intent (the ceiling driving the repo-wide reach, the prep-then-split shape as an answer to a too-coupled file) and stay marked inferred at the moment layer; diff balances are stat-verified.
+Provenance: 01KTMMGZWER9304EZM82KTEZMQ, 01KTMMHZCN03GA638EHKKCY50E, 01KTMMJVZMX3SJCBSK8YF896YP, 01KTMMM1322W32NGAH5H7MWYEP, 01KTMMN1CSG84TPZ4ZEFN9K62B, 01KTMMPARGNTSQB2Z67G6KBKQ0
+
+<!-- Entry-ID: 01KTMNH17RVXAWHF9SJ2Z7MCP9 -->
