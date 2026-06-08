@@ -804,3 +804,29 @@ Provenance:
 - d7a23a78 (PR #44 feat/v1.5-phase-4-block-visual-mode, 2026-05-07) — `src/ui/pager.rs` +451/-…, `src/app/mod.rs` +64, CHANGELOG.md +25, FEATURES.md +7.
 
 <!-- Entry-ID: 01KTMMQ0GAARS6ZPT0B6044VEF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:22.508167+00:00
+Role: scribe
+Type: Note
+Title: PR #63 — `:` command tab-completion: command-line input gains a completion path with a CI contract
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the `:` command prompt gains Tab-completion over a canonical `SPYC_COMMANDS` list, with a CI test pinning the list to the dispatch arms   [kind: new-capability]
+When: 2026-05-09 · PR #63 (feat/colon-tab-completion) · commit 34748f31
+Recorded rationale: "`:` command tab-completion. Hit Tab while typing the spyc command name (`pa<Tab>` → cycle through `pane-to-task` / `pause`, `lim<Tab>` → `limit `, `ver<Tab>` → `version`) and the prompt fills in from the canonical `SPYC_COMMANDS` list. Single match completes with a trailing space; common prefix advances and shows the candidates with '— Tab to cycle'; ambiguous prefix stages a cycle … Once the buffer contains whitespace (`cd <Tab>`, `grep foo<Tab>`) Tab falls through to the existing filesystem completion. No change to the `J`/`!` prompts." — CHANGELOG.md (commit 34748f31, 2026-05-09)
+Inferred intent: command-line input completeness — the `:` prompt previously had only filesystem completion, which is useless before the first space — evidence: the rationale describes the whitespace fall-through to existing fs completion; new `SPYC_COMMANDS` const + completion logic lands across `src/app/mod.rs` (+99) and `src/app/state.rs` (+86)
+                  confidence: high
+Supersedes: (none)
+
+The notable engineering choice here is the CI contract, not the completion UX. The rationale: "Two unit tests guard the contract: `SPYC_COMMANDS` must be sorted + deduped, and every entry must round-trip through `dispatch_command` without falling into the 'unknown command' branch (so adding a new `:foo` to the list without wiring up the dispatch arm fails CI)." This is the same shape PR #82 applies to routing three days later — make a decision table that drifts silently into a tested invariant. The drive-by fix is recorded: "bare `:set` now flashes `usage: :set key=value` instead of 'unknown command'."
+
+The completion is scoped tightly: only the command-name token of the `:` prompt; whitespace hands back to filesystem completion; `J`/`!` prompts untouched. This keeps the new path orthogonal to the path-prompt and history-prompt input handlers that #112 and #95/#163 touch later in the window.
+
+Provenance:
+- 34748f31 (PR #63 feat/colon-tab-completion, 2026-05-09) — `src/app/state.rs` +86 (`SPYC_COMMANDS` + completion state), `src/app/mod.rs` +99, CHANGELOG.md +20, BUGS.md ±.
+
+<!-- Entry-ID: 01KTMMR3QDMNK8EX8SMM6GJ3D8 -->

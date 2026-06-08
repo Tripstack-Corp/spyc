@@ -551,3 +551,32 @@ Provenance:
 - `git log main --grep='pull request #' ` (run 2026-06-08) — 17-PR slice chronology.
 
 <!-- Entry-ID: 01KTMMPRDQ4Y8Q0D5AD9ZND5SA -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:19.272303+00:00
+Role: scribe
+Type: Note
+Title: PR #68 — Gemini as the third AgentKind: the parallel-per-peer shape multiplies
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: a third `AgentKind` variant joins claude+codex, each carrying its own peer-specific save/restore plumbing   [kind: new-capability]
+When: 2026-05-10 · PR #68 (feat/gemini-agent-support) · commit 24dc9c6
+Recorded rationale: "Gemini CLI as a third agent kind alongside Claude and Codex. `gemini` (and path-qualified variants) are now detected as `AgentKind::Gemini` and tracked through the save/restore pipeline" — CHANGELOG.md (added PR #68)
+Inferred intent: extends the two-peer registration-layer pattern arc-07 established to a third peer, by adding a parallel set of peer-specific functions rather than abstracting over them — evidence: CHANGELOG enumerates the new functions; diff adds them to `src/state/sessions.rs` (+238) and `src/app/mod.rs` (+259)
+                  confidence: high
+Supersedes: (none — additive; AgentKind enum from PR #19 gains a variant)
+
+The arc-07 substrate (one socket) doesn't change here; the registration/session layer widens by one peer using exactly the parallel-implementation strategy the arc-07 tail described. The CHANGELOG enumerates the new plumbing verbatim: "New plumbing: `AgentKind::Gemini`, `is_gemini_command`, `command_without_gemini_resume`, `find_gemini_sessions`, `gemini_project_name`, `parse_iso8601_to_epoch_secs`, `parse_gemini_list_sessions_for_uuid`, plus a generalized `pick_closest_unclaimed_session` (now over a `SessionCandidate` trait so Claude and Gemini share the picker)."
+
+The asymmetries the CLIs force (the arc-07 tail's vocabulary) recur: codex resumes by UUID, claude by session-id flag, and gemini "`--resume` consumes an *index* into `--list-sessions`, not a UUID" — so spyc "shells out to `gemini --list-sessions` synchronously, parses the `<n>. <title> (...) [<uuid>]` lines, and spawns `gemini --resume <n>`" (CHANGELOG.md). Save walks `~/.gemini/tmp/<project>/chats/*.jsonl`, picking "the unclaimed UUID whose start time is closest to that pane's spawn time. Same multi-pane discipline as Claude/Codex (a `claimed` set prevents two panes from collapsing onto one conversation)" (CHANGELOG.md).
+
+One detail prefigures #176: the picker `pick_closest_unclaimed_session` is refactored to a generic over a new `SessionCandidate` trait "so Claude and Gemini share the picker" (verified in the `src/state/sessions.rs` diff: `pub fn pick_closest_unclaimed_session<T: SessionCandidate>`, `impl SessionCandidate for GeminiSessionInfo`). This is a *local* generalization of one shared sub-concern — the start-time-proximity picker — while detection, command-stripping, and resume-spawn stay fully per-peer. The narrow trait reads as consistent with the broader registry that #176 lands three weeks later; the diff shape suggests the per-peer repetition was already being felt at the picker. 18 new unit tests ship with it (CHANGELOG: "ISO-8601 parser, command stripping, list-sessions parser, picker generality").
+
+Provenance:
+- 24dc9c6 (PR #68 feat/gemini-agent-support, 2026-05-10) — CHANGELOG +29; `src/state/sessions.rs` +238/-13 (Gemini funcs, `SessionCandidate` trait, `GeminiSessionInfo`); `src/app/mod.rs` +259 (spawn/restore wiring).
+- second-parent subject (24dc9c6^2): "ci: use jiff for ISO-8601 parsing instead of rolled-by-hand math" — corroborates the `parse_iso8601_to_epoch_secs` plumbing.
+
+<!-- Entry-ID: 01KTMMR37MMRBBRMQK58RFN6R2 -->
