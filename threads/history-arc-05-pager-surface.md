@@ -740,3 +740,38 @@ Provenance:
 - 7dcfea36 (PR #38 fix/pager-ctrl-c-routing, 2026-05-07) — src/app/mod.rs +72; contextual ^C dispatch table (task-running SIGINT / task-finished / other-view cases).
 
 <!-- Entry-ID: 01KTMMPV14VAPT445FE1TS1AJ7 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:54.616463+00:00
+Role: scribe
+Type: Decision
+Title: PRs #40–#43, #45 (V1.5 phases 1/2/3/5): the pager becomes spyc's scrollback adapter — mount-enum → scrollback module → ^a-v rewrite → D-in-pane
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: the V1.5 "pager / task-viewer unification" lands as four phases: a `Mount` enum (`Overlay|TopPane|LowerPane`) on `PagerView`, a new `src/ui/scrollback.rs` vt100→styled-lines adapter, the `^a-v` pane-scroll rewrite from flat byte-buffer to a real lower-pane-mounted pager, and `D` retargeted from spawning `$PAGER` to the in-app pager — with a polish PR repairing the Phase-3 open.   [kind: new-capability]
+When: 2026-05-07 · PRs #40 (feat/v1.5-phase-1-pager-mount) · #41 (feat/v1.5-phase-2-scrollback-adapter) · #42 (feat/v1.5-phase-3-pager-as-scrollback) · #43 (feat/v1.5-phase-5-d-uses-in-app-pager) · #45 (fix/v1.5-phase-3-polish) · commits 69494d18, 579dca9c, 29036c0b, fb93c322, a37c6d04
+Recorded rationale: "Pane scroll mode is the current weak point in the agent workflow. 'Read what claude printed 200 lines ago' today means scrolling without search, without jump, without yank-by-range. The same pager that handles `! cmd` capture should handle pane history." — V1_5_PLAN.md (commit 919520c). Phase sequence verbatim: "### Phase 1 — `Mount` enum on `PagerView` … `App::render` reads `view.mount` and passes the right `Rect` … Phase 1 just lays the rail." / "### Phase 2 — Pty scrollback adapter … A new module `src/ui/scrollback.rs` that converts `vt100::Screen`'s scrollback (cell grid) into `Vec<Line<'static>>` with styles preserved." / "### Phase 3 — `^a-v` becomes pager-mounted-LowerPane … Replace the current pane scroll mode with a `PagerView::new_styled(...)` built from the scrollback adapter, mounted `LowerPane`." / "### Phase 5 — `D` uses in-app pager … opens the cursor file as a `PagerView` mounted `TopPane` instead of spawning `$PAGER` in a top overlay." — V1_5_PLAN.md
+Inferred intent: the pager is generalized from "always a centered overlay" into a renderer with three mount points, then made the consumer of pane scrollback — executing exactly the "render *into* the pager" direction the original arc-05 story-tail named (= 01KR2ANRAEFWWR5W9FQP11A0DB). — evidence: V1_5_PLAN.md "Sequencing: Phases 1–3 are the headline win — pager-as-scrollback"; PR #42 CHANGELOG "First user-visible piece of the v1.5 unification. The old scroll mode was a flat byte-buffer view." confidence: high
+Supersedes: the prior ad-hoc pane scroll mode (vt100 scroll-mode toggle) — PR #42 replaces it with a `PagerView` mounted `LowerPane`. Also supersedes PR #35's `display_in_pane` `$PAGER`-spawn path (arc-05 entry = 01KR2AD5PV989H58E49E5D18NM): PR #43 retargets `D` to the in-app pager, with a huge-file (`MAX_PAGER_BYTES` = 5 MB) overlay-`$PAGER` fallback.
+
+This is the arc's central architectural moment — the pager stops being one overlay and becomes the read-surface pane history flows through. The four phases are deliberately staged so each ends green and shippable: V1_5_PLAN names them as "interlocking" (1 lays the rail, 2 supplies the data, 3 is the consumer) and ships 1–3 together as "the first 1.5 win."
+
+Phase 1 (#40, commit 69494d18) is pure plumbing: the `Mount` enum lands on `PagerView` with `#[allow(dead_code)]` `TopPane`/`LowerPane` variants and a new `pager_inner_area` rect-dispatch helper (6 unit tests); every existing caller defaults to `Mount::Overlay` so nothing visible changes (src/ui/pager.rs +132). Phase 2 (#41, commit 579dca9c) adds `src/ui/scrollback.rs` (+311) — `lines_from_scrollback` walks the vt100 screen's scrollback backwards by mutating `scrollback_offset`, merges adjacent same-style cells into one ratatui span, trims trailing blanks, restores the original offset before returning; 10 unit tests, still dead-code-gated until its consumer exists. Phase 3 (#42, commit 29036c0b, src/app/mod.rs +132/-36) is the first user-visible piece: `^a-v` now opens a `LowerPane`-mounted pager fed by the Phase-2 adapter, inheriting `/` search, `:N` jump, `V` visual + `y` range yank, `l` line-numbers (off by default), `W` wrap; `Esc`/`q` snaps the pty back to live and clears the `[SCROLL]` indicator. Phase 5 (#43, commit fb93c322, src/app/mod.rs +365/-... heavy) retargets `D` to a `TopPane`-mounted in-app pager and extracts the shared `App::build_pager_view_for_file` helper so `Enter`/`d` and `D` share truncation banner, syntax highlighting, markdown render, and hex dump — with the >5 MB overlay-`$PAGER` fallback preserved "because `less` streams from disk while the in-app pager loads the (already truncated) buffer into memory."
+
+PR #45 (commit a37c6d04, fix/v1.5-phase-3-polish) is the first repair against the Phase-3 ship, folded here as the immediate finish of the same move: three issues — no-jump init (set `pending_scroll_to_bottom` and let the renderer, which has the real rect, call `scroll_to_bottom(rect.height)` before the first frame, instead of the buggy `scroll = lines - 1`), wrap-on-by-default for `LowerPane`, and borderless rendering in `Mount::LowerPane` ("The pty has no border; the pager replacing it shouldn't either"). It reads as drift-fuel: the polish PR is the seam between "the plan said it works" and "the open actually feels right."
+
+Note Phase 4 (block visual) and Phase 6 (task↔pane) are NOT in this PR slice — Phase 4's block-selection direction surfaces later via #115 (placement state), and the plan's Phase-4 columnar yank predates this window (arc-05 PR #33 visual-line-mode = 01KR2AAX12XSNRNZPTXJT2TXJA). Markdown rendering into this same `build_pager_view_for_file` path is `history-seg-markdown-rendering`.
+
+Provenance:
+- 919520c (2026-05-07) — V1_5_PLAN.md added (276 lines); phase sequence + "Sequencing" + "Why this is a 1.5" quoted verbatim above.
+- 69494d18 (PR #40, 2026-05-07) — V1_5_PLAN.md + src/ui/pager.rs +132 (`Mount` enum, `pager_inner_area`, 6 tests).
+- 579dca9c (PR #41, 2026-05-07) — src/ui/scrollback.rs +311 (`lines_from_scrollback`, 10 tests); pane::widget `cell_style`/`convert_color` made `pub`.
+- 29036c0b (PR #42, 2026-05-07) — src/app/mod.rs +132/-36, src/ui/pager.rs +11, src/pane/mod.rs +9; `^a-v` rewrite, `[SCROLL]` indicator.
+- fb93c322 (PR #43, 2026-05-07) — src/app/mod.rs heavy, FEATURES.md, BUGS.md; `build_pager_view_for_file`, `D` → TopPane, >5 MB fallback.
+- a37c6d04 (PR #45, 2026-05-07) — src/app/mod.rs +36, src/ui/pager.rs +54; Phase-3 polish (no-jump init, wrap-on, borderless LowerPane, 3 tests).
+- prior arc-05 entries superseded/extended: PR #35 = 01KR2AD5PV989H58E49E5D18NM, story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB.
+
+<!-- Entry-ID: 01KTMMRS83NW2K9GASEKF5R1T1 -->

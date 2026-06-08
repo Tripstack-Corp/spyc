@@ -21,3 +21,5 @@
 {"source":"entry:01KTMMP1HT4HHTN0KCRGZ3S8DK","target":"entry:01KTMMQ0GAARS6ZPT0B6044VEF","type":"followed_by"}
 {"source":"thread:history-arc-06-input-and-overlays","target":"entry:01KTMMR3QDMNK8EX8SMM6GJ3D8","type":"contains"}
 {"source":"entry:01KTMMQ0GAARS6ZPT0B6044VEF","target":"entry:01KTMMR3QDMNK8EX8SMM6GJ3D8","type":"followed_by"}
+{"source":"thread:history-arc-06-input-and-overlays","target":"entry:01KTMMS40G4T6XANRGGGF11092","type":"contains"}
+{"source":"entry:01KTMMR3QDMNK8EX8SMM6GJ3D8","target":"entry:01KTMMS40G4T6XANRGGGF11092","type":"followed_by"}

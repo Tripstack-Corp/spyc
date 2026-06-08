@@ -830,3 +830,29 @@ Provenance:
 - 34748f31 (PR #63 feat/colon-tab-completion, 2026-05-09) — `src/app/state.rs` +86 (`SPYC_COMMANDS` + completion state), `src/app/mod.rs` +99, CHANGELOG.md +20, BUGS.md ±.
 
 <!-- Entry-ID: 01KTMMR3QDMNK8EX8SMM6GJ3D8 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:50.852100+00:00
+Role: scribe
+Type: Decision
+Title: PR #82 — route_key: the dispatch-layer cleanup that precedes the MVU channel work
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the five inline routing guards in `handle_key` collapse into a pure `route::route_key(snap, key) -> KeyDestination` over a `RouteSnapshot`; routing decisions become unit-testable without a TUI   [kind: refactor]
+When: 2026-05-12 · PR #82 (refactor/route-event) · commit 76cf4e67
+Recorded rationale: "Centralized key-event routing into `route_key`. Closes the routing-refactor TODO filed in v1.50.25 after five inline-routing bugs in a week (#75 paste leak, #78 TopPane pager chord, #80 LowerPane pager chord, #81 exited-tab race, plus the original V-overlay key bug). The five inline guards in `handle_key` collapse into a single `match` on a `KeyDestination` enum; decision logic lives in a pure function `route::route_key(snap, key) -> KeyDestination` over a small `RouteSnapshot`. Behavior preserved (657 tests, including 19 new unit tests in `src/app/route.rs` …). The route function takes no `&self` and does no I/O, so every routing decision is unit-testable without instantiating the TUI; future routing bugs land as a failing test row rather than a sixth inline patch. Sets up v1.60 Phase 3 (input forwarding) to add a `RemotePeer(socket)` destination without touching the rest of `handle_key`." — CHANGELOG.md (commit 76cf4e67, 2026-05-12)
+Inferred intent: a five-bug-driven extraction — routing logic that had grown inline in `handle_key` is lifted into a pure function so the decision is testable and extensible — evidence: the rationale enumerates five bugs (#75/#78/#80/#81 + V-overlay); diff shape matches: `src/app/mod.rs` net −192/+… (guards removed), new `src/app/route.rs` +406 with 19 regression-row tests
+                  confidence: high
+Supersedes: the inline routing guards in `handle_key` (the dispatch path the baseline arc operated on through #25/#32) — replaces five inline `if` guards with one `match KeyDestination`
+
+This is the keystone of the continuation's dispatch story. The decision logic moves out of the side-effectful `handle_key` into `route::route_key`, a pure function over a `RouteSnapshot`. `src/app/route.rs:1-…` documents the `KeyDestination` enum and the `RouteSnapshot` fields; the regression cases are encoded as data rows (e.g. `// ── regression: TopPane pager + meta chord (#78)` with `pager_mount: Some(Mount::TopPane)`; the LowerPane #80 case alongside). The header comment carries the bug catalogue verbatim ("swallowed in TopPane pager (#78); chord swallowed in LowerPane …").
+
+Cross-reference: this is the dispatch-layer cleanup the later MVU work builds on — see `history-seg-refactor-mvu`, whose message/channel restructuring sits downstream of `route_key`. The rationale itself points forward to "v1.60 Phase 3 (input forwarding)" adding a `RemotePeer(socket)` destination "without touching the rest of `handle_key`" — the extension seam the MVU/forwarding work consumes. The two `Mount::TopPane`/`LowerPane` pager cases also formalize the pager-as-self-contained-surface property PR #44's block-visual mode relied on.
+
+Provenance:
+- 76cf4e67 (PR #82 refactor/route-event, 2026-05-12) — new `src/app/route.rs` +406 (pure `route_key` + `KeyDestination` + `RouteSnapshot` + 19 tests), `src/app/mod.rs` +192/−133 (inline guards → single match), CHANGELOG.md +18, TODO.md (closes the routing-refactor TODO).
+
+<!-- Entry-ID: 01KTMMS40G4T6XANRGGGF11092 -->

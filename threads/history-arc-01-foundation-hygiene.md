@@ -410,3 +410,39 @@ Provenance:
 - arc-01 PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV (the `cargo install cargo-deny --locked` this supersedes).
 
 <!-- Entry-ID: 01KTMMPDE6S4PA834YDR24SX1H -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:45.938421+00:00
+Role: scribe
+Type: Note
+Title: PRs #56,#59,#60,#199,#200: test-surface expansion — the green-CI substrate for the refactor
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: test-infra — Reconstructed: the test surface expands along four axes — widget snapshot tests (#56), narrow property tests (#59), a pty/vt100 roundtrip integration test (#60), and App-harness routing/focus + session-restore regression tests (#199,#200) — each closing a named TEST_IMPROVEMENT_PLAN / TODO.md item, all cfg(test)-additive with zero runtime behavior change.   [kind: new-capability]
+When: 2026-05-09 (#56,#59,#60) · 2026-05-30 (#199,#200) · PRs #56 (widget-snapshots, 1e535b8), #59 (property-tests, e62ad23), #60 (pty-roundtrip, 2136a80), #199 (test-routing-focus, 6225392), #200 (test-session-restore, 2606a0b)
+Recorded rationale: #56 "Adds 10 new insta snapshots for the four widgets called out in TODO.md's \"[M] Snapshot tests on widgets\" item" (1e535b8^2). #59 "Adds the `proptest` dev-dep and one `proptest!` block per site, matching the TODO.md \"[S] Property tests (narrow)\" item. Five properties across three sites" (e62ad23^2). #60 "New tests/pane_roundtrip.rs... closes the TODO.md \"[L] One pty integration test\" item" (2136a80^2). #199/#200 "TEST_IMPROVEMENT_PLAN Phase 2... Test-only, additive cfg(test) — zero runtime behavior change" (6225392^2, 2606a0b^2).
+Inferred intent: a deliberate, plan-driven build-out of the test surface (snapshot/property/pty/harness), each PR retiring a sized TODO item or a TEST_IMPROVEMENT_PLAN phase-2 item — not ad-hoc coverage. evidence: every commit body names its plan item and flips it `[x]`; test counts climb 794 (#199) → 800 (#200) → 929 (later). confidence: high
+Supersedes: (none — net-new test surface; builds on the `make check` gate from arc-01 PR #2 = 01KR0W81XE4K3G7BBSP42GE1HH)
+
+This moment is the load-bearing substrate for a claim made elsewhere in the reconstruction: the MVU refactor's "behavior-equivalence behind green CI" assertion (cross-ref `history-seg-refactor-mvu`). A large internal rewrite can only be asserted as no-behavior-change if there is a behavior oracle; this moment is where that oracle is built.
+
+The four axes, each grounded in the commit body:
+- **#56 widget snapshots (05-09):** 10 insta snapshots — list_view (3), pager (4: ANSI, pretty-hex, line-number gutter widening, search highlight), prompt (3: simple, vi insert, vi normal). Glyph-level (symbols-only) harness mirroring the existing status-bar pattern: "catches layout, gutter, and search-bar regressions but not pure styling/color drift" (1e535b8^2). These are the snapshots PR #295 (ratatui bump) later relies on as unchanged.
+- **#59 property tests (05-09):** `proptest` dev-dep + 5 properties across `shell::expand::shell_quote` (round-trip via a test-only POSIX decoder, "real, not a tautology against the encoder itself"), `state::ignore::Mask` (union-over-patterns, literal self-match), `keymap::resolver::Resolver` (count composition, leading-zero handling). Adds proptest to Cargo.lock — the crate that motivated PR #66's `.ci-cache-version` mechanism (the immutable-cache problem).
+- **#60 pty roundtrip (05-09):** `tests/pane_roundtrip.rs`, `#[cfg(unix)]`, spawns `cat` via portable-pty, drains through vt100, asserts row 0. "validates the integration contract spyc relies on (portable-pty + vt100) without going through any spyc-internal wiring" (2136a80^2).
+- **#199/#200 harness regressions (05-30):** #199 adds 3 routing/focus workflow tests on the App harness (prompt-wins-over-list, overlay-pager-consumes-keys, esc-closes-overlay) driving the full resolver→route→dispatch path pty-free. #200 adds agent reconstruct-restore per-profile coverage (claude/codex/agy/gemini/Other resume semantics) + a session disk round-trip test. Both explicitly TEST_IMPROVEMENT_PLAN Phase 2 (routing/focus), both `make check + make lint-linux green` (the lint-linux from PR #188, see cross-compile moment).
+
+#56,#59,#60 land on 2026-05-09 — interleaved with the cache campaign on the same day; #59's proptest addition is what later forces PR #66's cache-busting fix. #199/#200 land three weeks later as the refactor approaches, which fits their role as the App-harness oracle.
+
+Provenance:
+- 1e535b8 (PR #56, 2026-05-09) — src/ui/{list_view,pager,prompt}.rs harnesses + 10 .snap files; commit body quoted.
+- e62ad23 (PR #59, 2026-05-09) — Cargo.toml proptest dev-dep; property blocks in src/keymap/resolver.rs, src/shell/expand.rs, src/state/ignore.rs.
+- 2136a80 (PR #60, 2026-05-09) — tests/pane_roundtrip.rs (+110).
+- 6225392 (PR #199, 2026-05-30) — src/app/mod.rs +56 (3 routing tests); body cites 794 tests.
+- 2606a0b (PR #200, 2026-05-30) — src/agent/mod.rs +71, src/state/sessions.rs +64; body cites 800 tests.
+- arc-01 PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (the `make check` gate these run under).
+
+<!-- Entry-ID: 01KTMMQN283Z4FYP184WT4015X -->

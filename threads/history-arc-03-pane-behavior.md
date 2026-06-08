@@ -736,3 +736,28 @@ Provenance:
 - arc-03 head entry 01KR10JBACRS (PR #34) — the overlay-as-pane focus model this extends to the paste path
 
 <!-- Entry-ID: 01KTMMQPCA7E5VN78TTBZ43MQY -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:40.211359+00:00
+Role: scribe
+Type: Note
+Title: PR #81 + #90: exited-tab lifecycle — meta-only dismiss, and stale [exited N] label scrubbed at save/restore
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: exited-tab lifecycle — Reconstructed: an exited pane tab stops dismissing on any keystroke (now only `^a-x`/`^a-R`), and its `[exited N]` label suffix is stripped on session save and restore   [kind: gotcha]
+When: 2026-05-12 · PR #81 (fix/exited-tab-meta-only-dismiss, c41066d) · v1.50.28  —  2026-05-15 · PR #90 (fix/stale-exit-label-on-restore, b2a4033)
+Recorded rationale: #81 CHANGELOG verbatim: "Exited tabs only dismiss on explicit ^a-x (or ^a-R to restart). Reported: pressing ^a-R to restart an exited pane tab raced the dismiss — the bare ^a keystroke fired the old 'any key closes the exited tab' branch, dropping the tab before R could land." #90 CHANGELOG verbatim: "Tab labels no longer carry a stale [exited N] suffix across session restore. … Session save serialized the label verbatim; on spyc -r the tab was respawned alive but the label was restored with the dead-process suffix still glued on."
+Inferred intent: both treat an exited tab as a *recoverable* state rather than a transient about to vanish — consistent with the slice's general drift toward pane persistence. evidence: #81 makes non-meta keys flash a hint ("pane exited — `^a-R` to restart, `^a-x` to close") and do nothing, while meta chords fall through to the resolver; #90 adds a pure `pane::tabs::strip_exit_suffix` helper (src/pane/tabs.rs +86) applied at both save and restore. confidence: high
+Supersedes: #81 supersedes the earlier "any key closes the exited tab" branch (a destroy-leaning behavior, sibling in spirit to the destroy-on-toggle that #94 later removes). #90 supersedes the verbatim-label save path from the session-restore machinery — it heals older session JSONs defensively on load.
+
+Two fixes that harden the *exited* end of a tab's life. #81: the bare `^a` of a `^a-R` restart chord used to trip the eager "any key dismisses" branch, so the tab vanished before `R` arrived; the fix gates dismissal to explicit meta intent and routes all meta chords to the resolver so `^a-R`, `^a-x`, `^a-j` all still work. #90: `mark_exited` appended ` [exited N]` for display, and the session serializer wrote that verbatim — on `spyc -r` a respawned-alive tab showed "exited 0" until manually renamed. The new `strip_exit_suffix` runs at save (clean new JSONs) and at restore (older files self-heal), with 6 unit tests covering numeric/`?` codes, no-suffix passthrough, idempotence, the require-trailing-`]` guard, and the middle-of-label case. Each PR retires a BUGS.md entry (#81: -3; #90: +4 net the report plus other edits).
+
+Provenance:
+- c41066d (PR #81, 2026-05-12) — src/app/mod.rs +21/-13 (meta-only dismiss + hint flash), BUGS.md -3, CHANGELOG +12
+- b2a4033 (PR #90, 2026-05-15) — src/pane/tabs.rs +86 (strip_exit_suffix + tests), src/app/mod.rs +16/-3 (save/restore call sites), BUGS.md +4, CHANGELOG +15
+- relates to #67 (per-pane resume id) — same session save/restore fidelity concern on the pane↔session seam
+
+<!-- Entry-ID: 01KTMMRPVC83MXP3YS6VHS9YJZ -->

@@ -3,3 +3,5 @@
 {"source":"entry:01KTMMKHEYZ540PV6VVZR33K79","target":"entry:01KTMMMQ1VY8ZERQ3NQAF89DN4","type":"followed_by"}
 {"source":"thread:history-seg-docs-planning","target":"entry:01KTMMPA6HBDB91KMZPTBPNHX3","type":"contains"}
 {"source":"entry:01KTMMMQ1VY8ZERQ3NQAF89DN4","target":"entry:01KTMMPA6HBDB91KMZPTBPNHX3","type":"followed_by"}
+{"source":"thread:history-seg-docs-planning","target":"entry:01KTMMRKSSJ8EN3RC6RB36RSM3","type":"contains"}
+{"source":"entry:01KTMMPA6HBDB91KMZPTBPNHX3","target":"entry:01KTMMRKSSJ8EN3RC6RB36RSM3","type":"followed_by"}

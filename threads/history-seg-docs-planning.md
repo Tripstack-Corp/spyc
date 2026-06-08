@@ -84,3 +84,32 @@ Provenance:
 - 01KTMMMQ1VY8ZERQ3NQAF89DN4 (prior entry, this thread) — v1.60 hub track this plan defers behind.
 
 <!-- Entry-ID: 01KTMMPA6HBDB91KMZPTBPNHX3 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:43.522270+00:00
+Role: scribe
+Type: Note
+Title: PR #92/#93 — PANE_RECOVERY_PLAN (tiered recovery) + PANE_STARTUP_TABS_PLAN, both from external-contributor analysis
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: two pane plans land back-to-back, both sourced from external-contributor analysis (Caleb Howard, 2026-05-15). PANE_RECOVERY_PLAN splits "recovery" into tiers by program kind; PANE_STARTUP_TABS_PLAN adds config-driven startup tabs while deferring real splits. The same PRs dump a large batch of contributor-reported bugs into BUGS.md.   [kind: new-capability]
+When: 2026-05-16 · PR #92 (docs/pane-recovery-plan) commit db70c95 · PR #93 (docs/pane-startup-tabs-plan) commit abeac38
+Recorded rationale (recovery): "The 'recovery' word collapses three very different problems. … Recovery splits along **what kind of program is in the pane**. Each kind admits a different ceiling on what we can restore, and the right answer is to handle each tier explicitly." — docs/PANE_RECOVERY_PLAN.md, added PR #92
+Recorded rationale (startup tabs): "A spycrc knob that opens K tabs in the bottom pane at startup, instead of just one. … No splits, no tree, no grid. Just 'open these K tabs for me when I launch.'" — docs/PANE_STARTUP_TABS_PLAN.md, added PR #93
+Inferred intent: a planning pass that turns a daily-driver pain report into a tiered design, plus a small opportunistic config feature, while parking the broader bug haul in BUGS.md. evidence: both docs carry the header "Sourced from external-contributor analysis (Caleb Howard, 2026-05-15)"; db70c95 adds the plan +215 and a +37-line BUGS.md batch (hide-don't-destroy, J?, PgUp/PgDn discoverability, DSL gaps, `unmap` no-op); abeac38 adds +219 plan + ROADMAP entry. confidence: high
+Supersedes: (none) — both are new docs; the startup-tabs doc explicitly distinguishes itself from session-restore (`spyc -r` round-trips `Session.tabs` already).
+
+Reconstructed: PANE_RECOVERY_PLAN (#92) is explicit that it is distinct from the in-session hide/unhide round-trip (`F10`/`^a-\`) — "that's … a simpler fix (hide-don't-destroy; the pty stays alive)." It tiers recovery by program: Tier 1 known agent CLIs (Claude/Codex/Gemini) with first-class resume, where it proposes tightening Claude sid-capture by listening on the MCP socket for the "session created" notification instead of the banner/JSONL race; Tier 2 stateful processes that rediscover their own state on respawn; lower tiers for bare shells. The ROADMAP gains a v1.52 entry: Phase 0 cosmetic vt100-grid snapshot backdrop, Phase 1 MCP-side sid capture, Phase 2 opt-in `[pane] use_tmux`.
+
+PANE_STARTUP_TABS_PLAN (#93) proposes a `[pane] tabs = [...]` compact form plus `[[pane.tab]]` table form (cap 9 to match `^W 1..9`), reusing the existing tab system — "No splits, no layout refactor." The ROADMAP entry notes it "also captures the larger 'real splits' ask … as a deferred future direction." This aligns with the established project convention that pane multiplicity means tabs, not tmux-style splits.
+
+Cross-segment: the hide-don't-destroy fix this plan scopes out as "simpler" is the work that lands in the pane-behavior arc — see history-arc-03-pane-behavior (the repo's current branch at reconstruction time is `fix/pane-toggle-hide-not-destroy`). The contributor-bug batch in #92's BUGS.md (J?, DSL completeness, PgUp/PgDn) is later promoted to ROADMAP in #160 (see the triage-discipline moment).
+
+Provenance:
+- db70c95 (PR #92 docs/pane-recovery-plan, 2026-05-16) — docs/PANE_RECOVERY_PLAN.md +215; BUGS.md +37 (contributor batch); ROADMAP.md +8 (v1.52 entry). Cites src/state/sessions.rs `AgentKind` enum as the existing resume substrate.
+- abeac38 (PR #93 docs/pane-startup-tabs-plan, 2026-05-16) — docs/PANE_STARTUP_TABS_PLAN.md +219; ROADMAP.md +10. Cites src/app/mod.rs:4646-4676 (`Action::PaneNewTab`), src/keymap/action.rs:114 (`PaneTabByIndex`).
+
+<!-- Entry-ID: 01KTMMRKSSJ8EN3RC6RB36RSM3 -->

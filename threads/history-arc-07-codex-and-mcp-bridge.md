@@ -580,3 +580,32 @@ Provenance:
 - second-parent subject (24dc9c6^2): "ci: use jiff for ISO-8601 parsing instead of rolled-by-hand math" — corroborates the `parse_iso8601_to_epoch_secs` plumbing.
 
 <!-- Entry-ID: 01KTMMR37MMRBBRMQK58RFN6R2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:00.422953+00:00
+Role: scribe
+Type: Note
+Title: PR #70 — Status-bar agent segment: the active peer becomes visible (and branches by kind)
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: the active pane's agent identity surfaces as its own status-bar segment, resolved per-kind from each agent's on-disk session records   [kind: new-capability]
+When: 2026-05-11 · PR #70 (feat/status-bar-agent-segment) · commit b5d4d9a
+Recorded rationale: "Active pane's agent identity now appears as its own status-bar segment between the git and suffix bands: `claude:<8-hex>` / `gemini:<8-hex>` / bare `codex`" — CHANGELOG.md (added PR #70)
+Inferred intent: makes the multi-peer surface legible in the UI, but the short-id resolution is another per-kind branch — evidence: `src/ui/status.rs` +76 adds `agent_info` segment; `src/state/sessions.rs` +37 resolves the id per agent
+                  confidence: high
+Supersedes: (none — additive UI; consumes the per-agent session records #68 and PR #19 wrote)
+
+A new powerline segment renders between the git band and the suffix, themed in its own background (`agent_bg = Color::Rgb(0x32, 0x36, 0x52)`, glyph ``, verified `src/ui/status.rs`). Short-id "resolves at render time from each agent's on-disk session records (`~/.claude/sessions/`, `~/.gemini/tmp/<proj>/chats/`) using the pane's `spawn_epoch_secs` to pick the matching entry; the matching is the same closest-by-startTime logic save_session uses" (CHANGELOG.md) — i.e. it reuses the `SessionCandidate` picker generalized in #68, but the resolution is itself per-kind.
+
+Two asymmetries are recorded as deferred work, both peer-shaped: "Codex's UUID lives in its rollout filename (`rollout-<TS>-<UUID>.jsonl`); parsing that is a future follow-up — Codex panes currently show just `codex` in the segment" and "Token usage from each CLI is skipped — none of the three surface it natively" (CHANGELOG.md). The segment is "Hidden when no pane is open or the active pane isn't a known agent" (CHANGELOG.md) — the "known agent" predicate is, at this point, a hardcoded enumeration that #176 will route through the registry.
+
+The PR also archives a planning doc: "V1.5 plan archived to `docs/V1_5_PLAN.md` [...] long since shipped (closed at v1.50.0). Keeping the historical doc but out of the repo root" (CHANGELOG.md) — a mechanical move (`V1_5_PLAN.md => docs/V1_5_PLAN.md`, 0 content lines), folded here. A snapshot test ships (`snapshot_status_powerline_with_agent.snap`). Cross-reference `history-seg-refactor-mvu`: PR #234 later moves this segment's agent-status resolution off the render thread — the "resolves at render time" cost named here is what #234 addresses.
+
+Provenance:
+- b5d4d9a (PR #70 feat/status-bar-agent-segment, 2026-05-11) — `src/ui/status.rs` +76 (`agent_info` segment, `push_segment`); `src/state/sessions.rs` +37 (per-agent short-id resolve); `src/app/mod.rs` +32 (wire `agent_info` into render); snapshot test added; `V1_5_PLAN.md` → `docs/`.
+- second-parent subject (b5d4d9a^2): "feat: status bar agent segment + archive V1_5_PLAN.md (v1.50.18)".
+
+<!-- Entry-ID: 01KTMMRZ2K1RSQN8HNSHZS03E1 -->

@@ -701,3 +701,35 @@ Provenance:
 - `git diff ba6d07e^1 ba6d07e -- CHANGELOG.md` — the verbatim rationale paragraph quoted above; v1.50.4 entry.
 
 <!-- Entry-ID: 01KTMMPY4VXGTWWXW21RF6XYV2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:48.426136+00:00
+Role: scribe
+Type: Decision
+Title: PR #83 (refactor/unsafe-reduction): unsafe sites 36 → 2 via DI + rustix; the signal-hook revert that fixed the count at 2
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: security/unsafe-surface — Reconstructed: the `unsafe` block count drops from 36 to 2 by routing test-time env mutation through a per-thread `with_state_root` override, migrating `libc` calls to `rustix` safe wrappers, and passing env values as parameters instead of mutating the process env   [kind: refactor]
+When: 2026-05-13 · PR #83 (refactor/unsafe-reduction) · merge 106b8e7 (squash; subject "refactor: cut unsafe sites 36 → 2 (DI + rustix)")
+Recorded rationale: "`unsafe` reduction: 36 → 2 sites. Remaining unsafe: the `:setenv` prompt command (user-driven, intentional) and the `install_signal_handlers` block at startup (one isolated call). Four changes got us there." — CHANGELOG.md ### Internal (PR #83)
+Inferred intent: a security-hardening refactor that eliminates the largest source of unsafe (env-mutation in tests) via dependency-injection — evidence: 20 files touched, +668/-656; new dep `rustix`; `src/state/mod.rs` gains `state_root()` / `with_state_root`; eight state modules re-routed. confidence: high
+Supersedes: the pre-existing `env_test_lock` mutex + per-module `std::env::set_var(XDG_STATE_HOME)` test pattern — "the `env_test_lock` mutex is gone"
+
+This is part one of the "shrink the unsafe surface" security throughline. The CHANGELOG enumerates the four changes verbatim: (1) test-time `XDG_STATE_HOME` mutation replaced by a per-thread `with_state_root` override on a new `crate::state::state_root()` helper, with every state module (`harpoon`, `marks`, `inventory`, `sessions`, `graveyard`, `history`, `frecency`, `health`) delegating to it; (2) `libc::kill`, `libc::tcsetpgrp`, `libc::getpgrp`, `libc::umask` migrated to `rustix` safe wrappers (`process::kill_process_group`, `termios::tcsetpgrp`, `process::getpgrp`, `process::umask`), with the `tcsetpgrp` fd from `std::io::stdin().as_fd()` "so no hand-built `BorrowedFd`"; (3) `SHELL` and `TMUX` reads in `shell` and `term_title` accept their values as parameters; (4) `paths::expand` factored into `expand_with(input, home, lookup)`. Net per CHANGELOG: "36 `unsafe` blocks across 11 files → 2, 669 tests still green, one new dep (`rustix`, already in our transitive tree)." Verified: `git grep -c unsafe` at the parent (76cf4e6^) = 36.
+
+The two residual sites are named as intentional. The CHANGELOG records a rejection that fixed the count at 2 rather than 1: an "experimental migration to `signal-hook` for SIGINT/SIGQUIT/SIGTTOU broke the `tcsetpgrp` restore path after `v` / `p` / `;` foreground commands" — with SIGTTOU set to a custom Rust handler instead of kernel `SIG_IGN`, "POSIX `tcsetpgrp` from outside the FG group returns `EINTR` rather than succeeding (the kernel checks for 'ignored' specifically, not 'handled')." Symptom: spyc exiting with status 146 the first time a user closed an editor/pager. That piece was reverted; the `install_signal_handlers` unsafe block stays on raw `libc`. This is a rejection with a quoted, mechanism-level rationale — the kind of moment the template marks as recorded-with-rejection.
+
+The diff also bundles a key-routing refactor (`route_key`) under the same `### Internal` heading — folded here as a co-shipped change, not a separate moment in this segment (it belongs to the routing/keymap arc, not recoverability).
+
+The `:setenv` site named here as "user-driven, intentional" is the exact site PR #154 later removes — see the next-but-one moment; PR #154 supersedes this entry's characterization of `:setenv` as a permanent residual.
+
+Provenance:
+- 106b8e7 (PR #83 refactor/unsafe-reduction, 2026-05-13) — squash merge; subject "refactor: cut unsafe sites 36 → 2 (DI + rustix)".
+- `git diff 106b8e7^1 106b8e7 --stat` — 20 files, +668/-656; src/state/mod.rs +58, src/state/graveyard.rs net rewrite (277-line block), src/shell/mod.rs +82/-... , src/paths.rs +56, src/term_title.rs, Cargo.toml +rustix.
+- `git diff 106b8e7^1 106b8e7 -- CHANGELOG.md` — the ### Internal block; all quotes above verbatim.
+- `git grep -c unsafe 76cf4e6^ -- src` = 36 (baseline before PR #83).
+
+<!-- Entry-ID: 01KTMMRWF583H2AY49TF7M6WQT -->
