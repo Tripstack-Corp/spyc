@@ -160,3 +160,30 @@ Confidence: Uniformly high — every moment carries verbatim CHANGELOG (and ROAD
 Provenance: 01KTMMG3MTKFGRKYEJGHN65QY8, 01KTMMGRQ8WXQQA9Y0AWPS5X9Z, 01KTMMHF832JPTVJ91GGHG8AFM, 01KTMMJ3WCPSR7PH80MBES90JW, 01KTMMJW20G78SSRS5TCFCRN1P, 01KTMMKR5K08NMX743ZN7132WQ, 01KTMMMZT01JK92DWDBMNJASWD, 01KTMMNW2TV95JZ1QG2HVWA0J7, 01KTMMPPPBJYJVVAGK5WSP6Y9P, 01KTMMR0PQQYXE3YTA9WSK3E9D
 
 <!-- Entry-ID: 01KTMNHBEZQYY8WY4CKBH57P5E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:27:11.750822+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-seg-docs-planning — one thesis ("the noun the agent operates on") propagated across positioning, plans, and triage
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-seg-docs-planning — one thesis ("the noun the agent operates on") propagated across positioning, plans, and triage
+Span: 2026-05-09 → 2026-05-30 · 7 moments · 4 supersessions
+Narrative:
+  This secondary reconstruction summarizes history-seg-docs-planning; every claim carries an inline moment ref. The positioning spine starts with a three-PR same-day burst (#72/#73/#74) that rewrites README, AGENTS, and the deck to one thesis recorded verbatim: "The file commander is the noun the agent operates on, not the chrome around it" [01KTMMKHEYZ540PV6VVZR33K79]. That same moment records the origin of the squash-merge convention later segments inherit (AGENTS #73, attributed to an external catalogue review). The thesis is re-quoted verbatim in the Yazi competitive review (#157), which benchmarks the nearest neighbour feature-by-feature and recommends deferring native OSC-72 drag-and-drop; its same-day follow-up #158 executes those edits — rewriting the ROADMAP DnD entry and promoting cwd-export-on-quit [01KTMMVPG9JPMQ9N5CGB84KGVG].
+
+  The plan-doc spine shows architectural churn recorded before code. The v1.60 "CounterTop" plan is filed on a recursive-composition thesis (#76), then reversed within ~4.5h to "siblings + mirror" (#77), then hardened with a capability-negotiation compatibility matrix (#79) — the CHANGELOG records the recursion route as "considered-and-rejected after design discussion with the user" [01KTMMMQ1VY8ZERQ3NQAF89DN4]. PR #86 promotes a one-line BUGS wish into the v1.51 AUTO_APPROVAL plan and records a rejection on a security argument: "Security features should not be built on regex against another tool's UI" [01KTMMPA6HBDB91KMZPTBPNHX3]. The v1.70 "Mise en Place" plan (#114) reframes the MCP socket from v1.60's informal peer-discovery channel into a formal typed daemon protocol (stations/plates/orders/bells), one-protocol-three-clients, and sequences a crate split before the protocol work [01KTMMSRJ3DEDE2S4VWY5JHEND].
+
+  Two pane plans (#92/#93) land from external-contributor analysis: PANE_RECOVERY_PLAN tiers recovery by program kind, PANE_STARTUP_TABS_PLAN adds config-driven startup tabs while deferring real splits — consistent with the recorded project convention that pane multiplicity means tabs, not tmux-style splits [01KTMMRKSSJ8EN3RC6RB36RSM3]. PR #179 then reorganizes the ROADMAP to "Lean 2.0" and flips REFACTOR_PLAN from "hold the whole plan until after 2.0" to "take the low-risk decomposition now, hold only the deep MVU rewrite," with the recorded trigger "the file crossed ~12k lines... Decomposition also unblocks the 2.x crate split" [01KTMMWRE9YX58H2RXKYY58QVH].
+
+  Underneath the big plan docs runs a recurring triage discipline (#62/#71/#159/#160/#171): TODO flips with honest notes, the BUGS→ROADMAP promotion cadence, and a version-stamped FIXED ledger — the same promotion pattern that turned the auto-approval line into a plan, operating at lower altitude [01KTMMYFCAPJDTD83XH66BE7P8].
+Lineage: moment [01KTMMKHEYZ540PV6VVZR33K79] -> moment [01KTMMVPG9JPMQ9N5CGB84KGVG] (positioning thesis spine); moment [01KTMMMQ1VY8ZERQ3NQAF89DN4] -> moment [01KTMMSRJ3DEDE2S4VWY5JHEND] -> moment [01KTMMWRE9YX58H2RXKYY58QVH] (v1.60→v1.70→Lean-2.0 plan spine, each superseding the prior stance); moment [01KTMMPA6HBDB91KMZPTBPNHX3] and moment [01KTMMYFCAPJDTD83XH66BE7P8] are the BUGS→plan→ROADMAP promotion cadence
+Open / unsettled: implementation of the per-agent settings curation + `:approvals` pager (deferred to agent-integration, named at [01KTMMPA6HBDB91KMZPTBPNHX3]); the v1.70 crate split + decomposition Phases 1-2 and held-post-2.0 MVU rewrite are owned by history-seg-refactor-mvu (this segment records only the planning decisions, [01KTMMSRJ3DEDE2S4VWY5JHEND]/[01KTMMWRE9YX58H2RXKYY58QVH]); the "real splits" ask stays a deferred future direction [01KTMMRKSSJ8EN3RC6RB36RSM3]. Several FIXED-ledger code fixes land in engineering segments, not here [01KTMMYFCAPJDTD83XH66BE7P8].
+Confidence: every moment is marked recorded (verbatim plan-doc/CHANGELOG quotes, diff-verified); all inferred-intent reads are explicitly flagged per moment at "high" confidence. Recorded-dominant ratio carried up unchanged.
+Provenance: 01KTMMKHEYZ540PV6VVZR33K79, 01KTMMMQ1VY8ZERQ3NQAF89DN4, 01KTMMPA6HBDB91KMZPTBPNHX3, 01KTMMRKSSJ8EN3RC6RB36RSM3, 01KTMMSRJ3DEDE2S4VWY5JHEND, 01KTMMVPG9JPMQ9N5CGB84KGVG, 01KTMMWRE9YX58H2RXKYY58QVH, 01KTMMYFCAPJDTD83XH66BE7P8
+
+<!-- Entry-ID: 01KTMNHGWSQK3S2QZ68D3WBCGC -->
