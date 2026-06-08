@@ -161,3 +161,29 @@ Provenance:
 - daae050 (PR #107, 2026-05-20) — the soft-break override this PR reverts (Entry 01KTMMJ3WCPSR7PH80MBES90JW in this thread)
 
 <!-- Entry-ID: 01KTMMKR5K08NMX743ZN7132WQ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:36.947237+00:00
+Role: scribe
+Type: Note
+Title: PR #118 + #130 — syntax highlighting: user grammar dir + bare-filename detect
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: the syntect-backed highlighter gains two extensibility/correctness fixes — (#118) it merges user-supplied `.sublime-syntax` files from `$XDG_CONFIG_HOME/spyc/syntaxes/`, and (#130) `highlight_to_lines` probes by bare filename before first-line detection so extension-less formats like `Makefile` resolve.   [kind: new-capability]
+When: 2026-05-22 · PR #118 (feat/user-syntax-dir) · commit 4911db5  |  2026-05-24 · PR #130 (fix/syntax-detect-by-filename) · commit 05570bd
+Recorded rationale: (#118) "User-supplied syntax grammars. The pager's syntax highlighting (via `syntect`) ships with ~90 languages but has notable gaps — TypeScript is the canonical missing one. Instead of bundling every grammar we could ever want, spyc now merges `.sublime-syntax` files dropped in `$XDG_CONFIG_HOME/spyc/syntaxes/` (or `~/.config/spyc/syntaxes/` when `XDG_CONFIG_HOME` is unset). ... Loading is best-effort; a malformed grammar fails open (log + skip) so a bad file doesn't break startup. ... Reported by Spencer: 'typescript not highlighted but this should be customizable rather than pre-installed'." — CHANGELOG.md (added PR #118). (#130) "Syntax highlighting for `Makefile` (and other bare-filename formats). `highlight_to_lines` only consulted `path.extension()`, which is `None` for `Makefile` / `GNUmakefile` / `OCamlMakefile` — so the pager rendered them as plain text even though syntect's bundled `Makefile.sublime-syntax` lists the filename in its `file_extensions` table. Now we also probe by bare filename before falling through to first-line shebang detection." — CHANGELOG.md (added PR #130)
+Inferred intent: both treat syntect as the current engine while acknowledging it as a stopgap — #118 explicitly defers tree-sitter to the roadmap; #130 makes the existing engine's bundled grammars actually reachable. evidence: (#118) src/ui/syntax.rs +43 `static SYNTAX_SET: LazyLock<SyntaxSet>`, +48 `build_syntax_set()` calls `load_defaults_newlines()` then +57 `builder.add_from_folder(&dir, true)` with fail-open `Err` arm; user dir resolver at +67. (#130) src/ui/syntax.rs detection chain rewritten -14 (`find_syntax_by_extension(ext)` only) → +29..+33 extension then `path.file_name() ... find_syntax_by_extension(name)` then +39 `find_syntax_by_first_line`; tests `highlights_makefile_by_bare_filename`, `highlights_by_extension_still_works`, `unknown_filename_returns_none`.
+                  confidence: high
+Supersedes: PR #130 corrects the detection logic introduced before this slice (the extension-only chain shown removed at src/ui/syntax.rs -9..-18); within the slice it complements PR #118 — a user-supplied grammar keyed on a bare filename only resolves because of #130's filename probe (CHANGELOG: "Any user-supplied `.sublime-syntax` keyed on a bare filename will also resolve").
+
+These are the two syntax-highlighting moments, grouped: #118 makes the grammar set extensible, #130 makes filename-keyed grammars (bundled or user-supplied) reachable. PR #118 also edits ROADMAP.md (+14) recording tree-sitter as the intended future engine: "the underlying engine is still syntect (Sublime-Text-format grammars, regex-based). Tree-sitter is the modern alternative ... Switching is a real refactor of `src/ui/syntax.rs` ... Pairs naturally with the `spyc-render-core` crate split in V1_70 Mise en Place. Reported by Spencer: 'look into telescope for syntax highlighting solutions'." (ROADMAP.md, added PR #118). #130 is a squash merge whose pre-squash second parent subject is "fix: syntax highlighting for Makefile (probe by bare filename)" (commit 74d96b2, 2026-05-23).
+
+Provenance:
+- 4911db5 (PR #118 feat/user-syntax-dir, 2026-05-22) — src/ui/syntax.rs +55 (LazyLock SYNTAX_SET, build_syntax_set + add_from_folder fail-open, user_syntaxes_dir); ROADMAP.md +14 (tree-sitter deferral); BUGS.md +3, CHANGELOG.md +16
+- 05570bd (PR #130 fix/syntax-detect-by-filename, 2026-05-24; second parent 74d96b2 "fix: syntax highlighting for Makefile (probe by bare filename)") — src/ui/syntax.rs +56/-13 (extension→bare-filename→first-line detection chain + 3 tests); CHANGELOG.md +11
+- CHANGELOG.md (added PR #118, PR #130); ROADMAP.md (added PR #118) — quoted rationale above
+
+<!-- Entry-ID: 01KTMMMZT01JK92DWDBMNJASWD -->

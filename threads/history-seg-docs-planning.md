@@ -30,3 +30,31 @@ Provenance:
 - 5497973 (PR #74 docs/presentation-update, 2026-05-11) — docs/presentation.html refresh (HTTP→Unix socket, stats, roadmap flips); Cargo.toml `description` updated off the "pairs with Claude Code" wording.
 
 <!-- Entry-ID: 01KTMMKHEYZ540PV6VVZR33K79 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:32.410285+00:00
+Role: scribe
+Type: Decision
+Title: PR #76/#77/#79 — V1_60_PLAN "CounterTop": recursive → siblings+mirror rewrite, then compatibility hardening
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: the v1.60 "CounterTop" hub plan is filed, then rewritten within hours from a recursive-composition architecture to siblings+mirror, then hardened with a capability-negotiation compatibility layer — three PRs in one day showing the plan-churn before any code.   [kind: supersession]
+When: 2026-05-12 · PR #76 (docs/v1.60-plan) commit ddd2194 · PR #77 (docs/v1.60-plan-rewrite) commit 27c6467 · PR #79 (docs/v1.60-plan-compat) commit 27f8d83
+Recorded rationale (v1): "The thesis is recursive composition: spyc panes already host any program; spyc happens to be a program; therefore spyc panes already host spyc. … each workspace is a child spyc process running in a pane tab of the master." — docs/V1_60_PLAN.md, added PR #76
+Recorded rationale (v2): "The architectural choice is **siblings + mirror**, not recursive composition. Each spyc owns its own pty and lives in its own terminal window … The hub is a peer that happens to be a client of every other peer's MCP socket." — docs/V1_60_PLAN.md, rewritten PR #77. CHANGELOG #77: "Design discussion with the user reframed the architecture … The recursive-composition route from yesterday's plan is recorded as considered-and-rejected."
+Inferred intent: a same-day architectural reversal driven by recorded design discussion, then a review-driven robustness pass. evidence: #76 diff adds 259 lines with recursive thesis; #77 rewrites 421-line churn (261 ins / 181 del) flipping to siblings+mirror and explicitly listing recursion as "considered first; rejected after design discussion"; #79 CHANGELOG names "Two questions surfaced during plan review." confidence: high
+Supersedes: PR #76's recursive-composition thesis (each workspace a child spyc in a master's pane tab) — superseded by #77's siblings+mirror within ~4.5h (merge 11:04 → 15:26). #76's discovery-file shape (`{pid, project_home, session_name, mcp_socket, …}`) is superseded by #79's `{schema_version, spyc_version, capabilities, mode, …}`.
+
+Reconstructed: #76 files docs/V1_60_PLAN.md ("CounterTop") on a recursive thesis — the master spyc runs each workspace as a child in a pane tab, discovery + introspection over the MCP socket each child already exposes. Hours later #77 reverses it: each spyc owns its own pty in its own terminal, the hub is a peer client, "take control" = mirror the remote's render stream (`subscribe_frames`) and forward keystrokes (`send_input`), with last-keystroke-wins justified because "the OS already serializes intent." The CHANGELOG records the recursion route as considered-and-rejected after design discussion with the user. #79 then adds a Compatibility section after plan review — a per-capability behavior matrix (`status`/`frame_mirror`/`input_forward`) and the stated principle "an older peer is visible but degraded, never invisible," plus atomic publish (write `.tmp` + rename) and `notify`-watched discovery.
+
+Note #79 also bundled an unrelated Fixed entry (`^a-j`/`^w-j` reaching the resolver from a `D`-opened pager — the meta-chord-fallthrough fix); that code change belongs to pane/chord-routing work, not this docs segment — pointer to the pane-behavior arc. The CounterTop discovery surface and frame-mirror primitives later feed the v1.70 plan, which says "the MCP socket that V1_60 used informally for peer discovery becomes a formal typed surface in V1_70."
+
+Provenance:
+- ddd2194 (PR #76 docs/v1.60-plan, 2026-05-12) — docs/V1_60_PLAN.md +259 (recursive thesis); ROADMAP.md +6; Cargo bump.
+- 27c6467 (PR #77 docs/v1.60-plan-rewrite, 2026-05-12) — docs/V1_60_PLAN.md churn 261/181 (siblings+mirror); CHANGELOG rewrite entry.
+- 27f8d83 (PR #79 docs/v1.60-plan-compat, 2026-05-12) — docs/V1_60_PLAN.md +136 (Compatibility matrix, schema_version/capabilities); CHANGELOG Documentation + unrelated Fixed (`^a-j` pager meta-chord fallthrough).
+
+<!-- Entry-ID: 01KTMMMQ1VY8ZERQ3NQAF89DN4 -->

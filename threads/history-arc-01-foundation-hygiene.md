@@ -343,3 +343,30 @@ Provenance:
 - 3d682ec (PR #164, 2026-05-29) — "full test suite (770 tests)"; 2af9f03 (PR #293, 2026-06-06) — "929 tests".
 
 <!-- Entry-ID: 01KTMMKT8E97SAHMKW6GJHTX6E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:34.984073+00:00
+Role: scribe
+Type: Note
+Title: PR #51: v1.50.0 release cut — the pager/task-viewer unification ships
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: release — Reconstructed: the [Unreleased] backlog since v1.41.1 is cut as the dated v1.50.0 release; CHANGELOG + Cargo.toml/lock version bump only.   [kind: new-capability]
+When: 2026-05-08 · PR #51 (release/v1.50.0) · commit 4f59994 (merge), 4f59994^2 "release: v1.50.0"
+Recorded rationale: "The pager / task-viewer unification. The pager grew from \"overlay you summon\" into \"renderer you mount anywhere\" — `^a-v` is a real pager, `D` opens files in-pager, `:task-to-pane` and `:pane-to-task` move pty hosts between display containers, MCP socket discovery is project-scoped (no more cross-project attachment), and a long tail of daily-driver UX fixes from internal usage." — CHANGELOG.md `## [1.50.0] - 2026-05-08` header (commit 4f59994^2).
+Inferred intent: a release-cut moment in the same shape as arc-01's v1.37.2 (PR #4) — collect [Unreleased] into a dated block, bump the version. evidence: diff is 3 files (CHANGELOG.md +11, Cargo.toml version, Cargo.lock), zero src/* touch. confidence: high
+Supersedes: extends the release cadence first observed at arc-01 PR #4 (v1.37.2 cut) = 01KR0WBKNMQF231X2T8KTGD9KS — same mechanism (CHANGELOG block + version bump), now a recurring move.
+
+PR #51 is the first hygiene-segment moment and the first release cut in the continuation window. It is mechanically identical to arc-01's PR #4 v1.37.2 cut: no application logic, just the version-bump-and-date ritual. The feature content it ships (pager-as-renderer, `:task-to-pane`/`:pane-to-task`) belongs to other segments; this entry records only that v1.50.0 is *cut* here, establishing the version baseline (1.50.0) the entire CI-caching campaign will iterate patch versions against over the next day.
+
+The patch-version mechanics matter for the very next moment: each subsequent patch bump rewrites `Cargo.lock`'s `name = "spyc"` version line, which becomes the load-bearing fact behind the 05-09 cache-key restructure (see next entry — commit 793df19's "every patch version bump rewrote [the lockfile]" diagnosis).
+
+Provenance:
+- 4f59994 (PR #51 release/v1.50.0, 2026-05-08) — CHANGELOG.md +11 (`## [1.50.0] - 2026-05-08` block), Cargo.toml version, Cargo.lock.
+- CHANGELOG.md `## [1.50.0]` header text quoted verbatim above.
+- arc-01 PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (the v1.37.2 release-cut this mirrors).
+
+<!-- Entry-ID: 01KTMMMPZDCN2D25KSX9G1R6Y1 -->

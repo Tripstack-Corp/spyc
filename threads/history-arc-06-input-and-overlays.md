@@ -725,3 +725,30 @@ Provenance:
 - `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (precedent for the flat-condition-shape-holds-until-policy-needs-more-axes seam observation; this entry's second seam echoes that one across a different surface).
 
 <!-- Entry-ID: 01KR2H094DPBVASNG884XXFEJH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:44.274837+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): input dispatch grows a routing layer, a vi-grammar resolver, and trace tooling
+
+Spec: scribe
+
+tags: #history #arc-06
+
+This Note opens the **#38–#311 continuation** appended to arc 06. The arc-06 baseline above closed at PR #32 (2026-05-06) with six head entries on picker overlays and dispatch correctness. This continuation covers the input-dispatch / chord-resolution / vim-binding / command-line-input slice of the #38–#311 window (2026-05-07 → 2026-06-08) — eleven PRs, written as nine moments below.
+
+**What carries forward from the baseline.** Two seams the baseline tail flagged get follow-through inside this window:
+- The `--key-trace` diagnostic (shipped ahead of a consumer in PR #25) gains a first real extension — PR #120 adds TX-side timestamps for an input-lag report. The "diagnostic ships ahead of its consumer" bet the baseline tail described moves toward validated.
+- The chord-precedence rule (PR #32, `chord_locked`) and the post-chord bounce guard (PR #25, `focus_chord_completed`) both get a continuation: PR #155 reworks the bounce guard to stand down while the resolver is pending. That is a direct supersession of #25's guard, verified by pickaxe below.
+
+**The window's three threads.**
+- *Routing layer (#82).* `refactor/route-event` lifts the five inline routing guards in `handle_key` into a pure `route::route_key` function over a `RouteSnapshot`. This is the dispatch-layer cleanup the later MVU work builds on — cross-reference `history-seg-refactor-mvu`, whose channel work sits downstream of this seam.
+- *Vi grammar in the resolver (#44, #112, #123, #126).* Block-visual mode, vi editing in path prompts, the `dd`/`Ndd`/`ZZ` operator-pending family, and the `S`/`gs` sort chord — the resolver's `PendingSeq` enum grows from the baseline's `Normal`/`G` into a small operator-pending grammar.
+- *Jump-history `?` trigger (#95, #163).* The `?`-on-empty affordance from the baseline (`!?`) extends to the `J` prompt and then to Normal-mode mid-prompt. References the existing `feature-jump-history-popup-trigger` thread (the planning entry for #95).
+
+**Provenance method.** All eleven PRs in this slice are squash merges on `main`; no feature branches survive on `bitbucket` (checked `git branch -r`). Recorded rationale is the merge subject plus the CHANGELOG / BUGS.md blocks the squash carried (these ARE the maintainer's recorded prose and are quoted verbatim). Code-shape claims cite the diff against the merge's first parent (`git diff <sha>^1 <sha>`).
+
+Moments follow in chronological order: #39, #44, #63, #82, #95+#163, #112, #120, #123+#126, #155.
+
+<!-- Entry-ID: 01KTMMN5RTFKWX352K9XBR4V0D -->

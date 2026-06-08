@@ -80,3 +80,27 @@ Provenance:
 - CHANGELOG.md (added PR #135) — quoted rationale above.
 
 <!-- Entry-ID: 01KTMMKR90HM2V9VZYSDFS1WCZ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:28.549065+00:00
+Role: scribe
+Type: Decision
+Title: PR #138 — event-driven .spyc-context.json writes (kills the 1 Hz polling write)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: the unconditional 1 Hz `write_context()` of `.spyc-context.json` is replaced by a `context_dirty` flag set by real context-bearing event sources; the file is written at end-of-iteration only if dirty AND ≥150 ms since the last write AND not inside the 300 ms typing-burst window.   [kind: supersession]
+When: 2026-05-26 · PR #138 (perf/event-driven-context-write) · commit 9f99f171 (pre-squash 58990d2c)
+Recorded rationale: "perf: event-driven .spyc-context.json writes (kill the 1Hz poll)" — commit subject. CHANGELOG (added PR #138): "Reported: input echo in the claude pane feels laggy under spyc but not standalone — confirmed via the `A` monitor that spyc itself was idle... so the culprit had to be something *outside* spyc... claude's HUD plugin watches `.spyc-context.json` and re-renders on every mtime change. The old 1 Hz polling write kept yanking claude's main loop ~once a second, even when state hadn't changed... Now the write is gated on a `context_dirty` flag set by event sources that can actually affect context (keypresses, MCP commands, fs-driven refresh_listing, git worker results)."
+Inferred intent: the laggy-echo symptom here is downstream, not in spyc's loop — spyc's writes were perturbing claude's file-watcher. Evidence (pickaxe + diff): `git diff 9f99f171^ 9f99f171 -- src/app/mod.rs` shows four `self.write_context();` call sites removed and replaced with `self.context_dirty = true;`, plus a new `context_dirty: bool` field whose doc says "Replaces the old 1 Hz polling re-reads on every change, so unconditional 1 Hz writes were..." and the loop tail changes from `if last_context_write.elapsed() >= Duration::from_secs(1)` to an event-driven + 300 ms-burst-guard gate. confidence: high
+Supersedes: the prior 1 Hz polling `write_context()` path (verified removed in the #138 diff). This is the cluster's clearest poll→event-driven supersession, paralleling the poll-cost reductions in PR #99/#100 but on the write side.
+
+Notable as the moment where the `A` activity monitor is used as a diagnostic instrument: the report was triaged by reading the monitor (`mcp:0/s fs:0/s git:0/s p:0`), which ruled spyc's own loop out and pointed at an external watcher. That monitor is extended one PR later (#137) with a second internals line; this entry shows why the instrumentation mattered. The `context_dirty` symbol survives into the MVU refactor (pickaxe: `2026-06-02 MVU Phase 6 PR-C4+C5 — extract... context-write to loop_steps.rs`); cross-reference history-seg-refactor-mvu.
+
+Provenance:
+- 9f99f171 / 58990d2c (PR #138 perf/event-driven-context-write, 2026-05-26) — `src/app/mod.rs` +50/-9: removes 4 `write_context()` sites, adds `context_dirty` field + 150 ms/300 ms-burst gate, CHANGELOG +22.
+- CHANGELOG.md (added PR #138) — quoted rationale above.
+
+<!-- Entry-ID: 01KTMMMSG4DXNDQZ66KVXXBE93 -->
