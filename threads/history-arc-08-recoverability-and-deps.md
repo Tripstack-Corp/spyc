@@ -854,3 +854,33 @@ Provenance:
 - Local: branch `fix/q-command-session-save`, commit 27012a6 "fix(quit): typed CommandResult::Quit variant (review follow-up)".
 
 <!-- Entry-ID: 01KTMMYVX1S3K0GPJPWNN3NXQ0 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:30.199927+00:00
+Role: scribe
+Type: Note
+Title: PR #124 (feat/graveyard-view-discoverable): ? opens help + entry-hint flash in the graveyard view — making PR #13's recovery bindings discoverable
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: graveyard-surface (discoverability) — Reconstructed: in the graveyard view, `?` / F1 now opens the standard help overlay (previously swallowed by the catch-all arm of `handle_graveyard_view_key`), and entering the view flashes a one-line binding hint, so the restore/purge chords PR #13 shipped are discoverable from inside the view   [kind: new-capability]
+When: 2026-05-23 · PR #124 (feat/graveyard-view-discoverable) · merge 9135c10 (squash; subject from branch slug)
+Recorded rationale: "Graveyard view: `?` now opens the help overlay, and the view flashes a hint on entry. Reported by a user dropping into the graveyard for the first time: the restore (`p` / `P`), purge (`dd` / `x` / `Z`), and navigation bindings exist but were undiscoverable — `?` fell through to the catch-all arm in `handle_graveyard_view_key` and got swallowed." — CHANGELOG.md (PR #124)
+Inferred intent: close the discoverability gap on the graveyard recovery surface without changing the bindings themselves — evidence: src/app/mod.rs adds a `KeyCode::Char('?') | KeyCode::F(1)` arm in `handle_graveyard_view_key` calling `self.open_help()` (clearing the pending-`d`/`g` chord state first), and an entry flash `graveyard: p restore here · P original · dd/x purge · ? help` gated on `matches!(self.state.view, View::Graveyard)` after the toggle. confidence: high
+Supersedes: extends PR #13's graveyard viewer (this thread, entry 01KR38VEGHFT9JGRDCXXBFX8V1) — the `gy` viewer and its `p`/`P`/`dd`/`x`/`Z` keymap shipped there; #124 makes those bindings legible from inside the view
+
+This continues the graveyard surface the original arc 08 opened at PR #13. PR #13 landed the recovery primitives (soft-delete cache, `gy` viewer with `p`/`P`/`dd`/`x`/`Z`, `:undo`); PR #124 closes the discoverability gap on that surface. The CHANGELOG attributes it to "a user dropping into the graveyard for the first time" — the bindings existed but `?` "fell through to the catch-all arm in `handle_graveyard_view_key` and got swallowed."
+
+Two changes, both verified in the diff. (1) A new match arm: `KeyCode::Char('?') | KeyCode::F(1)` in `handle_graveyard_view_key` clears `graveyard_pending_d` / `graveyard_pending_g` and calls `self.open_help()`; the inline comment notes "the pager-mounted help overlay coexists fine with the underlying graveyard view — Esc on the help returns to the same cursor position." (2) The `Action::OpenGraveyardView` handler, because `open_graveyard_view` toggles, checks the post-call view to distinguish enter-vs-exit and on entry flashes `graveyard: p restore here · P original · dd/x purge · ? help`. Both inline comments attribute the report to "Justin." Also touches BUGS.md (+4/-... ).
+
+The supersession here is additive, not corrective: the case-as-intent `p`/`P` dispatch and the rest of the keymap from PR #13 are unchanged; #124 only surfaces them. Squash merge; full CHANGELOG `### Fixed` rationale — recorded.
+
+Provenance:
+- 9135c10 (PR #124 feat/graveyard-view-discoverable, 2026-05-23) — squash; merge title from branch slug.
+- `git diff 9135c10^1 9135c10 -- src/app/mod.rs` — `?`/F1 help arm in `handle_graveyard_view_key` (+~11); entry-hint flash in `Action::OpenGraveyardView` (+~12); inline comments quoted.
+- `git diff 9135c10^1 9135c10 -- CHANGELOG.md` — verbatim rationale quoted above; BUGS.md +4.
+- Cross-ref: PR #13 graveyard entry in this thread = 01KR38VEGHFT9JGRDCXXBFX8V1 (the viewer + `gy`/`p`/`P`/`dd`/`x`/`Z` keymap #124 surfaces).
+
+<!-- Entry-ID: 01KTMMZTVFPNJ14QHF15EVA3MA -->
