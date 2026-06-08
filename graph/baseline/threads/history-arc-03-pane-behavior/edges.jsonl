@@ -21,3 +21,5 @@
 {"source":"entry:01KR11S8RG29J98QKN1H0VAA6W","target":"entry:01KR11TME2KF5QFQ45GJYG8MC7","type":"followed_by"}
 {"source":"thread:history-arc-03-pane-behavior","target":"entry:01KTMMKJWX5X3WS2QD90MY153F","type":"contains"}
 {"source":"entry:01KR11TME2KF5QFQ45GJYG8MC7","target":"entry:01KTMMKJWX5X3WS2QD90MY153F","type":"followed_by"}
+{"source":"thread:history-arc-03-pane-behavior","target":"entry:01KTMMMHWAHASBVT11Y96RBKSA","type":"contains"}
+{"source":"entry:01KTMMKJWX5X3WS2QD90MY153F","target":"entry:01KTMMMHWAHASBVT11Y96RBKSA","type":"followed_by"}

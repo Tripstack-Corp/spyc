@@ -77,3 +77,31 @@ Provenance:
 - 8e0c70b5 (feature-branch commit, 2026-06-05) — pre-squash subject "migrate repo discovery (gitdir + branch) to gix"
 
 <!-- Entry-ID: 01KTMMKCGA2NKTRHBH3VPW37AJ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:15.365772+00:00
+Role: scribe
+Type: Decision
+Title: PR #286–#287 — status parity spike, then flip the hot path to gix
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: the canonical parity→flip pattern. PR #286 builds a gix `repo_status` backend ALONGSIDE the subprocess one and proves byte-for-byte equivalence with assert-equal parity tests; PR #287 then flips the status hot path to gix by default, gated by an `SPYC_GIT_BACKEND=subprocess` escape hatch. [kind: supersession]
+When: 2026-06-05 · PR #286 (feat/gix-status-parity) commit 95971ecc · and PR #287 (feat/gix-status-flip) commit 5edcc569 (squashes ef4fc297→68ce2680, 9e66cd06)
+Recorded rationale:
+  - #286: "feat(git): gix status parity spike — alongside subprocess, assert-equal" — commit 95971ecc. src/git/status.rs doc verbatim: "PR 4 is a parity *spike*: this backend runs only from the parity tests, not the live status path (still the subprocess + `parse_porcelain_statuses`)." And: "subprocess truth by the parity tests below."
+  - #287: "feat(git): flip the status hot-path to gix (worker + cache)" — commit 5edcc569. CHANGELOG.md verbatim: "Git status now uses gix (gitoxide) instead of shelling out to `git status`... Output is validated byte-for-byte against `git status --porcelain` across a parity corpus, so markers are unchanged. Safety valve for the rollout: set `SPYC_GIT_BACKEND=subprocess` to revert the status backend to the legacy `git` subprocess (a temporary escape hatch; it will be removed once gix status has soaked)."
+Inferred intent: this two-step is the risk-management spine of the migration — never flip a hot path blind. #286 introduces a shared intermediate (`decode_porcelain` → `StatusEntry` → `map_to_listing`) that BOTH backends feed, so the gix output can be diffed against `git status --porcelain` truth in `mod parity_tests` before anything live changes. #287 swaps the default and adds `repo_status_entries(repo_root, listing_dir)` which branches on `subprocess_backend()`; the gix path is now the worker's default. Evidence: status.rs +598/-... at #286 introduces `repo_status` using gix::status plumbing (tree_index_track_renames, index_worktree_rewrites at 0.5 similarity); #287 status.rs +185 adds the env-gated dispatch + worker rewire (app/state.rs +75/-..., -149 sysinfo.rs). confidence: high
+Supersedes: the subprocess status path (`porcelain_raw` + `parse_porcelain_statuses` in sysinfo.rs). #287 reduces it to a flag-gated fallback ("flip is a flag flip, not a code restore"); sysinfo.rs loses -149 lines. Builds on the facade seam (entry 01KTMMHJ879C24FY2WYYT9F1SF) and the dependency add (01KTMMJB955RF16D842WFFEBYP).
+
+The gix `repo_status` deliberately matches subprocess defaults: `untracked_files(Collapsed)` to mirror `git`'s collapsed `?? sub/` directory output, and `gix_diff::Rewrites::default()` (0.5 rename similarity, "in fact gix's default", "matching"). #287's escape-hatch comment frames the rollout philosophy verbatim: "a one-release-cycle safety valve so a field regression in the gix flip is a flag flip, not a code restore. Removed in PR 9." This is the throughline of the whole segment — parity, then flip, then (eventually, PR #292 = "PR 9") drop.
+
+Provenance:
+- 68ce2680 / 95971ecc (PR #286 feat/gix-status-parity, 2026-06-05) — status.rs +598 (gix repo_status + parity_tests + shared decode_porcelain/map_to_listing), sysinfo.rs -116
+- 9e66cd06 / 5edcc569 (PR #287 feat/gix-status-flip, 2026-06-05) — status.rs +185 (repo_status_entries env-gated dispatch, subprocess_backend()), app/state.rs +75, sysinfo.rs -149, CHANGELOG.md +9
+- src/git/status.rs (parity spike doc + escape-hatch doc) — quoted
+- CHANGELOG.md (at 5edcc569) — quoted gix-status rollout entry
+
+<!-- Entry-ID: 01KTMMMBVCGADASG74RTHKWY97 -->

@@ -585,3 +585,29 @@ Provenance:
 - prior entry this thread: 01KTMMJB49K22EGR14EF11BP18 (continuation framing).
 
 <!-- Entry-ID: 01KTMMKGQJ9DE88F4M670QZ7KZ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:17.294645+00:00
+Role: scribe
+Type: Note
+Title: PR #148: git-poll cache-key ordering — stat the index/HEAD mtimes before reading status, not after
+
+Spec: scribe
+
+tags: #history #arc-04
+
+Moment: git-poll cache-key ordering — Reconstructed: the background git worker captured its (index, HEAD) mtime cache key *after* running `git status`; an index write racing that window pinned a stale snapshot under a newer key, and the 1 Hz poll then short-circuited on it forever. The worker now stats the key first.   [kind: gotcha]
+When: 2026-05-27 · PR #148 (fix/git-poll-cache-key-ordering) · commit 1b28bf9 (squash; no 2nd parent on `main`)
+Recorded rationale: "fix: stat git cache-key mtimes before reading status" — commit subject, 1b28bf9. CHANGELOG.md (1b28bf9) expands it: "The background git-status worker captured its cache key (`.git/index` + `HEAD` mtimes) *after* running `git status`, so an index write racing that window stored old status under a new mtime — and the 1 Hz safety poll then matched the same mtime and short-circuited forever, hiding staged/working changes until an unrelated later write happened to move the mtime again. The worker now stats the mtimes before reading status (validate-key-first)…"
+Inferred intent: a pure read-ordering / TOCTOU fix on the cache key, not a feature. evidence: the diff is a 7-line reorder in the git-worker thread in `src/app/mod.rs` — the `resolve_gitdir(...).map_or(...)` mtime stat block moves to *before* the `git_status_porcelain_raw` call (mod.rs:~933-951); the inline comment frames it as "An older key paired with newer status is safe (forces one redundant refresh), whereas the reverse order — newer key, older status — would make the 1 Hz poll short-circuit on a stale snapshot forever." confidence: high
+Supersedes: (none — hardens the 1 Hz diff-aware poll introduced in this thread's PR #1 baseline; does not replace it)
+
+This is the smallest moment in the slice and the most subtle: a classic capture-order bug on a cache key. The 1 Hz safety poll (this thread's founding capability, PR #1) keys git-status reuse on the `.git/index` and `HEAD` mtimes. If the worker reads status first and stamps the key second, a write that lands in between gets a *newer* key glued to *older* status — and because the poll compares only the key, it never notices the body is stale. Reversing the order makes the failure benign: a racing write now yields an older key with newer status, which simply forces one extra refresh. CHANGELOG calls the new ordering "validate-key-first."
+
+No `src/git/` directory exists in this tree; the git-worker plumbing lives in `src/app/mod.rs` (the worker thread) and `src/sysinfo.rs` (`git_status_porcelain_raw`, `resolve_gitdir`). This same worker is the subprocess machinery that **history-seg-gix-migration** later replaces at #283–#292.
+
+Provenance:
+- 1b28bf9 (PR #148 fix/git-poll-cache-key-ordering, 2026-05-27) — `src/app/mod.rs` (+10/-1): moves the `(index_mtime, head_mtime)` stat block above the `git_status_porcelain_raw(&req.canonical, req.huge)` call in the git-worker thread; adds the ordering-rationale comment. `CHANGELOG.md` (+10) documents the race. Squash merge — no second parent on `main`, so recorded rationale is the subject + CHANGELOG.
+- note: at #148 `git_status_porcelain_raw` still takes the `huge` flag; PR #168 (one moment later) removes it.
+
+<!-- Entry-ID: 01KTMMMDE31YKNBCGGYC89JKBG -->

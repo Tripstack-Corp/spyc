@@ -636,3 +636,31 @@ Provenance:
 - docs/PANE_RECOVERY_PLAN.md (PR #92 db70c95, 2026-05-15) — distinguishes toggle-preserve from general recovery; cross-ref history-seg-docs-planning
 
 <!-- Entry-ID: 01KTMMKJWX5X3WS2QD90MY153F -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:25.822473+00:00
+Role: scribe
+Type: Note
+Title: PR #46–#48 (v1.5 phase 6): shared PtyHost makes the pane↔task relationship bidirectional
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: pane↔task migration — Reconstructed: the pty kernel is extracted into a shared `PtyHost` and made movable between a pane tab and a background task, in both directions, without killing the child   [kind: new-capability]
+When: 2026-05-07 → 2026-05-08 · PR #46 (feat/v1.5-phase-6-task-pane-migration, a680db3) · PR #47 (feat/v1.5-phase-6b-task-to-pane, 130528b) · PR #48 (feat/v1.5-phase-6c-pane-to-task, 96347d5)
+Recorded rationale: docs/V1_5_PLAN.md §"Phase 6 — Task ↔ pane migration" verbatim: ":task-to-pane [N] — promote a backgrounded ! task to a new pane tab. Reads from the task's pty (already alive) … :pane-to-task — demote the active pane tab to a background task. Inverse of above. Pane keeps running; just stops displaying." Scope clause: "A shared PtyHost trait or struct that both Pane and BackgroundTask wrap. Today they each hold their own child / writer / output_rx; unifying lets us move the same handles between containers." Risk clause: "highest of the phases. Touches both pty subsystems and the surrounding state machine. Save for last."
+Inferred intent: the plan named the abstraction before the code existed; the three PRs land it in the planned order (host first, then promote, then demote). evidence: V1_5_PLAN sequencing line "Phase 6 (task ↔ pane) waits for 1–5 because the cleaner pty abstraction makes it tractable"; #46 stat moves the kernel out of `src/pane/mod.rs` (-346) into new `src/pane/pty_host.rs` (+409). confidence: high
+Supersedes: the pre-v1.5 arrangement where `Pane`, `PendingCapture`, and `BackgroundTask` each owned a private `child`/`writer`/`output_rx` — #46 CHANGELOG names this directly and identifies it as the blocker: "spawn_capture now retains the master in the host, so backgrounded captures can be resized … This was the blocker that made Phase 6b (:task-to-pane) impossible."
+
+PR #46 (phase 6a) is a strict-no-behavior-change refactor: the pty kernel — "master + writer + child + reader thread + event channel + closed / exit_status / last_size / debug_dump" — is pulled out of three consumers into `pane::pty_host`. The CHANGELOG marks the goal verbatim: "Pure refactor — strict no-behavior-change goal, 594 tests still pass." Three new `PtyHost` unit tests guard the seam (`spawn_and_drain_echo`, `resize_updates_last_size_and_coalesces`, `process_id_is_some_after_spawn`). The side benefit is the actual unlock: retaining the master in the host so captures stay resizable.
+
+PR #47 (6b, `:task-to-pane`) and #48 (6c, `:pane-to-task`) are the two directions. Promotion "moves the host from the task into a fresh Pane … resize to the bottom-pane geometry, replay the captured buffer through a new vt100 parser … and SIGCONT the child if it was paused" (CHANGELOG #47). Demotion is the inverse with one honest asymmetry the CHANGELOG flags: "Buffer recovery is empty start. vim's ^z parity: fresh output accumulates from the demote point, prior visual context is gone. Seeding the task buffer from the vt100 grid would erase color (grid is cells; task buffer is ANSI bytes)." The round-trip invariant — same child PID through both transitions — is asserted by tests per the plan's success criterion. Two inherited-property gotchas are documented rather than fixed: a promoted tab keeps the task's `dumb` TERM (alt-screen TUIs still won't work), and an already-exited task refuses promotion (flashes "task #N already exited; :fg to view its output instead").
+
+Provenance:
+- a680db3 (PR #46, 2026-05-07) — new src/pane/pty_host.rs (+409); src/pane/mod.rs (-346 net shape change), src/app/mod.rs (~280 lines reworked), src/pane/tabs.rs (+9)
+- 130528b (PR #47, 2026-05-07) — src/app/mod.rs (+125 promotion path), src/pane/pty_host.rs (+21/-9), FEATURES.md +15, src/ui/help.rs +4
+- 96347d5 (PR #48, 2026-05-08) — src/app/mod.rs (+62 demotion path), src/pane/pty_host.rs (+68/-27), src/pane/tabs.rs (+25)
+- docs/V1_5_PLAN.md §"Phase 6 — Task ↔ pane migration" — quoted above
+
+<!-- Entry-ID: 01KTMMMHWAHASBVT11Y96RBKSA -->
