@@ -12,12 +12,13 @@
     "history-seg-module-decomposition": {
       "reactions": {},
       "tags": [
-        "history"
+        "history",
+        "onboarding"
       ],
       "flags": [],
       "xrefs": [],
       "pinned": false,
-      "last_touched": "2026-06-08T22:30:37.037053+00:00",
+      "last_touched": "2026-06-08T22:30:45.165437+00:00",
       "vote_score": 0
     }
   }
