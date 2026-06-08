@@ -858,3 +858,29 @@ Provenance:
 - fc5717ab (PR #84, 2026-05-13) — src/ui/pager.rs +57 (header helper), src/app/mod.rs +25 (yank paths), src/config/mod.rs +64 + default.spycrc.toml +10 (`include_pager_title`).
 
 <!-- Entry-ID: 01KTMMWQNM0KA5GBBVJWSQE8A5 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:19.734714+00:00
+Role: scribe
+Type: Note
+Title: PR #89 (scrollback-stale-on-tab-switch): the ^a-v pager becomes per-tab state, stashed on tab-switch
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: the `^a-v` scrollback pager moves from App-level state to per-tab state — each tab gets a `stashed_scrollback_pager` slot; tab-switch handlers stash the departing tab's pager and restore the destination tab's, so the pager travels with its tab instead of showing a stale view of the wrong tab's pty.   [kind: gotcha]
+When: 2026-05-15 · PR #89 (fix/scrollback-stale-on-tab-switch) · commit 04575a68
+Recorded rationale: "`^a-v` scrollback pager now travels with the tab. Previously the pager was App-level state: opening it on tab 1, then `^a-n` to tab 2, left the pager rendering tab 1's history while the active-tab pointer was on tab 2 — a stale view of the wrong tab's pty. Now each tab has its own `stashed_scrollback_pager` slot." — CHANGELOG (commit 04575a68)
+Inferred intent: the scrollback pager is bound to a specific pty (its source tab), so App-level singleton state was a category error once multiple tabs exist; the fix re-homes it onto the tab. The CHANGELOG distinguishes this from content-bound pagers (Overlay file viewer, TopPane Markdown) which stay App-level "tied to content, not to a pty." — evidence: src/app/mod.rs +57, src/pane/tabs.rs +17 (the per-tab slot); stash on `PaneNextTab`/`PanePrevTab`/`PaneTabByIndex`. confidence: high
+Supersedes: refines the #42 `^a-v` rewrite (= 01KTMMRS83NW2K9GASEKF5R1T1) — Phase 3 stored the scrollback pager App-level; this re-homes it per-tab.
+
+The fix encodes a distinction the V1.5 unification glossed: a pager is either *pty-bound* (scrollback — belongs to one tab's history) or *content-bound* (a file viewer / markdown render — belongs to content, persists across tabs). PR #89 splits the former onto `src/pane/tabs.rs`'s new per-tab `stashed_scrollback_pager` slot (+17) and wires the three tab-switch action handlers in `src/app/mod.rs` (+57) to stash-on-depart / restore-on-arrive. The visible appear/disappear on tab-swap is treated as its own signal (no flash); the pager reappears exactly as left (scroll, search, selection).
+
+This is the same pty-vs-content boundary that the eventual `PagerStream` abstraction (#309–#311) formalizes — there, the scrollback/transcript stream is one source among several, all id-gated. PR #89 is the early, manual form of "this pager is tied to a specific source."
+
+Provenance:
+- 04575a68 (PR #89, 2026-05-15) — src/app/mod.rs +57 (tab-switch stash/restore), src/pane/tabs.rs +17 (`stashed_scrollback_pager`).
+- refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1; foreshadows stream-abstraction entry (#309–#311).
+
+<!-- Entry-ID: 01KTMMXKYZ78J9AGSK60HJF9BV -->

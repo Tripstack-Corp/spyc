@@ -937,3 +937,32 @@ Provenance:
 - 01KR2H094DPB… (this thread) — the baseline tail seam describing the `--key-trace` "ahead of a consumer" bet that this moment resolves.
 
 <!-- Entry-ID: 01KTMMWGABE7B3ACCTC22ZAC89 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:16.986909+00:00
+Role: scribe
+Type: Note
+Title: PR #123 (+ #126) — the resolver grows a vi operator-pending grammar: dd/Ndd/ZZ, plus the S/gs sort chord
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the resolver's `PendingSeq` enum grows `D` and `Z` states — `d` becomes a vi operator-pending arming key (`dd`/`Ndd` delete, `ZZ` quit), and `Enter` becomes the sole open/descend primary; #126 adds `S`/`gs` sort chords alongside   [kind: new-capability]
+When: 2026-05-23 · PR #123 (feat/dd-delete-vim-binding) · commit c8d2063e   |   folded: 2026-05-23 · PR #126 (feat/sort-cycle-key-and-status-indicator) · commit 866aa699
+Recorded rationale: #123 — "`dd` / `Ndd` to delete; `ZZ` to quit. Vim-style bindings for the two most common ops we'd been bare-shortcut-only on. … `Enter` is now the sole primary for 'open/descend' — previously `d` and `Enter` shared the binding. Bare `d` is now a chord-arming key (vim parity: `d` is always operator-pending). … `0dd` is a no-op (vim: `0` is line-start motion; never reaches `dd`)." (CHANGELOG.md, commit c8d2063e, 2026-05-23). #126 — "`S` cycles sort; `gs` reverses; status bar shows the current mode. … `S` cycles name → size → mtime → ext → name … `gs` toggles a reverse flag … `:sort reverse` (or `:sort -`) is the colon-cmd equivalent of `gs`." (CHANGELOG.md, commit 866aa699, 2026-05-23)
+Inferred intent: vi-parity for the file list's most common ops, expressed as resolver grammar rather than flat bindings — evidence: `src/keymap/resolver.rs` (+112 in #123) adds `PendingSeq::D`/`PendingSeq::Z` states with `d`→arm, `dd`→delete, `Z`→arm, `ZZ`→`Action::Quit`; `Enter` split out from the old `Enter | Char('d')` arm
+                  confidence: high
+Supersedes: the old `KeyCode::Enter | KeyCode::Char('d')` shared open/descend binding in `src/keymap/resolver.rs` — #123 splits `d` off into operator-pending arming, leaving `Enter` as the sole primary
+
+This is where the resolver's `PendingSeq` enum — `Normal`/`G` at the baseline (see the PR #32 chord-precedence moment) — grows a real vi operator-pending grammar. `src/keymap/resolver.rs` adds `PendingSeq::D` and `PendingSeq::Z`: bare `d` arms (`self.pending = PendingSeq::D`), a following `d` fires delete, a non-`d` follow-up is `Ignored` (cancel); bare `Z` arms and `ZZ` resolves to `Action::Quit` (the rationale lists `ZZ` as an alias for the existing `Q`/`^D`/`:q`). `0dd` is a documented no-op because `0` is a line-start motion that never reaches the arming path. The count form `Ndd` carries an explicit scope rule worth keeping: "The explicit count *ignores picks* — the count is the user being explicit about scope."
+
+#123 also ships a render-side consequence-preview — a crimson `delete_warning` row highlight while the confirm prompt is up (load-bearing for `Ndd`, where affected rows depend on cursor position when the chord fired) — and a `[delete] confirm = false` yolo opt-in.
+
+**+ PR #126 folded** (feat/sort-cycle-key-and-status-indicator, 866aa699, same day): a sibling keymap addition in the same `resolver.rs`/`action.rs` pair — `Char('S')` → `Action::SortCycle`, `gs` → `Action::SortReverse` (with `:sort reverse`/`:sort -` as the colon equivalent), plus a `sort:<mode>` status-bar chip with an `↑` reversed marker. No new resolver-grammar mechanism (it rides the existing `g`-chord and a top-level binding); folded here as the day's other file-list keymap addition rather than its own moment.
+
+Provenance:
+- c8d2063e (PR #123 feat/dd-delete-vim-binding, 2026-05-23) — `src/keymap/resolver.rs` +112 (`PendingSeq::D`/`Z`, `Enter`/`d` split), `src/keymap/action.rs` +14, `src/app/state.rs` +40, `src/app/mod.rs` +38, `src/config/mod.rs` +37 (+`confirm` opt-in), `src/ui/theme.rs`/`list_view.rs` (warning highlight), CHANGELOG.md +38.
+- 866aa699 (PR #126 feat/sort-cycle-key-and-status-indicator, 2026-05-23) — `src/keymap/resolver.rs` +5 (`S`/`gs`), `src/keymap/action.rs` +8 (`SortCycle`/`SortReverse`), `src/fs/listing.rs` +30, `src/app/state.rs` +45, `src/app/mod.rs` +43, `src/ui/help.rs` +11, CHANGELOG.md +16.
+
+<!-- Entry-ID: 01KTMMXGV8ZBCEQXRSBXN5HYAH -->

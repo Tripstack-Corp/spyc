@@ -841,3 +841,28 @@ Provenance:
 - #133's CHANGELOG names #134 as its filed follow-up
 
 <!-- Entry-ID: 01KTMMW7N1HQ6Q2A90D1CPZ230 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:12.929223+00:00
+Role: scribe
+Type: Note
+Title: PR #150 + #151: pane parser lifecycle hardening — panic recovery, always-join worker, zero-row safety
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: parser/pty lifecycle robustness — Reconstructed: the vt100 parser worker recovers from a poisoned mutex instead of crashing the session, a RAII `ParserWorker` joins the thread on every teardown path, the dead `has_pending` fast-path is removed (#150), and `^a v` / `Pane::resize` are made safe on a 0-row pane (#151)   [kind: gotcha]
+When: 2026-05-27 · PR #150 (fix/pane-parser-lifecycle, 40aa27b)  —  2026-05-27 · PR #151 (fix/zero-row-pane-hang, d6d3c68)
+Recorded rationale: #150 CHANGELOG verbatim: "A panicking vt100 parser no longer crashes the whole session. The pane parser runs on a worker thread inside catch_unwind; the recovery path locked the parser mutex inside the guarded closure, so a panic unwound through the held guard and poisoned the mutex. … The worker now recovers the poisoned guard, installs a fresh parser, and clears the poison." And: "The pane parser worker thread is always stopped and joined. It was only joined on the demotion path (take_host); tab close, restart, and app exit dropped the Pane without joining. A new ParserWorker RAII type owns the stop-flag + join handle and joins on Drop." #151 CHANGELOG verbatim: "^a v no longer hangs (or panics) on a very short terminal. lines_from_scrollback paged the buffer in rows-sized chunks; a 0-row screen made chunk = remaining.min(0) never decrement, so the event loop spun forever."
+Inferred intent: both harden the pty/parser machinery introduced by the #46 PtyHost extraction against failure modes (panic, every teardown path, degenerate geometry). evidence: #150 reworks src/pane/mod.rs (+163/-...) and shrinks src/pane/pty_host.rs (-37 net) introducing `ParserWorker`; #151 floors `Pane::resize` at 1×1 (src/pane/mod.rs +6) because vt100 `set_size` does an unconditional `rows - 1`, and early-returns `lines_from_scrollback` on 0 rows (src/ui/scrollback.rs +19). confidence: high
+Supersedes: #150 removes the `has_pending` fast-path that "was never cleared for panes (only the unused main-thread drain cleared it) — so the gate always fell through," and replaces the demotion-only join (`take_host`) from the #46/#48 migration code with an all-paths RAII join. #150 notes `Pane` can't `Drop` directly "because it moves host out in take_host" — a direct consequence of the #48 demotion design.
+
+Two robustness PRs landed minutes apart, both tightening the parser/pty lifecycle the #46 PtyHost extraction set up. #150: the worker's panic-recovery path held the parser mutex inside the `catch_unwind` closure, so a panic poisoned it; the re-lock then silently failed and the next render hit `with_screen`'s `.expect(...)`, taking spyc down. The worker now recovers the poisoned guard, installs a fresh parser, and clears the poison; all lock sites tolerate poison; the intended "screen blanks for a frame, the child repaints" behavior finally works. The same PR fixes a leak — the worker was only joined on the demotion path — with a `ParserWorker` RAII type that joins on Drop across tab close, restart, and exit, and drops the long-dead `has_pending` gate. #151 addresses degenerate geometry: a 0-row screen made `lines_from_scrollback` spin forever (`remaining.min(0)` never decrements), and vt100's `set_size`/`rows - 1` underflowed; the fix early-returns on 0 rows and floors `Pane::resize` at 1×1.
+
+Provenance:
+- 40aa27b (PR #150, 2026-05-27) — src/pane/mod.rs +163/-... (ParserWorker RAII, poison recovery), src/pane/pty_host.rs -37 net, src/app/mod.rs +11/-..., CHANGELOG +23
+- d6d3c68 (PR #151, 2026-05-27) — src/ui/scrollback.rs +19 (0-row early return), src/pane/mod.rs +6 (resize floor 1×1), CHANGELOG +7
+- both depend on the #46 PtyHost worker-thread model and the #48 take_host demotion (named in #150's CHANGELOG)
+
+<!-- Entry-ID: 01KTMMXD1KSTYMEPXSQZN45HXB -->
