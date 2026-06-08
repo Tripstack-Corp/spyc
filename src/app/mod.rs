@@ -379,7 +379,7 @@ struct Runtime {
     /// once in `run()` and bridges it onto the unified `Message` channel.
     git_result_rx: Option<std::sync::mpsc::Receiver<state::GitWorkerResult>>,
     /// Main thread → git worker requests. The Model records desired
-    /// requests in `state.pending_git_requests` (it owns no channel); the
+    /// requests in `state.git_cache.pending_git_requests` (it owns no channel); the
     /// run loop drains that outbox through this sender via
     /// `flush_git_requests`. `None` in the test harness.
     git_worker_tx: Option<std::sync::mpsc::Sender<state::GitWorkerRequest>>,

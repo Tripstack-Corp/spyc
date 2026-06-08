@@ -230,20 +230,20 @@ impl App {
                 // last prompt.
                 match key.code {
                     KeyCode::Enter => {
-                        let trimmed = strip_ansi_escapes(&self.state.pane_prompt_buf);
+                        let trimmed = strip_ansi_escapes(&self.state.pane.pane_prompt_buf);
                         if !trimmed.is_empty() {
-                            self.state.last_pane_prompt = Some(trimmed);
+                            self.state.pane.last_pane_prompt = Some(trimmed);
                         }
-                        self.state.pane_prompt_buf.clear();
+                        self.state.pane.pane_prompt_buf.clear();
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.state.pane_prompt_buf.clear();
+                        self.state.pane.pane_prompt_buf.clear();
                     }
                     KeyCode::Backspace => {
-                        self.state.pane_prompt_buf.pop();
+                        self.state.pane.pane_prompt_buf.pop();
                     }
                     KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.state.pane_prompt_buf.push(c);
+                        self.state.pane.pane_prompt_buf.push(c);
                     }
                     _ => {}
                 }
@@ -370,7 +370,7 @@ impl App {
                 self.set_pane_focus(true);
             }
             // Track pasted text for yP (yank last prompt).
-            self.state.pane_prompt_buf.push_str(&text);
+            self.state.pane.pane_prompt_buf.push_str(&text);
             // Wrap in bracketed paste so the child app (e.g. claude) receives
             // the block as a single paste, not line-by-line.
             let pane = self.runtime.pane_tabs.as_mut().unwrap().active_mut();

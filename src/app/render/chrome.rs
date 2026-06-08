@@ -153,7 +153,7 @@ impl App {
         let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
         let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
         let mut bg_width = 0usize;
-        let zoom_tag = if self.state.pane_zoomed {
+        let zoom_tag = if self.state.pane.pane_zoomed {
             " [ZOOM]"
         } else {
             ""
@@ -202,7 +202,7 @@ impl App {
             ));
         }
 
-        if self.state.pane_zoomed {
+        if self.state.pane.pane_zoomed {
             spans.push(Span::styled(
                 zoom_tag,
                 Style::default()

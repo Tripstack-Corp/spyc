@@ -111,7 +111,7 @@ impl App {
                 .pane_tabs
                 .as_ref()
                 .map_or(0, PaneTabs::active_index),
-            pane_height_pct: self.state.pane_height_pct,
+            pane_height_pct: self.state.pane.pane_height_pct,
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
@@ -258,7 +258,7 @@ impl App {
         }
         self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
         // Restore pane layout.
-        self.state.pane_height_pct = session.pane_height_pct;
+        self.state.pane.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
             self.runtime.pane_tabs = None;
             for tab in &session.tabs {

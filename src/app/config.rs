@@ -79,7 +79,7 @@ impl App {
         // status) or `HEAD` (branch switch) -- everything else (objects,
         // packs, lockfiles, gc activity, refs/, logs/) is rejected so
         // background git housekeeping doesn't cascade.
-        if let Some(git_dir) = self.state.current_gitdir.as_deref() {
+        if let Some(git_dir) = self.state.git_cache.current_gitdir.as_deref() {
             if path == git_dir {
                 return true;
             }

@@ -154,8 +154,8 @@ impl App {
             pane_focused: self.state.pane_focused(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
             // loop-top), not the live host — decouples routing from Runtime.
-            pane_scrolling: self.state.pane_snapshot.is_scrolling,
-            pane_closed: self.state.pane_snapshot.is_closed,
+            pane_scrolling: self.state.pane.pane_snapshot.is_scrolling,
+            pane_closed: self.state.pane.pane_snapshot.is_closed,
             resolver_pending: self.state.resolver.is_pending(),
         }
     }

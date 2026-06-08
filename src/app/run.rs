@@ -64,7 +64,7 @@ impl App {
             &mut watched_listing,
             &mut watched_git,
             &self.state.listing.dir,
-            self.state.current_gitdir.as_deref(),
+            self.state.git_cache.current_gitdir.as_deref(),
         );
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
@@ -540,7 +540,7 @@ impl App {
             // Flush the Model's git-request outbox onto the worker channel
             // before the loop blocks on `recv`. The pure-domain refresh paths
             // (refresh_listing / refresh_git_state / chdir) only *record*
-            // requests in `state.pending_git_requests` — the Model owns no
+            // requests in `state.git_cache.pending_git_requests` — the Model owns no
             // channel — so this is where they're actually dispatched. Placed
             // after every pre-recv refresh (and after the prior iteration's
             // message dispatch) so a cache-miss reaches the worker without
@@ -643,7 +643,7 @@ impl App {
                     &mut ctx.watched_listing,
                     &mut ctx.watched_git,
                     &self.state.listing.dir,
-                    self.state.current_gitdir.as_deref(),
+                    self.state.git_cache.current_gitdir.as_deref(),
                 );
             }
 

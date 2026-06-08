@@ -216,7 +216,7 @@ impl App {
         // stays alive in `pane_tabs`, just no rect for it this frame.
         let layout = Self::compute_layout(
             area,
-            self.runtime.pane_tabs.is_some() && !self.state.pane_hidden,
+            self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden,
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
