@@ -560,3 +560,44 @@ Provenance:
 - window-1 `insight-drift` framing = 01KR3B7KW5QNRWHG6YTV9QSF07 (register and methodology inherited unchanged).
 
 <!-- Entry-ID: 01KTMTNWVQJZQX85ZPA3BBZVGV -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:57:41.383595+00:00
+Role: critic
+Type: Note
+Title: Pattern A′: Squash-subject understatement at structural scale — window-1 Pattern A goes systemic; the honest framing relocates to CHANGELOG + plan docs
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** Window-1 Pattern A (= 01KR3BA3CZWA6TZCDKNJZDPAGH) named five PRs where the commit *subject* described a narrower scope than the diff covered, with the honest framing surviving in the commit body / CHANGELOG / version files. In window 2 the same drift is no longer incidental — it is **structural**, because the predominant merge mode is squash (origin recorded at PR #73, seg-docs-planning 01KTMMKHEYZ540PV6VVZR33K79: "Squash on merge … `main`'s `git log` becomes one commit per shipped shape"). On `main`, an enormous diff routinely reduces to one line. The compensating recorded rationale that window 1 found in the commit *body* has relocated to two surfaces window 1 did not lean on: the CHANGELOG and the committed plan docs.
+
+**Instance enumeration with moment-entry citations.**
+
+1. **An 800-LoC decompose PR is a one-line `main` subject.** PR #275 (refactor/decompose-fs-ops) opens the "800-LoC campaign"; the `main` squash subject is the branch slug only, while the diff cuts the long-listing formatter into `fs/long_listing.rs` (+394/-384) and the phase goes on to carve `run.rs` (+670/-657), `bootstrap.rs`, `proc.rs`, `util.rs` out of `app/mod.rs`. The recorded scope lives not in the subject but in CLAUDE.md (PR #282) and AGENTS.md ("the 800-LoC campaign carved it down to ~1k"). *Cite: seg-module-decomposition 01KTMMHZCN03GA638EHKKCY50E (#275–#281); the rationale-bearing doc at 01KTMMJVZMX3SJCBSK8YF896YP (PR #282 CLAUDE.md ceiling).*
+
+2. **The largest single file in the slice — a 3907-line state.rs split — is one subject.** PR #308 (refactor/decompose-state) reduces to a slug; the diff is state.rs −3907, eleven new `state/*.rs` +4009, plus a guard-test convention edit in `git/mod.rs`. The understatement ratio (one line ↔ ~4000-line restructure) is the window's largest. *Cite: seg-module-decomposition 01KTMMPARGNTSQB2Z67G6KBKQ0 (#307–#308).*
+
+3. **A 12-PR extraction wave, each PR a one-line verbatim-move subject.** PRs #248–#259 relocate twelve concerns out of `app/mod.rs`; each `main` subject is a slug (`refactor/mod-extract-prN-*`), each diff a near-balanced insertion/deletion (e.g. #254 +643/−633, #258 +513/−501). The "what and why" is the REFACTOR_PLAN.md Phase-1 rule ("verbatim move + a `mod …; use …;` import — no behavior change … Each was one PR"), not the subjects. *Cite: seg-module-decomposition 01KTMMGZWER9304EZM82KTEZMQ (#248–#259).*
+
+4. **A whole MVU phase reduces to its phase label.** PR #201 (refactor/mvu-phase-1-input-channel) is one subject on `main`; the diff is `app/mod.rs` +705/−198 — a new `Message` enum, `spawn_input_reader`, a parkable `ForegroundExec`, and the loop switching `event::poll`→`recv_timeout`. The 8-phase scope that frames it is MVU_PLAN.md (PR #196), not the subject. The Phase-5 moment (#218–#232) folds *nine* migration PRs whose individual squash subjects ("fold git_info/git_files into AppState.git: GitState", etc.) each understate the per-step diff. *Cite: seg-refactor-mvu 01KTMKXA7ZKKR421NTPRJ9EQ3M (#201) and 01KTMM1A4SE4HRHFQ97PRJCZYD (#218–#232); the plan-doc rationale source 01KTMKVE85DEBMBWYCXY7YHP5E (#196).*
+
+**Instance count: four structural instances** (each spanning a multi-PR wave or a single outsize diff), against window-1 Pattern A's five single-PR instances.
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *The relocation of the honest framing is the load-bearing observation.* Window-1 Pattern A's instances all carried the corrected description in the commit body or CHANGELOG — i.e. *inside the PR's own artifacts*. Window 2's squash subjects carry no body on `main` at all; the honest scope lives in a separate committed doc (REFACTOR_PLAN.md, CLAUDE.md, MVU_PLAN.md) that frames a *campaign*, not one PR. The drift's amplitude grew (one line ↔ thousands of changed lines) and its compensating surface moved (commit body → plan doc + CHANGELOG).
+
+- *Why this is not simply more of Pattern A.* Window-1 Pattern A's drift was *within-PR description accuracy* — the subject of PR N misdescribed the diff of PR N. Window 2's structural understatement is partly an artifact of the merge mode itself: the squash discards the body that would have carried the honest scope, so the drift is co-produced by the tooling convention (PR #73) and the work's scale. A reader on `main` sees a slug; the scope is one indirection away in a plan doc.
+
+- *Direction held.* Like window-1 Pattern A, every instance is *understatement* (subject narrower than diff), never overstatement. The reverse-polarity "six call sites" over-claim window 1 flagged at PR #31 has no window-2 analogue in this catalogue.
+
+Provenance:
+- seg-module-decomposition: 01KTMMHZCN03GA638EHKKCY50E (#275–#281, 800-LoC), 01KTMMPARGNTSQB2Z67G6KBKQ0 (#307–#308, state.rs −3907), 01KTMMGZWER9304EZM82KTEZMQ (#248–#259, 12-PR wave), 01KTMMJVZMX3SJCBSK8YF896YP (#282 CLAUDE.md, the rationale doc).
+- seg-refactor-mvu: 01KTMKXA7ZKKR421NTPRJ9EQ3M (#201), 01KTMM1A4SE4HRHFQ97PRJCZYD (#218–#232), 01KTMKVE85DEBMBWYCXY7YHP5E (#196 MVU_PLAN).
+- seg-docs-planning: 01KTMMKHEYZ540PV6VVZR33K79 (PR #73, squash-on-merge convention origin).
+- window-1 Pattern A = 01KR3BA3CZWA6TZCDKNJZDPAGH (the incidental version this intensifies).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTQ8RT04DKANY20CG8TE39 -->
