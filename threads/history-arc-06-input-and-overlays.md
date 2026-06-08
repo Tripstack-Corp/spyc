@@ -856,3 +856,31 @@ Provenance:
 - 76cf4e67 (PR #82 refactor/route-event, 2026-05-12) — new `src/app/route.rs` +406 (pure `route_key` + `KeyDestination` + `RouteSnapshot` + 19 tests), `src/app/mod.rs` +192/−133 (inline guards → single match), CHANGELOG.md +18, TODO.md (closes the routing-refactor TODO).
 
 <!-- Entry-ID: 01KTMMS40G4T6XANRGGGF11092 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:46.691175+00:00
+Role: scribe
+Type: Note
+Title: PR #95 + #163 — the jump-history `?` trigger: from empty-buffer J to Normal-mode mid-prompt
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the `?`-on-empty affordance (baseline `!?` shell-history) extends to the `J` prompt (#95), then to Normal mode mid-prompt so it survives `Esc k` recall (#163)   [kind: new-capability]
+When: 2026-05-16 · PR #95 (fix/j-question-mark-jump-history) · commit abc655d0   |   2026-05-29 · PR #163 (fix/history-popup-question-normal-mode) · commit a71de792
+Recorded rationale: #95 — "`J ?` opens the jump-history popup (spy-parity). The popup already existed at `App::show_jump_history_popup` but was only reachable via `J <Esc> <Space>` — two prerequisites a spy user has no reason to know. The `?`-on-empty-buffer pattern already worked for shell history (`!?`); extended the same handler in `handle_vi_prompt_key` to recognize `PromptKind::Jump` …" (CHANGELOG.md, commit abc655d0, 2026-05-16). #163 — "`?` opens the history editor mid-prompt, not just from a fresh `!?`. The `?` affordance only fired when the prompt buffer was empty, so after `Esc k` recalled a command into the buffer, `?` no longer opened the viewer. `?` now mirrors `Space` in the line editor's Normal mode …" (CHANGELOG.md, commit a71de792, 2026-05-29)
+Inferred intent: spy muscle-memory parity, reached in two passes — #95 wires `?` for the J prompt; #163 closes the gap that the empty-buffer guard left after `Esc k` recall — evidence: #163's diff changes one match from `Char(' ')` to `Char(' ' | '?')` in the Normal-mode line-editor handler (`src/app/mod.rs`), and its comment names the exact gap ("the empty-buffer `?` block above only fires on a fresh prompt")
+                  confidence: high
+Supersedes: #95's empty-buffer-only `?` trigger — #163 adds the Normal-mode path so `?` works after history recall, without removing the empty-buffer path
+
+This moment threads the existing `feature-jump-history-popup-trigger` thread (its single planning entry, 2026-05-15, is the design note for #95 — the proposal to bind `?` in the J prompt for spy parity). #95 extends the existing `?`-on-empty handler in `handle_vi_prompt_key` to recognize `PromptKind::Jump` and route to `show_jump_history_popup()` (`src/app/mod.rs`), and corrects two stale docstrings that described an Esc-on-empty trigger "that didn't exist in the code."
+
+#163 is the gotcha follow-on: the empty-buffer `?` block fires only on a fresh prompt, so once `Esc k` recalls a command into the buffer the `?` stops matching. #163 routes `?` in the line editor's Normal mode to the same viewer — `matches!(key.code, KeyCode::Char(' ' | '?'))` — explicitly noting `?` "is otherwise unbound in Normal mode, so nothing was clobbered." This is the same `?`/`Space`-as-history-summon idiom the baseline's `!?` established, now consistent across fresh and recalled prompt states. PR #95 also flagged `src/ui/help.rs` to advertise the new affordance.
+
+Provenance:
+- abc655d0 (PR #95 fix/j-question-mark-jump-history, 2026-05-16) — `src/app/mod.rs` +44/−… (`handle_vi_prompt_key` recognizes `PromptKind::Jump`; two docstring fixes at ~:555-560 and ~:7972-7976), `src/ui/help.rs` ±, CHANGELOG.md +12, BUGS.md −8.
+- a71de792 (PR #163 fix/history-popup-question-normal-mode, 2026-05-29) — `src/app/mod.rs` +21/−7 (`Char(' ')` → `Char(' ' | '?')` in Normal-mode handler), FEATURES.md +3, `src/ui/help.rs` +4, CHANGELOG.md +7.
+- feature-jump-history-popup-trigger (thread) — the #95 planning entry (2026-05-15).
+
+<!-- Entry-ID: 01KTMMTPHKSD76E1CG00CDF3TV -->
