@@ -5,19 +5,19 @@
   "title": "history seg docs planning",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-06-08T22:26:07.184474+00:00",
+  "last_updated": "2026-06-08T22:26:18.735080+00:00",
   "summary": "",
-  "entry_count": 9,
+  "entry_count": 10,
   "annotations": {
-    "history-seg-docs-planning": {
+    "01KTMNFX61488V1CQ2DMAM968H": {
       "reactions": {},
-      "tags": [
-        "has_decisions"
-      ],
+      "tags": [],
       "flags": [],
-      "xrefs": [],
+      "xrefs": [
+        "01KTMMSRJ3DEDE2S4VWY5JHEND"
+      ],
       "pinned": false,
-      "last_touched": "2026-06-08T22:26:07.186316+00:00",
+      "last_touched": "2026-06-08T22:26:18.768180+00:00",
       "vote_score": 0
     },
     "01KTMMPA6HBDB91KMZPTBPNHX3": {
@@ -33,6 +33,17 @@
       "last_touched": "2026-06-08T22:26:07.186316+00:00",
       "vote_score": 0
     },
+    "history-seg-docs-planning": {
+      "reactions": {},
+      "tags": [
+        "has_decisions"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:26:18.768180+00:00",
+      "vote_score": 0
+    },
     "01KTMNFKER3C9W6A6MZET6CQXA": {
       "reactions": {},
       "tags": [],
@@ -42,6 +53,19 @@
       ],
       "pinned": false,
       "last_touched": "2026-06-08T22:26:07.186316+00:00",
+      "vote_score": 0
+    },
+    "01KTMMSRJ3DEDE2S4VWY5JHEND": {
+      "reactions": {},
+      "tags": [
+        "decision_extracted"
+      ],
+      "flags": [],
+      "xrefs": [
+        "01KTMNFX61488V1CQ2DMAM968H"
+      ],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:26:18.768180+00:00",
       "vote_score": 0
     }
   }

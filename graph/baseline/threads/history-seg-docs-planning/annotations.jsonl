@@ -2,3 +2,7 @@
 {"id":"01KTMNFP6JX1G40XX5RETJG8GZ","target_id":"01KTMMPA6HBDB91KMZPTBPNHX3","target_type":"entry","kind":"xref","value":"01KTMNFKER3C9W6A6MZET6CQXA","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:07.186316+00:00"}
 {"id":"01KTMNFP6JX1G40XX5RETJG8H0","target_id":"01KTMNFKER3C9W6A6MZET6CQXA","target_type":"entry","kind":"xref","value":"01KTMMPA6HBDB91KMZPTBPNHX3","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:07.186316+00:00"}
 {"id":"01KTMNFP6JX1G40XX5RETJG8H1","target_id":"history-seg-docs-planning","target_type":"thread","kind":"tag","value":"has_decisions","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:07.186316+00:00"}
+{"id":"01KTMNG1GGFK2Q943Q1A69T0VS","target_id":"01KTMMSRJ3DEDE2S4VWY5JHEND","target_type":"entry","kind":"tag","value":"decision_extracted","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}
+{"id":"01KTMNG1GGFK2Q943Q1A69T0VT","target_id":"01KTMMSRJ3DEDE2S4VWY5JHEND","target_type":"entry","kind":"xref","value":"01KTMNFX61488V1CQ2DMAM968H","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}
+{"id":"01KTMNG1GGFK2Q943Q1A69T0VV","target_id":"01KTMNFX61488V1CQ2DMAM968H","target_type":"entry","kind":"xref","value":"01KTMMSRJ3DEDE2S4VWY5JHEND","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}
+{"id":"01KTMNG1GGFK2Q943Q1A69T0VW","target_id":"history-seg-docs-planning","target_type":"thread","kind":"tag","value":"has_decisions","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}

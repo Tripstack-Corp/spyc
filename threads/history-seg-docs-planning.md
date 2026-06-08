@@ -251,3 +251,35 @@ Agent: Claude Code (caleb) | Role: scribe | 2026-06-08T22:12:21.395457+00:00
 > Security features should not be built on regex against another tool's UI.
 
 <!-- Entry-ID: 01KTMNFKER3C9W6A6MZET6CQXA -->
+
+---
+Entry: ExtractDecisionsDaemon (system) 2026-06-08T22:26:18.732858+00:00
+Role: scribe
+Type: Decision
+Title: Adopt the v1.70 'Mise en Place' plan: formalize the MCP socket into a typed d...
+
+Spec: decision-extractor
+[automated: decision_extractor]
+
+Confidence: 5/5
+
+## Decision
+Adopt the v1.70 'Mise en Place' plan: formalize the MCP socket into a typed daemon protocol with kitchen vocabulary (stations, plates, orders, bells), served by one protocol across three clients (CLI, SDK, MCP), with a crate split executed before the protocol work.
+
+## Rationale
+To make spyc programmatically addressable with typed orders and bells instead of timer-based heuristics, absorbing rmux differentiators (typed daemon protocol, embeddable widget, structured snapshots) while rejecting tmux compatibility.
+
+## Scope
+spyc project, v1.70 plan (Mise en Place) — protocol design, client architecture, and crate decomposition
+
+## Alternatives Considered
+Rejected tmux compatibility from rmux; extends v1.60's informal subscribe_frames/send_input rather than replacing it
+
+## Evidence
+Source entry: #4 `01KTMMSRJ3DEDE2S4VWY5JHEND` — "PR #114 — V1_70_PLAN "Mise en Place": programmatic addressability, one protocol / three clients, rmux-inspired crate split" (thread: history-seg-docs-planning)
+Agent: Claude Code (caleb) | Role: scribe | 2026-06-08T22:14:28.414142+00:00
+> one protocol, three clients
+> Crate split happens *before* the protocol work
+> Peer subscription (V1_60's `subscribe_frames`) becomes one order shape among many.
+
+<!-- Entry-ID: 01KTMNFX61488V1CQ2DMAM968H -->
