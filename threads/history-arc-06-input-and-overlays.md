@@ -884,3 +884,29 @@ Provenance:
 - feature-jump-history-popup-trigger (thread) — the #95 planning entry (2026-05-15).
 
 <!-- Entry-ID: 01KTMMTPHKSD76E1CG00CDF3TV -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:15.052757+00:00
+Role: scribe
+Type: Note
+Title: PR #112 — vi editing in path prompts: copy/move/mkdir swap Prompt::simple for Prompt::shell
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the `copy to:` / `move to:` / `mkdir:` prompts switch from `Prompt::simple` (append + backspace) to `Prompt::shell`, gaining the vi line editor; history nav deliberately disabled for them   [kind: new-capability]
+When: 2026-05-21 · PR #112 (feat/vi-editing-in-path-prompts) · commit 7891fad1
+Recorded rationale: "`copy to:` / `move to:` / `mkdir:` prompts get vi editing. These prompts used `Prompt::simple` (plain char append + backspace only); now they use `Prompt::shell` so vi bindings — `w`/`b`, `0`/`$`, `cw`/`dd`, etc. — work for editing the destination path. Tab completion already worked and still does. Up/Down history nav is intentionally disabled for these prompts: they share the shell-command history slot, which has nothing useful for a path prompt and was surfacing `!`-typed commands on Up arrow." — CHANGELOG.md (commit 7891fad1, 2026-05-21)
+Inferred intent: editor-parity across all text prompts — the path prompts were the remaining `Prompt::simple` holdouts without vi editing — evidence: the diff swaps three `Prompt::simple(PromptKind::CopyTo|MoveTo|MakeDir, …)` constructions to `Prompt::shell(…)` in `src/app/mod.rs`, and `src/app/state.rs` adds the history-nav skip gated on those three `PromptKind`s
+                  confidence: high
+Supersedes: the `Prompt::simple` construction of the copy/move/mkdir prompts — replaces it with `Prompt::shell` (verified by the three `simple → shell` swaps in the diff)
+
+The change is small and surgical: three constructor swaps in `src/app/mod.rs` (`Prompt::simple` → `Prompt::shell` for `CopyTo`, `MoveTo`, `MakeDir`) plus a guard in `src/app/state.rs` that suppresses Up/Down history nav for exactly those three `PromptKind`s. The state-side comment names the bug the suppression fixes: "`make sync-all` on Up in a `move to:` prompt" — the path prompts shared the shell-command history slot, so Up surfaced unrelated `!`-typed commands.
+
+This is the same vi-grammar idiom #44 brought to the pager and #123 brings to the file list, now applied to text prompts: the bindings the rationale lists (`w`/`b`, `0`/`$`, `cw`/`dd`) are the shell-prompt editor's, reused rather than reimplemented. The decision to keep Tab completion while dropping history nav keeps the path prompt's input surface coherent — completion is useful, the shared history slot is not.
+
+Provenance:
+- 7891fad1 (PR #112 feat/vi-editing-in-path-prompts, 2026-05-21) — `src/app/mod.rs` +27 (three `Prompt::simple` → `Prompt::shell` swaps), `src/app/state.rs` +12/−3 (history-nav skip for CopyTo/MoveTo/MakeDir), CHANGELOG.md +10.
+
+<!-- Entry-ID: 01KTMMVMS5H1PBSH30EDW6049Q -->
