@@ -568,3 +568,35 @@ Provenance:
 - PR #164/#165 toolchain moment = 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 (the 1.88 MSRV context that unblocks time).
 
 <!-- Entry-ID: 01KTMMX44WY1DPSCGSN27C77S0 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:38.064243+00:00
+Role: scribe
+Type: Note
+Title: PRs #143,#170: release-debug profile (make install-debug) and the v1.51.4 cut
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: release — Reconstructed: a `release-debug` Cargo profile + `make install-debug` target ships a symbolicated `spyc.debug` alongside the symbol-stripped production binary (#143); the [Unreleased] backlog is then cut as the dated v1.51.4 release — the first tagged release since v1.50.0 (#170).   [kind: new-capability]
+When: 2026-05-29 (#143, by date; merged 05-30 00:14) · 2026-05-29 (#170) · PRs #143 (feat/release-debug-syms-target, 5b9b66e), #170 (release/v1.51.4, 6b96ace)
+Recorded rationale: #143 "The production `spyc` binary strips symbols (`strip = \"symbols\"` in `[profile.release]`) — great for ship size, useless for profiling. `sample <pid>` returns raw addresses instead of Rust function names... New `release-debug` Cargo profile inherits all release optimisations (opt-level 3, lto thin, codegen-units 1) but keeps debug info... installed as `spyc.debug` alongside the production binary via `make install-debug`" (5b9b66e^2). #170 "Cut the [Unreleased] backlog as the dated 1.51.4 release (first tagged release since v1.50.0). No code change — CHANGELOG only; Cargo.toml is already at 1.51.4." (6b96ace^2).
+Inferred intent: #143 — make production slowdowns diagnosable without rebuilding, by keeping a parallel symbolicated binary; #170 — the recurring release-cut ritual, now decoupled from version bumps (Cargo.toml already at 1.51.4 from intervening patch work). evidence: #143's new `[profile.release-debug]` inheriting release flags + `make install-debug`; #170's CHANGELOG-only diff. confidence: high
+Supersedes: #170 continues the release cadence from PR #51 (v1.50.0) = 01KTMMMPZDCN2D25KSX9G1R6Y1 and arc-01 PR #4 (v1.37.2) = 01KR0WBKNMQF231X2T8KTGD9KS. #143 adds a profile without superseding the production one.
+
+Two release-flavored moments fold here.
+
+**#143 (release-debug profile):** the production release profile strips symbols for size, which makes `sample <pid>` profiling of a long-running spyc session return raw addresses. The fix is a parallel `release-debug` profile inheriting all release optimizations (opt-level 3, thin LTO, codegen-units 1) but keeping debug info + a packed dSYM, installed as `spyc.debug` via `make install-debug`. Users keep the fast production binary as default and switch to the symbolicated build only to attach a profiler. This is a build/Makefile concern (Makefile +23, Cargo.toml +14) — squarely in the hygiene segment.
+
+**#170 (v1.51.4 cut):** the recurring release ritual, and a notable cadence detail — it is "the first tagged release since v1.50.0," with the v1.50.x patch versions (1.50.5–1.50.17, visible in the cache-campaign commit subjects) and the 1.51.x line having accrued in `[Unreleased]` without a dated cut. By #170 the cut is *purely* CHANGELOG: "Cargo.toml is already at 1.51.4," because intervening patch PRs bumped the version inline. The v1.51.4 CHANGELOG header summarizes the window's hygiene work verbatim: "Under the hood: pinned to Rust 1.96.0, MSRV 1.88, a codebase-wide `if let` chains sweep, and the `time` DoS advisory (RUSTSEC-2026-0009) cleared" — folding PR #164, the MSRV bump, and PR #167 into one release narrative.
+
+Note the merge-order wrinkle: #170 (v1.51.4) merged 2026-05-29 13:51, while #143 merged 2026-05-30 00:14 — so the debug-syms profile landed *after* the v1.51.4 cut and rides a later release.
+
+Provenance:
+- 5b9b66e (PR #143 feat/release-debug-syms-target, merged 2026-05-30) — Cargo.toml +14 (`[profile.release-debug]`); Makefile +23 (`install-debug`); CHANGELOG +7; commit body quoted.
+- 6b96ace (PR #170 release/v1.51.4, 2026-05-29) — CHANGELOG +10 (`## [1.51.4] - 2026-05-29` block); no code; header quoted.
+- PR #51 entry = 01KTMMMPZDCN2D25KSX9G1R6Y1; arc-01 PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (release cadence).
+- PR #164/#165 = 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 and PR #167 = 01KTMMX44WY1DPSCGSN27C77S0 (the work the v1.51.4 header summarizes).
+
+<!-- Entry-ID: 01KTMMY535PG8SJAN371WVMKPN -->
