@@ -138,3 +138,36 @@ Provenance:
 - render.rs origin: 71bc573 (2026-05-30); pager_handler.rs origin: 13a1f2d (2026-05-30) — the superseded Phase-2 single files
 
 <!-- Entry-ID: 01KTMMM1322W32NGAH5H7MWYEP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:47.699087+00:00
+Role: scribe
+Type: Note
+Title: PR #299,300,301,302,304: core subsystems (sessions/resolver/mcp/key-dispatch/pane) split
+
+Spec: scribe
+
+tags: #history #module-decomposition
+
+Moment: module-decomposition — Reconstructed: the non-render core subsystems are converted to directory modules — the 2190-line `src/mcp.rs` and 1878-line `keymap/resolver.rs` are the headline cuts, split into protocol/server/config/readers and a thematically-partitioned test tree; key-dispatch, sessions, and pane follow the same `foo.rs` → `foo/{mod,…}` pattern.   [kind: refactor]
+When: 2026-06-06→07 · PR #299, #300, #301, #302, #304 (refactor/decompose-sessions, -resolver, -mcp, -key-dispatch, -pane) · commits 6a4ce89e, 7898c0ec, 18cf538b, 1023103f, 6b15b03a
+Recorded rationale: "decompose mcp.rs into a directory module" / "decompose resolver.rs; thematically split its test mod" — pre-squash subjects (commits ac78f1e, 594031f). Governed by CLAUDE.md's ~800-line ceiling (PR #282); both source files were >1800 lines.
+Inferred intent: same campaign discipline reaching the protocol/keymap/persistence layers. The splits separate production code from large test modules and partition tests by theme — `keymap/resolver` gains `tests/{bindings,counts,keys,panes,prefixes}.rs` (#300), `mcp` gains `tests/mod.rs` (682 lines) plus `protocol.rs`/`server.rs`/`config.rs`/`readers.rs` (#301). confidence: high
+Supersedes: `src/app/key_dispatch.rs` was created by the REFACTOR_PLAN.md Phase-2 extraction (commit 64be4d3, 2026-05-30; see history-seg-refactor-mvu); `src/state/sessions.rs` and `src/mcp.rs` predate the campaign (sessions/mcp from the v1.5.0 era, commit a31c3b8 for mcp.rs, 2026-04-18). This moment splits each into a directory module.
+
+Reconstructed: the five cuts, folded:
++ #299 sessions → `state/sessions/{mod,tests}.rs` (pure test split, +572/-572)
++ #300 resolver → `keymap/resolver/{mod, tests/{mod,bindings,counts,keys,panes,prefixes}}.rs` (+1907/-1878; the production `mod.rs` is 672 lines, the rest is the partitioned 1235-line test tree)
++ #301 mcp → `mcp/{mod,config,protocol,readers,server,tests/mod}.rs` (+2258/-2192; 2190-line monolith → six files, none over ~700)
++ #302 key-dispatch → `app/key_dispatch/{mod,confirms,prompts}.rs` (+1076/-1053)
++ #304 pane → `pane/{mod,tests}.rs` (pure test split, +201/-194)
+The sessions/resolver/pane cuts are predominantly test-extraction (the production half was already near or under ceiling), confirming the campaign's secondary convention: large `#[cfg(test)]` modules move to dedicated `tests.rs` / `tests/` trees — the convention PR #308 later teaches the no-subprocess git guard to recognize.
+
+Provenance:
+- 18cf538b (PR #301 refactor/decompose-mcp, 2026-06-07) — `src/mcp.rs` -2190; mcp/{config,mod,protocol,readers,server,tests}.rs; ARCHITECTURE.md + AGENTS.md path bumps
+- 7898c0ec (PR #300 refactor/decompose-resolver, 2026-06-07) — `keymap/resolver.rs` -1878; mod.rs +672 + five themed test files
+- 1023103f (PR #302) key_dispatch dir; 6a4ce89e (PR #299) sessions dir; 6b15b03a (PR #304) pane dir
+- ac78f1e / 594031f (pre-squash, bitbucket/refactor/decompose-mcp,-resolver) — directory-module subjects
+- key_dispatch.rs origin: 64be4d3 (2026-05-30); mcp.rs origin: a31c3b8 (2026-04-18) — superseded single files
+
+<!-- Entry-ID: 01KTMMN1CSG84TPZ4ZEFN9K62B -->

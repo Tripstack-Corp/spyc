@@ -5,3 +5,5 @@
 {"source":"entry:01KTMMHZCN03GA638EHKKCY50E","target":"entry:01KTMMJVZMX3SJCBSK8YF896YP","type":"followed_by"}
 {"source":"thread:history-seg-module-decomposition","target":"entry:01KTMMM1322W32NGAH5H7MWYEP","type":"contains"}
 {"source":"entry:01KTMMJVZMX3SJCBSK8YF896YP","target":"entry:01KTMMM1322W32NGAH5H7MWYEP","type":"followed_by"}
+{"source":"thread:history-seg-module-decomposition","target":"entry:01KTMMN1CSG84TPZ4ZEFN9K62B","type":"contains"}
+{"source":"entry:01KTMMM1322W32NGAH5H7MWYEP","target":"entry:01KTMMN1CSG84TPZ4ZEFN9K62B","type":"followed_by"}
