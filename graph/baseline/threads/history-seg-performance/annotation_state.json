@@ -2,13 +2,14 @@
   "history-seg-performance": {
     "reactions": {},
     "tags": [
-      "history"
+      "history",
+      "onboarding"
     ],
     "flags": [],
     "xrefs": [],
     "pinned": false,
-    "last_touched": "2026-06-08T22:31:24.802738+00:00",
+    "last_touched": "2026-06-08T22:31:32.371593+00:00",
     "vote_score": 0
   },
-  "_ann_size": 220
+  "_ann_size": 443
 }
