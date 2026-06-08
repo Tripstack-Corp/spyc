@@ -795,3 +795,32 @@ Provenance:
 - All three CHANGELOG `### Fixed` blocks quoted verbatim above.
 
 <!-- Entry-ID: 01KTMMWD5MCGJ5DM208DS27HRK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:30.846266+00:00
+Role: scribe
+Type: Note
+Title: PR #97 (fix/clipboard-linux-pbcopy): yank works on Linux — src/clipboard.rs platform branches (wl-copy → xclip → xsel), two pbcopy sites deduped
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: clipboard-edge-case — Reconstructed: a new `src/clipboard.rs` module replaces two hardcoded `pbcopy` invocations with platform branches (macOS `pbcopy`; Linux `wl-copy` when `$WAYLAND_DISPLAY` set → `xclip -selection clipboard` → `xsel -ib`), flashing a helper-not-found hint when none is on PATH   [kind: gotcha]
+When: 2026-05-19 · PR #97 (fix/clipboard-linux-pbcopy) · merge f2b1f5b (squash; subject "Fix/clipboard linux pbcopy")
+Recorded rationale: "Yank to clipboard now works on Linux. Previously `yf`, `yp`, `yP`, `ya`, and every pager-side yank failed with `yank failed: No such file or directory (os error 2)` because both clipboard sites unconditionally invoked `pbcopy` (macOS-only). Extracted a single `src/clipboard.rs` helper with platform branches … No new crate dependency — mirrors the `cfg(target_os)` pattern from `src/sysinfo.rs`. Closes Tripstack-Corp/spyc#2." — CHANGELOG.md (PR #97)
+Inferred intent: make the clipboard yank cross-platform by introducing a single shell-out abstraction with an ordered fallback chain — evidence: src/clipboard.rs +192 (new); src/app/mod.rs -... and src/ui/pager.rs -... both lose their inline pbcopy bodies and call the new module; src/main.rs +1 (mod registration). confidence: high
+Supersedes: the two duplicated inline `pbcopy` call sites in `src/app/mod.rs` and `src/ui/pager.rs` — "Deduped two identical bodies … into the new module"
+
+This is the clipboard edge-case fix; the relevant pre-existing thread is `bug-yank-clipboard-pbcopy-linux`, and the CHANGELOG records it as closing the public issue Tripstack-Corp/spyc#2. The bug was platform-specific: both yank sites called macOS-only `pbcopy` unconditionally, so on Linux every yank (`yf`, `yp`, `yP`, `ya`, and pager-side yanks) failed with `os error 2` (binary not found).
+
+The fix is structural, not just a branch: a new `src/clipboard.rs` (+192) consolidates the two previously-duplicated bodies and adds the ordered Linux fallback chain — `wl-copy` (gated on `$WAYLAND_DISPLAY`), then `xclip -selection clipboard`, then `xsel -ib` — with a user-facing flash `no clipboard helper available — install xclip, xsel, or wl-copy` when none resolves. The CHANGELOG notes the deliberate no-dependency choice: "No new crate dependency — mirrors the `cfg(target_os)` pattern from `src/sysinfo.rs`," keeping the clipboard a shell-out rather than pulling an arboard-style crate. The PR also adds install guidance across BUGS.md, FEATURES.md, INSTALL.md (+15), and README.md.
+
+The dedup is the supersession: `src/app/mod.rs` and `src/ui/pager.rs` each shed ~13-21 lines of inline pbcopy logic in favor of the shared module call. Squash merge with full CHANGELOG rationale — recorded.
+
+Provenance:
+- f2b1f5b (PR #97 fix/clipboard-linux-pbcopy, 2026-05-19) — squash; subject "Fix/clipboard linux pbcopy".
+- `git diff f2b1f5b^1 f2b1f5b --stat` — src/clipboard.rs +192 (new), src/app/mod.rs +21/-... , src/ui/pager.rs +23/-... , src/main.rs +1, BUGS.md +8, INSTALL.md +15, README.md +8, FEATURES.md +6.
+- `git diff f2b1f5b^1 f2b1f5b -- CHANGELOG.md` — verbatim rationale quoted above; "Closes Tripstack-Corp/spyc#2".
+
+<!-- Entry-ID: 01KTMMY020Q2946BB69FEVR4QN -->
