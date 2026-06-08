@@ -113,3 +113,29 @@ Provenance:
 - abeac38 (PR #93 docs/pane-startup-tabs-plan, 2026-05-16) — docs/PANE_STARTUP_TABS_PLAN.md +219; ROADMAP.md +10. Cites src/app/mod.rs:4646-4676 (`Action::PaneNewTab`), src/keymap/action.rs:114 (`PaneTabByIndex`).
 
 <!-- Entry-ID: 01KTMMRKSSJ8EN3RC6RB36RSM3 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:28.414142+00:00
+Role: scribe
+Type: Decision
+Title: PR #114 — V1_70_PLAN "Mise en Place": programmatic addressability, one protocol / three clients, rmux-inspired crate split
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: the v1.70 plan reframes the MCP socket from an informal peer-discovery channel (v1.60) into a formal typed daemon protocol — stations, plates, orders, bells — consumed by one protocol across three clients (CLI / SDK / MCP), and sequences a crate split before the protocol work.   [kind: new-capability]
+When: 2026-05-21 · PR #114 (docs/v1.70-mise-en-place-plan) commit 94aa3fb
+Recorded rationale: "v1.70 makes spyc **programmatically addressable**. Every pane, selection, and pager view becomes a named target with a structured snapshot. External clients … issue typed *orders* against those targets and wait on typed *bells* … instead of timer-based heuristics. The MCP socket that V1_60 used informally for peer discovery becomes a formal typed surface in V1_70." — docs/V1_70_PLAN.md, added PR #114
+Inferred intent: a planning pass that absorbs a competitor's (rmux) differentiators — typed daemon protocol, embeddable widget, structured snapshots — while rejecting its tmux compatibility, and stages the crate split as the enabling seam. evidence: 94aa3fb adds docs/V1_70_PLAN.md +271; doc cites rmux + its HN launch as Inspiration and says the differentiators "we want to absorb are the typed daemon protocol + embeddable widget + structured snapshots, not the tmux compatibility"; ROADMAP +10 seven-phase entry. confidence: high
+Supersedes: extends v1.60's informal `subscribe_frames`/`send_input` — the plan says "Peer subscription (V1_60's `subscribe_frames`) becomes one order shape among many." Does not replace v1.60; builds the typed rail above it.
+
+Reconstructed: the plan's architecture is recorded as decided — "one protocol, three clients": a `spyc` CLI (`spyc send-keys`, `spyc plate`), a `spyc-sdk` crate (typed async Rust, embeddable), and the existing MCP server (becomes "a thin wrapper over the daemon protocol; tool names stay the same for compatibility"). All three speak to the running spyc process itself — "there's no separate `spycd`." Kitchen vocabulary names the surfaces: Station (stable pane/picker/pager handle, survives layout changes), Plate (structured snapshot — cwd, selection, mode, exit code, prompt-ready flag), Order (typed incoming command), Bell (async ready signal replacing timer heuristics like `RESTORE_BANNER_SETTLE`). Phase 1 introduces `StationId(u32)` minted monotonically on `PaneTabs::push` / `App::set_pager`.
+
+Cross-segment pointer: the plan states "Crate split happens *before* the protocol work" and lists single-responsibility crates (`spyc-proto`, `spyc-os`, `spyc-pty`, `spyc-ipc`, `spyc-render-core`, `spyc-core`, `spyc-server`, `spyc-cli`, `spyc-sdk`) on the rmux model. That crate-split/MVU execution is owned by history-seg-refactor-mvu — this entry is the pointer only; the decomposition that unblocks it is later sequenced into the road-to-2.0 in #179 (next-but-one moment).
+
+Provenance:
+- 94aa3fb (PR #114 docs/v1.70-mise-en-place-plan, 2026-05-21) — docs/V1_70_PLAN.md +271 (thesis, one-protocol/three-clients, kitchen vocab, seven phases, crate split); ROADMAP.md +10 (v1.70 entry). Cites rmux (github.com/helvesec/rmux) + HN item 48219918 as inspiration.
+- 01KTMMMQ1VY8ZERQ3NQAF89DN4 (prior entry, this thread) — v1.60 plan whose `subscribe_frames` this formalizes.
+
+<!-- Entry-ID: 01KTMMSRJ3DEDE2S4VWY5JHEND -->

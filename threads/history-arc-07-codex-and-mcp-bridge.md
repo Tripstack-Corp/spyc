@@ -609,3 +609,29 @@ Provenance:
 - second-parent subject (b5d4d9a^2): "feat: status bar agent segment + archive V1_5_PLAN.md (v1.50.18)".
 
 <!-- Entry-ID: 01KTMMRZ2K1RSQN8HNSHZS03E1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:31.395426+00:00
+Role: scribe
+Type: Note
+Title: PR #109 — Claude resume-enter race: a two-phase keystroke injection
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: the claude restore path splits its `/resume <sid>\r` injection into text-then-Enter to dodge a mid-render submit drop   [kind: gotcha]
+When: 2026-05-21 · PR #109 (fix/claude-resume-enter-race) · commit 58a67d1
+Recorded rationale: "Intermittent 'Claude restore stops at the prompt' race fixed. Restoring a session with a Claude pane sometimes left the `/resume <sid>` command typed but unsubmitted [...] a single combined write of `/resume <sid>\r` could arrive at Claude's TUI mid-render, the prompt absorbed the chars but the trailing `\r` got dropped" — CHANGELOG.md (added PR #109)
+Inferred intent: a timing fix in the peer-specific restore path — claude's, specifically — that the parallel-per-peer design localizes to one branch — evidence: diff is `src/app/mod.rs` +68 and `src/pane/tabs.rs` +31, claude restore path only
+                  confidence: high
+Supersedes: the claude restore-spawn injection timing from PR #19's resume work — changes a single combined write to two phased writes
+
+The fix is recorded precisely: "the keystroke injection is two-phase: text goes in after a 2 s banner-settle (was 1.5 s), then 300 ms later a separate `\r` write submits it. The pause between writes lets the prompt finish reacting to the typed chars before we tell it to submit" (CHANGELOG.md). The bug is a classic TUI-injection race — a downstream agent's prompt re-rendering swallows a trailing carriage return when the whole command arrives in one write.
+
+What makes this a segment-relevant gotcha rather than a generic bug: it lands in the claude-specific restore branch. In the parallel-per-peer world this segment inhabits, a timing fix for claude does not automatically protect codex/gemini's restore paths — each has its own injection sequence. The diff touches only `src/app/mod.rs` (+68) and `src/pane/tabs.rs` (+31); no shared injection helper exists to fix once. This is the kind of per-peer maintenance burden that motivates the #176 registry, though #176's `AgentProfile` carries behavior selectors rather than a unified injector, so the phased-write timing stays claude-shaped after it too.
+
+Provenance:
+- 58a67d1 (PR #109 fix/claude-resume-enter-race, 2026-05-21) — `src/app/mod.rs` +68/-15, `src/pane/tabs.rs` +31; banner-settle 1.5s→2s, separate 300ms-delayed `\r` write. Clean squash (no second parent); rationale from CHANGELOG verbatim.
+
+<!-- Entry-ID: 01KTMMT76DJR9MACFF973R44PK -->

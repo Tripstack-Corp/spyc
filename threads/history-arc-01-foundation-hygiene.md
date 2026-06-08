@@ -446,3 +446,33 @@ Provenance:
 - arc-01 PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (the `make check` gate these run under).
 
 <!-- Entry-ID: 01KTMMQN283Z4FYP184WT4015X -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:24.748987+00:00
+Role: scribe
+Type: Note
+Title: PR #88: scheduled weekly deps-drift pipeline — advisories caught off the push path
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: supply-chain — Reconstructed: a `weekly-deps` custom Bitbucket pipeline is added, running `cargo deny check advisories` (hard-fail) + `cargo outdated` + `cargo tree --duplicates` (soft), wired to a UI-configured schedule rather than push.   [kind: new-capability]
+When: 2026-05-14 · PR #88 (ci/weekly-deps-drift) · commit b806df1 (merge)
+Recorded rationale: not recorded as a body (squash merge; subject only: "ci: weekly deps-drift pipeline (advisories + outdated)"). The rationale is carried in the `bitbucket-pipelines.yml` header comment added by the diff (read directly, it IS the design statement).
+Inferred intent: close the gap where RUSTSEC advisories land against unchanged deps on weeks with no commits — the push-path quality gate cannot catch those. evidence: the added header comment "It does NOT run on push — it's wired to a Bitbucket *schedule*... Quality-gate runs on PRs cover the push path; this run covers the gap"; the step comment on `cargo deny check advisories` "picks up new advisories against existing deps even on weeks where we shipped no commits". confidence: high
+Supersedes: extends the cargo-deny supply-chain rail from arc-01 PR #3 = 01KR0W9QF3P9E529E6J3XQMXDV — that PR made cargo-deny a push-time gate; this adds the time-based dimension cargo-deny's static gate could not cover.
+
+PR #88 adds a third CI step (`&deps-status`, "Dependency drift report") alongside Quality and Coverage, plus rewrites the pipeline header to document a `weekly-deps` custom pipeline. The pipeline reuses the exact pinned cargo-deny prebuilt block from PR #57 (same VERSION 0.19.4 / SHA256, same idempotent install dance) and adds `cargo install cargo-outdated --locked`.
+
+The severity split is deliberate and documented in the diff: `cargo deny check advisories` hard-fails (re-fetches the RUSTSEC DB every run), while `cargo outdated --root-deps-only || true` and `cargo tree --duplicates || true` are soft — "we want the report visible in the log... not a red build that trains us to ignore it". The schedule itself lives in the Bitbucket repo UI, not YAML: "Bitbucket Cloud doesn't expose schedules in YAML; the pipeline name and the UI schedule are the contract." Failures route through "the existing Bitbucket → Slack integration."
+
+This is the supply-chain rail growing a temporal axis. Arc-01 PR #3 made advisory-checking a *push-time* gate via `make check`'s `deny` target; on a quiet week, a freshly-published RUSTSEC advisory against an existing dep would not be caught until the next commit. The weekly schedule closes that gap. The PR also touches BUGS.md (−5) and TODO.md (+51) — bookkeeping folded here, no separate moment.
+
+Provenance:
+- b806df1 (PR #88 ci/weekly-deps-drift, 2026-05-14) — bitbucket-pipelines.yml: header rewrite + `&deps-status` step (+61); BUGS.md −5, TODO.md +51.
+- bitbucket-pipelines.yml header + step comments (post-merge) — quoted above; the recorded rationale for a subject-only squash.
+- arc-01 PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV (the cargo-deny push-time gate this extends).
+- PR #57 entry = 01KTMMPDE6S4PA834YDR24SX1H (the prebuilt cargo-deny block reused here).
+
+<!-- Entry-ID: 01KTMMSWZPN5FJTTCCRZ7CA445 -->
