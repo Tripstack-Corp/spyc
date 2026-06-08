@@ -408,3 +408,41 @@ Provenance:
 - prior entry 01KTMM409Y3RTZPDTVWPQWR6EW (this thread, Phase E) — left the render/dispatch loop body for this purity pass.
 
 <!-- Entry-ID: 01KTMM4ZMPP9DCW3R3NK5BDA93 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:03:25.678784+00:00
+Role: scribe
+Type: Note
+Title: PR #267–#274 — Last-mile: unified Update enum → single App::update entry point, command-table module, decide_focus
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the three separate update entry points (`ApplyResult`/`CommandResult`/`PromptResult`) collapse into one — a unified `Update` enum with `From` conversions (Stage 3B), bridges consuming it (3C), and finally a single `App::update(msg)` entry (3D) — alongside relocating the `:command` registry into `command_table.rs`, extracting pure agent resume-strippers/resolvers into `src/agent/resume.rs`, and extracting `decide_focus` as a pure tested fn.   [kind: refactor]
+When: 2026-06-03 · PR #267 (update-enum) commit c6beaa4 · #268 (update-collapse) · #269 (update-entry) commit 266c306 · #270 agent-strippers · #271 resume-resolver · #272 cmd-table-move · #273 cmd-handlers · #274 decide-focus commit a1e487a
+Recorded rationale: Squash subjects — #267 "add unified Update enum + From conversions (Stage 3B)"; #268 "bridges consume the unified Update enum (Stage 3C)"; #269 "single App::update(msg) entry point (Stage 3D)"; #272 "relocate the :command registry into command_table.rs (Part A.1)"; #273 "table-driven :command dispatch with compile-checked handlers (Part A.2)"; #274 "extract decide_focus as a pure fn behind tests (Stage 5)." Underlying plan: "Collapse the three update entry pairs into one `update(&mut Model, &mut ViewState, Message, now) -> Vec<Effect>`." — docs/MVU_PLAN.md (Phase 5); and ARCHITECTURE.md's named last-mile work: "collapsing the three update entry points (`ApplyResult`/`CommandResult`/`PromptResult`) into one `update(…)`."
+Inferred intent: this closes the single-`update()` goal the plan deferred from Phase 5 and ARCHITECTURE.md flagged as in-progress. The staged sequence (3B add enum + From shims → 3C bridges consume it → 3D one entry) is the strangler-fig pattern applied to the result-enum collapse: the unified enum coexists with the three carriers before they're removed. #272/#273 finish the Phase-6 command table by giving it its own module (`command_table.rs`) with compile-checked handlers (so a missing registration is a compile error, not a runtime "unknown command" flash). #270/#271 lift the pure agent resume logic into `src/agent/resume.rs`; #274 extracts `decide_focus` as a pure tested fn — both are de-IO/purity tidy-ups.   confidence: high
+Supersedes: the three-way update carrier (`ApplyResult`/`CommandResult`/`PromptResult` entry points) → one `App::update(msg)` (#267→#269); the in-`state.rs` `COMMAND_TABLE` from Phase-6 entry 01KTMM27M59N08NB1HSWCESQTR → relocated to `command_table.rs` with compile-checked handlers (#272/#273). Builds on entry 01KTMM4ZMPP9DCW3R3NK5BDA93 (last-mile render).
+
+Reconstructed — the slice, folded:
++ #267 unified `Update` enum + `From` conversions (Stage 3B).
++ #268 bridges consume the unified `Update` enum (Stage 3C).
++ #269 single `App::update(msg)` entry point (Stage 3D) — the collapse completes.
++ #270 move pure resume-strippers into `src/agent/resume.rs`.
++ #271 move resume-target resolvers into `agent/resume.rs` (Stage 4.2).
++ #272 relocate the `:command` registry into `command_table.rs` (Part A.1).
++ #273 table-driven `:command` dispatch with compile-checked handlers (Part A.2).
++ #274 extract `decide_focus` as a pure fn behind tests (Stage 5).
+This is the terminal moment of the MVU campaign in this slice: the Model/View/Update triad is structurally complete — one channel, one `update` entry, effects-as-data executed by `run_effects`, a mutation-free render path, and a compile-checked command table. The campaign continues into the module-decomposition track (see history-seg-module-decomposition, #248–#308) which carves the now-MVU `src/app/` further; the gix work proceeds on history-seg-gix-migration.
+
+Provenance:
+- c6beaa4 (PR #267, 2026-06-03) — unified `Update` enum + From; Stage 3B.
+- 4b60ae8/266c306 (PR #268/#269, 2026-06-03) — bridges consume Update; single `App::update(msg)` entry (3C/3D).
+- df32eb7/794b2a7 (PR #270/#271, 2026-06-03) — `src/agent/resume.rs` strippers + resolvers.
+- 0b8c8b2/aaec6847 (PR #272/#273, 2026-06-03) — `command_table.rs` relocation + compile-checked handlers.
+- a1e487a (PR #274, 2026-06-03) — `decide_focus` pure fn behind tests.
+- docs/MVU_PLAN.md (Phase 5 collapse) + ARCHITECTURE.md (Remaining last-mile work) — quoted.
+- prior entries 01KTMM27M59N08NB1HSWCESQTR (Phase 6 command table) and 01KTMM4ZMPP9DCW3R3NK5BDA93 (last-mile render) in this thread.
+
+<!-- Entry-ID: 01KTMM60KR8W18TWXPXDGT9J8Y -->
