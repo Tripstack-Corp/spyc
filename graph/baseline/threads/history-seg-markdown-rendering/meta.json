@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-08T22:13:29.838341+00:00",
   "summary": "",
-  "entry_count": 10
+  "entry_count": 10,
+  "annotations": {
+    "history-seg-markdown-rendering": {
+      "reactions": {},
+      "tags": [
+        "history"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:31:07.554863+00:00",
+      "vote_score": 0
+    }
+  }
 }
