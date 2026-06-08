@@ -89,6 +89,13 @@ enum Message {
     /// the `if let Some(picker)` guard). Collapsed in the coalesce pre-step;
     /// never surfaced as `Input`.
     FindOutput,
+    /// A pager-stream worker (the unified `pager_stream` abstraction — grep /
+    /// git-view / transcript collapse onto it) produced a batch / its one-shot
+    /// model. Payloadless wake — the payload rides the boxed stream's `rx`,
+    /// re-drained by `drain_pager_stream` (id-gated against the live pager's
+    /// `stream_id`, so a wake for a replaced/closed stream self-discards).
+    /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
+    PagerStreamOutput,
     /// MVU Phase 3d: a writable MCP request forwarded from the socket server.
     /// Unlike the wake variants, this carries a payload (the command + its
     /// one-shot reply Sender). Buffered into `mcp_pending` by the recv
@@ -194,6 +201,7 @@ mod mod_tests;
 mod navigate;
 mod pager_handler;
 mod pager_history;
+mod pager_stream;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
@@ -410,6 +418,20 @@ struct Runtime {
     git_view_session: Option<GitViewSession>,
     /// Monotonic git-view-session id (stale-session guard).
     next_git_view_id: u32,
+    /// The active pager stream (the unified "worker → pager" abstraction —
+    /// see [`pager_stream`]). grep / git-view / transcript collapse onto this
+    /// slot as each migrates; `None` until then. Drained every tick by
+    /// `drain_pager_stream` (id-gated against the live pager's `stream_id`).
+    pager_stream: Option<Box<dyn pager_stream::PagerStream>>,
+    /// Monotonic pager-stream id (stale-stream guard), shared across all
+    /// stream kinds.
+    next_stream_id: u32,
+    /// In-flight pager streams parked while their LowerPane scrollback pager is
+    /// stashed on a backgrounded tab (keyed by the pager's `stream_id`). Kept
+    /// here rather than on the `pane::TabEntry` because `PagerStream` is an
+    /// `app` type and the dependency runs `app → pane` only. Re-installed into
+    /// `pager_stream` by `restore_active_tab_scrollback_pager`.
+    stashed_pager_streams: std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
     /// Off-render-thread agent-status resolve: the landing slot + in-flight
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,

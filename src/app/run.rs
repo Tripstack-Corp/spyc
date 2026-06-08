@@ -259,6 +259,7 @@ impl App {
                 | Message::SinkOutput { .. }
                 | Message::GrepOutput
                 | Message::GitViewOutput
+                | Message::PagerStreamOutput
                 | Message::FindOutput
                 | Message::ReaderExited
                 | Message::AgentStatusReady,
@@ -484,6 +485,13 @@ impl App {
             // renders it into the matching pager (and the session stays
             // alive to back the `|` layout toggle).
             if self.drain_git_view_session() {
+                ctx.draw.mark(3);
+            }
+
+            // The unified pager-stream drain (the `pager_stream` abstraction
+            // grep / git-view / transcript collapse onto). A no-op while no
+            // stream is active; id-gated against the live pager's `stream_id`.
+            if self.drain_pager_stream() {
                 ctx.draw.mark(3);
             }
 

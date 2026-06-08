@@ -179,6 +179,12 @@ pub struct PagerView {
     /// `lines` once the worker reports, and the `|` layout toggle re-renders
     /// from the retained model while the id matches the active session.
     pub git_view_id: Option<u32>,
+    /// When set, this pager view is backed by a [`crate::app`] *pager stream*
+    /// (the unified worker→pager abstraction). The main tick loop drains the
+    /// active stream into this view while the id matches; a wake for a
+    /// replaced / closed / stashed pager self-discards. grep / git-view /
+    /// transcript migrate onto this, retiring `grep_id` / `git_view_id`.
+    pub stream_id: Option<u32>,
     /// Number of columns for multi-column layout (1 = normal single column).
     /// Lines flow top-to-bottom within each column, then left-to-right.
     pub columns: u8,

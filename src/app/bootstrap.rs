@@ -237,6 +237,9 @@ impl App {
                 next_grep_id: 0,
                 git_view_session: None,
                 next_git_view_id: 0,
+                pager_stream: None,
+                next_stream_id: 0,
+                stashed_pager_streams: std::collections::HashMap::new(),
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
