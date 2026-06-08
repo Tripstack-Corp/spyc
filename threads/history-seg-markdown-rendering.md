@@ -187,3 +187,55 @@ Provenance:
 - CHANGELOG.md (added PR #118, PR #130); ROADMAP.md (added PR #118) — quoted rationale above
 
 <!-- Entry-ID: 01KTMMMZT01JK92DWDBMNJASWD -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:03.903530+00:00
+Role: scribe
+Type: Note
+Title: PR #125 — markdown re-renders after v (edit in $EDITOR) returns
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: the $EDITOR-return path (`PagerReturn::SourceFile`) stops rebuilding the view inline via `PagerView::new_plain` and instead reuses `build_pager_view_for_file`, so a markdown file edited with `v` comes back rendered (with a working `m` toggle) instead of as plain text.   [kind: gotcha]
+When: 2026-05-23 · PR #125 (fix/markdown-rerender-after-edit) · commit 1337602
+Recorded rationale: "Markdown re-renders after `v` (edit in $EDITOR) returns. Reported by JRob: open a `.md` (rendered), press `v` to edit it in $EDITOR, quit the editor — the file came back as plain text and `m` had nothing to toggle to. The `PagerReturn::SourceFile` restore path built the view inline via `PagerView::new_plain`, skipping the markdown / alt_lines branch entirely. Reuse the full `build_pager_view_for_file` builder on return so markdown files go through the same rendering path as on first open; override the position with the scroll we stashed before launching $EDITOR." — CHANGELOG.md (added PR #125)
+Inferred intent: a lifecycle-parity gotcha — the edit-return path bypassed the single rendering builder, so the rendered/source dual-view invariant from PR #85 didn't survive a round-trip through $EDITOR. evidence: src/app/mod.rs -25 old `let mut view = PagerView::new_plain(name, lines)` → +36 `self.build_pager_view_for_file(&path)`, with +39 comment "override ... the per-file cache with the scroll" stashed before launch. Removes 2 entries from BUGS.md.
+                  confidence: high
+Supersedes: closes a regression against PR #85's rendered/source dual-view lifecycle (Entry 01KTMMG3MTKFGRKYEJGHN65QY8) — that invariant held on first open but not through the $EDITOR return path until this PR routed both through the same builder.
+
+A small but architecturally telling fix (src/app/mod.rs +26/-? ; net the diff is a delete-and-redirect to the shared builder). The bug is the classic "two code paths construct the same view" hazard: first-open used `build_pager_view_for_file` (markdown-aware), edit-return used `new_plain` (not). Consolidating onto one builder is the durable correctness move. The scroll stashed before launching $EDITOR is reapplied, tying back to PR #85's per-side scroll memory.
+
+Provenance:
+- 1337602 (PR #125 fix/markdown-rerender-after-edit, 2026-05-23) — src/app/mod.rs +26/-? (PagerReturn::SourceFile reuses build_pager_view_for_file + scroll override); BUGS.md -2, CHANGELOG.md +12
+- CHANGELOG.md (added PR #125) — quoted re-render-after-edit rationale (reported by JRob)
+- 82dc9d8 (PR #85, 2026-05-13) — the dual-view lifecycle this restores through the edit path (Entry 01KTMMG3MTKFGRKYEJGHN65QY8 in this thread)
+
+<!-- Entry-ID: 01KTMMNW2TV95JZ1QG2HVWA0J7 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:34.945631+00:00
+Role: scribe
+Type: Note
+Title: PR #129 — JSON pretty-print pager (src/ui/json.rs), m toggles pretty↔raw
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: a new `src/ui/json.rs` module opens `.json` files as canonical 2-space-indented JSON (syntect-highlighted), with `m` toggling pretty↔raw on-disk bytes — generalizing the markdown rendered/source toggle to a second content type. Parse failures and `.jsonl` fall through to plain text.   [kind: new-capability]
+When: 2026-05-24 · PR #129 (feat/json-pretty-pager) · commit c2584d5
+Recorded rationale: "JSON pretty-print pager. `.json` files now open with canonical 2-space-indented JSON in the pager, with syntect highlighting on top. Minified-on-disk files become readable on open; already-pretty files render unchanged. — `m` toggles pretty ↔ raw on-disk bytes (mirrors the markdown `m` toggle). Toggle is suppressed when the two views would be identical. — Parse failures (json5-with-comments, malformed input) fall through to the existing plain-text pager — no behavior regression for non-strict JSON files. — `.jsonl` (line-delimited JSON) is intentionally NOT pretty-printed: reflowing would destroy the one-record-per-line affordance ... No new crate deps (uses the existing `serde_json` + `syntect`)." — CHANGELOG.md (added PR #129)
+Inferred intent: reuses the markdown rendered/source dual-view machinery (PR #85) for a structurally identical pretty/raw pair — pretty is "rendered," raw on-disk bytes are "source." evidence: new file src/ui/json.rs +84 with `is_json_path` (+22, "Deliberately does NOT match `.jsonl`"), `pretty_print` (+39 `serde_json::from_str(input).ok()?` → `to_string_pretty`); src/ui/mod.rs +1 registers the module; src/app/mod.rs +34 builds pretty into `lines`, stashes raw into `alt_lines`, +41 `if pretty != content` gates the toggle ("the same interpretation for JSON: pretty is 'rendered'"); src/ui/pager.rs +5 minor wiring. Pre-squash second parent subject: "feat: JSON pretty-print pager (.json), m toggles pretty ↔ raw" (commit 4ecbb6b, 2026-05-23).
+                  confidence: high
+Supersedes: (none) — extends the PR #85 dual-view lifecycle to a new content type rather than replacing prior behavior. CHANGELOG defers folding / path-indicator / search-within-structure / `:jq` to "v1.50.73+".
+
+The third distinct rendering content type in the pager (after markdown rendered/source and syntect highlighting): JSON pretty/raw. The implementation deliberately mirrors markdown — same `m` key, same lines/alt_lines slot pattern, same fail-open philosophy (non-strict JSON falls through to plain text, no regression). The `.jsonl` exclusion is an explicit affordance-preservation decision baked into `is_json_path`. No new dependencies — `serde_json` and `syntect` were already in the tree.
+
+Provenance:
+- c2584d5 (PR #129 feat/json-pretty-pager, 2026-05-24; second parent 4ecbb6b "feat: JSON pretty-print pager (.json), m toggles pretty ↔ raw") — new src/ui/json.rs +84 (is_json_path, pretty_print + tests); src/ui/mod.rs +1; src/app/mod.rs +34 (pretty→lines / raw→alt_lines, toggle gate); src/ui/pager.rs +5; CHANGELOG.md +19
+- CHANGELOG.md (added PR #129) — quoted JSON pretty-pager rationale incl. .jsonl exclusion and deferred features
+- 82dc9d8 (PR #85, 2026-05-13) — the dual-view `m`-toggle machinery this reuses (Entry 01KTMMG3MTKFGRKYEJGHN65QY8 in this thread)
+
+<!-- Entry-ID: 01KTMMPPPBJYJVVAGK5WSP6Y9P -->

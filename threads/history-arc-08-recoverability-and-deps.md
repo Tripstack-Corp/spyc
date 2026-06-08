@@ -642,3 +642,33 @@ Provenance:
 - `onboarding-risk-register` entry 0 = 01KR0P9JC8Z3DF6FQ1GJPF3VKA ("Bitten on `:undo` (v1.41.1)" verbatim; the seed-level naming of PR #14's bug class).
 
 <!-- Entry-ID: 01KR3A23E11K8F7VNVSM5XY6M2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:14.450380+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): staying correct and alive under adversarial/edge conditions
+
+Spec: scribe
+
+tags: #history #arc-08
+
+This Note opens the **#38–#311 continuation** appended to arc 08. The original thread (entries 0–7) reconstructed the baseline recoverability-and-deps PRs (#13 graveyard-undo, #14 undo-routing, #28 huge-directory cap, #30 vt100-panic-recovery, #31 vt100/ratatui bump). The continuation extends the same theme — spyc staying correct and alive under adversarial/edge conditions — across eleven later PRs on `main` (2026-05-08 → 2026-05-28).
+
+The continuation slice and its sub-throughlines:
+
+- **The "shrink the unsafe surface" security pair** — #83 (refactor/unsafe-reduction, 05-13) cuts unsafe sites 36 → 2; #154 (fix/remove-unsafe-setenv, 05-28) then removes one of the two remaining sites. Verified: `git grep -c unsafe` at #83's parent (76cf4e6^) returns 36; the CHANGELOG names the residual two as `:setenv` and `install_signal_handlers`. #154 is the supersession that takes `:setenv` off that list.
+- **The "PROJECT_HOME is the anchor for all path ops" throughline** — #91 (worktree chroot, 05-15), #101 (session-save anchor, 05-19), #102 (yank-paste relative, 05-19). Three PRs converge `project_home` into the single anchor for harpoon, MCP context, session save, and selection-paste. #101 supersedes the prior cwd-relative defaulting (the `.git`-required initialization).
+- **Session-save quit fix** — #98 (fix/q-command-session-save, 05-19) reconciles `:q` / `:quit` with the `Q` keybinding's save lifecycle. Directly relevant: the existing thread `bug-q-command-skips-session-save`.
+- **Huge-tree resilience** — #87 (recursive-watch cap, 05-14) caps the listing watcher's subdir walk at 256, explicitly "same shape as the MAX_ENTRIES cap" from PR #28 (this thread). Relevant thread: `bug-listing-watcher-recursive-hang`.
+- **Terminal / clipboard / symlink edge cases** — #55 (COLORTERM=truecolor, 05-08), #97 (clipboard linux pbcopy, 05-19; relevant thread `bug-yank-clipboard-pbcopy-linux`), #127 (Enter follows symlinks-to-dirs, 05-23).
+- **The graveyard surface continues** — #124 (graveyard-view-discoverable, 05-23) adds `?` help and an entry hint to the graveyard view PR #13 (this thread) shipped.
+
+Voice and method match the baseline entries: third-person observational, reconstruction voice, verbatim CHANGELOG/commit quoting, honest recorded-vs-inferred marking. Most PRs in this slice carry rich CHANGELOG rationale (recorded); the squash-only ones are marked. Moments follow in chronological order.
+
+Provenance:
+- This thread's framing entry = 01KR38QZ1XQ6EP2A4QC94DRD80; PR #13 entry = 01KR38VEGHFT9JGRDCXXBFX8V1; PR #28 entry = 01KR3903VA7DTNDJKQAFZ6DP8M.
+- Merge SHAs verified on `main`: #55 ba6d07e, #83 106b8e7, #87 f06201f, #91 93a8af9, #97 f2b1f5b, #98 e347152, #101 5811f22, #102 a74a309, #124 9135c10, #127 4accb70, #154 a4ce0f6.
+- `git grep -c unsafe 76cf4e6^ -- src` = 36 (pre-#83 baseline).
+
+<!-- Entry-ID: 01KTMMNZGF280TRX1M7C616KGM -->

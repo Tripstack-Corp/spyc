@@ -752,3 +752,55 @@ This Note opens the **#38–#311 continuation** appended to arc 06. The arc-06 b
 Moments follow in chronological order: #39, #44, #63, #82, #95+#163, #112, #120, #123+#126, #155.
 
 <!-- Entry-ID: 01KTMMN5RTFKWX352K9XBR4V0D -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:16.864179+00:00
+Role: scribe
+Type: Note
+Title: PR #39 — nvim cursor visible again in pty panes: render-side cursor placement, not a dispatch change
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: a render-side fix restores the host cursor for alt-screen pty children; not an input-routing change, but the first child-TUI keystroke-feedback fix of the window   [kind: gotcha]
+When: 2026-05-07 · PR #39 (fix/nvim-cursor-visible-in-pty-pane) · commit 616b1798
+Recorded rationale: "nvim / less / htop / lazygit cursor visible again inside spyc's pty panes. Reported by Spencer: opening nvim via `V` (top overlay) or `^a-c` → `nvim` (new tab) showed an invisible cursor … Root cause: the v1.41.18 alt-screen guard correctly stopped us from painting a reverse-block over nvim's cursor shape — but spyc hides the host cursor at startup (`main.rs::setup_terminal`) and nothing was telling ratatui to put it back at the child's vt100 cursor position … Now `App::render` calls `frame.set_cursor_position` for the focused pty pane … gated on `!screen.hide_cursor()` so DEC ?25l still hides the cursor." — CHANGELOG.md (commit 616b1798, 2026-05-07)
+Inferred intent: a regression-tail of the v1.41.18 alt-screen guard — the guard stopped spyc painting over the child cursor but left no host cursor at all for alt-screen children — evidence: the rationale names v1.41.18 as the introducing change; diff is render-side only (`src/app/mod.rs` +119/-28, no keymap/resolver touch)
+                  confidence: high
+Supersedes: (none) — repairs a side-effect of the v1.41.18 alt-screen guard, outside this thread's slice
+
+This is the first keystroke-feedback moment of the continuation, and it sits on the *render* side rather than the dispatch side: keystrokes were reaching the nvim child correctly: only the visual cursor was missing. `App::render` now calls `frame.set_cursor_position` at the focused pty's vt100 cursor coordinates (`src/app/mod.rs`), choosing the overlay pane when `!pane_focused` and the bottom pane otherwise, gated on `!screen.hide_cursor()` so a child's DEC `?25l` still hides it. Non-alt-screen panes keep the existing reverse-block cue.
+
+The rationale is explicit that this is a child-TUI integration gotcha, not a spyc input bug — `v` (full TTY suspend) was unaffected "because the OS terminal owned the cursor." The note also scopes out a follow-on: forwarding the child's *cursor shape* (beam vs block) to the host is "a separate piece of work."
+
+Provenance:
+- 616b1798 (PR #39 fix/nvim-cursor-visible-in-pty-pane, 2026-05-07) — `src/app/mod.rs` +119/-28 (render-side `set_cursor_position`), CHANGELOG.md +19, BUGS.md +15. No `src/keymap/` or resolver changes.
+
+<!-- Entry-ID: 01KTMMP1HT4HHTN0KCRGZ3S8DK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:55.261857+00:00
+Role: scribe
+Type: Note
+Title: PR #44 — visual block (columnar) selection: the pager grows a vi ^v mode
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the pager gains vi's `^v` rectangle (block visual mode), a new keystroke-driven mode on top of the existing line-visual `V`   [kind: new-capability]
+When: 2026-05-07 · PR #44 (feat/v1.5-phase-4-block-visual-mode) · commit d7a23a78
+Recorded rationale: "Visual block (columnar) selection in the pager. v1.5 Phase 4 — vi's `^v` rectangle. From normal pager mode `^v` enters block visual; from line visual (`V`) `^v` upgrades in place, preserving anchor / cursor lines. `j`/`k` extend rows, `h`/`l` extend columns … `y` yanks the slice … `V` from inside block drops down to line mode (vim parity)." — CHANGELOG.md (commit d7a23a78, 2026-05-07)
+Inferred intent: a numbered phase of the v1.5 vi-pager work — the subject reads "v1.5 Phase 4: visual block (columnar) selection" — evidence: the merge subject names the phase; diff bulk is in the pager not the dispatch layer (`src/ui/pager.rs` +451/-…)
+                  confidence: high
+Supersedes: (none) — extends the line-visual `V` mode, does not replace it
+
+The block-visual key grammar lives inside the pager, not the global resolver: `src/ui/pager.rs` carries 451 of the PR's insertions while `src/app/mod.rs` takes only 64. This is consistent with the pager owning its own modal keystroke handling once an overlay is mounted — the same pager-as-self-contained-surface shape PR #82 later has to special-case in routing (`pager_mount: Some(Mount::TopPane | LowerPane)`, see the route-event moment).
+
+The rationale carries an honest caveat worth keeping: "column units are character-based (Unicode scalars), not display-width — so a wide CJK / emoji glyph counts as 1 in the rectangle even though it paints as 2 cells. Vim does the same; full display-width-aware block selection is future work." The mode-transition rules are stated as vim-parity throughout (`^v` toggles off, `V` from block drops to line mode, `Esc` cancels), establishing the vi-grammar idiom this window's later keymap moments (#123 `dd`, #126 `S`) extend into the file list.
+
+Provenance:
+- d7a23a78 (PR #44 feat/v1.5-phase-4-block-visual-mode, 2026-05-07) — `src/ui/pager.rs` +451/-…, `src/app/mod.rs` +64, CHANGELOG.md +25, FEATURES.md +7.
+
+<!-- Entry-ID: 01KTMMQ0GAARS6ZPT0B6044VEF -->

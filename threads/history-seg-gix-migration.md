@@ -105,3 +105,53 @@ Provenance:
 - CHANGELOG.md (at 5edcc569) — quoted gix-status rollout entry
 
 <!-- Entry-ID: 01KTMMMBVCGADASG74RTHKWY97 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:07.081193+00:00
+Role: scribe
+Type: Note
+Title: PR #288 — worktree create/list/remove on gix; per-repo .worktrees/ grouping
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: worktree operations (create/list/remove) migrate to gix; the `worktree-mutation` gix feature is enabled as pre-planned, and the on-disk layout changes to group worktrees under a per-repo `<repo>.worktrees/<branch>` dir. [kind: supersession]
+When: 2026-06-06 · PR #288 (feat/gix-worktree) · commit b9dcdfa0 (squash); feature-branch commit a7a06ce5
+Recorded rationale: "feat(git): group worktrees under <repo>.worktrees/<branch>" — commit a7a06ce5, 2026-06-06. CHANGELOG.md verbatim: "`W n` now groups worktrees under a per-repo `<repo>.worktrees/<branch>` dir (e.g. `~/src/foo.worktrees/feature`) instead of a bare `<repo_parent>/<branch>` sibling — no more cluttering the parent dir or colliding with unrelated same-named dirs. Part of the git → gix migration."
+Inferred intent: two changes ride together here — the backend swap (subprocess `git worktree` → gix worktree-mutation) and a UX/layout fix (group worktrees in a dedicated per-repo dir to avoid parent-dir clutter and same-name collisions). The Cargo.toml comment from PR #284 had pre-committed to enabling `worktree-mutation` "when worktree create/remove migrates (PR 6)", and this is PR 6 of the 9-step arc. Evidence: src/git/worktree.rs +743/-105 (the largest single-file change in the segment), Cargo.toml +5 (worktree-mutation feature), Cargo.lock +29. confidence: high
+Supersedes: the subprocess `git worktree` calls in src/git/worktree.rs (the verbatim-relocated subprocess version from PR #283) — replaced with gix mutation. Also supersedes the old bare-sibling worktree layout with the grouped `<repo>.worktrees/<branch>` scheme.
+
+worktree.rs nearly quadruples (125 → ~760 LoC), consistent with worktree mutation requiring more in-process bookkeeping than a `git worktree add/remove` shell-out (ref resolution, index/HEAD setup). The feature-flag discipline from #284 pays off exactly here: the heavier `worktree-mutation` feature stays off until this PR needs it, keeping earlier builds lean.
+
+Provenance:
+- b9dcdfa0 (PR #288 feat/gix-worktree, 2026-06-06) — squash merge; src/git/worktree.rs +743/-105, Cargo.toml +5, Cargo.lock +29, CHANGELOG.md +12
+- a7a06ce5 (feature-branch commit, 2026-06-06) — pre-squash subject "group worktrees under <repo>.worktrees/<branch>"
+- CHANGELOG.md (at a7a06ce5) — quoted worktree-grouping entry
+- Cargo.toml:41 comment (at #284) — pre-planned "worktree-mutation gets added when worktree create/remove migrates (PR 6)"
+
+<!-- Entry-ID: 01KTMMNW4ZDF0R1C5631XRD593 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:52.450035+00:00
+Role: scribe
+Type: Note
+Title: PR #289 — gix diff/show/blame data model (no UI flip yet)
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: an in-process gix data model for diff/show/blame lands (src/git/diff_model/ + src/git/blame.rs + src/git/model.rs) — ~1900 lines of new producers, with the UI still on the old path. The model layer of a model→render→wire sub-arc. [kind: new-capability]
+When: 2026-06-06 · PR #289 (feat/gix-diff-model) · commit dd518f58 (squash); feature-branch commit (feat/gix-diff-model tip)
+Recorded rationale: "feat(git): gix diff/show/blame data model (no UI flip yet)" — feature-branch commit, 2026-06-06. The "(no UI flip yet)" parenthetical is the load-bearing signal: this PR builds the structured model only.
+Inferred intent: diff/show/blame is the last and richest domain, so it is split into three PRs mirroring the status parity→flip discipline — first an isolated, testable data model (#289), then a pure renderer (#290), then the wiring/flip (#291). Building the model in isolation lets the gix diff output be validated before any pixel of UI depends on it, the same alongside-then-flip caution used for status. Evidence: new src/git/diff_model/{mod,build,blob}.rs (+547/+587/+359), src/git/blame.rs (+244), src/git/model.rs (+185); src/git/diff.rs only +7 (subprocess diff still intact); zero src/ui/ changes in this PR. confidence: high
+Supersedes: (none yet) — additive model layer alongside the still-live subprocess diff/show/blame in src/git/diff.rs. Supersession is deferred to the wire PR #291.
+
+The split into diff_model/build.rs (constructing the diff from gix blob-diff) and diff_model/blob.rs (blob fetch/decode) plus a standalone model.rs (+185) and blame.rs (+244) reads as separating the gix plumbing (produce structured diff/blame data) from any presentation concern — consistent with the facade's pure-infrastructure rule established in PR #283 (no ratatui in src/git/). The `blob-diff` and `blame` gix features enabled back in #284 are what this PR consumes.
+
+Provenance:
+- dd518f58 (PR #289 feat/gix-diff-model, 2026-06-06) — squash merge; +1930/-4 across 8 files: new src/git/diff_model/{mod,build,blob}.rs, src/git/blame.rs (+244), src/git/model.rs (+185), src/git/diff.rs (+7), src/git/mod.rs (+3)
+- feat/gix-diff-model branch tip — pre-squash subject "gix diff/show/blame data model (no UI flip yet)"
+
+<!-- Entry-ID: 01KTMMPRPTSP0J1MTJCT3WW6N1 -->

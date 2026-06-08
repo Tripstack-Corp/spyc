@@ -686,3 +686,57 @@ Provenance:
 - `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (precedent for seams-aside register; same forward-pointing-not-predicting voice).
 
 <!-- Entry-ID: 01KR2AQ5M13KAR1M7A4561B5GM -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:09.708397+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): the pager becomes spyc's universal scrollback adapter, then a stream source
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: continuation framing for the #38–#311 window, extending the arc-05 thesis from "pager as a mode you live in" to "pager as spyc's universal read-surface / scrollback adapter," culminating in a stream-source abstraction.   [kind: segment-topology]
+When: 2026-05-07 → 2026-06-08 · PRs #38–#311 (this slice: #38,#40,#41,#42,#43,#45,#49,#50,#52,#53,#78,#80,#84,#89,#104,#105,#106,#113,#115,#128,#131,#132,#136,#309,#310,#311)
+Recorded rationale: "Pager and task viewer become *renderers* you can mount into any of three slots — overlay, top pane, lower pane — and the lower pane's `^a-v` scroll mode becomes a real pager (search, jump, range yank) instead of a flat byte buffer." — V1_5_PLAN.md (added commit 919520c, 2026-05-07)
+Inferred intent: the window resolves the question the original arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) left open — whether catalogue §4's "render *into* the pager rather than splintering into overlays" direction would land. It lands as V1.5's mount-enum + scrollback-adapter, and the #309–#311 stream abstraction is its architectural payoff. — evidence: V1_5_PLAN.md phase sequence; ARCHITECTURE.md "Off-thread read/parse is the default architecture" (commit c1505dd). confidence: high
+Supersedes: (none — framing only; extends the closure entry = 01KR2AJVZA1E85YSKHF4FNRQQ3 and story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB)
+
+The first arc-05 window (PRs #11–#36) closed with the pager having become "a mode you live in" — `V` visual-line, `D`-launch-into-top-overlay — but with catalogue §4's specific picker-into-pager pattern undone, framed as DIRECTION ALIGNMENT not execution. This continuation reconstructs the #38–#311 window where that direction becomes load-bearing structure.
+
+The window has three legible movements. (1) The **V1.5 "pager / task-viewer unification"** (#40–#43, #45) — a committed plan doc names the pager as a `renderer` mountable into three slots, and rewrites the lower-pane `^a-v` scrollback from "a flat byte buffer" into a real pager fed by a new `src/ui/scrollback.rs` adapter. This is the arc's central architectural move: the pager stops being one overlay among many and becomes the read-surface that pane history, file display, and command capture all flow through. (2) A long **affordance-and-repair tail** (#49–#136) — a regression-repair wave immediately after the V1.5 ship (#49,#50,#52,#53), meta-key passthrough (#78,#80), position memory (#104,#105), exit/eof/scrollback indicators (#106,#128,#132,#136), visual-block placement (#115), V-mirroring (#131), tab-local stashing (#89), title-yank (#84), and ctrl-c routing (#38). (3) The culminating **`PagerStream` abstraction** (#309–#311) — a month later, the pager gains an off-thread stream-source seam; `:grep` and git-view (diff/show/blame) migrate onto it, collapsing their bespoke `grep_session` / `git_view_session` skeletons. This is the arc's payoff: the pager is now not just a render surface but a unified *source* abstraction.
+
+Cross-references carried through this continuation: `history-seg-markdown-rendering` (markdown renders INTO this pager — the same read-surface), `history-seg-refactor-mvu` (#180 extract-pager-history, #189 extract-pager-handler, and 5dc68c3 decompose `src/ui/pager.rs` → `src/ui/pager/` directory module all touched pager internals underneath these features), and `history-seg-gix-migration` (the git-view that #311 migrates onto `PagerStream`). Entries follow in chronological order.
+
+Provenance:
+- 919520c (2026-05-07, "docs: add V1_5_PLAN — pager / task-viewer unification") — added root-level `V1_5_PLAN.md` (276 lines); commit body and doc quoted above.
+- c1505dd (PR #309, 2026-06-08) — ARCHITECTURE.md "Pager-stream workers" + "Off-thread read/parse is the default architecture" sections.
+- prior arc-05 entries: framing 01KR29ZCRYY132QKB0HKRRRERQ, closure 01KR2AJVZA1E85YSKHF4FNRQQ3, story-tail 01KR2ANRAEFWWR5W9FQP11A0DB, seams-aside 01KR2AQ5M13KAR1M7A4561B5GM.
+
+<!-- Entry-ID: 01KTMMP0ZVARBSD274T5V4A05P -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:50.047383+00:00
+Role: scribe
+Type: Note
+Title: PR #38 (fix/pager-ctrl-c-routing): ^C inside the pager becomes contextual instead of leaking to the spyc-list status bar
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: `^C` while a pager is up dispatches contextually (SIGINT to a running task's process group, "already stopped" / "press Esc or q" flashes otherwise) instead of printing a quit-binding notice on the background spyc-list flash row.   [kind: gotcha]
+When: 2026-05-07 · PR #38 (fix/pager-ctrl-c-routing) · commit 7dcfea36
+Recorded rationale: "`^C` inside the pager is now contextual instead of leaking to the spyc-list status bar. Reported with a screenshot: a `! find /` capture had finished (correct exit 130 from the original ^C), but every subsequent ^C while the user was still looking at the result printed `^C is not a quit binding` on the *background* spyc-list flash row — wrong screen for the notice." — CHANGELOG (commit 7dcfea36, 2026-05-07)
+Inferred intent: a routing-correctness fix scoping `^C` to the active pager surface — the same "this key was being handled by the wrong layer" shape that recurs through the meta-key PRs (#78,#80) later in the window. — evidence: src/app/mod.rs +72 lines (only code file touched); CHANGELOG three-case dispatch table. confidence: high
+Supersedes: (none — repairs existing ^C handling; no prior arc-05 entry covers ^C)
+
+This PR lands the same morning as the V1.5 phase 1 ship but before it (commit 7dcfea36 at 11:40 UTC vs 69494d18 at 16:52). It reads as a standalone correctness fix on the pre-V1.5 pager: `^C` was being treated as a global quit-binding probe even when a pager owned the screen, so the "not a quit binding" notice painted on the wrong surface (the background listing's flash row). The fix makes `^C` mean different things by pager context — task viewer + task running sends `SIGINT` to the process group and flashes inside the pager; task finished flashes "process already stopped"; any other pager view (file viewer, help) flashes "press Esc or q to close pager."
+
+The diff is confined to `src/app/mod.rs` (+72 lines), consistent with a dispatch-branch addition rather than new surface. It is the first instance in this window of the recurring "a key reached the wrong handler because the routing guard checked the wrong thing" pattern that the meta-key fixes (#78, #80) name explicitly later.
+
+Provenance:
+- 7dcfea36 (PR #38 fix/pager-ctrl-c-routing, 2026-05-07) — src/app/mod.rs +72; contextual ^C dispatch table (task-running SIGINT / task-finished / other-view cases).
+
+<!-- Entry-ID: 01KTMMPV14VAPT445FE1TS1AJ7 -->

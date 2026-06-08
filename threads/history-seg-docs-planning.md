@@ -58,3 +58,29 @@ Provenance:
 - 27f8d83 (PR #79 docs/v1.60-plan-compat, 2026-05-12) — docs/V1_60_PLAN.md +136 (Compatibility matrix, schema_version/capabilities); CHANGELOG Documentation + unrelated Fixed (`^a-j` pager meta-chord fallthrough).
 
 <!-- Entry-ID: 01KTMMMQ1VY8ZERQ3NQAF89DN4 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:21.395457+00:00
+Role: scribe
+Type: Decision
+Title: PR #86 — AUTO_APPROVAL_PLAN: curate native agent permissions, reject pty interception (BUGS→plan→roadmap promotion)
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: a one-line BUGS.md wish ("approve certain Claude CLI actions automatically and keep a log") is promoted into a full six-phase v1.51 plan that records a rejection: curate each agent's native permission file, never intercept the pty.   [kind: rejection]
+When: 2026-05-13 · PR #86 (docs/auto-approval-plan) commit bf58312
+Recorded rationale: "**Curate each agent's native permission system; do not intercept the pty.** Considered and rejected: **pty interception** … the failure mode is *silent wrong-approval*: any upstream change to the prompt format breaks our matcher, and the safest fallback (don't approve) is the worst UX. Security features should not be built on regex against another tool's UI." — docs/AUTO_APPROVAL_PLAN.md, added PR #86
+Inferred intent: a planning pass that converts a vague backlog item into a scoped feature with an architecture decision and an explicit anti-pattern. evidence: bf58312 deletes the two-line BUGS.md item "feature to allow spyc to approve certain Claude CLI actions automatically and keep a log" and adds docs/AUTO_APPROVAL_PLAN.md +380; ROADMAP.md gains a v1.51 entry pointing at the plan. confidence: high
+Supersedes: the BUGS.md SMALL entry tracking auto-approval (removed in bf58312) — promoted out of triage into a planned release.
+
+Reconstructed: the plan's thesis names permission prompts as "the friction" for trusted patterns (`git status`, `cargo check`, `*.md` edits, `Read`), and frames two asks — auto-approve a curated pattern set, and keep a verifiable action log. The architectural choice is recorded as decided: read/write each agent's official settings file (Claude `.claude/settings.json`, Codex `.codex/config.toml`, Gemini TBD), let the agent itself decide whether to prompt, and build the log by reading each agent's transcript files (already done for session resume). The plan explicitly considers and rejects pty interception on a security argument — "Security features should not be built on regex against another tool's UI." Target release v1.51, "feature-shaped, not blocking v1.60 hub work" — the doc positions itself against the v1.60 CounterTop track from the prior moment.
+
+This is the segment's clearest BUGS→plan→roadmap promotion pattern: a raw triage line becomes a doc with a decision, then a roadmap entry. The same promotion cadence recurs in the curation moment (#159/#160). Implementation of the per-agent settings curation and the `:approvals` pager would land in agent-integration engineering, not this docs segment.
+
+Provenance:
+- bf58312 (PR #86 docs/auto-approval-plan, 2026-05-13) — docs/AUTO_APPROVAL_PLAN.md +380 (thesis, decided architecture, per-agent specifics, rejection of pty interception); BUGS.md −2 (item promoted); ROADMAP.md +7 (v1.51 entry).
+- 01KTMMMQ1VY8ZERQ3NQAF89DN4 (prior entry, this thread) — v1.60 hub track this plan defers behind.
+
+<!-- Entry-ID: 01KTMMPA6HBDB91KMZPTBPNHX3 -->

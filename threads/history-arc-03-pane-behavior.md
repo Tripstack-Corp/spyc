@@ -688,3 +688,27 @@ Provenance:
 - arc-03 thread entry 01KR11TME2KF — "pane_focused's three meanings" seam this fix narrows
 
 <!-- Entry-ID: 01KTMMNC6G5B7Y73KC0ZN1BEMH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:37.759766+00:00
+Role: scribe
+Type: Note
+Title: PR #67 (fix/per-pane-resume-id): multiple panes in one cwd resume to distinct sessions
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: pane↔session identity — Reconstructed: `save_session` now assigns each pane its own resume session id via a claim-tracking closest-match picker, instead of falling back to one shared per-cwd JSONL   [kind: gotcha]
+When: 2026-05-10 · PR #67 (fix/per-pane-resume-id, 2585d69) · v1.50.15
+Recorded rationale: CHANGELOG verbatim: "Multiple Claude/Codex panes now resume to distinct sessions. Reported in BUGS.md: with several Claude/Codex tabs alive in the same cwd at quit time, restoring the saved session pulled all of them into a single conversation. Cause: save_session's resolver fell back to most_recent_jsonl_for_cwd when the pane hadn't yet printed an exit banner (the common case — Claude is usually still alive when the user quits spyc), and that fallback returned the same JSONL for every pane in the cwd."
+Inferred intent: the fix attaches resume *identity* to the individual pane (its spawn time) rather than its cwd. evidence: CHANGELOG names the mechanism — "save_session now walks tabs in order tracking a claimed set … picks the unclaimed record whose startedAt is closest to that pane's spawn time (a new spawn_epoch_secs on TabInfo)"; the diff adds the field on `src/pane/tabs.rs` (+8) and a pure picker `pick_closest_unclaimed_session` with five unit tests in `src/state/sessions.rs` (+157). confidence: high
+Supersedes: the per-cwd fallback resolver (`most_recent_jsonl_for_cwd`) as the identity source for still-alive panes — that heuristic collapsed N panes onto one conversation
+
+This is the moment the pane↔task relationship gains *session identity*: a pane is no longer "the thing running in this cwd" but "the thing that spawned at this instant." The new `spawn_epoch_secs` on `TabInfo` is the discriminator. `save_session` walks tabs in order with a `claimed` set; the Claude resolver scans `~/.claude/sessions/*.json` and picks the unclaimed record whose `startedAt` is nearest that pane's spawn time, verifying the JSONL exists before committing; Codex's banner-derived id is likewise gated on `claimed`. The picker is extracted as a pure helper with five unit tests "covering the closest-match-with-claim-skip semantics." A BUGS.md entry (-5) is retired by the fix.
+
+Provenance:
+- 2585d69 (PR #67, 2026-05-10) — src/state/sessions.rs +157/-... (picker + claim tracking), src/app/mod.rs +88/-... (save_session walk), src/pane/tabs.rs +8 (spawn_epoch_secs), BUGS.md -5
+- relates forward to #90 (stale exit-label on restore) — both are session save/restore fidelity fixes on the pane↔session seam
+
+<!-- Entry-ID: 01KTMMPE3J1R4KEC6DXRS9Q5DF -->

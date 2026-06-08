@@ -104,3 +104,28 @@ Provenance:
 - CHANGELOG.md (added PR #138) — quoted rationale above.
 
 <!-- Entry-ID: 01KTMMMSG4DXNDQZ66KVXXBE93 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:27.520801+00:00
+Role: scribe
+Type: Note
+Title: PR #137 — throttle git-worker re-spawns from refresh_listing + A-monitor internals line
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: `refresh_listing` no longer invalidates the raw git-status cache (and thus re-spawns `git status`) on every debounced fs event; spawns are throttled to at most once per 10 s on huge trees (1 s on small). A second teal internals line is added to the `A` activity monitor surfacing bg-task / git-worker / fs / mcp / listing / pager state with per-second rates.   [kind: refactor]
+When: 2026-05-26 · PR #137 (perf/git-worker-throttle-and-extended-activity) · commit 236c4396
+Recorded rationale: "perf+feat: throttle git-worker spawns; extend A monitor with internals" — commit subject. CHANGELOG (added PR #137): "On a huge tree (e.g. a 112K-file monorepo), running spyc next to a busy agent that writes files... drove sustained ~48% CPU. Root cause: `refresh_listing` unconditionally invalidated the raw git status cache, causing every debounced file-system event in the listing dir to re-spawn `git status --porcelain -uno` (200-500 ms each on huge trees). Now throttled — at most once per 10 s on huge trees (1 s on small)." Monitor: "`git last:Nms` is the roundtrip duration of the most recent worker request (would have surfaced the CPU bug above on first glance — high spawn rate jumps out)."
+Inferred intent: this directly addresses the invalidation boundary that PR #99 deliberately left uncached — "the event-driven refresh... still recomputes unconditionally." PR #137 finds that the unconditional path is itself a cost source under continuous fs activity and throttles it (without caching it). Evidence: `src/app/mod.rs` +120, `src/app/state.rs` +50, `src/ui/help.rs` +5 (documents the new monitor line). confidence: high
+Supersedes: tightens the PR #99 caveat — the event-driven `refresh_listing` recompute is no longer unconditional-per-event but throttled; the stated trade is "at-most-10 s lag in working-tree ` M` markers for edits within the throttle window." (This throttle is later made smarter by PR #156, which replaces the bare throttle with a max-defer predicate.)
+
+Two distinct concerns in one PR, folded into this moment: (1) the perf throttle (own decision), (2) the `A` monitor second line (instrumentation feature). The monitor work pairs with PR #138's diagnosis story — the entry for #138 shows the monitor being used to rule spyc out; this PR is where its internals readout gains the git-worker spawn rate / roundtrip that "would have surfaced the CPU bug above on first glance." The throttle interacts with the same `refresh_listing → git_file_statuses_cached → raw porcelain` pipeline that PR #156 later hardens with a test; cross-reference history-arc-04-git-integration.
+
+Provenance:
+- 236c4396 (PR #137 perf/git-worker-throttle-and-extended-activity, 2026-05-26) — `src/app/mod.rs` +120 (throttle gate on cache-invalidation + monitor render), `src/app/state.rs` +50 (throttle bookkeeping), `src/ui/help.rs` +5, CHANGELOG +29.
+- CHANGELOG.md (added PR #137) — quoted rationale above.
+- 01KTMMHXYR7E0PYD7AZTHFAR8E (PR #99 entry, this thread) — the uncached event-driven refresh boundary this throttles.
+
+<!-- Entry-ID: 01KTMMP87YEBGTXTHDPH0BJJY0 -->

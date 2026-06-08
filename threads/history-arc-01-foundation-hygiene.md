@@ -370,3 +370,43 @@ Provenance:
 - arc-01 PR #4 entry = 01KR0WBKNMQF231X2T8KTGD9KS (the v1.37.2 release-cut this mirrors).
 
 <!-- Entry-ID: 01KTMMMPZDCN2D25KSX9G1R6Y1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:12:23.867671+00:00
+Role: scribe
+Type: Note
+Title: PRs #57,#58,#61,#64,#65,#66,#69: the CI-caching campaign — cut CI wall-clock
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: ci-caching-campaign — Reconstructed: a single-day (mostly 05-09) sequence of seven CI changes restructures the Bitbucket cache keys, swaps cargo-deny to a verified prebuilt, adds rustup/coverage caches, relaxes the target cache key, and disables CI incremental compilation — with explicit wall-clock budgets in every commit body.   [kind: refactor]
+When: 2026-05-09 (#57,#58,#61,#64,#65,#66) · 2026-05-11 (#69) · PRs #57 (pipeline-cache-improvements, 4561884), #58 (rustup-cache, f779192), #61 (relax-target-and-fat-image, 02f2117), #64 (separate-coverage-cache, 742957b), #65 (coverage-target-dir-env, b2c6c6f), #66 (cache-version-file, 3d79913), #69 (disable-cargo-incremental, c4a2e0b)
+Recorded rationale: "Two changes that together cut cold-cache CI from ~6 min toward ~1.5" (commit 4561884^2, 2026-05-09). And later: "warm-cache CI should be measured in tens of seconds" (commit 02f2117^2). The throughline names itself in the commit bodies: cut CI wall-clock.
+Inferred intent: a measured optimization campaign, not a one-shot — each PR cites a specific observed CI cost and the next-largest remaining cost, in sequence. evidence: #58 body "After the cargo-deny prebuilt swap, the next visible CI cost was `rustup component add`"; #64 "~18s observed in the v1.50.11 PR"; #69 "Pipeline #380's warm-cache run showed... ~3 min vs ~6 min... should be closer to <1 min". confidence: high
+Supersedes: rewrites the cache + cargo-deny-install shape laid down in arc-01 PR #2/#3 — the `target` cache keyed on `Cargo.lock` + `rust-toolchain.toml` (PR #2, entry 01KR0W81XE4K3G7BBSP42GE1HH) and `cargo install cargo-deny --locked` (PR #3, entry 01KR0W9QF3P9E529E6J3XQMXDV) are both superseded here.
+
+This is the densest hygiene moment in the window: seven PRs in ~36 hours, all on `bitbucket-pipelines.yml`, each with a verbatim cost-accounting commit body (preserved on `^2`). The campaign's spine:
+
+1. **#57 — cache-key restructure + cargo-deny prebuilt.** The `cargo` cache ($CARGO_HOME) drops `Cargo.lock` from its key, keying on `rust-toolchain.toml` only: "Previously the key included Cargo.lock, which every patch version bump rewrote (the lockfile records `name = \"spyc\" version = \"...\"`), so each patch PR busted the whole cache" (4561884^2). cargo-deny moves from `cargo install --locked` (~3 min) to a sha256-verified prebuilt tarball from the EmbarkStudios GitHub release, pinned to 0.19.4, idempotent on warm cache. This directly supersedes the PR #3 install line.
+2. **#58 — rustup cache.** New `rustup` cache scoped to $RUSTUP_HOME keyed on `rust-toolchain.toml`, wired into both quality + coverage steps; "rustup component add is idempotent: on a warm cache the step becomes a near-no-op" (f779192^2).
+3. **#61 — relax target key + fat image.** The `target` cache also drops `Cargo.lock` (now toolchain-only): "cargo's per-crate fingerprint hashes each crate's actual inputs... so restoring a stale target/ against a different Cargo.lock is *safe*" (02f2117^2). Base image `rust:1.85-slim` → `rust:1.85` to bake in make/git/curl and drop the ~13s apt-get step. This supersedes the PR #2 `target` key.
+4. **#64 → #65 — coverage isolation, with a stumble.** #64 adds a dedicated `target-cov` cache because "`cargo llvm-cov` injects `-C instrument-coverage` RUSTFLAGS so its target/ contents are *not* reusable by the un-instrumented Quality build" (742957b^2) — but used `--target-dir`, a flag `cargo llvm-cov` does not accept. #65 is a same-pattern hot-fix: "it failed with `error: invalid option '--target-dir'`. The repo doesn't gate merges on green pipelines so it landed and broke main's Coverage step" (b2c6c6f^2) — switched to `CARGO_TARGET_DIR=target-cov`. This is a gotcha worth flagging: **CI is not a merge gate in this repo**, so a broken pipeline reaches `main` and is fixed forward.
+5. **#66 — explicit cache busting.** New `.ci-cache-version` file added to all four cache keys because "Bitbucket caches are immutable per key — once a cache is uploaded for a given key, subsequent runs *never* upload over it" (3d79913^2), so newly-added crates (proptest from #59) never entered the cache. Bumping the integer forces a fresh upload.
+6. **#69 — disable CI incremental.** `CARGO_INCREMENTAL=0` on the CI cargo invocations: incremental metadata "include[s] build paths and timestamps that don't match the fresh runner's filesystem state" so warm-cache hits silently rebuilt; "Standard big-Rust-shop CI pattern (rust-lang itself)... Local dev keeps incremental on" (c4a2e0b^2). Bumped `.ci-cache-version` to 2.
+
+The campaign reads as iterative profiling: measure the dominant cost, eliminate it, re-measure. The "CI is not a merge gate" fact (surfaced by #65's regression reaching main) is the same property arc-01 PR #3's drift findings implied (TODO.md doc-lag landing on main); here it has a concrete cost.
+
+Provenance:
+- 4561884 (PR #57, 2026-05-09) — bitbucket-pipelines.yml: cargo cache key Cargo.lock→toolchain; cargo-deny prebuilt block (VERSION/SHA256 0.19.4); commit body quoted.
+- f779192 (PR #58, 2026-05-09) — bitbucket-pipelines.yml: `rustup` cache def + wired into quality/coverage steps.
+- 02f2117 (PR #61, 2026-05-09) — bitbucket-pipelines.yml: `target` cache key relaxed to toolchain-only; image rust:1.85-slim→rust:1.85.
+- 742957b (PR #64, 2026-05-09) — bitbucket-pipelines.yml: `target-cov` cache def; (broken) `--target-dir target-cov` on cargo llvm-cov.
+- b2c6c6f (PR #65, 2026-05-09) — bitbucket-pipelines.yml: hot-fix to `CARGO_TARGET_DIR=target-cov`; commit body names the invalid-option failure.
+- 3d79913 (PR #66, 2026-05-09) — new `.ci-cache-version` (init 1) added to all four cache key file-lists.
+- c4a2e0b (PR #69, 2026-05-11) — `CARGO_INCREMENTAL=0` on quality + coverage steps; `.ci-cache-version`→2.
+- arc-01 PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (the cache + target key this supersedes).
+- arc-01 PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV (the `cargo install cargo-deny --locked` this supersedes).
+
+<!-- Entry-ID: 01KTMMPDE6S4PA834YDR24SX1H -->
