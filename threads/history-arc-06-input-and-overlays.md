@@ -966,3 +966,31 @@ Provenance:
 - 866aa699 (PR #126 feat/sort-cycle-key-and-status-indicator, 2026-05-23) — `src/keymap/resolver.rs` +5 (`S`/`gs`), `src/keymap/action.rs` +8 (`SortCycle`/`SortReverse`), `src/fs/listing.rs` +30, `src/app/state.rs` +45, `src/app/mod.rs` +43, `src/ui/help.rs` +11, CHANGELOG.md +16.
 
 <!-- Entry-ID: 01KTMMXGV8ZBCEQXRSBXN5HYAH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:51.725471+00:00
+Role: scribe
+Type: Note
+Title: PR #155 — chord-bounce guard stands down while the resolver is pending: the #25 bounce guard's continuation
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: the post-chord bounce guard from #25 is extracted into a pure `is_post_chord_bounce` and gated on resolver-not-pending, so a rapid second `^a-j`/`^a-k` isn't swallowed as a bounce   [kind: supersession]
+When: 2026-05-28 · PR #155 (fix/chord-bounce-resolver-pending) · commit 1eaeac8f
+Recorded rationale: "Rapid repeated `^a-j` / `^a-k` no longer drops every chord after the first. A post-chord 'bounce' guard suppresses a stray same-key Press/Repeat for ~60 ms after a focus-switch chord (so a held key doesn't leak a `j`/`k` byte into the now-focused pane). But it ran before the chord resolver and didn't account for a *fresh* `^a` already being mid-chord — so a quick second `^a-j` had its completing `j` swallowed inside the bounce window. The guard now stands down while the resolver is pending: a key mid-chord is a legitimate completion, not a bounce." — CHANGELOG.md (commit 1eaeac8f, 2026-05-28)
+Inferred intent: a correctness fix on the very guard #25 added defensively — #25's guard was right for the held-key bounce but over-fired on a deliberate fast re-chord — evidence: pickaxe + diff: the guard's inline body (`if let Some((at, code)) = self.focus_chord_completed { let within_window = at.elapsed() < Duration::from_millis(60); … }`) is replaced by `is_post_chord_bounce(self.focus_chord_completed, self.state.resolver.is_pending(), key)` returning `at.elapsed() < POST_CHORD_BOUNCE_WINDOW && !resolver_pending && …`
+                  confidence: high
+Supersedes: the inline `focus_chord_completed` bounce guard added in PR #25 (this thread's input-dispatch-hardening moment) — extracts it to a pure tested function and adds the `!resolver_pending` term
+
+This is the continuation the baseline left implicit. PR #25 added `focus_chord_completed` and a 60 ms swallow window as a *defensive* guard ("couldn't reproduce, but two plausible failure modes were addressed") — see the PR #25 input-dispatch-hardening moment. #155 is the confirmed-bug repair on that exact guard: the guard ran *before* the chord resolver, so a fast second `^a-j` had its completing `j` eaten as a bounce. The fix gates the swallow on `!resolver_pending` — a key arriving mid-chord is a legitimate completion. This sits alongside the PR #32 chord-precedence rule (`chord_locked`) as the second time the chord-resolver's interaction with same-key timing needed a precedence/state guard: #32 ordered chord-vs-user-keymap, #155 orders bounce-vs-chord-completion.
+
+The diff also pays down the #25 inline-guard debt the way #82 did for routing: the logic moves into a free function `is_post_chord_bounce(focus_chord_completed, resolver_pending, key)` with a `POST_CHORD_BOUNCE_WINDOW` const and a `mod post_chord_bounce_tests` (e.g. `swallows_same_key_bounce_in_window_when_idle`, `does_not_swallow_when_resolver_pending`) — the bounce decision becomes unit-testable without the TUI, the same "decision-as-pure-function + regression rows" shape PRs #63 and #82 established this window.
+
+Provenance:
+- 1eaeac8f (PR #155 fix/chord-bounce-resolver-pending, 2026-05-28) — `src/app/mod.rs` +114/−15 (inline `focus_chord_completed` guard → `is_post_chord_bounce` + `POST_CHORD_BOUNCE_WINDOW` const + `post_chord_bounce_tests`), CHANGELOG.md +11. Pickaxe: `git log -S 'focus_chord_completed'` ties the guard back to PR #25's `bfc4a18`.
+- 01KR2GMSNX29… (this thread, PR #25 moment) — the bounce guard #155 supersedes.
+- 01KR2GQJSTRY… (this thread, PR #32 moment) — the sibling chord-precedence (`chord_locked`) rule.
+
+<!-- Entry-ID: 01KTMMYGF5RESXYKP5TTAPFRM7 -->

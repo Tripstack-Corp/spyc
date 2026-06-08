@@ -191,3 +191,32 @@ Provenance:
 - 01KTMMSRJ3DEDE2S4VWY5JHEND (prior entry, this thread) — v1.70 plan whose crate-split this decomposition unblocks.
 
 <!-- Entry-ID: 01KTMMWRE9YX58H2RXKYY58QVH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:49.142001+00:00
+Role: scribe
+Type: Note
+Title: PR #62/#71/#159/#160/#171 — triage discipline: TODO flips, the BUGS→ROADMAP promotion cadence, and the FIXED ledger
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: a recurring triage discipline runs across the segment — TODO items flipped to done with honest notes, a contributor-reported BUGS batch promoted into structured ROADMAP entries, and a FIXED ledger appended as bugs close. These are the housekeeping PRs that keep the planning docs honest between the big plan docs.   [kind: convention]
+When: 2026-05-09 → 2026-05-29 · PR #62 (docs/flip-print-config-todo) commit 8bc92b7 · PR #71 (docs/sccache-todo) commit 8de8b67 · PR #159 (docs/bugs-prune-promoted) commit 06f5f88 · PR #160 (docs/promote-bugs-roadmap-batch) commit 7c5086e · PR #171 (docs/bugs-fixed-today) commit 168c167
+Recorded rationale: "Many `Action` variants are unbindable. `parse_action` doesn't accept `HarpoonAppend`, `SetMark(_)`, … `unmap` is a no-op … Pick one: grow `parse_action` to cover them, or explicitly document which actions are user-bindable" — ROADMAP.md "Keymap DSL completeness (promoted from BUGS; external contributor 2026-05-15)", added PR #160. And: "(fixed, v1.51.3) untracked files now show the `?` marker in large repos … the huge-tree subdir threshold … `-uno` saved ~nothing yet hid every untracked file. Now always `-unormal`." — BUGS.md FIXED, added PR #171
+Inferred intent: the maintenance rhythm that complements the plan docs — converting raw triage into roadmap-grade entries and recording closures with version stamps. evidence: 8bc92b7 flips `--dump-default-config` TODO to a shipped `--print-config` with a round-trip-tested note; 8de8b67 adds a deferred sccache-CI TODO with a "good enough for now" rationale; 06f5f88 prunes promoted/duplicate BUGS items and adds a fresh contributor batch; 7c5086e moves 54 lines out of BUGS.md into 59 lines of structured ROADMAP entries; 168c167 appends five `(fixed, v1.51.x)` FIXED entries. confidence: high
+Supersedes: #160 removes the raw contributor-bug lines added by #92 (J?/DSL/PgUp items) and re-expresses them as scoped ROADMAP entries — the BUGS→ROADMAP half of the promotion cadence also seen in #86 and #158. #159 removes the "support drag and drop" and "cwd should update on quit" BUGS lines already promoted to ROADMAP by #158.
+
+Reconstructed: the cadence has three motions. (1) TODO honesty — #62 flips the `--dump-default-config` wish to the shipped, unit-tested `--print-config` ("The TODO originally proposed `--dump-default-config`; the shorter `--print-config` shipped instead"); #71 files a fully-specified-but-deferred sccache CI-caching TODO ("Worth doing once we feel friction … for now v1.50.17's caching is 'good enough'"). (2) BUGS→ROADMAP promotion — #159 prunes already-promoted/duplicate items and adds a new contributor batch (`^a-^a` previous-pane, focus-model refactor, spymd standalone-markdown-pager idea, `?` in command history, ollama recovery); #160 moves 54 BUGS lines into 59 ROADMAP lines as four paired, file-cited entries (Keymap DSL completeness, PgUp/PgDn discoverability, Mouse forwarding, Image paste `^v`), each tagged with provenance and src/ references. (3) FIXED ledger — #171 stamps five closures with version markers (v1.51.0–v1.51.4: `^a ^a` last-window, pane cwd-history split, untracked `?` marker in large repos via `-unormal`, untracked-dir collapse marker).
+
+This is the triage backbone the plan docs sit on: the same promotion pattern that turned the auto-approval BUGS line into a v1.51 plan (#86) operates here at lower altitude, moving contributor reports up the rigor ladder from BUGS → ROADMAP entry. The actual code fixes recorded in #171's FIXED ledger land in engineering segments (git-status markers, pane history) — this docs segment only records that they closed.
+
+Provenance:
+- 8bc92b7 (PR #62 docs/flip-print-config-todo, 2026-05-09) — TODO.md +7/−3, `--print-config` flipped to done.
+- 8de8b67 (PR #71 docs/sccache-todo, 2026-05-11) — TODO.md +29, deferred sccache CI-caching item with GCS-backend wiring.
+- 06f5f88 (PR #159 docs/bugs-prune-promoted, 2026-05-28) — BUGS.md +19/−4, prune promoted items + new contributor batch.
+- 7c5086e (PR #160 docs/promote-bugs-roadmap-batch, 2026-05-28) — BUGS.md −54, ROADMAP.md +59 (four paired promoted entries with src/ citations).
+- 168c167 (PR #171 docs/bugs-fixed-today, 2026-05-29) — BUGS.md +21, five `(fixed, v1.51.x)` FIXED entries.
+
+<!-- Entry-ID: 01KTMMYFCAPJDTD83XH66BE7P8 -->
