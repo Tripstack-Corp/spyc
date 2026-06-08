@@ -113,10 +113,10 @@ impl App {
             frecency: crate::state::Frecency::load(),
             focus: state::Focus::FileList,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
-            pane_height_pct: 70,
-            pane_zoomed: false,
-            pane_focus_before_zoom: None,
-            pane_hidden: false,
+            pane: state::PaneLayout {
+                pane_height_pct: 70,
+                ..Default::default()
+            },
             harpoon_filter_set: harpoon
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())
@@ -125,29 +125,10 @@ impl App {
             // `harpoon` is moved (consumed) AFTER `harpoon_filter_set`
             // borrowed it just above.
             harpoon,
-            pane_prompt_buf: String::new(),
-            last_pane_prompt: None,
-            pane_snapshot: state::PaneSnapshot::default(),
             pending_delete_preview: None,
-            // Populated on the first successful `refresh_git_state`
-            // call. See `AppState::git_poll_cache` doc for why this
-            // starts None.
-            git_poll_cache: None,
-            // The very first chdir of App::run will set both based
-            // on the actual tree size. Bootstrap defaults are fine —
-            // the small-tree cadence is conservative until proven
-            // huge.
-            is_huge_tree: false,
-            huge_tree_anchor: None,
-            huge_tree_decisions: std::collections::HashMap::new(),
-            current_repo_root: None,
-            current_gitdir: None,
-            git_status_cache: None,
-            git_worker_available: false,
-            pending_git_requests: Vec::new(),
-            git_generation: 0,
-            last_git_invalidation: None,
-            last_git_request_at: None,
+            // Git cache/worker plumbing — all empty until the first chdir +
+            // `refresh_git_state` populate it. See [`state::GitCache`].
+            git_cache: state::GitCache::default(),
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
@@ -198,7 +179,7 @@ impl App {
         // process; the OS reaps the thread on exit. Both channel ends
         // live on the Runtime (`runtime.git_worker_tx` sender,
         // `runtime.git_result_rx` receiver); the Model holds no channel —
-        // it records desired requests in `state.pending_git_requests`,
+        // it records desired requests in `state.git_cache.pending_git_requests`,
         // which the run loop flushes to the worker via `flush_git_requests`.
         // See `state::GitWorkerRequest` / `state::GitWorkerResult`.
         let (git_req_tx, git_req_rx) = std::sync::mpsc::channel::<state::GitWorkerRequest>();
@@ -234,7 +215,7 @@ impl App {
             }
         });
         let mut app_state = app_state;
-        app_state.git_worker_available = true;
+        app_state.git_cache.git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state

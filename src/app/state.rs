@@ -262,59 +262,14 @@ pub struct PaneSnapshot {
     pub is_closed: bool,
 }
 
-pub struct AppState {
-    pub listing: Listing,
-    pub picks: Picks,
-    pub inventory: Inventory,
-    pub marks: Marks,
-    pub masks: IgnoreMasks,
-    pub temp_filter: Option<String>,
-    pub sort_order: crate::fs::listing::SortMode,
-    /// When true, invert the per-mode natural direction (Name/Ext
-    /// ascending → descending, Size/Mtime descending → ascending).
-    /// Toggled by `gs` and `:sort reverse`. Dirs-first grouping is
-    /// always preserved regardless.
-    pub sort_reversed: bool,
-    pub view: View,
-    pub cursor: Cursor,
-    pub resolver: Resolver,
-    pub user_keymap: UserKeymap,
-    pub config: Config,
-    pub mode: Mode,
-    pub start_dir: PathBuf,
-    pub project_home: Option<PathBuf>,
-    pub session_name: Option<String>,
-    pub prev_dir: Option<PathBuf>,
-    pub last_search: Option<String>,
-    pub last_captured_cmd: Option<String>,
-    pub history: History,
-    /// Command history for the "pane command:" prompt (`^a c`). Holds
-    /// only the *commands* the user launched tabs with — never the
-    /// directories entered at the follow-up "pane cwd:" step, which
-    /// live in [`Self::pane_cwd_history`]. Sharing one bucket polluted
-    /// the command browse with directory paths.
-    pub pane_history: History,
-    /// Destination history for the "pane cwd:" prompt — previously-used
-    /// working directories, so Up/Down recalls them without mixing into
-    /// the command history above.
-    pub pane_cwd_history: History,
-    /// Persistent history for `J` (jump-to-path) prompts. Up / Down
-    /// in the prompt cycle through previously-jumped destinations,
-    /// independent of the shell-command and pane-prompt histories
-    /// so they don't pollute each other.
-    pub jump_history: History,
-    /// Persistent history for `:` (vim-style command-line) prompts.
-    /// Kept separate from shell-command history so `:make sync-all`
-    /// (a typo for `!make sync-all`) doesn't surface back as a `:`
-    /// command on Up arrow and explode with "unknown command".
-    pub command_history: History,
-    pub flash: Option<FlashMessage>,
-    pub should_quit: bool,
-    pub quit_pending: Option<std::time::Instant>,
-    /// MVU Phase 5: the git display pair (top-bar string + per-file
-    /// status map), written only together via [`GitState::set`]. See
-    /// [`GitState`].
-    pub git: GitState,
+/// Git status/worker plumbing cached on the Model: the 1 Hz mtime
+/// short-circuit pair, the huge-tree decision + its per-anchor cache,
+/// the resolved repo-root/gitdir, the structured-status cache, and the
+/// off-thread worker outbox/generation/timing. Grouped out of `AppState`
+/// (the loose git-cache fields) so the Model field block stays legible;
+/// the display pair lives separately in [`GitState`].
+#[derive(Default)]
+pub struct GitCache {
     /// Cached mtime pair of `.git/index` and `.git/HEAD` from the
     /// last successful `refresh_git_state` call. The 1 Hz poll
     /// short-circuits when both files' current mtimes match the
@@ -432,6 +387,95 @@ pub struct AppState {
     /// roundtrip duration for the most recent `git status` spawn
     /// (which on huge trees can be 200-500 ms).
     pub last_git_request_at: Option<std::time::Instant>,
+}
+
+/// Bottom-pane layout + prompt-echo state: the split percentage, zoom
+/// (with the focus captured at zoom-on), the hide toggle, the once-per-loop
+/// routing snapshot, and the `^a c` prompt-echo buffers. Grouped out of
+/// `AppState`'s loose pane fields.
+#[derive(Default)]
+pub struct PaneLayout {
+    pub pane_prompt_buf: String,
+    pub last_pane_prompt: Option<String>,
+    /// MVU Phase 5: active-pane routing flags, refreshed at loop-top (see
+    /// [`PaneSnapshot`]). Read by `route_snapshot` so routing reads the
+    /// Model, not the live pane host.
+    pub pane_snapshot: PaneSnapshot,
+    pub pane_height_pct: u16,
+    /// Tmux-style "zoom": when true, the bottom pane fills the middle
+    /// region (list collapses to 0 rows). The user's preferred
+    /// `pane_height_pct` is preserved untouched so un-zoom restores
+    /// exactly the prior split.
+    pub pane_zoomed: bool,
+    /// Focus state captured at zoom-on, restored at zoom-off. `None`
+    /// when not zoomed.
+    pub pane_focus_before_zoom: Option<bool>,
+    /// `F10` / `^a-\` (TogglePane) toggles this. When true, the pane
+    /// row is hidden — render skips the pane area, layout treats it
+    /// as if no pane existed — but `pane_tabs` and every child pty
+    /// stay alive. Re-toggle flips it back; the rendered grid picks
+    /// up wherever the running processes left off. Previous behavior
+    /// was destructive (`pane_tabs = None`, SIGKILL via `Drop for
+    /// PtyHost`), which the user experienced as "I lost my claude
+    /// conversation every time I needed the whole screen for a
+    /// second."  Explicit kill of a tab still goes through `^a-x`
+    /// (`PaneCloseTab`).
+    pub pane_hidden: bool,
+}
+
+pub struct AppState {
+    pub listing: Listing,
+    pub picks: Picks,
+    pub inventory: Inventory,
+    pub marks: Marks,
+    pub masks: IgnoreMasks,
+    pub temp_filter: Option<String>,
+    pub sort_order: crate::fs::listing::SortMode,
+    /// When true, invert the per-mode natural direction (Name/Ext
+    /// ascending → descending, Size/Mtime descending → ascending).
+    /// Toggled by `gs` and `:sort reverse`. Dirs-first grouping is
+    /// always preserved regardless.
+    pub sort_reversed: bool,
+    pub view: View,
+    pub cursor: Cursor,
+    pub resolver: Resolver,
+    pub user_keymap: UserKeymap,
+    pub config: Config,
+    pub mode: Mode,
+    pub start_dir: PathBuf,
+    pub project_home: Option<PathBuf>,
+    pub session_name: Option<String>,
+    pub prev_dir: Option<PathBuf>,
+    pub last_search: Option<String>,
+    pub last_captured_cmd: Option<String>,
+    pub history: History,
+    /// Command history for the "pane command:" prompt (`^a c`). Holds
+    /// only the *commands* the user launched tabs with — never the
+    /// directories entered at the follow-up "pane cwd:" step, which
+    /// live in [`Self::pane_cwd_history`]. Sharing one bucket polluted
+    /// the command browse with directory paths.
+    pub pane_history: History,
+    /// Destination history for the "pane cwd:" prompt — previously-used
+    /// working directories, so Up/Down recalls them without mixing into
+    /// the command history above.
+    pub pane_cwd_history: History,
+    /// Persistent history for `J` (jump-to-path) prompts. Up / Down
+    /// in the prompt cycle through previously-jumped destinations,
+    /// independent of the shell-command and pane-prompt histories
+    /// so they don't pollute each other.
+    pub jump_history: History,
+    /// Persistent history for `:` (vim-style command-line) prompts.
+    /// Kept separate from shell-command history so `:make sync-all`
+    /// (a typo for `!make sync-all`) doesn't surface back as a `:`
+    /// command on Up arrow and explode with "unknown command".
+    pub command_history: History,
+    pub flash: Option<FlashMessage>,
+    pub should_quit: bool,
+    pub quit_pending: Option<std::time::Instant>,
+    /// MVU Phase 5: the git display pair (top-bar string + per-file
+    /// status map), written only together via [`GitState::set`]. See
+    /// [`GitState`].
+    pub git: GitState,
     /// Snapshot of the active harpoon ancestor-set (slot paths plus
     /// every parent directory of every slot). App refreshes this
     /// whenever the harpoon list mutates so `apply_temp_filter`
@@ -444,12 +488,6 @@ pub struct AppState {
     /// prompt. (`pager_positions` is deferred — its `::load()` ctor does
     /// disk IO unwanted in `test_default`.)
     pub harpoon: Option<crate::state::Harpoon>,
-    pub pane_prompt_buf: String,
-    pub last_pane_prompt: Option<String>,
-    /// MVU Phase 5: active-pane routing flags, refreshed at loop-top (see
-    /// [`PaneSnapshot`]). Read by `route_snapshot` so routing reads the
-    /// Model, not the live pane host.
-    pub pane_snapshot: PaneSnapshot,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
     /// prompt is active. Drives the warning-color row highlight in
     /// the list view: the user sees exactly which files the `y` /
@@ -472,26 +510,6 @@ pub struct AppState {
     /// Which surface owns the keyboard. Replaces the old `pane_focused:
     /// bool`; read the derived bool via `self.pane_focused()`.
     pub focus: Focus,
-    pub pane_height_pct: u16,
-    /// Tmux-style "zoom": when true, the bottom pane fills the middle
-    /// region (list collapses to 0 rows). The user's preferred
-    /// `pane_height_pct` is preserved untouched so un-zoom restores
-    /// exactly the prior split.
-    pub pane_zoomed: bool,
-    /// Focus state captured at zoom-on, restored at zoom-off. `None`
-    /// when not zoomed.
-    pub pane_focus_before_zoom: Option<bool>,
-    /// `F10` / `^a-\` (TogglePane) toggles this. When true, the pane
-    /// row is hidden — render skips the pane area, layout treats it
-    /// as if no pane existed — but `pane_tabs` and every child pty
-    /// stay alive. Re-toggle flips it back; the rendered grid picks
-    /// up wherever the running processes left off. Previous behavior
-    /// was destructive (`pane_tabs = None`, SIGKILL via `Drop for
-    /// PtyHost`), which the user experienced as "I lost my claude
-    /// conversation every time I needed the whole screen for a
-    /// second."  Explicit kill of a tab still goes through `^a-x`
-    /// (`PaneCloseTab`).
-    pub pane_hidden: bool,
     pub rows: Vec<RowData>,
     /// MVU Phase 5: the geometry slice of the last rendered grid (cols ×
     /// rows-per-col), written by render and read by cursor/page-math. Was
@@ -500,6 +518,10 @@ pub struct AppState {
     /// Monotonic counter bumped whenever the display row list changes.
     /// Used by App to skip redundant `build_rows()` calls.
     pub list_generation: u64,
+    /// Git status/worker plumbing (see [`GitCache`]).
+    pub git_cache: GitCache,
+    /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
+    pub pane: PaneLayout,
 }
 
 impl AppState {
@@ -962,17 +984,18 @@ impl AppState {
                 // `.git/index` changes immediately; the only
                 // trade-off is a small lag in working-tree ` M`
                 // markers for edits within the throttle window.
-                let throttle = if self.is_huge_tree {
+                let throttle = if self.git_cache.is_huge_tree {
                     std::time::Duration::from_secs(10)
                 } else {
                     std::time::Duration::from_secs(1)
                 };
                 let should_invalidate = self
+                    .git_cache
                     .last_git_invalidation
                     .is_none_or(|t| t.elapsed() >= throttle);
                 if should_invalidate {
-                    self.git_status_cache = None;
-                    self.last_git_invalidation = Some(std::time::Instant::now());
+                    self.git_cache.git_status_cache = None;
+                    self.git_cache.last_git_invalidation = Some(std::time::Instant::now());
                 }
                 let dir = self.listing.dir.clone();
                 let new_git_files = self.git_file_statuses_cached(&dir);
@@ -1025,20 +1048,20 @@ impl AppState {
     /// surface.
     pub fn refresh_git_state(&mut self) -> bool {
         let key = self.compute_git_mtime_key_fast();
-        if key.is_some() && key == self.git_poll_cache {
+        if key.is_some() && key == self.git_cache.git_poll_cache {
             return false;
         }
         // mtime moved — invalidate the raw-status cache before going
         // through `git_file_statuses_cached`, which will re-spawn and
         // refill it on this dir.
-        self.git_status_cache = None;
+        self.git_cache.git_status_cache = None;
         let listing_dir = self.listing.dir.clone();
         let new_git_files = self.git_file_statuses_cached(&listing_dir);
         let new_git_info = self.compute_git_info_fast();
         // Stash on success so the next idle poll skips the
         // subprocesses. Stat fail (e.g. shallow repo, .git missing)
         // ⇒ key is None and we'll keep running until it appears.
-        self.git_poll_cache = key;
+        self.git_cache.git_poll_cache = key;
         if new_git_info == self.git.info && new_git_files == self.git.files {
             return false;
         }
@@ -1062,13 +1085,13 @@ impl AppState {
         &mut self,
         canonical: &Path,
     ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
-        let Some(repo_root) = self.current_repo_root.clone() else {
+        let Some(repo_root) = self.git_cache.current_repo_root.clone() else {
             // Not in a repo — nothing to do, no cache to maintain.
             return std::collections::HashMap::new();
         };
         let mtimes = self.compute_git_mtime_key_fast();
         // Decide whether to reuse the cached raw output.
-        let reuse = self.git_status_cache.as_ref().is_some_and(|c| {
+        let reuse = self.git_cache.git_status_cache.as_ref().is_some_and(|c| {
             c.repo_root == repo_root
                 && mtimes.is_some_and(|(idx, head)| idx == c.index_mtime && head == c.head_mtime)
         });
@@ -1080,22 +1103,22 @@ impl AppState {
             // will fill in real markers when the worker posts its
             // result (matched against `git_generation` so navigating
             // away mid-spawn discards the stale result).
-            if self.git_worker_available {
-                self.git_generation = self.git_generation.wrapping_add(1);
-                self.pending_git_requests.push(GitWorkerRequest {
-                    generation: self.git_generation,
+            if self.git_cache.git_worker_available {
+                self.git_cache.git_generation = self.git_cache.git_generation.wrapping_add(1);
+                self.git_cache.pending_git_requests.push(GitWorkerRequest {
+                    generation: self.git_cache.git_generation,
                     repo_root,
                 });
-                self.last_git_request_at = Some(std::time::Instant::now());
+                self.git_cache.last_git_request_at = Some(std::time::Instant::now());
                 return std::collections::HashMap::new();
             }
             // No worker (tests, App::new bootstrap) — fall through
             // to the synchronous walk path below.
-            self.git_status_cache = None;
+            self.git_cache.git_status_cache = None;
             if let Some(entries) = crate::git::status::repo_status(&repo_root)
                 && let Some((index_mtime, head_mtime)) = mtimes
             {
-                self.git_status_cache = Some(GitStatusCache {
+                self.git_cache.git_status_cache = Some(GitStatusCache {
                     repo_root,
                     index_mtime,
                     head_mtime,
@@ -1106,7 +1129,7 @@ impl AppState {
         // Re-filter the cached repo-wide entries to this listing dir's
         // prefix — no repo re-walk needed (the cache survives chdir
         // within the repo).
-        let Some(cache) = self.git_status_cache.as_ref() else {
+        let Some(cache) = self.git_cache.git_status_cache.as_ref() else {
             return std::collections::HashMap::new();
         };
         let prefix = canonical
@@ -1134,7 +1157,7 @@ impl AppState {
     /// Returns `None` if the listing dir isn't in a repo, mirroring
     /// the old `sysinfo::git_status` contract.
     pub fn compute_git_info_fast(&self) -> Option<String> {
-        let repo_root = self.current_repo_root.as_ref()?;
+        let repo_root = self.git_cache.current_repo_root.as_ref()?;
         let branch = crate::git::discovery::head_branch(repo_root)?;
         // Only trust the raw cache for the dirty marker if it was
         // captured for *this* repo. Without the `c.repo_root` filter,
@@ -1143,6 +1166,7 @@ impl AppState {
         // worker filled the new cache) — reported by Spencer as
         // "stale markers" after switching worktrees.
         let dirty = self
+            .git_cache
             .git_status_cache
             .as_ref()
             .filter(|c| &c.repo_root == repo_root)
@@ -1155,7 +1179,7 @@ impl AppState {
     /// once at chdir (`set_repo_root`), so this never opens gix or
     /// re-resolves the gitdir; it's pure `lstat` + `modified()`.
     fn compute_git_mtime_key_fast(&self) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
-        let gitdir = self.current_gitdir.as_ref()?;
+        let gitdir = self.git_cache.current_gitdir.as_ref()?;
         let index_mt = std::fs::metadata(gitdir.join("index"))
             .and_then(|m| m.modified())
             .ok()?;
@@ -1174,11 +1198,12 @@ impl AppState {
     /// fires when actually crossing into a different repo. The cached
     /// `current_gitdir` is then reused by the 1 Hz mtime poll with no gix.
     fn set_repo_root(&mut self, repo_root: Option<std::path::PathBuf>) {
-        if self.current_repo_root == repo_root {
+        if self.git_cache.current_repo_root == repo_root {
             return;
         }
-        self.current_gitdir = repo_root.as_deref().and_then(crate::git::discovery::gitdir);
-        self.current_repo_root = repo_root;
+        self.git_cache.current_gitdir =
+            repo_root.as_deref().and_then(crate::git::discovery::gitdir);
+        self.git_cache.current_repo_root = repo_root;
     }
 
     /// Recompute `is_huge_tree` / `huge_tree_anchor` for the given
@@ -1195,30 +1220,33 @@ impl AppState {
     pub fn update_huge_tree(&mut self, canonical: &Path) -> bool {
         let repo_root = find_repo_root(canonical);
         let new_anchor = repo_root.clone().unwrap_or_else(|| canonical.to_path_buf());
-        if self.huge_tree_anchor.as_ref() == Some(&new_anchor) {
+        if self.git_cache.huge_tree_anchor.as_ref() == Some(&new_anchor) {
             // Same project — keep the cached decision and skip the
             // walk. No flash either (we've already flashed this
             // project's first entry if it was huge).
             self.set_repo_root(repo_root);
-            return self.is_huge_tree;
+            return self.git_cache.is_huge_tree;
         }
-        let was_huge = self.is_huge_tree;
+        let was_huge = self.git_cache.is_huge_tree;
         // Look up a previously-cached decision for this anchor before
         // walking. Multi-slot cache survives leave-and-return cycles
         // (drill into the huge project → up to its parent → back in)
         // that the single-slot `huge_tree_anchor` thrashed on,
         // forcing a fresh `count_subdirs_capped` walk every time.
-        self.is_huge_tree = if let Some(&cached) = self.huge_tree_decisions.get(&new_anchor) {
-            cached
-        } else {
-            let huge = crate::app::count_subdirs_capped(
-                &new_anchor,
-                crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
-            ) > crate::app::HUGE_TREE_SUBDIR_THRESHOLD;
-            self.huge_tree_decisions.insert(new_anchor.clone(), huge);
-            huge
-        };
-        self.huge_tree_anchor = Some(new_anchor);
+        self.git_cache.is_huge_tree =
+            if let Some(&cached) = self.git_cache.huge_tree_decisions.get(&new_anchor) {
+                cached
+            } else {
+                let huge = crate::app::count_subdirs_capped(
+                    &new_anchor,
+                    crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
+                ) > crate::app::HUGE_TREE_SUBDIR_THRESHOLD;
+                self.git_cache
+                    .huge_tree_decisions
+                    .insert(new_anchor.clone(), huge);
+                huge
+            };
+        self.git_cache.huge_tree_anchor = Some(new_anchor);
         // Worktree-switch belt-and-suspenders: if we're crossing
         // into a *different* repo than the raw cache holds, wipe
         // the cache. `git_file_statuses_cached` does its own key
@@ -1232,19 +1260,19 @@ impl AppState {
         // satisfy `repo_root.is_some()` here, so the cache lives
         // on for re-entry.
         if let Some(new_root) = repo_root.as_ref()
-            && let Some(c) = self.git_status_cache.as_ref()
+            && let Some(c) = self.git_cache.git_status_cache.as_ref()
             && &c.repo_root != new_root
         {
-            self.git_status_cache = None;
+            self.git_cache.git_status_cache = None;
         }
         self.set_repo_root(repo_root);
-        if self.is_huge_tree && !was_huge {
+        if self.git_cache.is_huge_tree && !was_huge {
             self.flash_info(format!(
                 "large tree ({}+ subdirs) — git poll throttled, untracked markers off",
                 crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
             ));
         }
-        self.is_huge_tree
+        self.git_cache.is_huge_tree
     }
 
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
@@ -1284,7 +1312,7 @@ impl AppState {
         // chdir implicitly switched repos if the new tree has a
         // different `.git/`, so seed the cache here rather than wait
         // for the next 1 Hz poll to detect the mismatch.
-        self.git_poll_cache = self.compute_git_mtime_key_fast();
+        self.git_cache.git_poll_cache = self.compute_git_mtime_key_fast();
         self.picks.clear();
         self.temp_filter = None;
         self.cursor = Cursor::new();
@@ -2346,23 +2374,9 @@ impl AppState {
             should_quit: false,
             quit_pending: None,
             git: GitState::default(),
-            git_poll_cache: None,
-            is_huge_tree: false,
-            huge_tree_anchor: None,
-            huge_tree_decisions: std::collections::HashMap::new(),
-            current_repo_root: None,
-            current_gitdir: None,
-            git_status_cache: None,
-            git_worker_available: false,
-            pending_git_requests: Vec::new(),
-            git_generation: 0,
-            last_git_invalidation: None,
-            last_git_request_at: None,
+            git_cache: GitCache::default(),
             harpoon_filter_set: std::collections::HashSet::new(),
             harpoon: None,
-            pane_prompt_buf: String::new(),
-            last_pane_prompt: None,
-            pane_snapshot: PaneSnapshot::default(),
             pending_delete_preview: None,
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),
@@ -2371,10 +2385,10 @@ impl AppState {
             pending_sessions: None,
             frecency: Frecency::default(),
             focus: Focus::FileList,
-            pane_height_pct: 30,
-            pane_zoomed: false,
-            pane_focus_before_zoom: None,
-            pane_hidden: false,
+            pane: PaneLayout {
+                pane_height_pct: 30,
+                ..Default::default()
+            },
             rows: Vec::new(),
             grid_dims: GridDims {
                 cols: 1,
@@ -3796,7 +3810,7 @@ mod tests {
         std::fs::write(root.join("file.txt"), "v2\n").unwrap();
         // Bypass the in-state 1 s invalidation throttle so this call
         // re-fetches instead of reusing the cached clean snapshot.
-        s.last_git_invalidation = None;
+        s.git_cache.last_git_invalidation = None;
         s.refresh_listing();
         assert!(
             s.git.files.contains_key("file.txt"),
@@ -3808,7 +3822,7 @@ mod tests {
         // the mtime-cache invalidates on its own).
         run_git(&["add", "file.txt"]);
         run_git(&["commit", "-q", "-m", "v2"]);
-        s.last_git_invalidation = None;
+        s.git_cache.last_git_invalidation = None;
         s.refresh_listing();
         assert!(
             !s.git.files.contains_key("file.txt"),
@@ -3854,10 +3868,10 @@ mod tests {
 
         // Wire the "worker" and force a clean cache-miss baseline so the
         // asserted call takes the enqueue branch deterministically.
-        s.git_worker_available = true;
-        s.git_status_cache = None;
-        s.pending_git_requests.clear();
-        let gen_before = s.git_generation;
+        s.git_cache.git_worker_available = true;
+        s.git_cache.git_status_cache = None;
+        s.git_cache.pending_git_requests.clear();
+        let gen_before = s.git_cache.git_generation;
 
         let map = s.git_file_statuses_cached(&root);
 
@@ -3866,27 +3880,27 @@ mod tests {
             "worker path returns an empty map this frame (markers arrive async)"
         );
         assert_eq!(
-            s.pending_git_requests.len(),
+            s.git_cache.pending_git_requests.len(),
             1,
             "exactly one request enqueued for the run loop to flush"
         );
-        let req = &s.pending_git_requests[0];
+        let req = &s.git_cache.pending_git_requests[0];
         assert_eq!(
-            s.current_repo_root.as_deref(),
+            s.git_cache.current_repo_root.as_deref(),
             Some(req.repo_root.as_path()),
             "request carries the current repo root"
         );
         assert_eq!(
-            s.git_generation,
+            s.git_cache.git_generation,
             gen_before.wrapping_add(1),
             "generation bumped once"
         );
         assert_eq!(
-            req.generation, s.git_generation,
+            req.generation, s.git_cache.git_generation,
             "enqueued request stamped with the bumped generation"
         );
         assert!(
-            s.last_git_request_at.is_some(),
+            s.git_cache.last_git_request_at.is_some(),
             "request-sent timestamp stamped for the activity overlay"
         );
     }

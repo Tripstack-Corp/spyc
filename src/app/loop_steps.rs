@@ -40,7 +40,7 @@ impl App {
     /// before this point or strictly after `route_snapshot`, so the value
     /// matches what the old live read observed.
     pub(crate) fn snapshot_pane_routing(&mut self) {
-        self.state.pane_snapshot =
+        self.state.pane.pane_snapshot =
             self.runtime
                 .pane_tabs
                 .as_ref()
@@ -57,7 +57,7 @@ impl App {
     /// Returns whether a redraw is needed.
     pub(crate) fn poll_git_cadence(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
-        let git_poll_interval = if self.state.is_huge_tree {
+        let git_poll_interval = if self.state.git_cache.is_huge_tree {
             Duration::from_secs(10)
         } else {
             Duration::from_secs(1)

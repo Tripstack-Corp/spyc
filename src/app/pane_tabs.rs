@@ -36,17 +36,17 @@ impl App {
     /// each tab via `^a-x`), not a one-keystroke side effect.
     pub fn toggle_pane(&mut self) {
         if self.runtime.pane_tabs.is_some() {
-            self.state.pane_hidden = !self.state.pane_hidden;
+            self.state.pane.pane_hidden = !self.state.pane.pane_hidden;
             self.view.needs_full_repaint = true;
-            if self.state.pane_hidden {
+            if self.state.pane.pane_hidden {
                 // Park focus on the list while hidden. Keystrokes
                 // can't drive an off-screen pane sensibly. Zoom is
                 // mutually exclusive with hidden — clear it so a
                 // re-show doesn't try to render zoomed onto a
                 // newly-resized area.
                 self.state.focus = state::Focus::FileList;
-                self.state.pane_zoomed = false;
-                self.state.pane_focus_before_zoom = None;
+                self.state.pane.pane_zoomed = false;
+                self.state.pane.pane_focus_before_zoom = None;
                 self.state.flash_info("pane hidden — F10/^a-\\ to show");
             } else {
                 // Re-show: focus the pane so the next keystroke
@@ -315,13 +315,13 @@ impl App {
         if self.runtime.pane_tabs.is_none() {
             return;
         }
-        if self.state.pane_zoomed {
+        if self.state.pane.pane_zoomed {
             self.state.flash_info("pane is zoomed (^a z to exit)");
             return;
         }
-        let current = i32::from(self.state.pane_height_pct);
+        let current = i32::from(self.state.pane.pane_height_pct);
         let new = (current + delta_pct).clamp(10, 90);
-        self.state.pane_height_pct = new as u16;
+        self.state.pane.pane_height_pct = new as u16;
     }
 
     /// The pane percentage to use for layout/sizing computations.
@@ -329,10 +329,10 @@ impl App {
     /// stored `pane_height_pct` — the user's preferred split — stays
     /// untouched and is restored on un-zoom.
     pub const fn effective_pane_pct(&self) -> u16 {
-        if self.state.pane_zoomed {
+        if self.state.pane.pane_zoomed {
             100
         } else {
-            self.state.pane_height_pct
+            self.state.pane.pane_height_pct
         }
     }
 
@@ -346,9 +346,9 @@ impl App {
             self.state.flash_info("no pane open");
             return;
         }
-        if self.state.pane_zoomed {
-            self.state.pane_zoomed = false;
-            if let Some(prev) = self.state.pane_focus_before_zoom.take() {
+        if self.state.pane.pane_zoomed {
+            self.state.pane.pane_zoomed = false;
+            if let Some(prev) = self.state.pane.pane_focus_before_zoom.take() {
                 self.state.focus = if prev {
                     state::Focus::Pane
                 } else {
@@ -357,8 +357,8 @@ impl App {
             }
             self.state.flash_info("zoom: off");
         } else {
-            self.state.pane_focus_before_zoom = Some(self.state.pane_focused());
-            self.state.pane_zoomed = true;
+            self.state.pane.pane_focus_before_zoom = Some(self.state.pane_focused());
+            self.state.pane.pane_zoomed = true;
             self.state.focus = state::Focus::Pane;
             self.state.flash_info("zoom: on (^a z to exit)");
         }

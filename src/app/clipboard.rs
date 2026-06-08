@@ -39,7 +39,7 @@ impl App {
 
     /// yP — yank the last prompt the user typed into the pane.
     pub fn yank_last_prompt_to_clipboard(&mut self) -> Vec<Effect> {
-        let Some(text) = self.state.last_pane_prompt.as_ref() else {
+        let Some(text) = self.state.pane.last_pane_prompt.as_ref() else {
             self.state.flash_error("no prompt to yank");
             return Vec::new();
         };

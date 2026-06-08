@@ -263,7 +263,7 @@ impl App {
         }
         // Adaptive cadence: small trees get tight latency (500 ms debounce);
         // huge trees back off (3 s) so `git status` doesn't dominate idle CPU.
-        let refresh_quiet = if self.state.is_huge_tree {
+        let refresh_quiet = if self.state.git_cache.is_huge_tree {
             std::time::Duration::from_secs(3)
         } else {
             std::time::Duration::from_millis(500)
@@ -339,7 +339,7 @@ impl App {
         self.view.activity_git_results = self.view.activity_git_results.saturating_add(1);
         // Roundtrip duration: when the request was sent (set by
         // `git_file_statuses_cached`) vs. now.
-        if let Some(sent) = self.state.last_git_request_at.take() {
+        if let Some(sent) = self.state.git_cache.last_git_request_at.take() {
             self.view.activity_git_last_ms =
                 u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
         }
@@ -606,13 +606,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.state.last_git_request_at = Some(std::time::Instant::now());
+            app.state.git_cache.last_git_request_at = Some(std::time::Instant::now());
             app.ingest_git_result(git_result(99));
             // Recorded + cleared on the first result; a second doesn't panic
             // or re-take.
-            assert!(app.state.last_git_request_at.is_none());
+            assert!(app.state.git_cache.last_git_request_at.is_none());
             app.ingest_git_result(git_result(99));
-            assert!(app.state.last_git_request_at.is_none());
+            assert!(app.state.git_cache.last_git_request_at.is_none());
         });
     }
 }
