@@ -760,3 +760,33 @@ Provenance:
 - second-parent subject (f696dab^2): "refactor: unify agent handling behind an AgentProfile registry".
 
 <!-- Entry-ID: 01KTMMZWBVK4X3QJP7SJW3ZEG2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:18:08.583652+00:00
+Role: scribe
+Type: Note
+Title: PR #177 — zot: the first agent added under the registry (one impl + one line)
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: zot becomes the fifth agent, added entirely within `src/agent/` — proving the registry's "one impl + one registry line" claim   [kind: new-capability]
+When: 2026-05-29 · PR #177 (feat/zot-agent) · commit c4d8435
+Recorded rationale: "`zot` agent support. spyc now recognizes the `zot` coding agent in the pane (status bar shows `zot`), and `spyc -r` restores a `zot` tab with `zot --continue` (its resume-most-recent-for-cwd). First agent added under the new `AgentProfile` registry — one impl + one registry line, no dispatch-site edits." — CHANGELOG.md (added PR #177)
+Inferred intent: zot is the validation of #176 — added 18 minutes after the registry merged, touching only `src/agent/mod.rs` + a one-line persistence tag, with no `src/app/mod.rs` dispatch edits — evidence: diff is `src/agent/mod.rs` +121 (new ZotProfile + REGISTRY entry) and `src/state/sessions.rs` +1 (AgentKind::Zot tag); zero app/mod.rs lines
+                  confidence: high
+Supersedes: (none — additive; first consumer of the #176 registry convention)
+
+The claim #176 made — "adding an agent is a new impl + one `REGISTRY` entry rather than a tree-wide sweep" — is tested here and holds. The diff is confined: `src/agent/mod.rs` +121 (a `ZotProfile` impl plus its `REGISTRY` line) and `src/state/sessions.rs` +1 (the `AgentKind::Zot` persistence tag, per #176's "AgentKind stays the persistence tag" boundary). There are zero edits to `src/app/mod.rs` — the file that previously held the per-peer dispatch sweep every prior agent (gemini #68 +259, agy #172 +127) had to edit. The CHANGELOG states this directly: "no dispatch-site edits."
+
+Contrast with the cost of onboarding agy hours earlier (#172/#175: app/mod.rs +127, sessions.rs +78, a +179 transcript file). The fifth agent costs a single impl block; the fourth cost a tree-wide sweep plus a new file. That delta, on the same day, is the segment's thesis demonstrated rather than asserted.
+
+The registry also makes scope-deferral cheap and explicit: "Transcript scrollback and specific-session resume (`--session <path>`) are deferred until zot's on-disk session-file layout (`$ZOT_HOME/sessions/<cwd-hash>/`) and JSONL schema are confirmed against a real session" (CHANGELOG). zot ships with detection + `zot --continue` resume + status segment, and the transcript hook simply isn't implemented on `ZotProfile` yet — the profile abstraction lets a peer land partially without a parallel transcript file existing. This is the inverse of the per-peer transcript files (#146/#147/#175): under the registry, an unimplemented capability is an absent trait method, not an absent file.
+
+Provenance:
+- c4d8435 (PR #177 feat/zot-agent, 2026-05-29) — `src/agent/mod.rs` +121 (`ZotProfile` + REGISTRY entry), `src/state/sessions.rs` +1 (`AgentKind::Zot`), FEATURES.md ±15. No `src/app/mod.rs` change — verified in `git diff c4d8435^1 c4d8435 --stat`.
+- second-parent subject (c4d8435^2): "feat: add zot agent support".
+- references #176 = 01KTMMZWBVK4X3QJP7SJW3ZEG2 (the registry this consumes).
+
+<!-- Entry-ID: 01KTMN0ZW93D5P7TPZCVMCWC0B -->
