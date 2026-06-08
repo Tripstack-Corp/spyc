@@ -806,3 +806,30 @@ Provenance:
 - refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
 
 <!-- Entry-ID: 01KTMMTW9ADXAW9B6SZPDPD7MG -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:22.718389+00:00
+Role: scribe
+Type: Note
+Title: PRs #78, #80 (pager meta-key passthrough): the fourth instance of the routing-guard shape — meta chords fall through regardless of focus
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: with a slot-mounted pager coexisting with a bottom pane, meta chords (`^a`/`^w`/`^\`/F10) were swallowed by `handle_pager_key`; #78 fixes it for `TopPane` (the `D` pager), #80 generalizes to any slot-mounted pager (TopPane *or* LowerPane). The commit names this the fourth instance of one routing-guard pattern.   [kind: gotcha]
+When: 2026-05-12 · PRs #78 (fix/pager-meta-key-passthrough) · #80 (fix/lower-pane-pager-meta-key) · commits 3cd9edea, eeefafb5
+Recorded rationale: "same shape as the V paste bug and the original `top_overlay` key bug — the routing guard in front of `handle_pager_key` checked focus ownership but not 'is this a meta chord regardless of focus.'" — CHANGELOG (commit 3cd9edea). "Documents the fourth instance of the same pattern in the routing-refactor TODO; the refactor still wants to happen before v1.60 Phase 3 so input forwarding doesn't thread through this ad-hoc shape." — CHANGELOG (commit eeefafb5).
+Inferred intent: the slot-mounted pager shares the screen with a live pane, so focus-only routing strands the focus-flip chords; the fix makes meta chords unconditional fall-through. The commit's own "fourth instance" + "the refactor still wants to happen" framing reads as a recognized recurring shape, not a one-off. — evidence: #78 src/app/mod.rs +27/-... and TODO.md +15; #80 src/app/mod.rs +45/-21; both CHANGELOGs cite prior instances. confidence: high
+Supersedes: refines the #43 `D`-in-TopPane and #42 `^a-v`-LowerPane mounts (= 01KTMMRS83NW2K9GASEKF5R1T1) — the focus-flip chords (`^a-j`/`^a-k`) the V1.5 plan promised for slot mounts didn't reach the resolver until these.
+
+The two PRs are the same fix in two mounts. #78 (commit 3cd9edea, src/app/mod.rs +27) covers `Mount::TopPane` — with `D` open and a bottom agent pane visible, `^a-j`/`^w-j` did nothing because the pager's key handler swallowed them; the fix makes meta chords (`^a`/`^w`/`^\`/F10) always fall through to the resolver when the pager coexists with a bottom pane, regardless of which side has focus. #80 (commit eeefafb5, src/app/mod.rs +45/-21) generalizes the routing guard to any slot-mounted pager, scoping the non-meta-when-bottom-focused fall-through to `TopPane` only (since `LowerPane` visually replaces the bottom pty — there's no separate slot to type into).
+
+The commit body is explicit that this is a recurring structural shape — the "fourth instance" of a routing guard that checks focus ownership but not chord class — and points forward to a routing refactor wanted before v1.60 Phase 3. That refactor's later landing is tracked in `history-seg-refactor-mvu` (#180 extract-pager-history, #189 extract-pager-handler), where the pager input path is pulled out of `app/mod.rs`.
+
+Provenance:
+- 3cd9edea (PR #78, 2026-05-12) — src/app/mod.rs +27, TODO.md +15; meta-chord fall-through for TopPane.
+- eeefafb5 (PR #80, 2026-05-12) — src/app/mod.rs +45/-21; generalized to all slot mounts.
+- refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1; routing-refactor follow-up in history-seg-refactor-mvu.
+
+<!-- Entry-ID: 01KTMMVVRDCY22WSYSRMTFGCMY -->

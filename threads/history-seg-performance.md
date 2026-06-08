@@ -203,3 +203,28 @@ Provenance:
 - CHANGELOG.md (added PR #144) — quoted rationale above.
 
 <!-- Entry-ID: 01KTMMTSMP1F44C1ZPY2PP8J7M -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:32.575777+00:00
+Role: scribe
+Type: Note
+Title: PR #156 — refresh_listing no longer starves under continuous fs activity (max-defer predicate + test)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: the watcher-driven `refresh_listing` debounce moves from a pure trailing-edge (`now - last_event_at >= refresh_quiet`, no cap) to a pure `should_fire_refresh` predicate that fires when EITHER the trailing-quiet window OR a `max_defer` cap (`refresh_quiet * 2` — 1 s small, 6 s huge) elapses since the FIRST event of the current busy stretch. Adds a real-pipeline integration test plus six predicate unit tests.   [kind: gotcha]
+When: 2026-05-28 · PR #156 (fix/refresh-debounce-starvation) · commit 2639cd38
+Recorded rationale: "fix: refresh_listing no longer starves under continuous fs activity" — commit subject. CHANGELOG (added PR #156): "The watcher-driven `refresh_listing` used a pure trailing-edge debounce (`now - last_event_at >= refresh_quiet`) with no max-wait cap. Continuous fs writes — cargo emitting to `target/`, claude streaming files, IDE autosave bursts — kept bumping `last_event_at` to 'now,' the quiet window never arrived, and per-file markers could stay stale for as long as the activity lasted. The decision now lives in a pure `should_fire_refresh` predicate that fires when *either* the trailing-quiet window OR a `max_defer` (`refresh_quiet * 2` — 1 s small, 6 s huge) cap elapses since the *first* event of the current busy stretch."
+Inferred intent: the corrective bookend to PR #137. PR #137's huge-tree throttle (and PR #100's 3 s `REFRESH_QUIET` backoff) widened the trailing-quiet window; under genuinely continuous fs activity a trailing-only debounce can never fire, so markers stall indefinitely — the inverse failure of the cost problem the campaign started from. The fix adds a leading-anchored max-defer ceiling. Evidence: `src/app/mod.rs` +190/-19, `src/app/state.rs` +75 (predicate + tests); the test name `refresh_listing_picks_up_edit_and_clears_after_commit` drives "the real refresh pipeline against a temp git repo." confidence: high
+Supersedes: the unbounded trailing-edge debounce that PR #100 (3 s huge-tree `REFRESH_QUIET`) and PR #137 (10 s spawn throttle) had implicitly stretched. The predicate is extracted pure specifically to be testable — the CHANGELOG frames the integration test as a regression guard for "a future regression in any of the layers (`refresh_listing` → `git_file_statuses_cached` → raw porcelain parse → `rebuild_rows`)."
+
+This closes the performance arc on a note of balance: the campaign spent #99/#100/#137 making the git-status refresh cheaper and less frequent under load; #156 ensures the same throttling can't swing into staleness when the load never lets up. The extraction of the timing decision into a pure predicate with unit + integration coverage also marks the campaign's first investment in regression tests for this pipeline; cross-reference history-arc-04-git-integration for the `git_file_statuses_cached` layer it exercises.
+
+Provenance:
+- 2639cd38 (PR #156 fix/refresh-debounce-starvation, 2026-05-28) — `src/app/mod.rs` +190/-19 (max-defer wiring, busy-stretch first-event tracking), `src/app/state.rs` +75 (`should_fire_refresh` predicate + 6 unit tests + integration test), CHANGELOG +21.
+- CHANGELOG.md (added PR #156) — quoted rationale above.
+- 01KTMMP87YEBGTXTHDPH0BJJY0 (PR #137 entry, this thread) — the throttle whose trailing-edge gap this fixes.
+
+<!-- Entry-ID: 01KTMMW22XTS48TGVY3DS1HPPA -->

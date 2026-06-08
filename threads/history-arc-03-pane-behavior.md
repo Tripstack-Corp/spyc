@@ -816,3 +816,28 @@ Provenance:
 - the two share branch slug fix/pane-scroll-pane-focus-chord — #116 is the corrected re-land
 
 <!-- Entry-ID: 01KTMMVBB7ZNVH9YM9813VEBXJ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:37.656779+00:00
+Role: scribe
+Type: Note
+Title: PR #133 + #134: active-tab vs activity-tab — disentangling "you are here" from "this tab has output"
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: tab visual state — Reconstructed: the active-tab style is given a REVERSED background-fill so it no longer renders identically to an amber-bold activity tab (#133), and background-tab activity is now detected in the event-loop pre-drain rather than only at render time (#134)   [kind: gotcha]
+When: 2026-05-26 · PR #133 (fix/tab-active-vs-activity-style, 4a9ea7d)  —  2026-05-26 · PR #134 (fix/background-tab-activity-detection, c00cf03)
+Recorded rationale: #133 CHANGELOG verbatim: "Active tab is now visually distinct from a background tab with activity. Reported by Spencer: 'tab name highlighting buggy and highlights don't get cleared from tabs sometimes so it's hard to tell where you are.' Cause: the active-tab style and the activity style were both theme.pick (amber) + BOLD … so the two states rendered identically, with only the small */+ glyph distinguishing them." #134 CHANGELOG verbatim: "Background-tab activity is now detected promptly. … the event-loop pre-drain consumed the background tab's bytes (correctly, to avoid pile-up) but didn't flip has_activity. The render-path drain_all was the only setter, and by the time it ran the queue was already empty."
+Inferred intent: the two PRs separate two conflated signals — *which tab is focused* vs *which tab produced output* — at the style layer (#133) and at the detection layer (#134). evidence: #133 adds REVERSED to the active style in src/app/mod.rs (+10/-4) giving "three clearly distinct states" (active reversed / activity amber-bold / inactive gray); #134 makes pre-drain flip has_activity + request redraw (src/app/mod.rs +23/-10) so the `+` shows within one poll tick (16–100 ms). confidence: high
+Supersedes: the shared `theme.pick`+BOLD styling that made active and activity tabs indistinguishable (#133); the render-only `drain_all`-as-sole-`has_activity`-setter assumption (#134) — the pre-drain now also sets it
+
+A two-part disentangling. #133 is purely visual: active-tab and has-activity both used amber-bold `theme.pick`, and `pick` shares its RGB with `prompt_prefix`, so "you are here" and "this tab spoke" looked the same except for a tiny `*`/`+` glyph. The active tab gains a REVERSED background-fill so focus registers in peripheral vision; activity stays amber-bold, inactive stays gray — three distinct states. Its CHANGELOG explicitly forward-references the detection bug: "background-tab output not being detected without foreground input — filed in BUGS, follow-up PR." #134 is that follow-up: the event-loop pre-drain consumed background bytes (correctly, to prevent pile-up) but never flipped `has_activity`; the only setter was the render-path `drain_all`, which by then saw an empty queue, so the `+` only appeared after a foreground keystroke. Pre-drain now flips `has_activity` and requests a redraw on background bytes, surfacing the indicator within one poll tick.
+
+Provenance:
+- 4a9ea7d (PR #133, 2026-05-26) — src/app/mod.rs +10/-4 (REVERSED active style), BUGS.md +3, CHANGELOG +17
+- c00cf03 (PR #134, 2026-05-26) — src/app/mod.rs +23/-10 (pre-drain has_activity + redraw), BUGS.md +4/-... (report retired), CHANGELOG +12
+- #133's CHANGELOG names #134 as its filed follow-up
+
+<!-- Entry-ID: 01KTMMW7N1HQ6Q2A90D1CPZ230 -->

@@ -635,3 +635,37 @@ Provenance:
 - 58a67d1 (PR #109 fix/claude-resume-enter-race, 2026-05-21) — `src/app/mod.rs` +68/-15, `src/pane/tabs.rs` +31; banner-settle 1.5s→2s, separate 300ms-delayed `\r` write. Clean squash (no second parent); rationale from CHANGELOG verbatim.
 
 <!-- Entry-ID: 01KTMMT76DJR9MACFF973R44PK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:26.295802+00:00
+Role: scribe
+Type: Note
+Title: PR #146,#147 (+#145,#149,#175) — Transcript scrollback: three near-identical per-agent files
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: `^a v` learns to render an agent's on-disk JSONL transcript instead of scraping the terminal grid; the renderer is reimplemented once per agent   [kind: new-capability]
+When: 2026-05-27 · PRs #146 (feat/codex-transcript-scrollback, 0627579), #147 (feat/claude-transcript-toggle, a041568) · folds #145, #149; forward-refs #175
+Recorded rationale: "Agent-aware scrollback: `^a v` on a codex pane shows the real conversation. Codex keeps its history in a DECSTBM scroll region [...] so it can never be screen-scraped from the terminal. Instead, `^a v` now reads codex's on-disk rollout transcript [...] and renders the actual conversation" — CHANGELOG.md (added PR #146)
+Inferred intent: the terminal-capture scrollback can't see agents that confine history to a scroll region, so each agent gets a dedicated transcript reader — and each reader is a new `state/<agent>_transcript.rs` file, the clearest per-peer repetition in the segment — evidence: #146 adds `src/state/codex_transcript.rs` (+302), #147 adds `src/state/claude_transcript.rs` (+171), #175 adds `src/state/agy_transcript.rs` (+179), each "same machinery"
+                  confidence: high
+Supersedes: the vt100 terminal-capture-only `^a v` scrollback — for codex (always) and claude/agy (opt-in), the source of truth becomes the on-disk JSONL
+
+The driving constraint is codex-specific and recorded verbatim: "Codex keeps its history in a DECSTBM scroll region (both alt-screen and `--no-alt-screen`), so it can never be screen-scraped from the terminal" (CHANGELOG #146). The fix reads "`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` — the source of truth, flushed per turn — resolves the active pane's session by cwd + spawn time, and renders the actual conversation (user turns `❯`, agent replies, tool calls `⚙`) in the pager" (CHANGELOG #146). It "works in *both* codex modes since it doesn't depend on terminal capture at all."
+
+The per-peer repetition is explicit in the commit record. #147 brings the claude variant and names the duplication: "`[pane] claude_transcript_scrollback = true` makes `^a v` on a Claude pane render Claude's on-disk conversation JSONL (`~/.claude/projects/<slug>/<session-id>.jsonl`) [...] **Same machinery as the codex transcript view**, resolving the active pane's session by cwd + spawn time" (CHANGELOG #147, emphasis added). Claude's defaults to **false** because "Claude's terminal output scrolls into the main buffer, so the existing vt100 capture works and stays the default." Two days later #175 adds the third instance, `src/state/agy_transcript.rs`, "same `(transcript)` treatment as codex." Three files — `codex_transcript.rs`, `claude_transcript.rs`, `agy_transcript.rs` — implementing the same read-resolve-render shape against three JSONL layouts. This is the most legible expression of the segment's throughline: the transcript surface is exactly the kind of per-peer concern #176 cites ("transcript scrollback") as one of the ~10 dispatch sites it unifies.
+
+Folded into this moment (same surface, same week):
++ #145 fix/codex-scrollback-feedback (03fb34a, 2026-05-27) — a precursor fix: before the transcript reader, `^a v` on codex "previously opened a silent, empty-looking pager with no explanation"; #145 detects empty scrollback and flashes "no scrollback captured — codex & inline TUIs keep their own history", and corrects earlier wrong advice ("An earlier release recommended launching codex with `--no-alt-screen` as a fix; that was incorrect"). It supersedes the prior `--no-alt-screen` guidance in FEATURES.md. Adds `src/ui/scrollback.rs` +48.
++ #149 fix/transcript-bounded-read (05c5fdc, 2026-05-27) — a shared hardening: "Both the codex and (opt-in) Claude transcript renderers read the whole JSONL into memory synchronously on the render thread — and real Claude conversation logs reach 100+ MB, so a single `^a v` could hang the TUI for seconds." Now they "read just the tail (last 4 MB) via `state::read_tail_lossy`." This is the one place the per-agent files share a helper (`src/state/mod.rs` +63); the diff touches both `claude_transcript.rs` and `codex_transcript.rs` by +3 each — fixing the same bug twice, once per file, the exact cost #176 reduces.
+
+Provenance:
+- 0627579 (PR #146, 2026-05-27) — `src/state/codex_transcript.rs` +302, `src/app/mod.rs` ±136, FEATURES.md.
+- a041568 (PR #147, 2026-05-27) — `src/state/claude_transcript.rs` +171, `src/config/` toggle +35, `src/state/sessions.rs` +22. second-parent: "feat: opt-in Claude transcript scrollback ([pane] toggle, default off)".
+- 03fb34a (PR #145, 2026-05-27) — `src/ui/scrollback.rs` +48, FEATURES.md ±27. second-parent: "fix: explain empty scrollback on codex; correct --no-alt-screen advice".
+- 05c5fdc (PR #149, 2026-05-27) — `src/state/mod.rs` +63 (`read_tail_lossy`), both transcript files +3.
+- da4a6e1 (PR #175, 2026-05-29) — `src/state/agy_transcript.rs` +179 (full detail in the agy onboarding moment).
+
+<!-- Entry-ID: 01KTMMVJ6RR8RM6WNZ9HKQC5C8 -->

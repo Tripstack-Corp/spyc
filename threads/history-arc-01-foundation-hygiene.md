@@ -507,3 +507,34 @@ Provenance:
 - PR #199/#200 entry = 01KTMMQN283Z4FYP184WT4015X (cite `make lint-linux green` as their bar).
 
 <!-- Entry-ID: 01KTMMV2X1VV9QPY0YA4AZPE05 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:29.121972+00:00
+Role: scribe
+Type: Note
+Title: PRs #164,#165: pin Rust toolchain to 1.96.0; reconcile INSTALL.md MSRV to 1.85
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: toolchain-pin — Reconstructed: `rust-toolchain.toml` is pinned from the floating `stable` channel to an exact `1.96.0` (#164), and stale INSTALL.md prose claiming MSRV 1.80 is reconciled to the authoritative 1.85 (#165).   [kind: convention]
+When: 2026-05-29 · PRs #164 (chore/pin-rust-toolchain-1.96, 3d682ec), #165 (docs/install-msrv-1.85, e25f10e)
+Recorded rationale: #164 "`rust-toolchain.toml` floated on the `stable` channel, so the compiler and clippy silently tracked whatever stable was current. Combined with the `cargo clippy --locked -- -D warnings` commit gate, a new stable shipping a new lint could break commits mid-work with no code change. Pin the exact version (1.96.0, released 2026-05-25) so toolchain upgrades are an explicit, reviewable bump." (3d682ec^2). #165 "INSTALL.md said \"Minimum supported Rust version: 1.80\" but `Cargo.toml`'s authoritative `rust-version` is 1.85... Fix the stale prose." (e25f10e^2).
+Inferred intent: make toolchain upgrades a reviewable event rather than an ambient surprise, because the `-D warnings` gate turns any new clippy lint into a build break. evidence: #164 names the failure mode ("break commits mid-work with no code change") and verifies green ("770 tests"); the floating-channel→pinned-version diff in rust-toolchain.toml. confidence: high
+Supersedes: hardens the `cargo clippy --locked -- -D warnings` gate the cache campaign and arc-01 PR #3 already established — the gate was the thing that made a floating toolchain dangerous.
+
+This moment separates two distinct version concepts that are easy to conflate:
+
+- **Pinned dev toolchain** (#164): the exact compiler CI and devs build *with*. Moves from `channel = "stable"` to `channel = "1.96.0"` in `rust-toolchain.toml`. The rationale is precise: a floating stable + a `-D warnings` clippy gate means any new stable's new lint breaks commits with no code change. Pinning makes the upgrade reviewable. Documented in INSTALL.md, no version bump ("dev-toolchain change, no user-visible behavior").
+- **MSRV / `rust-version`** (#165): the *minimum* Rust a consumer needs, which lives in `Cargo.toml`. #165 only fixes stale INSTALL.md prose (1.80 → 1.85) to match the authoritative `Cargo.toml` value, noting "deny.toml, ROADMAP, SECURITY, and the CI image all already say 1.85."
+
+Honesty note on the MSRV timeline: PR #165 reconciles prose *to 1.85* on 05-29, but by PR #167 (same day, supply-chain moment) `Cargo.toml`'s `rust-version` already reads **1.88** (verified: `Cargo.toml` at 3d682ec^2~1 shows `rust-version = "1.88"`), and the v1.51.4 CHANGELOG (PR #170) states "MSRV 1.88." The 1.85→1.88 MSRV bump itself is **not in this slice** — it landed in another segment (the MSRV-1.88 let-chain sweep referenced by PR #188). So #165's reconciliation is to a value (1.85) that the repo was simultaneously moving past; this entry records the reconciliation as a doc-hygiene fix, not as the MSRV decision. PURE SEQUENCE-INFERENCE on which segment owns the 1.88 bump — flagged for the coordinator.
+
+Provenance:
+- 3d682ec (PR #164, 2026-05-29) — rust-toolchain.toml channel stable→1.96.0; INSTALL.md +5; CHANGELOG +8; commit body quoted.
+- e25f10e (PR #165, 2026-05-29) — INSTALL.md single-line 1.80→1.85.
+- Cargo.toml at 3d682ec^2~1 — `rust-version = "1.88"` (the MSRV already past 1.85, owned by another segment).
+- PR #188 entry = 01KTMMV2X1VV9QPY0YA4AZPE05 (names the "MSRV-1.88 let-chain sweep").
+
+<!-- Entry-ID: 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 -->

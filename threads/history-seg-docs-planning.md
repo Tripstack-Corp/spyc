@@ -139,3 +139,29 @@ Provenance:
 - 01KTMMMQ1VY8ZERQ3NQAF89DN4 (prior entry, this thread) — v1.60 plan whose `subscribe_frames` this formalizes.
 
 <!-- Entry-ID: 01KTMMSRJ3DEDE2S4VWY5JHEND -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:19.923948+00:00
+Role: scribe
+Type: Note
+Title: PR #157/#158 — YAZI_COMPETITIVE_REVIEW + roadmap follow-up: benchmark the nearest neighbour, restate the thesis, re-scope DnD/cwd
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: a competitive review against Yazi (filed the same day Yazi merged its OSC 72 drag-and-drop PR) catalogues feature-by-feature standing, restates spyc's thesis, and flags a stale ROADMAP DnD entry. The same-day follow-up #158 acts on it: rewrites the DnD entry around OSC 72 + a drop-action picker and promotes cwd-export-on-quit to a working track.   [kind: convention]
+When: 2026-05-28 · PR #157 (docs/yazi-competitive-review) commit 6d96e8d · PR #158 (docs/roadmap-dnd-cwd-followup) commit 3fe93f0
+Recorded rationale: "Yazi is the closest neighbour in the TUI file-commander space … `ROADMAP.md` carries four Yazi-inspired entries … but there is no single place that lays out what Yazi actually does, where we overlap, and where we deliberately don't. This doc is that place. … A two-pane file commander whose distinguishing feature is a local MCP socket … The file commander is the noun the agent operates on. Yazi is not in this game." — docs/YAZI_COMPETITIVE_REVIEW.md, added PR #157
+Inferred intent: a positioning/benchmarking pass that converts a competitor's daily activity into concrete roadmap edits, keeping the differentiator (MCP-from-the-pane) explicit. evidence: 6d96e8d adds the review +220, dated against "PR #4005 (drag-and-drop) merged the same day"; flags ROADMAP.md:571 DnD as "stale in two ways" (OSC 52 is clipboard not DnD; kitty-only payoff small); 3fe93f0 then rewrites that entry around OSC 72 + a drop-action picker and moves cwd-export from "Additional Ideas" up into a working track. confidence: high
+Supersedes: ROADMAP.md DnD entry "files from the desktop into spyc via OSC 52 or path paste" (revised in 3fe93f0 to OSC 72 + Yazi PR #4005 reference + path-paste-first deferral); the standalone "Cwd export on quit" idea is relocated/promoted in 3fe93f0.
+
+Reconstructed: the review benchmarks Yazi (~37k stars) feature-by-feature — async scheduler, image preview (out of scope for spyc), Lua plugins (explicit non-goal, ROADMAP.md:447), trash bin (spyc's two-tier graveyard cascading to system trash beats Yazi's single tier) — and is honest about gaps (archive extraction, bulk rename, visual-mode range pick all roadmapped-not-shipped). Its framing reasserts the README/thesis line verbatim: "The file commander is the noun the agent operates on." On DnD it recommends referencing OSC 72 and deferring native impl "until at least one more terminal ships OSC 72," shipping the cheap path-paste fallback first.
+
+#158 executes the review's recommendations the same day: the ROADMAP DnD entry is rewritten to cite Yazi PR #4005 and OSC 72, and grows a drop-action picker design (send to lower pane as image / create new file / add to picks / open in pager) — the "send to lower pane as image" arm called out as "the spyc-shaped one Yazi doesn't have." cwd-export-on-quit is promoted up the roadmap with `Q` retaining no-export semantics. This review is the reference the project says to "re-read before any 'should we copy X?' conversation."
+
+Provenance:
+- 6d96e8d (PR #157 docs/yazi-competitive-review, 2026-05-28) — docs/YAZI_COMPETITIVE_REVIEW.md +220 (feature matrix, thesis restatement, OSC 72 analysis); ROADMAP.md DnD entry revised +6/−2. Cites src/state/graveyard.rs, multiple ROADMAP line refs.
+- 3fe93f0 (PR #158 docs/roadmap-dnd-cwd-followup, 2026-05-28) — ROADMAP.md DnD entry rewrite + drop-action picker; cwd-export promoted from Additional Ideas; YAZI_COMPETITIVE_REVIEW.md tidy (53-line churn).
+
+<!-- Entry-ID: 01KTMMVPG9JPMQ9N5CGB84KGVG -->
