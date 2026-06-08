@@ -29,3 +29,30 @@ Provenance:
 - CHANGELOG.md (added PR #99) — quoted rationale above.
 
 <!-- Entry-ID: 01KTMMHXYR7E0PYD7AZTHFAR8E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:30.838835+00:00
+Role: scribe
+Type: Note
+Title: PR #100 — huge-tree adaptive backoff + git-status off the UI thread + zero-subprocess cached chdir
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: a single PR lands three layered git-cost reductions for very large trees: (a) `git status` moves to a background worker so cache-miss chdir no longer blocks the UI, (b) huge-tree classification triggers adaptive backoff of poll/debounce/untracked-mode, (c) a cached-repo chdir does zero git subprocesses by reading `.git/HEAD` directly.   [kind: refactor]
+When: 2026-05-19 · PR #100 (perf/huge-tree-adaptive-backoff) · commit db0ea614
+Recorded rationale: "perf: huge-tree adaptive backoff (Tier 1)" — commit subject. CHANGELOG (added PR #100), worker move: "`git status` runs on a background worker thread... cache misses... still blocked the UI for the 200-500 ms `git status` index walk on a ~110k-file repo. Now the chdir returns immediately... The worker is a single long-running thread holding an `mpsc` request queue... A `git_generation` counter bumps on every cache-miss send. Results carry the generation they were spawned for; if the user has navigated past that point, the result is discarded silently (no thread cancellation needed)." Backoff: "When the count exceeds `HUGE_TREE_SUBDIR_THRESHOLD` (256)... `REFRESH_QUIET`: 500 ms → 3 s... `GIT_POLL_INTERVAL`: 1 s → 10 s... untracked mode: `-unormal` → `-uno`." Cached chdir: "every chdir on a *cached* repo... does the following instead: No subprocess at all."
+Inferred intent: builds directly on PR #99's mtime cache ("Tier 1" / "Following on from the huge-tree adaptive backoff" / "Combined with the Tier 0 mtime cache, the idle poll is now stat-only *and* 10× less frequent"). Evidence: largest diff in the slice — `src/app/state.rs` +398/-... , `src/app/mod.rs` +212, `src/sysinfo.rs` reworked (+127/-... for `read_head_branch`/`resolve_gitdir`). confidence: high
+Supersedes: PR #99's single-slot caches — the CHANGELOG notes the prior single-slot `huge_tree_anchor` and `git_status_raw_cache` "were wiped on every anchor change," replaced here by a multi-slot `huge_tree_decisions: HashMap<PathBuf, bool>` and a self-invalidating `(repo_root, mtimes, huge)`-keyed `git_status_raw_cache`.
+
+The diff shape reads as several pre-squash commits folded into one PR: (1) async startup — "`App::new` no longer blocks on `git_status` / `git_file_statuses`"; (2) the long-running worker thread with `git_generation` discard-on-stale semantics; (3) the multi-slot huge-tree decision cache surviving leave-and-return; (4) the zero-subprocess cached chdir using new `sysinfo::read_head_branch` ("handles attached refs and detached HEADs") and `sysinfo::resolve_gitdir` ("handles `.git` dirs *and* worktree/submodule gitfiles"). All four were folded into this one moment; no separate decision per sub-commit.
+
+Net effect quoted verbatim: "per-chdir cost on a cached repo drops from 'hundreds of ms, user-visible' to 'single-digit ms on the worst dir read; sub-ms for git work.'" The huge-tree path makes a visible trade — "untracked files no longer get a `?` marker on huge trees" — and flashes it: "large tree (256+ subdirs) — git poll throttled, untracked markers off." The worker-thread + generation-counter pattern introduced here is the same shape later reused for off-thread vt100 parsing (see PR #141) — this is the campaign's first move of blocking work onto a background thread with a stale-result discard counter. The MVU loop interactions around the worker request/result channels cross-reference history-seg-refactor-mvu; the git plumbing cross-references history-arc-04-git-integration.
+
+Provenance:
+- db0ea614 (PR #100 perf/huge-tree-adaptive-backoff, 2026-05-19) — `src/app/state.rs` (multi-slot decision cache, raw-status cache rework), `src/app/mod.rs` +212 (worker thread, mpsc queue, generation counter), `src/sysinfo.rs` (`read_head_branch`, `resolve_gitdir`, `count_subdirs_capped` made platform-agnostic), CHANGELOG +123.
+- CHANGELOG.md (added PR #100) — quoted rationale above.
+- 01KTMMHXYR7E0PYD7AZTHFAR8E (PR #99 entry, this thread) — the Tier-0 cache this builds on / supersedes the single-slot version of.
+
+<!-- Entry-ID: 01KTMMK08N55944H24EY4RM81E -->

@@ -109,3 +109,29 @@ Provenance:
 - CHANGELOG.md (added PR #107) — quoted soft-break-as-hard-break rationale incl. self-flagged prose tradeoff
 
 <!-- Entry-ID: 01KTMMJ3WCPSR7PH80MBES90JW -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:28.350323+00:00
+Role: scribe
+Type: Note
+Title: PR #108 — table width hint subtracts the line-number gutter
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: the pager body width passed to the markdown renderer now subtracts an estimated line-number gutter (`ilog10(lines) + 2` cells, with a safety margin) so wide tables stop overflowing the pager's right edge when line numbers are on.   [kind: supersession]
+When: 2026-05-21 · PR #108 (fix/markdown-table-gutter-overflow) · commit c332829
+Recorded rationale: "Wide markdown tables no longer overflow the pager's right edge when line numbers are on. v1.50.48 hinted the markdown renderer at the actual pager body width so wide tables would expand instead of wrap. That width didn't account for the line-number gutter the pager draws on top of the rendered lines (`ilog10(lines) + 2` cells), so a table sized to fill the body width still got pushed off the right edge by the gutter columns. Now we estimate the gutter from the source line count (with a ~1-digit safety margin to cover soft-break-as-hard-break and table expansion) and subtract it from the hint." — CHANGELOG.md (added PR #108)
+Inferred intent: a direct correction to the PR #103 hint — the hint was the full body width, but the pager overlays a gutter the renderer didn't know about. evidence: src/app/mod.rs +32 `let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;` then +33 `let pager_w = body_w.saturating_sub(2 + gutter_w);` replacing the old +29 `centered_body_width(term_w).saturating_sub(2)`. The `saturating_mul(4)` is the cited safety margin covering soft-break-as-hard-break (PR #107) and table expansion (PR #103).
+                  confidence: high
+Supersedes: PR #103 (feat/markdown-tables-use-pager-width, commit 386b7bc) — the width hint computed there is reduced by the gutter estimate here. The fix lives entirely in the call site (src/app/mod.rs), not the renderer; render()'s signature is unchanged.
+
+This is the fix half of the #103/#108 table-width pair. Notably the safety-margin comment explicitly references both prior moments in this slice: the `* 4` over the source line count pads the gutter estimate "because of soft-break-as-hard-break [PR #107] + table expansion [PR #103]" (src/app/mod.rs +18..+26 comment). The renderer is untouched — this is purely the hint the caller feeds in.
+
+Provenance:
+- c332829 (PR #108 fix/markdown-table-gutter-overflow, 2026-05-21) — src/app/mod.rs +16/-2 (gutter_w = ilog10-based estimate, subtracted from body_w); CHANGELOG.md +13
+- CHANGELOG.md (added PR #108) — quoted gutter-overflow rationale referencing v1.50.48 (PR #103)
+- 386b7bc (PR #103, 2026-05-19) — the width hint this PR corrects (Entry 01KTMMHF832JPTVJ91GGHG8AFM in this thread)
+
+<!-- Entry-ID: 01KTMMJW20G78SSRS5TCFCRN1P -->
