@@ -609,3 +609,30 @@ Provenance:
 - `history-arc-02-lazygit-investigation-and-harvest` harvest entry = 01KR0Z11CKNJRYEZ3T38EAFSC4 (BUGS.md MAYBE mode-2026 entry — the suspect §3 fourth-condition candidate that didn't land in this window).
 
 <!-- Entry-ID: 01KR11TME2KF5QFQ45GJYG8MC7 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:50.882989+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): pane behavior carries forward from arc 03 baseline
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: pane-behavior — Reconstructed: framing the #38–#311 continuation of the pane surface, appended to the arc-03 baseline   [kind: segment-topology]
+When: 2026-05-07 → 2026-05-29 · PRs #46–#162 (the pane-behavior slice of the #38–#311 window)
+Recorded rationale: arc-03 closure entry 01KR10MXSHV2 ("arc 03 baseline complete; … arc 04 (git-integration) follows") — the baseline this continuation extends
+Inferred intent: the arc-03 head (#6,#22,#26,#29,#34) reconstructed the bottom pane as a *visual + child-process* surface — zoom, four-stage shutdown, dim-unfocused, cursor-block guard, overlay-as-pane focus. The continuation slice is the same surface maturing along four axes that the head only gestured at: (1) the pane↔task relationship becomes bidirectional and first-class (V1.5 phase 6), (2) the pane visibility model flips from destroy-on-toggle to hide-not-destroy, (3) tab/pane *focus* and *activity* state get disentangled, (4) the pty/parser lifecycle is hardened against crashes and degenerate geometry. PURE SEQUENCE-INFERENCE for the grouping; each grouped moment carries its own recorded rationale. confidence: high
+Supersedes: (none — extends the arc-03 baseline; individual supersessions are flagged per-moment below)
+
+This Note frames the #38–#162 pane-behavior moments that follow. Arc 03's head treated the bottom pane as a single tmux-like region whose recurring concern oscillated between visual state (zoom, dim) and child-process lifetime (shutdown). The continuation keeps that recurring-concern shape but the concern fans out: a pane is now a *container of tabs*, each tab wraps a shared pty kernel (`PtyHost`, PR #46), and that kernel can migrate between a pane tab and a background task without quitting the child (#47/#48). Once tabs and ptys are first-class, the rest of the slice is consequence management — who has focus when you switch tabs (#54), which session a pane resumes (#67), what a hidden pane means (#94), how "active" reads differently from "has activity" (#133/#134), and how the parser survives a panic or a zero-row layout (#150/#151).
+
+Two threads outside this arc are load-bearing for the visibility moment and are referenced by name there: `feature-pane-toggle-preserve-context` (the in-session hide/unhide round-trip that #94 implements) and `feature-pane-state-general-recovery` / `docs/PANE_RECOVERY_PLAN.md` (the broader quit→relaunch recovery story, cross-referenced in `history-seg-docs-planning`). The recovery plan (PR #92) explicitly separates itself from the toggle case: "that's the in-session hide/unhide round-trip (`F10` / `^a-\`) … a simpler fix (hide-don't-destroy; the pty stays alive)."
+
+Provenance:
+- arc-03 thread entries 01KR108QNEEG (PR #6), 01KR10ASW7YS (PR #22), 01KR10MXSHV2 (closure) — the baseline being extended
+- docs/V1_5_PLAN.md §"Phase 6 — Task ↔ pane migration" (added pre-#46) — names the migration as the highest-risk, last-sequenced V1.5 phase
+- docs/PANE_RECOVERY_PLAN.md (PR #92 db70c95, 2026-05-15) — distinguishes toggle-preserve from general recovery; cross-ref history-seg-docs-planning
+
+<!-- Entry-ID: 01KTMMKJWX5X3WS2QD90MY153F -->
