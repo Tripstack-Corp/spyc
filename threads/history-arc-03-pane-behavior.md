@@ -712,3 +712,27 @@ Provenance:
 - relates forward to #90 (stale exit-label on restore) — both are session save/restore fidelity fixes on the pane↔session seam
 
 <!-- Entry-ID: 01KTMMPE3J1R4KEC6DXRS9Q5DF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:10.931136+00:00
+Role: scribe
+Type: Note
+Title: PR #75 (fix/paste-into-top-overlay): paste routes to the V/D editor overlay, not the bottom pane
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: overlay vs pane routing — Reconstructed: `Event::Paste` gains a `top_overlay` arm ahead of the `pane_tabs` arm, so paste stays in a `V`-opened editor instead of being misrouted to the bottom pane   [kind: gotcha]
+When: 2026-05-11 · PR #75 (fix/paste-into-top-overlay, 0971213) · v1.50.22
+Recorded rationale: CHANGELOG verbatim: "Paste into a V-opened top-overlay editor stays in the editor. Reported in BUGS.md: with V open (editor running as a top overlay) and a bottom pane visible (e.g. claude), pasting text routed the paste to the bottom pane and yanked focus to the bottom pane — losing both the paste and the editor session. Cause: Event::Paste's router had three branches (prompt / pane_tabs / ignored) but no top_overlay arm, so the pane_tabs.is_some() branch fired indiscriminately."
+Inferred intent: extends the overlay-as-pane focus model the arc-03 head introduced (#34) to the *paste* event path, which had been overlooked. evidence: CHANGELOG describes the fix — "a new arm before the pane_tabs one routes paste to top_overlay when it exists, unless the user has explicitly focused the bottom pane (^a-j) — in which case the bottom-pane arm still wins. No focus-stealing in the overlay arm." confidence: high
+Supersedes: the three-branch `Event::Paste` router (prompt / pane_tabs / ignored) established before this PR — adds the missing fourth branch; conceptually continues PR #34's "overlay-as-pane focus model" (arc-03 head entry 01KR10JBACRS)
+
+The same surface arc-03's head reconciled for *keystrokes* (PR #34's meta-key fall-through and overlay-as-pane model) had an unhandled hole for *paste* events. The reconstructed router gains a precedence rule: top overlay wins paste unless the user has signalled bottom-pane intent with `^a-j`. The deliberate omission of focus-stealing in the overlay arm is the model-consistent detail — pasting into an editor is content, not a focus switch. A 6-line BUGS.md entry is added (the report) alongside the fix.
+
+Provenance:
+- 0971213 (PR #75, 2026-05-11) — src/app/mod.rs +21 (top_overlay paste arm before pane_tabs), CHANGELOG +15, BUGS.md +6
+- arc-03 head entry 01KR10JBACRS (PR #34) — the overlay-as-pane focus model this extends to the paste path
+
+<!-- Entry-ID: 01KTMMQPCA7E5VN78TTBZ43MQY -->

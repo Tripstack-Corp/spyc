@@ -672,3 +672,32 @@ Provenance:
 - `git grep -c unsafe 76cf4e6^ -- src` = 36 (pre-#83 baseline).
 
 <!-- Entry-ID: 01KTMMNZGF280TRX1M7C616KGM -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:08.458063+00:00
+Role: scribe
+Type: Note
+Title: PR #55 (fix/colorterm-truecolor): panes advertise COLORTERM=truecolor so child apps don't downgrade to 256-color
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: terminal-compat — Reconstructed: `pane::spawn_with_env` adds `COLORTERM=truecolor` to the child env alongside `SPYC_CONTEXT` so spawned panes signal 24-bit color regardless of host terminal   [kind: gotcha]
+When: 2026-05-08 · PR #55 (fix/colorterm-truecolor) · merge ba6d07e (second-parent commit, "fix: panes advertise COLORTERM=truecolor (v1.50.4)", 2026-05-08 14:57 -04)
+Recorded rationale: "Spawned panes now advertise `COLORTERM=truecolor`. Reported by Gemini code review: `TERM=xterm-256color` alone doesn't tell apps that negotiate truecolor (bat, fzf, delta, lazygit, …) that the surrounding terminal can render 24-bit color, so they silently downgrade their palette to 256." — CHANGELOG.md (PR #55)
+Inferred intent: a one-line env-injection fix for a color-negotiation edge case in spawned panes — evidence: src/pane/mod.rs `Pane::spawn_with_env` gains `env.push(("COLORTERM", "truecolor"))` and bumps the Vec capacity from `extra_env.len() + 1` to `+ 2`. confidence: high
+Supersedes: (none) — extends the pane env-injection started for `SPYC_CONTEXT`
+
+The first moment of the continuation is a small terminal-compatibility fix, the only PR in this slice attributed to an automated reviewer. The CHANGELOG names the diagnosis verbatim: `portable-pty` inherits the parent env so `COLORTERM` "usually leaks through, but 'usually' depends on which terminal launched spyc." The fix sets it explicitly rather than relying on inheritance. The added doc-comment at `src/pane/mod.rs` calls `COLORTERM=truecolor` "the de facto standard pair" with `TERM=xterm-256color`.
+
+The change is scoped: the CHANGELOG notes background-task capture (which runs `TERM=dumb`) is unaffected because "it builds its own env and is non-interactive by design." Diff size is small (4 files, +20/-4): pane/mod.rs (+9/-2), CHANGELOG (+11), and a version bump to v1.50.4 in Cargo.toml/Cargo.lock.
+
+Recorded rationale is rich here (full CHANGELOG paragraph + the "reported by Gemini code review" attribution); the moment is recorded, not inferred.
+
+Provenance:
+- ba6d07e (PR #55 fix/colorterm-truecolor, 2026-05-08) — merge commit; second-parent subject "fix: panes advertise COLORTERM=truecolor (v1.50.4)".
+- `git diff ba6d07e^1 ba6d07e -- src/pane/mod.rs` — `env.push(("COLORTERM", "truecolor"))` added in `spawn_with_env`; Vec capacity `+1`→`+2`.
+- `git diff ba6d07e^1 ba6d07e -- CHANGELOG.md` — the verbatim rationale paragraph quoted above; v1.50.4 entry.
+
+<!-- Entry-ID: 01KTMMPY4VXGTWWXW21RF6XYV2 -->
