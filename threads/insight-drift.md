@@ -601,3 +601,41 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTQ8RT04DKANY20CG8TE39 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:58:27.146621+00:00
+Role: critic
+Type: Note
+Title: Pattern B′: Slug-prefix-vs-diff-intent drift — the gix migration ships swaps as feat/gix-*; conventional-commit prefix disagrees with [kind] classification
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** A sub-shape of window-1 Pattern A's prefix-drift (= 01KR3BA3CZWA6TZCDKNJZDPAGH, where PRs #5/#18 used `investigate/`/`chore/` prefixes that mismatched the diff's weight). In window 2 the cleanest instance is the gix migration: a string of PRs ship under a `feat/gix-*` slug while the segment thread classifies their diffs as `[kind: supersession]` (backend swaps) or `[kind: refactor]` (relocation), not new capability. The drift is at the conventional-commit-prefix level — `feat` reads as "new capability for the user," the diff reads as "same behavior, different backend behind a held-stable seam."
+
+**Instance enumeration with moment-entry citations.**
+
+1. **`feat/gix-discovery` (#285) is a supersession, not a feature.** The segment classifies it `[kind: supersession]`: repo-discovery moves from subprocess to gix (+115 `src/git/discovery.rs`, −99 `sysinfo.rs`), call sites rewired but user-visible behavior identical — "the migration changed the implementation, not the callers." The `feat/` prefix names a capability; the diff swaps a backend. *Cite: seg-gix-migration 01KTMMKCGA2NKTRHBH3VPW37AJ (#285).*
+
+2. **`feat/gix-status-flip` (#287) is the canonical swap.** `[kind: supersession]`: the status hot path flips to gix by default, gated by an escape hatch; the CHANGELOG itself frames it as parity-preserving ("Output is validated byte-for-byte against `git status --porcelain` … so markers are unchanged"). A flip-with-no-behavior-change under a `feat/` slug. (Verified at the slug level: `git log` merge subject reads "Merged in feat/gix-status-flip (pull request #287)".) *Cite: seg-gix-migration 01KTMMMBVCGADASG74RTHKWY97 (#286–#287).*
+
+3. **`feat/gix-worktree` (#288) and `feat/gix-diff-model` (#289) — supersession + additive-model under feat.** #288 is `[kind: supersession]` (worktree ops swap to gix; the one genuinely user-visible half is the `<repo>.worktrees/<branch>` layout change, bundled with the backend swap). #289 is `[kind: new-capability]` but its own subject carries the parenthetical "(no UI flip yet)" — i.e. the `feat/` ships a model layer with the feature deliberately *not* wired, the load-bearing signal being the not-yet. *Cite: seg-gix-migration 01KTMMNW4ZDF0R1C5631XRD593 (#288); the no-UI-flip model at 01KTMMPRPTSP0J1MTJCT3WW6N1 (#289).*
+
+**The counter-evidence the pattern must hold against (verified, and it holds).** Not every gix PR drifts. The two structural-relocation PRs correctly use `refactor/`: PR #283 (refactor/gix-facade-seam, "no gix yet") and PR #292 (refactor/gix-drop-subprocess). And PR #284 (feat/gix-dependency) is a *defensible* `feat/` — it genuinely adds a new dependency/capability surface (Cargo.toml +21, the gix crate available), additive with "(none)" supersession. So the prefix discipline is applied correctly at the bookends (facade seam = refactor, drop = refactor, dependency-add = feat) and drifts specifically on the **swap PRs in the middle** (#285/#287/#288), where `feat/` labels a behavior-preserving backend replacement. *Cite: seg-gix-migration 01KTMMHJ879C24FY2WYYT9F1SF (#283 facade, refactor), 01KTMMJB955RF16D842WFFEBYP (#284 dependency, defensible feat), 01KTMMTF0MQ96P7BVN7QQPVBNS (#292 drop, refactor).*
+
+**Instance count: three drifting PRs (#285, #287, #288), with #289 a partial (feat-but-unwired).** The pattern is bounded — it does not cover the whole gix arc, only the middle swaps; the `refactor/` bookends are the control that proves the prefix carries intent elsewhere.
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *Why this is a distinct sub-shape, not just Pattern A′.* Pattern A′ is about *scope* (subject narrower than diff). Pattern B′ is about *kind* — the prefix asserts a change-category (`feat` = new capability) that the diff contradicts (supersession/refactor). Window-1 Pattern A's PR #5 `investigate/` and PR #18 `chore/` were the same shape (prefix-vs-diff-kind); window 2 concentrates it into one migration where the convention is otherwise followed, which makes the drift legible *as drift* rather than as absence of convention.
+
+- *The convention that makes the drift visible is the same one that mostly prevents it.* PR #73's AGENTS.md rule (01KTMMKHEYZ540PV6VVZR33K79) states "commit subject = actual scope not its caption." The gix bookends honor it; the swaps caption themselves `feat`. The catalogue observes the divergence between the stated rule and the slug; it does not adjudicate whether "migrate a domain to gix" is a feature from the user's seat or a refactor from the diff's seat — both readings are recorded by the segment (user-facing: in-process git, no `git` install needed; diff-facing: behavior-preserving swap). Where two readings fit, both are named, not synthesized.
+
+Provenance:
+- seg-gix-migration: 01KTMMKCGA2NKTRHBH3VPW37AJ (#285), 01KTMMMBVCGADASG74RTHKWY97 (#286–#287), 01KTMMNW4ZDF0R1C5631XRD593 (#288), 01KTMMPRPTSP0J1MTJCT3WW6N1 (#289), 01KTMMHJ879C24FY2WYYT9F1SF (#283), 01KTMMJB955RF16D842WFFEBYP (#284), 01KTMMTF0MQ96P7BVN7QQPVBNS (#292).
+- seg-docs-planning 01KTMMKHEYZ540PV6VVZR33K79 (PR #73 "subject = actual scope not its caption" rule).
+- window-1 Pattern A = 01KR3BA3CZWA6TZCDKNJZDPAGH (the prefix-drift sub-shape this concentrates).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTRNPWDK14NQHD78DV2ZEE -->
