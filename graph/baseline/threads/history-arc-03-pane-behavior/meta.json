@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-08T22:16:42.653650+00:00",
   "summary": "The development thread for arc 03 focuses on improving the behavior of the bottom pane in a Tmux-like interface, with key features including tmux-style zoom, shutdown processes, and visual enhancements. Key decisions involved introducing a four-stage shutdown process, adding SGR 2 for unfocused panes, and refining focus routing. The outcome is a completed baseline for arc 03, with lessons learned for future development.",
-  "entry_count": 22
+  "entry_count": 22,
+  "annotations": {
+    "history-arc-03-pane-behavior": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:33:03.074221+00:00",
+      "vote_score": 0
+    }
+  }
 }
