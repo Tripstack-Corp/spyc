@@ -910,3 +910,30 @@ Provenance:
 - 7891fad1 (PR #112 feat/vi-editing-in-path-prompts, 2026-05-21) — `src/app/mod.rs` +27 (three `Prompt::simple` → `Prompt::shell` swaps), `src/app/state.rs` +12/−3 (history-nav skip for CopyTo/MoveTo/MakeDir), CHANGELOG.md +10.
 
 <!-- Entry-ID: 01KTMMVMS5H1PBSH30EDW6049Q -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:42.428212+00:00
+Role: scribe
+Type: Note
+Title: PR #120 — TX-side timestamps in the key trace: the first real consumer of #25's diagnostic seam
+
+Spec: scribe
+
+tags: #history #arc-06
+
+Moment: input-and-overlays — Reconstructed: `--key-trace` gains TX lines (logged on every pane write) annotated with elapsed-since-last-RX, so an input-lag report can attribute latency to spyc vs upstream   [kind: new-capability]
+When: 2026-05-22 · PR #120 (feat/key-trace-tx-timestamps) · commit 2712a899
+Recorded rationale: "TX-side timestamps in the key trace. `--key-trace` / `SPYC_KEY_TRACE=1` now logs `TX` lines whenever a pane write fires (`send_key` or `send_bytes`), annotated with the elapsed time since the most recent RX event: `[12345ms] TX send_key code=Backspace mods=… bytes=\"^?\" [+3ms since RX]`. Lets a user reporting input lag (Justin's report: pane-shell keystrokes feel slow inside tmux) tell at a glance whether spyc itself is adding latency vs. something upstream (terminal repeat rate, tmux's `escape-time`, OS keyboard pacing). New `key_trace::note_rx_event` / `log_tx` helpers; the RX path stamps after logging so the next TX has a reference." — CHANGELOG.md (commit 2712a899, 2026-05-22)
+Inferred intent: a real input report (Justin, lag inside tmux) drives the first extension of the #25 diagnostic — evidence: the rationale names the report; diff adds `note_rx_event`/`log_tx` to `src/key_trace.rs` (+34) and TX trace points in `src/pane/mod.rs` (+73)
+                  confidence: high
+Supersedes: extends the `--key-trace` infrastructure shipped in PR #25 (the baseline's "diagnostic ahead of a consumer" seam) — adds the TX half it lacked
+
+This is the moment the baseline tail's open question resolves toward "validated." PR #25 shipped `--key-trace` ahead of any consumer; the baseline tail (entry 01KR2H094DPB…) framed the bet explicitly: "if a future input bug surfaces and ships its cause via a `key-trace` log, the bundle pattern … shifts from speculative to validated." PR #120 is that future bug — Justin's tmux input-lag report — and the trace gains a TX side specifically to serve it. The diagnostic was used, then extended; the bet read closer to paid than to upkeep-without-payoff.
+
+The implementation pairs RX and TX timing: `key_trace::note_rx_event` stamps after the RX log so the next `log_tx` can render `[+Nms since RX]` — turning the trace from an event log into a latency attribution tool. The PR also adds a README note on `^a`/`^w` chord-prefix shell conflicts and the tmux `escape-time 0` hint, and a ROADMAP line for a permanent first-run flash — the docs half of the same input-latency report.
+
+Provenance:
+- 2712a899 (PR #120 feat/key-trace-tx-timestamps, 2026-05-22) — `src/pane/mod.rs` +73 (TX trace points in `send_key`/`send_bytes`), `src/key_trace.rs` +34 (`note_rx_event`/`log_tx`), `src/app/mod.rs` +3, README.md +12, ROADMAP.md +13, BUGS.md +3, CHANGELOG.md +18.
+- 01KR2H094DPB… (this thread) — the baseline tail seam describing the `--key-trace` "ahead of a consumer" bet that this moment resolves.
+
+<!-- Entry-ID: 01KTMMWGABE7B3ACCTC22ZAC89 -->
