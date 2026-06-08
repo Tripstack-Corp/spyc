@@ -913,3 +913,35 @@ Provenance:
 - `git diff 4accb70^1 4accb70 -- CHANGELOG.md` — verbatim rationale quoted above; BUGS.md +4.
 
 <!-- Entry-ID: 01KTMN0NXJW02PGHZ3N0XFDFXF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:18:31.854717+00:00
+Role: scribe
+Type: Decision
+Title: PR #154 (fix/remove-unsafe-setenv): :s drops unsafe set_var for a thread-safe crate::envset store — removes one of the two residual unsafe sites from PR #83
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: security/unsafe-surface — Reconstructed: `:s` (setenv) stops calling `unsafe { std::env::set_var }` and instead records overrides in a new thread-safe `crate::envset` store (a `LazyLock<RwLock<HashMap>>`) that spyc's own var reads consult and `PtyHost` merges into every child spawn — removing the env-mutation unsafe site PR #83 had marked as the intentional residual   [kind: supersession]
+When: 2026-05-28 · PR #154 (fix/remove-unsafe-setenv) · merge a4ce0f6 (squash; subject "fix: drop unsafe set_var from :s — thread-safe env override store")
+Recorded rationale: "`:s` (setenv) no longer mutates the process environment. It used `unsafe { std::env::set_var }`, which is undefined behavior now that spyc runs worker threads (per-pane vt100 parsers, the git-status worker that itself spawns `git`) — a concurrent `getenv`/`setenv` is UB. Overrides are now kept in a thread-safe store (`crate::envset`) that layers over the real environment … every child spawned through `PtyHost` … gets the overrides merged into its environment — so behavior is unchanged, the last `unsafe` env mutation is gone." — CHANGELOG.md (PR #154)
+Inferred intent: complete the unsafe-surface reduction by replacing the last env-mutation unsafe with a layered override store, preserving observable behavior — evidence: src/envset.rs +80 (new): `static OVERRIDES: LazyLock<RwLock<HashMap<String,String>>>`, `set`/`var`/`overrides()`; src/app/state.rs swaps `unsafe { std::env::set_var(name, value) }` for `crate::envset::set(name, value)`; src/pane/pty_host.rs +7 merges `envset::overrides()` into child env; reads in src/shell/mod.rs, src/paths.rs re-routed through `envset::var`. confidence: high
+Supersedes: PR #83 (this thread, entry 01KTMMRWF583H2AY49TF7M6WQT) — #83 left `:setenv` as one of two "user-driven, intentional" residual unsafe sites; #154 removes it, taking the unsafe-env-mutation count to zero and leaving only `install_signal_handlers`
+
+This closes the "shrink the unsafe surface" security throughline opened by PR #83. PR #83 cut unsafe 36 → 2 and named the two residuals: `install_signal_handlers` (justified, kept) and `:setenv` ("user-driven, intentional"). PR #154 supersedes that second characterization — the `:setenv` site is now gone, leaving the signal-handler block as the sole remaining unsafe.
+
+The recorded rationale is a precise soundness argument, not a style cleanup: `std::env::set_var` "is undefined behavior now that spyc runs worker threads (per-pane vt100 parsers, the git-status worker that itself spawns `git`) — a concurrent `getenv`/`setenv` is UB." The fix is a layering pattern rather than a removal of the feature. The new `src/envset.rs` doc-comment (verbatim) describes it: `var` "returns an override if present, else the real process env"; `overrides()` "snapshots the map so `crate::pane::pty_host` can merge it into every spawned child's environment — panes and `!` captures see the vars just as they did when we mutated `environ`." So observable behavior is preserved on both sides — spyc's own reads of `$EDITOR`/`$VISUAL`, `$PAGER`, `$SHELL`, `$SPYC_PANE_CMD`, and `$VAR` path expansion consult the store, and children inherit the overrides via `PtyHost`. The store uses `LazyLock<RwLock<HashMap>>` with poison-tolerant access (`unwrap_or_else(PoisonError::into_inner)`), consistent with a value safe to read concurrently. Verified in the diff: `src/app/state.rs` replaces `unsafe { std::env::set_var(name, value) }` with `crate::envset::set(name, value)`, and a SHELL read becomes `crate::envset::var("SHELL")`.
+
+Squash merge; the CHANGELOG `### Changed` block plus the `src/envset.rs` module doc carry the full rationale — recorded.
+
+Provenance:
+- a4ce0f6 (PR #154 fix/remove-unsafe-setenv, 2026-05-28) — squash; subject "fix: drop unsafe set_var from :s — thread-safe env override store".
+- `git diff a4ce0f6^1 a4ce0f6 -- src/envset.rs` — new (+80): `OVERRIDES: LazyLock<RwLock<HashMap>>`, `set`/`var`/`overrides`; module doc quoted above.
+- `git diff a4ce0f6^1 a4ce0f6 -- src/app/state.rs` — `unsafe { std::env::set_var(name, value) }` → `crate::envset::set(name, value)`; SHELL read → `crate::envset::var("SHELL")`.
+- `git diff a4ce0f6^1 a4ce0f6 -- src/pane/pty_host.rs` (+7, merge overrides into child env), src/shell/mod.rs, src/paths.rs (reads re-routed), src/main.rs +1 (mod registration).
+- `git diff a4ce0f6^1 a4ce0f6 -- CHANGELOG.md` — verbatim `### Changed` rationale quoted above.
+- Cross-ref / supersedes: PR #83 entry in this thread = 01KTMMRWF583H2AY49TF7M6WQT (named `:setenv` as the intentional residual #154 removes).
+
+<!-- Entry-ID: 01KTMN1PMZRV0KVHN1H6FB48B1 -->
