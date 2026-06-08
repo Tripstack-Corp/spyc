@@ -35,6 +35,20 @@ mod no_subprocess_git_in_production {
             if path.is_dir() {
                 scan(&path, offenders);
             } else if path.extension().is_some_and(|e| e == "rs") {
+                // Skip whole-file test modules — those reached via
+                // `#[cfg(test)] mod …;` carry no in-file `#[cfg(test)]` marker,
+                // so the split heuristic below would misread them as production.
+                // The campaign's convention: `tests.rs`, `*_tests.rs`, or any
+                // file under a `tests/` directory. Test fixtures may use `git`.
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let in_tests_dir = path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    == Some("tests");
+                if name == "tests.rs" || name.ends_with("_tests.rs") || in_tests_dir {
+                    continue;
+                }
                 let src = std::fs::read_to_string(&path).expect("read .rs");
                 // Production portion = everything before the first cfg(test).
                 let production = src.split("#[cfg(test)]").next().unwrap_or("");
