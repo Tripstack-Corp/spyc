@@ -27,12 +27,13 @@
     "reactions": {},
     "tags": [
       "has_decisions",
-      "history"
+      "history",
+      "onboarding"
     ],
     "flags": [],
     "xrefs": [],
     "pinned": false,
-    "last_touched": "2026-06-08T22:31:39.640158+00:00",
+    "last_touched": "2026-06-08T22:31:47.833165+00:00",
     "vote_score": 0
   },
   "01KTMNFKER3C9W6A6MZET6CQXA": {
@@ -59,5 +60,5 @@
     "last_touched": "2026-06-08T22:26:18.768180+00:00",
     "vote_score": 0
   },
-  "_ann_size": 2016
+  "_ann_size": 2241
 }

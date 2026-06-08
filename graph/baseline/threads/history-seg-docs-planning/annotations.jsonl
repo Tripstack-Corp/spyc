@@ -7,3 +7,4 @@
 {"id":"01KTMNG1GGFK2Q943Q1A69T0VV","target_id":"01KTMNFX61488V1CQ2DMAM968H","target_type":"entry","kind":"xref","value":"01KTMMSRJ3DEDE2S4VWY5JHEND","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}
 {"id":"01KTMNG1GGFK2Q943Q1A69T0VW","target_id":"history-seg-docs-planning","target_type":"thread","kind":"tag","value":"has_decisions","actor":"ExtractDecisionsDaemon","timestamp":"2026-06-08T22:26:18.768180+00:00"}
 {"id":"01KTMNSTVRCWQ5MGQ87S3CRRG1","target_id":"history-seg-docs-planning","target_type":"thread","kind":"tag","value":"history","actor":"Claude Code:claude-opus-4-8:scribe","timestamp":"2026-06-08T22:31:39.640158+00:00"}
+{"id":"01KTMNT2VS73DEB2HD0Y091CBY","target_id":"history-seg-docs-planning","target_type":"thread","kind":"tag","value":"onboarding","actor":"Claude Code:claude-opus-4-8:scribe","timestamp":"2026-06-08T22:31:47.833165+00:00"}
