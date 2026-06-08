@@ -155,3 +155,30 @@ Provenance:
 - feat/gix-diff-model branch tip — pre-squash subject "gix diff/show/blame data model (no UI flip yet)"
 
 <!-- Entry-ID: 01KTMMPRPTSP0J1MTJCT3WW6N1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:02.652087+00:00
+Role: scribe
+Type: Note
+Title: PR #290–#291 — in-house diff/show/blame renderer, then wire it live
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: the render→wire half of the diff sub-arc. PR #290 adds a pure in-house diff/show/blame renderer (src/ui/diff_render.rs + blame_render.rs) that is "not yet wired"; PR #291 wires the gix model + renderer into the live pager, adding word-level diff highlighting and a side-by-side toggle. [kind: supersession]
+When: 2026-06-06 · PR #290 (feat/gix-diff-render) commit 0aa4e929 · PR #291 (feat/gix-diff-wire) commit f31582b9
+Recorded rationale:
+  - #290: "feat(ui): in-house diff/show/blame renderer (pure; not yet wired)" — feature-branch commit, 2026-06-06. "(pure; not yet wired)" continues the model→render→wire staging.
+  - #291: "feat(ui): word-level diff highlighting + calmer washes" — feature-branch commit 755d4ac4. CHANGELOG.md verbatim: "Modified lines get word-level highlighting — the whole line gets a dim wash and the actually-changed tokens a brighter tint... Press `|` in the pager to toggle between side-by-side and the classic unified view; narrow terminals fall back to unified automatically. Blame gets a per-commit-colored author/date gutter."
+Inferred intent: #290 keeps the renderer pure and unwired so it can be built and (presumably) snapshot-tested in isolation before replacing the live view — the same caution as the status parity spike, applied to UI. #291 is the flip: it consumes the gix diff_model (#289) through the new renderer (#290) in the live pager, supersedes the old subprocess-fed diff view, and adds capabilities the subprocess `git diff` pager could not cheaply offer (word-level token highlighting, side-by-side, themed blame gutter) because spyc now owns the structured diff in-process. Evidence: #290 is src/ui-only (diff_render.rs +804, blame_render.rs +182, theme.rs +111, config +25) with no app/ wiring; #291 rewires app/git_state.rs (+176/-...), adds app/git_view_session.rs (+442), touches pager.rs (+15), diff_render.rs (+319). confidence: high
+Supersedes: the subprocess-fed diff/show/blame view path through the pager. #291 routes the live view through gix diff_model + the in-house renderer; src/git/diff.rs shrinks (-16 net) as the renderer takes over presentation. Builds on the diff model (entry 01KTMMPRPTSP0J1MTJCT3WW6N1) and the facade seam (01KTMMHJ879C24FY2WYYT9F1SF).
+
+The new app/git_view_session.rs (+442) reads as the stateful glue between a gix diff/blame model and the pager (scroll, side-by-side toggle, large-diff handling), separating session state from the pure renderer — consistent with the project's pure-infrastructure / pure-render layering. The side-by-side toggle (`|`) and narrow-terminal fallback are presentation features unlocked by owning the structured diff rather than piping pre-rendered `git diff` text.
+
+Provenance:
+- 0aa4e929 (PR #290 feat/gix-diff-render, 2026-06-06) — squash merge; +1125/-1 across 7 files: src/ui/diff_render.rs (+804), blame_render.rs (+182), theme.rs (+111), config/default.spycrc.toml (+11), config/mod.rs (+14), ui/mod.rs (+2)
+- f31582b9 / 755d4ac4 (PR #291 feat/gix-diff-wire, 2026-06-06) — squash merge; +980/-130 across 20 files: app/git_view_session.rs (+442), app/git_state.rs (+176), ui/diff_render.rs (+319), pager.rs (+15), theme.rs (+31), CHANGELOG.md (+15)
+- CHANGELOG.md (at 755d4ac4) — quoted word-level highlighting / side-by-side toggle / blame gutter entry
+
+<!-- Entry-ID: 01KTMMR7X2GJAMQE0HD0C0HA6R -->

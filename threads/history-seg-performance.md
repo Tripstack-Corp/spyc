@@ -154,3 +154,28 @@ Provenance:
 - 01KTMMKR90HM2V9VZYSDFS1WCZ (PR #135 entry, this thread) — the typing-burst window both layer on.
 
 <!-- Entry-ID: 01KTMMQEW38T70F1GDME1FDJ8M -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:06.843904+00:00
+Role: scribe
+Type: Decision
+Title: PR #141 — move pane vt100 parsing to a worker thread (the architectural fix; retires #139/#140)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: each `Pane` gains its own parser worker thread that consumes PTY bytes and parses them into a `Arc<Mutex<vt100::Parser>>` grid concurrently with the main loop. The main thread reads grid state via brief-locking `with_screen` / `with_screen_mut` closures, and `Pane::drain_output()` becomes a non-locking generation-counter read. Per-iteration main-thread cost is now bounded by render + input dispatch only, regardless of how many bytes the pane emits.   [kind: refactor]
+When: 2026-05-26 · PR #141 (perf/vt100-parsing-on-worker-thread) · commit 4be0d38b (pre-squash incl. 5c94bbf7, 1932aed8)
+Recorded rationale: "perf: move pane vt100 parsing to a worker thread" — commit subject. CHANGELOG (added PR #141): "v1.50.82/83's defer + cap mitigations helped but didn't eliminate the long-running-claude input lag. The structural problem: parsing pane bytes was synchronous on the main thread, so a chatty pane stretched every iteration body proportional to how many bytes claude had emitted since the previous iteration. Now each `Pane` owns a parser worker thread... Main thread reads grid state via `with_screen` / `with_screen_mut` closures... `Pane::drain_output()` becomes a non-locking generation-counter read. Effect: per-iteration cost on the main thread is now bounded by render + input dispatch only, regardless of how many bytes claude emits."
+Inferred intent: this is the structural fix the cluster had been deferring since PR #135 ("let pane output wake the main loop directly... is the proper solution but a larger refactor"). Verified off-thread move via pickaxe + diff: `git diff 4be0d38b^ 4be0d38b -- src/pane/mod.rs` adds `use std::sync::{Arc, Mutex}`, `parser: Arc<Mutex<vt100::Parser>>`, `parser_gen: Arc<AtomicU64>`, `stop_parser: Arc<AtomicBool>`, `parser_thread: Option<thread::JoinHandle<...>>`, a `thread::spawn(... parser_worker(...))` inside `pub fn adopt(host, parser)`, and `pub fn take_host()` that "stops the parser worker and restores the byte receiver to the host." Largest cluster diff: `src/app/mod.rs` 246 changed lines, `src/pane/mod.rs` +285/-..., `src/pane/pty_host.rs` +61. confidence: high
+Supersedes: (1) the inline/synchronous main-thread vt100 parse — the root cause #139/#140 only mitigated; (2) the #139/#140 throttles themselves — CHANGELOG: "Remove v1.50.82/83 throttles — they were vestigial under the worker-thread parser... they were just *delaying* the moment the main thread checked the worker's generation counter. That delay manifested as an off-by-one between keystroke and visible echo." Verified: pickaxe `1932aed8 fix: drop v1.50.82/83 throttles` is part of this PR. (The render cap is then re-added as "cheap belt-and-braces.")
+
+This is the campaign's notable architectural move: it reuses the worker-thread + generation-counter discard pattern first introduced for git-status in PR #100, now applied to pane parsing. A folded companion commit (`5c94bbf7 fix: pane render + cursor share one parser lock`) closes a race the new concurrency opened: "the pane content was drawn under one `with_screen` lock, then `place_pty_cursor` re-acquired the lock... Between the two, the worker thread could parse a new chunk — so the cursor reflected a *newer* grid state." Cursor placement is folded into the same `with_screen` closure. The `with_screen` / `drain_output` / parser-worker surface introduced here is later reshaped by the MVU work — pickaxe shows `with_screen` and `drain_output` touched by `2026-05-31 MVU Phase 3b PR1 — pane output wakes the channel`, `2026-06-02 MVU Phase 6 PR-C3 — extract pane-output drain to streaming.rs`, and the pane-parser-lifecycle fix PR #150; cross-reference history-seg-refactor-mvu.
+
+Provenance:
+- 4be0d38b (PR #141 perf/vt100-parsing-on-worker-thread, 2026-05-26) — `src/pane/mod.rs` +285/- (parser worker, `Arc<Mutex<vt100::Parser>>`, `parser_gen`, `with_screen`/`with_screen_mut`, `adopt`, `take_host`), `src/app/mod.rs` 246 lines (drain becomes gen-counter read; throttles removed), `src/pane/pty_host.rs` +61, CHANGELOG +56.
+- pickaxe `git log -S with_screen` / `-S typing_burst` — confirms 5c94bbf7 (lock unification) and 1932aed8 (throttle removal) belong to this PR.
+- 01KTMMQEW38T70F1GDME1FDJ8M (PR #139+#140 entry, this thread) — the mitigations this supersedes.
+
+<!-- Entry-ID: 01KTMMSKB3JSCEJJHN4DB5K4H2 -->
