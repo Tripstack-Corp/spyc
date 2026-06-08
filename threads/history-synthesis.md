@@ -349,3 +349,28 @@ Confidence: recorded-dominant — most PRs are squash merges whose second parent
 Provenance: 01KTMMKT8E97SAHMKW6GJHTX6E, 01KTMMMPZDCN2D25KSX9G1R6Y1, 01KTMMPDE6S4PA834YDR24SX1H, 01KTMMQN283Z4FYP184WT4015X, 01KTMMSWZPN5FJTTCCRZ7CA445, 01KTMMV2X1VV9QPY0YA4AZPE05, 01KTMMVZKGKKZ0Z8VY1Q8TW3D2, 01KTMMX44WY1DPSCGSN27C77S0, 01KTMMY535PG8SJAN371WVMKPN, 01KTMMZ7PWE0F54CZJGT317SED, 01KTMN0F2B7PDYT29J4YG2GN99
 
 <!-- Entry-ID: 01KTMNMAPV4N1KFHSPAVYN9VP4 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:29:18.584938+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-04-git-integration (#38–#311 continuation) — a thin correctness tail on the subprocess-git era (successor story is gix-migration)
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-04-git-integration (#38–#311 continuation) — a thin correctness tail on the subprocess-git era (successor story is gix-migration)
+Span: 2026-05-22 → 2026-05-30 · 4 moments (1 framing + 3 PR moments) · 3 supersessions
+Narrative:
+  This is a deliberately thin secondary reconstruction. It covers only the #38–#311 continuation of history-arc-04 (the "Continuation framing" Note onward); the five-axis git-awareness baseline is the first-window arc. Read upfront: this thread does NOT own the window's git story. The framing Note records that the dominant git work of the window — replacing subprocess `git` with the `gix` crate (#283–#292) — lives in the sibling segment history-seg-gix-migration, and that git-status performance work (#99 mtime-cache, #137 worker-throttle) lives in history-seg-performance; this thread covers only residual git-marker / worktree-cache correctness fixes that landed before the gix rewrite [01KTMMJB49K22EGR14EF11BP18]. Every PR in the slice is a `fix/...` slug touching the same baseline files, with no new feature axis (inferred from the diffs, confidence high).
+
+  Three correctness moments. Worktree git-cache staleness gets two passes: PR #119 filters/clears the raw cache (a `repo_root` guard plus a precautionary clear, candidly self-described in-code as "belt-and-suspenders"), then PR #178 finds the root cause — the fs-watcher hardcoded `<cwd>/.git` and gated on `is_dir()`, so a linked worktree's `.git` *file* (pointing outside the working tree) was never watched; it introduces `current_gitdir`/`set_repo_root` to watch the resolved gitdir and supersedes #119's symptom-level guards [01KTMMKGQJ9DE88F4M670QZ7KZ]. PR #148 is a TOCTOU cache-key ordering fix: the background git worker stamped its (index, HEAD) mtime key *after* reading status, so a racing index write pinned a stale snapshot forever; reversing to "validate-key-first" makes a racing write merely force one redundant refresh [01KTMMMDE31YKNBCGGYC89JKBG]. PRs #168/#169 fix untracked-marker correctness on huge trees: `-uno` was silently hiding the `?` marker in any repo with a built `target/` while (recorded measurement) saving "next to nothing"; #168 always runs `-unormal` and rips out the now-dead `huge` plumbing, and #169 follows up so an untracked-only directory collapses to `?` rather than the generic `~`, with tracked outranking untracked order-independently [01KTMMNHWKEASZ0E7NN394D0Z8].
+
+  The arc ties off here. All the still-subprocess plumbing these fixes harden — `git_status_porcelain_raw`, `resolve_gitdir`, the `git_status_raw_cache` key — is the exact machinery that history-seg-gix-migration then replaces wholesale at #283–#292. That sibling segment is the successor story; this thread is the last correctness pass on the subprocess era.
+Lineage: moment [01KTMMKGQJ9DE88F4M670QZ7KZ] (#119 symptom-level guards -> #178 root-cause watch-the-real-gitdir) -> moment [01KTMMMDE31YKNBCGGYC89JKBG] (#148 cache-key ordering) -> moment [01KTMMNHWKEASZ0E7NN394D0Z8] (#168/#169 untracked-marker correctness) -> SUCCESSOR: history-seg-gix-migration (#283–#292), which replaces this subprocess machinery wholesale; see also history-seg-performance (#99, #137) for the git-status performance story this thread does not own
+Open / unsettled: nothing left open within this thin tail — the framing Note explicitly states "the arc ties off here." Every correctness fix targets the subprocess-git surface that the gix migration supersedes; readers wanting the architectural git story are pointed to history-seg-gix-migration, and the performance story to history-seg-performance.
+Confidence: recorded for the PR moments (CHANGELOG / second-parent commit bodies quoted verbatim, pickaxe-confirmed; #148 is a no-second-parent squash so rationale is subject + CHANGELOG, marked). The framing/topology read is explicitly the scribe's inference, not a quoted decision (stated in [01KTMMJB49K22EGR14EF11BP18]); inferred-intent reads flagged per moment at "high."
+Provenance: 01KTMMJB49K22EGR14EF11BP18, 01KTMMKGQJ9DE88F4M670QZ7KZ, 01KTMMMDE31YKNBCGGYC89JKBG, 01KTMMNHWKEASZ0E7NN394D0Z8
+
+<!-- Entry-ID: 01KTMNNEBQ9C114A0394R7PQ9D -->

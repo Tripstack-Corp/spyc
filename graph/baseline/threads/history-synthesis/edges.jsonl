@@ -23,3 +23,5 @@
 {"source":"entry:01KTMNKX58D0V25E2WFYD8SVYP","target":"entry:01KTMNM51MHPYVXWWK39J85T0E","type":"followed_by"}
 {"source":"thread:history-synthesis","target":"entry:01KTMNMAPV4N1KFHSPAVYN9VP4","type":"contains"}
 {"source":"entry:01KTMNM51MHPYVXWWK39J85T0E","target":"entry:01KTMNMAPV4N1KFHSPAVYN9VP4","type":"followed_by"}
+{"source":"thread:history-synthesis","target":"entry:01KTMNNEBQ9C114A0394R7PQ9D","type":"contains"}
+{"source":"entry:01KTMNMAPV4N1KFHSPAVYN9VP4","target":"entry:01KTMNNEBQ9C114A0394R7PQ9D","type":"followed_by"}
