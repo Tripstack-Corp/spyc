@@ -29,8 +29,9 @@ use crate::ui::{
 /// no poll floor: the parkable crossterm reader feeds `Input` (+ `ReaderExited`
 /// on death); the notify watcher closure feeds `FsEvent`; the git forwarder
 /// feeds `GitResult` (3a); pane parser workers feed `PaneOutput` (3b); capture/
-/// task reader threads feed `SinkOutput` (3c); the MCP forwarder feeds `Mcp`
-/// and the finder/grep workers feed `FindOutput`/`GrepOutput` (3d). The only
+/// task reader threads feed `SinkOutput` (3c); the MCP forwarder feeds `Mcp`;
+/// the finder feeds `FindOutput`; and pager-stream workers (grep / git-view /
+/// transcript) feed `PagerStreamOutput` (3d). The only
 /// remaining timed wakes are armed `Tick` deadlines (git poll, activity
 /// rollover, capture-timer, …) — and they only SHORTEN the wait; nothing armed
 /// means an unbounded block until a real message.
@@ -70,12 +71,6 @@ enum Message {
     /// so a stale id after a `:fg`/`^Z`/demote/promote self-discards).
     /// Buffered/collapsed; never surfaced as `Input`.
     SinkOutput { sink: SinkId },
-    /// MVU Phase 3d: a grep worker produced a batch or completed. Payloadless
-    /// wake — the matches ride `GrepSession.rx`, re-drained by
-    /// `drain_grep_session` (which id-gates against the live pager's
-    /// `grep_id`, so a wake for a replaced/closed session self-discards).
-    /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
-    GrepOutput,
     /// PR 8b: a git-view worker (diff / show / blame) finished building its
     /// bounded model. Payloadless wake — the built `GitViewPayload` rides
     /// `GitViewSession.rx`, re-drained by `drain_git_view_session` (which
@@ -228,7 +223,6 @@ pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
 use git_view_session::GitViewSession;
-use grep_session::GrepSession;
 use pager_history::PagerHistory;
 use pane_wake::SinkId;
 use proc::{ForegroundExec, spawn_input_reader};
@@ -409,10 +403,6 @@ struct Runtime {
     background_tasks: BackgroundTasks,
     /// Active F-finder (holds the walker thread's receiver).
     find_picker: Option<FindPicker>,
-    /// Active `:grep` session (holds the worker receiver).
-    grep_session: Option<GrepSession>,
-    /// Monotonic grep-session id (stale-session guard).
-    next_grep_id: u32,
     /// Active git-view session (diff / show / blame): holds the worker
     /// receiver plus the retained model that backs the `|` layout toggle.
     git_view_session: Option<GitViewSession>,

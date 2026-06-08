@@ -54,7 +54,6 @@ pub fn coalesce_pending(
             // 0→1 CAS is the primary firehose collapse; this is the second).
             Message::PaneOutput { .. }
             | Message::SinkOutput { .. }
-            | Message::GrepOutput
             | Message::GitViewOutput
             | Message::PagerStreamOutput
             | Message::FindOutput
@@ -162,8 +161,7 @@ pub fn coalesce_recv(
         // short-id (the worker can't redraw, only wake — see the field
         // doc on `agent_status_pending`).
         Ok(
-            Message::GrepOutput
-            | Message::GitViewOutput
+            Message::GitViewOutput
             | Message::PagerStreamOutput
             | Message::FindOutput
             | Message::ReaderExited
@@ -493,10 +491,10 @@ mod tests {
             .unwrap();
         tx.send(Message::GitResult(git_result(0))).unwrap();
         tx.send(Message::Tick(Deadline::GitPoll)).unwrap();
-        // MVU Phase 3d: grep/finder wakes collapse to nothing buffered (the
-        // data rides their own channels; the loop re-drains on re-entry).
-        tx.send(Message::GrepOutput).unwrap();
-        tx.send(Message::GrepOutput).unwrap();
+        // MVU Phase 3d: pager-stream/finder wakes collapse to nothing buffered
+        // (the data rides their own channels; the loop re-drains on re-entry).
+        tx.send(Message::PagerStreamOutput).unwrap();
+        tx.send(Message::PagerStreamOutput).unwrap();
         tx.send(Message::FindOutput).unwrap();
         // MVU Phase 3d: an MCP request carries its reply Sender — it MUST be
         // buffered into mcp_pending, NEVER dropped (else the client strands).

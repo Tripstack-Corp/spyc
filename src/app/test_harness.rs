@@ -35,8 +35,6 @@ impl App {
                 pending_capture: None,
                 background_tasks: BackgroundTasks::new(),
                 find_picker: None,
-                grep_session: None,
-                next_grep_id: 0,
                 git_view_session: None,
                 next_git_view_id: 0,
                 pager_stream: None,

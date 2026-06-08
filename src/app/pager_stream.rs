@@ -20,9 +20,8 @@
 //!   (the impl owns its `Receiver<T>`), so the trait is object-safe and lives
 //!   behind `Box<dyn PagerStream>` in `Runtime`.
 //!
-//! The migration lands incrementally: the transcript reads move here first;
-//! `grep` and `git-view` follow, retiring `grep_id` / `git_view_id` for the
-//! single `stream_id`.
+//! The migration lands incrementally: transcript reads + `:grep` are here;
+//! git-view follows, retiring `git_view_id` for the single `stream_id`.
 
 use super::{App, state};
 use crate::ui::pager::{self, PagerView};
@@ -198,9 +197,9 @@ impl App {
     /// from the run loop (a no-op when no stream is active). Returns true when
     /// something changed so the caller can request a redraw.
     ///
-    /// Mirrors the old `drain_grep_session` / `drain_git_view_session` id-gate:
-    /// if the live pager's `stream_id` no longer matches (closed / replaced /
-    /// stashed), the stream is dropped and its worker exits on its next send.
+    /// id-gate: if the live pager's `stream_id` no longer matches (closed /
+    /// replaced / stashed), the stream is dropped and its worker exits on its
+    /// next send.
     pub(crate) fn drain_pager_stream(&mut self) -> bool {
         let Some(stream) = self.runtime.pager_stream.as_ref() else {
             return false;
