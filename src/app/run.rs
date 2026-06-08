@@ -257,7 +257,6 @@ impl App {
                 | Message::Mcp(_)
                 | Message::PaneOutput { .. }
                 | Message::SinkOutput { .. }
-                | Message::GrepOutput
                 | Message::GitViewOutput
                 | Message::PagerStreamOutput
                 | Message::FindOutput
@@ -469,14 +468,6 @@ impl App {
             {
                 picker.refilter();
                 self.render_find_picker();
-                ctx.draw.mark(3);
-            }
-
-            // :grep session: drain match batches into the active
-            // grep pager. Same shape as the F-finder drain but the
-            // results land directly in the pager body instead of
-            // being re-ranked.
-            if self.drain_grep_session() {
                 ctx.draw.mark(3);
             }
 

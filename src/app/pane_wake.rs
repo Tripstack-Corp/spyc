@@ -78,22 +78,6 @@ impl App {
         }
     }
 
-    /// MVU Phase 3d: build the grep worker's wake — a payloadless
-    /// `Message::GrepOutput` send (the data rides `GrepSession.rx`; the loop
-    /// re-drains via `drain_grep_session`). Wrapped around the worker's data
-    /// `Sender` by a `WakingSender`. No-op before `run()` installs the sender.
-    pub(crate) fn make_grep_wake(&self) -> PaneWake {
-        match &self.runtime.pane_wake_tx {
-            Some(tx) => {
-                let tx = tx.clone();
-                Arc::new(move || {
-                    let _ = tx.send(Message::GrepOutput);
-                })
-            }
-            None => Arc::new(|| {}),
-        }
-    }
-
     /// PR 8b: build the git-view worker's wake — a payloadless
     /// `Message::GitViewOutput` send (the built model rides
     /// `GitViewSession.rx`; the loop re-drains via `drain_git_view_session`).
@@ -114,9 +98,9 @@ impl App {
     /// Build a pager-stream worker's wake — a payloadless
     /// `Message::PagerStreamOutput` send (the payload rides the boxed stream's
     /// `rx`, re-drained by `drain_pager_stream`). Wrapped around the worker's
-    /// data `Sender` by a `WakingSender`. The unified successor to
-    /// `make_grep_wake` / `make_git_view_wake`. No-op before `run()` installs
-    /// the sender.
+    /// data `Sender` by a `WakingSender`. The unified successor to the
+    /// per-feature wakes (grep migrated; git-view's `make_git_view_wake` next).
+    /// No-op before `run()` installs the sender.
     pub(crate) fn make_pager_stream_wake(&self) -> PaneWake {
         match &self.runtime.pane_wake_tx {
             Some(tx) => {

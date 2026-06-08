@@ -1,13 +1,13 @@
 //! MVU Phase 3d: an mpsc `Sender` wrapper that fires a wake closure after
 //! every send, so a worker thread streaming onto a per-source channel also
 //! wakes the unified `App::run` event loop (which then re-drains that
-//! channel). Used for the finder walker and grep searcher once the poll
-//! floor is gone.
+//! channel). Used for the finder walker and the pager-stream workers (grep /
+//! git-view / transcript) once the poll floor is gone.
 //!
 //! Holds only an `Arc<dyn Fn() + Send + Sync>` — never `app::Message` — so
 //! `crate::fs` gains no dependency on the app layer. The app builds the wake
-//! closure (sending `Message::FindOutput` / `Message::GrepOutput`) and hands
-//! it in at spawn; in tests / before `run()` it's `Arc::new(|| {})`.
+//! closure (sending `Message::FindOutput` / `Message::PagerStreamOutput`) and
+//! hands it in at spawn; in tests / before `run()` it's `Arc::new(|| {})`.
 
 use std::sync::Arc;
 use std::sync::mpsc::{SendError, Sender};
