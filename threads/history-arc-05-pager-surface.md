@@ -913,3 +913,35 @@ Provenance:
 - refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
 
 <!-- Entry-ID: 01KTMMYJYCF9GJ0JRAA649Q5BW -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:45.229569+00:00
+Role: scribe
+Type: Note
+Title: PRs #106, #128, #132, #136 (+#113 folded): the scrollback/exit visual-affordance wave — glyphs, in-content [EOF], altscreen hint, blue signal
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: a cluster of visual affordances making the pager-as-read-surface legible — exit-status glyphs (✓/✗/⏳) in capture/task titles, an `[EOF — exit N]` marker as a real bottom content line, the altscreen-`^a-v` flash naming inline-mode workarounds, and switching the scrollback signal color from amber to blue; plus dropping a redundant `⏳ running` prompt-bar duplicate.   [kind: new-capability]
+When: 2026-05-20 → 2026-05-26 · PRs #106 (feat/pager-exit-indicators) · #128 (feat/eof-marker-in-content) · #132 (feat/altscreen-scrollback-hint) · #136 (feat/scrollback-blue-indicator) · #113 (fix/drop-redundant-capture-running-bar) · commits f92c5103, 53e1b2ec, fcccd760, 9a62bbcd, bd7dccf1
+Recorded rationale: "Command-capture pager title shows a status glyph. … Now the title gains `✓` for clean exits, `✗` for non-zero / killed / crashed / `^\` interrupts — matching the glyphs the bottom-status-bar already uses." — CHANGELOG (commit f92c5103). "`[EOF — exit N]` marker stays visible at the bottom of finished `!` captures and task viewers, even on long output. … Now the marker is appended as a real content line on capture-finish / task-status transition, anchored to the bottom of the stream regardless of content length." — CHANGELOG (commit 53e1b2ec). "Scrollback mode now uses blue (not amber) as its color signal. … amber kept reading as 'this is your focused element,' not 'you've left live view.'" — CHANGELOG (commit 9a62bbcd). "`^a v` alt-screen flash hints at inline-mode workarounds. Reported by Spencer: `^w-v` on a codex pane was dead. Cause is fundamental — alt-screen TUIs do virtual scrolling inside a fixed grid." — CHANGELOG (commit fcccd760).
+Inferred intent: once the pager is the universal read-surface for captures, tasks, and pane history, the work shifts to making its *state* self-evident — did the command pass/fail, where does the stream end, why is `^a-v` dead on a codex pane, and "am I in live or scrollback view." Each is a legibility affordance on the same surface. — evidence: all confined to src/app/mod.rs (+ src/ui/pager.rs +16 in #128); #136 reuses `theme.dir` (blue) for divider/`[SCROLL]` tag/active-tab fill. confidence: high
+Supersedes: #136 supersedes the amber scrollback signal introduced with the #42 `[SCROLL]` indicator (= 01KTMMRS83NW2K9GASEKF5R1T1). #132 extends arc-05 PR #20's original alt-screen scroll hint (= 01KR2A6TT516XA5FEGVBXYPWD7). #113 removes a prompt-bar duplicate of the #106-era running indicator.
+
+The four affordance PRs share one project: make the read-surface's state visible. #106 (commit f92c5103, src/app/mod.rs +46/-...) adds ✓/✗/⏳ glyphs to capture and `gB` task-viewer titles, matching the bottom-status-bar's existing backgrounded-task glyphs. #128 (commit 53e1b2ec, src/app/mod.rs +61, src/ui/pager.rs +16) makes `[EOF — exit N]` a real appended content line anchored to the stream bottom — previously it was painted only in unused viewport rows, so long output (taller than the pane) silently lost it after `scroll_to_bottom`. #132 (commit fcccd760, src/app/mod.rs +11, FEATURES.md) turns the dead-`^a-v`-on-altscreen case (reported by Spencer on a codex pane) into a flash naming the inline-mode workaround (`--no-alt-screen`, `[tui] alternate_screen = "never"`) — this extends the original arc-05 PR #20 alt-screen scroll hint with actionable guidance. #136 (commit 9a62bbcd, src/app/mod.rs +13) re-colors the scrollback signal (divider rule, `[SCROLL]` tag, active-tab fill) from amber (`theme.pick`, also the live-focus color) to blue (`theme.dir`, unused elsewhere) so "you've left live view" stops reading as "this is your focused element."
+
+#113 (commit bd7dccf1, src/app/mod.rs -17) is folded as the inverse move: it *removes* a redundant `⏳ running` prompt-bar indicator that duplicated the pager title's own `⏳ ! cmd — running...` — the keybinding hint it carried is already in `?`. A subtraction in a wave of additions; same legibility project (one signal, not two).
+
+Note: #128's `[EOF]`-as-real-content-line and #136's blue signal both interact with markdown/styled rendering into the pager — see `history-seg-markdown-rendering`.
+
+Provenance:
+- f92c5103 (PR #106, 2026-05-20) — src/app/mod.rs +46; ✓/✗/⏳ title glyphs.
+- bd7dccf1 (PR #113, 2026-05-21) — src/app/mod.rs -17; drop redundant prompt-bar running indicator.
+- 53e1b2ec (PR #128, 2026-05-23) — src/app/mod.rs +61, src/ui/pager.rs +16; `[EOF — exit N]` as content line.
+- fcccd760 (PR #132, 2026-05-26) — src/app/mod.rs +11, FEATURES.md; altscreen inline-mode hint.
+- 9a62bbcd (PR #136, 2026-05-26) — src/app/mod.rs +13; amber→blue (`theme.dir`) scrollback signal.
+- extends arc-05 PR #20 = 01KR2A6TT516XA5FEGVBXYPWD7; refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
+
+<!-- Entry-ID: 01KTMN09307X7E73BREP8D7T3R -->
