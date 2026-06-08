@@ -345,3 +345,39 @@ Provenance:
 - `history-arc-01-foundation-hygiene` thread (the only arc thread written at the time of this tail; topic-name template for the others).
 
 <!-- Entry-ID: 01KR0XPRBJVH80FNZ9XN7DG01E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:21:56.329629+00:00
+Role: scribe
+Type: Note
+Title: Framing: the second window — reconstruction of PRs #38–#311 (the "first 22 days" → the next 32)
+
+Spec: scribe
+
+tags: #history #segmentation
+
+Purpose: open the spine's **second window**. The original reconstruction (entries 0–5 above, written 2026-05-07) covered spyc's first 22 days — PRs #1–#37 — as eight arc threads plus four insight tiers. This entry opens the continuation: **PRs #38–#311**, merged 2026-05-07 → 2026-06-08 (the next ~32 days), reconstructed as moment-per-PR entries appended to the existing arc threads and written into six new `history-seg-*` segment threads. The method is the deep-history reconstruction (Phase-1 deterministic ledger + Phase-2 bounded per-segment narration), the same family as the first window but at ~7.4× the PR volume (273 PRs vs 37).
+
+Source of truth for this window: the **canonical Bitbucket origin** `git@bitbucket.org:tripstack/spyc.git`, not the GitHub mirror. The GitHub remote `calebjacksonhoward/spyc` (named in the first window's provenance as the Threads Repo URL) is a push mirror with **no PR objects** — `gh pr list` returns empty — so PR rationale could not be mined from GitHub. The local checkout had been ~3 weeks / 412 commits stale at PR #96; it was fast-forwarded to `bitbucket/main` (PR #311, 22fc349, 2026-06-08) before reconstruction. The maintainer remains the sole author across the window (consistent with `onboarding-team-map`'s single-developer finding); the three-remote topology is documented in `history-three-repo-lineage`.
+
+Voice and provenance contracts: unchanged from the first window (entry 0). Third-person observational, present tense; hedge whitelist (appears to / reads as / the diff shape suggests / points toward / aligns with / the commit message indicates); banned maintainer-mindset verbs (wants / thinks / believes / decided / feels / intends to / is concerned that) outside of a quoted "the commit message indicates"; verbatim commit and planning-doc quoting attributed by SHA + date; every entry ends with a Provenance block. The per-moment entries additionally carry the deep-history honesty gate: an explicit `Recorded rationale` line (quoted-or-declared-absent), a labeled + evidence-cited + confidence-scored `Inferred intent` line, and native-or-textual `Supersedes` links verified against the deterministic change graph (pickaxe `git log -S`).
+
+**Squash-merge caveat (the central provenance fact of this window).** PRs #1–#37 merged largely as true merges (their feature-branch commits survive with full bodies). The #38–#311 window is predominantly **Bitbucket squash merges**: the first-parent commit on `main` carries only a one-line subject, and the pre-squash branch detail is gone from `main`. Three things rescued recorded-rationale coverage anyway, and each is cited per-entry where used: (1) **committed planning docs** — `docs/MVU_PLAN.md`, `docs/V1_5_PLAN.md`, `docs/V1_60_PLAN.md`, `docs/V1_70_PLAN.md`, `docs/AUTO_APPROVAL_PLAN.md`, `docs/PANE_RECOVERY_PLAN.md`, `docs/PANE_STARTUP_TABS_PLAN.md`, `docs/YAZI_COMPETITIVE_REVIEW.md`, `REFACTOR_PLAN.md`, `ROADMAP.md` — which ARE the recorded design rationale and were quoted verbatim; (2) **CHANGELOG.md** prose, which in this window carries detailed per-PR `### Fixed/Performance/Internal` narrative that reads as recorded rationale; (3) **squash second-parent subjects** (`<sha>^2`) and, for the most recent campaigns (gix, decompose), **surviving feature branches on the `bitbucket` remote** with full pre-squash commit bodies.
+
+**Recorded-vs-inferred tally for the window.** Across the ~123 moment entries written this session, the overwhelming majority carry a real quoted rationale; pure-sequence-inference (a moment read only from the diff sequence, no recorded rationale) was rare and flagged inline where it occurred (notably one MSRV-bump ownership question in arc-01, and one multi-agent-motivation read in arc-07 marked confidence: med). This window is therefore **lower Epistemia-risk than the method's worst case** — the maintainer's habit of committing plan docs and detailed CHANGELOG prose left a dense recorded record, so the reconstruction is mostly *quotation and lineage assembly*, not intent-guessing.
+
+**Calibration probe (§C).** The `history-seg-gix-migration` segment was reconstructed primarily from the diff sequence (facade-seam → dependency → discovery → status-parity → flip → worktree → diff model/render/wire → drop-subprocess) and then compared against the recorded rationale (the `SPYC_GIT_BACKEND` flag doc and the "Removed in PR 9" promise in the #287 flip commit). The pure-sequence read — "a parity-then-flip-then-drop strangler-fig, the escape hatch removed at the end" — matched the recorded intent. The MVU segment is a stronger anchor: `docs/MVU_PLAN.md` records the full phase plan, so its eight phases were quotation, not inference. The probe's finding: where this maintainer leaves a landed successor + a flag + a plan doc, sequence-inference and recorded intent converge.
+
+This thread (`history-overview`) stays OPEN. The segment-map entry that follows enumerates every thread written this window with its moment count and anchor entry-id.
+
+Provenance:
+- bitbucket/main tip = 22fc349 (PR #311 refactor/pager-stream-git-view, 2026-06-08 14:13 +0000) — window end.
+- a303251 (PR #37 fix/mcp-socket-project-scoped-discovery, 2026-05-07) — first-window end / second-window start boundary.
+- PR ledger #38–#311 from `git log <ref> --format='%ci%x09%s' | grep 'pull request #'` against bitbucket/main (273 PRs enumerated).
+- `gh pr list --state all` against origin (GitHub mirror) = empty, confirming PR objects live on Bitbucket.
+- `watercooler_health` this session: server v0.5.3; Code Branch main; Branch Parity clean ✓; Threads Repo URL git@github.com:calebjacksonhoward/spyc.git.
+- First-window spine entries: history-overview index 0 = 01KR0TRFWT9W6WMFHC49YSW0BG (framing/voice contract); index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P (8-arc segmentation).
+- Prior repo-topology thread: history-three-repo-lineage.
+- Planning docs cited above all present on bitbucket/main at the window end (docs/ and repo root).
+
+<!-- Entry-ID: 01KTMN7X7FV45E8E05DN1RV719 -->
