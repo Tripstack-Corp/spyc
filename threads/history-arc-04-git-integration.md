@@ -556,3 +556,32 @@ Provenance:
 - sibling segments: history-seg-gix-migration (#283–#292), history-seg-performance (#99, #137)
 
 <!-- Entry-ID: 01KTMMJB49K22EGR14EF11BP18 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:48.892552+00:00
+Role: scribe
+Type: Note
+Title: PR #119 + #178: worktree git-cache staleness — a partial cache-filter, then the root-cause "watch the real gitdir" fix
+
+Spec: scribe
+
+tags: #history #arc-04
+
+Moment: worktree git-cache staleness — Reconstructed: two passes at "stale markers after a worktree switch"; #119 filters/clears the raw cache, #178 finds the root cause (the unwatched worktree gitdir) and supersedes #119's belt-and-suspenders   [kind: supersession]
+When: 2026-05-22 · PR #119 (fix/worktree-switch-stale-git-cache) · commit 550e99e   AND   2026-05-30 · PR #178 (fix/worktree-git-marker-staleness) · commit 6293dca (2nd-parent 6aac965)
+Recorded rationale (#119, BUGS.md removed line): "our git caching may have a bug when switching worktrees it will show stale markers for file additions, etc. Switching a worktree should force a \"recook\" (as a background process) (reported by Spencer)" — BUGS.md, 550e99e
+Recorded rationale (#178 commit body, 6aac965, 2026-05-29): "The fs-watcher's gitdir watch (`sync_listing_watch`) and its event filter (`is_listing_path`) both hardcoded `<cwd>/.git` and gated on `is_dir()`. A linked worktree's `.git` is a *file* pointing at `<main>/.git/worktrees/<name>/`, which lives OUTSIDE the working tree — so the worktree's `index`/`HEAD` were never watched … Same root cause for the long-standing \"git state stale when viewing a subdirectory\" report"
+Inferred intent: #119 treats the stale marker as a cache-trust problem (the raw cache held the prior worktree's data for a frame); #178 reframes it as a watch problem (the worktree's real index/HEAD were never under the fs-watcher at all, so refresh fell back to the slow poll). evidence: #119 adds a `.filter(|c| &c.repo_root == repo_root)` guard in `compute_git_info_fast` and a precautionary cache-clear in `update_huge_tree` (state.rs:938, ~1006); #178 adds `current_gitdir` + `set_repo_root` (state.rs:275, ~1029) and rewrites `is_listing_path` / `sync_listing_watch` to watch the resolved gitdir (mod.rs:2436, 11058). confidence: high
+Supersedes: PR #119's cache-filter/clear — #178 addresses the same Spencer "stale markers after worktree switch" report at its root (unwatched gitdir) rather than at the cache-trust layer; #119's guards remain as a same-frame safety net.
+
+#119 attacks the symptom in two leak paths, both named verbatim in `CHANGELOG.md` (550e99e): (1) `compute_git_info_fast` "derived its dirty marker from the raw porcelain cache without checking the cache's `repo_root` matched the current one" — fixed by `.filter(|c| &c.repo_root == repo_root)` before reading `c.raw` (state.rs:938-950). (2) `update_huge_tree` "no longer cleared the raw cache when crossing a repo boundary (removed in v1.50.44's 'cache survives leave-and-return' optimization)"; #119 re-adds a *targeted* clear — only when the new anchor is a different repo than the cache holds — explicitly to preserve that earlier leave-and-return win (state.rs:~1006-1031). The in-code comment is candid that this is "belt-and-suspenders" and that `git_file_statuses_cached` already does its own key check on the marker path; `compute_git_info_fast` was the path that previously didn't.
+
+#178 finds why a worktree needed belt-and-suspenders in the first place. The fs-watcher hardcoded `<cwd>/.git` and gated on `is_dir()`, but a linked worktree's `.git` is a *file*, so its real `index`/`HEAD` (under `<main>/.git/worktrees/<name>/`, outside the working tree) were never watched — stage/commit/checkout/branch-switch only refreshed on the periodic poll (up to 10 s on huge trees). The fix resolves the real gitdir once on chdir via the pre-existing `sysinfo::resolve_gitdir`, caches it as `AppState::current_gitdir`, and threads it through both `is_listing_path` (the event filter, mod.rs:2436) and `sync_listing_watch` (the watch setup, mod.rs:11058) so worktrees get instant refresh "with no per-event filesystem I/O." `set_repo_root` keeps `current_repo_root` and `current_gitdir` from drifting (state.rs:1029). Four `resolve_gitdir` tests cover normal-repo, absolute-gitfile worktree, relative-gitfile worktree, and non-repo (sysinfo.rs:542+). Pickaxe confirms `current_gitdir` and `fn set_repo_root` both first appear in 6aac965; the `repo_root` cache-filter first appears in 550e99e — so the two PRs are genuinely the two passes, not a reintroduction.
+
+Provenance:
+- 550e99e (PR #119 fix/worktree-switch-stale-git-cache, 2026-05-22) — `src/app/state.rs` (+33/-12): `compute_git_info_fast` cache `repo_root` filter; `update_huge_tree` targeted cache-clear. `BUGS.md` removes the Spencer report; `CHANGELOG.md` documents both leak paths.
+- 6293dca / 2nd-parent 6aac965 (PR #178 fix/worktree-git-marker-staleness, 2026-05-30) — `src/app/state.rs` (`current_gitdir`, `set_repo_root`), `src/app/mod.rs` (`is_listing_path`, `sync_listing_watch` now take/use the resolved gitdir), `src/sysinfo.rs` (4 `resolve_gitdir` tests), `BUGS.md` (marks worktree + subdir cases FIXED v1.55.2).
+- pickaxe: `git log -S 'current_gitdir'` → first at 6aac965; `git log -S 'filter(|c| &c.repo_root == repo_root)'` → first at 550e99e.
+- prior entry this thread: 01KTMMJB49K22EGR14EF11BP18 (continuation framing).
+
+<!-- Entry-ID: 01KTMMKGQJ9DE88F4M670QZ7KZ -->
