@@ -790,3 +790,31 @@ Provenance:
 - references #176 = 01KTMMZWBVK4X3QJP7SJW3ZEG2 (the registry this consumes).
 
 <!-- Entry-ID: 01KTMN0ZW93D5P7TPZCVMCWC0B -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:18:36.029715+00:00
+Role: scribe
+Type: Note
+Title: PR #142 — Activity monitor process-stats line: observability for the dogfooding host
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: the `A` activity monitor gains a third line of live process stats (pid/uptime/rss/threads/panes) for watching the multi-agent host process   [kind: new-capability]
+When: 2026-05-30 · PR #142 (feat/activity-monitor-process-stats) · commit a7e8abc
+Recorded rationale: "Activity monitor third line: process stats. Below the existing throughput (line 1) and internals (line 2) lines, `A` now surfaces a third line (lavender): `pid:NNNN  up:HHh MMm  rss:NNNm  thr:N  panes:N` — PID for attaching `sample`/`lldb` mid-run, RSS for memory-growth watch, thread count for worker/reader-thread accumulation, and the live pane count" — CHANGELOG.md (added PR #142)
+Inferred intent: gives the operator a live view of process health while multiple agent panes and their reader threads run — the "thr:N" and "panes:N" fields read as directly motivated by the multi-agent/transcript-reader thread growth this segment introduces — evidence: `src/app/mod.rs` +143; CHANGELOG names "worker/reader-thread accumulation"
+                  confidence: med   (the thread-count motivation is inferred from the field choice; not stated as caused by multi-agent work)
+Supersedes: (none — additive third line on the existing A monitor)
+
+The third monitor line is recorded verbatim above. Its field selection reads as observability for exactly the failure modes a multi-agent, multi-transcript-reader process accumulates: "thread count for worker/reader-thread accumulation" (CHANGELOG) is the count that grows as each agent pane spawns its cwd-poller and each `^a v` transcript read spins a worker; "rss for memory-growth watch" pairs with the 100+ MB transcript reads #149 had just bounded. The connection to the segment's other work is inferential — the CHANGELOG names the metrics' purpose generically, not as a response to agent growth — so confidence is med on the motivation, high on the mechanics.
+
+Mechanics: "Refreshed once per 1 s A-monitor tick (`ps -o rss=,thcount= -p $$` on macOS, `nlwp=` on Linux); hidden behind the monitor so it's zero-cost when off" (CHANGELOG). The diff is contained to `src/app/mod.rs` +143 and a one-line `src/ui/help.rs` touch. Cross-reference `history-seg-refactor-mvu`: PR #228's bitbucket pre-squash history shows "perf: run the A-monitor's ps stats off the render thread too" (commit aee1af0, 2026-06-01) — this process-stats line was, days later, moved off the render thread, consistent with the same render-thread-offloading track that #234 applies to agent-status.
+
+Provenance:
+- a7e8abc (PR #142 feat/activity-monitor-process-stats, 2026-05-30) — `src/app/mod.rs` +143 (third stats line, 1s `ps` sample), `src/ui/help.rs` ±1.
+- second-parent subject (a7e8abc^2): "feat: add process stats line to activity monitor".
+- bitbucket/fix/mcp-socket-timeouts log — commit aee1af0 "perf: run the A-monitor's ps stats off the render thread too" (2026-06-01), the later offload.
+
+<!-- Entry-ID: 01KTMN1TSVDFN7SWK34QF2SWY5 -->
