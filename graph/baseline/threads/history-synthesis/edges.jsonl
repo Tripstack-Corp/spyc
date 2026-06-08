@@ -1,3 +1,5 @@
 {"source":"thread:history-synthesis","target":"entry:01KTMNAVSB3410Y59S3FDMZCHQ","type":"contains"}
 {"source":"thread:history-synthesis","target":"entry:01KTMNFSQP1XJ1TSXS545PR01E","type":"contains"}
 {"source":"entry:01KTMNAVSB3410Y59S3FDMZCHQ","target":"entry:01KTMNFSQP1XJ1TSXS545PR01E","type":"followed_by"}
+{"source":"thread:history-synthesis","target":"entry:01KTMNG0CYN2NW1Y3RBR71J5FP","type":"contains"}
+{"source":"entry:01KTMNFSQP1XJ1TSXS545PR01E","target":"entry:01KTMNG0CYN2NW1Y3RBR71J5FP","type":"followed_by"}

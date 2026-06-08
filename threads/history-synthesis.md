@@ -52,3 +52,30 @@ Confidence: High recorded-rationale density. Most moments quote verbatim from do
 Provenance: 01KTMKSAG0R0FQ70HRQW1H4EKW, 01KTMKTBHT9G2VBZNJZFY5EJM4, 01KTMKVE85DEBMBWYCXY7YHP5E, 01KTMKWF071QA1Y5MD5TMMRGHC, 01KTMKXA7ZKKR421NTPRJ9EQ3M, 01KTMKY262M6Y6GH25DYKBY33H, 01KTMKZ502R8JYARTMFMKSGB72, 01KTMM03Q5F5EA3VEQSJQJZYN0, 01KTMM1A4SE4HRHFQ97PRJCZYD, 01KTMM35YXDZ69C08M78F4XKBB, 01KTMM27M59N08NB1HSWCESQTR, 01KTMM409Y3RTZPDTVWPQWR6EW, 01KTMM4ZMPP9DCW3R3NK5BDA93, 01KTMM60KR8W18TWXPXDGT9J8Y
 
 <!-- Entry-ID: 01KTMNFSQP1XJ1TSXS545PR01E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:26:21.223909+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-05-pager-surface — pager as universal render surface (V1.5) → universal arrival surface (PagerStream #309–#311)
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-05-pager-surface — pager as universal render surface (V1.5) → universal arrival surface (PagerStream #309–#311)
+Span: 2026-05-07 → 2026-06-08 · 11 moments · 9 supersessions
+Narrative:
+  This arc summarizes the #38–#311 continuation window only; it is secondary to the per-moment log in history-arc-05-pager-surface, which it does not replace. The framing moment sets the throughline: the pager stops being one overlay among many and becomes "spyc's universal read-surface / scrollback adapter," and the window's payoff is a stream-source abstraction [01KTMMP0ZVARBSD274T5V4A05P]. The window opens with a standalone routing fix — `^C` inside the pager dispatches contextually instead of leaking to the background spyc-list flash row [01KTMMPV14VAPT445FE1TS1AJ7] — which reads as the first instance of the "a key reached the wrong handler" shape that recurs through the window (inferred).
+
+  The central architectural move is the V1.5 "pager / task-viewer unification," landed as four staged phases: a `Mount` enum (`Overlay|TopPane|LowerPane`) on `PagerView`, a new `src/ui/scrollback.rs` vt100→styled-lines adapter, the `^a-v` pane-scroll rewrite from "a flat byte buffer" into a real lower-pane-mounted pager, and `D` retargeted from spawning `$PAGER` to the in-app pager [01KTMMRS83NW2K9GASEKF5R1T1]. The recorded plan states the motivation: "The same pager that handles `! cmd` capture should handle pane history." The mount generalization immediately costs a four-PR regression wave the next morning — snapshot geometry, viewport-height miscompute for `LowerPane`, and `?`-help dropping the slot-mounted pager — each a place the generalization left an Overlay-only assumption [01KTMMTW9ADXAW9B6SZPDPD7MG]. The meta-key passthrough fixes name the recurring routing-guard shape explicitly: the commit calls it "the fourth instance of the same pattern" [01KTMMVVRDCY22WSYSRMTFGCMY].
+
+  A long affordance-and-repair tail follows on the same surface: title-header provenance on yanks [01KTMMWQNM0KA5GBBVJWSQE8A5]; the `^a-v` scrollback pager re-homed from App-level singleton to per-tab state, encoding a pty-bound vs content-bound distinction [01KTMMXKYZ78J9AGSK60HJF9BV]; per-file scroll position persisted to disk, then a same-window repair when it "shipped but didn't work" [01KTMMYJYCF9GJ0JRAA649Q5BW]; a wave of legibility affordances — exit-status glyphs, an `[EOF — exit N]` content line, an altscreen hint, and amber→blue scrollback signal [01KTMN09307X7E73BREP8D7T3R]; and a placement-cursor sub-mode plus slot-aware editor launch [01KTMN185R410PMH15J2KN8CKD].
+
+  The arc closes with the `PagerStream` abstraction: an object-safe trait plus shared spawn/wake/id-gate/drain core in `src/app/pager_stream.rs`, onto which transcript scrollback (#309), `:grep` (#310), and git-view diff/show/blame (#311) migrate, collapsing their hand-rolled session skeletons [01KTMN2XSH67BNFQPAMTSFD81X]. The recorded ARCHITECTURE.md line names the result: "Off-thread read/parse is the default architecture for any feature that fills a pager from disk or compute." The diff shape suggests the payoff the framing pointed toward: having made the pager the universal place content is rendered, this window unifies how content arrives at it (inferred).
+Lineage: moment [01KTMMRS83NW2K9GASEKF5R1T1] -> [01KTMMTW9ADXAW9B6SZPDPD7MG] -> [01KTMMVVRDCY22WSYSRMTFGCMY] -> [01KTMMXKYZ78J9AGSK60HJF9BV] -> [01KTMMYJYCF9GJ0JRAA649Q5BW] -> [01KTMN09307X7E73BREP8D7T3R] -> [01KTMN185R410PMH15J2KN8CKD] -> [01KTMN2XSH67BNFQPAMTSFD81X]
+Open / unsettled: The picker-into-pager `picker_items` field still does not exist [01KTMN2XSH67BNFQPAMTSFD81X]; the catalogue §4 "render into the pager" direction resolved via the more general PagerStream route rather than the specific picker shape. The routing-guard refactor the meta-key commits wanted "before v1.60 Phase 3" is tracked downstream in history-seg-refactor-mvu (#180/#189) [01KTMMVVRDCY22WSYSRMTFGCMY]. The pane-to-task buffer-recovery and inherited-TERM gotchas live in arc-03, not here.
+Confidence: Uniformly high across the window — every moment carries recorded-rationale (CHANGELOG / V1_5_PLAN.md / ARCHITECTURE.md verbatim) backing each substantive claim; inferred reads are confined to intent framing and are marked.
+Provenance: 01KTMMP0ZVARBSD274T5V4A05P, 01KTMMPV14VAPT445FE1TS1AJ7, 01KTMMRS83NW2K9GASEKF5R1T1, 01KTMMTW9ADXAW9B6SZPDPD7MG, 01KTMMVVRDCY22WSYSRMTFGCMY, 01KTMMWQNM0KA5GBBVJWSQE8A5, 01KTMMXKYZ78J9AGSK60HJF9BV, 01KTMMYJYCF9GJ0JRAA649Q5BW, 01KTMN09307X7E73BREP8D7T3R, 01KTMN185R410PMH15J2KN8CKD, 01KTMN2XSH67BNFQPAMTSFD81X
+
+<!-- Entry-ID: 01KTMNG0CYN2NW1Y3RBR71J5FP -->
