@@ -19,3 +19,5 @@
 {"source":"entry:01KR3DJ9KJY1T9FFP8KDEPTBJ1","target":"entry:01KR3DM9DBRV6MBA4D516KRR12","type":"followed_by"}
 {"source":"thread:insight-recurrence","target":"entry:01KTMTMAB6G8JJAFFQF29XVZGB","type":"contains"}
 {"source":"entry:01KR3DM9DBRV6MBA4D516KRR12","target":"entry:01KTMTMAB6G8JJAFFQF29XVZGB","type":"followed_by"}
+{"source":"thread:insight-recurrence","target":"entry:01KTMTNYS83V5A7PY2MJVV60MF","type":"contains"}
+{"source":"entry:01KTMTMAB6G8JJAFFQF29XVZGB","target":"entry:01KTMTNYS83V5A7PY2MJVV60MF","type":"followed_by"}

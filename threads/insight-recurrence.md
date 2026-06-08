@@ -698,3 +698,44 @@ Provenance:
 - Release ledger verified by `git log main --format='%s' | grep -oiE 'v1\.[0-9]+\.[0-9]+'`: v1.41.x runs to .37, v1.50.x to .82, plus v1.51.4 and v1.56.0; minor cuts v1.41.0 and v1.50.0 only across the span.
 
 <!-- Entry-ID: 01KTMTMAB6G8JJAFFQF29XVZGB -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:56:58.982162+00:00
+Role: critic
+Type: Note
+Title: Pattern 1 (window-2): Strangler-fig migration — two campaign-scale instances (MVU, gix) sharing one grow→parity→flip→drop shape; the window's dominant recurrence, with no window-1 equivalent
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement (NEW shape).** Two of window-2's largest engineering campaigns instantiate the same migration shape: a new implementation is **grown alongside** the legacy one behind a facade or a guard, brought to **parity** (proven byte-for-byte / behavior-equivalent), **flipped** to default, and then the legacy implementation is **dropped** with the escape hatch removed. The shape recurs **twice at campaign scale** in the window. Window-1 catalogued no migration pattern at all — this is genuinely new to window-2, not an evolution of any prior pattern.
+
+**Instance enumeration.**
+
+1. **MVU runtime migration (`history-seg-refactor-mvu`, #166–#274).** The grow-alongside is literal: the MVU runtime (single Message channel, effect-as-data, off-thread workers, draw accumulator) is grown *beside* the old busy-poll `App::run` loop, phase by phase, each phase behavior-equivalence-tested behind green CI, before the loop body is finally reshaped and the three update entry points collapse into one `App::update(msg)`. The "drop" is the terminal moment recording the Model/View/Update triad structurally complete. The parity discipline is the recorded "behavior-equivalence tests" gate plus the candid trade-off "deep loop/concurrency surgery before launch carries regression risk behavior-equivalence tests don't fully catch (timing, focus, stdin) — accepted, not closed." *Moment citations: 01KTMKVE85DEBMBWYCXY7YHP5E (MVU_PLAN.md APPROVED, the migration's recorded charter); 01KTMM60KR8W18TWXPXDGT9J8Y (the terminal collapse-to-one-entry-point drop). Synthesis arc: 01KTMNFSQP1XJ1TSXS545PR01E.*
+
+2. **gix backend migration (`history-seg-gix-migration`, #283–#292).** The textbook instance, and the synthesis arc names the shape verbatim: "a planned 9-step strangler-fig replacing every `git` subprocess shell-out with the pure-Rust `gix` crate, behind a single facade." Grow-alongside = the `src/git/` facade seam built around the legacy organism first (01KTMMHJ879C24FY2WYYT9F1SF), then gix added additively `default-features = false` (01KTMMJB955RF16D842WFFEBYP). Parity = the status spike "runs only from the parity tests, not the live status path," proving byte-for-byte equivalence before the flip. Flip = #287 behind `SPYC_GIT_BACKEND=subprocess`, recorded verbatim as "a one-release-cycle safety valve so a field regression in the gix flip is a flag flip, not a code restore. Removed in PR 9" (01KTMMMBVCGADASG74RTHKWY97). Drop = #292 removes the last `Command::new("git")`, deletes the escape hatch "exactly as promised," adds the `no_subprocess_git_in_production` guard test, net diff −178 — "the migration ends by removing more than it adds, the recorded signature of a completed strangler-fig" (01KTMMTF0MQ96P7BVN7QQPVBNS). *Synthesis arc: 01KTMNJD6GJM90D0WTTS0X28XR.*
+
+**Instance count: two.** Both are full grow→parity→flip→drop, not partial. The diff/diff-render sub-arc *inside* gix (#289 model → #290 renderer → #291 wire) is a fractal of the same caution — "first an isolated, testable gix data model … no UI flip yet, then a pure in-house renderer not yet wired, then the live wire" — so the shape recurs *within* one instance as well, but the catalogue counts the two campaign-level instances and notes the fractal sub-instance rather than promoting it to a third.
+
+**Sub-shape: the escape-hatch register differs across the two instances.** This is the load-bearing recurrence-reading the per-segment threads could not see, because each owns only one instance:
+
+- **gix uses an explicit runtime flag** (`SPYC_GIT_BACKEND`) as its safety valve, with a recorded one-release-cycle soak window that "lasted exactly the planned window" and was closed on schedule. The rollback unit is a flag flip.
+- **MVU uses green CI + behavior-equivalence tests** as its safety valve — there is no runtime flag; the "old loop still runs alongside" *is* the hatch, phase by phase, and each phase stays individually revertable ("a uniform add-the-wake / delete-the-floor split so each migration stays revertable"). The rollback unit is a per-phase PR revert.
+
+Two instances, two safety-valve registers (runtime-flag vs revertable-phases-behind-CI), one migration shape. The recurrence is the shape; the register varies. (*Why* the maintainer chose a flag for gix and CI-phases for MVU is tier-4 — captured factually here.)
+
+**Contrast with window-1.** Window-1's closest analogue was Pattern 6 (implicit-machinery-chain) — establish-then-consume — but that shape never *replaced* a legacy implementation; it accreted capability. The strangler-fig is the first recurrence in either window where the recurring shape's defining feature is *retiring the thing it grew alongside*. The window-1 catalogue had no migration vantage; this is the dominant new shape of the larger window.
+
+**Boundary notes.**
+- *Not a phase-train (Pattern 2).* The MVU instance is *also* a phase-numbered train (Pattern 2 instance 1), but the strangler-fig shape and the phase-train shape are distinct readings of the same campaign: Pattern 1 reads the grow→parity→flip→drop lifecycle; Pattern 2 reads the ordered-small-same-shape-PRs delivery mechanism. gix is a strangler-fig (Pattern 1) but is recorded as a "9-step" not a numbered-phase train, so it sits in Pattern 1 only. Same campaign, two shapes — the catalogue does not double-count; it cross-references (see Pattern 2 and the convergence tail).
+- *Drift boundary.* Neither instance carries a misnaming-at-merge aspect — the slugs (`refactor/...`, gix PR subjects) describe the moves accurately, and the plan docs record the lifecycle openly. Recurrence-only; not a drift.
+
+Provenance:
+- `history-seg-refactor-mvu`: 01KTMKVE85DEBMBWYCXY7YHP5E (PR #196 MVU_PLAN.md APPROVED, strangler-fig charter), 01KTMM60KR8W18TWXPXDGT9J8Y (PR #267–#274 terminal collapse/drop); synthesis arc 01KTMNFSQP1XJ1TSXS545PR01E.
+- `history-seg-gix-migration`: 01KTMMHJ879C24FY2WYYT9F1SF (#283 facade seam = grow-alongside), 01KTMMJB955RF16D842WFFEBYP (#284 gix added additively), 01KTMMMBVCGADASG74RTHKWY97 (#286–#287 parity spike then flip behind SPYC_GIT_BACKEND), 01KTMMPRPTSP0J1MTJCT3WW6N1 + 01KTMMR7X2GJAMQE0HD0C0HA6R (#289–#291 model→render→wire fractal sub-instance), 01KTMMTF0MQ96P7BVN7QQPVBNS (#292 drop + guard test + escape-hatch removed, −178 net); synthesis arc 01KTMNJD6GJM90D0WTTS0X28XR.
+- Contrast: `insight-recurrence` window-1 Pattern 6 = 01KR3DC7E4B0JC1NN212PYVT56 (implicit-machinery-chain, the closest window-1 analogue; accretes rather than replaces).
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB.
+
+<!-- Entry-ID: 01KTMTNYS83V5A7PY2MJVV60MF -->
