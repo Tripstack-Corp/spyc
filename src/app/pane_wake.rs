@@ -78,29 +78,12 @@ impl App {
         }
     }
 
-    /// PR 8b: build the git-view worker's wake — a payloadless
-    /// `Message::GitViewOutput` send (the built model rides
-    /// `GitViewSession.rx`; the loop re-drains via `drain_git_view_session`).
-    /// Wrapped around the worker's data `Sender` by a `WakingSender`. No-op
-    /// before `run()` installs the sender.
-    pub(crate) fn make_git_view_wake(&self) -> PaneWake {
-        match &self.runtime.pane_wake_tx {
-            Some(tx) => {
-                let tx = tx.clone();
-                Arc::new(move || {
-                    let _ = tx.send(Message::GitViewOutput);
-                })
-            }
-            None => Arc::new(|| {}),
-        }
-    }
-
     /// Build a pager-stream worker's wake — a payloadless
     /// `Message::PagerStreamOutput` send (the payload rides the boxed stream's
     /// `rx`, re-drained by `drain_pager_stream`). Wrapped around the worker's
-    /// data `Sender` by a `WakingSender`. The unified successor to the
-    /// per-feature wakes (grep migrated; git-view's `make_git_view_wake` next).
-    /// No-op before `run()` installs the sender.
+    /// data `Sender` by a `WakingSender`. The single wake for every pager
+    /// stream (grep / git-view / transcript). No-op before `run()` installs the
+    /// sender.
     pub(crate) fn make_pager_stream_wake(&self) -> PaneWake {
         match &self.runtime.pane_wake_tx {
             Some(tx) => {

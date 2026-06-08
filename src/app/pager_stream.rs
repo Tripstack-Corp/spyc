@@ -20,8 +20,9 @@
 //!   (the impl owns its `Receiver<T>`), so the trait is object-safe and lives
 //!   behind `Box<dyn PagerStream>` in `Runtime`.
 //!
-//! The migration lands incrementally: transcript reads + `:grep` are here;
-//! git-view follows, retiring `git_view_id` for the single `stream_id`.
+//! All three producers — `:grep`, git-view diff/show/blame, and the agent
+//! transcript reads — now ride this seam through the single `stream_id` /
+//! `Message::PagerStreamOutput`.
 
 use super::{App, state};
 use crate::ui::pager::{self, PagerView};
@@ -33,9 +34,7 @@ pub enum DrainOutcome {
     /// retained to back a command). No redraw.
     Idle,
     /// The stream mutated the pager (appended lines / replaced content / a
-    /// title-progress refresh). Mark the frame dirty. Constructed by the
-    /// streaming grep stream (Stage D).
-    #[allow(dead_code)]
+    /// title-progress refresh). Mark the frame dirty.
     Changed,
     /// A one-shot stream rendered its result. The loop keeps the stream alive
     /// iff [`PagerStream::retain_after_finish`] (git-view retains its model for
@@ -46,8 +45,7 @@ pub enum DrainOutcome {
     /// resolved to nothing).
     CloseInfo(String),
     /// Terminal: close the stream's pager and flash this as an error (git-view
-    /// bad rev / a dead worker). Constructed by the git-view stream (Stage E).
-    #[allow(dead_code)]
+    /// bad rev / a dead worker).
     CloseError(String),
 }
 
@@ -56,14 +54,20 @@ pub enum DrainOutcome {
 /// theme and the pager both live under `self.view`, so a borrowed `&Theme`
 /// would alias the `&mut`. `Theme` is a cheap `Clone` (colors only).
 ///
-/// The fields are read by the git-view renderer (Stage E); the streaming
-/// grep / one-shot transcript streams ignore `ctx`.
-#[allow(dead_code)]
+/// The fields are read by the git-view renderer; the streaming grep /
+/// one-shot transcript streams ignore `ctx`.
 pub struct RenderCtx {
     /// The active theme (clone of `self.view.theme`).
     pub theme: Theme,
     /// Whether the backing pager is full-width — affects diff body width.
     pub full_width: bool,
+}
+
+/// An in-pager command routed to a retained stream (via
+/// [`App::dispatch_pager_command`]). git-view's `|` flips its diff layout.
+pub enum PagerStreamCmd {
+    /// Flip diff/show unified ⇄ side-by-side (git-view `|`).
+    ToggleLayout,
 }
 
 /// A background producer streaming styled content into a [`PagerView`].
@@ -87,6 +91,18 @@ pub trait PagerStream {
     fn retain_after_finish(&self) -> bool {
         false
     }
+
+    /// Handle an in-pager command (re-rendering `view` from a retained model
+    /// without re-touching the worker). Returns true if handled. Default: not
+    /// handled (streaming grep / one-shot transcript have no commands).
+    fn on_pager_command(
+        &mut self,
+        _cmd: PagerStreamCmd,
+        _view: &mut PagerView,
+        _ctx: &RenderCtx,
+    ) -> bool {
+        false
+    }
 }
 
 /// How [`App::spawn_pager_stream`] mounts the initial (empty / "computing…")
@@ -94,8 +110,6 @@ pub trait PagerStream {
 pub enum PagerStreamMount {
     /// Centered overlay (grep, git-view): pushes the prior pager onto history
     /// for `:bprev`. `line_count_hint` locks the gutter width while streaming.
-    /// Constructed by the grep / git-view streams (Stages D/E).
-    #[allow(dead_code)]
     Overlay {
         /// Initial title (e.g. `"grep — … — scanning…"`).
         title: String,
@@ -261,11 +275,44 @@ impl App {
         }
     }
 
+    /// Route an in-pager command (e.g. git-view's `|` layout toggle) to the
+    /// active stream if it backs the live pager. Returns whether it was handled
+    /// (false → the key falls through as a no-op, e.g. `|` on a non-git-view /
+    /// blame pager). Re-renders from the retained model — no worker round-trip.
+    pub(crate) fn dispatch_pager_command(&mut self, cmd: PagerStreamCmd) -> bool {
+        let Some(stream) = self.runtime.pager_stream.as_ref() else {
+            return false;
+        };
+        let id = stream.id();
+        if self
+            .view
+            .pager
+            .as_ref()
+            .is_none_or(|p| p.stream_id != Some(id))
+        {
+            return false;
+        }
+        let ctx = RenderCtx {
+            theme: self.view.theme.clone(),
+            full_width: self.view.pager.as_ref().is_some_and(|p| p.full_width),
+        };
+        let view = self
+            .view
+            .pager
+            .as_mut()
+            .expect("pager presence checked above");
+        let stream = self
+            .runtime
+            .pager_stream
+            .as_mut()
+            .expect("stream presence checked above");
+        stream.on_pager_command(cmd, view, &ctx)
+    }
+
     /// Close the active stream-backed pager: pop the prior pager from history
     /// (so a one-shot that resolves empty / errors pops back to where the user
     /// was) or clear it. For a LowerPane scroll pager (transcript scrollback),
-    /// also exit the pane's scroll mode. Generalizes the old
-    /// `close_git_view_pager`.
+    /// also exit the pane's scroll mode.
     fn close_stream_pager(&mut self) {
         let Some(pager) = self.view.pager.as_ref() else {
             return;
