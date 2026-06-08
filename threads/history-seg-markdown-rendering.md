@@ -84,3 +84,28 @@ Provenance:
 - CHANGELOG.md (added PR #103) — quoted table-width rationale incl. 24/60 clamp and prose-stays-80 caveat
 
 <!-- Entry-ID: 01KTMMHF832JPTVJ91GGHG8AFM -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:03.891986+00:00
+Role: scribe
+Type: Note
+Title: PR #107 — soft line breaks render as hard breaks
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: the renderer overrides CommonMark soft-break handling so each source `\n` flushes a line; `Event::SoftBreak | Event::HardBreak => self.flush_line()` collapses both events to a hard break.   [kind: new-capability]
+When: 2026-05-20 · PR #107 (feat/markdown-hard-line-breaks) · commit daae050
+Recorded rationale: "Markdown soft line breaks render as hard breaks. CommonMark spec joins consecutive non-blank lines into one reflowed paragraph, which collapsed common patterns like `**To:** Alice\n**From:** Bob\n**Status:** Draft` into a single wrapped line. Now each source line renders on its own row — matches Discord / Slack / chat-style rendering and the way technical docs with `**Key:**` metadata expect to look. Prose authored at 80-col source wrap shows as several short lines instead of one reflowed paragraph; small trade for the metadata case actually working." — CHANGELOG.md (added PR #107)
+Inferred intent: a deliberate deviation from CommonMark to fix the `**Key:** value` metadata-stack case, accepting a known regression (80-col prose breaks into short lines) that PR #110 lands three days later to undo. evidence: src/ui/markdown.rs -17..-21 old separate SoftBreak/HardBreak arms → +33 merged `Event::SoftBreak | Event::HardBreak => self.flush_line()`; regression test `soft_breaks_render_as_hard_breaks` at +42.
+                  confidence: high
+Supersedes: (none yet) — but the CHANGELOG itself flags the prose tradeoff, which becomes the problem statement for PR #110.
+
+This is a small, intentional spec deviation (src/ui/markdown.rs +35/-7). The recorded rationale is unusually candid about the cost: it names the exact regression ("Prose authored at 80-col source wrap shows as several short lines") and calls it "small trade for the metadata case actually working." That self-flagged tradeoff is what PR #110 (reflow-prose) reverses — see the next moment, which supersedes this one.
+
+Provenance:
+- daae050 (PR #107 feat/markdown-hard-line-breaks, 2026-05-20) — src/ui/markdown.rs +35/-7 (SoftBreak|HardBreak → flush_line + test); CHANGELOG.md +11
+- CHANGELOG.md (added PR #107) — quoted soft-break-as-hard-break rationale incl. self-flagged prose tradeoff
+
+<!-- Entry-ID: 01KTMMJ3WCPSR7PH80MBES90JW -->

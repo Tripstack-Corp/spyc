@@ -41,3 +41,38 @@ Provenance:
 - REFACTOR_PLAN.md (Phase 1, lines 81–106) — "verbatim move + a `mod ...; use ...;` import — no behavior change … Each was one PR"; goal "No file in `src/app/` over ~1500 lines"
 
 <!-- Entry-ID: 01KTMMGZWER9304EZM82KTEZMQ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:01.580197+00:00
+Role: scribe
+Type: Note
+Title: PR #275–281: decompose-mod-* — mod.rs split into run/bootstrap/proc/tests/util siblings
+
+Spec: scribe
+
+tags: #history #module-decomposition
+
+Moment: module-decomposition — Reconstructed: the campaign's "800-LoC" phase carves the event-loop machinery and test scaffolding out of `src/app/mod.rs` into named siblings (`run.rs`, `bootstrap.rs`, `proc.rs`, `util.rs`) and pulls the in-file test modules into their own files; one `fs/ops.rs` formatter split rides along first.   [kind: refactor]
+When: 2026-06-03→04 · PR #275–281 (refactor/decompose-fs-ops, -mod-runloop, -bootstrap, -proc, -tests, -harness, -util) · commits cf48899a, 5fa1b404, 0681d216, 009b1ad0, 50b92967, 4ee4ceae, da42bb16
+Recorded rationale: "extract the long-listing formatter into fs/long_listing.rs (800-LoC campaign)" — pre-squash subject (commit 19df2a1, refactor/decompose-fs-ops). The "800-LoC campaign" tag is the recorded name of this phase; AGENTS.md later records its effect: mod.rs cut "to ~1k … the constructor, event loop, process I/O, and leaf helpers are sibling modules" (AGENTS.md, edited PR #282).
+Inferred intent: where mod-extract (#248–259) moved feature concerns, this phase targets the structural core REFACTOR_PLAN.md had deliberately left in mod.rs ("the App struct, App::new, and the ~920-line run event loop" — REFACTOR_PLAN.md lines 156–161). The diffs are large balanced cuts: #276 run.rs +670/-657, #277 bootstrap.rs +318/-308, #278 proc.rs +363/-351, #281 util.rs +260/-264. confidence: high
+Supersedes: REFACTOR_PLAN.md Phase 2 done-criteria (lines 154–161) explicitly named these as *optional follow-on* and listed run/`App::new` as "what remains is largely what the criterion intends to stay"; this phase moves them anyway, taking mod.rs below the Phase-2 floor.
+
+Reconstructed: the wave establishes the test-extraction convention later codified in PR #308's no-subprocess guard — test modules go to `*_tests.rs` / `tests.rs` files (the no-subprocess git scan special-cases exactly these names). The seven cuts, folded:
++ #275 long-listing formatter → `fs/long_listing.rs` (+394/-384; the one non-app cut, lands first)
++ #276 the ~660-line `run` event loop → `run.rs`
++ #277 `App::new` → `bootstrap.rs`
++ #278 process I/O (input reader, foreground exec) → `proc.rs`
++ #279 unit tests → `mod_tests.rs` (+515/-513; file header names "(800-LoC campaign)")
++ #280 test harness → `harness_tests.rs` + `test_harness.rs`
++ #281 leaf helpers (time/byte/text format) → `util.rs`
+The guard test that polices the result lives in the file #279 created — `app::guard_tests::mod_rs_stays_decomposed`, ceiling 4000 lines, "If you hit this: extract a module, don't bump the ceiling" (src/app/mod_tests.rs:14–32).
+
+Provenance:
+- cf48899a (PR #275 refactor/decompose-fs-ops, 2026-06-03) — `src/fs/long_listing.rs` created, `fs/ops.rs` -384
+- 19df2a1 (pre-squash, bitbucket/refactor/decompose-fs-ops) — subject tags "(800-LoC campaign)"
+- 5fa1b404 (PR #276, 2026-06-04) — `src/app/run.rs` +670; 0681d216 (#277) bootstrap.rs; 009b1ad0 (#278) proc.rs; da42bb16 (#281) util.rs
+- 50b92967 (PR #279, 2026-06-04) — `src/app/mod_tests.rs` created (+515); src/app/mod_tests.rs:1 "Unit tests relocated from app/mod.rs (800-LoC campaign)"
+- REFACTOR_PLAN.md (lines 154–161, 286–297) — Phase-2 criteria naming run/App::new as intended-to-stay and the follow-on tidy-up as optional
+
+<!-- Entry-ID: 01KTMMHZCN03GA638EHKKCY50E -->
