@@ -128,3 +128,28 @@ Provenance:
 - prior entry 01KTMKVE85DEBMBWYCXY7YHP5E (this thread, MVU_PLAN moment) — the plan these PRs execute.
 
 <!-- Entry-ID: 01KTMKWF071QA1Y5MD5TMMRGHC -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T21:58:39.299235+00:00
+Role: scribe
+Type: Note
+Title: PR #201 — Phase 1: the single Message channel + parkable input reader + ForegroundExec
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the unified `mpsc::Receiver<Message>` is born — a parkable crossterm reader thread feeds `Message::Input(Event)` and the loop switches from `event::poll` to `recv_timeout`, with the inline foreground-exec path rerouted through a parking-aware `ForegroundExec` so reader and child don't both read the tty.   [kind: new-capability]
+When: 2026-05-31 · PR #201 (refactor/mvu-phase-1-input-channel) · commit fe7f1cb (src/app/mod.rs +705/−... ; docs/MVU_PLAN.md +23)
+Recorded rationale: "Phase 1 — Single channel for Input + parkable reader. Introduce the one `mpsc::Receiver<Message>`; move crossterm input onto it via a parkable reader thread (blocking `event::read`, Press-filtered for Key only), and reroute the still-inline `run_child_in_foreground` through a parking-aware minimal `ForegroundExec` executor (lands early because the always-on reader otherwise races vim/less for stdin)." — docs/MVU_PLAN.md (Phase 1)
+Inferred intent: the stdin-contention hazard forces the parking machinery to land now, not later. The resolved mechanism is recorded as NOT a self-pipe: "crossterm 0.28 has no public mid-read interrupt… So the reader loops on `event::poll(10ms)` (finite — uses `try_lock`, so a parked reader holds no lock) and checks a park flag between polls… Park lands within ~one poll interval. (Done — `spawn_input_reader`/`ForegroundExec` in `src/app/mod.rs`.)" The diff confirms: `enum Message { Input(Event) }` (only one variant for now, "grown variant-by-variant as each source migrates"), `let reader_handle = spawn_input_reader(msg_tx)`, a `ForegroundExec { park: reader_handle.park.clone() }`, and `msg_rx.recv_timeout(Duration::from_millis(poll_ms))` replacing the old `event::poll`.   confidence: high
+Supersedes: the inline `run_child_in_foreground` call path (rerouted through the parking executor) and the direct `event::poll`/`event::read` in `App::run` (now fed by the reader thread). (verified: `recv_timeout`/`spawn_input_reader` first appear in this PR's mod.rs diff)
+
+Reconstructed: the loop's adaptive cadence is preserved — `recv_timeout(poll_ms)` keeps the same 16/100/500 timing as the old poll, so behavior is unchanged while the plumbing inverts. The hard done-criterion was "no keystroke leakage to/from a foreground `$EDITOR`/`$PAGER` (round-trip smoke + park-gate test); reader forwards Paste/Resize, drops only non-Press Key events," and the phase is recorded as "revertable by deleting the reader + park gate + FG reroute together." This is the keystone of the migration: every later source (3a–3d) plugs new `Message` variants into the receiver this PR creates.
+
+Provenance:
+- fe7f1cb (PR #201 refactor/mvu-phase-1-input-channel, 2026-05-31) — `src/app/mod.rs` +705/−198: adds `enum Message`, `spawn_input_reader`, `ForegroundExec` with shared park flag, `recv_timeout` loop; docs/MVU_PLAN.md +23 (records the resolved park mechanism).
+- docs/MVU_PLAN.md — Phase 1 + Effect class (B) ForegroundExec + Risks "Stdin contention" (quoted).
+- prior entry 01KTMKVE85DEBMBWYCXY7YHP5E (this thread) — the plan this executes.
+
+<!-- Entry-ID: 01KTMKXA7ZKKR421NTPRJ9EQ3M -->
