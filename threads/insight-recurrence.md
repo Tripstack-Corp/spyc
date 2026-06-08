@@ -820,3 +820,46 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 2 = 01KTMTQSTE7QSH8WJ442ADX02F.
 
 <!-- Entry-ID: 01KTMTSAVQNENHP8ZFWBKTWXN6 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:59:43.066657+00:00
+Role: critic
+Type: Note
+Title: Pattern 4 (window-2): Per-X-repetition-then-generalize — do the per-instance work N times, then collapse it into a registry/abstraction; two surfaces (AgentProfile #176, PagerStream #309–#311), payoff measured in both
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement.** A capability is implemented **per-instance, repeatedly** — the same shape copied N times across near-identical files or `match` arms — and then, once the repetition cost is visibly paid, **collapsed into a single abstraction** (a trait + registry, or a shared core), with the abstraction's payoff measured immediately by how cheaply the *next* instance lands. The shape recurs across **two distinct surfaces** in the window, each running the full repeat-then-generalize cycle.
+
+**Instance enumeration — two surfaces, both complete cycles.**
+
+1. **Per-agent dispatch → `AgentProfile` registry (`history-arc-07`, #176).** The repetition is recorded explicitly across the arc: gemini arrives as "the third `AgentKind`, carrying its own detection, resume, and session-discovery functions" (01KTMMR37MMRBBRMQK58RFN6R2); the transcript renderer is "reimplemented once per agent across three near-identical files (`codex_transcript.rs`, `claude_transcript.rs`, `agy_transcript.rs`)," with a shared tail-read helper fixing the same 100+ MB hang "twice, once per file" (01KTMMVJ6RR8RM6WNZ9HKQC5C8); agy onboards "the expensive way — detection, resume, status short-id, and a third parallel transcript file" (01KTMMY8R53BC7BJPEHKVWTRD0). Then the collapse: #176 folds "~10 per-agent `match AgentKind` dispatch sites" into "one `AgentProfile` trait plus `REGISTRY`," behavior-preserving ("all existing agent tests pass verbatim") (01KTMMZWBVK4X3QJP7SJW3ZEG2). *Synthesis arc: 01KTMNJRT9FD74NGXQXHH78A3B.*
+
+2. **Per-source pager sessions → `PagerStream` (`history-arc-05`, #309–#311).** The repetition is the "hand-rolled session skeletons" each pager-filling feature carried; the collapse is "an object-safe trait plus shared spawn/wake/id-gate/drain core in `src/app/pager_stream.rs`, onto which transcript scrollback (#309), `:grep` (#310), and git-view diff/show/blame (#311) migrate, collapsing their hand-rolled session skeletons" (01KTMN2XSH67BNFQPAMTSFD81X). The recorded ARCHITECTURE.md line names the generalized result: "Off-thread read/parse is the default architecture for any feature that fills a pager from disk or compute." *Synthesis arc: 01KTMNG0CYN2NW1Y3RBR71J5FP.*
+
+**Instance count: two surfaces.** Both are full cycles (repeat → collapse), not partial generalizations. The catalogue counts the two surfaces; it does not count each per-agent file or each pager source as a separate pattern instance — those are the *repetition phase* of the two instances, not instances themselves.
+
+**The recurrence reading no single arc owns: the payoff is measured the same way on both surfaces — by the cost of the next instance.** This is the load-bearing cross-surface observation:
+
+- **AgentProfile's payoff is measured at +18 minutes:** zot becomes the fifth agent "18 minutes later via 'one impl + one registry line, no dispatch-site edits,' with zero `src/app/mod.rs` changes against agy's tree-wide sweep hours earlier" (01KTMN0ZW93D5P7TPZCVMCWC0B). The before/after is explicit: agy (pre-collapse) touched the tree everywhere; zot (post-collapse) touched one impl + one line.
+- **PagerStream's payoff is measured by three same-day migrations:** the three sources (#309/#310/#311) land *onto* the new trait in immediate succession, "collapsing their hand-rolled session skeletons" — the abstraction proves itself by absorbing three consumers at once.
+
+Both surfaces validate the abstraction by the **marginal cost of the next consumer** — the recurrence is not just "abstract after N repeats" but "abstract after N repeats *and the very next instance is cheap, recorded as proof*." That measured-payoff signature is identical across the two surfaces and is visible only when the two are read together.
+
+**Contrast with window-1 Pattern 6 (implicit-machinery-chain).** Window-1's chains *accreted* capability (PagerView field-accretion, git_files chain) but never reached a *collapse* — the machinery stayed parallel/additive. Window-2's per-X-then-generalize is the shape where the accretion *terminates in an abstraction that retires the repetition*. It is the natural successor to Pattern 6's accretion: window-1 accreted and stopped; window-2 accretes, then generalizes. (Indeed arc-07's framing records the collapse as "answering the arc-07 tail's open question about whether a per-peer registration layer would stay parallel or become parametric" — the window-1 question, answered parametric in window-2.)
+
+**Sub-shape: partial-generalization-during-repetition.** Both surfaces show a *foreshadowing* sub-shape — a small piece is generalized mid-repetition before the full collapse: gemini's per-agent arrival already generalizes "one shared sub-concern — the closest-by-start-time picker — over a `SessionCandidate` trait" (01KTMMR37MMRBBRMQK58RFN6R2), and the transcript repetition shares a "tail-read helper" before the registry exists. So the recurrence carries an internal gradient: shared helpers emerge *during* the repetition, then the full trait emerges *after*. Two instances of this foreshadowing sub-shape (one per surface); noted, not promoted.
+
+**Boundary notes.**
+- *Distinct from Pattern 1 (strangler-fig).* Strangler-fig *replaces a legacy implementation*; per-X-then-generalize *unifies N parallel implementations of the same new capability*. AgentProfile did not replace a prior backend — it collapsed N copies of new agent-support code. Different shapes.
+- *Drift boundary.* The #176 and #309–#311 slugs describe their collapses accurately; behavior-preservation is test-recorded. Recurrence-only.
+
+Provenance:
+- `history-arc-07` (synthesis 01KTMNJRT9FD74NGXQXHH78A3B): 01KTMMR37MMRBBRMQK58RFN6R2 (gemini per-peer + SessionCandidate foreshadow), 01KTMMVJ6RR8RM6WNZ9HKQC5C8 (three near-identical transcript files, hang fixed twice), 01KTMMY8R53BC7BJPEHKVWTRD0 (agy onboarded the expensive way), 01KTMMZWBVK4X3QJP7SJW3ZEG2 (#176 AgentProfile collapse, ~10 dispatch sites), 01KTMN0ZW93D5P7TPZCVMCWC0B (zot at +18min, payoff measured).
+- `history-arc-05` (synthesis 01KTMNG0CYN2NW1Y3RBR71J5FP): 01KTMN2XSH67BNFQPAMTSFD81X (#309–#311 PagerStream collapse, three sources migrated).
+- Contrast/successor: `insight-recurrence` window-1 Pattern 6 = 01KR3DC7E4B0JC1NN212PYVT56 (accretion without collapse; arc-07's parallel-or-parametric open question).
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 3 = 01KTMTSAVQNENHP8ZFWBKTWXN6.
+
+<!-- Entry-ID: 01KTMTTZQK31H30M2RQ6J3FEY1 -->
