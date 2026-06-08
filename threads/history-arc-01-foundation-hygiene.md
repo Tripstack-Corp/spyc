@@ -538,3 +538,33 @@ Provenance:
 - PR #188 entry = 01KTMMV2X1VV9QPY0YA4AZPE05 (names the "MSRV-1.88 let-chain sweep").
 
 <!-- Entry-ID: 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:03.238523+00:00
+Role: scribe
+Type: Note
+Title: PR #167: update time 0.3.47, clear RUSTSEC-2026-0009, drop stale deny.toml ignores
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: supply-chain — Reconstructed: `time` is updated 0.3.45 → 0.3.47 (unblocked by the 1.88 MSRV bump), clearing the RUSTSEC-2026-0009 DoS advisory; the resolved advisory ignore and a now-stale `paste` ignore are removed from `deny.toml`, leaving cargo-deny clean with no warnings.   [kind: supersession]
+When: 2026-05-29 · PR #167 (chore/update-time-clear-rustsec) · commit 62d035e (merge), 62d035e^2 "deps: update time 0.3.45 -> 0.3.47, clear RUSTSEC-2026-0009"
+Recorded rationale: "The `time` DoS advisory (RUSTSEC-2026-0009) fix landed in 0.3.47, but the newer `time` declared a rust-version above the old 1.85 MSRV, so cargo's edition-2024 resolver kept us pinned at 0.3.45. The 1.88 MSRV bump unblocks it... Removed the resolved advisory ignore from deny.toml. Also dropped the stale `paste` (RUSTSEC-2024-0436) ignore — that crate is no longer in the tree (cargo-deny was warning `advisory-not-detected`)." (62d035e^2).
+Inferred intent: retire advisory ignores once the underlying condition is gone, keeping deny.toml honest rather than accumulating stale suppressions. evidence: two ignores removed for two distinct resolved reasons (version unblock + crate-gone); "cargo deny check now passes clean with no warnings; build + 770 tests + clippy -D warnings all green". confidence: high
+Supersedes: removes two of the documented advisory ignores that arc-01 PR #3 = 01KR0W9QF3P9E529E6J3XQMXDV introduced in `deny.toml:72-94` (the `time 0.3.45` and `paste` entries with `reason` fields). This is the first time the window shows a PR-#3 ignore being *retired* rather than carried.
+
+PR #167 is the supply-chain rail doing exactly what arc-01 PR #3's design anticipated: the documented ignores in `deny.toml` carried `reason` fields naming the dep-graph route and why each was tolerable; this PR closes two of them on their merits.
+
+The RUSTSEC-2026-0009 clearance is gated on the MSRV: `time` 0.3.47 (which carries the DoS fix) declared a rust-version above the old 1.85 MSRV, so the edition-2024 resolver held spyc at 0.3.45. The 1.88 MSRV bump (owned by another segment — see PR #164/#165 toolchain moment) is what made `cargo update -p time` resolve 0.3.47, pulling transitive num-conv/time-core/time-macros bumps with it. The second removal is housekeeping: the `paste` ignore (RUSTSEC-2024-0436) was firing `advisory-not-detected` because paste had already left the tree. The diff is `deny.toml −10` and `Cargo.lock` ±16 — no source change.
+
+This is the only moment in the window where cargo-deny's gate visibly *catches and then clears* something; arc-01's tail observed that the establishing window had "no incident" of cargo-deny catching anything (entry 01KR0XR504ZR10Y242JERT4K9S). This continuation is where the gate earns its keep.
+
+Provenance:
+- 62d035e (PR #167 chore/update-time-clear-rustsec, 2026-05-29) — deny.toml −10 (time 0.3.45 + paste ignores removed); Cargo.lock ±16 (time→0.3.47); CHANGELOG +8; commit body quoted.
+- arc-01 PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV (genesis of the deny.toml ignores being retired here; `deny.toml:72-94`).
+- arc-01 tail entry = 01KR0XR504ZR10Y242JERT4K9S ("no incident in the 22-day window" of cargo-deny catching something — this is the first clear).
+- PR #164/#165 toolchain moment = 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 (the 1.88 MSRV context that unblocks time).
+
+<!-- Entry-ID: 01KTMMX44WY1DPSCGSN27C77S0 -->

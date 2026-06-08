@@ -669,3 +669,30 @@ Provenance:
 - da4a6e1 (PR #175, 2026-05-29) — `src/state/agy_transcript.rs` +179 (full detail in the agy onboarding moment).
 
 <!-- Entry-ID: 01KTMMVJ6RR8RM6WNZ9HKQC5C8 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:05.430394+00:00
+Role: scribe
+Type: Note
+Title: PR #152,#153 — MCP context-freshness + codex-resolver hygiene
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: two same-day correctness fixes to the bridge — agent-initiated mutations write the context file synchronously, and codex transcript resolution canonicalizes cwds and shares the ISO-8601 parser   [kind: gotcha]
+When: 2026-05-27 · PRs #152 (fix/mcp-context-freshness, f984c20), #153 (fix/codex-resolver-hygiene, 84fe380)
+Recorded rationale: "MCP clients no longer read stale picks/filter after a mutation. `navigate_to` / `set_filter` / `pick_files` / `clear_picks` marked the context file dirty and let the debounced, event-driven writer flush it — but that writer is suppressed during a typing burst, so a follow-up `get_spyc_context` (which reads the on-disk file) could see pre-mutation state" — CHANGELOG.md (added PR #152)
+Inferred intent: #152 closes a read-after-write hole in the MCP query/mutate loop (the substrate the whole arc rests on); #153 is hygiene on the new codex transcript resolver from #146 — evidence: #152 touches `src/app/mod.rs` +16/-8 (the four MCP mutation handlers); #153 touches `src/state/codex_transcript.rs` -6 net and reuses `parse_iso8601_to_epoch_secs`
+                  confidence: high
+Supersedes: #152 supersedes the debounced-only context-write path (PR #19/#37-era) for agent-initiated mutations; #153 supersedes the codex resolver's stricter zone-required timestamp parser introduced in #146
+
+**#152 — context freshness.** This is a substrate fix, not a per-peer one: it protects the bidirectional-awareness loop the charter is built on. The MCP mutation tools (`navigate_to`, `set_filter`, `pick_files`, `clear_picks`) previously only marked the context file dirty and relied on the debounced writer — "but that writer is suppressed during a typing burst, so a follow-up `get_spyc_context` [...] could see pre-mutation state for as long as the user kept typing" (CHANGELOG). The fix: "These agent-initiated mutations now write the context file synchronously. Ordinary edits (cursor moves, browsing) stay debounced" (CHANGELOG). The distinction drawn — agent-initiated writes are synchronous, human-initiated stay debounced — is a clean statement of the read-after-write contract a query-and-mutate MCP surface needs.
+
+**#153 — codex-resolver hygiene.** Cleanup on #146's brand-new `codex_transcript.rs`. Two fixes, recorded: "it now also compares the *canonicalized* cwd, so a pane started under a symlinked path (e.g. `/var` → `/private/var`) still resolves" and "Its timestamp parser also reused a stricter variant that rejected zoneless stamps (bucketing them at epoch 0 and mis-ranking the session); it now shares `parse_iso8601_to_epoch_secs`, which falls back to assuming UTC" (CHANGELOG). The second fix is a small convergence signal: the codex resolver drops its private timestamp parser to reuse the shared `parse_iso8601_to_epoch_secs` that #68 introduced for gemini — a per-peer file giving up a duplicated helper in favor of a shared one, the same direction #176 takes wholesale. The `src/state/codex_transcript.rs` diff is net -6 (26 changed, fewer lines), consistent with deleting a redundant parser.
+
+Provenance:
+- f984c20 (PR #152 fix/mcp-context-freshness, 2026-05-27) — `src/app/mod.rs` +16/-8 (synchronous write in the four MCP mutation handlers). Clean squash; rationale from CHANGELOG.
+- 84fe380 (PR #153 fix/codex-resolver-hygiene, 2026-05-27) — `src/state/codex_transcript.rs` 26 lines changed (net -6), `src/state/sessions.rs` ±1 (share `parse_iso8601_to_epoch_secs`). Clean squash.
+
+<!-- Entry-ID: 01KTMMWZXSEMHKYCD0GGNSNR3E -->
