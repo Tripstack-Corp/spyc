@@ -129,3 +129,28 @@ Provenance:
 - 01KTMMHXYR7E0PYD7AZTHFAR8E (PR #99 entry, this thread) — the uncached event-driven refresh boundary this throttles.
 
 <!-- Entry-ID: 01KTMMP87YEBGTXTHDPH0BJJY0 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:32.054136+00:00
+Role: scribe
+Type: Note
+Title: PR #139 + #140 — typing must stay smooth: cap pane renders, then defer active-pane vt100 drain (interim mitigations)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: two interim mitigations target the chatty-pane typing-latency symptom by keeping pane work off the keystroke path. #139 caps pane-driven renders to ~30 dps inside the typing-burst window (skip if previous render <33 ms ago); #140 additionally skips the active pane's reader-channel drain inside the burst if it drained within the last 100 ms, freezing the vt100 grid so the next ratatui diff emits empty.   [kind: refactor]
+When: 2026-05-26 · PR #139 (perf/cap-pane-render-during-input) commit 0da9f9e6 (pre-squash 95f6f9e5) · PR #140 (perf/defer-active-pane-drain-during-typing) commit 28eed537 (pre-squash d2ee951f)
+Recorded rationale: #139 subject "perf: cap pane-driven renders to ~30 dps during typing burst"; CHANGELOG: "holding `j` to scroll the file list spiked spyc CPU to 90%+... the per-iteration cost wasn't channel work, it was the vt100 parse + ratatui render of the chatty pane... we skip the pane-driven render if the previous render was <33 ms ago. Bytes are still drained from the PTY (no back-pressure to claude), and key-event renders escape the cap entirely." #140 subject "perf: defer active-pane vt100 parsing during typing burst"; CHANGELOG: "every *event*-driven render still included a fresh vt100 grid update for the pane... the loop iterated only ~8 times/sec while holding `j`... Now: in the 300 ms typing-burst window, the active pane's reader-thread channel drain is skipped if we drained within the last 100 ms... the vt100 grid stays frozen... Background tabs are always drained... Only the *active* pane is deferred."
+Inferred intent: both are explicitly framed as incremental, each conceding the prior was insufficient — #140's CHANGELOG: "The v1.50.82 render cap helped pane-only renders, but every *event*-driven render still included a fresh vt100 grid update." They attack the symptom (loop iteration rate collapsing under a chatty pane) by avoiding work during typing, not by removing the synchronous parse. Evidence: each is a small `src/app/mod.rs`-only diff (#139 +34/-2, #140 +31). confidence: high
+Supersedes: layered on PR #135's typing-burst window. Both are themselves superseded one PR later — PR #141 removes them as "vestigial under the worker-thread parser" (then re-keeps the cap as cheap belt-and-braces). Verified: pickaxe `git log -S typing_burst` → `1932aed8 fix: drop v1.50.82/83 throttles — vestigial under worker-thread parser` (2026-05-26).
+
+Folded as one moment (the "typing must stay smooth" interim pair): both are mitigations of the same root cause — synchronous vt100 parse + render on the main loop, cost proportional to bytes the chatty pane emitted since the last iteration. They buy responsiveness by deferring pane work out of the keystroke path while preserving no back-pressure to claude (bytes still queue in the unbounded channel). They set up #141, which removes the root cause rather than deferring it.
+
+Provenance:
+- 0da9f9e6 / 95f6f9e5 (PR #139 perf/cap-pane-render-during-input, 2026-05-26) — `src/app/mod.rs` +34/-2, CHANGELOG +20.
+- 28eed537 / d2ee951f (PR #140 perf/defer-active-pane-drain-during-typing, 2026-05-26) — `src/app/mod.rs` +31, CHANGELOG +23.
+- 01KTMMKR90HM2V9VZYSDFS1WCZ (PR #135 entry, this thread) — the typing-burst window both layer on.
+
+<!-- Entry-ID: 01KTMMQEW38T70F1GDME1FDJ8M -->

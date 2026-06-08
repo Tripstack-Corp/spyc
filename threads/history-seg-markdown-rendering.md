@@ -239,3 +239,30 @@ Provenance:
 - 82dc9d8 (PR #85, 2026-05-13) — the dual-view `m`-toggle machinery this reuses (Entry 01KTMMG3MTKFGRKYEJGHN65QY8 in this thread)
 
 <!-- Entry-ID: 01KTMMPPPBJYJVVAGK5WSP6Y9P -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:13:29.835405+00:00
+Role: scribe
+Type: Note
+Title: Topology — markdown was one file across this slice; decomposed at #297 (out of slice)
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: across this slice (#85–#130, 2026-05-13→05-24) the markdown renderer is a single file `src/ui/markdown.rs`; the content-rendering surface also comprises `src/ui/syntax.rs` (syntect highlighting) and, from #129, `src/ui/json.rs`. The directory decomposition into `src/ui/markdown/{mod,renderer,wrap,tests}.rs` happens later, out of this slice.   [kind: segment-topology]
+When: slice window 2026-05-13→2026-05-24 (PRs #85,#96,#103,#107,#108,#110,#118,#125,#129,#130); decomposition at 2026-06-06 · PR #297
+Recorded rationale: "decompose markdown.rs into a directory module" — commit c5cc306 subject (PR #297, merge 02f22c9, 2026-06-06). Not part of this slice's recorded rationale; noted only to set the file-topology boundary.
+Inferred intent: the seven markdown PRs in this slice all edit one ~accreting file; the rendering logic, table layout, prose wrap, and tests grow in `src/ui/markdown.rs` until #297 splits them. evidence: every diff in this slice touches `src/ui/markdown.rs` (single file) or the call sites in `src/app/mod.rs`; current tree shows `src/ui/markdown/mod.rs|renderer.rs|wrap.rs|tests.rs` first appearing at c5cc306 (`git log --diff-filter=D -- src/ui/markdown.rs` → c5cc306).
+                  confidence: high
+Supersedes: (none — orienting note)
+
+Boundary marker for downstream readers. The "new subsystem `src/ui/markdown/`" framing reflects the *end* state; within this slice it is still the single `src/ui/markdown.rs` plus sibling `src/ui/syntax.rs` and (new in #129) `src/ui/json.rs`. The file→directory split is recorded in history-seg-module-decomposition (#297 decompose-markdown), not here. The pager that hosts all of this rendering is covered in history-arc-05-pager-surface — every width hint, scroll-stash, and `m`-toggle in this slice flows through that pager.
+
+Folded into prior moments / accounted-for PR tally for this slice (10 PRs, all own-or-grouped, none dropped): #85 (scroll), #96 (loose list), #103 (table width), #107 (hard breaks), #108 (gutter, supersedes #103), #110 (reflow, supersedes #107), #118 + #130 (syntax, grouped), #125 (rerender-after-edit), #129 (JSON pretty).
+
+Provenance:
+- c5cc306 / 02f22c9 (PR #297 refactor/decompose-markdown, 2026-06-06) — markdown.rs → markdown/{mod,renderer,wrap,tests}.rs (out of slice; cross-ref history-seg-module-decomposition)
+- src/ui/markdown.rs, src/ui/syntax.rs, src/ui/json.rs — the content-rendering surface files in the slice window
+
+<!-- Entry-ID: 01KTMMR0PQQYXE3YTA9WSK3E9D -->
