@@ -980,3 +980,42 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M; window-2 document #1 = 01KTMTPYARF1GDCQHMMF9YN5J1.
 
 <!-- Entry-ID: 01KTMTR9XYV5ZW49ENMMP4CMBE -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:59:05.647811+00:00
+Role: critic
+Type: Note
+Title: Window-2 Document #3: docs/V1_5_PLAN.md — six-phase pager/task-viewer unification executed essentially as specified across arc-05 + arc-03; the window's SECOND near-exact execution (shipped v1.50.0)
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+**Stated-plan content.** `docs/V1_5_PLAN.md` (added commit 919520c, 2026-05-07) is the pager/task-viewer unification: *"Pager and task viewer become renderers you can mount into any of three slots — overlay, top pane, lower pane — and the lower pane's `^a-v` scroll mode becomes a real pager… Tasks gain bidirectional flow with panes."* Six phases, each with a verbatim "what done looks like." The plan's own sequencing: *"Phases 1–3 are the headline win — pager-as-scrollback"*; *"Phase 6 (task ↔ pane) waits for 1–5 because the cleaner pty abstraction makes it tractable."* The V1_60 predecessor note records it *"shipped at v1.50.0."*
+
+**Per-phase trajectory disposition (verified against arc-05 + arc-03 continuation entries).**
+
+- **Phase 1** (`Mount` enum on `PagerView`) — #40, commit 69494d18. EXECUTED AS SPECIFIED: `Mount::{Overlay|TopPane|LowerPane}` lands with every existing caller defaulting to Overlay ("Phase 1 just lays the rail"). 6 unit tests.
+- **Phase 2** (pty scrollback adapter) — #41, commit 579dca9c. EXECUTED: `src/ui/scrollback.rs` converts vt100 scrollback → `Vec<Line<'static>>`, styles preserved. 10 tests.
+- **Phase 3** (`^a-v` becomes pager-mounted-LowerPane) — #42, commit 29036c0b. EXECUTED — "first user-visible piece of the v1.5 unification"; the flat byte-buffer scroll mode replaced by a real pager (search/jump/visual/yank). One same-day polish PR (#45) repaired the Phase-3 open (no-jump init, wrap-on, borderless). EXECUTED-with-immediate-polish.
+- **Phase 5** (`D` uses in-app pager) — #43, commit fb93c322. EXECUTED: `D` retargeted from spawning `$PAGER` to a `TopPane`-mounted in-app pager, with the >5 MB `MAX_PAGER_BYTES` overlay-`$PAGER` fallback the plan named.
+- **Phase 6** (task ↔ pane migration) — #46–#48 (arc-03, entry 01KTMMMHWAHASBVT11Y96RBKSA). EXECUTED in the planned order (host first 6a, then promote 6b, then demote 6c): the pty kernel extracted into a shared `PtyHost`, made movable between pane and background task in both directions without killing the child. The plan named the abstraction before the code existed; the three PRs land it as named. Two honest asymmetries documented-not-fixed (empty-start buffer recovery on demote; promoted tab keeps `dumb` TERM) — recorded gotchas, not divergences.
+- **Phase 4** (block/columnar visual selection) — the ONE phase not landed as a clean V1.5 unit in-window: the columnar-yank direction predates this window (arc-05 PR #33 visual-line-mode, window-1 = 01KR2AAX12XSNRNZPTXJT2TXJA) and the placement-cursor half surfaces later via #115 (arc-05 continuation = 01KTMN185R410PMH15J2KN8CKD). Disposition: DIRECTION-LANDED-ACROSS-WINDOWS, not a single-PR Phase-4 execution.
+
+**V1_5 non-goals (the negative-recommendation register).** The plan's non-goals (verified on disk): cursor-shape forwarding ("separately landable"), mouse capture inside panes ("tracked in BUGS.md"), and *"Real Model-View-Update refactor of `app/mod.rs` — that's REFACTOR_PLAN's territory."* All three HONORED within the V1.5 work — V1.5 did not absorb the MVU rewrite (that landed separately under MVU_PLAN, document #1), did not add pane mouse-capture, did not forward cursor shape. This is the same skip-honored-exactly shape window-1 catalogued, recurring at a fourth independent document.
+
+**Trajectory disposition: NEAR-EXACT EXECUTION (five of six phases as specified; phase 4 direction-landed-across-windows; non-goals honored).** V1_5_PLAN is the window's SECOND near-exact execution alongside MVU_PLAN. Like MVU_PLAN, it is a numbered phase plan with per-phase done-criteria, not a borrow/adapt/skip ranking — and like MVU_PLAN it executed essentially as written, in the stated order, including the deliberate "save Phase 6 for last" risk-sequencing. The qualifier "near-exact" is carried entirely by Phase 4 (the one phase whose execution straddles the window boundary) and the Phase-3 same-day polish; no phase landed in a structurally different shape than specified.
+
+**Two near-exact executions, same document kind.** Documents #1 (MVU_PLAN) and #3 (V1_5_PLAN) are both numbered-phase, done-criteria-bearing specs, and both executed near-exactly. This is the cross-document recurrence window-2 contributes: where window-1's cross-document recurrence was *the negative-vs-positive asymmetry* across three loose-recommendation documents, window-2's is *near-exact phase execution* across two executable-spec documents. The count is stated; the property is reserved.
+
+**Boundary with `insight-emergent-properties`.** Whether "phase-numbered plans with done-criteria execute near-exactly" is an emergent property is tier-4. The trajectory thread states: V1_5_PLAN's six phases landed essentially as specified across arc-05 and arc-03, in the stated order, with non-goals honored.
+
+Provenance:
+- 919520c (2026-05-07) — V1_5_PLAN.md added (276 lines); phase sequence + "Sequencing" + non-goals quoted verbatim; non-goals verified on disk.
+- arc-05 V1.5 phases 1/2/3/5 decision entry = 01KTMMRS83NW2K9GASEKF5R1T1 (commits 69494d18/579dca9c/29036c0b/fb93c322/a37c6d04).
+- arc-03 V1.5 phase 6 entry = 01KTMMMHWAHASBVT11Y96RBKSA (commits a680db3/130528b/96347d5).
+- Phase-4 direction: arc-05 PR #33 (window-1) = 01KR2AAX12XSNRNZPTXJT2TXJA; arc-05 continuation #115 = 01KTMN185R410PMH15J2KN8CKD.
+- window-1 document #2 (UX catalogue skip-vs-adapt) = 01KR3ESJ42TT0ZGJHGHJ5CTNYC (the modified-shape contrast).
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M; document #1 = 01KTMTPYARF1GDCQHMMF9YN5J1.
+
+<!-- Entry-ID: 01KTMTSTYW0ZAF94QBA9NPH340 -->
