@@ -57,3 +57,30 @@ Provenance:
 - CHANGELOG.md (added PR #96) — quoted loose-list / pulldown-cmark Paragraph-wrapper rationale
 
 <!-- Entry-ID: 01KTMMGRQ8WXQQA9Y0AWPS5X9Z -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:09:40.626674+00:00
+Role: scribe
+Type: Note
+Title: PR #103 — markdown tables expand to pager width (table_width_hint)
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: the markdown renderer gains an optional `table_width_hint` argument; `render()` now takes the actual pager body width and computes per-column caps proportionally (clamped 24..60) instead of hard-capping tables at the 80-column prose budget.   [kind: new-capability]
+When: 2026-05-19 · PR #103 (feat/markdown-tables-use-pager-width) · commit 386b7bc
+Recorded rationale: "Markdown tables expand to the pager body width. Tables used to be hard-capped at the 80-column prose budget with a 24-cell per-column ceiling, so on a wide terminal a two-column reference table looked cramped (~30-cell columns) with the right half of the pager empty. Now the renderer takes an optional width hint, the file-open path passes the actual pager body width (90% of terminal, minus borders), and the per-column cap is computed proportionally — clamped between 24 (the old minimum, preserves existing tight behavior on small terminals) and 60 (avoids 200-cell-wide single columns on ultrawides). Prose intentionally still wraps at 80 columns regardless of the hint — long prose lines are unpleasant to read." — CHANGELOG.md (added PR #103)
+Inferred intent: separates two width budgets — tables follow the terminal, prose stays at CONTENT_WIDTH — establishing the `table_width_hint` plumbing that PR #108 then has to correct for the gutter and PR #110 reuses for prose. evidence: src/ui/markdown.rs signature change `pub fn render(source, theme, table_width_hint: Option<usize>)` (src/ui/markdown.rs +74), Renderer carries the hint (+82, +90 "Target total width for tables"); src/app/mod.rs +10 passes the pager body width at file-open.
+                  confidence: high
+Supersedes: PR #85's implicit single-width model — render() now distinguishes table width from prose width. The new signature is the seed the next two table/prose moments build on.
+
+The diff reworks the doc comments that previously described a single CONTENT_WIDTH cap (src/ui/markdown.rs -33..-36 old "Maximum visual width of a single table column" → +44 "Hard ceiling on a single table column even with vast amounts of terminal real estate"). The 24/60 clamp is the explicit tradeoff: floor preserves small-terminal behavior, ceiling avoids ultrawide single-column blowups.
+
+This is a fix-on-feature pair with PR #108 (gutter overflow), which discovers the hint didn't account for the line-number gutter. See that moment.
+
+Provenance:
+- 386b7bc (PR #103 feat/markdown-tables-use-pager-width, 2026-05-19) — src/ui/markdown.rs +81/-22 (render() table_width_hint arg, proportional per-column cap, 24/60 clamp); src/app/mod.rs +10 (pass pager body width at open); CHANGELOG.md +14
+- CHANGELOG.md (added PR #103) — quoted table-width rationale incl. 24/60 clamp and prose-stays-80 caveat
+
+<!-- Entry-ID: 01KTMMHF832JPTVJ91GGHG8AFM -->
