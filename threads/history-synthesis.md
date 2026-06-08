@@ -133,3 +133,30 @@ Confidence: High recorded-rationale density. Each moment quotes verbatim from CL
 Provenance: 01KTMMGZWER9304EZM82KTEZMQ, 01KTMMHZCN03GA638EHKKCY50E, 01KTMMJVZMX3SJCBSK8YF896YP, 01KTMMM1322W32NGAH5H7MWYEP, 01KTMMN1CSG84TPZ4ZEFN9K62B, 01KTMMPARGNTSQB2Z67G6KBKQ0
 
 <!-- Entry-ID: 01KTMNH17RVXAWHF9SJ2Z7MCP9 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:27:05.176746+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-seg-markdown-rendering — pager-hosted rendered/source dual-view, generalized across content types and reconciled width budgets
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-seg-markdown-rendering — pager-hosted rendered/source dual-view, generalized across content types and reconciled width budgets
+Span: 2026-05-13 → 2026-05-24 · 10 moments · 4 supersessions
+Narrative:
+  This arc summarizes the whole history-seg-markdown-rendering thread; it is secondary to the per-moment log there and does not replace it. The lifecycle anchor is the `m` (rendered↔source) toggle: it stops hard-resetting scroll to line 0 and instead stashes per-side scroll in a `saved_alt_scroll` slot, with a proportional projection on first visit because "the rendered and source views have different line counts" [01KTMMG3MTKFGRKYEJGHN65QY8]. That dual-view model — rendered and source as two views of one buffer with independent positions — is the invariant the rest of the arc threads through. A separate one-shot event-ordering fix keeps loose-list bullets attached to their item text via a `just_started_item` flag, a pulldown-cmark gotcha surfaced by dogfooding BUGS.md itself [01KTMMGRQ8WXQQA9Y0AWPS5X9Z].
+
+  The arc's longest tension is width and line-break handling, which the diff shape suggests was tuned in a tight feedback loop (inferred). Tables gain an optional `table_width_hint` so they expand to the pager body width while prose stays at the 80-column budget [01KTMMHF832JPTVJ91GGHG8AFM]. Soft breaks are then overridden to render as hard breaks to fix the `**Key:** value` metadata-stack case — the recorded rationale candidly names the cost, "small trade for the metadata case actually working" [01KTMMJ3WCPSR7PH80MBES90JW]. The table hint is corrected to subtract the line-number gutter so wide tables stop overflowing, its safety margin explicitly citing both prior moments [01KTMMJW20G78SSRS5TCFCRN1P]. Then the soft-break override is reverted: paragraphs reflow at the pager width again, and the metadata case is re-achieved narrowly via a `force_hard_breaks_before_keyed_lines` preprocessor [01KTMMKR5K08NMX743ZN7132WQ]. This reads as supersession-with-preservation — keep the win, drop the collateral prose damage.
+
+  Two correctness/extensibility moments harden the broader rendering surface: syntect gains a user grammar directory and bare-filename detection so formats like `Makefile` resolve, with tree-sitter explicitly deferred to the roadmap [01KTMMMZT01JK92DWDBMNJASWD]; and the $EDITOR-return path is consolidated onto the shared `build_pager_view_for_file` builder so a markdown file edited with `v` comes back rendered, restoring the dual-view invariant through the round-trip [01KTMMNW2TV95JZ1QG2HVWA0J7].
+
+  The dual-view machinery then generalizes to a second content type: a new `src/ui/json.rs` opens `.json` as canonical pretty JSON with `m` toggling pretty↔raw, deliberately mirroring markdown's `m` key, lines/alt_lines slot pattern, and fail-open philosophy, with `.jsonl` excluded to preserve its one-record-per-line affordance [01KTMMPPPBJYJVVAGK5WSP6Y9P]. A closing topology note records that across this slice the renderer is a single `src/ui/markdown.rs`; the directory decomposition into `src/ui/markdown/{mod,renderer,wrap,tests}.rs` happens later, out of slice, at #297 [01KTMMR0PQQYXE3YTA9WSK3E9D].
+Lineage: moment [01KTMMG3MTKFGRKYEJGHN65QY8] -> [01KTMMHF832JPTVJ91GGHG8AFM] -> [01KTMMJ3WCPSR7PH80MBES90JW] -> [01KTMMJW20G78SSRS5TCFCRN1P] (supersedes #103) -> [01KTMMKR5K08NMX743ZN7132WQ] (supersedes #107); and [01KTMMG3MTKFGRKYEJGHN65QY8] -> [01KTMMNW2TV95JZ1QG2HVWA0J7] (restores dual-view through edit) / [01KTMMPPPBJYJVVAGK5WSP6Y9P] (extends dual-view to JSON)
+Open / unsettled: tree-sitter is recorded as the intended future highlighting engine, deferred and pairing with the spyc-render-core crate split [01KTMMMZT01JK92DWDBMNJASWD]; JSON folding / path-indicator / search-within-structure / `:jq` are deferred to v1.50.73+ [01KTMMPPPBJYJVVAGK5WSP6Y9P]; the renderer's file→directory decomposition is out of slice and tracked in history-seg-module-decomposition [01KTMMR0PQQYXE3YTA9WSK3E9D].
+Confidence: Uniformly high — every moment carries verbatim CHANGELOG (and ROADMAP, for #118) recorded rationale plus diff-level evidence; inferred reads are confined to intent and tuning-loop framing and are marked.
+Provenance: 01KTMMG3MTKFGRKYEJGHN65QY8, 01KTMMGRQ8WXQQA9Y0AWPS5X9Z, 01KTMMHF832JPTVJ91GGHG8AFM, 01KTMMJ3WCPSR7PH80MBES90JW, 01KTMMJW20G78SSRS5TCFCRN1P, 01KTMMKR5K08NMX743ZN7132WQ, 01KTMMMZT01JK92DWDBMNJASWD, 01KTMMNW2TV95JZ1QG2HVWA0J7, 01KTMMPPPBJYJVVAGK5WSP6Y9P, 01KTMMR0PQQYXE3YTA9WSK3E9D
+
+<!-- Entry-ID: 01KTMNHBEZQYY8WY4CKBH57P5E -->
