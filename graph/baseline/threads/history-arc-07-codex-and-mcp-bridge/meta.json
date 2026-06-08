@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-08T22:19:06.471599+00:00",
   "summary": "The development thread focuses on improvements to the MCP transport and Codex, with key decisions including the renaming of `CLAUDE.md` to `AGENTS` and the introduction of a shared data model and parallel parsers for session-resume. These changes enhance interoperability and functionality, marking a progression from groundwork to closure in the Arc 07 history.",
-  "entry_count": 18
+  "entry_count": 18,
+  "annotations": {
+    "history-arc-07-codex-and-mcp-bridge": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-08T22:33:35.879167+00:00",
+      "vote_score": 0
+    }
+  }
 }
