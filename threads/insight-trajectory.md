@@ -904,3 +904,43 @@ Provenance:
 - docs/MVU_PLAN.md, REFACTOR_PLAN.md, docs/V1_5_PLAN.md, docs/V1_60_PLAN.md, docs/V1_70_PLAN.md, docs/AUTO_APPROVAL_PLAN.md, docs/PANE_RECOVERY_PLAN.md, docs/PANE_STARTUP_TABS_PLAN.md, docs/YAZI_COMPETITIVE_REVIEW.md — verified on `main` at reconstruction time.
 
 <!-- Entry-ID: 01KTMTN3M67GWM09JCK865XS9M -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:57:30.263610+00:00
+Role: critic
+Type: Note
+Title: Window-2 Document #1: docs/MVU_PLAN.md — the 8-phase strangler-fig migration executed phase-by-phase against named done-criteria; the window's NEAR-EXACT positive-recommendation execution (contrast: window-1's zero)
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+**Stated-plan content.** `docs/MVU_PLAN.md` (added PR #196, commit 5b3ba59, 2026-05-30) is the detailed design for REFACTOR_PLAN's Phase 3 — an 8-phase strangler-fig migration to the Elm Model-View-Update architecture. Status header verbatim: *"Status (2026-05-30): APPROVED — pre-2.0 / road-to-2.0 track… a strangler-fig migration: the MVU machinery grows alongside the existing `App::run` busy-poll loop and never replaces it in one step."* The phase table is the spine: **−1** re-baseline test fixtures · **0** Focus-as-one-value · **1** single Input channel + parkable reader · **2** timer/deadline layer + pane floor · **3** migrate each source onto the channel (3a–3d) · **4** widen PostAction into the Effect vocabulary · **5** physically split Model/Runtime/ViewState + de-IO audit · **6** pure-of-IO View + command table, loop reaches ~100 lines. The document records it *"survived four adversarial review lenses (Rust-feasibility, sync-only, incrementalism, scope-honesty)."*
+
+**The sequencing reversal, recorded verbatim.** *"Sequencing decision (2026-05-30): this lands pre-2.0, reversing the earlier 'hold the MVU rewrite until 2.0 + ~2 weeks' gate. Rationale: 2.0 should ship on the cleaner foundation, not carry a big-bang refactor as launch overhang. This is only safe because of the strangler-fig design — every phase is behavior-equivalent behind green CI (all 786 tests, no assertion edits)."* — docs/MVU_PLAN.md. The hold-then-reverse is itself a stated-plan trajectory: REFACTOR_PLAN's "2026-04-29: Plan written. Holding Phase 1 until after 2.0 ships" was narrowed by #179's roadmap-reorg (decomposition early) and the gate fully reversed by #196 (MVU pre-2.0). The reversal is honored in the strong sense — not deferred, *executed* in the reversed-forward direction.
+
+**Per-phase trajectory disposition (verified against `history-seg-refactor-mvu`).** Each phase is a named PR cluster that the seg-thread verifies landed against the plan's own done-criteria:
+
+- **Phase −1** (test fixtures) — #198 re-baselined `test_state()` into a base + struct-update builder. EXECUTED, with one honest in-plan amendment: the absolutist "zero test edits" invariant was *falsified against `test_state()`* and relaxed to "no assertion/expected-value edits; mechanical fixture churn permitted" — the plan recorded its own correction (seg entry 01KTMKWF071QA1Y5MD5TMMRGHC).
+- **Phase 0** (Focus as one Model value) — #197 shipped the `Focus` enum replacing ~8 scattered booleans / ~10 `pane_focused = false` sites; done-criterion `grep 'self.state.pane_focused\s*='` → zero matches outside the transition fn. EXECUTED AS SPECIFIED (lands first, as the plan ordered it).
+- **Phase 1** (single Message channel) — #201 born the `mpsc::Receiver<Message>`, parkable reader, `ForegroundExec`. EXECUTED; the plan even records the *resolved* park mechanism it had flagged open (crossterm-0.28 has no mid-read interrupt → poll-with-park-flag). (01KTMKXA7ZKKR421NTPRJ9EQ3M)
+- **Phase 2** (deadline scheduler) — #202 added `src/app/scheduler.rs` with the `Deadline` enum + pane floor retained "because the wake sources (3b) don't exist yet." EXECUTED. (01KTMKY262M6Y6GH25DYKBY33H)
+- **Phase 3** (3a–3d source migration) — #203–#212, ten PRs, each "add the wake / delete the floor"; ends with `MAX_IDLE_CAP` removed, loop blocking on `recv()`, "0 idle wakes." EXECUTED — plan records "Phase 3 DONE." (01KTMKZ502R8JYARTMFMKSGB72)
+- **Phase 4** (Effect vocabulary) — #213–#217 widened `PostAction` into `enum Effect`; `run_effects` the sole executor. EXECUTED, with a self-corrected metric (the original cross-file grep was "vacuous"). (01KTMM03Q5F5EA3VEQSJQJZYN0)
+- **Phase 5** (split Model/Runtime/ViewState + de-IO) — #218–#232 (conceptual migration) + Phase D #240–#242 (physical struct split). EXECUTED; the chdir fork chose plan-flagged option (a) (synchronous blocking effect). (01KTMM1A4SE4HRHFQ97PRJCZYD, 01KTMM35YXDZ69C08M78F4XKBB)
+- **Phase 6** (+ Phase E + last-mile) — #233–#247, #260–#274: single `COMMAND_TABLE`, loop-step extraction, mutation-free render, the three update entry points collapsed to one `App::update(msg)`. EXECUTED — ARCHITECTURE.md (PR #260) records "the structural migration… has landed." (01KTMM27M59N08NB1HSWCESQTR, 01KTMM409Y3RTZPDTVWPQWR6EW, 01KTMM4ZMPP9DCW3R3NK5BDA93, 01KTMM60KR8W18TWXPXDGT9J8Y)
+
+**The trajectory disposition: NEAR-EXACT EXECUTION.** All eight phases (−1 through 6) plus the last-mile pass landed in the specified order, with the specified mechanisms, against the plan's own named done-criteria. This is categorically different from window-1, where the load-bearing observation was *zero* exactly-as-specified positive-recommendation executions across the lazygit catalogue and ROADMAP additions. The qualifier "NEAR-exact" (not "exact-exact") is earned by two recorded in-plan amendments, both of which the plan documented as it went: (i) Phase −1's "zero test edits" invariant was falsified and relaxed; (ii) several phases corrected their own done-metrics (Phase 4's "vacuous grep," Phase −1's fixture-churn allowance). These are *the spec correcting itself mid-execution*, not *execution diverging from the spec* — the distinction matters at trajectory grain. There is no phase that landed in a structurally different shape than specified, and no phase deferred out of the window. Against window-1's framing — positive recommendations land in modified shape — MVU_PLAN is the counter-instance: a positive, multi-phase, capability-shipping plan that executed essentially as written.
+
+**Why this is the window-2 load-bearing observation.** Window-1's closure named the negative-vs-positive asymmetry — skip honored exactly, adapt all modified. MVU_PLAN breaks the positive-side pattern: a positive recommendation executed at near-exact grain. The document differs in kind from the lazygit catalogue: it is not a borrow/adapt/skip ranking but a numbered phase plan with done-criteria and adversarial-review provenance. The trajectory observation is that *the disposition profile tracks the document kind* — executable-spec documents execute near-exactly; loose-recommendation documents land in modified shape. The count is stated; the property (whether plan-doc-as-spec is a stable mode) is reserved for `insight-emergent-properties`.
+
+**Boundary with `insight-emergent-properties`.** Whether the near-exact execution reflects an emergent property — "the project executes documents that carry done-criteria and adversarial review near-exactly, and ranking-style recommendations in modified shape" — is tier-4 and forbidden here. The trajectory thread states: MVU_PLAN's 8 phases executed near-exactly, in order, against named criteria, with self-corrections recorded in the plan itself.
+
+Provenance:
+- 5b3ba59 (PR #196 docs/mvu-plan, 2026-05-30) — added docs/MVU_PLAN.md (design + bug-class table + phase table + sequencing reversal); status/sequencing quoted verbatim. Verified on disk: header still reads "APPROVED — pre-2.0."
+- `history-seg-refactor-mvu` MVU_PLAN moment = 01KTMKVE85DEBMBWYCXY7YHP5E; phase entries 01KTMKWF071QA1Y5MD5TMMRGHC (−1/0) · 01KTMKXA7ZKKR421NTPRJ9EQ3M (1) · 01KTMKY262M6Y6GH25DYKBY33H (2) · 01KTMKZ502R8JYARTMFMKSGB72 (3) · 01KTMM03Q5F5EA3VEQSJQJZYN0 (4) · 01KTMM1A4SE4HRHFQ97PRJCZYD (5) · 01KTMM35YXDZ69C08M78F4XKBB (D) · 01KTMM27M59N08NB1HSWCESQTR (6) · 01KTMM409Y3RTZPDTVWPQWR6EW (E) · 01KTMM4ZMPP9DCW3R3NK5BDA93 + 01KTMM60KR8W18TWXPXDGT9J8Y (last-mile).
+- window-1 document #3 entry = 01KR3EW3166JZ59TDR8PYMGN4T (the zero-exact-execution ROADMAP additions this contrasts against).
+- window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS (15-and-0 count).
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
+
+<!-- Entry-ID: 01KTMTPYARF1GDCQHMMF9YN5J1 -->
