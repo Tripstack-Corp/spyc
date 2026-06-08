@@ -153,3 +153,28 @@ Provenance:
 - prior entry 01KTMKVE85DEBMBWYCXY7YHP5E (this thread) — the plan this executes.
 
 <!-- Entry-ID: 01KTMKXA7ZKKR421NTPRJ9EQ3M -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T21:59:03.604693+00:00
+Role: scribe
+Type: Note
+Title: PR #202 — Phase 2: timer/deadline scheduler with a pane-presence floor
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the `elapsed()`-vs-poll-cadence timers become `Message::Tick(Deadline)`s armed against a new `Scheduler`; the loop blocks on `recv_timeout(min(next_deadline − now, pane_idle_floor))`, with `now` threaded so timing is a pure function of inputs.   [kind: refactor]
+When: 2026-05-31 · PR #202 (refactor/mvu-phase-2-deadlines) · commit d649de7 (src/app/scheduler.rs +103 new; src/app/mod.rs +205/−32)
+Recorded rationale: "Phase 2 — Timer/deadline layer with pane floor. Replace `elapsed()`-vs-poll-cadence timers with `Message::Tick(Deadline)`; loop blocks on `recv_timeout(min(next_deadline - now, pane_idle_floor))`. Keep the pane floor (the 16/100/500 cadence as a floor when a pane/overlay/capture is present) — deleting the idle-pane poll before Phase 3b would regress streaming visibility. Thread `now` so timing logic is a pure fn of inputs." — docs/MVU_PLAN.md (Phase 2)
+Inferred intent: the pane floor is deliberately retained because the wake sources (3b) don't exist yet — removing the idle-pane poll now would break streaming visibility. The diff confirms a new `src/app/scheduler.rs` with `pub enum Deadline { GitPoll, ActivityRollover, … }`, `pub struct Scheduler` exposing `arm/disarm/next`, and `arm_resume_deadlines(scheduler, tabs)`. The plan enumerates the deadlines: GitPoll/ActivityRollover/RefreshQuiet/ContextWrite/RestoreSettle/ResumeEnter (ScrollThrottle excluded — "it's an in-arm event-gap dedup, not a wakeup timer").   confidence: high
+Supersedes: the scattered `elapsed()` timer checks in `App::run` (1Hz git poll, 1s activity rollover, 150ms context-write debounce, 300ms resume-enter) — re-expressed as armed `Deadline`s on the `Scheduler`. (verified: `enum Deadline`/`struct Scheduler` first appear in this PR's scheduler.rs)
+
+Reconstructed: the done-criteria were a behavior-preservation bar — "idle agent pane streams ≤100ms unchanged; idle CPU at 0 draws/sec preserved; a timing-equivalence harness asserts a Message arriving 5ms into a 150ms debounce does not prematurely fire it." Threading `now` (rather than calling `Instant::now()` inside transitions) is what makes the timing logic testable and is the seam Phase 5's pure `update(&mut Model, …, now)` later relies on.
+
+Provenance:
+- d649de7 (PR #202 refactor/mvu-phase-2-deadlines, 2026-05-31) — adds `src/app/scheduler.rs` (Deadline enum + Scheduler arm/disarm/next + arm_resume_deadlines); `src/app/mod.rs` +205/−32 switches the loop to deadline-bounded recv_timeout.
+- docs/MVU_PLAN.md — Phase 2 + the `Tick(Deadline)` Message variant note (quoted).
+- prior entry 01KTMKXA7ZKKR421NTPRJ9EQ3M (this thread, Phase 1 channel) — supplies the receiver this phase computes timeouts against.
+
+<!-- Entry-ID: 01KTMKY262M6Y6GH25DYKBY33H -->
