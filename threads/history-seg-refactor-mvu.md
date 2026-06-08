@@ -69,3 +69,34 @@ Provenance:
 - 33d5454 (PR #195, 2026-05-30) — ARCHITECTURE.md module index + `src/app/mod.rs` anti-monolith guard test (CEILING=8_500).
 
 <!-- Entry-ID: 01KTMKTBHT9G2VBZNJZFY5EJM4 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T21:57:38.295108+00:00
+Role: scribe
+Type: Decision
+Title: PR #196 — MVU_PLAN.md: the strangler-fig Elm-architecture migration is APPROVED, pre-2.0
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: `docs/MVU_PLAN.md` lands as the approved, adversarially-vetted design for the Model-View-Update rewrite — an 8-phase (−1…6) strangler-fig migration that grows MVU machinery alongside the existing busy-poll loop, reversing an earlier "hold until 2.0 + ~2 weeks" gate.   [kind: convention]
+When: 2026-05-30 · PR #196 (docs/mvu-plan) · commit 5b3ba59 (added docs/MVU_PLAN.md)
+Recorded rationale: "Status (2026-05-30): APPROVED — pre-2.0 / road-to-2.0 track. This is the detailed design for `REFACTOR_PLAN.md`'s Phase 3 (the Model-View-Update rewrite). It is a strangler-fig migration: the MVU machinery grows alongside the existing `App::run` busy-poll loop and never replaces it in one step." — docs/MVU_PLAN.md (added PR #196). And the sequencing reversal: "Sequencing decision (2026-05-30): this lands pre-2.0, reversing the earlier 'hold the MVU rewrite until 2.0 + ~2 weeks' gate. Rationale: 2.0 should ship on the cleaner foundation, not carry a big-bang refactor as launch overhang. This is only safe because of the strangler-fig design — every phase is behavior-equivalent behind green CI (all 786 tests, no assertion edits)." — docs/MVU_PLAN.md.
+Inferred intent: the doc IS the recorded rationale; it is motivated by concrete bug classes, not aesthetics — "This migration is motivated by recurring, design-rooted bug classes (grounded in `BUGS.md`), not by aesthetics." The doc's bug-class table names Focus-model confusion (~8 scattered booleans), key-routing shape bugs (route.rs's five-in-one-week history), `^C`/signal mis-routing, the two/three-site `:command` punt-list footgun (bitten on `:undo`, `:limit`), state-out-of-sync (git_files vs git_info), PostAction anemia, forgot-to-clear `pending_X`, and the WriteContext self-refresh loop — each mapped to the phase that closes it, with honest "partial scope" notes.   confidence: high
+Supersedes: REFACTOR_PLAN.md Phase 3 (the "block-out-a-week big-bang" framing) — "The strangler-fig design makes every phase behavior-equivalent behind green CI and independently revertable, so it lands incrementally pre-2.0… Follow `docs/MVU_PLAN.md`." (REFACTOR_PLAN.md, edited PR #196 era)
+
+Reconstructed: the target pattern is the canonical ratatui Elm architecture — "a `Model`, a `Message` enum, `update(model, msg) → effects`, `view(model)`, one message channel, and side-effects represented as data and run by the runtime. spyc already has the bones of this (`AppState::apply → ApplyResult` is a partial Update; `render.rs` is the View; `PostAction` is effect-as-data; `route.rs` is a pure router). The work is to finish and unify them." (docs/MVU_PLAN.md, Target pattern.)
+
+The migrating-from snapshot is named precisely: `App::run` (~920 lines) is a busy-poll loop that non-blocking-drains 7+ independent sources, computes an adaptive `poll_ms` (16/100/500ms), and blocks only on `event::poll`. "There is no single message channel." The target loop is ~100 lines blocking on one `mpsc::Receiver<Message>`. State splits into three types — Model (pure domain, `src/app/model.rs`), Runtime (OS handles/threads/channels), ViewState (render ephemerals) — with `App = { model, runtime, view }`. The borrow-checker contract is explicit: `update()` takes `&mut Model` and returns `Vec<Effect>` (not `(Model, Vec<Effect>)`), so owned-data effects outlive the borrow.
+
+The phase table (the spine of this thread): −1 re-baseline test fixtures · 0 Focus-as-one-value (lands first, daily-driver fix) · 1 single Input channel + parkable reader · 2 timer/deadline layer + pane floor · 3 migrate each source onto the channel (3a–3d) · 4 widen PostAction into the Effect vocabulary · 5 physically split Model/Runtime/ViewState + de-IO audit · 6 pure-of-IO View + command table, loop reaches ~100 lines. The plan records it "survived four adversarial review lenses (Rust-feasibility, sync-only, incrementalism, scope-honesty)" and states the honest trade-off: deep loop/concurrency surgery before a public launch carries regression risk behavior-equivalence tests don't fully catch (timing, focus, stdin) — accepted to avoid a post-launch refactor overhang.
+
+This moment frames every subsequent entry in this thread; sibling segments `history-seg-module-decomposition` (#248–#308) and `history-seg-gix-migration` proceed in parallel.
+
+Provenance:
+- 5b3ba59 (PR #196 docs/mvu-plan, 2026-05-30) — added docs/MVU_PLAN.md (the full design + bug-class table + phase table); quoted verbatim above.
+- docs/MVU_PLAN.md — Status/Sequencing, Target pattern, Current state, three-type split, Phases table, Risks.
+- 662e744 — earlier commit "docs: add MVU migration plan (REFACTOR_PLAN Phase 3 detailed design)" confirming the doc's pre-squash provenance.
+
+<!-- Entry-ID: 01KTMKVE85DEBMBWYCXY7YHP5E -->
