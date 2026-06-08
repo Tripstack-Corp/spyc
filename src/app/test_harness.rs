@@ -35,8 +35,6 @@ impl App {
                 pending_capture: None,
                 background_tasks: BackgroundTasks::new(),
                 find_picker: None,
-                git_view_session: None,
-                next_git_view_id: 0,
                 pager_stream: None,
                 next_stream_id: 1,
                 stashed_pager_streams: std::collections::HashMap::new(),

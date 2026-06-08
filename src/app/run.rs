@@ -257,7 +257,6 @@ impl App {
                 | Message::Mcp(_)
                 | Message::PaneOutput { .. }
                 | Message::SinkOutput { .. }
-                | Message::GitViewOutput
                 | Message::PagerStreamOutput
                 | Message::FindOutput
                 | Message::ReaderExited
@@ -468,14 +467,6 @@ impl App {
             {
                 picker.refilter();
                 self.render_find_picker();
-                ctx.draw.mark(3);
-            }
-
-            // PR 8b: git-view session: the worker builds one bounded
-            // diff/show/blame model off-thread and reports once; this
-            // renders it into the matching pager (and the session stays
-            // alive to back the `|` layout toggle).
-            if self.drain_git_view_session() {
                 ctx.draw.mark(3);
             }
 

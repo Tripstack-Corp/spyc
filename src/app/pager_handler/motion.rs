@@ -144,9 +144,9 @@ impl App {
             KeyCode::Char('|') => {
                 // git-view diff/show: flip unified ⇄ side-by-side and
                 // re-render from the retained model. A no-op for blame /
-                // non-git-view pagers (toggle returns false). Re-borrows
-                // `self` (the `view` borrow above is not used in this arm).
-                self.toggle_git_view_layout();
+                // non-git-view pagers (returns false). Re-borrows `self` (the
+                // `view` borrow above is not used in this arm).
+                self.dispatch_pager_command(crate::app::pager_stream::PagerStreamCmd::ToggleLayout);
             }
             KeyCode::Char('w') => view.toggle_whitespace(),
             KeyCode::Char('W') => view.toggle_wrap(),

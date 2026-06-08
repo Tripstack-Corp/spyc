@@ -46,11 +46,12 @@ Where threads exist today:
 that fills a pager from disk or compute — it does not block the
 keypress path. A 4 MB agent-transcript tail-read + JSON parse, a
 streaming ripgrep search, and a gix diff/show/blame model all ride this
-one `pager_stream` seam (transcripts first; `:grep` and git-view migrate
-onto it, retiring their bespoke `grep_session` / `git_view_session`
-skeletons). Adding a new such feature = a `produce` closure (the worker
-body) + a small `PagerStream` impl (the apply step); the channel, wake,
-id-gating, and mounting are shared.
+one `pager_stream` seam — the bespoke `grep_session` / `git_view_session`
+skeletons collapsed onto `GrepStream` / `GitViewStream`, sharing the
+single `stream_id` / `Message::PagerStreamOutput`. Adding a new such
+feature = a `produce` closure (the worker body) + a small `PagerStream`
+impl (the apply step); the channel, wake, id-gating, and mounting are
+shared.
 
 Future work (background directory loading, etc.) will follow the
 same pattern: spawn a worker, push a typed message into a channel,

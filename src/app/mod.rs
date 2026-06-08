@@ -71,13 +71,6 @@ enum Message {
     /// so a stale id after a `:fg`/`^Z`/demote/promote self-discards).
     /// Buffered/collapsed; never surfaced as `Input`.
     SinkOutput { sink: SinkId },
-    /// PR 8b: a git-view worker (diff / show / blame) finished building its
-    /// bounded model. Payloadless wake — the built `GitViewPayload` rides
-    /// `GitViewSession.rx`, re-drained by `drain_git_view_session` (which
-    /// id-gates against the live pager's `git_view_id`, so a wake for a
-    /// replaced/closed session self-discards). Collapsed in the coalesce
-    /// pre-step; never surfaced as `Input`.
-    GitViewOutput,
     /// MVU Phase 3d: the F-finder walker produced a candidate batch or
     /// completed. Payloadless wake — the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk` (a wake after the picker closed no-ops at
@@ -222,7 +215,6 @@ use capture::PendingCapture;
 pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
-use git_view_session::GitViewSession;
 use pager_history::PagerHistory;
 use pane_wake::SinkId;
 use proc::{ForegroundExec, spawn_input_reader};
@@ -403,11 +395,6 @@ struct Runtime {
     background_tasks: BackgroundTasks,
     /// Active F-finder (holds the walker thread's receiver).
     find_picker: Option<FindPicker>,
-    /// Active git-view session (diff / show / blame): holds the worker
-    /// receiver plus the retained model that backs the `|` layout toggle.
-    git_view_session: Option<GitViewSession>,
-    /// Monotonic git-view-session id (stale-session guard).
-    next_git_view_id: u32,
     /// The active pager stream (the unified "worker → pager" abstraction —
     /// see [`pager_stream`]). grep / git-view / transcript collapse onto this
     /// slot as each migrates; `None` until then. Drained every tick by

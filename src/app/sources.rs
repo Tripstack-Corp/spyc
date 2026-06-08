@@ -54,7 +54,6 @@ pub fn coalesce_pending(
             // 0→1 CAS is the primary firehose collapse; this is the second).
             Message::PaneOutput { .. }
             | Message::SinkOutput { .. }
-            | Message::GitViewOutput
             | Message::PagerStreamOutput
             | Message::FindOutput
             | Message::ReaderExited
@@ -161,8 +160,7 @@ pub fn coalesce_recv(
         // short-id (the worker can't redraw, only wake — see the field
         // doc on `agent_status_pending`).
         Ok(
-            Message::GitViewOutput
-            | Message::PagerStreamOutput
+            Message::PagerStreamOutput
             | Message::FindOutput
             | Message::ReaderExited
             | Message::AgentStatusReady,
