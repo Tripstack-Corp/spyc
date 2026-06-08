@@ -519,3 +519,44 @@ Provenance:
 - All eight arc threads' per-PR entries with their drift-findings sections are the load-bearing infrastructure this catalogue was built atop; the per-pattern entries above cite the specific arc-entry ULIDs.
 
 <!-- Entry-ID: 01KR3BVVYN37WDWJ5A3D8A5XWH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:56:56.826041+00:00
+Role: critic
+Type: Note
+Title: Continuation framing (#38–#311 window): the drift profile shifts under squash-merges + plan-doc discipline — six patterns named for window 2
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+This continuation extends `insight-drift` from window 1 (#1–#37, the "first 22 days") into the second window (#38–#311, 2026-05-07 → 2026-06-08). The register is unchanged from the window-1 contract: **tier-1 pure observation** — name the pattern, count instances, cite real moment entry_ids from the 13 #38–#311 history threads, observe the artifact only. No motive attribution, no maintainer-mindset verbs. Where window 1's six patterns illuminate the contrast, this window's entries name the window-1 pattern entry and say how the second window differs.
+
+**Why the drift profile changes between windows — two structural facts.**
+
+Window 1 was per-PR merges: every PR's commit subject and body survived on `main`, so drift was observable at the commit-body grain (Pattern A read subject-vs-body; Pattern E read three text channels in one diff). Window 2 has two facts that reshape what drift the substrate can carry:
+
+1. **The window is predominantly Bitbucket squash merges.** PR #73 (docs/agents-md-conventions, 2026-05-11) is the *recorded origin* of the convention — AGENTS.md gains "Squash on merge … `main`'s `git log` becomes one commit per shipped shape" (seg-docs-planning entry 01KTMMKHEYZ540PV6VVZR33K79). After that, `main`'s log for most PRs is a one-line subject; pre-squash bodies live only on `bitbucket/<branch>` remotes. The honest framing that window 1 found in the commit *body* now lives in the CHANGELOG and in committed plan docs (MVU_PLAN.md, REFACTOR_PLAN.md, CLAUDE.md, the V1_5/V1_60/V1_70 plans). The substrate moved.
+
+2. **Plan-doc discipline precedes most engineering.** PR #196 (MVU_PLAN.md APPROVED) lands a full 8-phase design *before* the rewrite begins (seg-refactor-mvu 01KTMKVE85DEBMBWYCXY7YHP5E); PR #282 (CLAUDE.md ~800-line ceiling) is a typed Decision governing every subsequent decompose PR (seg-module-decomposition 01KTMMJVZMX3SJCBSK8YF896YP); PR #283's facade module-doc pre-names a 9-step gix arc. Drift that window 1 read *between* the description and the diff is, in window 2, frequently *pre-recorded* — the plan doc states the scope, the squash subject understates it, the CHANGELOG carries the honest middle.
+
+**The six window-2 patterns named (counts verified per entry below).**
+
+- **A′. Squash-subject understatement at structural scale** — window-1 Pattern A (subject narrower than diff) intensifies. The understatement is now systemic, not incidental: an 800-LoC decompose PR, a whole MVU phase, a 12-PR extraction wave each reduce to a one-line `main` subject. The compensating recorded rationale moved into CHANGELOG + committed plan docs. *(contrast: window-1 Pattern A = 01KR3BA3CZWA6TZCDKNJZDPAGH)*
+- **B′. Slug-prefix-vs-diff-intent drift (feat-labeled refactor)** — the gix migration ships its swaps as `feat/gix-*` though the segment classifies most as `[kind: supersession]`/`[kind: refactor]` (backend swaps behind a held-stable seam). A new sub-shape of window-1 Pattern A's prefix-drift. *(contrast: 01KR3BA3CZWA6TZCDKNJZDPAGH)*
+- **C′. Cumulative self-retraction (vestigial mitigation; escape-hatch add-then-drop)** — window-1 Pattern E (within-PR self-correction) re-grained: here a diff retracts an *earlier diff*'s code, by design. #141 retires the #139/#140 throttles as "vestigial"; #292 deletes the `SPYC_GIT_BACKEND` escape hatch #287 added. *(contrast: window-1 Pattern E = 01KR3BK1VP3SZ5DM9VAQ01FFYX)*
+- **D′. Same-day plan self-reversal** — the description layer drifts from *itself*: V1_60_PLAN.md is rewritten recursive→siblings+mirror within ~4.5h (#76→#77). Window 1 had no plan-doc layer thick enough to self-reverse. *(no window-1 analogue)*
+- **E′. "aislop" description-layer cruft** — a drift *type* window 1 did not have: #293/#294/#296 detect-then-gate AI-generated stale/process-narrating comments and unjustified `.unwrap()`s left by agentic code movement. *(no window-1 analogue)*
+- **F′. Fix-on-feature regression waves** — feature lands, an immediate repair wave follows at the merge boundary: arc-05 #49–#53 (the morning after the V1.5 mount ship), markdown #103→#108 / #107→#110. This is window-1 Pattern D (documented-vs-wired at merge) recast as a cumulative shape. *(contrast: window-1 Pattern D = 01KR3BGMAKS4AZNZE2QFXH10W4)*
+
+**Methodology.** Each pattern entry below catalogues instances against the #38–#311 thread moment entry_ids, verified against the segment workers' diff citations (SHAs, file:line spans, CHANGELOG/plan-doc quotes). Where a curated lead did not hold or holds only partially, the entry says so. A continuation closure tallies the counts and reads the window-2-vs-window-1 profile shift; a tail names the negative space.
+
+**What this continuation is NOT.** Not a re-narration of the engineering (that is the 13 segment threads' work). Not recurrence/trajectory/emergent-property reading (those are the other three insight tiers; the coordinator's segmentation entry defers an equivalent insight pass and lists this exact seed set — "the v1.60 same-day architecture reversal #76→#77; the #139/#140 throttles made vestigial by #141; the fix-on-feature regression waves in arc-05 #49–#53 and markdown #103→#108"). This continuation writes the drift tier of that deferred pass.
+
+Provenance:
+- `history-overview` second-window framing = 01KTMN7X7FV45E8E05DN1RV719; segmentation = 01KTMN9MRB31A0C8ZWSXX5M5ZQ (the ~123-moment map; names the drift seed list quoted above).
+- `history-seg-docs-planning` entry 01KTMMKHEYZ540PV6VVZR33K79 (PR #73 — squash-on-merge convention recorded origin) and 01KTMMMQ1VY8ZERQ3NQAF89DN4 (V1_60 same-day reversal).
+- `history-seg-refactor-mvu` 01KTMKVE85DEBMBWYCXY7YHP5E (MVU_PLAN); `history-seg-module-decomposition` 01KTMMJVZMX3SJCBSK8YF896YP (CLAUDE.md ceiling); `history-seg-gix-migration` 01KTMMHJ879C24FY2WYYT9F1SF (facade 9-step arc doc).
+- window-1 `insight-drift` framing = 01KR3B7KW5QNRWHG6YTV9QSF07 (register and methodology inherited unchanged).
+
+<!-- Entry-ID: 01KTMTNWVQJZQX85ZPA3BBZVGV -->
