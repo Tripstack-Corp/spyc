@@ -56,3 +56,27 @@ Provenance:
 - 01KTMMHXYR7E0PYD7AZTHFAR8E (PR #99 entry, this thread) — the Tier-0 cache this builds on / supersedes the single-slot version of.
 
 <!-- Entry-ID: 01KTMMK08N55944H24EY4RM81E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:02.704258+00:00
+Role: scribe
+Type: Note
+Title: PR #135 — typing-burst poll cadence (opens the 2026-05-26 typing-latency push)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: a keypress now arms a 250 ms typing-burst window that tightens the event-loop poll cadence from the 100 ms idle interval to 16 ms while a pane is open, so the first echo after an idle gap lands in ~16 ms instead of ~100 ms.   [kind: new-capability]
+When: 2026-05-26 · PR #135 (perf/input-typing-burst-poll) · commit e5ac0ea0 (pre-squash 1524b694)
+Recorded rationale: "perf: typing-burst poll cadence for low first-echo latency" — commit subject. CHANGELOG (added PR #135): "Reported: 'I seem to be able to type faster than the input.' Cause: `crossterm::event::poll` doesn't wake on PTY output — only on host-terminal events — so after a keystroke is sent to the child, the event loop could sit at the 100 ms idle poll for up to one full window before draining the echo. Sustained typing was fine (`pane_had_output` already drives 16 ms), but the *first* character after an idle gap had a worst-case ~100 ms latency... any keypress arms a 250 ms typing-burst window that tightens the poll cadence to 16 ms when a pane is open."
+Inferred intent: this opens the concentrated 2026-05-26 responsiveness push (#135–#144, eight PRs in one day). The throughline is stated in this very entry: the proper fix is acknowledged as out of scope — "Longer-term fix (let pane output wake the main loop directly, rather than timeout polling) is the proper solution but a larger refactor." Evidence: `src/app/mod.rs` +28/-5 only; the `typing_burst` symbol introduced here (pickaxe `git log -S typing_burst` → 1524b694, 2026-05-26 07:08) is read by every subsequent PR in the cluster. confidence: high
+Supersedes: (none) — additive cadence layer over the existing `pane_had_output`-driven 16 ms path.
+
+This is the cluster's framing moment: spyc's event loop is a timeout-poll loop (`crossterm::event::poll`), and PTY output does not wake it, so latency is bounded by the poll interval. The 250 ms typing-burst window is the cheap, bounded mitigation. The CHANGELOG explicitly names the structural fix it is deferring — direct pane-output wake — which is later realized in the MVU work (pickaxe shows `2026-05-31 refactor: MVU Phase 3b PR1 — pane output wakes the channel` and `Phase 3b PR2 — delete the pane poll floor`); cross-reference history-seg-refactor-mvu.
+
+Provenance:
+- e5ac0ea0 / 1524b694 (PR #135 perf/input-typing-burst-poll, 2026-05-26) — `src/app/mod.rs` +28/-5 (typing-burst window arming, cadence tightening), CHANGELOG +18.
+- CHANGELOG.md (added PR #135) — quoted rationale above.
+
+<!-- Entry-ID: 01KTMMKR90HM2V9VZYSDFS1WCZ -->

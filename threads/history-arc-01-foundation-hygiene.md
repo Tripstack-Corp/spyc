@@ -314,3 +314,32 @@ Provenance:
 - `history-overview` spine entries 0–3 = 01KR0TRFWT9W6WMFHC49YSW0BG, 01KR0TWHTC1MPK4KJ08Y9SPE6P, 01KR0TYF5F11DA8P5HNPA20DBK, 01KR0V01TAJVSZFE5ZNMCZHQSF.
 
 <!-- Entry-ID: 01KR0XSCA6AD371NHQBZ7HTS3V -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:00.555182+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): the hygiene segment matures
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: continuation-framing — Reconstructed: this thread, originally the 3-PR establishing arc (#2,#3,#4, v1.37.2, 2026-04-30), is extended forward to carry the CI/release/toolchain/supply-chain hygiene slice of the #38–#311 continuation window (2026-05-08 → 2026-06-06).   [kind: segment-topology]
+When: 2026-05-08 → 2026-06-06 · PRs #51,#56–#61,#64–#66,#69,#88,#117,#143,#164,#165,#167,#170,#188,#199,#200,#293–#296
+Recorded rationale: the arc-01 head established `make check` as the single CI gate (PR #2) and hung cargo-deny + `--locked` + `SECURITY.md` + `deny.toml` on it (PR #3); the continuation narrates how that rail is *tuned and extended* across the next month — see arc-01 PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH and PR #3 entry = 01KR0W9QF3P9E529E6J3XQMXDV.
+Inferred intent: the segment throughline reads as "spyc's build/test/release/supply-chain discipline maturing from established-but-cold into measured-and-fast" — evidence: the 05-09 cache campaign carries explicit wall-clock targets in commit bodies ("cut cold-cache CI from ~6 min toward ~1.5", commit 793df19), and the test-surface expands from the v1.37.2 baseline (770 → 929 tests across the window per commit bodies 3d682ec, 2af9f03). confidence: high
+Supersedes: (none — extends arc 01 forward; supersession callouts are per-moment below)
+
+This is the continuation segment for arc-01's concern (foundation hygiene) across the #38–#311 window. The arc-01 head (entries 0–6 above, 2026-05-07 authoring) narrated the three v1.37.2 PRs that *established* the hygiene rails. This continuation narrates the month in which those rails were tuned, measured, and extended: a CI-caching campaign with stated wall-clock budgets, a test-surface expansion, a clutch of release cuts, a toolchain pin + MSRV reconciliation, supply-chain advisory clearing + a scheduled drift report, and a late "aislop"/comment-hygiene cleanup pass.
+
+Two cross-segment threads matter. (1) The test-infra moment (#56,#59,#60,#199,#200) is the data behind the later MVU refactor's "behavior-equivalence behind green CI" claim — cross-ref `history-seg-refactor-mvu`; the snapshot/property/pty/harness tests are what made a large internal rewrite assertable as no-behavior-change. (2) The comment-hygiene PRs (#293,#294,#296) are explicitly downstream of the gix migration and the impl-extraction / 800-LoC decomposition (commit 2af9f03 names "the gix migration, the impl-extraction sweep, and the 800-LoC decomposition") — cross-ref `history-seg-gix-migration` and the refactor segment.
+
+Recorded-rationale note: PRs #51,#56–#61,#64–#66,#69,#143,#164,#165,#167,#170,#188,#199,#200,#293–#296 are squash merges whose **second parent retains the full pre-squash commit body** (`git show <sha>^2`), so recorded rationale is unusually rich for this slice. PR #88 and PR #117 are subject-only squashes — rationale there is the merge subject + diff, marked inferred. Cadence: this continuation does not repeat the per-PR shape of the arc-01 head; it folds into ~10 moments per the bounding rule, naming every PR.
+
+Provenance:
+- arc-01 head entries 0–6 = 01KR0W6FR7T01ZJR84MRKWA13A, 01KR0W81XE4K3G7BBSP42GE1HH, 01KR0W9QF3P9E529E6J3XQMXDV, 01KR0WBKNMQF231X2T8KTGD9KS, 01KR0WD8428XFNTJV11MXX59NF, 01KR0XR504ZR10Y242JERT4K9S, 01KR0XSCA6AD371NHQBZ7HTS3V.
+- 793df19 (PR #57^2, 2026-05-09) — "cut cold-cache CI from ~6 min toward ~1.5".
+- 3d682ec (PR #164, 2026-05-29) — "full test suite (770 tests)"; 2af9f03 (PR #293, 2026-06-06) — "929 tests".
+
+<!-- Entry-ID: 01KTMMKT8E97SAHMKW6GJHTX6E -->

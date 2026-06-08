@@ -135,3 +135,29 @@ Provenance:
 - 386b7bc (PR #103, 2026-05-19) — the width hint this PR corrects (Entry 01KTMMHF832JPTVJ91GGHG8AFM in this thread)
 
 <!-- Entry-ID: 01KTMMJW20G78SSRS5TCFCRN1P -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:04.705485+00:00
+Role: scribe
+Type: Note
+Title: PR #110 — prose reflows at pager width; soft breaks soft again
+
+Spec: scribe
+
+tags: #history #markdown-rendering
+
+Moment: markdown-rendering — Reconstructed: soft breaks revert to CommonMark whitespace (paragraphs reflow), prose wrap now tracks the pager body width hint instead of the fixed CONTENT_WIDTH, and a `force_hard_breaks_before_keyed_lines` preprocessor inserts a hard-break marker only before `**Word(s):**` lines to keep the metadata case working.   [kind: supersession]
+When: 2026-05-21 · PR #110 (fix/markdown-reflow-prose) · commit f1c1103
+Recorded rationale: "Markdown prose reflows at the pager body width. Two earlier choices combined badly on source files authored with 80-col wrap ... (a) v1.50.52 made every source `\n` a hard line break, so each ~70-char source row became its own ~70-char rendered row; (b) prose wrap was hard-capped at the 80-col `CONTENT_WIDTH` even on wide terminals. Result: a paragraph that ought to flow across a 200-cell pager broke into a dozen short, mid-word rows. Now: soft breaks are CommonMark-default whitespace (paragraph reflows), and the wrap target tracks the pager body width passed in by `display_in_pane` (the same hint tables already use). ... The `**Key:** value` metadata stack still renders as separate rows: a new `force_hard_breaks_before_keyed_lines` preprocessor inserts markdown's two-space hard-break marker before each line that starts with `**Word(s):**`, so the metadata case keeps working without forcing every other paragraph into short-line mode." — CHANGELOG.md (added PR #110)
+Inferred intent: reconciles the PR #107 metadata fix with the PR #103/#108 width plumbing — keep the `**Key:**` win, drop its collateral prose damage, and extend the table width hint to also drive prose wrap. evidence: src/ui/markdown.rs -157 (old `SoftBreak | HardBreak => flush_line()`) → +168 `Event::SoftBreak => self.current.push(Span::raw(" "))`, +169 `Event::HardBreak => self.flush_line()`; +63 `let prepared = force_hard_breaks_before_keyed_lines(source)`, fn at +105; prose wrap now `self.prose_width.saturating_sub(...)` (+138) tracking the hint vs old `CONTENT_WIDTH` (-135).
+                  confidence: high
+Supersedes: PR #107 (feat/markdown-hard-line-breaks, commit daae050) — the blanket SoftBreak→HardBreak override is removed; soft breaks are soft again, and the metadata-stack behavior is re-achieved narrowly via the keyed-line preprocessor. Also extends PR #103's `table_width_hint` to drive prose wrap.
+
+The largest renderer churn in the slice (src/ui/markdown.rs +146/-47). It is a textbook supersession-with-preservation: the prior moment's goal (the `**Key:**` metadata stack rendering on separate rows) is kept, but its mechanism (override all soft breaks) is replaced by a targeted preprocessor that only touches keyed lines. A `MIN_PROSE_WIDTH` floor is added (+32 doc: "A 30-cell terminal wrapping prose at 30 chars") so the hint-driven wrap doesn't go absurdly narrow.
+
+Provenance:
+- f1c1103 (PR #110 fix/markdown-reflow-prose, 2026-05-21) — src/ui/markdown.rs +146/-47 (SoftBreak reverted to space, prose_width tracks hint, force_hard_breaks_before_keyed_lines preprocessor, MIN_PROSE_WIDTH); CHANGELOG.md +22
+- CHANGELOG.md (added PR #110) — quoted reflow rationale naming v1.50.52 (PR #107) and the keyed-line preprocessor
+- daae050 (PR #107, 2026-05-20) — the soft-break override this PR reverts (Entry 01KTMMJ3WCPSR7PH80MBES90JW in this thread)
+
+<!-- Entry-ID: 01KTMMKR5K08NMX743ZN7132WQ -->

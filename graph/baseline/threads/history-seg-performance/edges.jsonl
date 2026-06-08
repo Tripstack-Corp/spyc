@@ -1,3 +1,5 @@
 {"source":"thread:history-seg-performance","target":"entry:01KTMMHXYR7E0PYD7AZTHFAR8E","type":"contains"}
 {"source":"thread:history-seg-performance","target":"entry:01KTMMK08N55944H24EY4RM81E","type":"contains"}
 {"source":"entry:01KTMMHXYR7E0PYD7AZTHFAR8E","target":"entry:01KTMMK08N55944H24EY4RM81E","type":"followed_by"}
+{"source":"thread:history-seg-performance","target":"entry:01KTMMKR90HM2V9VZYSDFS1WCZ","type":"contains"}
+{"source":"entry:01KTMMK08N55944H24EY4RM81E","target":"entry:01KTMMKR90HM2V9VZYSDFS1WCZ","type":"followed_by"}

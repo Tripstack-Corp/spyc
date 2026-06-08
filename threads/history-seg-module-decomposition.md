@@ -104,3 +104,37 @@ Provenance:
 - REFACTOR_PLAN.md (line 30) — the superseded ~1500-line target
 
 <!-- Entry-ID: 01KTMMJVZMX3SJCBSK8YF896YP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:06.889223+00:00
+Role: scribe
+Type: Note
+Title: PR #297,298,303,305,306: UI/render subsystems split into directory modules
+
+Spec: scribe
+
+tags: #history #module-decomposition
+
+Moment: module-decomposition — Reconstructed: the rendering subsystems are converted from single oversized `.rs` files into directory modules (`foo.rs` → `foo/{mod.rs, …}`), splitting renderer logic from tests and from per-area concerns; the two largest files in the slice (`ui/pager.rs` ~2954 lines, `app/pager_handler.rs` ~1500, `app/render.rs` ~1406) are the headline cuts.   [kind: refactor]
+When: 2026-06-06→07 · PR #297, #298, #303, #305, #306 (refactor/decompose-markdown, -diff-render, -render, -pager-handler, -pager) · commits 02f22c98, 1d05b331, 71817e4e, c325b815, e077c047
+Recorded rationale: "decompose pager.rs into a directory module" / "decompose handle_pager_key into per-context sub-handlers" — pre-squash subjects (commits 5dc68c3, ad34202, on the -pager / -pager-handler branches). The governing rule is CLAUDE.md's ~800-line ceiling (PR #282): each of these files was far over it.
+Inferred intent: same verbatim-relocation discipline as the mod.rs phases, now applied to `src/ui/` and `src/app/render`+`pager_handler`. Diffs are insertion/deletion-balanced directory conversions (e.g. #306: pager.rs -2954, six new pager/*.rs +2954; #303: render.rs -1406, four render/*.rs +1456). Snapshot `.snap` fixtures are `git mv`'d into the new `snapshots/` subdirs (0-line moves in the stat), so the `insta`/`TestBackend` net stays intact. confidence: high
+Supersedes: `src/app/render.rs` and `src/app/pager_handler.rs` were themselves created by the REFACTOR_PLAN.md Phase-2 extraction (render.rs at commit 71bc573, pager_handler.rs at 13a1f2d, both 2026-05-30; see history-seg-refactor-mvu) and re-created in the mod-extract wave above — this moment splits those single files into directory modules.
+
+Reconstructed: the five cuts, grouped by area, folded:
++ #297 markdown → `ui/markdown/{mod,renderer,wrap,tests}.rs` (renderer.rs -595, mod+wrap+tests +604)
++ #298 diff-render → `ui/diff_render/{mod,tests}.rs` (pure test split, +379/-379)
++ #303 render → `app/render/{mod,chrome,inner,overlays}.rs` (+1456/-1408, snapshots moved)
++ #305 pager-handler → `app/pager_handler/{mod,modes,motion,pickers}.rs` (+1656/-1501; pre-squash shows a two-step: first split `handle_pager_key` into per-context sub-handlers, then relocate into the directory)
++ #306 pager → `ui/pager/{mod,construct,layout,render,scroll_search,selection,tests}.rs` (+3021/-2954; the single biggest file in the campaign)
+Each `decompose-*` PR also bumps the one-line module-index reference in AGENTS.md (and ARCHITECTURE.md for #303) in the same commit — the "update affected docs in the same commit" rule from CLAUDE.md.
+
+Provenance:
+- e077c047 (PR #306 refactor/decompose-pager, 2026-06-07) — `src/ui/pager.rs` -2954; six pager/*.rs created; 4 snapshot files `git mv`'d
+- 71817e4e (PR #303 refactor/decompose-render, 2026-06-07) — `src/app/render.rs` -1406; render/{mod,chrome,inner,overlays}.rs; 5 snapshots moved
+- c325b815 (PR #305, 2026-06-07) — `src/app/pager_handler.rs` -1500; four sub-files
+- 02f22c98 (PR #297, 2026-06-06) markdown; 1d05b331 (PR #298) diff_render
+- ad34202 / 5dc68c3 (pre-squash, bitbucket/refactor/decompose-pager*) — subjects naming the directory-module conversion
+- render.rs origin: 71bc573 (2026-05-30); pager_handler.rs origin: 13a1f2d (2026-05-30) — the superseded Phase-2 single files
+
+<!-- Entry-ID: 01KTMMM1322W32NGAH5H7MWYEP -->
