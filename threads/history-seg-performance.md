@@ -179,3 +179,27 @@ Provenance:
 - 01KTMMQEW38T70F1GDME1FDJ8M (PR #139+#140 entry, this thread) — the mitigations this supersedes.
 
 <!-- Entry-ID: 01KTMMSKB3JSCEJJHN4DB5K4H2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:57.651023+00:00
+Role: scribe
+Type: Note
+Title: PR #144 — cache the status-line agent short-id (was ~65% of main-thread CPU)
+
+Spec: scribe
+
+tags: #history #performance
+
+Moment: performance — Reconstructed: `App::render` no longer calls `active_agent_status` every frame (which walked every `~/.claude/sessions/*.json` with a full serde_json parse and could scan a session's `*.jsonl` for `custom-title`). The resolved status string is cached with a 30 s TTL keyed on the active pane's `(kind, cwd, spawn_epoch_secs)`.   [kind: refactor]
+When: 2026-05-26 · PR #144 (perf/cache-agent-status) · commit dbab8b3b
+Recorded rationale: "perf: cache the status-line agent short-id (was 65% main-thread CPU)" — commit subject. CHANGELOG (added PR #144): "`App::render` called `active_agent_status` every frame, which walked every `~/.claude/sessions/*.json` with a full `serde_json::Value` parse and could then scan a session's `*.jsonl` looking for `custom-title`. For a long-running user with hundreds of accumulated session files, a symbolicated `sample` showed `serde_json::value::de::deserialize` consumed about two-thirds of the main thread. Cache the resolved status string with a 30 s TTL, keyed on the active pane's `(kind, cwd, spawn_epoch_secs)`."
+Inferred intent: closes the 2026-05-26 push with the last per-frame hotspot the burst surfaced — a render-path cost unrelated to pane parsing (the prior PRs' target), this time filesystem+JSON work in the status line. Evidence: `src/app/mod.rs` +59/-5 only; TTL cache wrapper around an existing resolver. The CHANGELOG notes the resolver's own doc comment had pre-flagged it: "caller should add a per-pane TTL cache if it shows up as a hotspot — now it has." confidence: high
+Supersedes: the per-frame `active_agent_status` call in `App::render` (verified by the diff replacing the direct call with a TTL-gated cache read). No prior thread moment touched this path.
+
+This is a standalone hotspot fix, not part of the pane-parsing chain — it shares the cluster's method (profile under a long-running session, find the per-frame cost, cache behind a coarse TTL because "the status string itself changes ~never within a session") rather than its subject. With PR #141 having bounded the per-iteration parse cost, the agent-status walk became the next visible fraction of main-thread CPU; the `sample`-driven diagnosis mirrors the `A`-monitor-driven diagnosis used earlier in the cluster (see PR #138).
+
+Provenance:
+- dbab8b3b (PR #144 perf/cache-agent-status, 2026-05-26) — `src/app/mod.rs` +59/-5 (30 s TTL cache keyed on `(kind, cwd, spawn_epoch_secs)`, invalidated on tab switch / in-pane chdir), CHANGELOG +19.
+- CHANGELOG.md (added PR #144) — quoted rationale above.
+
+<!-- Entry-ID: 01KTMMTSMP1F44C1ZPY2PP8J7M -->

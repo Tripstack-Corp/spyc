@@ -476,3 +476,34 @@ Provenance:
 - PR #57 entry = 01KTMMPDE6S4PA834YDR24SX1H (the prebuilt cargo-deny block reused here).
 
 <!-- Entry-ID: 01KTMMSWZPN5FJTTCCRZ7CA445 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:55.356792+00:00
+Role: scribe
+Type: Note
+Title: PRs #117,#188: cross-compile lint + doctor — catching Linux-only lints from a Mac
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: cross-compile-tooling — Reconstructed: `make doctor` is reordered to check rustup first (#117), and a `make lint-linux` target is added that runs clippy for the musl Linux target from macOS via zig as the C cross-compiler — fixing a class of OS-gated lint that host clippy compiled out and never saw (#188).   [kind: gotcha]
+When: 2026-05-22 (#117) · 2026-05-30 (#188) · PRs #117 (fix-make-doctor, 7894add), #188 (fix/linux-clippy-cross, 8156895)
+Recorded rationale: #117 not recorded as a body (squash merge; subject only: "Merged in fix-make-doctor"). #188 recorded: "clipboard.rs's Linux copy_impl had a nested `if WAYLAND_DISPLAY { if let Some(r) = ... }` that clippy's collapsible_if flags as a let-chain. The block is cfg(target_os = \"linux\"), so host (macOS) clippy compiles it out and never saw it — the MSRV-1.88 let-chain sweep missed it and it failed only on Linux CI" (8156895^2).
+Inferred intent: the development host is macOS but CI (and a deploy target) is Linux; OS-gated code can only be linted from the host that compiles that branch in. evidence: #188 body "the only way to lint cfg(target_os = \"linux\") code from a Mac and catch this class of OS-gated lint before it reaches CI"; the `make doctor` diff (#117) checks for `zig` and `cargo-zigbuild`, the cross-compile toolchain. confidence: high
+Supersedes: #117 reorders the `doctor` target in Makefile (genesis predates this window); #188 adds a net-new `lint-linux` target. (no prior moment in this thread superseded)
+
+These two PRs read as one concern: spyc is developed on macOS but ships/CIs on Linux, and the gap between them is a recurring source of breakage.
+
+**#117 (05-22)** is a one-line Makefile fix: the `doctor` target's rustup probe is moved to run *first* (before rustc/cargo) and loses a `| head -1` pipe. Subject-only squash; the diff shows the `doctor` target already checks zig + cargo-zigbuild as prerequisites, so the cross-compile toolchain is already a tracked build dependency by this point.
+
+**#188 (05-30)** makes the gap concrete. A `collapsible_if` clippy lint inside a `cfg(target_os = "linux")` block in `src/clipboard.rs` was invisible to macOS-host clippy (the branch is compiled out on the host), and "the MSRV-1.88 let-chain sweep missed it" — so it failed only on Linux CI. The fix collapses the if into a let-chain *and*, more durably, adds `make lint-linux`: clippy for `x86_64-unknown-linux-musl` run from macOS via cargo-zigbuild's `zig cc` wrapper ("translates the target triple so zstd-sys builds"). After this PR, the test-infra PRs #199/#200 both cite `make check + make lint-linux green` as their bar — the cross-lint becomes part of the local gate.
+
+The #188 gotcha also names a supersession-adjacent fact: an "MSRV-1.88 let-chain sweep" happened (in another segment) that this PR patches a miss from. That MSRV-1.88 move is the same one PR #167 (supply-chain moment) leans on to unblock `time` 0.3.47.
+
+Provenance:
+- 7894add (PR #117 fix-make-doctor, 2026-05-22) — Makefile: `doctor` target reorders rustup probe to first line, drops `| head -1`.
+- 8156895 (PR #188 fix/linux-clippy-cross, 2026-05-30) — Makefile +21 (`lint-linux` target via cargo-zigbuild); src/clipboard.rs collapsible_if → let-chain (8 lines); commit body quoted.
+- PR #199/#200 entry = 01KTMMQN283Z4FYP184WT4015X (cite `make lint-linux green` as their bar).
+
+<!-- Entry-ID: 01KTMMV2X1VV9QPY0YA4AZPE05 -->

@@ -775,3 +775,34 @@ Provenance:
 - prior arc-05 entries superseded/extended: PR #35 = 01KR2AD5PV989H58E49E5D18NM, story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB.
 
 <!-- Entry-ID: 01KTMMRS83NW2K9GASEKF5R1T1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:51.713939+00:00
+Role: scribe
+Type: Note
+Title: PRs #49, #50, #52, #53 (fix/pager-scrollback-regressions wave): the day-after fix-on-feature cluster that the new mount slots created
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: a four-PR regression wave the morning after the V1.5 ship, all tracing to the new non-Overlay mount slots: snapshot geometry mismatch, viewport-height miscompute for `LowerPane`, and `?`-help dropping/flickering the underlying slot-mounted pager.   [kind: gotcha]
+When: 2026-05-08 · PRs #49 (fix/pager-scrollback-regressions) · #50 (fix/pager-scroll-viewport-mismatch) · #52 (fix/pager-help-restores-mount) · #53 (fix/pager-help-keeps-pane-mount) · commits 44436ca0, 1b4330e9, a3998bfd, 87084d30
+Recorded rationale: "`^a-v` snapshot now mirrors the live screen geometry. Reported: opening pane scrollback via `^a-v` made text 'jump' vertically and the latest pty output … was missing from the snapshot." — CHANGELOG (commit 44436ca0). "`handle_pager_key` computed the viewport from `term_h * 92 / 100 - 2`, which is correct for the centered overlay but wrong for `Mount::LowerPane` (the lower pane slot is ~40 % of terminal height, not 92 %)." — CHANGELOG (commit 1b4330e9). "The `?` handler was pushing the pre-help pager onto `pager_history`, which silently filters out `no_history=true` views — and both v1.5 mounts set that flag intentionally." — CHANGELOG (commit a3998bfd).
+Inferred intent: each fix is a place the V1.5 mount generalization left an assumption that only held for `Mount::Overlay` — geometry, viewport %, history-stash behavior. The cluster reads as the cost of the mount-enum landing: the same code now runs in three slots, and the slot-specific assumptions surface one at a time. — evidence: all four diffs confined to src/app/mod.rs (+ scrollback.rs in #49); CHANGELOG entries each name "Mount::LowerPane" / "non-Overlay" / "both v1.5 mounts." confidence: high
+Supersedes: refines PRs #42/#43/#45 (= 01KTMMRS83NW2K9GASEKF5R1T1) — does not change the architecture, repairs slot-specific behavior the V1.5 ship assumed Overlay-only.
+
+This is the immediate fix-on-feature cluster the framing flags as drift-fuel: the same morning's four PRs all repair regressions the new mount slots introduced. #49 (commit 44436ca0, src/app/mod.rs +136, scrollback.rs reworked +94/-... ) makes the `^a-v` snapshot mirror live geometry — drain pending reader bytes into vt100 *before* snapshotting so last-moment output (the claude HUD paint) is captured, and stop trimming trailing blank live rows so the snapshot is a verbatim frozen copy; it also fixes `v` (edit) from a slot-mounted pager returning to the same slot rather than a centered overlay. #50 (commit 1b4330e9, src/app/mod.rs +35) fixes the viewport math: `handle_pager_key` was using the 92%-of-terminal centered-overlay heuristic for a `LowerPane` slot that is ~40% tall, so `scroll_max` clamped early and the snapshot's last lines (the HUD) were unreachable; the fix prefers the renderer's cached `last_viewport_h` (the real body row count) and falls back to the heuristic only before the first frame.
+
+#52 and #53 are the help-overlay pair. #52 (commit a3998bfd, src/app/mod.rs +37) fixes `?` from a non-Overlay pager dropping into a stale overlay on dismiss: the `?` handler pushed the pre-help pager onto `pager_history`, which silently filters out `no_history=true` views — and both V1.5 mounts set that flag so `[b`/`]b` don't surface them. A dedicated `pager_help_stash` slot, exempt from the filter, restores the pre-help pager verbatim. #53 (commit 87084d30, src/app/mod.rs +67) is the polish follow-up: while help was up, the underlying slot reverted to non-pager rendering (live pty / file list) because `top_pager`/`bottom_is_pager` read `self.pager.mount`, which is `Overlay` while help is active; the fix peeks into `pager_help_stash` for the slot mount so the underlying pager keeps drawing while the centered help paints on top.
+
+The four-PR shape — feature ships, four mount-slot assumptions surface the next morning — is the structural cost the V1.5 plan's "Risk: medium … we're effectively retiring [the old path]" line foreshadowed for Phase 3.
+
+Provenance:
+- 44436ca0 (PR #49, 2026-05-08) — src/app/mod.rs +136, src/app/state.rs +6, src/ui/scrollback.rs reworked; snapshot geometry + edit-returns-to-slot.
+- 1b4330e9 (PR #50, 2026-05-08) — src/app/mod.rs +35; `last_viewport_h` viewport fix for LowerPane.
+- a3998bfd (PR #52, 2026-05-08) — src/app/mod.rs +37; `pager_help_stash` (no_history-exempt).
+- 87084d30 (PR #53, 2026-05-08) — src/app/mod.rs +67; help peeks stash for slot mount (no flicker).
+- refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
+
+<!-- Entry-ID: 01KTMMTW9ADXAW9B6SZPDPD7MG -->

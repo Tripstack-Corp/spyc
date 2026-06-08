@@ -733,3 +733,33 @@ Provenance:
 - `git grep -c unsafe 76cf4e6^ -- src` = 36 (baseline before PR #83).
 
 <!-- Entry-ID: 01KTMMRWF583H2AY49TF7M6WQT -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:01.526691+00:00
+Role: scribe
+Type: Note
+Title: PR #87 (fix/recursive-watch-cap-on-large-trees): 256-subdir cap on the listing watcher, same shape as PR #28's MAX_ENTRIES cap
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: huge-tree-resilience — Reconstructed: `pick_recursive_mode` gates `RecursiveMode::Recursive` behind a 256-subdir cap (`MAX_RECURSIVE_WATCH_DIRS`) counted with early termination, falling back to a non-recursive watch on large trees so the main thread doesn't block on per-directory `inotify_add_watch` walks   [kind: new-capability]
+When: 2026-05-14 · PR #87 (fix/recursive-watch-cap-on-large-trees) · merge f06201f (squash; subject "fix: cap recursive listing watcher to avoid blocking on huge trees")
+Recorded rationale: not in CHANGELOG (no CHANGELOG entry in this PR); rationale is in the source doc-comments — "On Linux, `notify`'s recursive mode is not OS-native — it walks the subtree and calls `inotify_add_watch` per directory … hanging the TUI. Same shape as the `MAX_ENTRIES` cap added in [PR #28]." — src/app/mod.rs doc-comment on `MAX_RECURSIVE_WATCH_DIRS`
+Inferred intent: extend the bounded-walk defense from directory *listing* (PR #28) to directory *watching* — evidence: src/app/mod.rs +200 adds `MAX_RECURSIVE_WATCH_DIRS: usize = 256`, `count_subdirs_capped(root, cap)` (DFS with `count > cap` early return), and `pick_recursive_mode(new_dir)` with a Linux-only cap branch and a `const fn` no-op on macOS/Windows where recursive watches are OS-level. confidence: high
+Supersedes: extends PR #28's `Listing::read` 50,000-entry cap (this thread, entry 01KR3903VA7DTNDJKQAFZ6DP8M) — same bounded-walk defense, applied to the watcher instead of the lister
+
+This continues the huge-tree-resilience throughline the original arc 08 opened at PR #28. The relevant pre-existing thread is `bug-listing-watcher-recursive-hang`. The doc-comment is explicit about the platform asymmetry: on Linux `notify`'s recursive mode is emulated (a userspace subtree walk issuing one `inotify_add_watch` per directory), which blocks the TUI on huge trees; on macOS (FSEvents) and Windows (ReadDirectoryChangesW) recursive watches are OS-level, so the cap is compiled out via a `const fn` returning `Recursive` unconditionally.
+
+The count is bounded by design. The doc-comment notes `count_subdirs_capped` uses a DFS form "keeps stack memory bounded by `cap`" and stops as soon as `count > cap`, so the worst case becomes "walks at most `MAX_RECURSIVE_WATCH_DIRS + 1` `read_dir` calls per chdir" rather than the full subtree. The comment also notes the walker "does not chase symlinks either, so the count we produce here tracks what `notify` would have walked" — a deliberate parity with notify's own behavior. When the cap trips, the only regression named is "up to one second" of staleness because the 1 Hz git poll already covers parent-row dirty refresh.
+
+The diff also bundles a `togglepane` config-DSL action (src/config/dsl.rs +15) — an escape hatch for users whose terminal grabs the built-in `^\` / `F10` pane-toggle. That is a keymap/config concern, not recoverability; folded here as a co-shipped change with no bearing on the watch-cap moment. This PR is a squash merge with the load-bearing rationale living in source doc-comments rather than the CHANGELOG (the CHANGELOG carried no entry for it); marked recorded-via-source, not inferred.
+
+Provenance:
+- f06201f (PR #87 fix/recursive-watch-cap-on-large-trees, 2026-05-14) — squash merge; subject quoted above; Approved-by: Derek Marshall.
+- `git diff f06201f^1 f06201f -- src/app/mod.rs` — `MAX_RECURSIVE_WATCH_DIRS = 256`, `count_subdirs_capped`, `pick_recursive_mode` (Linux cap branch + macOS/Windows `const fn` no-op); +200/-... net.
+- `git diff f06201f^1 f06201f -- src/config/dsl.rs` — `togglepane` action + `parses_togglepane` test (+15; folded, off-segment).
+- Cross-ref: PR #28 entry in this thread = 01KR3903VA7DTNDJKQAFZ6DP8M (the `MAX_ENTRIES` cap the doc-comment names "same shape as").
+
+<!-- Entry-ID: 01KTMMTRQ21DMSTBQ38W9SYSQB -->
