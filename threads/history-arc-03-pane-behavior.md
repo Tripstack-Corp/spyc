@@ -761,3 +761,33 @@ Provenance:
 - relates to #67 (per-pane resume id) — same session save/restore fidelity concern on the pane↔session seam
 
 <!-- Entry-ID: 01KTMMRPVC83MXP3YS6VHS9YJZ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:16.943780+00:00
+Role: scribe
+Type: Decision
+Title: PR #94 + #121 + #161: pane visibility model — hide-not-destroy, pure-toggle, and last-active jump
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: pane persistence — Reconstructed: `toggle_pane` stops dropping the whole pane container (which SIGKILLed every child) and instead flips a `pane_hidden` flag; the toggle becomes a pure no-op when empty; and `^a ^a` jumps to the last-active tab   [kind: supersession]
+When: 2026-05-16 · PR #94 (fix/pane-toggle-hide-not-destroy, 886d49f)  —  2026-05-22 · PR #121 (fix/toggle-pane-no-op-when-empty, 79d6b31)  —  2026-05-29 · PR #161 (feat/last-active-pane-tab, 55a57be)
+Recorded rationale: #94 CHANGELOG verbatim: "F10 / ^a-\ hides the pane instead of killing it. Previous behavior was destructive: toggle_pane set pane_tabs = None, which dropped every TabEntry, which dropped every PtyHost, which SIGKILLed the claude (or whatever) child via the Drop for PtyHost chain. Daily-drivers lost their conversation every time they wanted the full screen for a few seconds. Replaced with a visibility flag (state.pane_hidden: bool)." Sourced verbatim: "external-contributor analysis (Caleb Howard, feature-pane-toggle-preserve-context thread)." #121 CHANGELOG verbatim: "^a-\ / F10 is a pure hide/show toggle. When no pane exists, TogglePane silently spawned the default command … Now ^a-\ with no pane flashes 'no pane — ^a-c to create one' and returns."
+Inferred intent: this is the slice's central model flip — a pane is durable state you hide, not a thing you recreate. evidence: pickaxe `git log -S 'pane_hidden'` shows the symbol first appearing in 886d49f (PR #94); #94 diff adds `pane_hidden` to src/app/state.rs (+12) and reworks toggle in src/app/mod.rs (+55/-...); #161 adds `last_active: Option<usize>` + `switch_to_last()` to src/pane/tabs.rs (+147) with a guard that nulls the hint when any tab is removed. confidence: high
+Supersedes: the destroy-on-toggle behavior (`toggle_pane` → `pane_tabs = None` → Drop chain → SIGKILL) that traces back to the arc-03 head's zoom/toggle lineage (`fn toggle_pane` first appears in 329222b, the PR #6 zoom commit). This is the verification of the project memory note "toggle hides, not destroys." #121 then closes the residual surprise that an empty toggle implicitly spawned a pane (Justin: "I see ^a-c defaults to claude, POLA"); #161 adds back-navigation now that tabs persist.
+
+The keystone of the continuation. Before #94, `F10`/`^a-\` was a one-keystroke way to lose a running conversation: dropping `pane_tabs` cascaded through `Drop for PtyHost` to SIGKILL. The fix introduces `state.pane_hidden`: the toggle flips the flag, the ptys keep running inside `pane_tabs`, and layout treats hidden as "no pane" so the file list reclaims the middle region; re-toggle restores everything. Destroying the container is now an intentional multi-step act (`^a-x` per tab). The rationale is explicitly external-contributor sourced — the `feature-pane-toggle-preserve-context` thread — and `docs/PANE_RECOVERY_PLAN.md` (PR #92, cross-ref `history-seg-docs-planning`) separates this in-session round-trip from the broader quit→relaunch recovery story.
+
+The two follow-ups complete the persistence model. #121 makes the toggle a *pure* toggle: an empty `^a-\` no longer silently spawns `$SPYC_PANE_CMD`/`claude` (a POLA violation), it flashes "no pane — ^a-c to create one"; creation stays explicit. #161 adds `^a ^a` to jump to the last-active tab — meaningful only because tabs now persist across a hide — implemented as a `last_active: Option<usize>` on the tab list, swapped on every real `activate()`, and explicitly nulled whenever a tab is removed so the back-jump never points at a stale index.
+
+Provenance:
+- 886d49f (PR #94, 2026-05-16) — src/app/state.rs +12 (pane_hidden flag), src/app/mod.rs +55/-... (hide-not-destroy toggle + flash), BUGS.md -7, CHANGELOG +18
+- 79d6b31 (PR #121, 2026-05-22) — src/app/mod.rs +11/-... (empty-toggle no-op + flash), CHANGELOG +9
+- 55a57be (PR #161, 2026-05-29) — src/pane/tabs.rs +147 (last_active + switch_to_last), src/keymap/resolver.rs +40, src/keymap/action.rs +2, src/app/mod.rs +21, FEATURES.md +1
+- pickaxe: `git log -S 'pane_hidden'` → first introduced 886d49f; `git log -S 'fn toggle_pane'` → 329222b (PR #6 zoom) is the destroy-era origin
+- docs/PANE_RECOVERY_PLAN.md (PR #92) — "the in-session hide/unhide round-trip … simpler fix (hide-don't-destroy; the pty stays alive)"
+- external thread feature-pane-toggle-preserve-context — named source of the #94 design
+
+<!-- Entry-ID: 01KTMMSVHSFYKGPSD9R8NRFCZY -->
