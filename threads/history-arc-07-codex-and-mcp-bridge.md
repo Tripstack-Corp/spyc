@@ -728,3 +728,35 @@ Provenance:
 - 1831585 (PR #173, 2026-05-29 16:23) — `.gitignore` +4. 2b10643 (PR #174, 2026-05-29 16:28) — `.antigravitycli/*.json` -1.
 
 <!-- Entry-ID: 01KTMMY8R53BC7BJPEHKVWTRD0 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:32.083369+00:00
+Role: scribe
+Type: Decision
+Title: PR #176 — AgentProfile registry: the generalization moment (hardcoded peers → declarative)
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: the ~10 per-agent `match AgentKind` dispatch sites collapse into one `AgentProfile` trait + `REGISTRY` in a new `src/agent/` module; adding an agent becomes one impl + one registry line   [kind: supersession]
+When: 2026-05-29 · PR #176 (refactor/agent-profile-registry) · commit f696dab (pre-squash 2ba3158)
+Recorded rationale: "Internal: agent handling unified behind an `AgentProfile` registry (`src/agent/`). The ~10 per-agent `match AgentKind` dispatch sites (detection, resume save/restore, transcript scrollback, status short-id, picker label, exit summary) now route through one trait + registry; adding an agent is a new impl + one `REGISTRY` entry rather than a tree-wide sweep. No user-visible behavior change — all existing agent tests pass verbatim. `AgentKind` stays the persistence tag in saved sessions." — CHANGELOG.md (added PR #176)
+Inferred intent: this is the answer to the arc-07 tail's open question — the tail predicted no `trait MCPRegistrationFile` and a per-peer registration layer; #176 ships the agent-layer equivalent (`trait AgentProfile`), turning hardcoded peers into a declarative registry — evidence: pickaxe `git log -S 'trait AgentProfile'` → first appears in 2ba3158 (this PR); `src/agent/mod.rs` +415 new, `src/app/mod.rs` -288 net (362 changed, dispatch sweep deleted)
+                  confidence: high
+Supersedes: every per-peer dispatch site added since PR #19 — the `match AgentKind` arms in detection, resume save/restore, transcript scrollback (#146/#147/#175), status short-id (#70), picker label, exit summary. The arc-07 tail (01KR2JM67RTQ…) named this seam as open ("cheap, but not parametric"); #176 makes the agent layer parametric.
+
+This is the pivotal moment of the segment. The diff creates a new module `src/agent/mod.rs` (+415) and removes ~288 net lines from `src/app/mod.rs` (362 lines changed, the bulk deletions) — the inversion signature of a dispatch-collapse refactor: behavior moves out of scattered `match` arms into a typed registry. Verified symbols in the new module: `pub trait AgentProfile: Sync` with methods `name()`, `binary()`, and behavior selectors; concrete `ClaudeProfile`, `CodexProfile`, `GeminiProfile`, `AgyProfile` impls; a `REGISTRY` plus `detect(cmd)` / `profile_for(kind)` entry points and a fallback profile "reproducing" the legacy default. The module doc-comment states the contract verbatim: "Adding an agent is a new impl + one `REGISTRY` entry."
+
+Pickaxe confirms supersession: `git log -S 'trait AgentProfile'` and `git log -S 'REGISTRY' -- src/agent/mod.rs` both return exactly one commit, 2ba3158 (this PR's pre-squash) — the abstraction did not exist before. The persistence boundary is held deliberately: "`AgentKind` stays the persistence tag in saved sessions" (CHANGELOG) — the enum that PR #19 introduced as the serialized peer tag survives as the on-disk key, while behavior migrates to the profile. This is a clean separation the arc-07 tail did not anticipate: not `AgentKind`-removed, but `AgentKind`-demoted-to-tag with `AgentProfile` carrying behavior.
+
+This is a convention/supersession moment in the contract's sense: it changes how every future agent is added. The recorded design doc is `AGENTS.md`, edited in the same diff (+1 line, verbatim): "**`src/agent/`** — Agent profile registry. One `AgentProfile` impl per hosted AI agent (claude/codex/gemini/agy); `detect(cmd)` / `profile_for(kind)` replace per-agent `match AgentKind` dispatch (detection, resume save/restore, transcript scrollback, status short-id, picker label, exit summary). Adding an agent = one impl + one `REGISTRY` entry. `AgentKind` (in `state/sessions.rs`) stays the persistence tag; profiles carry behavior." The refactor is asserted behavior-preserving — "No user-visible behavior change — all existing agent tests pass verbatim" — which is why it reads as supersession of internal convention, not a capability change. The throughline this segment opened (hardcoded peers → declarative agent registry) completes here; #177 (next moment) is its immediate dividend.
+
+Provenance:
+- f696dab (PR #176 refactor/agent-profile-registry, 2026-05-29; pre-squash 2ba3158) — `src/agent/mod.rs` +415 (new), `src/app/mod.rs` 362 changed / net -288, `src/state/sessions.rs` -42 net (dispatch removed, AgentKind kept), `src/config/mod.rs` +15, `src/main.rs` +1 (mod decl), `AGENTS.md` +1.
+- `git log -S 'trait AgentProfile' --oneline` (run 2026-06-08) → 2ba3158 only — verifies the trait is net-new.
+- CHANGELOG.md (added PR #176) — the "~10 dispatch sites" enumeration and the no-behavior-change assertion.
+- arc-07 tail = 01KR2JM67RTQ… — the open seam ("cheap, but not parametric") this supersedes for the agent layer.
+- second-parent subject (f696dab^2): "refactor: unify agent handling behind an AgentProfile registry".
+
+<!-- Entry-ID: 01KTMMZWBVK4X3QJP7SJW3ZEG2 -->
