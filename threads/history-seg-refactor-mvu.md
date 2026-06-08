@@ -325,3 +325,30 @@ Provenance:
 - prior entry 01KTMM03Q5F5EA3VEQSJQJZYN0 (this thread, Phase 4) — established `run_effects` as executor, which the command-table handlers (`PureDomain|TerminalTouching`) target.
 
 <!-- Entry-ID: 01KTMM27M59N08NB1HSWCESQTR -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:01:51.909626+00:00
+Role: scribe
+Type: Note
+Title: PR #240–#242 — Phase D: physically split App into Model / Runtime / ViewState
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the three-type split becomes physical — `ViewState` is introduced (pager group + render caches), OS-handle/`PtyHost` fields move into `Runtime`, and the remaining ~48 `App` fields are sorted into `ViewState`, leaving `App = { state: AppState, runtime: Runtime, view: ViewState }` as three disjoint fields.   [kind: refactor]
+When: 2026-06-02 · PR #240 (mvu-phase-d1-viewstate) commit 7e015f4 · #241 (d2-runtime) commit b3170d7 · #242 (d3-viewstate-rest) commit 5b7ec7b
+Recorded rationale: Squash subjects — #240 "MVU split D1 — introduce ViewState (pager group + render caches)"; #241 "MVU split D2 — move OS-handle/PtyHost fields into Runtime"; #242 "MVU Phase D3 — move remaining 48 App fields into ViewState." Underlying plan: "State is three types under `src/app/`, with `App = { model, runtime, view }`. … Runtime: OS handles + threads + channels; never serialized; never seen by `update()`. ViewState: render ephemerals + caches… `last_grid` is eliminated." — docs/MVU_PLAN.md (Target state / three types)
+Inferred intent: Phase 5 had already migrated the data into the right conceptual buckets via backward-compat accessors; Phase D performs the literal struct surgery, which is why the diffs are wide-but-shallow (#240 +305/−286 over 11 files, #241 +323/−252 over 13, #242 +401/−488 over 11) — field relocations rippling through every reader. The end-state ARCHITECTURE.md records `App` owning "three disjoint fields … `state: AppState` (the Model …), `runtime: Runtime` …, and `view: ViewState`."   confidence: high
+Supersedes: the monolithic `App` struct (all fields flat) — partitioned into Model/Runtime/ViewState. Builds directly on the conceptual migration in entry 01KTMM1A4SE4HRHFQ97PRJCZYD (Phase 5). (verified: ViewState/Runtime field relocations span 11–13 files per PR)
+
+Reconstructed: this is the borrow-checker payoff the plan engineered for — once `runtime`, `state`, and `view` are disjoint fields, `render(&model, &view, &runtime)` can hold `&state`/`&view` reads concurrently with a `&mut runtime` resize, and `update(&mut model, &mut view, …)` can run without touching Runtime at all. The three PRs are sequenced introduce-ViewState → move-handles-to-Runtime → sweep-the-rest-into-ViewState, each behavior-equivalent. Folded as one moment (the split is one logical operation across three mechanical PRs).
+
+Provenance:
+- 7e015f4 (PR #240, 2026-06-02) — introduce `ViewState`; 11 files +305/−286.
+- b3170d7 (PR #241, 2026-06-02) — move OS-handle/`PtyHost` fields into `Runtime`; 13 files +323/−252.
+- 5b7ec7b (PR #242, 2026-06-02) — move remaining 48 App fields into ViewState; 11 files +401/−488.
+- docs/MVU_PLAN.md — Target state + three-types section (quoted); ARCHITECTURE.md "Three-type state split" (end-state).
+- prior entry 01KTMM1A4SE4HRHFQ97PRJCZYD (this thread, Phase 5) — did the conceptual migration this physically realizes.
+
+<!-- Entry-ID: 01KTMM35YXDZ69C08M78F4XKBB -->
