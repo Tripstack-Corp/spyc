@@ -295,3 +295,30 @@ Confidence: High recorded-rationale density. Every moment quotes verbatim from C
 Provenance: 01KTMMN5RTFKWX352K9XBR4V0D, 01KTMMP1HT4HHTN0KCRGZ3S8DK, 01KTMMQ0GAARS6ZPT0B6044VEF, 01KTMMR3QDMNK8EX8SMM6GJ3D8, 01KTMMS40G4T6XANRGGGF11092, 01KTMMTPHKSD76E1CG00CDF3TV, 01KTMMVMS5H1PBSH30EDW6049Q, 01KTMMWGABE7B3ACCTC22ZAC89, 01KTMMXGV8ZBCEQXRSBXN5HYAH, 01KTMMYGF5RESXYKP5TTAPFRM7
 
 <!-- Entry-ID: 01KTMNKX58D0V25E2WFYD8SVYP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:28:36.459385+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-03-pane-behavior — the bottom pane matures into a durable, tab-bearing pty container (migration, hide-not-destroy, lifecycle hardening)
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-03-pane-behavior — the bottom pane matures into a durable, tab-bearing pty container (migration, hide-not-destroy, lifecycle hardening)
+Span: 2026-05-07 → 2026-05-29 · 11 moments · 8 supersessions
+Narrative:
+  This arc summarizes the #38–#311 continuation window only (the #46–#162 pane-behavior slice); it is secondary to the per-moment log in history-arc-03-pane-behavior and does not replace it. The framing moment sets the shape: the arc-03 head treated the bottom pane as a single tmux-like visual + child-process region, and the continuation is that surface fanning out — a pane becomes a container of tabs, each tab wrapping a shared pty kernel, with the rest of the slice as consequence management [01KTMMKJWX5X3WS2QD90MY153F]. The enabling move is V1.5 Phase 6: the pty kernel is extracted into a shared `PtyHost` and made movable between a pane tab and a background task in both directions without killing the child, landed host-first then promote then demote per the plan [01KTMMMHWAHASBVT11Y96RBKSA].
+
+  Once tabs and ptys are first-class, focus and identity get disentangled. Switching tabs now pulls focus into the pane, generalizing a convention that already held for tab creation [01KTMMNC6G5B7Y73KC0ZN1BEMH]. Each pane gains its own resume session id via a claim-tracking closest-match picker keyed on `spawn_epoch_secs`, so multiple panes in one cwd no longer collapse onto a single conversation — "a pane is no longer 'the thing running in this cwd' but 'the thing that spawned at this instant'" [01KTMMPE3J1R4KEC6DXRS9Q5DF]. Paste gains a `top_overlay` arm so it stays in a `V`-opened editor instead of misrouting to the bottom pane, extending the overlay-as-pane model to the paste event path [01KTMMQPCA7E5VN78TTBZ43MQY]. The exited-tab end of life is hardened to treat an exited tab as recoverable: meta-only dismiss, and the stale `[exited N]` label scrubbed at save and restore [01KTMMRPVC83MXP3YS6VHS9YJZ].
+
+  The keystone is the visibility model flip. `toggle_pane` stops dropping the pane container — which had cascaded through `Drop for PtyHost` to SIGKILL every child, so "daily-drivers lost their conversation every time they wanted the full screen for a few seconds" — and instead flips a `pane_hidden` flag; the toggle is later made a pure no-op when empty, and `^a ^a` jumps to the last-active tab now that tabs persist [01KTMMSVHSFYKGPSD9R8NRFCZY]. The recorded rationale is external-contributor sourced (the feature-pane-toggle-preserve-context thread). A focus-chord pair corrects its own layering: the `^a-k`/`^a-j` switch from inside a `^a-v` scrollback pager is moved from an unreachable pager-local handler to the `route_key` layer where a meta key actually fires [01KTMMVBB7ZNVH9YM9813VEBXJ].
+
+  Two more moments separate conflated signals and harden the substrate. Active-tab style gains a REVERSED fill so "you are here" stops rendering identically to an amber-bold activity tab, and background-tab activity is detected in the event-loop pre-drain rather than only at render time [01KTMMW7N1HQ6Q2A90D1CPZ230]. The vt100 parser worker recovers from a poisoned mutex instead of crashing, a RAII `ParserWorker` joins the thread on every teardown path, and `^a v` / `Pane::resize` are made safe on a degenerate 0-row pane — all tightening the lifecycle the #46 PtyHost extraction set up [01KTMMXD1KSTYMEPXSQZN45HXB]. A cwd-handling pair aligns pane spawning with where the user is now: F9 resumes in the current listing dir, and the "pane cwd:" prompt gets its own history bucket [01KTMMY9KR4746DNJY7ZPKGG1G].
+Lineage: moment [01KTMMMHWAHASBVT11Y96RBKSA] -> [01KTMMNC6G5B7Y73KC0ZN1BEMH] -> [01KTMMPE3J1R4KEC6DXRS9Q5DF] -> [01KTMMRPVC83MXP3YS6VHS9YJZ] -> [01KTMMSVHSFYKGPSD9R8NRFCZY] (the destroy-on-toggle supersession) -> [01KTMMVBB7ZNVH9YM9813VEBXJ] -> [01KTMMXD1KSTYMEPXSQZN45HXB]
+Open / unsettled: pane-to-task demotion has an "empty start" buffer-recovery asymmetry (vim's ^z parity) and a promoted tab keeps the task's `dumb` TERM so alt-screen TUIs still won't work [01KTMMMHWAHASBVT11Y96RBKSA]; the broader quit→relaunch recovery story is deliberately separated from this in-session toggle and lives in docs/PANE_RECOVERY_PLAN.md (#92) / history-seg-docs-planning [01KTMMSVHSFYKGPSD9R8NRFCZY]; #162 does not migrate existing pane_history files, leaving stale directory entries until cleaned [01KTMMY9KR4746DNJY7ZPKGG1G].
+Confidence: Uniformly high — every moment carries verbatim CHANGELOG / V1_5_PLAN.md rationale plus diff and pickaxe evidence (`pane_hidden` first appears in #94; `toggle_pane` traces to the PR #6 zoom commit). The continuation's four-axis grouping in the framing note is marked pure sequence-inference; each grouped moment carries its own recorded rationale [01KTMMKJWX5X3WS2QD90MY153F].
+Provenance: 01KTMMKJWX5X3WS2QD90MY153F, 01KTMMMHWAHASBVT11Y96RBKSA, 01KTMMNC6G5B7Y73KC0ZN1BEMH, 01KTMMPE3J1R4KEC6DXRS9Q5DF, 01KTMMQPCA7E5VN78TTBZ43MQY, 01KTMMRPVC83MXP3YS6VHS9YJZ, 01KTMMSVHSFYKGPSD9R8NRFCZY, 01KTMMVBB7ZNVH9YM9813VEBXJ, 01KTMMW7N1HQ6Q2A90D1CPZ230, 01KTMMXD1KSTYMEPXSQZN45HXB, 01KTMMY9KR4746DNJY7ZPKGG1G
+
+<!-- Entry-ID: 01KTMNM51MHPYVXWWK39J85T0E -->
