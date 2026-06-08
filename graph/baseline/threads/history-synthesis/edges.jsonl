@@ -11,3 +11,5 @@
 {"source":"entry:01KTMNH17RVXAWHF9SJ2Z7MCP9","target":"entry:01KTMNHBEZQYY8WY4CKBH57P5E","type":"followed_by"}
 {"source":"thread:history-synthesis","target":"entry:01KTMNHGWSQK3S2QZ68D3WBCGC","type":"contains"}
 {"source":"entry:01KTMNHBEZQYY8WY4CKBH57P5E","target":"entry:01KTMNHGWSQK3S2QZ68D3WBCGC","type":"followed_by"}
+{"source":"thread:history-synthesis","target":"entry:01KTMNJD6GJM90D0WTTS0X28XR","type":"contains"}
+{"source":"entry:01KTMNHGWSQK3S2QZ68D3WBCGC","target":"entry:01KTMNJD6GJM90D0WTTS0X28XR","type":"followed_by"}
