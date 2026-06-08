@@ -290,3 +290,38 @@ Provenance:
 - prior entry 01KTMKZ502R8JYARTMFMKSGB72 (this thread, Phase 3) — left the capture/task exit on-channel message as a deferral this phase closes.
 
 <!-- Entry-ID: 01KTMM1A4SE4HRHFQ97PRJCZYD -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:01:20.492096+00:00
+Role: scribe
+Type: Note
+Title: PR #233–#239 — Phase 6 PR-A/B/C: single :command table, off-thread agent status, loop-step extraction
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the three-way `:command` punt-list is replaced by one `COMMAND_TABLE` registry (killing the "unknown command" footgun), agent status-line short-id resolution moves off the render thread, and the busy parts of `App::run` are extracted into `loop_steps.rs`/`sources.rs`/`streaming.rs`/`key_dispatch.rs` step functions.   [kind: refactor]
+When: 2026-06-02 · PR #233 (command-table) commit 2176aac · #234 (agent-status-offthread) commit 1458a37 · #235–#239 (PR-C1…C6 loop-step extraction)
+Recorded rationale: "Phase 6 — Pure-of-IO View + command table. Replace the three-way `:command` punt-list with one command table `{name, completion_visible, handler: PureDomain|TerminalTouching}`; `SPYC_COMMANDS` derived from it. Done: adding an App-handled `:command` can no longer flash 'unknown command' (regression-tests the `:undo`/`:limit` footgun); `App::run` is ~100 lines." — docs/MVU_PLAN.md (Phase 6). Squash subjects: #233 "single :command registry (COMMAND_TABLE)"; #234 "resolve agent status-line short-id off the render thread"; #235 "extract 7 loop steps to loop_steps.rs."
+Inferred intent: this realizes the "two/three-site `:command` punt-list footgun" bug-class row — the prose split (NotHandled walls + unknown-command fallthrough + hand-synced `SPYC_COMMANDS`) becomes one table where "forgetting registration becomes an obvious missing entry, not a runtime flash." The #234 off-thread move is a render-purity prerequisite (status-line work must not block the draw). #235–#239 are the mechanical loop-step carve-out that shrinks `App::run` toward the ~100-line target.   confidence: high
+Supersedes: the three-site `:command` dispatch (the NotHandled/unknown-command/`SPYC_COMMANDS` split named in MVU_PLAN.md's bug-class table) → unified `COMMAND_TABLE` (#233; `src/app/state.rs` +225/−... ); on-render-thread agent-status resolution → off-thread (#234). The COMMAND_TABLE here is later relocated to its own module in last-mile #272/#273.
+
+Reconstructed — the slice, folded:
++ #233 (PR-A) single `:command` registry `COMMAND_TABLE` in `src/app/state.rs`.
++ #234 (PR-B) agent status-line short-id resolved off the render thread (a `perf:` commit; `src/app/sources.rs` +5, mod.rs reshaped).
++ #235 (PR-C1) extract 7 loop steps to `loop_steps.rs`.
++ #236 (PR-C2) fold fs-ingest + refresh-debounce into `sources.rs`.
++ #237 (PR-C3) extract pane-output drain to `streaming.rs`.
++ #238 (PR-C4+C5) extract restore-resumes + context-write to `loop_steps.rs`.
++ #239 (PR-C6) extract paste/resize dispatch bodies to `key_dispatch.rs`.
+The C-series is pure relocation (no decision beyond "shrink the loop"); folded here.
+
+Provenance:
+- 2176aac (PR #233, 2026-06-02) — `COMMAND_TABLE` registry; `src/app/state.rs` +225.
+- 1458a37 (PR #234, 2026-06-02) — off-thread agent status resolution; `src/app/mod.rs` reshaped, sources.rs +5.
+- 1bd3348/ce5904c/2604625/572965b/83380ac (PR #235–#239, 2026-06-02) — loop-step extractions into loop_steps.rs/sources.rs/streaming.rs/key_dispatch.rs.
+- docs/MVU_PLAN.md — Phase 6 + bug-class table row "two/three-site `:command` punt-list footgun" (quoted).
+- prior entry 01KTMM03Q5F5EA3VEQSJQJZYN0 (this thread, Phase 4) — established `run_effects` as executor, which the command-table handlers (`PureDomain|TerminalTouching`) target.
+
+<!-- Entry-ID: 01KTMM27M59N08NB1HSWCESQTR -->
