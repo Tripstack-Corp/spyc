@@ -11,7 +11,7 @@ use crate::app::{App, Effect};
 impl App {
     /// Contextual `^C`: interrupt a viewed task, else flash an in-pager hint.
     pub(super) fn handle_pager_ctrl_c(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // ^C inside the pager is contextual:
         //   - Task viewer + task running → SIGINT to the process group
         //     (mirrors a real ^C in the captured task's tty), flash
@@ -29,12 +29,12 @@ impl App {
             if let Some(id) = view.task_id {
                 match self.interrupt_task(Some(id)) {
                     Ok(msg) | Err(msg) => {
-                        if let Some(v) = self.view.pager.as_mut() {
+                        if let Some(v) = active_pager_mut!(self) {
                             v.flash = Some(msg);
                         }
                     }
                 }
-            } else if let Some(v) = self.view.pager.as_mut() {
+            } else if let Some(v) = active_pager_mut!(self) {
                 v.flash = Some("press Esc or q to close pager".into());
             }
             return Some(Vec::new());
@@ -49,7 +49,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // While typing a search query, most keys feed the buffer.
         if view.is_typing_search() {
             match key.code {
@@ -92,7 +92,7 @@ impl App {
 
     /// Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
     pub(super) fn handle_pager_jump_buf(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
         if let Some(ref mut buf) = self.view.pager_jump_buf {
             match key.code {
@@ -148,6 +148,13 @@ impl App {
         // [b / ]b — pager buffer history navigation (two-key sequence).
         // [t / ]t — task viewer cycle (peek through backgrounded tasks).
         if let Some(bracket) = self.view.pager_pending_bracket.take() {
+            // Buffer history + task cycle belong to the top/overlay pager.
+            // A bottom scrollback (`view.scroll_pager`) is `no_history` and
+            // task-less, so swallow the chord rather than navigate the top
+            // pager's history from underneath the focused scrollback.
+            if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+                return Some(Vec::new());
+            }
             if key.code == KeyCode::Char('b') {
                 match bracket {
                     '[' => {
@@ -206,7 +213,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // Placement mode: pre-visual-block cursor positioning.
         // First `^v` enters this state; vi motions move the cursor
         // without defining a selection yet. Second `^v` commits to
@@ -292,7 +299,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // Visual mode: Line (`V`) or Block (`^v`). Intercept first
         // so motion keys (j/k/G/^d/^u/^f/^b/PageDn/PageUp/Space) move
         // the selection cursor instead of the scroll position, and

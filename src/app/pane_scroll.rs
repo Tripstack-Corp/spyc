@@ -64,16 +64,18 @@ impl App {
     /// Content-bound pagers (Overlay file viewer, TopPane Markdown,
     /// etc.) are App-level and persist across tab switches.
     pub fn stash_scrollback_pager_to_active_tab(&mut self) {
-        if !self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+        // The bottom scrollback lives in its own region slot now; the
+        // top-region `view.pager` (a `D` doc, etc.) is App-level and persists
+        // across tab switches untouched.
+        let Some(view) = self.view.scroll_pager.take() else {
             return;
-        }
-        let view = self.view.pager.take();
+        };
         // If the stashed pager is backed by an in-flight stream, park the
         // stream by id so `drain_pager_stream` doesn't drop it while its pager
         // is off-screen (it id-gates against the *live* pager). Re-installed on
         // restore. (The stream lives here, not on the `pane::TabEntry`, per the
         // one-way `app → pane` rule.)
-        if let Some(id) = view.as_ref().and_then(|v| v.stream_id)
+        if let Some(id) = view.stream_id
             && self
                 .runtime
                 .pager_stream
@@ -84,19 +86,17 @@ impl App {
             self.runtime.stashed_pager_streams.insert(id, stream);
         }
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-            tabs.active_entry_mut().stashed_scrollback_pager = view;
+            tabs.active_entry_mut().stashed_scrollback_pager = Some(view);
         }
     }
 
     /// Restore the active tab's stashed scrollback pager into
-    /// `self.view.pager` if one is stashed AND no other pager is currently
-    /// displayed. A non-scrollback pager (Overlay file viewer, etc.)
-    /// up at the time of the tab switch is left alone; the stash
-    /// surfaces on the next switch back where no overlay is in the
-    /// way. See `stash_scrollback_pager_to_active_tab` for the
-    /// outgoing half of the pair.
+    /// `self.view.scroll_pager` if one is stashed AND none is currently
+    /// displayed. See `stash_scrollback_pager_to_active_tab` for the outgoing
+    /// half of the pair. (The top-region `view.pager` is independent — a `D`
+    /// doc stays visible across tab switches.)
     pub fn restore_active_tab_scrollback_pager(&mut self) {
-        if self.view.pager.is_some() {
+        if self.view.scroll_pager.is_some() {
             return;
         }
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
@@ -112,7 +112,7 @@ impl App {
         {
             self.runtime.pager_stream = Some(stream);
         }
-        self.set_pager(view);
+        self.view.scroll_pager = Some(view);
     }
 
     pub fn open_pane_scroll_pager(&mut self) {
@@ -247,7 +247,9 @@ impl App {
         // the LowerPane render branch knows the real viewport height
         // and scrolls there, avoiding a one-frame jump.
         view.pending_scroll_to_bottom.set(true);
-        self.set_pager(view);
+        // The bottom-region scrollback slot — coexists with a top-region
+        // `view.pager` (`D`) rather than evicting it.
+        self.view.scroll_pager = Some(view);
         self.state.focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
         self.state
