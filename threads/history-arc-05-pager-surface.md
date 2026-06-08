@@ -972,3 +972,35 @@ Provenance:
 - extends arc-05 PR #33 = 01KR2AAX12XSNRNZPTXJT2TXJA; refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
 
 <!-- Entry-ID: 01KTMN185R410PMH15J2KN8CKD -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:19:12.831368+00:00
+Role: scribe
+Type: Decision
+Title: PRs #309–#311 (pager-stream abstraction): the arc's payoff — a unified off-thread PagerStream seam; :grep and git-view collapse their bespoke session skeletons onto it
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: the pager gains a `PagerStream` abstraction (`src/app/pager_stream.rs`) — an object-safe trait + shared spawn/wake/id-gate/drain core for "off-thread read/parse → streaming pager." Claude full-screen transcript scrollback lands on it first (#309); `:grep` (#310) and git-view diff/show/blame (#311) migrate onto it, collapsing their hand-rolled `grep_session` / `git_view_session` skeletons and retiring `grep_id`/`git_view_id` for one `stream_id`.   [kind: refactor]
+When: 2026-06-08 · PRs #309 (refactor/pager-stream-abstraction) · #310 (refactor/pager-stream-grep) · #311 (refactor/pager-stream-git-view) · commits c1505ddd, 37ee0363, 22fc3494
+Recorded rationale: "The unified 'background worker streams styled content into a pager' abstraction. Three features hand-rolled the same skeleton — `:grep` (…streaming append), git-view diff/show/blame (…one-shot + a retained model for the `|` layout toggle), and the agent-transcript reads — differing only in the *producer* (the worker body) and the *apply-to-pager* step. This module is the shared core they collapse onto, making 'off-thread read/parse → streaming pager' the default architecture." — src/app/pager_stream.rs module doc (commit c1505ddd). "Off-thread read/parse is the default architecture for any feature that fills a pager from disk or compute — it does not block the keypress path. … Adding a new such feature = a `produce` closure (the worker body) + a small `PagerStream` impl (the apply step); the channel, wake, id-gating, and mounting are shared." — ARCHITECTURE.md (commit c1505ddd). Second-parent subjects: "feat(scrollback): off-thread PagerStream + Claude full-screen transcript scrollback" (#309); "refactor(grep): migrate :grep onto the PagerStream abstraction" (#310); "refactor(git-view): migrate diff/show/blame onto PagerStream + close the collapse" (#311).
+Inferred intent: this is the architectural payoff the whole arc points at — having made the pager the universal *render* surface in V1.5, the work now unifies how content *arrives* at it. Three features had independently re-derived the worker/wake/id-gate skeleton; the abstraction extracts that and supersedes the per-source wiring. — evidence: pager_stream.rs +403 new (#309); grep_session.rs 179→131 lines (#310, net −98 in PR); git_view_session.rs 442→355 lines (#311, net −91 in PR); ARCHITECTURE.md edited from "migrate onto it, retiring their bespoke skeletons" to "the bespoke skeletons collapsed onto `GrepStream` / `GitViewStream`." confidence: high
+Supersedes: the bespoke per-source pager wiring — `grep_session`'s `grep_id` and `git_view_session`'s `git_view_id` ad-hoc id-gating, both replaced by `GrepStream` / `GitViewStream` impls of `PagerStream` over one shared `stream_id` / `Message::PagerStreamOutput`. Generalizes the pty-vs-content / per-source binding the arc handled manually since #89 (= 01KTMMXKYZ78J9AGSK60HJF9BV).
+
+This is the arc's architectural close. The V1.5 work (#40–#43) made the pager the universal place content is *rendered*; #309–#311 make `PagerStream` the universal way content *arrives* — off the UI thread, id-gated against the live pager so stale output self-discards. The trait is deliberately object-safe: the payload type is erased inside each impl (each owns its own `Receiver<T>`), so a `Box<dyn PagerStream>` lives in `Runtime`. The two halves are a producer closure on a worker thread (pushing through a `fs::WakingSender`, waking the loop with a payloadless `Message::PagerStreamOutput`) and a main-thread `drain` that id-gates via `stream_id` and applies the result through `DrainOutcome` (`Idle`/`Changed`/`Finished`/`CloseInfo`/`CloseError`).
+
+The migration is staged exactly as the module doc says: transcripts first. #309 (commit c1505ddd, pager_stream.rs +403 new, pane_scroll.rs +284/-... heavy) lands the abstraction and ports a 4 MB Claude full-screen agent-transcript tail-read + JSON parse onto it. #310 (commit 37ee0363) migrates `:grep` — `grep_session.rs` drops from 179 to 131 lines and gains a `struct GrepStream` + `impl PagerStream for GrepStream`; `grep_id` and the bespoke wake plumbing in `pane_wake.rs`/`run.rs`/`bootstrap.rs` retire (PR net −98). #311 (commit 22fc3494) does the same for git-view diff/show/blame — `git_view_session.rs` drops 442→355 lines, gains `struct GitViewStream` + `impl PagerStream`, and the commit subject names it "close the collapse"; the ARCHITECTURE.md prose is rewritten from future-tense ("migrate onto it, retiring …") to past-tense ("the bespoke skeletons collapsed onto `GrepStream` / `GitViewStream`"). Both `*_session` modules survive as thinner producer bodies — the skeleton, not the file, is what collapsed.
+
+Cross-references: the git-view migrated in #311 is the gix-based diff/show/blame engine of `history-seg-gix-migration`. The `pager_handler/motion.rs` and `src/ui/pager/` directory-module touched here are the post-decomposition pager internals of `history-seg-refactor-mvu` (5dc68c3 split `src/ui/pager.rs` → `src/ui/pager/`; #180/#189 extracted the pager history/handler). The transcript content that streams in is rendered through the same markdown/styled path as `history-seg-markdown-rendering`.
+
+The original arc-05 story-tail (= 01KR2ANRAEFWWR5W9FQP11A0DB) left open whether catalogue §4's "render *into* the pager rather than splintering into overlays" direction was "the picker pattern taking a different route, or deferred indefinitely." After #309–#311 the answer reads as: a different, more general route. The picker-into-pager `picker_items` field still does not exist; instead the unification happened one layer down — at how *any* source feeds the pager — which subsumes the per-source splintering the catalogue warned against without ever building the specific picker shape.
+
+Provenance:
+- c1505ddd (PR #309, 2026-06-08) — src/app/pager_stream.rs +403 (new; `PagerStream` trait, `DrainOutcome`, `spawn_pager_stream`/`drain_pager_stream`), pane_scroll.rs +284, ARCHITECTURE.md +19, AGENTS.md, src/ui/pager/mod.rs +6.
+- 37ee0363 (PR #310, 2026-06-08) — src/app/grep_session.rs 179→131 (`GrepStream` impl), pane_wake.rs/run.rs/bootstrap.rs/sources.rs slimmed; PR net −98 lines.
+- 22fc3494 (PR #311, 2026-06-08) — src/app/git_view_session.rs 442→355 (`GitViewStream` impl), pager_stream.rs +75, ARCHITECTURE.md prose future→past tense; PR net −91 lines.
+- refines #89 per-source binding = 01KTMMXKYZ78J9AGSK60HJF9BV; closes the §4 thread from story-tail = 01KR2ANRAEFWWR5W9FQP11A0DB; cross-refs history-seg-gix-migration, history-seg-refactor-mvu, history-seg-markdown-rendering.
+
+<!-- Entry-ID: 01KTMN2XSH67BNFQPAMTSFD81X -->
