@@ -521,3 +521,38 @@ Provenance:
 - `history-arc-03-pane-behavior` seams-aside = 01KR11TME2KF5QFQ45GJYG8MC7 (register reference for the short-aside-with-specific-observation form this entry inherits).
 
 <!-- Entry-ID: 01KR13DSV1YWH6NNF484NJS02K -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:08.743719+00:00
+Role: scribe
+Type: Note
+Title: Continuation framing (#38–#311 window): residual git-marker/worktree-cache correctness; architectural git story moved to gix-migration
+
+Spec: scribe
+
+tags: #history #arc-04
+
+Moment: arc-04 continuation framing — Reconstructed: the #38–#311 window is a thin correctness tail on this thread; the architectural git story relocated to sibling segments   [kind: segment-topology]
+When: 2026-05-22 → 2026-05-30 · PRs #119, #148, #168, #169, #178
+Recorded rationale: branch slugs only (squash merges); this framing is the scribe's topology read, not a quoted decision.
+Inferred intent: the original arc-04 baseline (#1–#27) answered "what does git-awareness mean in this file commander?" along five accretion axes. The continuation window does NOT extend those axes — it is residual correctness work on two surfaces that the baseline machinery already introduced (the `git_status_raw_cache` and the porcelain-collapse parser). evidence: every PR in the slice is a `fix/…` slug, not a `feat/…`; the diffs touch `src/app/state.rs`, `src/app/mod.rs`, `src/sysinfo.rs` — the same files as the baseline, with no new command or feature axis. confidence: high
+Supersedes: (none — this is a framing note)
+
+Scoping pointer (read before assuming this thread owns the window's git story): the dominant git work of the #38–#311 window is the replacement of subprocess `git` with the `gix` crate (#283–#292). That architectural story lives in the sibling segment **history-seg-gix-migration**, not here. Likewise, git-status *performance* work — the #99 mtime-cache and the #137 worker-throttle — lives in **history-seg-performance**. This thread (arc-04) covers only the residual git-marker / worktree-cache *correctness* fixes that landed before the gix rewrite.
+
+What this continuation does cover, in three moments:
+- worktree git-cache staleness — a recurring "stale markers after worktree switch" shape across #119 (a targeted cache-filter + precautionary clear) and #178 (the root-cause fix: watch the *real* gitdir). Supersession-linked: #178 introduces `current_gitdir` / `set_repo_root` and reframes #119's belt-and-suspenders as a symptom of the unwatched-gitdir root cause.
+- git-poll cache-key ordering (#148) — a stat-before-read ordering fix in the background git worker that stopped a racing index write from pinning a stale status snapshot forever.
+- untracked-marker correctness on huge trees (#168, #169) — `-uno` was silently suppressing `?` markers in any repo with a built `target/`; #168 always runs `-unormal` and rips out the now-dead `huge` plumbing, #169 follows up so untracked-only directories collapse to `?` rather than `~`.
+
+The arc ties off here. All of the still-subprocess git plumbing these fixes harden — `git_status_porcelain_raw`, `resolve_gitdir`, the `git_status_raw_cache` key — is the same machinery that **history-seg-gix-migration** then replaces wholesale at #283–#292. Read that segment for the successor story; this thread is the last correctness pass on the subprocess era.
+
+Provenance:
+- 550e99e (PR #119 fix/worktree-switch-stale-git-cache, 2026-05-22) — `src/app/state.rs`, `BUGS.md`, `CHANGELOG.md`
+- 1b28bf9 (PR #148 fix/git-poll-cache-key-ordering, 2026-05-27) — `src/app/mod.rs`, `CHANGELOG.md`
+- fab88b3 / 2nd-parent cd80de7 (PR #168 fix/untracked-markers-huge-tree, 2026-05-29) — `src/sysinfo.rs`, `src/app/mod.rs`, `src/app/state.rs`
+- 82f23f4 / 2nd-parent f2595ca (PR #169 fix/untracked-dir-marker, 2026-05-29) — `src/sysinfo.rs`
+- 6293dca / 2nd-parent 6aac965 (PR #178 fix/worktree-git-marker-staleness, 2026-05-30) — `src/app/mod.rs`, `src/app/state.rs`, `src/sysinfo.rs`, `BUGS.md`
+- sibling segments: history-seg-gix-migration (#283–#292), history-seg-performance (#99, #137)
+
+<!-- Entry-ID: 01KTMMJB49K22EGR14EF11BP18 -->
