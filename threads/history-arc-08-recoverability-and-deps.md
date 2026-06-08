@@ -884,3 +884,32 @@ Provenance:
 - Cross-ref: PR #13 graveyard entry in this thread = 01KR38VEGHFT9JGRDCXXBFX8V1 (the viewer + `gy`/`p`/`P`/`dd`/`x`/`Z` keymap #124 surfaces).
 
 <!-- Entry-ID: 01KTMMZTVFPNJ14QHF15EVA3MA -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:58.335164+00:00
+Role: scribe
+Type: Note
+Title: PR #127 (fix/follow-symlink-on-enter): Enter (and D/v guards) follow symlinks-to-directories via fs::entry::target_is_dir; R/picks still operate on the symlink
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: symlink-edge-case — Reconstructed: a new `fs::entry::target_is_dir(path)` (stat-follows-symlink) lets the Enter handler and the `D` / `v` guards descend into a symlink whose *target* is a directory, while destructive/selection ops (`R`, picks) intentionally keep operating on the symlink itself   [kind: gotcha]
+When: 2026-05-23 · PR #127 (fix/follow-symlink-on-enter) · merge 4accb70 (second-parent commit "fix: Enter follows symlinks-to-directories", 2026-05-23 15:21 -04)
+Recorded rationale: "Enter follows symlinks-to-directories. Reported in the wild on a pnpm `node_modules` tree where `prettier -> .pnpm/prettier@3.8.3/node_modules/prettier` couldn't be entered. `DirEntry::metadata` uses lstat semantics, so symlinks land as `EntryKind::Symlink` regardless of target, and the Enter handler only descended on `EntryKind::Dir`. Now Enter (and the `D` / `v` guards) follow through to the target kind and descend when the target is a directory. Other ops (`R`, picks, etc.) still intentionally operate on the symlink itself." — CHANGELOG.md (PR #127)
+Inferred intent: distinguish "navigate through a symlink" (follow) from "act on a symlink" (don't follow), adding a target-stat helper for the former only — evidence: src/fs/entry.rs adds `pub fn target_is_dir(path: &Path) -> bool { std::fs::metadata(path).is_ok_and(|md| md.is_dir()) }` with three unit tests (follows-to-dir, follows-to-file→false, broken-symlink→false); src/app/mod.rs (+19) gates Enter/`D`/`v` on it; src/fs/mod.rs +1. confidence: high
+Supersedes: the prior Enter handler that descended only on `EntryKind::Dir` (lstat-derived), treating all symlinks as non-directories
+
+This is the symlink-follow edge case. The root cause the CHANGELOG names is a stat-semantics mismatch: `DirEntry::metadata` uses lstat (does not follow), so every symlink is classified `EntryKind::Symlink` regardless of target, and Enter only descended on `EntryKind::Dir`. The reproduction was concrete — a pnpm `node_modules` tree where `prettier` is a symlink into the `.pnpm` store and couldn't be entered.
+
+The fix's design boundary is the load-bearing point. The new `target_is_dir` follows the symlink (`std::fs::metadata`, which is stat-not-lstat) and is wired only into the *navigation* paths — Enter and the `D` / `v` guards. Destructive and selection operations (`R`, picks) "still intentionally operate on the symlink itself," so deleting a symlink removes the link, not its target. The helper is defensively scoped: it "Returns `false` on broken/missing symlinks," covered by the `broken_symlink_returns_false` unit test, so a dangling link is treated as non-enterable rather than erroring. Three unit tests accompany the helper.
+
+Squash/merge with a second-parent commit carrying the descriptive subject; the CHANGELOG `### Fixed` block carries full rationale — recorded. Also touches BUGS.md (+4).
+
+Provenance:
+- 4accb70 (PR #127 fix/follow-symlink-on-enter, 2026-05-23) — merge; second-parent subject "fix: Enter follows symlinks-to-directories".
+- `git diff 4accb70^1 4accb70 -- src/fs/entry.rs` — `target_is_dir` (+46) + 3 symlink unit tests; `-- src/app/mod.rs` (+19) Enter/`D`/`v` gating; `-- src/fs/mod.rs` (+1).
+- `git diff 4accb70^1 4accb70 -- CHANGELOG.md` — verbatim rationale quoted above; BUGS.md +4.
+
+<!-- Entry-ID: 01KTMN0NXJW02PGHZ3N0XFDFXF -->
