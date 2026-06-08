@@ -818,3 +818,33 @@ Provenance:
 - bitbucket/fix/mcp-socket-timeouts log — commit aee1af0 "perf: run the A-monitor's ps stats off the render thread too" (2026-06-01), the later offload.
 
 <!-- Entry-ID: 01KTMN1TSVDFN7SWK34QF2SWY5 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:19:06.467061+00:00
+Role: scribe
+Type: Note
+Title: PR #228 — MCP socket timeouts: a wedged server surfaces as a JSON-RPC error, not a hang
+
+Spec: scribe
+
+tags: #history #seg-multi-agent
+
+Moment: multi-agent expansion — Reconstructed: the stdio MCP proxy bounds its socket reads/writes with a 20s deadline so a stalled server returns a clean JSON-RPC error instead of hanging the agent forever   [kind: gotcha]
+When: 2026-06-01 · PR #228 (fix/mcp-socket-timeouts) · commit 89180c3 (pre-squash c620782)
+Recorded rationale: "Socket IO deadline for the stdio proxy. Bounds how long it waits on a server response (and on a write) so a wedged / silent / panicked server thread surfaces as a clean JSON-RPC error to the agent instead of hanging it indefinitely. Generous — well above the server's own 5 s writable-action timeout — so a legitimately slow reply isn't cut off; only a genuine indefinite stall trips it." — doc-comment on `PROXY_IO_TIMEOUT`, `src/mcp.rs` (added PR #228)
+Inferred intent: hardens the single shared MCP substrate (the proxy every agent's registration re-execs into) against a wedged server — a liveness fix at exactly the chokepoint arc-07 made peer-agnostic — evidence: diff is `src/mcp.rs` +43/-1 only; sets `set_read_timeout`/`set_write_timeout` to a 20s `PROXY_IO_TIMEOUT`
+                  confidence: high
+Supersedes: the unbounded blocking `read_lsp_message` in the stdio proxy (the `spyc --mcp` proxy path from PR #19/#21) — adds a deadline where the read previously blocked indefinitely
+
+This is the segment's closing transport-hardening fix, and it lands on the one socket the arc-07 tail identified as the genuinely shared substrate ("one Unix socket, one `spyc --mcp` proxy [...] backs both agents" — now all five). The failure mode: the proxy's `read_lsp_message` "would otherwise block indefinitely on a silent server thread" (code comment, `src/mcp.rs`). The fix bounds both directions with a single `const PROXY_IO_TIMEOUT: Duration = Duration::from_secs(20)`, applied via `sock_clone.set_read_timeout(Some(PROXY_IO_TIMEOUT))` and `stream.set_write_timeout(Some(PROXY_IO_TIMEOUT))` (verified in diff).
+
+The error-path design is recorded in-comment and matters for protocol correctness: on timeout the proxy replies "to the agent with a JSON-RPC error (reusing the request id so the client matches it) so its tool call returns an error instead of hanging, then end[s] the proxy cleanly — a late reply would desync the stream framing" (code comment). The server side is bounded symmetrically on writes only: "Bound writes so a stalled client (proxy) can't wedge this server thread indefinitely. The read is intentionally left blocking" (code comment). The 20s figure is deliberately "well above the server's own 5 s writable-action timeout" so the deadline catches only genuine stalls.
+
+Because this is a `src/mcp.rs`-only change to the shared proxy, it is the multi-agent-era analogue of arc-07's PR #37 socket-discovery hardening (01KR2JCF7QEJ…): both harden the one shared MCP chokepoint rather than any per-peer registration file — the substrate stays singular and keeps absorbing the correctness work while the peer set grows. This closes the segment's hardening thread (#152 freshness, #153 resolver hygiene, #109 resume race, #228 liveness).
+
+Provenance:
+- 89180c3 (PR #228 fix/mcp-socket-timeouts, 2026-06-01; pre-squash c620782) — `src/mcp.rs` +43/-1: `PROXY_IO_TIMEOUT` const, read/write timeouts on the proxy socket, JSON-RPC error reply on timeout, write-timeout on the server thread.
+- bitbucket/fix/mcp-socket-timeouts — full pre-squash commit c620782 "fix: bound MCP proxy socket IO so a wedged server can't hang the agent" (2026-06-01); also the second-parent subject.
+- arc-07 PR #37 entry = 01KR2JCF7QEJ… — prior shared-substrate hardening this parallels.
+
+<!-- Entry-ID: 01KTMN2RJ3V39M24PWFHXJ3R7K -->
