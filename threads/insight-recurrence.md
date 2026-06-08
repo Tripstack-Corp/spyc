@@ -779,3 +779,44 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 1 = 01KTMTNYS83V5A7PY2MJVV60MF.
 
 <!-- Entry-ID: 01KTMTQSTE7QSH8WJ442ADX02F -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:58:49.331897+00:00
+Role: critic
+Type: Note
+Title: Pattern 3 (window-2): Verbatim-relocation recurrence — the behavior-identical file-split micro-shape recurs ~45× across decomposition and MVU extraction; the highest instance count in either window
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement.** A single micro-shape recurs at the highest instance count of either window: the **verbatim relocation** — moving code from an oversized file into a new sibling module with a near-perfectly-balanced `+N/-N` diff, a `mod …; use …;` re-export (or a `git mv` of snapshot fixtures), and an explicit "no behavior change, no API change" claim. Each instance is one PR. The shape is the *unit of work* across two campaigns, recurring roughly **45 times** when the decomposition waves and the MVU leaf/handler extractions are summed.
+
+**Instance enumeration — by wave, since per-PR ULIDs are folded at the moment grain.**
+
+The reconstruction folds the individual verbatim cuts into per-wave moments (per the deep-history bounding rule), so the instance count is read off the recorded PR-range counts the moments carry:
+
+- **mod-extract pr1..12 (#248–#259)** — "twelve verbatim cuts off app/mod.rs," one per PR, REFACTOR_PLAN.md Phase-1 verbatim: "verbatim move + a `mod ...; use ...;` import — no behavior change … Each was one PR." Diff signature recorded: "#248 +541/-502, #257 +431/-429, #258 +514/-501" — the near-balance is the verbatim fingerprint. **12 instances.** *01KTMMGZWER9304EZM82KTEZMQ.*
+- **decompose-mod-* (#275–#281)** — "mod.rs split into run/bootstrap/proc/tests/util siblings," ~7 PRs, same verbatim signature plus a guard test `mod_rs_stays_decomposed`. **~7 instances.** *01KTMMHZCN03GA638EHKKCY50E.*
+- **UI/render directory splits (#297,298,303,305,306)** — `foo.rs → foo/{mod,…}`, snapshot `.snap` fixtures `git mv`'d into new `snapshots/` subdirs "so the insta/TestBackend net stays intact"; biggest single file `ui/pager.rs` ~2954 lines → six `pager/*.rs`. **5 instances.** *01KTMMM1322W32NGAH5H7MWYEP.*
+- **core subsystem splits (#299,300,301,302,304)** — mcp.rs (2190L), keymap/resolver.rs (1878L), key-dispatch, sessions, pane; "predominantly test-extraction." **5 instances.** *01KTMMN1CSG84TPZ4ZEFN9K62B.*
+- **state.rs split (#307–#308)** — the 3907-line MVU Model into `state/{mod,apply,dispatch,git,listing,navigation,selection}.rs`; one non-verbatim prep PR (sub-structs) + one large verbatim directory conversion. **1 verbatim instance** (+1 prep, which is the *exception* below). *01KTMMPARGNTSQB2Z67G6KBKQ0.*
+- **MVU Phase 1 & 2 leaf/handler extractions (#180–#191)** — "six leaf-struct extractions, then four handler extractions … each a one-PR, behavior-equivalent move." **~10 instances** in the MVU campaign proper, before the decomposition campaign even opens. *01KTMKTBHT9G2VBZNJZFY5EJM4; synthesis 01KTMNFSQP1XJ1TSXS545PR01E.*
+
+**Instance count: ~40–45.** Summing the recorded wave-counts (12 + 7 + 5 + 5 + 1 + ~10) lands at ~40 verbatim relocations, ~45 if the smaller folded cuts in the decompose waves are counted individually. The catalogue states the count as **~45 with honest imprecision** — the exact figure depends on how the folded per-wave PRs are tallied, which the moment grain deliberately does not enumerate one-by-one. This is the single most-recurring micro-shape in either window by an order of magnitude (window-1's densest pattern, bundle-as-shape, had six instances).
+
+**The recurrence reading the per-segment threads could not see: the verbatim shape has a recorded falsifiable signature.** Each instance is identifiable not by slug but by **diff balance** — the `+N/-N` near-equality is the fingerprint, and the synthesis arc verifies it stat-by-stat ("the verbatim-move signature," "diff balances are stat-verified"). The recurrence is therefore *machine-checkable*: a verbatim relocation is one whose insertions ≈ deletions and whose behavior tests are unchanged. This is a sharper recurrence than window-1's shapes, which were identified by reading slugs and CHANGELOGs; here the shape is in the diff arithmetic itself.
+
+**Sub-shape: the exception that proves the verbatim rule.** The state.rs prep PR (#307, the sub-struct grouping) is recorded as "the only API-touching, non-mechanical edit in the slice (inferred from its 15-file +225/-229 ripple)" — i.e. the one PR in the campaign that is *not* verbatim, and it exists precisely to *create clean seams so the next PR can be verbatim*. The pattern thus carries a recurring **prep-then-verbatim** micro-shape at its hardest target: where a file is too coupled to cut cleanly, one non-verbatim seam-cutting PR precedes the verbatim relocation. One instance of this prep-exception (state.rs); the catalogue names it as a noted sub-shape, not a promoted recurrence.
+
+**Boundary notes.**
+- *Relationship to Pattern 2.* Verbatim relocation is the *content* of two of Pattern 2's phase-trains (mod-extract pr1..12, the MVU extraction phases). Pattern 2 reads the *ordered-train delivery*; Pattern 3 reads the *per-PR micro-shape inside it*. Same PRs, two grains — exactly the bundle-vs-bracket double-reading window-1 used for PR #18. The catalogue does not double-count: the train is one Pattern-2 instance; each cut is one Pattern-3 instance.
+- *Drift boundary.* The verbatim slugs ("extract X", "split Y") describe the diffs accurately, and the "no behavior change" claim is test-backed; no misnaming-at-merge. Recurrence-only. (If any verbatim PR's diff had turned out *not* behavior-identical, that single PR would be drift fuel — but the guard tests and the recorded stat-verification report none in slice.)
+
+Provenance:
+- `history-seg-module-decomposition`: 01KTMMGZWER9304EZM82KTEZMQ (pr1..12, +N/-N stats), 01KTMMHZCN03GA638EHKKCY50E (decompose-mod-* + guard test), 01KTMMM1322W32NGAH5H7MWYEP (UI/render git-mv snapshots), 01KTMMN1CSG84TPZ4ZEFN9K62B (core subsystem test-extraction), 01KTMMPARGNTSQB2Z67G6KBKQ0 (state.rs prep-then-verbatim, the exception); synthesis 01KTMNH17RVXAWHF9SJ2Z7MCP9.
+- `history-seg-refactor-mvu`: 01KTMKTBHT9G2VBZNJZFY5EJM4 (Phase 1&2 six-leaf + four-handler verbatim extractions); synthesis 01KTMNFSQP1XJ1TSXS545PR01E.
+- `insight-recurrence` window-1 densest pattern for scale contrast: Pattern 1 bundle-as-shape = 01KR3CW3DBHPTB6K8R8047TBCP (6 instances).
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 2 = 01KTMTQSTE7QSH8WJ442ADX02F.
+
+<!-- Entry-ID: 01KTMTSAVQNENHP8ZFWBKTWXN6 -->
