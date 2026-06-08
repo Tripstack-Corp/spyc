@@ -79,3 +79,30 @@ Confidence: Uniformly high across the window — every moment carries recorded-r
 Provenance: 01KTMMP0ZVARBSD274T5V4A05P, 01KTMMPV14VAPT445FE1TS1AJ7, 01KTMMRS83NW2K9GASEKF5R1T1, 01KTMMTW9ADXAW9B6SZPDPD7MG, 01KTMMVVRDCY22WSYSRMTFGCMY, 01KTMMWQNM0KA5GBBVJWSQE8A5, 01KTMMXKYZ78J9AGSK60HJF9BV, 01KTMMYJYCF9GJ0JRAA649Q5BW, 01KTMN09307X7E73BREP8D7T3R, 01KTMN185R410PMH15J2KN8CKD, 01KTMN2XSH67BNFQPAMTSFD81X
 
 <!-- Entry-ID: 01KTMNG0CYN2NW1Y3RBR71J5FP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:26:31.252815+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-seg-performance — under-load cost made proportional to actual change, then guarded against staleness
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-seg-performance — under-load cost made proportional to actual change, then guarded against staleness
+Span: 2026-05-19 → 2026-05-28 · 9 moments · 6 supersessions
+Narrative:
+  This is a secondary reconstruction over the committed moments in history-seg-performance; every claim below carries an inline moment ref. The arc opens with two git-poll cost cuts. PR #99 caches the (index mtime, HEAD mtime) pair so the 1 Hz safety poll bails before spawning a subprocess when those files have not moved — recorded as "skip 1Hz git poll subprocess when index/HEAD mtimes unchanged" [01KTMMHXYR7E0PYD7AZTHFAR8E]. PR #100 then moves `git status` to a background worker, adds huge-tree adaptive backoff (poll 1s→10s, debounce 500ms→3s, `-unormal`→`-uno`), and makes a cached-repo chdir do zero git subprocesses; it supersedes #99's single-slot caches with a multi-slot decision cache and self-invalidating raw-status cache [01KTMMK08N55944H24EY4RM81E]. The worker-thread plus generation-counter discard pattern introduced here recurs later in the arc (inferred linkage noted in the moment).
+
+  A concentrated 2026-05-26 typing-latency push follows. PR #135 arms a 250ms typing-burst window that tightens the poll cadence to 16ms, and records the structural fix it defers verbatim: "let pane output wake the main loop directly... is the proper solution but a larger refactor" [01KTMMKR90HM2V9VZYSDFS1WCZ]. PR #138 replaces the unconditional 1 Hz `.spyc-context.json` write with a `context_dirty` flag — the recorded diagnosis is that spyc was perturbing claude's external file-watcher, not lagging in its own loop, triaged using the `A` activity monitor [01KTMMMSG4DXNDQZ66KVXXBE93]. PR #137 throttles git-worker re-spawns from `refresh_listing` (the boundary #99 deliberately left uncached) and adds a second `A`-monitor internals line [01KTMMP87YEBGTXTHDPH0BJJY0].
+
+  The pane-parsing sub-chain attacks the chatty-pane symptom. PRs #139/#140 are interim mitigations (cap pane renders, then defer the active-pane vt100 drain inside the burst), each conceding the prior was insufficient [01KTMMQEW38T70F1GDME1FDJ8M]. PR #141 is the architectural fix the cluster had deferred since #135: each `Pane` gains a parser worker thread feeding an `Arc<Mutex<vt100::Parser>>`, so per-iteration main-thread cost is bounded by render plus input dispatch regardless of pane output; it retires #139/#140 as "vestigial under the worker-thread parser" [01KTMMSKB3JSCEJJHN4DB5K4H2]. PR #144 then caches the status-line agent short-id behind a 30s TTL — recorded as the per-frame hotspot that was "65% main-thread CPU" via a symbolicated `sample` [01KTMMTSMP1F44C1ZPY2PP8J7M].
+
+  PR #156 closes the arc on balance: the watcher-driven `refresh_listing` debounce moves from a pure trailing-edge to a `should_fire_refresh` predicate with a `max_defer` cap, so the throttling #100/#137 introduced cannot swing into indefinite staleness under continuous fs activity; it adds the arc's first regression tests for this pipeline [01KTMMW22XTS48TGVY3DS1HPPA].
+Lineage: moment [01KTMMHXYR7E0PYD7AZTHFAR8E] -> moment [01KTMMK08N55944H24EY4RM81E] -> moment [01KTMMP87YEBGTXTHDPH0BJJY0] -> moment [01KTMMW22XTS48TGVY3DS1HPPA] (poll/refresh-cost spine); and moment [01KTMMKR90HM2V9VZYSDFS1WCZ] -> moment [01KTMMQEW38T70F1GDME1FDJ8M] -> moment [01KTMMSKB3JSCEJJHN4DB5K4H2] (typing/pane-parse spine, mitigations superseded by the worker-thread parser)
+Open / unsettled: huge-tree path trades away the untracked `?` marker (named at [01KTMMK08N55944H24EY4RM81E]; the `-uno` myth is later debunked in history-arc-04 #168). The throttle/staleness tension between #137 and #156 is resolved within the arc; no further deferrals remain named. The `context_dirty`, `with_screen`, and `drain_output` surfaces are noted (inferred) as later reshaped by the MVU work in history-seg-refactor-mvu.
+Confidence: every moment is marked recorded (rich CHANGELOG/commit rationale, verified by pickaxe/diff); inferred-intent reads are explicitly flagged per moment and confidence is "high" throughout. The arc carries that recorded-dominant ratio up unchanged.
+Provenance: 01KTMMHXYR7E0PYD7AZTHFAR8E, 01KTMMK08N55944H24EY4RM81E, 01KTMMKR90HM2V9VZYSDFS1WCZ, 01KTMMMSG4DXNDQZ66KVXXBE93, 01KTMMP87YEBGTXTHDPH0BJJY0, 01KTMMQEW38T70F1GDME1FDJ8M, 01KTMMSKB3JSCEJJHN4DB5K4H2, 01KTMMTSMP1F44C1ZPY2PP8J7M, 01KTMMW22XTS48TGVY3DS1HPPA
+
+<!-- Entry-ID: 01KTMNG8WCGXX9SXWPXA84YY91 -->
