@@ -165,3 +165,29 @@ Provenance:
 - 3fe93f0 (PR #158 docs/roadmap-dnd-cwd-followup, 2026-05-28) — ROADMAP.md DnD entry rewrite + drop-action picker; cwd-export promoted from Additional Ideas; YAZI_COMPETITIVE_REVIEW.md tidy (53-line churn).
 
 <!-- Entry-ID: 01KTMMVPG9JPMQ9N5CGB84KGVG -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:56.995917+00:00
+Role: scribe
+Type: Decision
+Title: PR #179 — roadmap reorg to "Lean 2.0": decomposition Phases 1–2 go active, MVU rewrite held post-2.0
+
+Spec: scribe
+
+tags: #history #docs-planning
+
+Moment: docs-planning — Reconstructed: ROADMAP is reorganized around a "Lean 2.0" sequencing and REFACTOR_PLAN flips from "hold the whole plan until after 2.0" to "take the low-risk decomposition now, hold only the deep MVU rewrite." This is the planning decision that puts the app/mod.rs decomposition on the critical path to 2.0.   [kind: supersession]
+When: 2026-05-30 · PR #179 (docs/roadmap-reorg-2.0) commit 68ff8bc
+Recorded rationale: "**2026-05-30**: Go on Phases 1–2 *now*, as the road-to-2.0 decomposition track (ROADMAP 'Lean 2.0' sequencing). Trigger: the file crossed ~12k lines, navigation is search-not-scroll, and the agent-registry work showed how many fixes touch multiple handlers in the megafile. Decomposition also unblocks the 2.x crate split (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3 (MVU) still held until 2.0 has shipped + stabilized ~2 weeks." — REFACTOR_PLAN.md changelog, edited PR #179
+Inferred intent: a re-sequencing pass that promotes the cheap-and-safe decomposition into the 2.0 path while explicitly parking the risky rewrite. evidence: 68ff8bc edits REFACTOR_PLAN.md header to "Status (2026-05-30): STARTING," updates the file size estimate (~7400 → ~12k lines, ~120 → ~150 fns), relaxes Phase-1 done-criteria from a fixed `≤ 6500` line target to "down by ~1000," and rewrites 179 lines of ROADMAP.md around the three working tracks (Foundations/Thesis/Distribution) with decomposition named the one active Foundations item. confidence: high
+Supersedes: the prior REFACTOR_PLAN stance ("2026-04-29: Plan written. Holding Phase 1 until after 2.0 ships") and the fixed `wc -l ≤ 6500` Phase-1 done-criterion — both revised in 68ff8bc. The decomposition decision here is what #114's crate-split prerequisite ("can't split a 12k-line monolith") pointed toward.
+
+Reconstructed: the reorg restates the roadmap thesis (MCP server "shifted the tool's nature … a file manager that Claude can query") and re-frames the whole document around three parallel tracks, naming the `app/mod.rs` decomposition as "the road-to-2.0's next track." REFACTOR_PLAN.md's status header is flipped to STARTING; the original "hold until after 2.0" reasoning is kept as historical context but explicitly narrowed — it "applied to the *whole* plan; the decision now is to take the low-risk decomposition early and hold only the deep rewrite." Phase-1 done-criteria are loosened to track the file's floating size rather than an absolute line count, and clippy gate tightened to `--locked --all-targets -- -D warnings`.
+
+Cross-segment pointer: the decomposition Phases 1–2 and the held-post-2.0 MVU rewrite (Phase 3) are executed/owned by history-seg-refactor-mvu — this entry records only the planning decision that scheduled them and ties the rationale ("unblocks the 2.x crate split") back to the v1.70 plan in the prior CounterTop/Mise-en-Place moments.
+
+Provenance:
+- 68ff8bc (PR #179 docs/roadmap-reorg-2.0, 2026-05-30) — REFACTOR_PLAN.md +28 (STARTING header, size/criteria updates, 2026-05-30 changelog decision); ROADMAP.md 179-line reorg (three working tracks, decomposition as active Foundations item).
+- 01KTMMSRJ3DEDE2S4VWY5JHEND (prior entry, this thread) — v1.70 plan whose crate-split this decomposition unblocks.
+
+<!-- Entry-ID: 01KTMMWRE9YX58H2RXKYY58QVH -->

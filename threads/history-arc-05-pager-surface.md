@@ -833,3 +833,28 @@ Provenance:
 - refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1; routing-refactor follow-up in history-seg-refactor-mvu.
 
 <!-- Entry-ID: 01KTMMVVRDCY22WSYSRMTFGCMY -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:54.787888+00:00
+Role: scribe
+Type: Note
+Title: PR #84 (yank-pager-title-header): yanks prepend a `# <title>` provenance line by default
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: `y`/`Y` and visual-mode `y` (line + block) prepend the pager's title (`!cargo build`, `task #3: cargo test`, the filename) as a comment-style header line + blank separator before the content, so a pasted capture carries its "what command was this from" context.   [kind: new-capability]
+When: 2026-05-13 · PR #84 (feat/yank-pager-title-header) · commit fc5717ab
+Recorded rationale: "Pager yanks prepend a `# <title>` header by default. … The point: when you paste a capture into chat / a code review / a note, the 'what command was this from' context goes with it. Empty titles still skip the header (no `# \n\n` noise). Toggle off in `.spycrc.toml`: `[yank] include_pager_title = false`. Default `true`." — CHANGELOG (commit fc5717ab)
+Inferred intent: the pager-as-read-surface now feeds clipboard captures into agent chats and reviews; the title-header makes those captures self-describing. The default-on + config-off shape mirrors the reversibility-escape-hatch pattern the original arc-05 seams-aside noted for PR #36's `env*` (= 01KR2AQ5M13KAR1M7A4561B5GM). — evidence: src/config additions (default.spycrc.toml +10, config/mod.rs +64) + src/ui/pager.rs +57 + src/app/mod.rs +25; config round-trip + header-helper tests. confidence: high
+Supersedes: (none — additive on the yank path established by arc-05 PR #33 visual yank = 01KR2AAX12XSNRNZPTXJT2TXJA)
+
+This is the first PR in the window to treat the pager's *output* — the yanked text — as a first-class artifact rather than just selection mechanics. The header helper lives in `src/ui/pager.rs` (+57) and is exercised by both the full/visible `y`/`Y` paths and the visual-mode line+block paths in `src/app/mod.rs` (+25). The config plumbing (`[yank] include_pager_title`, default `true`, with round-trip tests) is the larger part of the diff — `src/config/mod.rs` +64, `default.spycrc.toml` +10.
+
+The empty-title skip (no `# \n\n` noise) is the kind of small correctness detail the arc tends to ship inline. The default-on-with-toggle-off shape is consistent with the reversibility pattern the seams-aside entry observed.
+
+Provenance:
+- fc5717ab (PR #84, 2026-05-13) — src/ui/pager.rs +57 (header helper), src/app/mod.rs +25 (yank paths), src/config/mod.rs +64 + default.spycrc.toml +10 (`include_pager_title`).
+
+<!-- Entry-ID: 01KTMMWQNM0KA5GBBVJWSQE8A5 -->
