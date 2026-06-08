@@ -859,3 +859,48 @@ Provenance:
 - `insight-recurrence` Patterns 1-6 (closure entry = 01KR3DFHA7FRV3BXEH2Z8SFJQN) — the reference set this tail confirms the fifteen-and-zero observation does not fit.
 
 <!-- Entry-ID: 01KR3FEAYFQS8QVXCPN4KQ8QYK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:56:30.053916+00:00
+Role: critic
+Type: Note
+Title: Window-2 Framing (#38–#311): plan-doc-RICH window opens; the development mode shifts from roadmap-as-loose-inspiration to plan-doc-as-executable-spec — register held, ten stated-plan documents enumerated
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+This is the second-window (#38–#311, 2026-05-07 → 2026-06-08) continuation of `insight-trajectory`. Window-1 (#1–#37) catalogued *trajectory-against-stated-plan* across eight maintainer-authored documents and closed on the **fifteen-and-zero asymmetry**: fifteen honor instances (4 catalogue skips + 6 charter non-goals + 5 advisory ignores) honored at exact-state grain, against **zero** exactly-as-specified positive-recommendation executions (window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS; the asymmetry tail = 01KR3FEAYFQS8QVXCPN4KQ8QYK). The register is unchanged: tier-3 work — verify stated plan against landed code, observe disposition factually, refuse the property name (that is `insight-emergent-properties`'s, tier-4). Count what landed; count what didn't; observe where it clusters.
+
+**The window's character is different in kind, and that difference is the headline.** Window-1's stated-plan documents were *roadmap-as-loose-inspiration*: a UX catalogue of borrow/adapt/skip recommendations (PR #5), three ROADMAP additions, a charter, a non-goals list. None executed exactly; positive recommendations all landed in modified shape. Window-2 is **plan-doc-RICH**: `history-seg-docs-planning` (framing entry 01KTMMKHEYZ540PV6VVZR33K79 onward) is essentially a *catalogue of stated-plan documents* — V1_5, V1_60, V1_70, AUTO_APPROVAL, PANE_RECOVERY, PANE_STARTUP_TABS, MVU, plus the roadmap-reorg and YAZI review — and the major engineering segments (`history-seg-refactor-mvu`, `history-seg-module-decomposition`, the arc-03/05 continuations) **execute those documents phase-by-phase against named done-criteria**. The documents in this window are not inspiration; several are executable specs with numbered phases, done-criteria, and adversarial-review provenance baked in.
+
+**The ten stated-plan documents (or document-clusters) this continuation dispositions, enumerated.**
+
+1. **`docs/MVU_PLAN.md`** (added PR #196, commit 5b3ba59) — the 8-phase (−1…6) strangler-fig Elm-architecture migration; the document IS the recorded rationale, with a bug-class table and a "survived four adversarial review lenses" note. Executed in `history-seg-refactor-mvu` (#197–#274). NOTE the sequencing reversal: "this lands pre-2.0, reversing the earlier 'hold the MVU rewrite until 2.0 + ~2 weeks' gate." This document is the window's strongest candidate for a near-exact plan execution — the verification below tests that.
+
+2. **`REFACTOR_PLAN.md`** (Phase 3 = MVU; the "No file in `src/app/` over ~1500 lines" target at line 30) — Phases 1–2 executed (#180–#195); the ~1500-line target SUPERSEDED by CLAUDE.md's ~800-line ceiling (PR #282); Phase 3 detail delegated wholesale to MVU_PLAN. Executed/superseded in `history-seg-module-decomposition`.
+
+3. **`docs/V1_5_PLAN.md`** (added commit 919520c) — six-phase pager/task-viewer unification. Phases 1/2/3/5 land in arc-05 (#40–#45, decision entry 01KTMMRS83NW2K9GASEKF5R1T1); phase 6 (task↔pane) lands in arc-03 (#46–#48, entry 01KTMMMHWAHASBVT11Y96RBKSA). The V1_60 predecessor note records it "shipped at v1.50.0."
+
+4. **`docs/V1_60_PLAN.md`** ("CounterTop"; added PR #76, same-day recursive→siblings rewrite #76→#77, compat hardening #79) — disposition reads against the plan-churn-before-code shape AND the present on-disk status ("plan, not yet implemented").
+
+5. **`docs/V1_70_PLAN.md`** ("Mise en Place" / one-protocol-three-clients; added PR #114) — status on disk at #311: "plan, not yet implemented."
+
+6. **`docs/AUTO_APPROVAL_PLAN.md`** (added PR #86) — carries a recorded REJECTION ("curate native agent permissions; do not intercept the pty"). Status: "plan, not yet implemented."
+
+7. **`docs/PANE_RECOVERY_PLAN.md`** (added PR #92) — tiered recovery by program-kind. Status: "plan, not yet implemented" — but its scoped-OUT "simpler fix" (in-session hide-not-destroy) lands separately in arc-03 (#94, decision entry 01KTMMSVHSFYKGPSD9R8NRFCZY).
+
+8. **`docs/PANE_STARTUP_TABS_PLAN.md`** (added PR #93) — config-driven startup tabs, splits deferred. Status: "plan, not yet implemented."
+
+9. **`docs/YAZI_COMPETITIVE_REVIEW.md`** (added PR #157) — the window's UX-catalogue analogue to window-1's lazygit catalogue: a feature-by-feature benchmark with adopt/skip standing, acted on same-day by #158.
+
+10. **The roadmap-reorg-to-2.0** (PR #179, "Lean 2.0" sequencing; REFACTOR_PLAN changelog edited) — reprioritized decomposition onto the 2.0 critical path; held MVU then the same-day MVU_PLAN (#196) reversed the hold. This is a stated-plan *re-sequencing* document, dispositioned as its own moment.
+
+**Boundary with `insight-emergent-properties` (re-affirmed).** This continuation states the per-document dispositions and the window-2 honor/modified/exact tally; it does NOT name *why* the development mode shifted from loose-inspiration to executable-spec, nor whether plan-doc-as-spec is a stable emergent property of the project. The mode-shift observation is stated as a trajectory fact (the documents changed kind; the execution-against-them changed disposition-profile); the property name is tier-4 and reserved.
+
+Provenance:
+- window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS (terminal 15-and-0 count); window-1 asymmetry tail = 01KR3FEAYFQS8QVXCPN4KQ8QYK; window-1 framing = 01KR3EJ0RWZXEBMYHY9EEZQX4A (register declared).
+- `history-seg-docs-planning` framing = 01KTMMKHEYZ540PV6VVZR33K79 (the catalogue of stated-plan documents this window dispositions against).
+- docs/MVU_PLAN.md, REFACTOR_PLAN.md, docs/V1_5_PLAN.md, docs/V1_60_PLAN.md, docs/V1_70_PLAN.md, docs/AUTO_APPROVAL_PLAN.md, docs/PANE_RECOVERY_PLAN.md, docs/PANE_STARTUP_TABS_PLAN.md, docs/YAZI_COMPETITIVE_REVIEW.md — verified on `main` at reconstruction time.
+
+<!-- Entry-ID: 01KTMTN3M67GWM09JCK865XS9M -->
