@@ -791,3 +791,28 @@ Provenance:
 - external thread feature-pane-toggle-preserve-context — named source of the #94 design
 
 <!-- Entry-ID: 01KTMMSVHSFYKGPSD9R8NRFCZY -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:07.150969+00:00
+Role: scribe
+Type: Note
+Title: PR #111 + #116 (fix/pane-scroll-pane-focus-chord): ^a-k/^a-j focus transfer from scrollback, take two
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: focus-chord in scrollback — Reconstructed: the `^a-k`/`^a-j` focus-switch from inside a `^a-v` scrollback pager is moved from an unreachable pager-local chord handler (#111) to the `route_key` layer where it actually fires (#116)   [kind: supersession]
+When: 2026-05-21 · PR #111 (fix/pane-scroll-pane-focus-chord, dbd4180) · v1.50.56  —  2026-05-21 · PR #116 (fix/pane-scroll-pane-focus-chord, 45f642d) — same slug, folded
+Recorded rationale: #111 CHANGELOG verbatim: "^a-k / ^a-j work inside ^a-v scrollback mode. The top-level keymap resolver is bypassed when a pager is active (the pager owns the keys) … The pager handler now tracks the ^a chord locally when the active view is a pane_scroll pager." #116 CHANGELOG verbatim: "v1.50.56 added a chord handler inside handle_pager_key … That handler was never reachable — ^a is a meta key, so route_key always sends it to the resolver, not to the pager. … The right fix lives in route_key: when a LowerPane pager is open and focus is on the top, non-meta keys flow to the file list — symmetric to the existing TopPane-pager-with-bottom-focus rule. … Remove the unreachable chord handler and its pager_pending_w_chord field."
+Inferred intent: #116 corrects #111's layering mistake — the chord can only be intercepted above the pager, not inside it. evidence: #116 diff removes ~70 lines from src/app/mod.rs (the dead handler) and adds +40 to src/app/route.rs (the reachable rule); CHANGELOG says the #111 handler "was never reachable." confidence: high
+Supersedes: PR #111's pager-local `^a` chord handler and its `pager_pending_w_chord` field — both removed by #116 (the second PR on the same branch slug, six hours later the same day)
+
+A self-correcting pair, both on branch slug `fix/pane-scroll-pane-focus-chord`. #111 tried to make `^a-k`/`^a-j` work while a `^a-v` scrollback pager owned the keys, by tracking the `^a` chord inside `handle_pager_key`. #116 found that path was dead on arrival: because `^a` is a meta key, `route_key` always hands it to the resolver before the pager ever sees it, so the chord dispatched `PaneFocusUp` but `set_pane_focus(false)` only flipped the flag while the `LowerPane` pager kept owning subsequent non-meta keys — j/k went right back into scrollback. The reachable fix is a `route_key` rule symmetric to the existing TopPane-pager-with-bottom-focus case: when a LowerPane pager is open and focus is on top, non-meta keys flow to the file list; the pager stays visible, only key ownership changes; `^a-j` flips back. #116 deletes the unreachable handler and its `pager_pending_w_chord` field. Per the contract, #116 is folded into this moment with #111 (same slug).
+
+Provenance:
+- dbd4180 (PR #111, 2026-05-21) — src/app/mod.rs +67 (pager-local chord, later removed), CHANGELOG +10
+- 45f642d (PR #116, 2026-05-21) — src/app/mod.rs -70 (delete dead handler), src/app/route.rs +40/-7 (reachable route_key rule), CHANGELOG +22
+- the two share branch slug fix/pane-scroll-pane-focus-chord — #116 is the corrected re-land
+
+<!-- Entry-ID: 01KTMMVBB7ZNVH9YM9813VEBXJ -->

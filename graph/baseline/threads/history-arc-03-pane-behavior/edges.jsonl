@@ -33,3 +33,5 @@
 {"source":"entry:01KTMMQPCA7E5VN78TTBZ43MQY","target":"entry:01KTMMRPVC83MXP3YS6VHS9YJZ","type":"followed_by"}
 {"source":"thread:history-arc-03-pane-behavior","target":"entry:01KTMMSVHSFYKGPSD9R8NRFCZY","type":"contains"}
 {"source":"entry:01KTMMRPVC83MXP3YS6VHS9YJZ","target":"entry:01KTMMSVHSFYKGPSD9R8NRFCZY","type":"followed_by"}
+{"source":"thread:history-arc-03-pane-behavior","target":"entry:01KTMMVBB7ZNVH9YM9813VEBXJ","type":"contains"}
+{"source":"entry:01KTMMSVHSFYKGPSD9R8NRFCZY","target":"entry:01KTMMVBB7ZNVH9YM9813VEBXJ","type":"followed_by"}
