@@ -214,3 +214,30 @@ Confidence: High recorded-rationale density. Most moments quote verbatim from sr
 Provenance: 01KTMMHJ879C24FY2WYYT9F1SF, 01KTMMJB955RF16D842WFFEBYP, 01KTMMKCGA2NKTRHBH3VPW37AJ, 01KTMMMBVCGADASG74RTHKWY97, 01KTMMNW4ZDF0R1C5631XRD593, 01KTMMPRPTSP0J1MTJCT3WW6N1, 01KTMMR7X2GJAMQE0HD0C0HA6R, 01KTMMTF0MQ96P7BVN7QQPVBNS
 
 <!-- Entry-ID: 01KTMNJD6GJM90D0WTTS0X28XR -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:27:50.784005+00:00
+Role: scribe
+Type: Note
+Title: Arc: history-arc-07-codex-and-mcp-bridge — hardcoded peers → AgentProfile registry
+
+Spec: scribe
+
+tags: #history #synthesis
+
+Arc: history-arc-07-codex-and-mcp-bridge — hardcoded peers → AgentProfile registry
+Span: 2026-05-10 → 2026-06-01 · 11 moments · 3 supersessions
+Narrative:
+  This arc summarizes the #38–#311 continuation window only; it is secondary to the per-moment log in history-arc-07-codex-and-mcp-bridge and does not replace it. The framing moment states the throughline: the claude+codex MCP bridge generalizes into a multi-agent surface, "hardcoded peers → declarative agent registry," answering the arc-07 tail's open question about whether a per-peer registration layer would stay parallel or become parametric [01KTMMPRDQ4Y8Q0D5AD9ZND5SA]. The expansion begins by multiplying the parallel-per-peer shape: gemini arrives as the third `AgentKind`, carrying its own detection, resume, and session-discovery functions, though one shared sub-concern — the closest-by-start-time picker — is generalized over a `SessionCandidate` trait [01KTMMR37MMRBBRMQK58RFN6R2]. The active peer becomes visible as a status-bar segment whose short-id resolves per-kind at render time [01KTMMRZ2K1RSQN8HNSHZS03E1].
+
+  A hardening sub-thread runs alongside the expansion, all on the shared substrate or its per-peer branches: a claude resume-enter race fixed with a two-phase keystroke injection [01KTMMT76DJR9MACFF973R44PK]; MCP context-freshness, where agent-initiated mutations now write the context file synchronously while human edits stay debounced, plus codex-resolver hygiene that drops a private timestamp parser for the shared `parse_iso8601_to_epoch_secs` [01KTMMWZXSEMHKYCD0GGNSNR3E]; and a 20s socket IO deadline so a wedged MCP server surfaces as a clean JSON-RPC error instead of hanging the agent [01KTMN2RJ3V39M24PWFHXJ3R7K]. The diff shape suggests the substrate stayed singular — one socket, one proxy — and kept absorbing correctness work while the peer set grew (inferred).
+
+  The per-peer cost peaks at the transcript surface: `^a v` learns to read an agent's on-disk JSONL instead of scraping the terminal grid, driven by the codex-specific constraint that it "keeps its history in a DECSTBM scroll region ... so it can never be screen-scraped" — and the renderer is reimplemented once per agent across three near-identical files (`codex_transcript.rs`, `claude_transcript.rs`, `agy_transcript.rs`), with a shared tail-read helper fixing the same 100+ MB hang "twice, once per file" [01KTMMVJ6RR8RM6WNZ9HKQC5C8]. Antigravity (agy) onboards as the fourth peer the expensive way — detection, resume, status short-id, and a third parallel transcript file — and the chronology (agy's onboarding hours before the registry merge the same day) reads as the motivation made nearly legible as cause-and-effect [01KTMMY8R53BC7BJPEHKVWTRD0].
+
+  The generalization lands at #176: the "~10 per-agent `match AgentKind` dispatch sites" collapse into one `AgentProfile` trait plus `REGISTRY` in a new `src/agent/` module, with `AgentKind` demoted to the on-disk persistence tag and behavior migrated to profiles — asserted behavior-preserving, "all existing agent tests pass verbatim" [01KTMMZWBVK4X3QJP7SJW3ZEG2]. The dividend is immediate and measurable: zot becomes the fifth agent 18 minutes later via "one impl + one registry line, no dispatch-site edits," with zero `src/app/mod.rs` changes against agy's tree-wide sweep hours earlier [01KTMN0ZW93D5P7TPZCVMCWC0B]. A process-stats line on the activity monitor (pid/uptime/rss/threads/panes) gives the operator visibility into the multi-agent host's thread and memory growth [01KTMN1TSVDFN7SWK34QF2SWY5].
+Lineage: moment [01KTMMR37MMRBBRMQK58RFN6R2] -> [01KTMMRZ2K1RSQN8HNSHZS03E1] -> [01KTMMVJ6RR8RM6WNZ9HKQC5C8] -> [01KTMMY8R53BC7BJPEHKVWTRD0] -> [01KTMMZWBVK4X3QJP7SJW3ZEG2] (supersedes every per-peer dispatch site since #19) -> [01KTMN0ZW93D5P7TPZCVMCWC0B]
+Open / unsettled: zot ships partial — transcript scrollback and `--session <path>` resume deferred until its on-disk layout is confirmed, now expressible as an unimplemented trait method rather than an absent file [01KTMN0ZW93D5P7TPZCVMCWC0B]; the claude phased-write injection timing stays claude-shaped after the registry since `AgentProfile` carries selectors, not a unified injector [01KTMMT76DJR9MACFF973R44PK]; codex status short-id (UUID in rollout filename) and per-CLI token usage remain deferred [01KTMMRZ2K1RSQN8HNSHZS03E1]; agent-status off-render-thread resolution is downstream in history-seg-refactor-mvu (#234).
+Confidence: High across the window; one moment (#142 activity monitor) is med on its multi-agent motivation — the metrics' purpose is recorded generically, not as caused by agent growth — high on mechanics [01KTMN1TSVDFN7SWK34QF2SWY5]. All other moments carry verbatim CHANGELOG / module-doc / AGENTS.md rationale plus pickaxe verification (#176 trait is net-new).
+Provenance: 01KTMMPRDQ4Y8Q0D5AD9ZND5SA, 01KTMMR37MMRBBRMQK58RFN6R2, 01KTMMRZ2K1RSQN8HNSHZS03E1, 01KTMMT76DJR9MACFF973R44PK, 01KTMMVJ6RR8RM6WNZ9HKQC5C8, 01KTMMWZXSEMHKYCD0GGNSNR3E, 01KTMMY8R53BC7BJPEHKVWTRD0, 01KTMMZWBVK4X3QJP7SJW3ZEG2, 01KTMN0ZW93D5P7TPZCVMCWC0B, 01KTMN1TSVDFN7SWK34QF2SWY5, 01KTMN2RJ3V39M24PWFHXJ3R7K
+
+<!-- Entry-ID: 01KTMNJRT9FD74NGXQXHH78A3B -->
