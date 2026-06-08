@@ -219,3 +219,35 @@ Provenance:
 - prior entry 01KTMKY262M6Y6GH25DYKBY33H (this thread, Phase 2) — supplied the pane floor this phase finally deletes.
 
 <!-- Entry-ID: 01KTMKZ502R8JYARTMFMKSGB72 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:00:12.054053+00:00
+Role: scribe
+Type: Note
+Title: PR #213–#217 — Phase 4: widen PostAction into the Effect vocabulary; run_effects becomes the sole executor
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the anemic two-variant `PostAction` is widened into a `#[non_exhaustive] enum Effect` in a new `src/app/effect.rs`, and `run_effects` becomes the single side-effect executor for clipboard, signals, send-to-pane, and terminal-title — moving five inline `clipboard::copy` sites, `kill_pg`/SIGSTOP/SIGCONT, and `update_term_title` behind effect data.   [kind: refactor]
+When: 2026-05-31..2026-06-01 · PR #213 (effect-scaffold) commit 3e978f4 · #214 clipboard · #215 signal · #216 send-title · #217 docs/mvu-phase4-done commit 63f2149
+Recorded rationale: "Phase 4 DONE (PRs #213–#216, each behavior-equivalent behind green CI + a per-PR adversarial verification workflow): `run_effects` (in the new `src/app/effect.rs`) is the sole side-effect executor for clipboard / signal / send-to-pane / terminal-title. Vocabulary: `ForegroundExec` (via a `From<PostAction> for Vec<Effect>` shim), `CopyToClipboard` + `ClipMsg`, `#[cfg(unix)] SignalGroup` + `SigOk`, `SendToPane` + `PaneTarget` + `PaneInput`, `SetTerminalTitle`." — docs/MVU_PLAN.md (Phase 4 DONE, added/edited PR #217)
+Inferred intent: the migration is kept surgical — "Only `ApplyResult::Post` was widened to `Post(Vec<Effect>)` — the other two result enums and the `update`-signature collapse stay in Phase 5." The scope is scoped honestly: "`^C`: only signal-delivery sites become `SignalGroup`; prompt-cancel/buffer-clear/flash-hint stay pure transitions." And the corrected Done metrics expose an earlier vacuous grep: "the original cross-file grep was vacuous — those handler modules were already at 0 because the IO lived in `mod.rs`. `clipboard::copy` now appears exactly 5× repo-wide (1 in `run_effects` + 3 `pager.rs` footer yanks + 1 `yank_quick_select`…)."   confidence: high
+Supersedes: the `PostAction` enum (only `None`+`Spawn` modeled) named in MVU_PLAN.md's "PostAction / inline side-effect anemia" bug class, and the 5 inline `clipboard::copy` IO sites — generalized into the `Effect` vocabulary with `run_effects` as sole executor. The `ForegroundExec` lands via a `From<PostAction>` shim so call sites stay byte-identical. (verified: `effect.rs` introduced in #213 diff, +439/−291 across 7 files)
+
+Reconstructed — the four-PR slice, folded:
++ #213 Effect scaffold + `ForegroundExec` via the `From` shim (reuses Phase 1's parking executor); `src/app/effect.rs` new, `pager_handler.rs`/`state.rs` rewired.
++ #214 `CopyToClipboard` effect for the 4 status-bar yanks.
++ #215 `SignalGroup` effect for pause/resume (`kill_pg` STOP/CONT).
++ #216 `SendToPane` + `SetTerminalTitle` (final Phase 4 slice).
+The plan records what was deliberately left inline as loop-intrinsic — "the producer is the loop, so threading through a non-existent handler return buys nothing": the paste bracketed-write, the resume-injection two-phase write (needs a `Tab`/`SinkId` target — Phase 5), the context-write debounce, `interrupt_task`'s SIGINT (flashes the pager footer not the status bar), and `write_context` (protects the MCP read-after-write contract). The typed `ForegroundDone`/`PostWork` message was explicitly NOT added — the spawn after-work runs inline in `run_effects`'s `ForegroundExec` arm (deferred to Phase 5). #217 is the doc milestone recording all of this.
+
+Provenance:
+- 3e978f4 (PR #213, 2026-05-31) — adds `src/app/effect.rs`; +439/−291 over 7 files; `From<PostAction> for Vec<Effect>` shim.
+- d03fb79/82f18a6/04b9eaf (PR #214/#215/#216, 2026-05-31..06-01) — clipboard, signal, send-to-pane+title effects.
+- 63f2149 (PR #217 docs/mvu-phase4-done, 2026-06-01) — docs/MVU_PLAN.md +26/−5 recording Phase 4 DONE + corrected metrics (quoted).
+- docs/MVU_PLAN.md — Phase 4 + Effect class (A)/(B) sections.
+- prior entry 01KTMKXA7ZKKR421NTPRJ9EQ3M (this thread, Phase 1) — supplied the parking `ForegroundExec` reused here.
+
+<!-- Entry-ID: 01KTMM03Q5F5EA3VEQSJQJZYN0 -->
