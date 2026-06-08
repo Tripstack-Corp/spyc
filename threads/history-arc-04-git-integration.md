@@ -611,3 +611,31 @@ Provenance:
 - note: at #148 `git_status_porcelain_raw` still takes the `huge` flag; PR #168 (one moment later) removes it.
 
 <!-- Entry-ID: 01KTMMMDE31YKNBCGGYC89JKBG -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:55.566461+00:00
+Role: scribe
+Type: Note
+Title: PR #168 + #169: untracked-marker correctness — drop the `-uno` huge-tree path, then collapse untracked-only dirs to `?` not `~`
+
+Spec: scribe
+
+tags: #history #arc-04
+
+Moment: untracked-marker correctness on huge trees — Reconstructed: the huge-tree heuristic was running `git status -uno`, silently hiding the `?` untracked marker in any repo with a built `target/`; #168 always runs `-unormal` and rips out the dead `huge` plumbing, #169 follows up so an untracked-only directory collapses to `?` rather than the generic `~`   [kind: supersession]
+When: 2026-05-29 · PR #168 (fix/untracked-markers-huge-tree) · commit fab88b3 (2nd-parent cd80de7)   AND   2026-05-29 · PR #169 (fix/untracked-dir-marker) · commit 82f23f4 (2nd-parent f2595ca)
+Recorded rationale (#168 body, cd80de7): "The git-status poll switched to `git status -uno` (no untracked enumeration) on any tree past the huge-tree subdir threshold. But that threshold counts on-disk subdirs — dominated by gitignored build dirs like `target/` — while git's untracked scan skips gitignored dirs entirely. So `-uno` saved next to nothing (measured: `-unormal` and `-uno` are both ~10ms on this repo) yet silently hid the `?` marker on every untracked file… Removes the now-dead `huge` field/param from `git_status_porcelain_raw`, `GitWorkerRequest`, `GitWorkerResult`, and `GitStatusRawCache`"
+Recorded rationale (#169 body, f2595ca): "Follow-up to the huge-tree untracked fix. When the list view collapses a subtree's git status onto its directory row, it used the generic unstaged-Modified (`~`) shape for *any* deep change — including a subtree whose only content is untracked… Now the dir-collapse distinguishes the two: an untracked-only subtree flags the directory `?`; any tracked change flags it `~`. Tracked outranks untracked and is order-independent"
+Inferred intent: #168 is a both-a-perf-myth-debunk and a correctness fix (the `-uno` optimization wasn't buying anything yet broke the `?` marker); #169 closes the dir-row gap the same fix exposed. evidence: #168 changes `git_status_porcelain_raw` to always `-unormal` and removes the `huge` param across sysinfo.rs / state.rs (`GitWorkerRequest`, `GitWorkerResult`, `GitStatusRawCache`) / mod.rs relevance-gate; #169 rewrites the dir-collapse branch in `parse_porcelain_statuses` (sysinfo.rs:194+) to seed dirs `clean()` then set `untracked` for untracked-only subtrees and overwrite to unstaged-Modified for any tracked sibling. confidence: high
+Supersedes: the `-uno`/huge-tree status branch (introduced earlier in the subprocess git path) — #168 deletes the `huge` cache-shape dimension entirely; #169 supersedes the prior dir-collapse rule that mapped every deep change to `~` (its old test `untracked_subdir_collapses_to_dirty_dir_entry` is replaced by `untracked_only_subdir_collapses_to_untracked_dir`).
+
+#168 is the larger of the pair. The huge-tree flag was a proxy for "expensive git status," but it counted on-disk subdirs dominated by gitignored build dirs — exactly the dirs git's untracked scan already skips. So `-uno` bought ~nothing (the commit cites a measurement: both ~10 ms on this repo) while hiding `?` on every untracked file in any repo with a built `target/`, making fresh never-committed files indistinguishable from tracked ones. The fix is one line of intent — always `-unormal` — plus the removal of the now-purposeless `huge` cache-shape dimension from four types and the result relevance-gate (the gate previously discarded a result if `is_huge_tree != result.huge`; now it gates on repo root alone). The huge-tree flag keeps its real jobs: fs-watcher recursion gating and the 10 s poll throttle.
+
+#169 is the follow-up the bigger fix surfaced. Once `?` markers were back, the directory-collapse rule in `parse_porcelain_statuses` still mapped *any* deep change to the generic `~`, so a folder of only-new files looked identical to one with tracked edits. The rewrite seeds the dir entry `GitFileStatus::clean()`, sets `untracked` when the subtree is untracked-only, and wholesale-overwrites to `unstaged(Modified)` for any tracked sibling — with the ordering invariant that tracked outranks untracked and never downgrades, regardless of which porcelain row git emits first. Two tests pin both orderings (`mixed_subdir_prefers_modified_over_untracked`). All of this hardens the still-subprocess `git status` path; **history-seg-gix-migration** replaces it at #283–#292.
+
+Provenance:
+- fab88b3 / 2nd-parent cd80de7 (PR #168 fix/untracked-markers-huge-tree, 2026-05-29) — `src/sysinfo.rs` (`git_status_porcelain_raw` always `-unormal`, drops `huge` param; regression test for `??` in subdir), `src/app/mod.rs` (worker call + relevance-gate lose `huge`), `src/app/state.rs` (`huge` removed from `GitWorkerRequest`/`GitWorkerResult`/`GitStatusRawCache` and reuse check). CHANGELOG documents the `-uno` myth.
+- 82f23f4 / 2nd-parent f2595ca (PR #169 fix/untracked-dir-marker, 2026-05-29) — `src/sysinfo.rs` (dir-collapse branch in `parse_porcelain_statuses`, sysinfo.rs:194+; old `~`-collapse test replaced, mixed/untracked-only tests added).
+- prior entry this thread: 01KTMMJB49K22EGR14EF11BP18 (continuation framing).
+
+<!-- Entry-ID: 01KTMMNHWKEASZ0E7NN394D0Z8 -->

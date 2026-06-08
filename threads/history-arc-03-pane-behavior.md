@@ -664,3 +664,27 @@ Provenance:
 - docs/V1_5_PLAN.md §"Phase 6 — Task ↔ pane migration" — quoted above
 
 <!-- Entry-ID: 01KTMMMHWAHASBVT11Y96RBKSA -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:11:59.103503+00:00
+Role: scribe
+Type: Note
+Title: PR #54 (fix/tab-switch-focuses-pane): switching tabs pulls focus into the pane
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: tab/pane focus — Reconstructed: switching pane tabs now flips `pane_focused = true`, so the next keystroke lands in the newly-active child rather than the file list   [kind: convention]
+When: 2026-05-08 · PR #54 (fix/tab-switch-focuses-pane, 4417597) · v1.50.3
+Recorded rationale: CHANGELOG verbatim: "Switching pane tabs (^a-n / ^a-p / ^a-1..9) now pulls focus into the pane. Reported: switching tabs from the file-list-focused state changed the active tab but kept focus on the file list — the next keystroke went to spyc, not the newly-active tab. Matches the existing behavior of ^a c (new tab), which has always pulled focus."
+Inferred intent: this generalizes a focus convention that already held for tab *creation* to tab *switching*. evidence: the added comment in src/app/mod.rs reads "Matches the behavior of `^a c` (new tab) which already does this in `open_pane_tab_in`."; the fix is three identical `self.state.pane_focused = true;` insertions, one per switch path (next / prev / numeric). confidence: high
+Supersedes: the prior tab-switch behavior where `^a-n`/`^a-p`/`^a-1..9` changed `active` but left `pane_focused` untouched — a pane-focus-model gap left open since the arc-03 head established `pane_focused` as the routing flag (see arc-03 tail entry 01KR11TME2KF on "pane_focused's three meanings")
+
+A small but model-defining fix: it settles one of the ambiguities the arc-03 tail flagged about `pane_focused`. The reconstructed dispatch reads as "tab switch is an interaction intent" — the three switch entry points (`^a-n`, `^a-p`, `^a-1..9`) each gain a `pane_focused = true` so focus follows the active tab. The comment in the diff states the principle directly: "Switching tabs implies 'I want to interact with this other tab' — pull focus into the pane so the next keystroke lands in the child, not the file list."
+
+Provenance:
+- 4417597 (PR #54, 2026-05-08) — src/app/mod.rs +9 (three `self.state.pane_focused = true;` insertions across the switch paths), CHANGELOG +7
+- arc-03 thread entry 01KR11TME2KF — "pane_focused's three meanings" seam this fix narrows
+
+<!-- Entry-ID: 01KTMMNC6G5B7Y73KC0ZN1BEMH -->

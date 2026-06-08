@@ -21,3 +21,5 @@
 {"source":"entry:01KTMMJB49K22EGR14EF11BP18","target":"entry:01KTMMKGQJ9DE88F4M670QZ7KZ","type":"followed_by"}
 {"source":"thread:history-arc-04-git-integration","target":"entry:01KTMMMDE31YKNBCGGYC89JKBG","type":"contains"}
 {"source":"entry:01KTMMKGQJ9DE88F4M670QZ7KZ","target":"entry:01KTMMMDE31YKNBCGGYC89JKBG","type":"followed_by"}
+{"source":"thread:history-arc-04-git-integration","target":"entry:01KTMMNHWKEASZ0E7NN394D0Z8","type":"contains"}
+{"source":"entry:01KTMMMDE31YKNBCGGYC89JKBG","target":"entry:01KTMMNHWKEASZ0E7NN394D0Z8","type":"followed_by"}
