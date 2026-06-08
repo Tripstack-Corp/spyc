@@ -2,13 +2,14 @@
   "history-synthesis": {
     "reactions": {},
     "tags": [
-      "history"
+      "history",
+      "onboarding"
     ],
     "flags": [],
     "xrefs": [],
     "pinned": false,
-    "last_touched": "2026-06-08T22:31:54.646973+00:00",
+    "last_touched": "2026-06-08T22:32:03.200091+00:00",
     "vote_score": 0
   },
-  "_ann_size": 214
+  "_ann_size": 431
 }
