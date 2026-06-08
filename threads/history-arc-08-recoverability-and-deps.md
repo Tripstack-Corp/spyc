@@ -763,3 +763,35 @@ Provenance:
 - Cross-ref: PR #28 entry in this thread = 01KR3903VA7DTNDJKQAFZ6DP8M (the `MAX_ENTRIES` cap the doc-comment names "same shape as").
 
 <!-- Entry-ID: 01KTMMTRQ21DMSTBQ38W9SYSQB -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:15:50.172643+00:00
+Role: scribe
+Type: Decision
+Title: PRs #91/#101/#102 (project-home throughline): PROJECT_HOME becomes the single anchor for worktree, session save, and selection-paste — superseding cwd-relative behavior
+
+Spec: scribe
+
+tags: #history #arc-08
+
+Moment: project-home-anchoring — Reconstructed: across three PRs, `state.project_home` converges into the single anchor for harpoon/MCP context (worktree entry/exit), session save, and selection-to-pane paste; `project_home` initialization stops requiring a literal `.git` and defaults to the launch dir unconditionally   [kind: supersession]
+When: 2026-05-15 → 2026-05-19 · PR #91 (fix/worktree-project-home-chroot, merge 93a8af9) · PR #101 (fix/session-save-anchors-on-project-home, merge 5811f22) · PR #102 (fix/yank-paste-relative-to-project-home, merge a74a309)
+Recorded rationale (PR #101, the anchoring decision): "Session save anchors on `project_home`, which now always defaults to the launch dir. … `project_home` initialization at startup no longer requires a literal `.git` in the cwd. … Now `project_home` defaults to the launch dir unconditionally; override with `:project <path>` / `gP`, clear with `:project clear`." — CHANGELOG.md (PR #101)
+Inferred intent: a three-step convergence making `project_home` the authoritative path anchor for every project-scoped operation — evidence: each PR re-routes one consumer (worktree chroot → session save → selection-paste) to `state.project_home`. confidence: high
+Supersedes: the prior cwd-relative behavior — (a) PR #101 supersedes the `.git`-required `project_home` init (launching one level above a repo left it `None`); (b) PR #101 supersedes session-save-at-current-listing-dir; (c) PR #102 supersedes absolute-path selection-paste. Each is a documented behavior change in `### Fixed`.
+
+This is the "PROJECT_HOME is the anchor" decision, told as one moment across three same-week PRs. The throughline: before this window, path-scoped operations took their anchor ad hoc (current listing dir for session save, parent repo for worktree harpoon, absolute paths for paste). After it, all three read `state.project_home`.
+
+**PR #91 — worktree entry/exit re-anchors PROJECT_HOME.** The CHANGELOG records the bug verbatim: pre-fix, selecting/creating/deleting a worktree (`W l`/`W n`/`W d`) "left `PROJECT_HOME` pointing at the parent repo (entry) or at the just-deleted dir (delete), so harpoon stayed bound to the wrong project, MCP context (and therefore claude's `:grep` / `search_paths` / `search_content`) searched the wrong tree, and `gh` (jump-home) jumped out of the worktree." The fix sets `state.project_home` and calls `reconcile_harpoon()` on each worktree transition; the `W d` arm "captures the main repo path *before* the delete … sets `state.project_home` to the main repo," accepting that `listing.dir` and `project_home` "legitimately differ here." Attributed in the CHANGELOG to "a daily-driver after a confusing afternoon." Also drops 4 lines from BUGS.md.
+
+**PR #101 — session save anchors on project_home, which now always defaults to the launch dir.** This is the supersession core. Two changes: (1) `project_home` init "no longer requires a literal `.git` in the cwd" — the prior behavior left it `None` when launched one level above a clone, leaving session save / harpoon / MCP context with no anchor; now it "defaults to the launch dir unconditionally." (2) Session save uses `project_home` (→ `start_dir` → `listing.dir` as "defense-in-depth fallbacks") instead of the current listing dir, because "quitting from a deep subdir was saving the session at that path … (because `load_sessions` dedups on cwd + tab commands) a fresh session entry for every drill-in rather than one entry per project." Consequence recorded: "`spyc -r` accordingly drops you at the project root."
+
+**PR #102 — `^W s` (PaneSendSelection) sends paths relative to project_home.** The selection-to-pane paste was "emitting absolute paths, so a Claude (or shell) session running inside the project received `/Users/.../src/foo.rs` when the agent would expect `src/foo.rs`." Now paths inside `project_home` strip the prefix (root itself becomes `.`); paths outside stay absolute "rather than walking up with `../../..`." Scoped narrowly: "No change to other `selection_paths()` consumers — file commands, shell `%` expansion, `:grep`, etc." All three are squash merges whose CHANGELOG carries full rationale (recorded). The merge subjects are terse ("fix: anchor session save on project_home" etc.); the `### Fixed` blocks are the recorded design rationale.
+
+Provenance:
+- 93a8af9 (PR #91, 2026-05-15) — `git diff 93a8af9^1 93a8af9 -- src/app/mod.rs src/app/state.rs CHANGELOG.md BUGS.md`; `state.project_home` set + `reconcile_harpoon` on `W l`/`W n`/`W d`; +105/-8; BUGS.md -4.
+- 5811f22 (PR #101, 2026-05-19) — `git diff 5811f22^1 5811f22 -- src/app/mod.rs CHANGELOG.md`; `project_home` unconditional launch-dir default + session-save anchor chain; +57/-6.
+- a74a309 (PR #102, 2026-05-19) — `git diff a74a309^1 a74a309 -- src/app/mod.rs CHANGELOG.md`; `PaneSendSelection` strips `project_home` prefix, root→`.`, outside stays absolute; +36/-3.
+- All three CHANGELOG `### Fixed` blocks quoted verbatim above.
+
+<!-- Entry-ID: 01KTMMWD5MCGJ5DM208DS27HRK -->
