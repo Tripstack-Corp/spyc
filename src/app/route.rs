@@ -59,8 +59,10 @@ pub(super) struct RouteSnapshot {
     pub is_prompting: bool,
     /// `App::top_overlay.is_some()` — `V`/`;` overlay pty alive.
     pub has_top_overlay: bool,
-    /// `App::pager`'s `Mount`, if any.
+    /// `view.pager`'s `Mount`, if any (top region: Overlay / TopPane).
     pub pager_mount: Option<Mount>,
+    /// A bottom-region `^a v` scrollback (`view.scroll_pager`) is open.
+    pub has_scroll_pager: bool,
     /// `App::pane_tabs.is_some()`.
     pub has_pane_tabs: bool,
     /// `state.pane_focused`.
@@ -86,28 +88,30 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
         return KeyDestination::OverlayPty;
     }
 
-    // 2. In-app pager. Overlay mounts always win; slot-mounts
-    //    (TopPane / LowerPane) coexist with another surface and
-    //    let three classes of key fall through:
-    //      - Meta chords always reach the resolver.
-    //      - Non-meta keys flow to the bottom pane when the bottom
-    //        pane has focus and the pager is in the *top* slot.
-    //      - Non-meta keys flow to the file list when the top has
-    //        focus and the pager is in the *lower* slot.
-    //    Symmetric: each slot owns input only when the "other" surface
-    //    is focused away from it. `^a-k` from a `^a-v` scrollback
-    //    pager moves focus to the file list while leaving the pager
-    //    visible; j/k then navigate the file list, not the
-    //    scrollback view.
+    // 2. Top-region pager (`view.pager`: Overlay or TopPane). Overlay is
+    //    modal and always eats keys. A TopPane pager (`D`) coexists with the
+    //    bottom: it yields non-meta keys to the bottom pane/scrollback when the
+    //    bottom is focused (`bottom_typing`), and meta chords always escape to
+    //    the resolver. `active_pager_mut!` resolves `PagerKey` to this pager
+    //    (the top is focused, or it's a modal Overlay).
     if let Some(mount) = snap.pager_mount {
-        let coexists_with_other_slot = matches!(mount, Mount::TopPane | Mount::LowerPane);
-        let escape_meta = coexists_with_other_slot && is_meta;
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
-        let top_typing = matches!(mount, Mount::LowerPane) && !bottom_owns && !is_meta;
-        if !(escape_meta || bottom_typing || top_typing) {
+        let escape_meta = matches!(mount, Mount::TopPane) && is_meta;
+        if !(bottom_typing || escape_meta) {
             return KeyDestination::PagerKey;
         }
-        // else fall through to the resolver / bottom-pane arms.
+        // else fall through to the scrollback / bottom-pane / resolver arms.
+    }
+
+    // 2b. Bottom-region scrollback (`view.scroll_pager`, `^a v`). Owns non-meta
+    //     keys while the bottom pane is focused — coexisting with a top-region
+    //     pager above (the symmetric half of `bottom_typing`). `active_pager_mut!`
+    //     resolves `PagerKey` to the scrollback because the pane is focused.
+    //     With the top focused instead, keys fall through to the file list so
+    //     j/k navigate it while the scrollback stays visible (`^a-k` workflow);
+    //     meta chords always escape.
+    if snap.has_scroll_pager && bottom_owns && !is_meta {
+        return KeyDestination::PagerKey;
     }
 
     // 3. Pane scrollback mode. Non-meta keys with the pane focused
@@ -150,6 +154,7 @@ impl App {
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             has_top_overlay: self.runtime.top_overlay.is_some(),
             pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+            has_scroll_pager: self.view.scroll_pager.is_some(),
             has_pane_tabs: self.runtime.pane_tabs.is_some(),
             pane_focused: self.state.pane_focused(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
@@ -172,6 +177,7 @@ mod tests {
             is_prompting: false,
             has_top_overlay: false,
             pager_mount: None,
+            has_scroll_pager: false,
             has_pane_tabs: false,
             pane_focused: false,
             pane_scrolling: false,
@@ -300,7 +306,7 @@ mod tests {
         // `^a-k` must reach the resolver so the user can focus the
         // file list.
         let snap = RouteSnapshot {
-            pager_mount: Some(Mount::LowerPane),
+            has_scroll_pager: true,
             has_pane_tabs: true,
             pane_focused: true,   // pane is the underlying owner
             pane_scrolling: true, // entered scroll mode
@@ -315,7 +321,7 @@ mod tests {
         // (scroll, search, etc.) belong to the pager when the bottom
         // surface is focused.
         let snap = RouteSnapshot {
-            pager_mount: Some(Mount::LowerPane),
+            has_scroll_pager: true,
             has_pane_tabs: true,
             pane_focused: true,
             ..idle()
@@ -332,7 +338,7 @@ mod tests {
         // symmetric to how a TopPane pager lets keys through to the
         // bottom pty when the bottom is focused.
         let snap = RouteSnapshot {
-            pager_mount: Some(Mount::LowerPane),
+            has_scroll_pager: true,
             has_pane_tabs: true,
             pane_focused: false, // ^a-k flipped focus to top
             ..idle()
@@ -341,6 +347,30 @@ mod tests {
         assert_eq!(route_key(snap, key('k')), KeyDestination::Resolver);
         // Meta keys still reach the resolver too.
         assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+    }
+
+    /// Coexistence: a `D` TopPane pager up top AND a `^a v` scrollback below at
+    /// the same time (the two-slot fix). Non-meta keys route to a pager either
+    /// way — `active_pager_mut!` picks the focused region's pager — so neither
+    /// evicts the other. Meta chords escape to the resolver.
+    #[test]
+    fn top_pager_and_scrollback_coexist_route_by_focus() {
+        let bottom = RouteSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            has_scroll_pager: true,
+            has_pane_tabs: true,
+            pane_focused: true, // bottom scrollback owns input
+            ..idle()
+        };
+        assert_eq!(route_key(bottom, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(bottom, ctrl('a')), KeyDestination::Resolver);
+
+        let top = RouteSnapshot {
+            pane_focused: false, // top `D` pager owns input
+            ..bottom
+        };
+        assert_eq!(route_key(top, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(top, ctrl('a')), KeyDestination::Resolver);
     }
 
     // ── regression: V/D top_overlay + paste / chord (#75 + V) ─────

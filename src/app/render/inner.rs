@@ -152,20 +152,14 @@ impl App {
             if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.view.theme);
             }
-            // Divider + bottom pane render normally below.
+            // Divider + bottom region render normally below. The bottom region
+            // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
+            // live pane — so a `D` top pager and a bottom scrollback coexist.
             if let Some(divider_rect) = layout.divider {
                 self.render_pane_status_line(frame, divider_rect);
             }
-            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
-                // Pane resize/drain + output_dirty clear settled in
-                // `prepare_panes`.
-                let focused = self.state.pane_focused();
-                tabs.active().with_screen(|screen| {
-                    frame.render_widget(PaneWidget { screen, focused }, rect);
-                    if focused {
-                        place_pty_cursor_from_screen(frame, screen, rect);
-                    }
-                });
+            if let Some(rect) = layout.pane {
+                self.render_bottom_region(frame, rect);
             }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
@@ -213,66 +207,26 @@ impl App {
             layout.list,
         );
 
-        // v1.5 Phase 3: a `LowerPane`-mounted pager (today: only
-        // pane scrollback view, opened via `^a-v`) replaces the
-        // pty widget in the bottom slot — the pty keeps running
-        // off-screen but the user is reading a frozen snapshot
-        // through the pager. The standard centered-overlay pager
-        // path further down is skipped for `LowerPane`-mounted
-        // views (rect dispatch happens here instead).
-        // Same `underlying` logic as the TopPane branch above:
-        // while the help overlay is open, peek into the stash so
-        // the LowerPane scrollback view stays drawn underneath
-        // instead of flickering back to the live pty.
-        let bottom_is_pager = if in_help {
-            self.view.pager_help_stash.as_ref()
+        // v1.5 Phase 3: the bottom region is the `^a v` scrollback pager
+        // (`view.scroll_pager`, a `LowerPane` snapshot) when one is open — it
+        // replaces the pty widget while the pty runs off-screen — else the live
+        // pane. Drawn by the shared `render_bottom_region` helper so it works
+        // identically whether the top region is the file list or a `D` pager.
+        // The scrollback lives in its own slot, independent of the help
+        // overlay's `view.pager` stash.
+        let bottom_is_pager = self.view.scroll_pager.is_some();
+        let bottom_pane_rect: Option<ratatui::layout::Rect> = if let Some(rect) = layout.pane {
+            self.render_bottom_region(frame, rect);
+            // output_dirty cleared in `prepare_panes`.
+            // Quick Select labels paint *over* the live pane widget so the user
+            // keeps the output as context. Skipped when the scrollback owns it.
+            if self.view.quick_select.is_some() && !bottom_is_pager {
+                self.render_quick_select_overlay(frame, rect);
+            }
+            Some(rect)
         } else {
-            self.view.pager.as_ref()
-        }
-        .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
-        let bottom_pane_rect: Option<ratatui::layout::Rect> =
-            if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
-                // Pane resize/drain + output_dirty clear settled in
-                // `prepare_panes`.
-                if bottom_is_pager {
-                    // Skip the pty widget — the pager owns this rect now.
-                    // The LowerPane first-frame scroll snap (the pending
-                    // case) is settled in `prepare_panes`, before this draw.
-                    let underlying = if in_help {
-                        self.view.pager_help_stash.as_ref()
-                    } else {
-                        self.view.pager.as_ref()
-                    };
-                    if let Some(view) = underlying {
-                        crate::ui::pager::render(frame, rect, view, &self.view.theme);
-                    }
-                } else {
-                    let focused = self.state.pane_focused();
-                    // Fold cursor placement into the same lock
-                    // acquisition as the pane render — otherwise
-                    // the worker thread can advance the screen
-                    // between the two and we paint the grid from
-                    // one frame and the cursor from the next
-                    // (visible as off-by-one tearing during fast
-                    // input).
-                    tabs.active().with_screen(|screen| {
-                        frame.render_widget(PaneWidget { screen, focused }, rect);
-                        if focused {
-                            place_pty_cursor_from_screen(frame, screen, rect);
-                        }
-                    });
-                }
-                // output_dirty cleared in `prepare_panes`.
-                // Quick Select labels paint *over* the pane widget so
-                // the user keeps the live output as context. Render
-                // here, after the pane, before the divider.
-                if self.view.quick_select.is_some() && !bottom_is_pager {
-                    self.render_quick_select_overlay(frame, rect);
-                }
-                Some(rect)
-            } else {
-                None
-            };
+            None
+        };
         // Cursor placement for the bottom-pane branch is folded into
         // the `with_screen` block above (single lock window for grid
         // + cursor). `bottom_pane_rect` is still computed so other
@@ -336,6 +290,28 @@ impl App {
         // except the activity monitor.
         if self.view.harpoon_menu.is_some() {
             self.render_harpoon_menu(frame);
+        }
+    }
+
+    /// Draw the bottom region into `rect`: the `^a v` scrollback pager
+    /// (`view.scroll_pager`) when one is open, else the live pty pane. Shared
+    /// by the TopPane-pager branch and the standard branch so a top-region `D`
+    /// pager and a bottom scrollback coexist. Cursor placement folds into the
+    /// pane's `with_screen` lock (grid + cursor from one snapshot — no
+    /// off-by-one tear during fast input).
+    fn render_bottom_region(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        if let Some(view) = self.view.scroll_pager.as_ref() {
+            // The scrollback snapshot owns this rect; the pty runs off-screen.
+            // The first-frame scroll snap (pending) is settled in `prepare_panes`.
+            crate::ui::pager::render(frame, rect, view, &self.view.theme);
+        } else if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
+            let focused = self.state.pane_focused();
+            tabs.active().with_screen(|screen| {
+                frame.render_widget(PaneWidget { screen, focused }, rect);
+                if focused {
+                    place_pty_cursor_from_screen(frame, screen, rect);
+                }
+            });
         }
     }
 }

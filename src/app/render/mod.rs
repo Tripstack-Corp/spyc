@@ -270,33 +270,21 @@ impl App {
             }
         }
 
-        // LowerPane pager first-frame snap (default draw path only): the
+        // Bottom-scrollback first-frame snap (default draw path only): the
         // opener can't know the viewport height, so it sets
-        // `pending_scroll_to_bottom` and the snap happens here, before the
-        // draw — so the user never sees a jump frame. Skipped under an
-        // overlay and while the help overlay is up (the stash's pending flag
-        // was already cleared on the original first frame).
-        if !overlay_active {
-            let in_help = self
-                .view
-                .pager
-                .as_ref()
-                .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE);
-            let bottom_is_pager = if in_help {
-                self.view.pager_help_stash.as_ref()
-            } else {
-                self.view.pager.as_ref()
-            }
-            .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::LowerPane));
-            if bottom_is_pager
-                && !in_help
-                && let Some(rect) = layout.pane
-                && let Some(view) = self.view.pager.as_mut()
-                && view.pending_scroll_to_bottom.get()
-            {
-                view.scroll_to_bottom(rect.height);
-                view.pending_scroll_to_bottom.set(false);
-            }
+        // `pending_scroll_to_bottom` and the snap happens here, before the draw
+        // — so the user never sees a jump frame. The scrollback lives in its
+        // own `view.scroll_pager` slot (independent of the help overlay), and
+        // `TranscriptStream::drain` re-arms the flag when its lines arrive
+        // off-thread. Skipped under a top-overlay (the scrollback isn't drawn
+        // there; the pending flag survives until it is).
+        if !overlay_active
+            && let Some(rect) = layout.pane
+            && let Some(view) = self.view.scroll_pager.as_mut()
+            && view.pending_scroll_to_bottom.get()
+        {
+            view.scroll_to_bottom(rect.height);
+            view.pending_scroll_to_bottom.set(false);
         }
     }
 

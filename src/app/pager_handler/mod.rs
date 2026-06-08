@@ -20,6 +20,22 @@ use crate::ui::pager;
 
 use super::{App, Effect, EntryKind, PagerView, state};
 
+/// `&mut` selector for the focused-region pager — the macro companion to
+/// [`App::active_pager_ref`]. Inlined (not a method) so the borrow stays
+/// field-level: a method returning `&mut PagerView` would borrow all of `*self`
+/// and collide with handlers that touch sibling fields (history pick, jump buf,
+/// config) while holding the pager. Yields `Option<&mut PagerView>` — use with
+/// `?` or `let Some(view) = active_pager_mut!(self) else { … }`.
+macro_rules! active_pager_mut {
+    ($self:ident) => {
+        if $self.state.pane_focused() && $self.view.scroll_pager.is_some() {
+            $self.view.scroll_pager.as_mut()
+        } else {
+            $self.view.pager.as_mut()
+        }
+    };
+}
+
 mod modes;
 mod motion;
 mod pickers;
@@ -30,7 +46,7 @@ impl App {
     /// context to a sub-handler (returning `Some` when it consumes the key,
     /// `None` to fall through); the final motion handler always consumes.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let Some(view) = &mut self.view.pager else {
+        let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
         };
         // Clear any one-shot flash message from the previous keypress.
@@ -76,7 +92,7 @@ impl App {
     /// renderer's cached `last_viewport_h`; falls back to the centered-
     /// overlay heuristic only before the first frame has run.
     fn pager_viewport(&self) -> u16 {
-        let Some(view) = self.view.pager.as_ref() else {
+        let Some(view) = self.active_pager_ref() else {
             return 2;
         };
         {
@@ -134,13 +150,15 @@ impl App {
     /// when no pane_scroll pager is open — safe to call from
     /// `Action::PaneFocusUp` / `PaneFocusDown` unconditionally.
     pub fn close_pane_scroll_pager(&mut self) {
-        if !self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+        if self.view.scroll_pager.is_none() {
             return;
         }
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.active_mut().exit_scroll_mode();
         }
-        self.clear_pager();
+        // The scrollback lives in its own region slot; the top/overlay pager
+        // (if any) stays put.
+        self.view.scroll_pager = None;
         self.view.needs_full_repaint = true;
         self.state.flash_info("scroll: off");
     }
@@ -153,6 +171,28 @@ impl App {
     pub fn set_pager(&mut self, view: PagerView) {
         self.remember_pager_position();
         self.view.pager = Some(view);
+    }
+
+    /// The pager the key handlers act on (read-only). The bottom pane-scrollback
+    /// (`view.scroll_pager`) and the top/overlay pager (`view.pager`) live in
+    /// separate region slots so a `D` top pager and a `^a v` bottom scrollback
+    /// coexist; this picks the one that currently owns input. Keys reach a
+    /// pager handler only when its region is focused (see `route_key`), so:
+    /// pane focused + a scrollback open → the scrollback; otherwise the
+    /// top/overlay pager.
+    ///
+    /// The `&mut` companion is the [`active_pager_mut!`] macro, not a method:
+    /// a `fn(&mut self) -> &mut PagerView` borrows all of `*self` for the
+    /// return's lifetime, which collides with handlers that also touch sibling
+    /// fields (`pending_history_pick`, `pager_jump_buf`, `state.config`) while
+    /// holding the pager. The macro inlines the slot pick so the borrow stays
+    /// field-level (`view.pager` / `view.scroll_pager` only).
+    pub(super) const fn active_pager_ref(&self) -> Option<&PagerView> {
+        if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+            self.view.scroll_pager.as_ref()
+        } else {
+            self.view.pager.as_ref()
+        }
     }
 
     pub fn edit_in_pane(&mut self) {

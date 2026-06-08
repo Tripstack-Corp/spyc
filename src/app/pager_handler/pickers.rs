@@ -14,7 +14,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // Jump-history popup: j/k navigate, Enter chdirs, x deletes,
         // q/Esc closes. Per-popup j/k handling because the pager
         // dispatch doesn't have a generic picker-move arm; each
@@ -152,7 +152,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // History editor: vi-edit highlighted line, Enter runs, d/x deletes.
         if let Some(ref mut editor) = self.view.pending_history_pick {
             use crate::ui::line_edit::EditResult;
@@ -349,7 +349,7 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = self.view.pager.as_mut()?;
+        let view = active_pager_mut!(self)?;
         // Session picker: j/k navigate, Enter/1-9 select, n new.
         if self.state.pending_sessions.is_some() {
             match key.code {

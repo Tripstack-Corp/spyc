@@ -198,7 +198,9 @@ impl App {
                 // Park at the bottom on first render (deferred — the LowerPane
                 // branch knows the real viewport height).
                 view.pending_scroll_to_bottom.set(true);
-                self.set_pager(view);
+                // The bottom-region scrollback slot — coexists with a
+                // top-region `view.pager` (`D`) rather than evicting it.
+                self.view.scroll_pager = Some(view);
                 self.state.focus = state::Focus::Pane;
                 self.view.needs_full_repaint = true;
                 self.state
@@ -219,28 +221,36 @@ impl App {
             return false;
         };
         let id = stream.id();
-        let pager_matches = self
-            .view
-            .pager
-            .as_ref()
-            .is_some_and(|p| p.stream_id == Some(id));
-        if !pager_matches {
+        // The stream's pager may live in either region slot: the top/overlay
+        // `view.pager` (grep, git-view) or the bottom `view.scroll_pager`
+        // (transcript). Drop the stream if neither holds it (closed / replaced
+        // / stashed).
+        let Some(in_scroll) = self.stream_slot(id) else {
             self.runtime.pager_stream = None;
             return false;
-        }
+        };
         // Owned RenderCtx (clone the theme) so the `&mut` pager borrow below
         // doesn't alias `&self.view.theme` — both live under `self.view`.
+        let full_width = if in_scroll {
+            self.view
+                .scroll_pager
+                .as_ref()
+                .is_some_and(|p| p.full_width)
+        } else {
+            self.view.pager.as_ref().is_some_and(|p| p.full_width)
+        };
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
-            full_width: self.view.pager.as_ref().is_some_and(|p| p.full_width),
+            full_width,
         };
-        // `self.view` and `self.runtime` are disjoint fields, so these two
-        // `&mut` borrows coexist; both end when `drain` returns the owned outcome.
-        let view = self
-            .view
-            .pager
-            .as_mut()
-            .expect("pager presence checked by pager_matches");
+        // Field-level `&mut` (one pager slot) + the disjoint `runtime` borrow
+        // coexist; both end when `drain` returns the owned outcome.
+        let view = if in_scroll {
+            self.view.scroll_pager.as_mut()
+        } else {
+            self.view.pager.as_mut()
+        }
+        .expect("matching slot checked above");
         let stream = self
             .runtime
             .pager_stream
@@ -261,13 +271,13 @@ impl App {
                 true
             }
             DrainOutcome::CloseInfo(msg) => {
-                self.close_stream_pager();
+                self.close_stream_pager(in_scroll);
                 self.state.flash_info(msg);
                 self.runtime.pager_stream = None;
                 true
             }
             DrainOutcome::CloseError(msg) => {
-                self.close_stream_pager();
+                self.close_stream_pager(in_scroll);
                 self.state.flash_error(msg);
                 self.runtime.pager_stream = None;
                 true
@@ -275,32 +285,61 @@ impl App {
         }
     }
 
+    /// Which region slot holds the pager backing stream `id`: `Some(true)` =
+    /// the bottom `view.scroll_pager`, `Some(false)` = the top/overlay
+    /// `view.pager`, `None` = neither (stale / closed). Pure read (returns a
+    /// `Copy` bool), so callers can hold disjoint `&mut` borrows afterward.
+    fn stream_slot(&self, id: u32) -> Option<bool> {
+        if self
+            .view
+            .scroll_pager
+            .as_ref()
+            .is_some_and(|p| p.stream_id == Some(id))
+        {
+            Some(true)
+        } else if self
+            .view
+            .pager
+            .as_ref()
+            .is_some_and(|p| p.stream_id == Some(id))
+        {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     /// Route an in-pager command (e.g. git-view's `|` layout toggle) to the
-    /// active stream if it backs the live pager. Returns whether it was handled
-    /// (false → the key falls through as a no-op, e.g. `|` on a non-git-view /
-    /// blame pager). Re-renders from the retained model — no worker round-trip.
+    /// active stream if it backs a live pager (either region slot). Returns
+    /// whether it was handled (false → the key falls through as a no-op, e.g.
+    /// `|` on a non-git-view / blame / transcript pager). Re-renders from the
+    /// retained model — no worker round-trip.
     pub(crate) fn dispatch_pager_command(&mut self, cmd: PagerStreamCmd) -> bool {
         let Some(stream) = self.runtime.pager_stream.as_ref() else {
             return false;
         };
         let id = stream.id();
-        if self
-            .view
-            .pager
-            .as_ref()
-            .is_none_or(|p| p.stream_id != Some(id))
-        {
+        let Some(in_scroll) = self.stream_slot(id) else {
             return false;
-        }
+        };
+        let full_width = if in_scroll {
+            self.view
+                .scroll_pager
+                .as_ref()
+                .is_some_and(|p| p.full_width)
+        } else {
+            self.view.pager.as_ref().is_some_and(|p| p.full_width)
+        };
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
-            full_width: self.view.pager.as_ref().is_some_and(|p| p.full_width),
+            full_width,
         };
-        let view = self
-            .view
-            .pager
-            .as_mut()
-            .expect("pager presence checked above");
+        let view = if in_scroll {
+            self.view.scroll_pager.as_mut()
+        } else {
+            self.view.pager.as_mut()
+        }
+        .expect("matching slot checked above");
         let stream = self
             .runtime
             .pager_stream
@@ -309,21 +348,24 @@ impl App {
         stream.on_pager_command(cmd, view, &ctx)
     }
 
-    /// Close the active stream-backed pager: pop the prior pager from history
-    /// (so a one-shot that resolves empty / errors pops back to where the user
-    /// was) or clear it. For a LowerPane scroll pager (transcript scrollback),
-    /// also exit the pane's scroll mode.
-    fn close_stream_pager(&mut self) {
-        let Some(pager) = self.view.pager.as_ref() else {
-            return;
-        };
-        if pager.stream_id.is_none() {
-            return;
-        }
-        let was_lower = pager.pane_scroll;
-        self.view.pager = self.view.pager_history.pop_back();
-        if was_lower && let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-            tabs.active_mut().exit_scroll_mode();
+    /// Close the stream-backed pager being torn down. `in_scroll` selects the
+    /// region slot: the bottom transcript scrollback (`view.scroll_pager`) is
+    /// cleared and scroll mode exited (it's `no_history` — nothing to pop); a
+    /// top/overlay stream pager (git-view) pops back to the prior pager so
+    /// `gd`/`g show` on a clean tree returns where the user was.
+    fn close_stream_pager(&mut self, in_scroll: bool) {
+        if in_scroll {
+            self.view.scroll_pager = None;
+            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                tabs.active_mut().exit_scroll_mode();
+            }
+        } else if self
+            .view
+            .pager
+            .as_ref()
+            .is_some_and(|p| p.stream_id.is_some())
+        {
+            self.view.pager = self.view.pager_history.pop_back();
         }
         self.view.needs_full_repaint = true;
     }

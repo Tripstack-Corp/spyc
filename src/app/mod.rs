@@ -421,7 +421,17 @@ struct Runtime {
 /// field; handlers reach it via `self.view.…`.
 #[allow(clippy::struct_excessive_bools)]
 pub struct ViewState {
+    /// The top-region / centered pager: `Mount::Overlay` (grep, git-view,
+    /// help, command output, file viewers) or `Mount::TopPane` (`D`). Drives
+    /// the file-list area or the centered overlay.
     pub pager: Option<PagerView>,
+    /// The bottom-region pane-scrollback pager (`^a v`): always
+    /// `Mount::LowerPane` + `pane_scroll`. Held in a *separate* slot so it
+    /// coexists with a top-region [`Self::pager`] (read a `D` doc up top while
+    /// scrolling claude's history below) — they occupy different screen regions
+    /// and must not evict each other. The focused-region pager is selected by
+    /// [`App::active_pager_mut`]; render draws both independently.
+    pub scroll_pager: Option<PagerView>,
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
@@ -534,6 +544,7 @@ impl ViewState {
     fn new(theme: Theme, context_path: PathBuf, context_dirty: bool, mcp_running: bool) -> Self {
         Self {
             pager: None,
+            scroll_pager: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,

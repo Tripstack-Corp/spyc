@@ -14,7 +14,7 @@ use crate::app::{App, Effect, PagerReturn, TaskStatus, sh_c};
 impl App {
     /// Fall-through: scroll / vi-motion / toggles / close / editor handoff.
     pub(super) fn handle_pager_motion(&mut self, key: KeyEvent, viewport: u16) -> Vec<Effect> {
-        let Some(view) = self.view.pager.as_mut() else {
+        let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
         };
         match key.code {
@@ -22,8 +22,10 @@ impl App {
                 // v1.5 pane-scroll pager: snap the underlying pty
                 // back to live and clear the divider's [SCROLL]
                 // indicator. The pager is closed in the regular
-                // path below.
-                if self.view.pager.as_ref().is_some_and(|v| v.pane_scroll) {
+                // path below. (`active_pager_ref` so a focused bottom
+                // scrollback in `view.scroll_pager` is what's checked,
+                // not the top pager.)
+                if self.active_pager_ref().is_some_and(|v| v.pane_scroll) {
                     self.close_pane_scroll_pager();
                     return Vec::new();
                 }
@@ -317,20 +319,33 @@ impl App {
                 );
             }
             KeyCode::Char('?') | KeyCode::F(1) => {
-                // Stash the current pager so dismissing the help
-                // (Esc/q) restores it verbatim — same content,
-                // same mount. Going through `pager_history.push`
-                // here was the v1.5 regression: it filters out
-                // `no_history=true` views (which both
-                // `Mount::LowerPane` `^a-v` and `Mount::TopPane`
-                // `D` set, intentionally) — so the help would
-                // dismiss to either nothing or a stale older
-                // file-viewer pulled off the back stack.
-                if let Some(current) = self.view.pager.take() {
-                    self.view.pager_help_stash = Some(current);
+                // Help is a top/overlay-pager concern (stash → restore the
+                // `view.pager` slot). A focused bottom scrollback
+                // (`view.scroll_pager`) has no `?` binding, so don't open help
+                // over the top pager from underneath it.
+                if !(self.state.pane_focused() && self.view.scroll_pager.is_some()) {
+                    // Stash the current pager so dismissing the help
+                    // (Esc/q) restores it verbatim — same content,
+                    // same mount. Going through `pager_history.push`
+                    // here was the v1.5 regression: it filters out
+                    // `no_history=true` views (which both
+                    // `Mount::LowerPane` `^a-v` and `Mount::TopPane`
+                    // `D` set, intentionally) — so the help would
+                    // dismiss to either nothing or a stale older
+                    // file-viewer pulled off the back stack.
+                    if let Some(current) = self.view.pager.take() {
+                        self.view.pager_help_stash = Some(current);
+                    }
+                    self.view.pager = Some(crate::ui::pager::build_pager_help(&self.view.theme));
+                    self.view.needs_full_repaint = true;
                 }
-                self.view.pager = Some(crate::ui::pager::build_pager_help(&self.view.theme));
-                self.view.needs_full_repaint = true;
+            }
+            KeyCode::Char('r') if view.pane_scroll => {
+                // Reload a transcript scrollback: re-resolve + re-read + render
+                // off-thread (a full-screen agent keeps appending, so the
+                // snapshot goes stale). `open_pane_scroll_pager` re-spawns into
+                // `view.scroll_pager`. (`view`'s borrow ends at the guard.)
+                self.open_pane_scroll_pager();
             }
             _ => {}
         }
