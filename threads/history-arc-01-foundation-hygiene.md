@@ -626,3 +626,38 @@ Provenance:
 - PR #56 entry = 01KTMMQN283Z4FYP184WT4015X (the snapshot oracle this bump is verified against).
 
 <!-- Entry-ID: 01KTMMZ7PWE0F54CZJGT317SED -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:51.326083+00:00
+Role: scribe
+Type: Note
+Title: PRs #293,#294,#296: comment-hygiene + the "aislop" gate — cleaning up after the refactors
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: comment-hygiene — Reconstructed: a 50-comment semantic audit fixes drift left by the gix migration / impl-extraction / 800-LoC decomposition (#293); `aislop` ("quality gate for agentic coding") is added as an advisory scan with a one-time slop cleanup (#294); then `aislop` is made a real regression gate via a committed baseline of accepted findings (#296).   [kind: convention]
+When: 2026-06-06 · PRs #293 (chore/comment-hygiene, 2af9f03), #294 (chore/aislop-cleanup, 93587f3), #296 (chore/aislop-baseline, b3b5fb8)
+Recorded rationale: #293 "A semantic comment audit... flagged comments that drifted out of date during the recent heavy code movement — the gix migration, the impl-extraction sweep, and the 800-LoC decomposition. Comment-only changes; no behavior change." (2af9f03^2). #294 "Add `aislop` (\"quality gate for agentic coding\") as an ADVISORY scan... deliberately NOT wired into `make check`: its format/lint/security engines duplicate the clippy+rustfmt gate... its value here is the comment-slop + unwrap audit only." (93587f3^2). #296 "aislop 0.10.2 has no native baseline and its comment engine over-fires on spyc's mandated dense \"why\" docs... so a raw scan buried ~2 real findings under ~78 accepted/false-positive ones. Make `make aislop` a real regression gate" (b3b5fb8^2).
+Inferred intent: "aislop" denotes AI-generated slop — stale/process-narrating comments, unjustified `.unwrap()`s, and TODO stubs left behind by agentic code movement. The trilogy reads as: detect (audit), tool (advisory scan + cleanup), gate (baseline net-new-only). evidence: #293's findings taxonomy (gix-migration drift, relocation narration "extracted verbatim from mod.rs"/"MVU Phase 5", displaced doc blocks, dead-symbol fixes); #294's "16 production .unwrap() → .expect(<invariant>)"; #296's per-(rule,file) count baseline. confidence: high
+Supersedes: extends the `make check` gate philosophy from arc-01 PR #2 = 01KR0W81XE4K3G7BBSP42GE1HH — but deliberately *does not* join `make check` (#294 keeps aislop advisory because its lint/format/security engines duplicate the existing clippy+rustfmt gate).
+
+What "aislop" denotes, from the diffs: artifacts of AI-assisted heavy code movement that clippy/rustfmt do not catch — comments that narrate process or removed state, `.unwrap()` calls without a documented invariant, and resolved-but-lingering TODO stubs. The three PRs form a detect→tool→gate arc, all on 2026-06-06.
+
+**#293 (comment audit):** 50 confirmed comment fixes across ~30 files, run as a multi-agent fan-out ("20 balanced file batches (40 agents); findings adversarially verified"). The taxonomy is the tell of what the preceding refactors left behind: comments still claiming `git` subprocess calls where the code now runs in-process gix (cross-ref `history-seg-gix-migration`); relocation narration like "extracted verbatim from mod.rs" and "MVU Phase 5 … ahead of the GitState reunion (PR 1/2)" (cross-ref the MVU refactor segment); displaced doc blocks; dead-symbol fixes. Also drops two stale `#[allow(dead_code)]` attributes now that the symbols are live. Comment-only, 929 tests green.
+
+**#294 (aislop tooling + cleanup):** adds the `aislop` advisory scanner via a `make aislop` target + `.aislop/config.yml`, tuned to spyc's own rules (`maxFileLoc: 800` deferring to the 800-LoC campaign, `maxFunctionLoc: 120` excepting long MVU dispatch fns). Crucially **not** wired into `make check` — its lint/format/security engines duplicate clippy+rustfmt. The cleanup: 16 production `.unwrap()` → `.expect("<invariant>")` (all provably safe), 4 trivial comments removed, 2 TODO stubs resolved. Findings: trivial-comment 24→20, unwrap 25→9 (the 9 are test-block false-positives), todo-stub 2→0.
+
+**#296 (aislop baseline):** turns the advisory scan into a regression gate. `scripts/aislop-baseline.py` records accepted findings as per-(rule,file) *counts* in `.aislop/baseline.json` (committed) and reports only net-new slop — "Counts (not line numbers) are the key so a moved or reflowed comment never resurfaces as 'new.'" Reworded 2 genuine meta-comments (bootstrap.rs, run.rs); the other 78 findings are documented FPs or owned by other campaigns (40 narrative-comment docs, 9 test unwraps, 4 allowed-long MVU dispatch fns, 2 file-too-large under the 800-LoC campaign).
+
+These three close the hygiene segment by cleaning up the *cost* of the segment's biggest neighbors (the gix migration and the decomposition) — the same way arc-01 PR #2's `cargo fmt` sweep was "the price of entry" for tightening the gate. Here the sweep is comments and unwraps, and the tooling to keep them from recurring.
+
+Provenance:
+- 2af9f03 (PR #293 chore/comment-hygiene, 2026-06-06) — comment-only edits across ~30 files (src/app/*, src/git/*, …); drops 2 `#[allow(dead_code)]`; commit body taxonomy quoted.
+- 93587f3 (PR #294 chore/aislop-cleanup, 2026-06-06) — `.aislop/config.yml` +50, `.aislop/rules.yml` +14, Makefile +14 (`make aislop`); 16 unwrap→expect across src/app/*, src/pane/pty_host.rs, src/ui/pager.rs, etc.; commit body quoted.
+- b3b5fb8 (PR #296 chore/aislop-baseline, 2026-06-06) — scripts/aislop-baseline.py +127, .aislop/baseline.json +59, Makefile +22, .gitignore +4; reworded src/app/{bootstrap,run}.rs comments; commit body quoted.
+- arc-01 PR #2 entry = 01KR0W81XE4K3G7BBSP42GE1HH (the `cargo fmt` "price of entry" sweep this rhymes with).
+- cross-ref `history-seg-gix-migration` (the subprocess→gix move #293 cleans comments after) and the MVU refactor segment ("MVU Phase 5"/"GitState reunion" narration #293 removes).
+
+<!-- Entry-ID: 01KTMN0F2B7PDYT29J4YG2GN99 -->

@@ -31,3 +31,5 @@
 {"source":"entry:01KTMMX44WY1DPSCGSN27C77S0","target":"entry:01KTMMY535PG8SJAN371WVMKPN","type":"followed_by"}
 {"source":"thread:history-arc-01-foundation-hygiene","target":"entry:01KTMMZ7PWE0F54CZJGT317SED","type":"contains"}
 {"source":"entry:01KTMMY535PG8SJAN371WVMKPN","target":"entry:01KTMMZ7PWE0F54CZJGT317SED","type":"followed_by"}
+{"source":"thread:history-arc-01-foundation-hygiene","target":"entry:01KTMN0F2B7PDYT29J4YG2GN99","type":"contains"}
+{"source":"entry:01KTMMZ7PWE0F54CZJGT317SED","target":"entry:01KTMN0F2B7PDYT29J4YG2GN99","type":"followed_by"}
