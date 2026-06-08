@@ -600,3 +600,29 @@ Provenance:
 - PR #164/#165 = 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 and PR #167 = 01KTMMX44WY1DPSCGSN27C77S0 (the work the v1.51.4 header summarizes).
 
 <!-- Entry-ID: 01KTMMY535PG8SJAN371WVMKPN -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:11.308446+00:00
+Role: scribe
+Type: Note
+Title: PR #295: ratatui 0.30.1 + crossterm dedupe onto 0.29
+
+Spec: scribe
+
+tags: #history #arc-01
+
+Moment: dependency-bump — Reconstructed: ratatui is patch-bumped 0.30.0 → 0.30.1 and the direct crossterm pin lifted 0.28 → 0.29 to collapse a duplicate crossterm (ratatui-crossterm already pulled 0.29); the resolve also dedupes a rustix/linux-raw-sys subtree. No source change — the snapshot tests are unchanged.   [kind: refactor]
+When: 2026-06-06 · PR #295 (chore/ratatui-0301) · commit 36ad0b7 (merge), 36ad0b7^2 "chore(deps): ratatui 0.30.1 + dedupe crossterm onto 0.29"
+Recorded rationale: "Patch-bump ratatui 0.30.0 → 0.30.1 and lift our direct crossterm pin 0.28 → 0.29 so the tree carries a single crossterm (ratatui already pulled 0.29 via ratatui-crossterm, leaving a duplicate)... ratatui 0.30.1 brings an allocation-free buffer-flush diff, a CJK half-width katakana width fix, and fixes to Clear (no panic when its area is outside the buffer), Scrollbar... and inline-viewport resize — all on widgets spyc already uses. No code change: our crossterm surface... is stable across 0.28→0.29, and the render-output snapshot tests are unchanged." (36ad0b7^2).
+Inferred intent: take upstream bug fixes on widgets in active use, and collapse a duplicate crossterm to keep the dep graph single-versioned. evidence: the listed 0.30.1 fixes (Clear no-panic, Scrollbar thumb, inline-viewport resize) are on widgets spyc uses; Cargo.lock ±218 lines reflecting the dedupe; "snapshot tests are unchanged" leans on the PR #56 snapshot harness. confidence: high
+Supersedes: (none — a dependency bump; relies on the PR #56 snapshot tests = 01KTMMQN283Z4FYP184WT4015X as the no-behavior-change oracle)
+
+PR #295 is a clean dependency-hygiene bump and a direct payoff of the test-infra investment. The claim "the render-output snapshot tests are unchanged" is *assertable* precisely because PR #56 built glyph-level snapshots over list_view/pager/prompt — the bump is verified no-behavior-change against that oracle, the same green-CI-equivalence pattern the test-infra moment set up for the refactor.
+
+The dedupe is the substantive part: lifting the direct crossterm pin to 0.29 collapses the tree to a single crossterm (ratatui-crossterm already required 0.29), and the resolve also collapses a duplicate rustix/linux-raw-sys subtree on the Linux-gated path. The diff is CHANGELOG +10, Cargo.toml (one line), Cargo.lock ±218 — no `src/*`. New `palette`/`approx`/`fast-srgb8` lock entries are recorded but never compiled (non-default ratatui-core feature). This connects the hygiene segment to the rendering stack without itself being a rendering change.
+
+Provenance:
+- 36ad0b7 (PR #295 chore/ratatui-0301, 2026-06-06) — Cargo.toml ratatui/crossterm bump; Cargo.lock ±218 (crossterm + rustix dedupe); CHANGELOG +10; commit body quoted.
+- PR #56 entry = 01KTMMQN283Z4FYP184WT4015X (the snapshot oracle this bump is verified against).
+
+<!-- Entry-ID: 01KTMMZ7PWE0F54CZJGT317SED -->

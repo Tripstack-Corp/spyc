@@ -884,3 +884,32 @@ Provenance:
 - refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1; foreshadows stream-abstraction entry (#309–#311).
 
 <!-- Entry-ID: 01KTMMXKYZ78J9AGSK60HJF9BV -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:17:08.815338+00:00
+Role: scribe
+Type: Note
+Title: PRs #104, #105 (pager-remember-position): per-file scroll position persists to disk, then actually restores
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: the pager remembers last scroll position per file, persisted to `pager_positions.json` (LRU-capped 500, keyed by canonical path, files only); #105 fixes that it didn't actually restore — a record/get key-canonicalization mismatch and an Esc/q-close-bypasses-save ordering bug.   [kind: new-capability]
+When: 2026-05-19 → 2026-05-20 · PRs #104 (feat/pager-remember-position) · #105 (fix/pager-position-key-mismatch) · commits 0bbbccf3, ea95882c
+Recorded rationale: "Pager remembers your last scroll position per file. … Stored as `pager_positions.json` under the spyc state dir, LRU-capped at 500 entries, keyed by canonical path. Scope is intentionally narrow: only files (`source_path: Some(_)`) — not command-output buffers, help overlays, pickers, etc." — CHANGELOG (commit 0bbbccf3). "Pager position memory now actually restores. Shipped in v1.50.49 but didn't work for two reasons … `record()` canonicalized the path before insert while `get()` looked up the raw path … Esc/q close bypassed save." — CHANGELOG (commit ea95882c)
+Inferred intent: the in-app pager is now the default file viewer (post-#43), so position memory is the kind of persistence a real reader expects; the narrow file-only scope reads as a deliberate boundary against persisting transient views (captures/help/pickers). — evidence: new module src/state/pager_positions.rs (+151 in #104), src/state/mod.rs +1; #105 adds shared `key()` helper + regression test. confidence: high
+Supersedes: refines #43 (`D`/file-display in-app pager = 01KTMMRS83NW2K9GASEKF5R1T1) — file display now persists position across sessions. #105 supersedes #104's non-working first ship.
+
+#104 (commit 0bbbccf3) adds a dedicated persistence module `src/state/pager_positions.rs` (+151): an LRU-capped map keyed by canonical path, scoped to `source_path: Some(_)` files only, saving on close, buffer swap, and process exit; out-of-range saves (file shrank) clamp to the new last line. The narrow scope is explicit — command-output buffers, help overlays, and pickers keep their "start at top" interaction.
+
+#105 (commit ea95882c) is the immediate "it shipped but didn't work" repair, folded as the finish of the same move: (1) `record()` canonicalized before insert while `get()` looked up the raw path, so any non-canonical caller form (`.`-segments, trailing slash, macOS `/private/tmp`) missed — fixed with a single shared `key()` helper used by both sides plus a regression test; (2) the Esc/q close handler pushed the active pager to buffer history before the trailing save could run, so close never recorded — reordered so the save fires first.
+
+The #104→#105 shape (feature ships, doesn't actually work, immediate same-window repair) is the same fix-on-feature drift the regression wave (#49–#53) and position-/title- features exhibit across this window.
+
+Provenance:
+- 0bbbccf3 (PR #104, 2026-05-19) — src/state/pager_positions.rs +151 (new), src/state/mod.rs +1, src/app/mod.rs +136/-...; LRU position store.
+- ea95882c (PR #105, 2026-05-20) — src/app/mod.rs +8, src/state/pager_positions.rs +39; shared `key()` + save-before-close fix.
+- refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
+
+<!-- Entry-ID: 01KTMMYJYCF9GJ0JRAA649Q5BW -->
