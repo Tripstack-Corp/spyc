@@ -76,3 +76,31 @@ Provenance:
 - REFACTOR_PLAN.md (lines 154–161, 286–297) — Phase-2 criteria naming run/App::new as intended-to-stay and the follow-on tidy-up as optional
 
 <!-- Entry-ID: 01KTMMHZCN03GA638EHKKCY50E -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:26.637857+00:00
+Role: scribe
+Type: Decision
+Title: PR #282: CLAUDE.md architectural contract — the ~800-line ceiling codified
+
+Spec: scribe
+
+tags: #history #module-decomposition
+
+Moment: module-decomposition — Reconstructed: a new `CLAUDE.md` "architectural contract" writes the decomposition rule down as a standing invariant ("No `.rs` over ~800 lines without a solid reason"), and `AGENTS.md`/`ARCHITECTURE.md` are refreshed to record the campaign's end-state (mod.rs ~1k, the module index).   [kind: convention]
+When: 2026-06-04 · PR #282 (docs/claude-md-architecture) · commit f5c2b4aa
+Recorded rationale: "No `.rs` over ~800 lines without a solid reason. Oversized files make diffs impossible to reason about. When a file grows, extract a cohesive child/sibling module (verbatim relocation, behavior-identical) rather than letting it sprawl. A module root holding its own core *type definitions* is a legitimate 'solid reason'; a pile of helpers is not." — CLAUDE.md (added PR #282).
+Inferred intent: this is the rationale source for the whole campaign — it states *why* files are being split (diff reviewability) and the rule that distinguishes a legitimate module root from a junk drawer. confidence: high
+Supersedes: the earlier ~1500-line target in REFACTOR_PLAN.md ("No file in `src/app/` over ~1500 lines", line 30). The new ceiling is ~800 and applies repo-wide, not just `src/app/` — which is why the per-subsystem wave (#297–#308) reaches into `ui/`, `mcp/`, `keymap/`, `state/`, `git/`.
+
+Reconstructed: CLAUDE.md also fixes the decomposition mechanics it expects: "`app/mod.rs` is the module root, not a junk drawer" — it holds the core type defs (App/Runtime/ViewState/Message) and a little glue; `run` → run.rs, `App::new` → bootstrap.rs, process I/O → proc.rs, leaf helpers → util.rs (exactly the #276–281 split). The AGENTS.md edit records the campaign by name: mod.rs "carved down to ~1k … the 800-LoC campaign" and updates the module index to the post-split layout. ARCHITECTURE.md flips the MVU narrative from "purity pass in progress" to "done", tying the decomposition to the completed MVU foundation (see history-seg-refactor-mvu).
+
+This entry is typed Decision: it carries a quoted, scoped rule (the ~800-line ceiling + the "module root vs junk drawer" distinction) that governs every subsequent decompose PR in the slice.
+
+Provenance:
+- f5c2b4aa (PR #282 docs/claude-md-architecture, 2026-06-04) — adds CLAUDE.md (82 lines, new file); edits AGENTS.md (+module index), ARCHITECTURE.md, CHANGELOG.md
+- CLAUDE.md (added PR #282, lines 35–47) — the ~800-line ceiling + extract-don't-sprawl rule
+- AGENTS.md (edited PR #282) — "the 800-LoC campaign carved it down to ~1k"; module index for the post-split `src/app/`
+- REFACTOR_PLAN.md (line 30) — the superseded ~1500-line target
+
+<!-- Entry-ID: 01KTMMJVZMX3SJCBSK8YF896YP -->
