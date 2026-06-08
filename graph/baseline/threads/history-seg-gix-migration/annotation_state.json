@@ -2,13 +2,14 @@
   "history-seg-gix-migration": {
     "reactions": {},
     "tags": [
-      "history"
+      "history",
+      "onboarding"
     ],
     "flags": [],
     "xrefs": [],
     "pinned": false,
-    "last_touched": "2026-06-08T22:30:51.781098+00:00",
+    "last_touched": "2026-06-08T22:31:00.087212+00:00",
     "vote_score": 0
   },
-  "_ann_size": 222
+  "_ann_size": 447
 }
