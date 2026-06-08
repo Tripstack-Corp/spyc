@@ -32,6 +32,25 @@ Where threads exist today:
 - MCP socket listener — accepts stdio-proxy connections.
 - `!` shell-capture reader thread — feeds bytes into the pager
   while the captured child runs.
+- **Pager-stream workers** (`app/pager_stream.rs`) — the unified seam
+  for "read/parse off the UI thread, stream styled lines into a pager."
+  A worker resolves / reads / renders and pushes payloads through a
+  `fs::WakingSender` (waking the loop with a payloadless
+  `Message::PagerStreamOutput`); the main loop's `drain_pager_stream`
+  id-gates the live pager via its `stream_id` and applies the result
+  through the object-safe `PagerStream` trait (`DrainOutcome`). Stale
+  output self-discards on the id mismatch — the generation-counter
+  cancellation pattern above, specialized for pagers.
+
+**Off-thread read/parse is the default architecture** for any feature
+that fills a pager from disk or compute — it does not block the
+keypress path. A 4 MB agent-transcript tail-read + JSON parse, a
+streaming ripgrep search, and a gix diff/show/blame model all ride this
+one `pager_stream` seam (transcripts first; `:grep` and git-view migrate
+onto it, retiring their bespoke `grep_session` / `git_view_session`
+skeletons). Adding a new such feature = a `produce` closure (the worker
+body) + a small `PagerStream` impl (the apply step); the channel, wake,
+id-gating, and mounting are shared.
 
 Future work (background directory loading, etc.) will follow the
 same pattern: spawn a worker, push a typed message into a channel,

@@ -111,6 +111,24 @@ impl App {
         }
     }
 
+    /// Build a pager-stream worker's wake — a payloadless
+    /// `Message::PagerStreamOutput` send (the payload rides the boxed stream's
+    /// `rx`, re-drained by `drain_pager_stream`). Wrapped around the worker's
+    /// data `Sender` by a `WakingSender`. The unified successor to
+    /// `make_grep_wake` / `make_git_view_wake`. No-op before `run()` installs
+    /// the sender.
+    pub(crate) fn make_pager_stream_wake(&self) -> PaneWake {
+        match &self.runtime.pane_wake_tx {
+            Some(tx) => {
+                let tx = tx.clone();
+                Arc::new(move || {
+                    let _ = tx.send(Message::PagerStreamOutput);
+                })
+            }
+            None => Arc::new(|| {}),
+        }
+    }
+
     /// MVU Phase 3d: build the F-finder walker's wake — a payloadless
     /// `Message::FindOutput` send (the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk`). No-op before `run()` installs the sender.
