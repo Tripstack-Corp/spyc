@@ -945,3 +945,30 @@ Provenance:
 - extends arc-05 PR #20 = 01KR2A6TT516XA5FEGVBXYPWD7; refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
 
 <!-- Entry-ID: 01KTMN09307X7E73BREP8D7T3R -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:18:16.853510+00:00
+Role: scribe
+Type: Note
+Title: PRs #115, #131 (visual-block placement + v-mirrors-V): the pager's mode grammar gains a placement cursor and slot-aware editor launch
+
+Spec: scribe
+
+tags: #history #arc-05
+
+Moment: pager-surface — Reconstructed: `^v` now enters a vi-motion "placement" cursor before committing a visual-block (or `V`-line) selection at an arbitrary anchor; and `v` (drop-to-`$EDITOR`) from the `D` top-pane mount mirrors file-list `V` (top-overlay Pane, bottom stays visible) instead of taking over the screen.   [kind: new-capability]
+When: 2026-05-21 → 2026-05-26 · PRs #115 (feat/pager-visual-block-placement) · #131 (fix/pager-v-mirrors-V-on-toppane) · commits d5d120b6, f5bcbcdb
+Recorded rationale: "Pager `^v` enters a placement state before visual block. Previously `^v` immediately anchored at the top visible line, col 0 — awkward when the user wanted the anchor anywhere else. Now `^v` enters a 'placement' cursor that moves with vi motions (`hjkl`, `w`/`b`, `0`/`$`, `g`/`G`); a second `^v` commits the anchor at the cursor for a visual block selection, or `V` commits to Line visual at the cursor's row." — CHANGELOG (commit d5d120b6). "Pager `v` from the top-pane mount (`D`) now mirrors file-list `V` instead of taking over the screen. … the editor opened full-screen via the `Spawn` path … which defeated the whole point of staying in the bottom-pane-visible workflow." — CHANGELOG (commit f5bcbcdb)
+Inferred intent: #115 completes the V1.5 plan's Phase-4 block-selection direction with an arbitrary-anchor placement step rather than the plan's fixed top-line anchor; #131 carries the slot-aware-launch principle (a top-pane pager should keep the bottom pane visible) from the meta-key fixes into the editor-spawn path. — evidence: #115 src/ui/pager.rs +367 (placement-cursor render + motions), src/app/mod.rs +96; #131 src/app/mod.rs +35 (TopPane + real source path → top-overlay Pane spawn). confidence: high
+Supersedes: #115 extends arc-05 PR #33 visual-line-mode (= 01KR2AAX12XSNRNZPTXJT2TXJA) and realizes V1_5_PLAN Phase 4 ("`^v` … enters `VisualBlock`"). #131 refines #43's `D`-TopPane mount (= 01KTMMRS83NW2K9GASEKF5R1T1) — `v`-to-editor now respects the slot.
+
+#115 (commit d5d120b6) is the larger of the two — src/ui/pager.rs +367, src/app/mod.rs +96 — and is where the pager's mode grammar grows a genuinely new state. V1_5_PLAN Phase 4 specified `^v` entering block mode anchored implicitly; #115 inserts a *placement* cursor first: `^v` enters placement, vi motions (`hjkl`, `w`/`b`, `0`/`$`, `g`/`G`) move it, a second `^v` commits a block anchor at the cursor or `V` commits a line-visual at the cursor's row, `Esc` cancels. The placement cursor renders as a reverse-video cell with a motions flash on entry. This is the "pager as a mode you live in" thesis extended one more notch — a sub-mode with its own cursor.
+
+#131 (commit f5bcbcdb, src/app/mod.rs +35) is the slot-aware-launch correction: from the `D` top-pane pager, `v` was spawning `$EDITOR` full-screen via the `Spawn` path (same as the centered overlay), defeating the bottom-pane-visible workflow. The fix: when `view.mount == Mount::TopPane` and a real source path is known, `v` spawns the editor as a top-overlay `Pane` — the same flow file-list `V` uses — so the bottom pane survives the edit. Other mounts and the temp-file edit case keep full-screen. This is the same "behavior must vary by mount slot" principle as the regression wave (#49–#53) and meta-key fixes (#78,#80).
+
+Provenance:
+- d5d120b6 (PR #115, 2026-05-21) — src/ui/pager.rs +367 (placement cursor + motions), src/app/mod.rs +96; realizes V1_5_PLAN Phase 4.
+- f5bcbcdb (PR #131, 2026-05-26) — src/app/mod.rs +35; `v` mirrors `V` on TopPane mount.
+- extends arc-05 PR #33 = 01KR2AAX12XSNRNZPTXJT2TXJA; refines V1.5 entry = 01KTMMRS83NW2K9GASEKF5R1T1.
+
+<!-- Entry-ID: 01KTMN185R410PMH15J2KN8CKD -->
