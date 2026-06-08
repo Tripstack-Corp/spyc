@@ -13,3 +13,5 @@
 {"source":"entry:01KTMKY262M6Y6GH25DYKBY33H","target":"entry:01KTMKZ502R8JYARTMFMKSGB72","type":"followed_by"}
 {"source":"thread:history-seg-refactor-mvu","target":"entry:01KTMM03Q5F5EA3VEQSJQJZYN0","type":"contains"}
 {"source":"entry:01KTMKZ502R8JYARTMFMKSGB72","target":"entry:01KTMM03Q5F5EA3VEQSJQJZYN0","type":"followed_by"}
+{"source":"thread:history-seg-refactor-mvu","target":"entry:01KTMM1A4SE4HRHFQ97PRJCZYD","type":"contains"}
+{"source":"entry:01KTMM03Q5F5EA3VEQSJQJZYN0","target":"entry:01KTMM1A4SE4HRHFQ97PRJCZYD","type":"followed_by"}

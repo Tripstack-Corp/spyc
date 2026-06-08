@@ -251,3 +251,42 @@ Provenance:
 - prior entry 01KTMKXA7ZKKR421NTPRJ9EQ3M (this thread, Phase 1) — supplied the parking `ForegroundExec` reused here.
 
 <!-- Entry-ID: 01KTMM03Q5F5EA3VEQSJQJZYN0 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:00:50.151500+00:00
+Role: scribe
+Type: Note
+Title: PR #218–#232 — Phase 5: state migrated into the Model (GitState, harpoon, PaneSnapshot), carrier unification, exits-as-messages
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: scattered/duplicated facts and live-host reads are folded into the Model — `git_info`+`git_files` → one `GitState`, harpoon moved off `App`, a `PaneSnapshot` replaces live-vt100 reads for yank/`gf`, `last_grid` eliminated, chdir becomes a synchronous `Effect::ChangeDir` — and the `CommandResult`/`PromptResult` carriers gain `Post(Vec<Effect>)` while capture/task exits become channel messages.   [kind: refactor]
+When: 2026-06-01..2026-06-02 · PR #218–#226 (mvu-phase5-pr0…pr7), #230 (pr9 carrier-unification), #232 (pr8 exits-as-messages) · commits 3c73580 … 18a56ef
+Recorded rationale: "Phase 5 — Physically split Model/Runtime/ViewState + de-IO audit. Introduce `Runtime` and `Model`/`ViewState`; move `git_worker_tx` into Runtime (channel reunited), `harpoon` into Model, eliminate `last_grid`… chdir fork (explicit, not mechanical)… (a) model chdir as a synchronous blocking effect run inline before the next Message (preferred — same-frame visibility, no async listing)." — docs/MVU_PLAN.md (Phase 5)
+Inferred intent: this phase attacks the "state-out-of-sync" bug class — "one `git` value feeds top-bar + per-file markers; reunites the torn git channel; removes `last_grid`." The squash subjects confirm each step: #220 "fold git_info/git_files into AppState.git: GitState"; #221 "move harpoon/pane_prompt_buf/last_pane_prompt to AppState"; #222 "route via a Model PaneSnapshot, not the live host"; #224 "eliminate last_grid; thread GridDims as motion params"; #225 "chdir → synchronous Effect::ChangeDir." The chdir fork chose option (a) (synchronous blocking effect) as the plan flagged preferred.   confidence: high
+Supersedes: (1) the torn git channel (`App.git_result_rx` + `AppState.git_worker_tx`) and the duplicated `git_info`/`git_files` — unified into `GitState` (#220) + git_result_rx moved to Runtime (#219); (2) `harpoon`'s misplacement on `App` (#221); (3) render's live-`PtyHost` reads for the yank/`gf`/scrollback arms → `PaneSnapshot` + `Effect::ReadPaneText` (#222/#223/#226); (4) `last_grid` — eliminated (#224, pickaxe `git log -S 'last_grid'` confirms removal at "MVU Phase 5 PR6"); (5) inline `:cd` chdir → deferred `Effect::ChangeDir` via the new `CommandResult::Post(Vec<Effect>)` carrier (#230); (6) in-handler `child.wait()` for capture/task exits → `CaptureExit`/`TaskExited` channel messages with a bounded `reap_exit`/`ExitOutcome` digest (#232).
+
+Reconstructed — the slice, folded:
++ #218 extract `apply_git_worker_result` → `git_state.rs` (prep).
++ #219 introduce the Runtime cluster, move `git_result_rx` in (channel reunion begins).
++ #220 fold git into `AppState.git: GitState` (pickaxe: `struct GitState` first appears here).
++ #221 move harpoon + pane-prompt buffers into AppState.
++ #222 route via a Model `PaneSnapshot` not the live host (the borrow-checker fix the plan deferred from 3b to here).
++ #223 `yank_pane`/scrollback via `Effect::ReadPaneText`.
++ #224 eliminate `last_grid`; thread `GridDims` as motion params.
++ #225 chdir → synchronous `Effect::ChangeDir`.
++ #226 `gf` → `ReadPaneText(Pickable)` + `GotoFile`.
++ #230 (PR9) carrier unification: `CommandResult::Post(Vec<Effect>)` so the pure `:cd` arm emits `Effect::ChangeDir` instead of chdir-ing inline (diff shows `Post(Vec<Effect>)` + the `:cd` arm returning `CommandResult::Post(vec![Effect::ChangeDir{…}])`).
++ #232 (PR8) exits-as-messages (Design B): `pub enum ExitOutcome { Exited { code, success }, … }` + `digest_exit`/`reap_exit` in `src/pane/pty_host.rs`; capture/task exit observed via channel message, closing the Phase-3c deferral that the reader "can't call `child.wait()` — `portable_pty` needs `&mut self`."
+Note #230 (carrier, 2026-06-01) lands before #232 (exits, 2026-06-02) by date despite the higher PR number — both are "PR8/PR9" out of merge order.
+
+Provenance:
+- 3c73580/07d2b2f/fc7c98d/c21e0eb/2ff07f9/29ded59/42866bc/4a00bcb/463de58 (PR #218–#226, 2026-06-01) — the nine Phase-5 migration PRs (subjects quoted above).
+- 0aaa73c (PR #230, 2026-06-01) — `CommandResult::Post(Vec<Effect>)` + `:cd → Effect::ChangeDir`; `src/app/state.rs` +73.
+- 18a56ef (PR #232, 2026-06-02) — `ExitOutcome`/`digest_exit`/`reap_exit`; `src/pane/pty_host.rs` +101, `src/app/streaming.rs` reshaped.
+- docs/MVU_PLAN.md — Phase 5 + the PaneSnapshot/borrow-checker contract (quoted).
+- prior entry 01KTMKZ502R8JYARTMFMKSGB72 (this thread, Phase 3) — left the capture/task exit on-channel message as a deferral this phase closes.
+
+<!-- Entry-ID: 01KTMM1A4SE4HRHFQ97PRJCZYD -->
