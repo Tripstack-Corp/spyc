@@ -739,3 +739,43 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB.
 
 <!-- Entry-ID: 01KTMTNYS83V5A7PY2MJVV60MF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T23:58:01.027679+00:00
+Role: critic
+Type: Note
+Title: Pattern 2 (window-2): Phase-numbered PR-train — the implicit-machinery-chain made explicit and numbered; three campaign-trains where small same-shape PRs run under one ordered, plan-anchored campaign
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement (EVOLUTION of window-1 Pattern 6).** A long ordered train of small, same-shape PRs runs under one named campaign with an **explicit ordering** — phase numbers, `prN` counters, or a wave sequence — where each PR is individually small and revertable and the *campaign* is the unit of architectural intent. Window-1's Pattern 6 (implicit-machinery-chain = 01KR3DC7E4B0JC1NN212PYVT56) was the shape where one PR establishes machinery and a later PR consumes it *without the consumer's commit naming the establisher* — the defining property was the *implicitness*. Window-2 inverts that property at campaign scale: the chains are now **explicit, numbered, and plan-anchored**. The same establish-then-build structure recurs, but the naming that window-1 noted as absent is now the campaign's organizing spine.
+
+**Instance enumeration — three campaign-trains.**
+
+1. **MVU phase-train (`history-seg-refactor-mvu`, #166–#274).** The most explicit numbering in either window. The MVU_PLAN.md records an eight-phase (−1..6) ordered migration; the moments execute it phase by phase, lowest-risk-first, with the ordering recorded verbatim: "The mechanical extractions in Phase 1 below buy ~70% of the review-ability win for ~5% of the architectural risk." Phases run −1/0 (Focus value + test re-baseline, 01KTMKWF071QA1Y5MD5TMMRGHC) → 1 (Message channel, 01KTMKXA7ZKKR421NTPRJ9EQ3M) → 2 (Scheduler, 01KTMKY262M6Y6GH25DYKBY33H) → 3 (every async source migrated, ten PRs folded, 01KTMKZ502R8JYARTMFMKSGB72) → 4 (Effect vocabulary, 01KTMM03Q5F5EA3VEQSJQJZYN0) → 5 (state into Model, fifteen PRs, 01KTMM1A4SE4HRHFQ97PRJCZYD) → 6/D/E (01KTMM27M59N08NB1HSWCESQTR, 01KTMM35YXDZ69C08M78F4XKBB, 01KTMM409Y3RTZPDTVWPQWR6EW) → last-mile (01KTMM4ZMPP9DCW3R3NK5BDA93, 01KTMM60KR8W18TWXPXDGT9J8Y). *The phase number IS the ordering contract.*
+
+2. **mod-extract `prN` train (`history-seg-module-decomposition`, #248–#259).** "twelve verbatim cuts off app/mod.rs," one cut per PR, numbered pr1..12, governed by REFACTOR_PLAN.md Phase-1: "verbatim move + a `mod ...; use ...;` import — no behavior change … Each was one PR" (01KTMMGZWER9304EZM82KTEZMQ). A second wave (decompose-mod-*, #275–#281, 01KTMMHZCN03GA638EHKKCY50E) and per-subsystem waves (#297–#308, 01KTMMM1322W32NGAH5H7MWYEP / 01KTMMN1CSG84TPZ4ZEFN9K62B / 01KTMMPARGNTSQB2Z67G6KBKQ0) extend the same train under the campaign banner. *Synthesis arc: 01KTMNH17RVXAWHF9SJ2Z7MCP9.*
+
+3. **gix 9-step sequence (`history-seg-gix-migration`, #283–#292).** Recorded as a "planned 9-step strangler-fig," with the order pre-committed in code — the dependency-add comment names "PR 6" as where `worktree-mutation` will be enabled, and the flip commit names "Removed in PR 9" before PR 9 exists (01KTMMJB955RF16D842WFFEBYP, 01KTMMMBVCGADASG74RTHKWY97). *The future PR is named by number before it lands — the antithesis of window-1's implicit chain. Synthesis arc: 01KTMNJD6GJM90D0WTTS0X28XR.*
+
+**Instance count: three campaign-trains.** A fourth candidate — the CI-caching campaign (arc-01 #57/#58/#61/#64/#65/#66/#69, "seven PRs in ~36 hours," 01KTMMPDE6S4PA834YDR24SX1H) — is a tight same-shape cluster but is *not* phase-numbered or ordering-contracted; it reads as a burst, not a numbered train. The catalogue does not promote it to a phase-train instance; it is folded here as a same-shape cluster without the explicit-ordering property that defines this pattern. (Three trains, one folded near-miss.)
+
+**The evolution, stated precisely.** Window-1 Pattern 6's three instances (arc-04 git_files chain, arc-05 PagerView accretion, arc-03→05 overlay-focus) shared "None of the commits says 'this enables that'" — the arc-04 story-tail's load-bearing line. Window-2's three trains share the opposite: the plan doc says "this enables that," the PR slug carries the phase number, and the *next* PR is named by index before it exists. The establish-then-build structure is identical; the **communication register flipped from implicit to explicit-and-numbered**. Naming *that the register flipped across windows* is the cumulative-grain observation no single segment owns. (*Why* it flipped — campaign volume forcing legibility? the plan-doc habit? — is tier-4.)
+
+**Sub-shape: phase-numbering carries a recorded risk-ordering, not just a sequence.** The MVU train's numbering is explicitly risk-sorted ("lowest-risk first," the ~70%-win-for-~5%-risk quote), and the gix sequence is explicitly capability-gated (worktree-mutation feature enabled "exactly when needed" at PR 6). The number is not arbitrary; it encodes a risk/dependency order. The mod-extract `prN` train is the flatter instance — its ordering is "one self-contained concern per PR," dependency-light. So within the three-train recurrence there is a 2-1 split: two risk/dependency-ordered trains (MVU, gix), one flat-enumeration train (mod-extract). The catalogue notes the sub-split without promoting the single flat instance to its own shape.
+
+**Boundary notes.**
+- *Convergence with Pattern 1.* MVU and gix are *both* Pattern 1 (strangler-fig) and Pattern 2 (phase-train) — the migration lifecycle and the delivery mechanism are distinct readings of the same campaigns. mod-extract is Pattern 2 only (no legacy implementation retired; it is Pattern 3 verbatim-relocation delivered as a numbered train). See the convergence tail.
+- *Drift boundary.* The numbered slugs describe their diffs accurately; no misnaming-at-merge. Recurrence-only.
+
+Provenance:
+- `history-seg-refactor-mvu`: 01KTMKVE85DEBMBWYCXY7YHP5E (eight-phase plan), 01KTMKWF071QA1Y5MD5TMMRGHC / 01KTMKXA7ZKKR421NTPRJ9EQ3M / 01KTMKY262M6Y6GH25DYKBY33H / 01KTMKZ502R8JYARTMFMKSGB72 / 01KTMM03Q5F5EA3VEQSJQJZYN0 / 01KTMM1A4SE4HRHFQ97PRJCZYD / 01KTMM27M59N08NB1HSWCESQTR / 01KTMM35YXDZ69C08M78F4XKBB / 01KTMM409Y3RTZPDTVWPQWR6EW / 01KTMM4ZMPP9DCW3R3NK5BDA93 / 01KTMM60KR8W18TWXPXDGT9J8Y (phases 0..6/D/E/last-mile).
+- `history-seg-module-decomposition`: 01KTMMGZWER9304EZM82KTEZMQ (pr1..12), 01KTMMHZCN03GA638EHKKCY50E / 01KTMMM1322W32NGAH5H7MWYEP / 01KTMMN1CSG84TPZ4ZEFN9K62B / 01KTMMPARGNTSQB2Z67G6KBKQ0 (later waves); synthesis 01KTMNH17RVXAWHF9SJ2Z7MCP9.
+- `history-seg-gix-migration`: 01KTMMJB955RF16D842WFFEBYP ("PR 6" pre-named), 01KTMMMBVCGADASG74RTHKWY97 ("Removed in PR 9" pre-named); synthesis 01KTMNJD6GJM90D0WTTS0X28XR.
+- Folded near-miss: arc-01 CI-caching cluster 01KTMMPDE6S4PA834YDR24SX1H (same-shape burst, not phase-numbered).
+- EVOLVES: `insight-recurrence` window-1 Pattern 6 = 01KR3DC7E4B0JC1NN212PYVT56 (implicit-machinery-chain; window-1 arc-04 story-tail's "None of the commits says 'this enables that'").
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 1 = 01KTMTNYS83V5A7PY2MJVV60MF.
+
+<!-- Entry-ID: 01KTMTQSTE7QSH8WJ442ADX02F -->
