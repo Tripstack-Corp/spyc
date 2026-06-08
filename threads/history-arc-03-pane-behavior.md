@@ -866,3 +866,28 @@ Provenance:
 - both depend on the #46 PtyHost worker-thread model and the #48 take_host demotion (named in #150's CHANGELOG)
 
 <!-- Entry-ID: 01KTMMXD1KSTYMEPXSQZN45HXB -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:16:42.651390+00:00
+Role: scribe
+Type: Note
+Title: PR #122 + #162: pane cwd handling — F9 resumes in the listing dir, and the cwd prompt gets its own history bucket
+
+Spec: scribe
+
+tags: #history #arc-03 #continuation
+
+Moment: pane cwd handling — Reconstructed: F9 (`ResumePane`) spawns in the current listing dir instead of `PROJECT_HOME` (#122), and the "pane cwd:" prompt records into its own `pane_cwd_history` bucket instead of polluting the command history (#162)   [kind: gotcha]
+When: 2026-05-23 · PR #122 (fix/f9-resume-pane-uses-listing-dir, 18b70ec)  —  2026-05-29 · PR #162 (fix/pane-cwd-history-pollution, d689899)
+Recorded rationale: #122 CHANGELOG verbatim: "F9 (ResumePane) spawns in the current listing dir, not PROJECT_HOME. Reported by Justin: after navigating to a different project folder in the file pane, pressing F9 opened claude --resume in the dir where he'd originally launched spyc … ^a-c (which prompts for cwd) already pre-fills with listing.dir; the bare-spawn path that F9 uses now follows the same default." #162 CHANGELOG verbatim: "Pane 'cwd:' directories no longer pollute the pane command history. The ^a c new-tab flow has two prompts — 'pane command:' and 'pane cwd:' — and both recorded into a single pane_history bucket … The cwd prompt now records into its own pane_cwd_history bucket … Root cause was two independent kind→bucket decisions that drifted; they're now one pure history_bucket_for mapping shared by the browse and record paths."
+Inferred intent: both align pane spawning with *where the user is now* rather than where spyc started or what was typed elsewhere. evidence: #122 makes the F9 bare-spawn path adopt `listing.dir` as default cwd (src/app/mod.rs +17/-6), matching `^a-c`; #162 splits the history bucket (src/app/state.rs +10 adds pane_cwd_history) and unifies the kind→bucket decision into one `history_bucket_for` mapping (src/app/mod.rs +145/-51). confidence: high
+Supersedes: #122 supersedes F9's prior `PROJECT_HOME`-anchored spawn; #162 supersedes the single shared `pane_history` bucket and the two drifted kind→bucket decisions. #162 explicitly does not migrate existing files: "Existing pane_history files keep their stale directory entries until cleaned — they're not migrated automatically."
+
+Two cwd-correctness fixes bracketing the slice, both reported by named users. #122: F9 (`ResumePane`) anchored at `PROJECT_HOME` (the launch dir), so resuming after navigating elsewhere opened `claude --resume` in the wrong place; the bare-spawn path now defaults to `listing.dir`, matching what `^a-c`'s prompt already pre-filled. #162: the `^a c` flow's two prompts ("pane command:" / "pane cwd:") both wrote into one `pane_history`, so directory paths surfaced when browsing the command prompt with Up/Down; the cwd prompt gets its own `pane_cwd_history` (where Up/Down usefully recalls prior working dirs), and the root cause — two independent kind→bucket decisions that drifted — is collapsed into a single pure `history_bucket_for` mapping shared by browse and record. The non-migration of existing history files is documented as an accepted limitation.
+
+Provenance:
+- 18b70ec (PR #122, 2026-05-23) — src/app/mod.rs +17/-6 (F9 bare-spawn defaults to listing.dir), CHANGELOG +10
+- d689899 (PR #162, 2026-05-29) — src/app/state.rs +10 (pane_cwd_history), src/app/mod.rs +145/-51 (unified history_bucket_for), FEATURES.md +7/-..., CHANGELOG +11
+- both align pane spawn/history with current listing dir vs launch-time PROJECT_HOME
+
+<!-- Entry-ID: 01KTMMY9KR4746DNJY7ZPKGG1G -->
