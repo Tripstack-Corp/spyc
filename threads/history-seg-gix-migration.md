@@ -182,3 +182,29 @@ Provenance:
 - CHANGELOG.md (at 755d4ac4) — quoted word-level highlighting / side-by-side toggle / blame gutter entry
 
 <!-- Entry-ID: 01KTMMR7X2GJAMQE0HD0C0HA6R -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:14:37.904543+00:00
+Role: scribe
+Type: Decision
+Title: PR #292 — drop the last git subprocess; guard test; release 1.56.0
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: the terminal supersession. The last `Command::new("git")` call sites are removed, the `SPYC_GIT_BACKEND=subprocess` escape hatch is deleted, and a `no_subprocess_git_in_production` guard test is added that fails if any production source spawns `git`. Released as 1.56.0. [kind: supersession]
+When: 2026-06-06 · PR #292 (refactor/gix-drop-subprocess) · commit b841bcf7 (squash); feature-branch commit db4c293c
+Recorded rationale: "refactor(git): drop the last git subprocess + release 1.56.0" — commit db4c293c, 2026-06-06. CHANGELOG.md [1.56.0] verbatim: "spyc no longer runs the `git` binary at all. The git → gix (gitoxide) migration is complete: repo discovery, status, diff, show, blame, and worktree create/list/remove all run in-process via the pure-Rust `gix` crate — no more `git` subprocess spawns, fragile porcelain parsing, or dependency on a `git` install at runtime. A guard test enforces zero `git`-subprocess usages in production code. (The `git` binary is still used to build fixtures when running spyc's own test suite.)"
+Inferred intent: this is "PR 9" of the arc — the close of the strangler-fig. With every domain on gix, the subprocess fallbacks are now dead weight, so they are deleted and replaced by an executable invariant. The guard test (src/git/mod.rs `mod no_subprocess_git_in_production`) is described in its own doc as the "Strangler-fig closing guard: production code must never spawn the `git` binary — every git operation runs in-process via gix"; it scans each source file's production portion (everything before the first `#[cfg(test)]` marker) for git-subprocess usage, allowing test fixtures to still construct throwaway repos with real `git`. Evidence: removes `porcelain_raw`, `subprocess_backend()`, `repo_status_entries` env-branch from status.rs (-90), deletes src/git/diff.rs subprocess producers (-95, four `Command::new("git")` sites), trims pager.rs (-62), bootstrap.rs/state.rs (-net); Cargo.toml/Cargo.lock version bump (+/-2). confidence: high
+Supersedes: the entire subprocess git backend — closes the chain begun at the facade seam (PR #283, entry 01KTMMHJ879C24FY2WYYT9F1SF). Directly removes the `SPYC_GIT_BACKEND=subprocess` escape hatch introduced at the status flip (PR #287, entry 01KTMMMBVCGADASG74RTHKWY97), exactly as that PR's doc promised ("Removed in PR 9"). Verified via pickaxe: the removed lines include `pub fn porcelain_raw`, `fn subprocess_backend`, and four `Command::new("git")` call sites in src/git/diff.rs.
+
+The net diff is -178 (+92/-270): the migration ends by removing more than it adds, the signature of a completed strangler-fig. The promise made in the #287 CHANGELOG ("it will be removed once gix status has soaked") and the #287 doc ("Removed in PR 9") are both kept here — the one-release-cycle safety valve lasted exactly the planned window. The guard test converts the architectural intent into a regression-proof invariant: future code cannot reintroduce a subprocess git call without failing CI.
+
+Provenance:
+- b841bcf7 / db4c293c (PR #292 refactor/gix-drop-subprocess, 2026-06-06) — squash merge; +92/-270 across 12 files: src/git/diff.rs deleted (-95), status.rs (-90), pager.rs (-62), git/mod.rs (+63, guard test), bootstrap.rs/state.rs trimmed, Cargo version → 1.56.0
+- src/git/mod.rs `mod no_subprocess_git_in_production` — quoted "Strangler-fig closing guard" doc
+- CHANGELOG.md [1.56.0] (at db4c293c) — quoted "spyc no longer runs the `git` binary at all" entry
+- prior entries 01KTMMHJ879C24FY2WYYT9F1SF (facade seam), 01KTMMMBVCGADASG74RTHKWY97 (status flip / escape hatch)
+
+<!-- Entry-ID: 01KTMMTF0MQ96P7BVN7QQPVBNS -->
