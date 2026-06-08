@@ -380,3 +380,31 @@ Provenance:
 - prior entry 01KTMM35YXDZ69C08M78F4XKBB (this thread, Phase D) — supplied the disjoint fields the reshaped loop reads.
 
 <!-- Entry-ID: 01KTMM409Y3RTZPDTVWPQWR6EW -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:02:50.698318+00:00
+Role: scribe
+Type: Note
+Title: PR #260–#266 — Last-mile: arch-docs milestone, mutation-free render path, dispatch_prompt de-IO
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the last-mile pass opens with the ARCHITECTURE.md milestone declaring MVU "landed," then makes the render path mutation-free — a pre-frame `prepare_frame` settles rows/grid and resize/drain moves out of the draw path so `render_inner` takes `&self` — behind a `TestBackend` full-frame snapshot net, and de-IOs `dispatch_prompt`.   [kind: refactor]
+When: 2026-06-03 · PR #260 (lastmile-arch-docs) commit f921164 · #261 git-worker-tx · #262 render-snapshots · #263 prepare-frame · #264 render-drain · #265 render-self · #266 dispatch-prompt-deio commit 9269fa8
+Recorded rationale: "spyc follows the Elm/Model-View-Update pattern. The structural migration … has landed; a final purity pass is in progress… Three-type state split. `App` owns three disjoint fields … Single message channel … `App::run` is event-driven: it blocks on `recv` / `recv_timeout` (0 wakes at idle …) — there is no `event::poll`, no adaptive busy-poll. … `run_effects` is the sole executor; handlers return `Vec<Effect>` and never touch the OS directly. This makes 'forgot to clear `pending_X`' and inline-IO bug classes structurally hard." — ARCHITECTURE.md (added/edited PR #260). And the named remaining work: "collapsing the three update entry points (`ApplyResult`/`CommandResult`/`PromptResult`) into one `update(&mut Model, &mut ViewState, msg, now) -> Vec<Effect>`; moving the last inline side-effects behind effects; and making the render pass mutation-free (a pre-frame `prepare` step) behind a ratatui `TestBackend` snapshot net." — ARCHITECTURE.md (Remaining last-mile work)
+Inferred intent: #260 is the documentation milestone (also lists the `Effect` end-state vocabulary: ForegroundExec, CopyToClipboard, SignalGroup, SendToPane, SetTerminalTitle, ReadPaneText, ChangeDir). The render-purity sub-PRs execute the "mutation-free render" goal in order: #262 lands the `TestBackend` + insta snapshot net first (the safety harness), then #263 extracts `prepare_frame` to settle list rows/grid before the draw, #264 relocates pane/overlay resize+drain out of the draw path, #265 makes `render_inner` take `&self`. #266 de-IOs `AppState::dispatch_prompt` (moving IO arms to the executor). #261 completes the git-channel reunion (moves `git_worker_tx` to Runtime; Model records requests via an outbox).   confidence: high
+Supersedes: render's residual `&mut self` mutation during draw → mutation-free `&self` `render_inner` (#263–#265); `dispatch_prompt`'s inline IO arms → executor effects (#266); the last `git_worker_tx` on AppState → Runtime outbox (#261, completing the Phase-5 reunion). Builds on entry 01KTMM409Y3RTZPDTVWPQWR6EW (Phase E).
+
+Reconstructed: the snapshot-net-first ordering (#262 before #263–#265) is the strangler-fig discipline applied to the riskiest remaining surgery — full-frame `TestBackend` snapshots pin the rendered output before the draw path is restructured. This pass tracks the View row of MVU_PLAN's goals: "zero clipboard/title/fs IO (the achievable purity goal), `&mut` only for ratatui `StatefulWidget`s." Folded: #261/#262 (channel + snapshot net) and #263–#266 (render purity + prompt de-IO) as one last-mile-render moment.
+
+Provenance:
+- f921164 (PR #260, 2026-06-03) — ARCHITECTURE.md +/− (the "MVU has landed" + Effect vocabulary + remaining-work section, quoted); AGENTS.md updated.
+- 938a1fd (PR #261) — git_worker_tx → Runtime, Model outbox.
+- 6fb5cb5 (PR #262) — `TestBackend` + insta full-frame snapshot net.
+- e5c6d9c/8bf7aa2/675e182 (PR #263/#264/#265, 2026-06-03) — `prepare_frame`; resize+drain out of draw; `render_inner(&self)`.
+- 9269fa8 (PR #266, 2026-06-03) — de-IO `AppState::dispatch_prompt`.
+- prior entry 01KTMM409Y3RTZPDTVWPQWR6EW (this thread, Phase E) — left the render/dispatch loop body for this purity pass.
+
+<!-- Entry-ID: 01KTMM4ZMPP9DCW3R3NK5BDA93 -->
