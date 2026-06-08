@@ -352,3 +352,31 @@ Provenance:
 - prior entry 01KTMM1A4SE4HRHFQ97PRJCZYD (this thread, Phase 5) — did the conceptual migration this physically realizes.
 
 <!-- Entry-ID: 01KTMM35YXDZ69C08M78F4XKBB -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:02:18.166483+00:00
+Role: scribe
+Type: Note
+Title: PR #243–#247 — Phase E: draw accumulator, RunCtx, coalesce, dispatch_effective, render_frame/teardown
+
+Spec: scribe
+
+tags: #history #refactor-mvu
+
+Moment: refactor-mvu — Reconstructed: the event loop's body is restructured into composable pieces — a draw accumulator replaces the scattered `needs_draw`/`draw_reason` flags, loop-step signatures collapse to `&mut RunCtx`, the source-coalescing match becomes `sources::coalesce_recv`, dispatch becomes `dispatch_effective` returning a `DispatchFlow`, and the draw/teardown bodies are extracted to `render_frame`/`run_teardown`.   [kind: refactor]
+When: 2026-06-02 · PR #243 (e1-draw-accumulator) commit ac7318a · #244 (e3-runctx) · #245 (e4-coalesce) · #246 (e5-dispatch) commit a827566 · #247 (e6e7-render-teardown) commit 7ccef44
+Recorded rationale: Squash subjects — #243 "MVU Phase E1 — Draw accumulator for the event loop"; #244 "MVU Phase E3 — collapse loop-step signatures to &mut RunCtx"; #245 "MVU Phase E4 — extract coalesce match into sources::coalesce_recv"; #246 "MVU Phase E5 — extract dispatch into dispatch_effective + DispatchFlow"; #247 "MVU Phase E6+E7 — render_frame + run_teardown." Underlying plan: "`needs_draw`/`draw_reason` collapse into `update()`'s `dirty: Option<RedrawReason>` return." — docs/MVU_PLAN.md (View)
+Inferred intent: with state physically split (Phase D), Phase E is the loop-body cleanup that makes `App::run` legible and small — each PR extracts one structural concern out of the loop. The diffs are mod.rs-only and net-shrinking the loop (#243 +56/−39, #246 +145/−91, #247 +91/−65), consistent with the "loop reaches ~100 lines" target. `RunCtx` (#244) bundles the loop-step parameters so step fns share one `&mut` context rather than long arg lists.   confidence: high
+Supersedes: the scattered `needs_draw`/`draw_reason` draw-flag handling (→ draw accumulator, #243); long per-step argument lists (→ `&mut RunCtx`, #244); the inline source-coalescing match (→ `sources::coalesce_recv`, #245); inline dispatch (→ `dispatch_effective` + `DispatchFlow`, #246); the inline draw/teardown bodies (→ `render_frame`/`run_teardown`, #247). Builds on entry 01KTMM35YXDZ69C08M78F4XKBB (Phase D).
+
+Reconstructed: this phase is almost entirely within `src/app/mod.rs` (the loop file) and `src/app/sources.rs` — it does not move data, it reshapes control flow. Folded as one moment: five mechanical loop-body extractions, no behavior change, each named above. After Phase E the loop is the recv → coalesce → dispatch → accumulate-draw → render_frame skeleton the plan targeted, leaving only the last-mile purity work.
+
+Provenance:
+- ac7318a (PR #243, 2026-06-02) — draw accumulator; mod.rs +56/−39.
+- 24ae5d1/c0b9cd9 (PR #244/#245, 2026-06-02) — `&mut RunCtx` signature collapse; `sources::coalesce_recv`.
+- a827566 (PR #246, 2026-06-02) — `dispatch_effective` + `DispatchFlow`; mod.rs +145/−91.
+- 7ccef44 (PR #247, 2026-06-02) — `render_frame` + `run_teardown`; mod.rs +91/−65.
+- docs/MVU_PLAN.md — View section (`dirty: Option<RedrawReason>` collapse, quoted).
+- prior entry 01KTMM35YXDZ69C08M78F4XKBB (this thread, Phase D) — supplied the disjoint fields the reshaped loop reads.
+
+<!-- Entry-ID: 01KTMM409Y3RTZPDTVWPQWR6EW -->
