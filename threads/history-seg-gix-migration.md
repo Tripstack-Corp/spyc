@@ -53,3 +53,27 @@ Provenance:
 - Cargo.toml:30-52 (at 70db0671) — quoted gix dependency comment block
 
 <!-- Entry-ID: 01KTMMJB955RF16D842WFFEBYP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:10:42.606566+00:00
+Role: scribe
+Type: Note
+Title: PR #285 — first real swap: repo discovery (gitdir + branch) on gix
+
+Spec: scribe
+
+tags: #history #gix-migration
+
+Moment: gix migration — Reconstructed: the first domain actually swapped from subprocess to gix — repository discovery (locating the gitdir + reading the current branch) — lands in a new src/git/discovery.rs and is deleted from sysinfo.rs. [kind: supersession]
+When: 2026-06-05 · PR #285 (feat/gix-discovery) · commit ef4fc297 (squash); feature-branch commit 8e0c70b5
+Recorded rationale: "feat(git): migrate repo discovery (gitdir + branch) to gix" — commit 8e0c70b5, 2026-06-05. (squash subject: "PR 3/9 of gix migration" implied by the arc; detailed body is on the feature branch.)
+Inferred intent: discovery is chosen as the first real swap because it is the lowest-risk domain — a read-only lookup with a small, stable output (a path + a branch name) and no porcelain-parsing surface. Migrating it first proves the gix wiring end-to-end before the riskier status hot path. Evidence: +115 src/git/discovery.rs, -99 sysinfo.rs; call sites in app/bootstrap.rs and app/state.rs rewired (state.rs +32/-... net). confidence: med (lowest-risk-first ordering is inferred from the diff scope; the arc comment in Cargo.toml at #284 listed discovery among the trimmed feature set)
+Supersedes: the subprocess discovery path in sysinfo.rs (removed -99) — first concrete strangle of the legacy backend established by the facade seam in PR #283.
+
+This is where the parity-then-flip arc begins in earnest, though discovery is swapped outright rather than run in parallel — its output is small enough that a side-by-side parity spike was apparently unnecessary (inferred from the absence of any parity-test module in this diff, in contrast to the status PR that follows). The src/git/mod.rs gains `pub mod discovery;` (+1). Call sites in app/bootstrap.rs (+2/-2) and app/state.rs are the only consumers touched, confirming the facade seam held: the migration changed the implementation, not the callers.
+
+Provenance:
+- ef4fc297 (PR #285 feat/gix-discovery, 2026-06-05) — squash merge; +136/-115 across 6 files: new src/git/discovery.rs (+115), sysinfo.rs (-99), app/state.rs/bootstrap.rs rewired
+- 8e0c70b5 (feature-branch commit, 2026-06-05) — pre-squash subject "migrate repo discovery (gitdir + branch) to gix"
+
+<!-- Entry-ID: 01KTMMKCGA2NKTRHBH3VPW37AJ -->
