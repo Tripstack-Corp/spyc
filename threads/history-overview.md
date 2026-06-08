@@ -381,3 +381,47 @@ Provenance:
 - Planning docs cited above all present on bitbucket/main at the window end (docs/ and repo root).
 
 <!-- Entry-ID: 01KTMN7X7FV45E8E05DN1RV719 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-08T22:22:51.627812+00:00
+Role: scribe
+Type: Note
+Title: Segmentation: the #38–#311 segment map — 7 extended arcs + 6 new segment threads, ~123 moments
+
+Spec: scribe
+
+tags: #history #segmentation
+
+The first window's eight arcs were intent-clusters over 37 PRs. The second window (#38–#311) is large enough that the segmentation does two things: it **extends seven of the original arcs** with their #38–#311 continuation moments, and it **opens six new `history-seg-*` threads** for subsystems that did not exist (or were not first-class) in the first 22 days. Routing was intent-based and partition-strict: every PR #38–#311 has exactly one owning thread, so no PR is narrated twice. Bounding followed the deep-history §B rule — one entry per *significant moment*, with mechanical/minor PRs folded into the nearest moment under an explicit `+N folded` line (never silently dropped).
+
+**New segment threads (6) — the engineering stories born in this window:**
+
+- `history-seg-refactor-mvu` — 14 entries (12 moments). The dominant story: the Model-View-Update architectural migration (#166, #180–#274). A strangler-fig rewrite that grew an MVU runtime (single Message channel, effect-as-data, off-thread workers, draw accumulator) alongside the old busy-poll `App::run` loop. Anchored by `docs/MVU_PLAN.md` (PR #196, the one Decision moment). Anchor entry-id 01KTMKSAG0R0FQ70HRQW1H4EKW.
+- `history-seg-module-decomposition` — 6 moments. The "800-LoC campaign" (#248–#308): verbatim file-splitting of the post-MVU monolith into the current `src/app/{key_dispatch,pager_handler,render,state}`, `src/ui/{markdown,diff_render,pager}`, etc. Convention codified in `CLAUDE.md` (PR #282): no `.rs` over ~800 lines without reason. Anchor 01KTMMGZWER9304EZM82KTEZMQ.
+- `history-seg-gix-migration` — 8 moments. Replacing subprocess `git` with the in-process `gix` crate (#283–#292) via a parity→flip→drop strangler-fig behind a `SPYC_GIT_BACKEND` escape hatch. Anchor 01KTMMHJ879C24FY2WYYT9F1SF.
+- `history-seg-performance` — 9 moments. The responsiveness-under-load campaign (#99–#156), incl. the 2026-05-26 typing-latency burst that moved vt100 parsing off the main thread (#141). Anchor 01KTMMHXYR7E0PYD7AZTHFAR8E.
+- `history-seg-markdown-rendering` — 9 moments. The content-rendering surface (#85–#130): markdown tables/reflow/lists, syntax highlighting, JSON pretty-print — rendered into the pager; the directory split itself lands later at #297 (decomposition). Anchor 01KTMMG3MTKFGRKYEJGHN65QY8.
+- `history-seg-docs-planning` — 8 moments. The planning cadence as a decision record (#62–#179): the V1.5→V1.6→V1.7 plan sequence, auto-approval/pane-recovery/startup-tabs plans, the yazi competitive review, the roadmap-reorg-to-2.0, and the BUGS→ROADMAP triage ladder. The plans that steer the other segments. Anchor 01KTMMKHEYZ540PV6VVZR33K79.
+
+**Extended arc threads (7) — first-window arcs continued (continuation-framing entry-id given):**
+
+- `history-arc-01-foundation-hygiene` — +11 entries. CI-caching campaign, test-surface expansion (the green-CI substrate the MVU rewrite leans on), releases v1.50.0/v1.51.4, toolchain/MSRV pin, supply-chain (RUSTSEC clear), the "aislop" comment-hygiene gate. Framing 01KTMMKT8E97SAHMKW6GJHTX6E.
+- `history-arc-03-pane-behavior` — +11 entries. V1.5 bidirectional pane↔task migration (#46–#48), the hide-not-destroy pane-visibility model (#94, a Decision), exit-label lifecycle, activity-vs-active styling, parser/zero-row hardening. Framing 01KTMMKJWX5X3WS2QD90MY153F.
+- `history-arc-04-git-integration` — +4 entries (deliberately thin). Residual git-marker/worktree-cache correctness only; the architectural git story moved to `history-seg-gix-migration` and the perf story to `history-seg-performance`, which the framing note points to. Framing 01KTMMJB49K22EGR14EF11BP18.
+- `history-arc-05-pager-surface` — +11 entries. The largest continuation: the V1.5 pager-as-scrollback migration (#40–#43, a Decision) and its culmination in the `PagerStream` abstraction (#309–#311, a Decision) — V1.5 made the pager the universal *render* surface, #309–#311 made it the universal way content *arrives*. Framing 01KTMMP0ZVARBSD274T5V4A05P.
+- `history-arc-06-input-and-overlays` — +10 entries. The `route_key` dispatch refactor (#82, the cleanup MVU's channel work builds on), resolver operator-pending grammar, vim bindings, jump-history `?` trigger, `:`-command completion. Framing 01KTMMN5RTFKWX352K9XBR4V0D.
+- `history-arc-07-codex-and-mcp-bridge` — +11 entries. The multi-agent expansion: hardcoded peers (claude/codex) → gemini → the `AgentProfile` registry (#176, the pivotal Decision) → agy/antigravity and zot landing for one impl + one line each. Framing 01KTMMPRDQ4Y8Q0D5AD9ZND5SA.
+- `history-arc-08-recoverability-and-deps` — +10 entries. Unsafe-surface reduction 36→2 (#83/#154, security), the PROJECT_HOME-as-anchor decision for session/path ops (#91/#101/#102), huge-tree watch cap, clipboard/symlink/truecolor edge cases, graveyard discoverability. Framing 01KTMMNZGF280TRX1M7C616KGM.
+
+**Cross-segment topology (the throughlines that span threads):** the engineering spine of this window is a single architectural arc — **route_key refactor (arc-06 #82) → MVU runtime (seg-refactor-mvu) → 800-LoC decomposition (seg-module-decomposition) → gix migration (seg-gix-migration)** — bracketed by the planning that authorized it (`docs/MVU_PLAN.md`, the roadmap-reorg-to-2.0 in seg-docs-planning) and the test-infra that made it safe (arc-01's green-CI substrate). The pager (arc-05) and agent-registry (arc-07) are the two product surfaces that reached their architectural payoff (`PagerStream`, `AgentProfile`) in parallel. Performance (seg-performance) and recoverability (arc-08) are the cross-cutting concerns that every other segment touches.
+
+**For the insight layer (Phase 3 of the first window) — deferred.** The first window produced four insight tiers (drift / recurrence / trajectory / emergent-properties) over its 8 arcs. An equivalent insight pass over this window's 13 threads is NOT written this session; the drift fuel is already visible in the per-moment entries (the v1.60 same-day architecture reversal #76→#77; the #139/#140 throttles made vestigial by #141; the fix-on-feature regression waves in arc-05 #49–#53 and markdown #103→#108). Those are the seed list if/when the insight layer is extended.
+
+Provenance:
+- All 13 thread topics and their entry counts verified by `watercooler_say` write receipts this session and re-read of each thread tail by its segment worker.
+- Anchor entry-ids as listed (first or framing entry of each thread).
+- Routing partition (#38–#311, one owner per PR) enforced by the coordinator's segment-assignment table.
+- Prior spine entries this window: history-overview framing = 01KTMN7X7FV45E8E05DN1RV719.
+- First-window segmentation (8-arc, #1–#37): history-overview index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
+
+<!-- Entry-ID: 01KTMN9MRB31A0C8ZWSXX5M5ZQ -->

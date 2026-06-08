@@ -5,7 +5,7 @@
   "title": "history overview",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-06-08T22:21:56.349509+00:00",
+  "last_updated": "2026-06-08T22:22:51.629265+00:00",
   "summary": "The thread outlines a two-layer reconstruction of spyc's first 22 days, with segmentation into 8 arcs based on commits, and a special handling of PR #5 with a mandatory back-reference arc.",
-  "entry_count": 7
+  "entry_count": 8
 }
