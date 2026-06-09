@@ -24,9 +24,44 @@ use crate::ui::pager::Mount;
 
 use super::{App, Mode};
 
-/// Where an incoming key event should be dispatched.
+/// Which kind of input event is being routed. A key may be a meta-chord
+/// (which escapes most content sinks to the resolver so `^a-j` works while
+/// a pane/pager is focused); a **paste is always content** (never a
+/// meta-chord), so it routes wherever a non-meta key would. The paste text
+/// is passed separately to the dispatcher — the router only needs the
+/// discriminant.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum InputKind {
+    Key(KeyEvent),
+    // Dead-code bridge: constructed by `handle_paste` once paste is
+    // migrated onto `route_input` (next PR). The route tests already
+    // exercise it; the `allow` is removed when the paste reader lands.
+    #[allow(dead_code)]
+    Paste,
+}
+
+/// Where an incoming input event (key or paste) is dispatched. The
+/// **modal** variants — a transient overlay swallowing all input — take
+/// precedence over the **content** variants — the persistent region that
+/// owns input. `route_input` returns this for both keys and paste, and
+/// both `handle_key` and `handle_paste` dispatch on it via an *exhaustive*
+/// match, so the two input kinds cannot drift: adding a variant is a build
+/// error until both handle it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum KeyDestination {
+pub(super) enum InputSink {
+    // ── modal sinks: eat ALL input, regardless of focus / meta-chord ──
+    /// `F` fuzzy-finder picker is open (type-to-filter).
+    FindPicker,
+    /// A `!` capture child is running — forward input to its pty.
+    Capture,
+    /// A top-overlay subprocess has exited and is held awaiting any input
+    /// to dismiss it.
+    OverlayDismiss,
+    /// Quick-select label overlay is open.
+    QuickSelect,
+    /// Harpoon menu is open.
+    Harpoon,
+    // ── content sinks: the focused region owns the input ──
     /// In-app prompt is active (`Mode::Prompting`); the key feeds
     /// the prompt's line editor.
     Prompt,
@@ -55,6 +90,17 @@ pub(super) enum KeyDestination {
 /// fields in update-syntax (`RouteSnapshot { foo: true, ..idle() }`).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RouteSnapshot {
+    /// `F` fuzzy-finder picker is open (`runtime.find_picker`).
+    pub has_find_picker: bool,
+    /// A `!` capture child is running (`runtime.pending_capture`).
+    pub has_capture: bool,
+    /// A top-overlay subprocess has exited and awaits a dismiss keypress
+    /// (`view.overlay_awaiting_dismiss`).
+    pub overlay_awaiting_dismiss: bool,
+    /// Quick-select label overlay is open (`view.quick_select`).
+    pub has_quick_select: bool,
+    /// Harpoon menu is open (`view.harpoon_menu`).
+    pub has_harpoon: bool,
     /// `state.mode` is `Mode::Prompting(_)`.
     pub is_prompting: bool,
     /// `App::top_overlay.is_some()` — `V`/`;` overlay pty alive.
@@ -76,16 +122,45 @@ pub(super) struct RouteSnapshot {
     pub resolver_pending: bool,
 }
 
-/// Decide where a key goes. **Pure**, no mutation, no I/O.
-pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestination {
-    let is_meta = super::is_spyc_meta_when_pane_focused(key, snap.resolver_pending);
+/// Decide where an input event goes. **Pure**, no mutation, no I/O.
+///
+/// A modal overlay (the finder, a running capture, a dismiss-awaiting
+/// overlay, quick-select, harpoon) eats EVERY input kind regardless of
+/// focus or meta-chord status, so those are checked first, in the same
+/// precedence the historical `handle_key` pre-check ladder used. With no
+/// modal active the content layer decides by focus + key-kind: a key may
+/// be a meta-chord that escapes to the resolver, but a paste is always
+/// content (`is_meta == false`) so it lands wherever a non-meta key would.
+pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSink {
+    // Modal layer — order mirrors the old pre-check ladder.
+    if snap.has_find_picker {
+        return InputSink::FindPicker;
+    }
+    if snap.has_capture {
+        return InputSink::Capture;
+    }
+    if snap.overlay_awaiting_dismiss {
+        return InputSink::OverlayDismiss;
+    }
+    if snap.has_quick_select {
+        return InputSink::QuickSelect;
+    }
+    if snap.has_harpoon {
+        return InputSink::Harpoon;
+    }
+
+    // Content layer.
+    let is_meta = match kind {
+        InputKind::Key(key) => super::is_spyc_meta_when_pane_focused(key, snap.resolver_pending),
+        InputKind::Paste => false,
+    };
     let bottom_owns = snap.has_pane_tabs && snap.pane_focused;
 
     // 1. Top-overlay pty (V editor, ; command). Meta chords and
     //    bottom-pane-focused keys fall through so the user can
     //    `^a-j` into claude while the editor stays visible above.
     if snap.has_top_overlay && !is_meta && !bottom_owns {
-        return KeyDestination::OverlayPty;
+        return InputSink::OverlayPty;
     }
 
     // 2. Top-region pager (`view.pager`: Overlay or TopPane). Overlay is
@@ -98,7 +173,7 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
         let escape_meta = matches!(mount, Mount::TopPane) && is_meta;
         if !(bottom_typing || escape_meta) {
-            return KeyDestination::PagerKey;
+            return InputSink::PagerKey;
         }
         // else fall through to the scrollback / bottom-pane / resolver arms.
     }
@@ -111,14 +186,14 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
     //     j/k navigate it while the scrollback stays visible (`^a-k` workflow);
     //     meta chords always escape.
     if snap.has_scroll_pager && bottom_owns && !is_meta {
-        return KeyDestination::PagerKey;
+        return InputSink::PagerKey;
     }
 
     // 3. Pane scrollback mode. Non-meta keys with the pane focused
     //    drive the scroll handler; meta keys escape to the resolver
     //    so pane commands (`^a-x`, focus switch) still work.
     if snap.has_pane_tabs && snap.pane_scrolling && snap.pane_focused && !is_meta {
-        return KeyDestination::PaneScroll;
+        return InputSink::PaneScroll;
     }
 
     // 4. Exited pane tab. Non-meta keys flash a hint and are
@@ -126,31 +201,36 @@ pub(super) const fn route_key(snap: RouteSnapshot, key: KeyEvent) -> KeyDestinat
     //    resolver. Closes the v1.50.28 race where `^a` itself
     //    silently dropped the tab.
     if snap.has_pane_tabs && snap.pane_focused && snap.pane_closed && !is_meta {
-        return KeyDestination::PaneExitedFlash;
+        return InputSink::PaneExitedFlash;
     }
 
     // 5. Bottom pane forward — pty has focus, non-meta, and we're
     //    not in a prompt (typed prompt text doesn't leak into the
     //    pane).
     if bottom_owns && !is_meta && !snap.is_prompting {
-        return KeyDestination::BottomPane;
+        return InputSink::BottomPane;
     }
 
     // 6. Prompt — file-list area is the active region; a prompt is
     //    up so feed the line editor.
     if snap.is_prompting {
-        return KeyDestination::Prompt;
+        return InputSink::Prompt;
     }
 
     // 7. Default: chord resolver / file-list navigation.
-    KeyDestination::Resolver
+    InputSink::Resolver
 }
 
 impl App {
-    /// Build the routing snapshot used by `route::route_key`.
+    /// Build the routing snapshot used by `route::route_input`.
     /// Pure read of the fields the router cares about.
     pub(super) fn route_snapshot(&self) -> RouteSnapshot {
         RouteSnapshot {
+            has_find_picker: self.runtime.find_picker.is_some(),
+            has_capture: self.runtime.pending_capture.is_some(),
+            overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
+            has_quick_select: self.view.quick_select.is_some(),
+            has_harpoon: self.view.harpoon_menu.is_some(),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             has_top_overlay: self.runtime.top_overlay.is_some(),
             pager_mount: self.view.pager.as_ref().map(|v| v.mount),
@@ -174,6 +254,11 @@ mod tests {
     /// Snapshot with every flag at its quiescent default.
     fn idle() -> RouteSnapshot {
         RouteSnapshot {
+            has_find_picker: false,
+            has_capture: false,
+            overlay_awaiting_dismiss: false,
+            has_quick_select: false,
+            has_harpoon: false,
             is_prompting: false,
             has_top_overlay: false,
             pager_mount: None,
@@ -184,6 +269,13 @@ mod tests {
             pane_closed: false,
             resolver_pending: false,
         }
+    }
+
+    /// Test shim: the historical key-only router. Lets the regression
+    /// matrix below stay verbatim while production routes both kinds
+    /// through `route_input`.
+    fn route_key(snap: RouteSnapshot, key: KeyEvent) -> InputSink {
+        route_input(snap, InputKind::Key(key))
     }
 
     fn key(c: char) -> KeyEvent {
@@ -198,7 +290,7 @@ mod tests {
 
     #[test]
     fn default_routes_to_resolver() {
-        assert_eq!(route_key(idle(), key('j')), KeyDestination::Resolver);
+        assert_eq!(route_key(idle(), key('j')), InputSink::Resolver);
     }
 
     #[test]
@@ -207,7 +299,7 @@ mod tests {
             is_prompting: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('a')), KeyDestination::Prompt);
+        assert_eq!(route_key(snap, key('a')), InputSink::Prompt);
     }
 
     #[test]
@@ -217,7 +309,7 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+        assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
     }
 
     #[test]
@@ -229,7 +321,7 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     #[test]
@@ -242,7 +334,7 @@ mod tests {
             resolver_pending: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, key('j')), InputSink::Resolver);
     }
 
     // ── pager: overlay mount eats everything ──────────────────────
@@ -253,8 +345,8 @@ mod tests {
             pager_mount: Some(Mount::Overlay),
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::PagerKey);
     }
 
     // ── regression: TopPane pager + meta chord (#78) ──────────────
@@ -269,7 +361,7 @@ mod tests {
             pane_focused: false, // pager has focus
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     #[test]
@@ -280,7 +372,7 @@ mod tests {
             pane_focused: false,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
     }
 
     #[test]
@@ -293,9 +385,9 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+        assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
         // And `^a-k` still works to switch focus back.
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     // ── regression: LowerPane pager + meta chord (#80) ────────────
@@ -312,7 +404,7 @@ mod tests {
             pane_scrolling: true, // entered scroll mode
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     #[test]
@@ -326,8 +418,8 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
-        assert_eq!(route_key(snap, key('/')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
+        assert_eq!(route_key(snap, key('/')), InputSink::PagerKey);
     }
 
     #[test]
@@ -343,10 +435,10 @@ mod tests {
             pane_focused: false, // ^a-k flipped focus to top
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::Resolver);
-        assert_eq!(route_key(snap, key('k')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, key('j')), InputSink::Resolver);
+        assert_eq!(route_key(snap, key('k')), InputSink::Resolver);
         // Meta keys still reach the resolver too.
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     /// Coexistence: a `D` TopPane pager up top AND a `^a v` scrollback below at
@@ -362,15 +454,15 @@ mod tests {
             pane_focused: true, // bottom scrollback owns input
             ..idle()
         };
-        assert_eq!(route_key(bottom, key('j')), KeyDestination::PagerKey);
-        assert_eq!(route_key(bottom, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(bottom, key('j')), InputSink::PagerKey);
+        assert_eq!(route_key(bottom, ctrl('a')), InputSink::Resolver);
 
         let top = RouteSnapshot {
             pane_focused: false, // top `D` pager owns input
             ..bottom
         };
-        assert_eq!(route_key(top, key('j')), KeyDestination::PagerKey);
-        assert_eq!(route_key(top, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(top, key('j')), InputSink::PagerKey);
+        assert_eq!(route_key(top, ctrl('a')), InputSink::Resolver);
     }
 
     // ── regression: V/D top_overlay + paste / chord (#75 + V) ─────
@@ -385,7 +477,7 @@ mod tests {
             pane_focused: false,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::OverlayPty);
+        assert_eq!(route_key(snap, key('j')), InputSink::OverlayPty);
     }
 
     #[test]
@@ -397,7 +489,7 @@ mod tests {
             pane_focused: false,
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     #[test]
@@ -409,7 +501,7 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('q')), KeyDestination::BottomPane);
+        assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
     }
 
     // ── regression: exited tab + non-meta key (#81) ───────────────
@@ -422,10 +514,10 @@ mod tests {
             pane_closed: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PaneExitedFlash);
+        assert_eq!(route_key(snap, key('j')), InputSink::PaneExitedFlash);
         assert_eq!(
             route_key(snap, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            KeyDestination::PaneExitedFlash,
+            InputSink::PaneExitedFlash,
         );
     }
 
@@ -438,7 +530,7 @@ mod tests {
             pane_closed: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     // ── pane scroll mode ──────────────────────────────────────────
@@ -451,8 +543,8 @@ mod tests {
             pane_scrolling: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PaneScroll);
-        assert_eq!(route_key(snap, key('G')), KeyDestination::PaneScroll);
+        assert_eq!(route_key(snap, key('j')), InputSink::PaneScroll);
+        assert_eq!(route_key(snap, key('G')), InputSink::PaneScroll);
     }
 
     #[test]
@@ -463,7 +555,7 @@ mod tests {
             pane_scrolling: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::Resolver);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
     }
 
     // ── prompts win over panes ────────────────────────────────────
@@ -478,7 +570,7 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('q')), KeyDestination::Prompt);
+        assert_eq!(route_key(snap, key('q')), InputSink::Prompt);
     }
 
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
@@ -495,7 +587,115 @@ mod tests {
             pane_focused: true,
             ..idle()
         };
-        assert_eq!(route_key(snap, key('j')), KeyDestination::PagerKey);
-        assert_eq!(route_key(snap, ctrl('a')), KeyDestination::PagerKey);
+        assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::PagerKey);
+    }
+
+    // ── modal layer: eats every kind, regardless of focus / meta ──────
+    //
+    // A modal overlay swallows ALL input — including meta chords — and
+    // takes precedence over the content layer. Each modal flag routes a
+    // plain key, a `^a` meta chord, AND a paste to its sink, even with a
+    // focused pane present.
+
+    #[test]
+    fn find_picker_eats_all_input() {
+        let snap = RouteSnapshot {
+            has_find_picker: true,
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), InputSink::FindPicker);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::FindPicker);
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::FindPicker);
+    }
+
+    #[test]
+    fn capture_eats_all_input() {
+        let snap = RouteSnapshot {
+            has_capture: true,
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), InputSink::Capture);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Capture);
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::Capture);
+    }
+
+    #[test]
+    fn overlay_dismiss_eats_all_input() {
+        let snap = RouteSnapshot {
+            overlay_awaiting_dismiss: true,
+            has_top_overlay: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('j')), InputSink::OverlayDismiss);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::OverlayDismiss);
+        assert_eq!(
+            route_input(snap, InputKind::Paste),
+            InputSink::OverlayDismiss
+        );
+    }
+
+    #[test]
+    fn quick_select_eats_all_input() {
+        let snap = RouteSnapshot {
+            has_quick_select: true,
+            has_pane_tabs: true,
+            pane_focused: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('a')), InputSink::QuickSelect);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::QuickSelect);
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::QuickSelect);
+    }
+
+    #[test]
+    fn harpoon_eats_all_input() {
+        let snap = RouteSnapshot {
+            has_harpoon: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('1')), InputSink::Harpoon);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Harpoon);
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::Harpoon);
+    }
+
+    /// Modal precedence: with several modal flags set at once, the order
+    /// is find_picker > capture > dismiss > quick_select > harpoon —
+    /// mirroring the historical `handle_key` pre-check ladder.
+    #[test]
+    fn modal_precedence_order() {
+        let all = RouteSnapshot {
+            has_find_picker: true,
+            has_capture: true,
+            overlay_awaiting_dismiss: true,
+            has_quick_select: true,
+            has_harpoon: true,
+            ..idle()
+        };
+        assert_eq!(route_key(all, key('j')), InputSink::FindPicker);
+        let no_finder = RouteSnapshot {
+            has_find_picker: false,
+            ..all
+        };
+        assert_eq!(route_key(no_finder, key('j')), InputSink::Capture);
+        let no_capture = RouteSnapshot {
+            has_capture: false,
+            ..no_finder
+        };
+        assert_eq!(route_key(no_capture, key('j')), InputSink::OverlayDismiss);
+        let no_dismiss = RouteSnapshot {
+            overlay_awaiting_dismiss: false,
+            ..no_capture
+        };
+        assert_eq!(route_key(no_dismiss, key('j')), InputSink::QuickSelect);
+        let only_harpoon = RouteSnapshot {
+            has_quick_select: false,
+            ..no_dismiss
+        };
+        assert_eq!(route_key(only_harpoon, key('j')), InputSink::Harpoon);
     }
 }
