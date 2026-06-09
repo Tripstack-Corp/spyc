@@ -313,3 +313,31 @@ Provenance:
 - 3be7989a (2026-04-17 18:20) — 🌶️ pepper in version strings.
 
 <!-- Entry-ID: 01KTNBH4F01YB3YNV9JT6MM8QH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:51:58.092925+00:00
+Role: scribe
+Type: Note
+Title: v1.1–v1.3 — git-status gutter markers, live .git/index watch, :cd/:sort/:marks/:set
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: git status moves from color-override to gutter markers with a live .git/index watcher; colon commands proliferate   [kind: refactor]
+When: 2026-04-17 · commits f60f2bea (v1.1), 285aa960 (v1.2 gutter markers), d5ff47f2 (v1.3 colon cmds), 14e2ab1c (v1.3.1 index watch)
+Recorded rationale: "Fix file type colors overridden by git status; bump to 1.1.0" (f60f2bea); "Git status markers in gutter instead of color override; bump to 1.2.0" (285aa960); ":cd, :sort, :marks, :set, pager buffer history; bump to 1.3.0" (d5ff47f2); "Watch .git/index for live git status marker updates; bump to 1.3.1" (14e2ab1c)
+Inferred intent: a small supersession in the arc-04 git-status line — git state stops hijacking filetype colors (which conflicted) and moves to a dedicated gutter column, then becomes live via a .git/index watcher built on the M4-era fs watch path. confidence: high — evidence: 285aa960 subject explicitly states "instead of color override"; pickaxe on the git-status rendering confirms the gutter move.
+Supersedes: 285aa960 supersedes ec8689d6 (git file-status COLORS in listing) — markers replace the color override because filetype colors and git colors collided (the bug f60f2bea fixed).
+
+The git-status-in-listing feature (born ec8689d6) is reworked twice here: f60f2bea fixes filetype colors being clobbered by git status, then 285aa960 abandons color-override entirely for gutter markers. 14e2ab1c makes those markers live by watching .git/index — the first git-specific use of the watcher, later broadened to watch .git/ as a directory (v1.18.1, cd43cd97) after commits weren't triggering refresh. d5ff47f2 adds the :cd/:sort/:marks/:set colon commands plus pager buffer history.
+
++1 folded: pager buffer-history (multiple pager buffers) introduced in d5ff47f2, roadmapped at 484af6e4.
+
+Provenance:
+- f60f2bea (2026-04-17 18:31) — v1.1.0, filetype-vs-git color fix.
+- 285aa960 (2026-04-17 19:24) — v1.2.0, gutter markers replace color override.
+- d5ff47f2 (2026-04-17 20:18) — v1.3.0, :cd/:sort/:marks/:set + pager buffer history.
+- 14e2ab1c (2026-04-17 20:27) — v1.3.1, .git/index live watch.
+
+<!-- Entry-ID: 01KTNBJ345J5SFWXZA2YN5M6K5 -->
