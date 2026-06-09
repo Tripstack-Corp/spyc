@@ -48,6 +48,13 @@ impl App {
                     is_scrolling: t.active().is_scrolling(),
                     is_closed: t.active().is_closed(),
                 });
+        // Re-derive `state.focus` from the live surfaces here, at the same
+        // loop-top seam and for the same reason: so the value `route_snapshot`
+        // reads next is always current. Most pager opens never set focus and
+        // closes leave it stale; this makes `state.focus` authoritative without
+        // bookkeeping at every open/close site. Behavior-preserving today (only
+        // the non-`Pane` discriminant moves; `pane_focused()` is unchanged).
+        self.recompute_focus();
     }
 
     /// 1 Hz safety-net git poll (10 s for huge trees) — converges within a
