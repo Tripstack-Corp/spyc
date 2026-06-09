@@ -949,3 +949,40 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVR9Z5SZ0T0HX8WTNX22NT -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:16:33.938146+00:00
+Role: critic
+Type: Note
+Title: Property 13 (window-2): Test-substrate-enables-migration — green CI plus behavior-equivalence and guard tests are the precondition the strangler-figs and decompositions run against; the artifact carries an executable invariant layer
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** The codebase carries an **executable invariant layer** — green CI, behavior-equivalence test suites, and standing guard tests — that functions as the precondition making window-2's campaign-scale migrations and decompositions safe to run. The artifact does not merely *have* tests; it carries tests that *enforce campaign invariants in CI* (a file stays decomposed; no production source spawns `git`; a backend is byte-for-byte at parity before the flip). Reads as: spyc, as artifact, made its test layer load-bearing for structural change — the strangler-fig's parity gate, the decomposition's ceiling guard, and the verbatim-relocation's "no assertion edits" discipline are all the same executable-precondition substrate the campaigns depend on.
+
+**Window contrast: this is a new artifact property with no window-1 precursor (extends, does not invert).** Window-1's properties did not name a test-as-enabling-substrate behavior — its drift catalogue's negative space recorded *no test-asserts-wrong-thing drift* but did not name tests as the precondition for migration, because window-1 had no campaign-scale migration to enable (cf. Property 8, strangler-fig is new to window-2). This property is the test-layer counterpart to the migration architecture: the migrations of Properties 8 and 9 are *safe* because of the invariant layer this property names.
+
+**Evidence enumeration.**
+
+*Tests are the strangler-fig's parity gate* (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF): the MVU migration's parity discipline is "the recorded 'behavior-equivalence tests' gate plus the candid trade-off … accepted, not closed"; the gix migration's parity is "the status spike 'runs only from the parity tests, not the live status path,' proving byte-for-byte equivalence before the flip," and the drop "adds the `no_subprocess_git_in_production` guard test, net diff −178." The flip and drop are gated on tests, by the migration's own recorded design.
+
+*Tests enforce the decomposition's invariants* (recurrence P3 = 01KTMTSAVQNENHP8ZFWBKTWXN6; drift A′ via the ceiling): the decomposition "adds executable invariants (`mod_rs_stays_decomposed` ceiling test, `no_subprocess_git_in_production` guard); the gix flip ships byte-for-byte parity tests *before* flipping," and the verbatim relocations carry an explicit "no behavior change, no assertion edits" discipline, machine-checkable by `+N/-N` diff balance plus unchanged behavior tests.
+
+*The green-CI substrate is named as the precondition, with negative space confirming it* (drift negative-space tail = 01KTMV0RPDEBMH87MB89JRE0BR): arc-01's test-surface expansion (#56/#59/#60/#199/#200) is "named 'the green-CI substrate for the refactor'"; the window's signature is "green-CI-as-precondition"; the MVU strangler-fig is "behavior-equivalent behind green CI (all 786 tests, no assertion edits)." The negative-space tail records the *inverse-of-drift* reading: "Tests in window 2 pin the post-change reality and *enforce* the conventions, the inverse of asserting a stale contract" — i.e. no test-asserts-wrong-thing drift across #166–#308 even under enormous code movement, and no stub-then-fill-in drift shipped into a live path.
+
+**The contract's "not-actually-gated-merges gotcha," searched and named as NOT surfaced.** The continuation contract flagged a possible undercutting gotcha — that the merges might not *actually* be CI-gated despite the green-CI framing. Reviewing the window-2 drift catalogue, that gotcha does **not** surface: the drift negative-space tail affirmatively names tests as "the safety substrate" and as *enforcing* (not merely accompanying) the conventions, and the drift closure (= 01KTMV2JE30J2QGRP3W3EBQNZH) records no merge-not-gated finding. The only adjacent drift is E′ (in-source comment cruft) and the staged-flip discipline (deliberately-unwired model layers, "no UI flip yet" — explicitly labeled and wired within the same sub-arc, not abandoned stubs). So the property is promoted on its lower-tier citations *with* the honest note that the catalogue contains no observation undercutting the tests-as-gate reading; if a future window's drift catalogue surfaced a merges-not-actually-gated finding, it would weaken this property (named in the falsification condition below).
+
+**Strongest evidence.** The two standing guard tests — `mod_rs_stays_decomposed` (decomposition ceiling) and `no_subprocess_git_in_production` (gix drop) — are the load-bearing observation: they are executable invariants the artifact carries *after* the campaigns, that fail in CI if the campaign's gain is reverted. The migration is not merely tested-during; the post-migration state is *fenced* by a test, which is the sharpest form of test-as-enabling-substrate (recurrence synthesis-legibility tail = 01KTMV38HW8N06YTPG0VQS5NYH: "parts of it are checked by the codebase itself … the verbatim count and the strangler-fig completion are diff- and test-verified facts, not analyst readings").
+
+**Where the property would falsify.** A campaign-scale migration or decomposition landing *without* a parity gate or behavior-equivalence test (a flip with no parity proof, a split with no "no behavior change" backing) would weaken the precondition claim. None observed — both strangler-figs ship parity before flip; the verbatim relocations carry the no-assertion-edits discipline. A drift finding that a campaign's merges were *not actually* CI-gated (the gotcha above) would directly refute the tests-as-gate reading; the window-2 drift catalogue surfaces none. A guard test removed without the invariant it protected being intentionally retired would weaken the fenced-state half; the gix and decomposition guards stand.
+
+**Tier-5 forward prediction.** Citing recurrence P1's parity-before-flip gates and recurrence P3's standing guard tests: post-window, a campaign-scale migration or decomposition will land behind a behavior-equivalence/parity gate and will leave a standing guard test fencing its terminal state in CI, rather than landing on unverified equivalence. (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF + P3 = 01KTMTSAVQNENHP8ZFWBKTWXN6.)
+
+Provenance:
+- recurrence window-2: P1 strangler-fig (behavior-equivalence gate; gix parity-before-flip; `no_subprocess_git_in_production` guard; −178 drop) = 01KTMTNYS83V5A7PY2MJVV60MF; P3 verbatim-relocation (the `mod_rs_stays_decomposed` ceiling test; no-assertion-edits discipline; machine-checkable signature) = 01KTMTSAVQNENHP8ZFWBKTWXN6; synthesis-legibility tail (machine-checkable / test-verified facts) = 01KTMV38HW8N06YTPG0VQS5NYH.
+- drift window-2: negative-space tail (arc-01 green-CI substrate #56/#59/#60/#199/#200; "green-CI-as-precondition"; 786 tests no assertion edits; tests enforce not assert-stale) = 01KTMV0RPDEBMH87MB89JRE0BR; closure (no merges-not-gated finding) = 01KTMV2JE30J2QGRP3W3EBQNZH.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7; sibling Property 8 (strangler-fig) = 01KTMVJ5B5DWEPR9CHFS7PRMWW; Property 9 (decomposition) = 01KTMVKP814X8MHX1427R0EBW3.
+
+<!-- Entry-ID: 01KTMVST4Q84SNSG6RY4SV3SFJ -->
