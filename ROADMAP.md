@@ -655,6 +655,41 @@ hard-depends on it being done, which it now is, pre-2.0.)
 > The remaining `docs/*_PLAN.md` files are the live, not-yet-started
 > designs referenced above.
 
+## Needs investigation
+
+Items where the *approach* is unknown — they need a discovery spike before
+they can graduate to a track.
+
+- **Ollama harness scrollback (`^a v`).** Goal: scrollback for an
+  ollama-backed agent pane, the way Claude's full-screen mode gets it.
+  **Findings so far (2026-06-09):**
+  - Plain `ollama run <model>` (and `ollama run … --experimental`, the agent
+    loop) is an **inline readline REPL — NOT alternate-screen** (probed: no
+    `\e[?1049h`; just `\e[2K`/`\e[1G` line redraws + `\e[?2026` synchronized
+    output). So vt100 scrollback already applies to the plain REPL. A plain-
+    `ollama` `AgentProfile` (detection + `AgentKind::Ollama` + restore-as-fresh)
+    is **complete but PARKED, unmerged, on branch `feat/ollama-agent-profile`** —
+    merge it if plain-REPL recognition is wanted on its own.
+  - The user's actual "ollama harness" is a **full-screen (alt-screen) wrapper /
+    third-party tool** backed by ollama (not plain `ollama run`). So `^a v`
+    dead-ends with "scroll: alt-screen app — use its own scrollback" — the exact
+    wall Claude's full-screen mode hit.
+  - **ollama itself persists no conversation:** no per-session transcript file
+    (unlike `~/.claude/projects/<slug>/<id>.jsonl`), the `~/.ollama/logs` are
+    operational only (HTTP access / model-load, no prompts/responses), and the
+    HTTP API is stateless (the client passes full history each call). So there
+    is **no clean-transcript source** to reconstruct from.
+  - **To proceed, two unknowns must be resolved:** (1) the wrapper's exact
+    command/binary — needed for `AgentProfile::matches_command` detection;
+    (2) whether/where that wrapper persists the conversation on disk
+    (JSON/JSONL/SQLite/markdown under `~`). If it does, the fix is a
+    `TranscriptSpec` (`resolve` + `render`) exactly like the Claude path
+    (`state::claude_transcript`, auto-engaged on the alt screen via
+    `pane_scroll::decide_scroll_source`). If it keeps history only in memory,
+    alt-screen scrollback needs a different capture mechanism (no source exists).
+  - **Template:** the Claude full-screen scrollback (PR #309) is the working
+    pattern to copy once the wrapper is identified.
+
 ## Additional Ideas
 
 Lower-priority items retained from the prior roadmap. Will graduate to
