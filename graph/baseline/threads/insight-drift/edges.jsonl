@@ -25,3 +25,5 @@
 {"source":"entry:01KTMTQ8RT04DKANY20CG8TE39","target":"entry:01KTMTRNPWDK14NQHD78DV2ZEE","type":"followed_by"}
 {"source":"thread:insight-drift","target":"entry:01KTMTT2MAQQSS8780NBK097TQ","type":"contains"}
 {"source":"entry:01KTMTRNPWDK14NQHD78DV2ZEE","target":"entry:01KTMTT2MAQQSS8780NBK097TQ","type":"followed_by"}
+{"source":"thread:insight-drift","target":"entry:01KTMTVGN940DGM1WTG61T8JDN","type":"contains"}
+{"source":"entry:01KTMTT2MAQQSS8780NBK097TQ","target":"entry:01KTMTVGN940DGM1WTG61T8JDN","type":"followed_by"}

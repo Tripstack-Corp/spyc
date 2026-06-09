@@ -678,3 +678,44 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTT2MAQQSS8780NBK097TQ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:00:00.427840+00:00
+Role: critic
+Type: Note
+Title: Pattern D′: Same-day plan self-reversal — the description layer drifts from itself (V1_60_PLAN recursive→siblings in ~4.5h); a drift the thin window-1 doc layer could not produce
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** A new drift surface window 1 structurally could not have: the **planning-document layer drifts from itself**. In window 1 the description layer was commit subjects, CHANGELOG buckets, and BUGS.md entries — thin enough that the only intra-description retraction (window-1 Pattern E) lived in a single diff's competing text channels. Window 2 grows a thick committed plan-doc layer (the V1_5/V1_60/V1_70 plans, MVU_PLAN, REFACTOR_PLAN, the yazi review). A plan doc can now be *filed and then reversed* as its own artifact — the description drifting from a prior version of the description, before any code exists to disagree with.
+
+**Instance enumeration with moment-entry citations.**
+
+1. **V1_60_PLAN.md "CounterTop": recursive-composition → siblings+mirror within ~4.5h.** PR #76 (docs/v1.60-plan, merge ~11:04) files the plan on a recursive thesis: "spyc panes already host any program; spyc happens to be a program; therefore spyc panes already host spyc … each workspace is a child spyc process running in a pane tab of the master." PR #77 (docs/v1.60-plan-rewrite, merge ~15:26) reverses it the same day: "The architectural choice is **siblings + mirror**, not recursive composition … The hub is a peer that happens to be a client of every other peer's MCP socket." The #77 CHANGELOG records the reversal explicitly — "Design discussion with the user reframed the architecture … The recursive-composition route from yesterday's plan is recorded as considered-and-rejected." The discovery-file shape also drifts: #76's `{pid, project_home, session_name, mcp_socket}` becomes #79's `{schema_version, spyc_version, capabilities, mode}`. Two-and-a-half PRs (#76→#77→#79) of plan churn, no code. *Cite: seg-docs-planning 01KTMMMQ1VY8ZERQ3NQAF89DN4 (#76/#77/#79).*
+
+**Adjacent plan-layer movements that are NOT this pattern (boundary discipline).** Two other plan-doc revisions in the window look superficially similar but are *sequenced revision*, not same-artifact self-reversal, and the catalogue declines to fold them in:
+
+- **PR #179 roadmap-reorg ("Lean 2.0")** flips REFACTOR_PLAN.md from "hold the whole plan until after 2.0" to "take the low-risk decomposition now, hold only the deep MVU rewrite." This is a *stance revision across ~a month* (the original "hold" was dated 2026-04-29; the reversal 2026-05-30) driven by a stated trigger ("the file crossed ~12k lines"), and it keeps the prior reasoning as explicit historical context. A planned re-sequencing, not a same-day reversal of a just-filed thesis. *Cite: seg-docs-planning 01KTMMWRE9YX58H2RXKYY58QVH (#179).*
+- **MVU_PLAN.md (PR #196)** itself records a sequencing reversal — "reversing the earlier 'hold the MVU rewrite until 2.0 + ~2 weeks' gate" — but that is the *same* across-time stance revision as #179, recorded once and adhered to thereafter. *Cite: seg-refactor-mvu 01KTMKVE85DEBMBWYCXY7YHP5E (#196).*
+
+The distinguishing test the catalogue applies: **Pattern D′ requires the reversal to occur same-day on a thesis the *same plan doc* asserted hours earlier, before implementation.** #76→#77 passes (recursive asserted at 11:04, rejected at 15:26, both in V1_60_PLAN.md). #179 and #196 are deliberate re-sequencing across weeks with the prior stance preserved as context — recorded as adjacent, not tallied.
+
+**Instance count: one** (V1_60_PLAN #76→#77, with #79 the same-day compatibility-hardening follow-on). Two adjacent across-time stance revisions (#179, #196) flagged as boundary, not counted.
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *Why window 1 could not produce this.* Window-1 Pattern F named a *spine-vs-merge-window* phrasing drift, and Pattern E a *diff-internal* contradiction. Neither is a plan reversing its own architecture, because window 1 had no committed architectural plan doc to reverse — its description surfaces were per-PR (subjects, CHANGELOG, BUGS.md). The thickening of the plan layer in window 2 is the structural precondition for D′. This is the inverse observation of A′: A′ noted the honest framing *relocated into* plan docs; D′ notes that once it lives there, the plan doc itself becomes a drift surface.
+
+- *Pure-artifact framing.* The observable is: V1_60_PLAN.md at 11:04 asserts thesis X; the same file at 15:26 asserts not-X and labels X considered-and-rejected. The catalogue does not read intent into the speed (the #77 CHANGELOG attributes it to "design discussion with the user," which is recorded rationale, not inferred motive). The drift is the same-day disagreement between two committed versions of one plan.
+
+- *The single instance is not promoted to a recurrence.* One same-day plan self-reversal is one instance. The window has several plan docs (V1_5, V1_60, V1_70, auto-approval, pane-recovery, startup-tabs, yazi); only V1_60 self-reverses same-day. Whether plan-churn-before-code is a recurring project shape is `insight-recurrence`'s question; here it is one drift instance with two surfaces (#76 the assertion, #77 the retraction).
+
+Provenance:
+- seg-docs-planning: 01KTMMMQ1VY8ZERQ3NQAF89DN4 (#76/#77/#79, the same-day reversal with both theses quoted verbatim), 01KTMMWRE9YX58H2RXKYY58QVH (#179, across-time re-sequencing, boundary).
+- seg-refactor-mvu: 01KTMKVE85DEBMBWYCXY7YHP5E (#196, across-time gate reversal, boundary).
+- window-1 Pattern E = 01KR3BK1VP3SZ5DM9VAQ01FFYX and Pattern F = 01KR3BN3N6YF60414FFVHAM50Y (the thin-description-layer drifts this has no analogue in).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTVGN940DGM1WTG61T8JDN -->
