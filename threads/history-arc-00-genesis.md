@@ -521,3 +521,32 @@ Provenance:
 - a3755a3f (2026-04-25 21:11) — v1.17.9 resume/enterprise-MCP/term-title roll-up.
 
 <!-- Entry-ID: 01KTNBQN49XQY7PAPNTB310M5B -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:55:27.236735+00:00
+Role: scribe
+Type: Note
+Title: v1.18 — the git-refresh debounce saga (watch .git/ as a directory)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a multi-commit debugging saga to make git status refresh reliably after commits — watching .git/ as a directory with a trailing debounce   [kind: gotcha]
+When: 2026-04-25 · commits cd43cd97 (v1.18.1) → db69d3bc (v1.18.5), interleaved with BUGS.md phrasing churn
+Recorded rationale: "Watch .git/ as a directory so commits trigger refresh (v1.18.1)" (cd43cd97); "Accept coalesced .git/ events (v1.18.2)" (3c88ec05); "Trailing debounce for git refresh; fixes stale top bar after chained commit (v1.18.5)" (db69d3bc)
+Inferred intent: the .git/index-only watcher (v1.3.1) missed commits because commit machinery touches more than index and events coalesce; the fix iterates from watching index → watching .git/ as a directory → accepting coalesced events → trailing debounce. A textbook filesystem-watcher gotcha (coalescing + debounce timing). confidence: high — evidence: five sequential v1.18.x commits all targeting the same "git change notices still not updating" BUGS entry.
+Supersedes: cd43cd97 supersedes the .git/index-only watch (14e2ab1c, v1.3.1) — the watch scope widens from a single file to the directory.
+
+This is the segment's clearest debugging saga and a good arc-04 gotcha. The git-status watcher (born watching .git/index at v1.3.1) fails to refresh after commits. The fix iterates: watch .git/ as a directory (v1.18.1), accept coalesced events + debug-log them (v1.18.2), debug-log refresh_listing transitions (v1.18.3), log the dirty-file list + raw porcelain (v1.18.4), and finally a trailing debounce that fixes the stale top bar after a chained commit (v1.18.5). The debounce-drops-events bug had also been hit earlier (af99f482 v1.7-era "Fix debounce dropping git status refresh events"), so this is the second debounce-vs-watcher collision in the segment.
+
++5 folded BUGS.md phrasing-churn commits on the same entry (c72d258a, 261586dd, 341678dd, af922cbe, be7ff528, "git change notices still not updating" / "tweak phrasing again") — the maintainer's running notes while the bug resisted; no code change in these.
++1 folded: 38649f2f (2026-04-25 v1.18.6) "Strip CRLF from captured shell output before pager render".
++1 folded: 22efd5f5 (2026-04-25 v1.18.0) pane scroll-mode indicator (retint divider, uppercase tab).
+
+Provenance:
+- cd43cd97 (2026-04-25 22:19) — v1.18.1 watch .git/ as directory.
+- 3c88ec05 (2026-04-25 22:24) — v1.18.2 accept coalesced events.
+- db69d3bc (2026-04-25 23:23) — v1.18.5 trailing debounce, stale-top-bar fix.
+
+<!-- Entry-ID: 01KTNBRFXEP0R304PM7NG070VB -->
