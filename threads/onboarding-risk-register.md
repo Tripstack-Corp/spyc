@@ -98,3 +98,46 @@ Provenance:
 - History/insight entry_ids consulted: `insight-drift` window-2 `01KTMTNWVQJZ`/`01KTMTQ8RT04`; `insight-emergent-properties` `01KTMVKP814X`(P9)/`01KTMVPK0QRK`(P11)/`01KTMVST4Q84`(P13); `history-arc-08` `01KR393P15VT`(vt100 PR #30); #37-era snapshot `01KR0P9JC8Z3DF6FQ1GJPF3VKA`.
 
 <!-- Entry-ID: 01KTND28QCJS2SJNXVSVGJGYAJ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:25:09.024885+00:00
+Role: critic
+Type: Note
+Title: Onboarding refresh: correction — gix migration is COMPLETE in production (the "8 subprocess sites" claim was wrong)
+
+Spec: security-audit
+
+Purpose: correct a factual error in the immediately-preceding refresh entry. That entry recorded a "partial gix migration — 6 production `Command::new("git")` subprocess sites remain" as a live risk. Verification shows that is **wrong**: production is 100% gix; the subprocess sites are all test fixtures. This correction supersedes that risk item.
+
+Observed:
+- All **8** `Command::new("git")` sites in `src/` are under a test scope, verified line-by-line:
+  - `src/git/status.rs:484,506` — under `#[cfg(test)]` (`src/git/status.rs:473`)
+  - `src/git/diff_model/mod.rs:219` — under `mod tests {` (`:204`)
+  - `src/git/discovery.rs:52` — under `mod tests {` (`:45`)
+  - `src/git/worktree.rs:370` — under `mod tests {` (`:350`)
+  - `src/git/blame.rs:113` — under `mod tests {` (`:102`)
+  - `src/app/state/tests/mod.rs:302,373` — under `#[test]`
+- `src/git/mod.rs:12-14` documents this explicitly: "remaining git-subprocess usages are `#[cfg(test)]` fixtures that … the `no_subprocess_git_in_production` guard test enforces that."
+- So the CHANGELOG v1.56.0 claim ("spyc no longer runs the `git` binary at all in production; a guard test enforces zero git-subprocess usages") is accurate, and `history-seg-gix-migration`'s "drop the last subprocess" (#292) landed as stated.
+
+Inferred:
+- The earlier refresh entry's "6 production sites" reading came from matching file paths (`src/git/blame.rs`, etc.) without checking the colocated `mod tests` scope — confidence: high — basis: the grep + cfg-context audit above.
+- Residual risk reframed: the real git-subprocess risk is **zero in production**; the only standing risk is that the gix worktree create/remove path is hand-rolled (`src/git/worktree.rs`) and gix is a fast-moving 0.x crate (0.84) — a dependency-churn risk, not a subprocess risk.
+
+Drift findings:
+- Found — corrected: the preceding refresh entry (this thread) overstated git-subprocess exposure (claimed 6 production sites; actual 0). This entry is the authoritative reading. The cross-checks #1–#5 in that entry remain valid as reported; only the gix-subprocess risk item is retracted.
+- The same erroneous "8 sites remain" framing also appears in `onboarding-team-map`'s refresh entry (corrected there too) and originated in the coordinator's session snapshot — none of it reached production-fact status.
+
+Next query: `watercooler_search(query="gix subprocess guard test production", thread_topic="history-seg-gix-migration", code_path=".")`
+
+Related:
+- onboarding-architecture — its refresh entry has the correct reading (production 100% gix); this aligns the risk-register with it.
+- history-seg-gix-migration — the #283–#292 reconstruction; the drop-subprocess moment (#292) and the guard test.
+
+Provenance:
+- `grep -rn 'Command::new("git")' src` (8 hits) + per-site awk cfg-context audit (this session).
+- `src/git/mod.rs:12-14` (the guard-test documentation); guard test name `no_subprocess_git_in_production`.
+- `Cargo.toml` gix = 0.84.
+- Supersedes the gix-subprocess risk item in the preceding onboarding-risk-register refresh entry (01KTND28QCJS2SJNXVSVGJGYAJ).
+
+<!-- Entry-ID: 01KTNDEV38CTJQ2WE9ZTK721XT -->
