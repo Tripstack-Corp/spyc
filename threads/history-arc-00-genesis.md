@@ -431,3 +431,33 @@ Provenance:
 - 33ba0e6b (2026-04-19) — ROADMAP names the Elm/MVU refactor target.
 
 <!-- Entry-ID: 01KTNBMXVMNF3CWFR2D0DVCCEG -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:54:00.448071+00:00
+Role: scribe
+Type: Note
+Title: v1.9 — Tab completion + frecency J; clap CLI; quit-warns-on-running-panes
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: filesystem Tab completion (with zsh-style match list) and a frecency-ranked J prompt land; clap replaces hand-rolled arg parsing   [kind: new-capability]
+When: 2026-04-20 → 04-21 · commits f2b8cfe6 (Tab completion), d2c55fb5 (v1.9.0 frecency J), 5770730b (clap), 2b28a2a2 (quit-warn)
+Recorded rationale: "Add Tab completion for filesystem paths in prompts" (f2b8cfe6); "Add double-Tab to show match list (zsh-style completion)" (1ef3d8d1); "v1.9.0: Frecency-based J prompt, Tab cycling, remote dir completion fix" (d2c55fb5); "clap CLI, ^a R restart tab, ya yank scrollback" (5770730b); "Quit warns about running pane processes before confirming" (2b28a2a2)
+Inferred intent: the prompt input surface gains completion (single-Tab complete, double-Tab list, Tab cycling) and J gains frecency ranking — both arc-06 input refinements. clap replaces the hand-rolled CLI parser. confidence: high.
+Supersedes: d2c55fb5 (frecency J) supersedes the plain J jump (833e3fa6) — the jump prompt now ranks candidates by frequency+recency; 2b28a2a2 supersedes the simple double-press-quit (14989f60) by adding a running-process warning gate.
+
+Tab completion arrives across a cluster (f2b8cfe6 → 1ef3d8d1 double-Tab list → a24fb5af "search Tab filters listing instead of completing") with several "Fix Tab completion for shell prompts" iterations — the completion path had to be intercepted before the line editor. v1.9 (d2c55fb5) adds frecency ranking to J and Tab cycling. 5770730b swaps the hand-rolled arg parser for clap and adds ^a R (restart tab) + ya (yank scrollback). 2b28a2a2 makes quit warn about running pane processes — the safety gate that the current branch's session-save work (fix/q-command-session-save) descends from.
+
++6 folded Tab-completion fix iterations (024654de, 5ceb2b12, a24fb5af, dfe06b83, aaa9ca22, ba441444 — "intercept before editor / filter listing on no progress"), 2026-04-20. The repeated re-fixing of one feature is an early instance of the per-handler-duplication smell REFACTOR_PLAN later cites as a start-signal.
++3 folded: 5c51fcbb/d3722942/c316fa2e BUGS triage + three small fixes (timer format, cw word boundary, paste focus), 2026-04-20.
++2 folded mouse-capture flip-flop: fd131b9c (enable to stop scrollback interference) → 72921b4d (replace with alternate-scroll + trackpad throttle), 2026-04-21.
+
+Provenance:
+- f2b8cfe6 (2026-04-20 18:28) — Tab completion for fs paths.
+- d2c55fb5 (2026-04-21 17:05) — v1.9.0 frecency J + Tab cycling.
+- 5770730b (2026-04-21 21:02) — clap CLI, ^a R, ya.
+- 2b28a2a2 (2026-04-21 21:05) — quit warns on running panes.
+
+<!-- Entry-ID: 01KTNBNTPHF5N5WTYY8YN8H6T1 -->
