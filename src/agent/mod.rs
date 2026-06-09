@@ -54,8 +54,10 @@ pub enum ExitSummaryMode {
 pub struct TranscriptSpec {
     /// Locate the transcript file for the pane's (cwd, spawn time).
     pub resolve: fn(&Path, u64) -> Option<PathBuf>,
-    /// Render that file into pager lines.
-    pub render: fn(&Path, &Theme) -> Vec<Line<'static>>,
+    /// Render that file into pager lines. `width` is the pager body-width
+    /// hint (cells) so agent prose reflows to the scrollback pane width
+    /// when rendered as Markdown; `None` falls back to the default.
+    pub render: fn(&Path, &Theme, Option<usize>) -> Vec<Line<'static>>,
     /// Config key gating the view; `None` = always-on (codex).
     pub config_key: Option<&'static str>,
     /// Default when the config key is unset.

@@ -47,8 +47,10 @@ pub fn resolve_active_jsonl(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathBuf
 }
 
 /// Parse a Claude conversation JSONL into styled pager lines, in
-/// chronological order. Returns empty on read failure.
-pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
+/// chronological order. Returns empty on read failure. Assistant prose
+/// is rendered through the Markdown viewer (`width` hints prose/table
+/// reflow); user prompts and tool calls stay plain, agent-styled.
+pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -56,7 +58,6 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
-    let agent_style = Style::default().fg(theme.file);
     let tool_style = Style::default().fg(theme.take);
 
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -104,14 +105,13 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
                     match block["type"].as_str() {
                         Some("text") => {
                             let body = block["text"].as_str().unwrap_or("");
-                            if body.is_empty() {
-                                continue;
-                            }
-                            push_blank(&mut out, &mut last_was_blank);
-                            for l in body.lines() {
-                                out.push(Line::from(Span::styled(l.to_string(), agent_style)));
-                            }
-                            last_was_blank = false;
+                            crate::state::push_agent_markdown(
+                                &mut out,
+                                &mut last_was_blank,
+                                body,
+                                theme,
+                                width,
+                            );
                         }
                         Some("tool_use") => {
                             let name = block["name"].as_str().unwrap_or("?");
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty() {
-        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default());
+        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default(), None);
         assert!(lines.is_empty());
     }
 
@@ -157,7 +157,7 @@ mod tests {
             "\n",
         );
         std::fs::write(&path, content).unwrap();
-        let lines = render_transcript(&path, &Theme::default());
+        let lines = render_transcript(&path, &Theme::default(), None);
         let _ = std::fs::remove_file(&path);
         let flat: Vec<String> = lines
             .iter()

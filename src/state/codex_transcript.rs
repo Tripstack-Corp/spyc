@@ -143,8 +143,10 @@ fn read_session_meta(path: &Path) -> Option<(String, u64)> {
 }
 
 /// Parse a codex rollout JSONL file into styled pager lines, in
-/// chronological order. Returns an empty vec on read failure.
-pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
+/// chronological order. Returns an empty vec on read failure. Agent
+/// prose is rendered through the Markdown viewer (`width` hints
+/// prose/table reflow); user prompts and tool lines stay plain.
+pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -152,7 +154,6 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
-    let agent_style = Style::default().fg(theme.file);
     let tool_style = Style::default().fg(theme.take);
     let dim_style = Style::default()
         .fg(theme.status_suffix)
@@ -194,11 +195,7 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
             }
             ("event_msg", "agent_message") => {
                 let msg = payload["message"].as_str().unwrap_or("");
-                push_blank(&mut out, &mut last_was_blank);
-                for body in msg.lines() {
-                    out.push(Line::from(Span::styled(body.to_string(), agent_style)));
-                }
-                last_was_blank = false;
+                crate::state::push_agent_markdown(&mut out, &mut last_was_blank, msg, theme, width);
             }
             ("response_item", "function_call") => {
                 let name = payload["name"].as_str().unwrap_or("?");
@@ -263,7 +260,11 @@ mod tests {
 
     #[test]
     fn render_transcript_missing_file_is_empty() {
-        let lines = render_transcript(Path::new("/nonexistent/rollout.jsonl"), &Theme::default());
+        let lines = render_transcript(
+            Path::new("/nonexistent/rollout.jsonl"),
+            &Theme::default(),
+            None,
+        );
         assert!(lines.is_empty());
     }
 
@@ -282,7 +283,7 @@ mod tests {
             "\n",
         );
         std::fs::write(&path, content).unwrap();
-        let lines = render_transcript(&path, &Theme::default());
+        let lines = render_transcript(&path, &Theme::default(), None);
         let _ = std::fs::remove_file(&path);
         let flat: Vec<String> = lines
             .iter()
