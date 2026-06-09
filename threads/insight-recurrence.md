@@ -1038,3 +1038,39 @@ Provenance:
 - Window-1 convergence tail for contrast: 01KR3DJ9KJY1T9FFP8KDEPTBJ1 (PR-grain convergences; Pattern 5 the only fully-separate-instances pattern).
 
 <!-- Entry-ID: 01KTMV1SBQ1PPH8A2WM4TSNX1N -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:04:14.394983+00:00
+Role: critic
+Type: Note
+Title: Tail (window-2): the synthesis arc layer carried what this continuation needed — at 273-PR volume the per-moment log alone could not surface campaign-scale recurrence; the readable-arc layer summed it
+
+Spec: critic
+
+tags: #insight #recurrence #window-2 #tail
+
+Window-1's closing tail (01KR3DM9DBRV6MBA4D516KRR12) named that the *arc story-tails* — the cumulative-grain entries — were the upstream that made window-1's recurrence patterns legible, because "recurrence requires the cumulative grain to *see* the count." Window-2 confirms that asymmetry and sharpens it: at ~7.4× the PR volume, the per-moment log alone could not surface campaign-scale recurrence at all, and a *new* layer — the `history-synthesis` readable-arc entries — did the summing the story-tails did in window-1.
+
+**The synthesis arcs were this continuation's load-bearing upstream.** Each window-2 pattern traces its shape to a synthesis arc that had already *named the shape as a throughline* before this thread counted it:
+- Pattern 1's "strangler-fig" word is verbatim from the gix synthesis arc ("a planned 9-step strangler-fig … the recorded signature of a completed strangler-fig," 01KTMNJD6GJM90D0WTTS0X28XR) and the MVU synthesis arc's "strangler-fig march" title (01KTMNFSQP1XJ1TSXS545PR01E).
+- Pattern 3's "verbatim-move signature … diff balances are stat-verified" is the module-decomposition synthesis arc's own phrasing (01KTMNH17RVXAWHF9SJ2Z7MCP9).
+- Pattern 4's "hardcoded peers → AgentProfile registry" is the arc-07 synthesis title (01KTMNJRT9FD74NGXQXHH78A3B); the "+18 minutes / one impl + one registry line" payoff is its recorded moment.
+- Pattern 5's plan→execute handoffs are the docs-planning synthesis arc's "one thesis propagated across positioning, plans, and triage" spine (01KTMNHGWSQK3S2QZ68D3WBCGC).
+
+The synthesis layer did the *intra-segment* arc work (one subsystem's shape); this thread did the *cross-segment* recurrence work (the same shape across two or three segments). The strangler-fig is the clearest case: the gix synthesis arc named gix-as-strangler-fig and the MVU synthesis arc named MVU-as-strangler-march, but *neither could see that the two are the same recurring shape* — each synthesis arc owns one segment. Naming "strangler-fig recurs twice across two segments" is the cross-segment count only this thread's grain reaches. The synthesis arcs summed within a subsystem; this thread sums across subsystems.
+
+**The asymmetry window-1 named holds, with a third layer added.** Window-1 had two layers feeding recurrence: per-PR drift-findings (per-PR grain) and arc story-tails (cumulative-per-arc grain). Window-2 has three: per-moment entries (per-PR/per-wave grain), synthesis readable-arcs (cumulative-per-segment grain), and this insight continuation (cross-segment grain). The added middle layer was *necessary* at this volume — window-1's eight arcs each fit in one analyst's working memory; window-2's thirteen threads and ~123 moments did not, so the synthesis layer's "one readable arc per segment, every claim carrying an inline `[entry_id]`" is what let a cross-segment reader hold all thirteen shapes at once without re-deriving them from ~273 raw PRs. The legibility infrastructure scaled with the substrate.
+
+**What made the recurrence machine-checkable this window, beyond legibility.** Two window-2 shapes carry *executable* signatures the per-moment layer recorded, which window-1's shapes lacked: Pattern 3's verbatim relocations are identifiable by `+N/-N` diff balance (and the decomposition's own `mod_rs_stays_decomposed` / `no_subprocess_git_in_production` guard tests *enforce* the campaign invariants in CI), and Pattern 1's gix drop is guarded by a test that fails if any production source spawns `git`. The recurrence is not only legible in prose — parts of it are checked by the codebase itself. That is a sharper substrate than window-1's slug-and-CHANGELOG reading, and it lowered this thread's inference burden: the verbatim count and the strangler-fig completion are diff- and test-verified facts, not analyst readings.
+
+**This continuation's own contribution atop the synthesis layer**, separate from per-segment assembly: the cross-segment shape-count (strangler-fig ×2, phase-train ×3, repeat-then-generalize ×2 surfaces), the window-1→window-2 lineage classification (2 new / 2 evolved / 2 native, in the closure), the escape-hatch-register sub-shape that needed both Pattern-1 instances side by side to see (flag vs CI-phases), the campaign-grain convergence-density observation (the prior tail), and the ledger-verified confirmation that window-1's v1.41.x corridor was the leading edge of a standing cadence. These are not work the synthesis arcs did; they are the cross-segment reading this thread does *atop* them. Roughly two-thirds synthesis-arc-assembly, one-third cross-segment refinement — the same ratio window-1's tail reported against its story-tail upstream, holding at the larger scale with the extra middle layer absorbing the volume.
+
+The thread is left OPEN.
+
+Provenance:
+- Synthesis arc upstreams: gix 01KTMNJD6GJM90D0WTTS0X28XR; MVU 01KTMNFSQP1XJ1TSXS545PR01E; module-decomposition 01KTMNH17RVXAWHF9SJ2Z7MCP9; arc-07 01KTMNJRT9FD74NGXQXHH78A3B; arc-05 01KTMNG0CYN2NW1Y3RBR71J5FP; docs-planning 01KTMNHGWSQK3S2QZ68D3WBCGC; synthesis opener 01KTMNAVSB3410Y59S3FDMZCHQ.
+- Machine-checkable signatures: verbatim guard test + ceiling Decision 01KTMMJVZMX3SJCBSK8YF896YP; gix drop guard test 01KTMMTF0MQ96P7BVN7QQPVBNS.
+- Window-1 infrastructure/legibility tail this echoes: 01KR3DM9DBRV6MBA4D516KRR12 (story-tails as recurrence upstream; the cumulative-grain asymmetry).
+- This continuation's entries: framing 01KTMTMAB6G8JJAFFQF29XVZGB; closure 01KTMV0568M86NZC6XZENTSB6D; convergence tail 01KTMV1SBQ1PPH8A2WM4TSNX1N.
+
+<!-- Entry-ID: 01KTMV38HW8N06YTPG0VQS5NYH -->
