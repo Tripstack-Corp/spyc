@@ -758,3 +758,44 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTWZ1424S5QYT2HS1K97B3 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:01:41.470121+00:00
+Role: critic
+Type: Note
+Title: Pattern F′: Fix-on-feature regression waves — feature lands, immediate repair wave follows at the merge boundary (arc-05 #49–#53; markdown #103→#108, #107→#110); window-1 Pattern D recast cumulatively
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** Window-1 Pattern D (= 01KR3BGMAKS4AZNZE2QFXH10W4) named one *documented-vs-wired-at-merge* instance: `:undo` shipped under `### Added` but unrouted for 25 minutes until PR #14 closed it. Window 2 produces a cumulative recast: **a feature lands, and an immediate repair wave follows at the merge boundary** — not a single documented-but-unwired capability, but a *cluster* of regressions the feature's generalization introduced, each repaired in a closely-following PR. The drift is at the moment of merge (the feature shipped with assumptions that held only for the pre-generalization case), made visible by the repair wave's tight temporal packing.
+
+**Instance enumeration with moment-entry citations.**
+
+1. **arc-05 #49–#53 — the morning-after-the-V1.5-ship mount-slot regression wave.** The V1.5 pager-as-scrollback migration (#40–#43, #45) generalizes the pager into a `renderer` mountable into three slots (overlay / top pane / lower pane). The next morning (2026-05-08) *four* PRs repair regressions the new non-Overlay slots introduced: #49 snapshot geometry mismatch, #50 viewport-height miscompute for `LowerPane` (the 92%-of-terminal heuristic applied to a ~40%-tall slot), #52 `?`-help dropping the slot-mounted pager (it was pushed onto `pager_history`, which filters `no_history=true` views — both V1.5 mounts set that flag), #53 the help-flicker polish follow-up. The segment names it directly: "each fix is a place the V1.5 mount generalization left an assumption that only held for `Mount::Overlay`." All four diffs confined to `app/mod.rs` (+ scrollback.rs in #49). *Cite: arc-05 01KTMMTW9ADXAW9B6SZPDPD7MG (#49–#53 wave); the feature it repairs = arc-05 V1.5 mount Decision 01KTMMRS83NW2K9GASEKF5R1T1 (#40–#43/#45).*
+
+2. **markdown #103→#108 — table-width feature, gutter overflow fix.** PR #103 (feat/markdown-tables-use-pager-width) makes tables expand to the pager body width. PR #108 (fix/markdown-table-gutter-overflow) is a *direct correction to #103's own hint* two days later: the width hint #103 passed was the full body width, but the pager overlays a line-number gutter the renderer didn't know about, so tables sized to fill the body got pushed off the right edge. The segment marks it `[kind: supersession]` against #103. *Cite: seg-markdown-rendering 01KTMMHF832JPTVJ91GGHG8AFM (#103, the feature) and 01KTMMJW20G78SSRS5TCFCRN1P (#108, the fix).*
+
+3. **markdown #107→#110 — soft-break override feature, then reverted (with the win preserved narrowly).** PR #107 (feat/markdown-hard-line-breaks) overrides CommonMark to render every soft break as hard — and its *own CHANGELOG* pre-flags the regression: "Prose authored at 80-col source wrap shows as several short lines … small trade for the metadata case actually working." PR #110 (fix/markdown-reflow-prose) three days later reverts the blanket override (soft breaks soft again) and re-achieves the `**Key:**` metadata win narrowly via a `force_hard_breaks_before_keyed_lines` preprocessor — a textbook supersession-with-preservation. *Cite: seg-markdown-rendering 01KTMMJ3WCPSR7PH80MBES90JW (#107, feature with self-flagged regression) and 01KTMMKR5K08NMX743ZN7132WQ (#110, the revert-with-preservation).*
+
+**A folded sibling instance (gix model→render→wire, no regression wave — the control).** The gix diff sub-arc (#289 model → #290 render → #291 wire) uses the *same* staged caution (build isolated, then flip) but produces *no* post-flip repair wave in the slice — the parity-spike discipline (#286 before #287) front-loaded the verification. This is the negative control that shows F′ is not inevitable: where a parity/isolation spike precedes the flip, the regression wave does not follow. Flagged for the contrast, not tallied as an F′ instance. *Cite: seg-gix-migration 01KTMMR7X2GJAMQE0HD0C0HA6R (#290–#291) and 01KTMMMBVCGADASG74RTHKWY97 (#286 parity spike).*
+
+**Instance count: three fix-on-feature waves (arc-05 #49–#53; markdown #103→#108; markdown #107→#110), with the gix model→render→wire arc flagged as the no-wave control.**
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *From single capability to cluster.* Window-1 Pattern D was *one* documented-but-unwired command closed by *one* follow-up. Window 2's F′ is a *feature whose generalization* (mount-enum across three slots; a width hint feeding two budgets; a soft-break policy) left multiple slot/case-specific assumptions that surface as a *wave* of repairs. The unit grew from one capability to one generalization-with-N-stranded-assumptions.
+
+- *The drift is at the merge boundary, and the segments say so in the feature's own framing.* In two of three cases the feature PR's *own* recorded rationale anticipates the regression: #107's CHANGELOG names the prose tradeoff it is shipping; the V1.5 plan's "Risk: medium … retiring [the old path]" line foreshadows the mount-slot wave. The drift is observable as a merge-boundary phenomenon: the feature ships with an honestly-noted-or-soon-discovered gap, and the gap is closed in the immediately following PRs. The catalogue does not evaluate whether shipping-then-repairing is fast or appropriate — only that the wave's tight packing makes the merge-boundary drift legible.
+
+- *Why this is F′ (Pattern-D-derived) and not C′ (self-retraction).* C′ is a diff retracting *its own earlier added code* as planned-obsolete (the throttles, the hatch — scaffolds intended to be removed). F′ is a diff *repairing a regression* the feature did not intend — the gutter overflow, the LowerPane viewport, the prose breakage are bugs, not scheduled deletions. C′'s removed code was always temporary; F′'s repaired behavior was meant to work and didn't. Adjacent shapes, different observable.
+
+Provenance:
+- arc-05: 01KTMMTW9ADXAW9B6SZPDPD7MG (#49–#53 wave), 01KTMMRS83NW2K9GASEKF5R1T1 (#40–#43/#45 V1.5 mount feature), 01KTMMP0ZVARBSD274T5V4A05P (arc-05 continuation framing, which flags the wave as drift-fuel).
+- seg-markdown-rendering: 01KTMMHF832JPTVJ91GGHG8AFM (#103), 01KTMMJW20G78SSRS5TCFCRN1P (#108), 01KTMMJ3WCPSR7PH80MBES90JW (#107), 01KTMMKR5K08NMX743ZN7132WQ (#110).
+- seg-gix-migration: 01KTMMR7X2GJAMQE0HD0C0HA6R (#290–#291 wire), 01KTMMMBVCGADASG74RTHKWY97 (#286 parity spike — the no-wave control).
+- window-1 Pattern D = 01KR3BGMAKS4AZNZE2QFXH10W4 (the single-capability version this recasts cumulatively).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTYJPVVVRNZB79ESVSBTZH -->
