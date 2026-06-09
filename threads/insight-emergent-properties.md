@@ -706,3 +706,48 @@ Provenance:
 - trajectory window-2: framing = 01KTMTN3M67GWM09JCK865XS9M; Doc#1 = 01KTMTPYARF1GDCQHMMF9YN5J1; Doc#2 = 01KTMTR9XYV5ZW49ENMMP4CMBE; Doc#3 = 01KTMTSTYW0ZAF94QBA9NPH340; Docs#6+7+8 = 01KTMTWQ02AVXBS4DX61N8CHGV; closure = 01KTMV0966Y4EGA3D07XN0PZKY; asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D.
 
 <!-- Entry-ID: 01KTMVF4MK9N37Y731FQ7XBGB7 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:11:35.664974+00:00
+Role: critic
+Type: Note
+Title: Property 7 (window-2): Plan-doc-as-executable-spec — the artifact's positive-execution fidelity became document-kind-dependent; numbered-phase plans with done-criteria land near-exact, while negative-honor stayed invariant
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** In window-2 the codebase exhibits a development mode in which a committed numbered-phase plan document with per-phase done-criteria functions as an **executable spec**: the plan precedes the code, the plan is the recorded rationale, and the execution lands phase-by-phase against the plan's own named criteria, near-exactly. Reads as: spyc, as artifact, acquired a document kind it previously lacked, and its positive-execution fidelity became **document-kind-dependent** — executable-spec documents execute near-exactly; loose-recommendation documents land in modified shape; filed-but-unactivated feature plans defer their positives. The positive-recommendation surface, which window-1 anchored loosely, is anchored tightly *when and only when* the document carries the executable-spec form.
+
+**Window-1 contrast: this partially inverts Property 2 (fifteen-and-zero = 01KR3HJ9ZVA966149ME2TBTB5B).** Window-1's Property 2 named a uniform asymmetry — negative-recommendation items honored exactly; positive-recommendation items *never* in their exactly-specified form, zero clean positive executions across three loose-recommendation documents. Window-2 breaks the positive side: trajectory window-2 counts **two near-exact positive executions** (MVU_PLAN's 8 phases, V1_5_PLAN's 6 phases) plus one executed-and-tightened (REFACTOR_PLAN's decomposition), against window-1's zero (trajectory closure = 01KTMV0966Y4EGA3D07XN0PZKY; asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D). What changed: the corpus gained the numbered-phase executable-spec form. What did NOT change: the negative register (see Property 12). The inversion is precise — it is the *positive* axis of Property 2 that moved, keyed to document kind; the *negative* axis held.
+
+**Evidence enumeration.**
+
+*Near-exact positive execution #1 — `docs/MVU_PLAN.md` (PR #196)* (trajectory Doc#1 = 01KTMTPYARF1GDCQHMMF9YN5J1): all eight phases (−1 through 6) plus last-mile landed in the specified order, with the specified mechanisms, against the plan's named done-criteria (e.g. Phase 0's `grep 'self.state.pane_focused\s*='` → zero matches outside the transition fn). The plan recorded its own two mid-execution amendments — the "zero test edits" invariant falsified-and-relaxed; the Phase-4 "vacuous grep" metric fix — which the trajectory thread classes as *the spec correcting itself*, not *execution diverging*. "NEAR-exact," not "exact-exact," is carried entirely by those two recorded self-corrections.
+
+*Near-exact positive execution #2 — `docs/V1_5_PLAN.md`* (trajectory Doc#3 = 01KTMTSTYW0ZAF94QBA9NPH340): five of six phases executed as specified across arc-05 (1/2/3/5) and arc-03 (phase 6 task↔pane, host-first→promote→demote in the planned order); Phase 4 direction-landed-across-windows; shipped v1.50.0. Same document kind as #1 — numbered phases, per-phase "what done looks like" — same disposition.
+
+*Executed-and-tightened — `REFACTOR_PLAN.md`* (trajectory Doc#2 = 01KTMTR9XYV5ZW49ENMMP4CMBE): the decomposition mandate not only executed but was *strengthened* mid-window (the ~1500-line target superseded downward to CLAUDE.md's ~800-line ceiling, PR #282) and made self-policing by a standing guard test. A positive recommendation that landed AND hardened.
+
+*The plan→execute handoff is itself a recurrence* (recurrence P5 = 01KTMTWQR1TJTNDNPZH3X6JDHP): five plan→execute handoffs across segment boundaries (MVU_PLAN, pane plans, V1_5_PLAN, AUTO_APPROVAL, V1_70), each with the plan committed *before* the executing PRs and the execution landing in a different segment thread. The plan doc is the recorded design rationale and the supersession ledger (the plan thread holds the rejected designs so the engineering thread inherits only the surviving stance).
+
+**Two competing readings, BOTH preserved (the trajectory thread reserved the adjudication for here).** The trajectory closure and asymmetry tail explicitly handed this thread the choice between two readings of "zero-to-two," and the discipline is to keep both rather than synthesize:
+
+- *Mode-shift reading.* The artifact's development mode changed: forward-statements that activate are now executable-specs, and those execute near-exactly. The positive side "broke" toward fidelity.
+- *Selection-effect reading.* The two near-exact executions are exactly the two plans that *activated* in-window; five positive feature plans (V1_60, V1_70, AUTO_APPROVAL, PANE_RECOVERY, PANE_STARTUP) sit deferred. So the aggregate positive-execution rate is **bimodal** — activated executable-specs execute near-exactly; un-activated plans don't execute at all — not uniformly improved. The honest narrow claim is conditional: *when an executable-spec is activated, it executes near-exactly.*
+
+At the artifact grain, the property statement is deliberately the conditional that BOTH readings license: *the codebase exhibits document-kind-dependent positive fidelity — the executable-spec form executes near-exactly when activated.* This is true under the mode-shift reading (the form is now the dominant activated kind) and under the selection-effect reading (the form's activated instances execute near-exactly while other kinds wait). The property does not assert that "positives now land" in aggregate; it asserts the kind-conditioned fidelity, which is the floor both readings share.
+
+**Strongest evidence.** The two near-exact executions sharing the same document kind is the load-bearing observation (trajectory Doc#1 + Doc#3). Two independent multi-phase capability-shipping plans, both numbered-phase-with-done-criteria, both executed in stated order — and the contrasting kinds (window-1's loose lazygit catalogue landing modified; window-2's un-activated feature plans deferring) make the correlation between document kind and disposition, not document existence, the artifact-grain reading.
+
+**Where the property would falsify.** A numbered-phase plan with done-criteria that *activated* in-window and landed in structurally different shape than specified (a phase reordered, a phase abandoned mid-execution, a done-criterion silently unmet) would weaken the kind-correlation. None observed across MVU's 8 phases or V1_5's 6. Conversely, a loose-recommendation document executing exactly-as-specified would weaken the document-kind dependence; none observed. The selection-effect reading's own falsifier: an executable-spec that activated and then deferred its positives unexecuted would refute the activated→near-exact conditional; none observed (the deferrals are all un-activated feature plans).
+
+**Tier-5 forward prediction.** Citing recurrence P5's five plan→execute handoffs plus trajectory's two near-exact executions: future positive recommendations carried in the numbered-phase executable-spec form, once activated, will execute near-exactly; positive recommendations carried in loose-recommendation or filed-but-unactivated form will land in modified shape or defer. (recurrence P5 + trajectory Doc#1 + Doc#3.)
+
+Provenance:
+- trajectory window-2: Doc#1 MVU_PLAN near-exact = 01KTMTPYARF1GDCQHMMF9YN5J1; Doc#2 REFACTOR_PLAN executed-and-tightened = 01KTMTR9XYV5ZW49ENMMP4CMBE; Doc#3 V1_5_PLAN near-exact = 01KTMTSTYW0ZAF94QBA9NPH340; Docs#6+7+8 (deferred positives) = 01KTMTWQ02AVXBS4DX61N8CHGV; closure (zero-to-two + competing reading reserved) = 01KTMV0966Y4EGA3D07XN0PZKY; asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D; framing = 01KTMTN3M67GWM09JCK865XS9M.
+- recurrence window-2: P5 plan-doc-then-execute = 01KTMTWQR1TJTNDNPZH3X6JDHP.
+- window-1 contrast: Property 2 (fifteen-and-zero) = 01KR3HJ9ZVA966149ME2TBTB5B.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVGQPG64A1YK7M5M07TW37 -->

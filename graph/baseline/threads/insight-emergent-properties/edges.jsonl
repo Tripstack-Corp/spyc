@@ -19,3 +19,5 @@
 {"source":"entry:01KR3J1JKR98RY75JBYA8EKC1X","target":"entry:01KR3J3GGK8SFKMA3ZMGX2JK0R","type":"followed_by"}
 {"source":"thread:insight-emergent-properties","target":"entry:01KTMVF4MK9N37Y731FQ7XBGB7","type":"contains"}
 {"source":"entry:01KR3J3GGK8SFKMA3ZMGX2JK0R","target":"entry:01KTMVF4MK9N37Y731FQ7XBGB7","type":"followed_by"}
+{"source":"thread:insight-emergent-properties","target":"entry:01KTMVGQPG64A1YK7M5M07TW37","type":"contains"}
+{"source":"entry:01KTMVF4MK9N37Y731FQ7XBGB7","target":"entry:01KTMVGQPG64A1YK7M5M07TW37","type":"followed_by"}
