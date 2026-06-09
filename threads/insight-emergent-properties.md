@@ -789,3 +789,42 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVJ5B5DWEPR9CHFS7PRMWW -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:13:13.132705+00:00
+Role: critic
+Type: Note
+Title: Property 9 (window-2): Additive → subtractive growth inversion — window-1 grew by stacking atop substrate; window-2 grows by splitting under a codified ~800-line ceiling
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** The codebase's growth behavior inverted across the window boundary. In window-1 the artifact grew **additively** — struct fields stacked, map consumers multiplied, peer surfaces placed side-by-side, files accreted capability without being broken up. In window-2 the artifact grows by **subtraction-into-siblings**: oversized files are split into directory modules by near-balanced verbatim relocations, governed by a codified repo-wide ~800-line ceiling, with the dominant unit of work being a behavior-identical `+N/-N` cut rather than a net-additive feature. Reads as: spyc, as artifact, changed the direction of its own growth — from accreting atop existing files to decomposing them under a stated size invariant; the file-count rises while individual file size is actively driven down.
+
+**Window-1 contrast: this directly inverts Property 4's additive half (= 01KR3HQCRV761KG6CVD6T11QNM).** Window-1's Property 4 named "the codebase grows by stacking atop existing substrate" — additive accretion at the substrate layer (PagerView field-accretion; the git_files chain; one socket serving additional peers). That additive growth-direction is exactly what window-2 inverts: the campaign-scale move is not accretion but *decomposition*. Where Property 4's substrate "widens cheaply" by stacking, window-2's substrate is *narrowed deliberately* by splitting — the same artifact, opposite growth vector. (Property 4's *registration* half — parallel-by-replication — gets its own window-2 successor in Property 11, where the repetition finally collapses into a seam; this property concerns only the additive/substrate half's inversion.)
+
+**Evidence enumeration.**
+
+*The decomposition is a ~45× verbatim-relocation campaign* (recurrence P3 = 01KTMTSAVQNENHP8ZFWBKTWXN6): the verbatim relocation — moving code from an oversized file into a new sibling module with a near-perfectly-balanced `+N/-N` diff, a `mod …; use …;` re-export, and an explicit "no behavior change, no API change" claim — is the *unit of work* across two campaigns, recurring ~40–45 times (the highest instance count of either window, against window-1's densest pattern at six). The diff balance is the machine-checkable fingerprint: a relocation is one whose insertions ≈ deletions and whose behavior tests are unchanged.
+
+*The growth is bounded by a codified ceiling* (drift A′ = 01KTMTQ8RT04DKANY20CG8TE39; recurrence P3 same entry): PR #282's CLAUDE.md "architectural contract" states verbatim "No `.rs` over ~800 lines without a solid reason. Oversized files make diffs impossible to reason about." This is the size invariant the decomposition serves; it is *tightening* — the ceiling dropped from REFACTOR_PLAN's earlier ~1500 (src/app/-scoped) to ~800 (repo-wide), per trajectory Doc#2 (= 01KTMTR9XYV5ZW49ENMMP4CMBE). The subtractive growth is self-policing: standing guard tests (`mod_rs_stays_decomposed`, ceiling first 8500 then 4000) enforce the invariant in CI.
+
+*The amplitude is the window's largest understatement, observable at the diff* (drift A′): `app/mod.rs` went 12,450 → 8,427 lines via twelve verbatim cuts (#248–#259), then the 800-LoC campaign carved `fs/`, `run.rs`, `bootstrap.rs`, `proc.rs`, `util.rs` siblings (#275–#281), and the 3907-line `state.rs` (the MVU Model) split into eleven `state/*.rs` (#308, state.rs −3907 / +4009). The subtractive direction is literal in the diff arithmetic: large negative deltas on the monolith, matching positive deltas distributed across new siblings.
+
+**A competing reading, preserved.** One could read window-2's growth as still *net-additive* — file count rises, total line count rises, new capability (V1.5 pager, gix, MVU runtime, new agents) lands throughout — and the decomposition as merely *reorganizing* additive growth rather than inverting the growth direction. Under this reading the property is narrower: *the artifact added a subtractive force (the ceiling-driven split) atop its continuing additive growth*, not *growth became subtractive*. The evidence fits both: the codebase did ship net-new capability (additive) AND ran a ~45× verbatim-split campaign actively reducing per-file size under a stated ceiling (subtractive). The artifact-grain statement both readings license is the one the property asserts: *the dominant unit of structural work inverted from accrete-atop-existing-file to split-existing-file-under-a-ceiling*, regardless of whether aggregate line count rose. The recurrence thread's count (~45 verbatim relocations, the highest of either window, near-zero outside the decomposition/MVU campaigns) is what makes the split-unit, not the feature-unit, the dominant *structural* move.
+
+**Strongest evidence.** The ~45× verbatim-relocation count with its machine-checkable `+N/-N` signature (recurrence P3) is the load-bearing observation. Window-1's densest structural pattern (bundle-as-shape) had six instances and was identified by reading slugs; window-2's dominant structural unit recurs ~45× and is identified by diff arithmetic. The order-of-magnitude jump in the count of the *splitting* unit, against window-1's *stacking* units, is the inversion at the artifact grain.
+
+**Where the property would falsify.** A window-2 campaign growing a single file past the ~800-line ceiling by accretion without a subsequent split (the additive direction reasserting against the ceiling) would weaken the property. None observed; the guard tests would fail and the campaigns are subtractive. A verbatim relocation that turned out *not* behavior-identical (a split that changed behavior) would be drift fuel and weaken the "verbatim" character; recurrence P3 records the guard tests and stat-verification reporting none in slice. The sub-shape exception (state.rs prep PR #307, the one non-verbatim API-touching cut) does *not* refute — it exists precisely to create clean seams so the *next* PR can be verbatim (prep-then-verbatim), confirming the split-unit's dominance.
+
+**Tier-5 forward prediction.** Citing recurrence P3's ~45 verbatim relocations and the CLAUDE.md ~800-line ceiling: post-window, a file crossing the ~800-line ceiling will be decomposed into a directory module by near-balanced verbatim relocations under the standing guard test, rather than retained as an accreting monolith. (recurrence P3 = 01KTMTSAVQNENHP8ZFWBKTWXN6 + the ceiling Decision.)
+
+Provenance:
+- recurrence window-2: P3 verbatim-relocation (~45× count; `+N/-N` signature; the CLAUDE.md ceiling; the state.rs prep-exception) = 01KTMTSAVQNENHP8ZFWBKTWXN6.
+- drift window-2: A′ squash-subject-understatement (the 12,450→8,427 mod.rs split; the state.rs −3907 split; the #282 CLAUDE.md ~800-line ceiling verbatim) = 01KTMTQ8RT04DKANY20CG8TE39.
+- trajectory window-2: Doc#2 REFACTOR_PLAN (the ~1500 → ~800 tightening supersession) = 01KTMTR9XYV5ZW49ENMMP4CMBE.
+- window-1 contrast: Property 4 (additive-substrate / parallel-registration — the additive half this inverts) = 01KR3HQCRV761KG6CVD6T11QNM.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVKP814X8MHX1427R0EBW3 -->
