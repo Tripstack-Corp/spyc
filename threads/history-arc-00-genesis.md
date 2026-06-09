@@ -699,3 +699,31 @@ Provenance:
 - 322f01b1 (2026-04-29 17:16) — v1.37.0 :pause/:resume for background tasks.
 
 <!-- Entry-ID: 01KTNBXH839DF5R9X15SMJBARF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:58:47.545155+00:00
+Role: scribe
+Type: Decision
+Title: REFACTOR_PLAN.md authored — the staged app/mod.rs (7400) → MVU path (the segment's throughline)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the final genesis commit authors REFACTOR_PLAN.md, naming the architecture's central tension (app/mod.rs ~7400 lines → MVU) before the PR workflow even begins   [kind: convention]
+When: 2026-04-29 · commit 265d2816 ("REFACTOR_PLAN: staged path from app/mod.rs (7400) → MVU")
+Recorded rationale (verbatim, REFACTOR_PLAN.md @265d2816): "Working doc for the staged decomposition of `app/mod.rs` (currently ~7400 lines, ~120 fns) into smaller, more reviewable units. ROADMAP already mentions the eventual Model-View-Update (Elm-style) target; this doc is the *staged path* there, with cheap wins first and the big architectural rewrite at the end." Goal: "No file in `src/app/` over ~1500 lines. Handlers ~5–20 lines each ... Side effects modeled as data (`Effect::Spawn { ... }`) so handlers are unit-testable without a real PTY / real signal / real disk."
+Inferred intent: this is THE throughline of the whole reconstruction. The plan defers itself ("Why we're not doing this right now: Pre-2.0 ... Shape is still emerging") and gives concrete start-signals — most tellingly "You'd hesitate to take an outside contributor's PR because of how hard the change-set would be to review against the megafile." That sentence anticipates the PR workflow this segment ends just before. confidence: high — verified: `git show 265d2816:src/app/mod.rs | wc -l` = 7421.
+Supersedes: formalizes and supersedes the ad-hoc "Phase 3 / Phase 4" AppState extractions (488ae17b, b787715e, 37279fc1) — those were the first cuts; this doc plans the full staged path.
+
+This Decision is the keystone the framing note promised. On day ~14, before PR #1, the maintainer commits a working doc that names the monolith (app/mod.rs, ~7400 lines / ~120 fns) and lays out a three-phase path to MVU: Phase 1 (cheap mechanical extractions — tasks.rs, pager_history.rs, find_picker.rs, grep_session.rs, prompt.rs, capture.rs — "~1000 LOC off app/mod.rs → ~6400"); Phase 2 (medium extractions — render.rs, pager_handler.rs, commands.rs, key_dispatch.rs — "→ ~4200"); Phase 3 (the MVU rewrite — one Model, one Message enum, one Effect enum, one update fn, one view fn, "Don't start unless you can block out a full week of unbroken focus").
+
+The plan is the explicit ancestor of two later threads: history-seg-refactor-mvu (which executes Phase 3, the Model/Message/Effect rewrite) and history-seg-module-decomposition (which executes Phases 1–2, the ~800-LoC-per-file split). Every extraction target named in the doc (BackgroundTasks→tasks.rs, FindPicker→find_picker.rs, GrepSession→grep_session.rs, the markdown/pager/capture concerns) maps to a subsystem born earlier in THIS thread. The doc's own decision log dates itself: "2026-04-29: Plan written. Holding Phase 1 until after 2.0 ships." Cross-reference: this is the last commit before merge d9b9360 (PR #2), so the next thing that happens in the repo's life is the Bitbucket PR workflow that history-arc-01 onward reconstructs.
+
+Provenance:
+- 265d2816 (2026-04-29 21:14) — REFACTOR_PLAN.md authored (final genesis commit before PR #2 / merge d9b9360).
+- REFACTOR_PLAN.md @265d2816 — full doc quoted above; Phase 1/2/3 tables, done-criteria, decision log.
+- src/app/mod.rs @265d2816 — 7421 lines (verifies the "~7400" figure).
+- cross-ref: history-seg-refactor-mvu, history-seg-module-decomposition.
+
+<!-- Entry-ID: 01KTNBYJVDJMGACCH7G0GE9RN8 -->
