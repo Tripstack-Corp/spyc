@@ -401,3 +401,33 @@ Provenance:
 - 8ec589e2 (2026-04-19) — CHANGELOG.md introduced.
 
 <!-- Entry-ID: 01KTNBM19MB1PT31ZZMZHE3T59 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:53:30.213434+00:00
+Role: scribe
+Type: Note
+Title: v1.7–v1.8 — performance refactor, writable MCP actions (Claude mutates the workspace)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a performance refactor with ^a pane prefix and activity monitor; then writable MCP actions let Claude mutate the TUI   [kind: new-capability]
+When: 2026-04-19 · commits 4f3e98e5 (v1.7.0), c473e673 (v1.8.0), d218e882 (CLAUDE.md MCP guidance)
+Recorded rationale: "v1.7.0: Performance refactor, ^a pane prefix, yank commands, activity monitor" (4f3e98e5); "v1.8.0: Writable MCP actions — Claude can mutate the TUI workspace" (c473e673); "CLAUDE.md: instruct Claude to use spyc MCP tools proactively" (d218e882)
+Inferred intent: v1.7 is a perf pass plus the ^a pane prefix (a second chord namespace alongside ^W) and an activity monitor. v1.8 is the MCP inflection: the bridge goes from read-only context handoff (M14) to writable — Claude can drive navigation/picks/filters in the live TUI. The CLAUDE.md edit (d218e882) makes proactive MCP use a project convention. confidence: high.
+Supersedes: c473e673 (writable MCP) supersedes the read-only M14 handoff (a31c3b84) — the MCP surface gains mutation, not just observation.
+
+The MCP subsystem crosses from observe to act here. v1.8 (c473e673) exposes write actions (navigate_to, pick_files, set_filter and kin — the tool surface visible today as the spyc MCP server) so an external Claude mutates the workspace. d218e882 codifies "use spyc MCP tools proactively" in CLAUDE.md. v1.7 (4f3e98e5) introduces ^a as a pane prefix and an activity monitor (self-measurement oscillation fixed later at 538dc942).
+
++1 folded: 0662dce5 (2026-04-19) "Add startup health check; rewrite README with MCP-first positioning" — the README repositions around the MCP/Claude story; 73579d7e softens the first-mover claim.
++3 folded README hero/screenshot edits (c156564b, 73579d7e) and ROADMAP cleanup (d14203a4, 33ba0e6b "add writable MCP actions, context enrichment, Elm refactor") — note the ROADMAP entry naming the "Elm refactor" target that REFACTOR_PLAN later stages.
++1 folded: 440c0273/1c69e315/72dfa732 (2026-04-19) — pane exit-status display (three iterative fixes).
+
+Provenance:
+- 4f3e98e5 (2026-04-19 18:55) — v1.7.0 perf refactor, ^a prefix, activity monitor.
+- c473e673 (2026-04-19 21:50) — v1.8.0 writable MCP actions.
+- d218e882 (2026-04-19 21:55) — CLAUDE.md proactive-MCP convention.
+- 33ba0e6b (2026-04-19) — ROADMAP names the Elm/MVU refactor target.
+
+<!-- Entry-ID: 01KTNBMXVMNF3CWFR2D0DVCCEG -->
