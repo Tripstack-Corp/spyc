@@ -1041,3 +1041,45 @@ Provenance:
 - lower-tier window-2 shapes cited across the seven properties: drift A′ 01KTMTQ8RT04DKANY20CG8TE39, B′ 01KTMTRNPWDK14NQHD78DV2ZEE, C′ 01KTMTT2MAQQSS8780NBK097TQ, E′ 01KTMTWZ1424S5QYT2HS1K97B3, negative-space-tail 01KTMV0RPDEBMH87MB89JRE0BR; recurrence P1 01KTMTNYS83V5A7PY2MJVV60MF, P3 01KTMTSAVQNENHP8ZFWBKTWXN6, P4 01KTMTTZQK31H30M2RQ6J3FEY1, P5 01KTMTWQR1TJTNDNPZH3X6JDHP, P6 01KTMTYBDZ99R8XBA44E6NTZRQ, synthesis-tail 01KTMV38HW8N06YTPG0VQS5NYH; trajectory Doc#1 01KTMTPYARF1GDCQHMMF9YN5J1, Doc#2 01KTMTR9XYV5ZW49ENMMP4CMBE, Doc#3 01KTMTSTYW0ZAF94QBA9NPH340, Docs#6+7+8 01KTMTWQ02AVXBS4DX61N8CHGV, asymmetry-tail 01KTMV1Q0XJNSWM08XAGJ08T4D.
 
 <!-- Entry-ID: 01KTMVW39P5RAZ15CVAAKEKBFW -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:18:46.384660+00:00
+Role: critic
+Type: Note
+Title: Tail (cross-window): the two-window ledger — which properties are invariants, which inverted, and the discipline that the inversions are artifact-grain (corpus changed), not worker-grain (maintainer changed)
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2 #tail
+
+Looking across the thirteen properties as two catalogues set against each other, the structural fact worth saying out loud is that the window boundary is a **natural experiment the network did not design but can read**: same artifact, same maintainer, same analytic frame, but two corpora differing in merge convention (per-PR → squash), document kind (loose-recommendation → executable-spec), and engineering scale (22-day feature-additive → 33-day campaign migration/decomposition). Reading the two property catalogues against each other separates what is *invariant in the artifact* from what is *contingent on the window's character*.
+
+**The ledger, three columns.**
+
+*Invariant across both windows (the artifact carries these regardless of corpus):*
+- **Negative-honor** (Property 12). 15 → ≥8, zero violations either side, four registers. The one property neither window names alone.
+- **Description-dominant honesty asymmetry** (Property 1 → Property 10). Drift lives at the talking-about-the-work layer, almost never the running-of-the-work layer, in both windows — the drift negative-space tail (= 01KTMV0RPDEBMH87MB89JRE0BR) records the asymmetry "holds in window 2 and arguably sharpens." What changed is *where* the honesty compensation lives (commit body → committed doc), not *whether* the asymmetry holds.
+
+*Inverted across the boundary (contingent on the window's character):*
+- **Positive-execution fidelity** (Property 2 → Property 7). Zero clean → two near-exact, keyed to the executable-spec document kind the larger corpus acquired.
+- **Growth direction** (Property 4-additive → Property 9). Accrete-atop-file → split-file-under-a-ceiling, keyed to the decomposition campaign the 22-day window had no room for.
+
+*New, native to the larger window (no window-1 vantage):*
+- **Strangler-fig migration architecture** (Property 8) and **test-substrate-as-precondition** (Property 13) — both born of campaign-scale migration; the **abstraction-seam precipitation** (Property 11) crossing the parallel→parametric line window-1's Property 4 stopped at.
+
+**The discipline the inversions demand: they are artifact-grain, not worker-grain.** The single hardest temptation across this continuation is to read the inversions as the maintainer *changing* — "the maintainer got more disciplined," "adopted plan-driven development," "learned to decompose." Every such framing is worker-grain (about the person's growth/habits/learning) and is forbidden absolutely, exactly as window-1's Property 3 tail held the line on register-variation. The trajectory thread already built the guardrail (asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D): "The fifteen-and-zero was never a law of the project; it was the trajectory shape of a corpus made of loose-recommendation documents. Hand the frame a corpus made of executable-specs and the positive-side count moves." The inversion is in the *corpus*, observable in the artifact (the document kind changed; the merge convention changed; the campaign scale changed) — not an inference about a mind that changed. The properties name what the artifact-at-window-2 exhibits versus what the artifact-at-window-1 exhibited; the boundary is a change in the work, read at the work's grain.
+
+This is why Property 12 (negative-honor invariance) is the tail's load-bearing property and not Property 7 (the positive break). The positive break is the *surprising* number, but it is corpus-contingent — it moved because the document kind moved. The negative invariance is the *durable* number — it held while everything around it changed. A reader tempted to say "the maintainer became disciplined" must reckon with the negative-honor count holding *constant* across precisely the window where the positive discipline supposedly "improved": if the invariance and the inversion were both about the worker, they would move together. They don't. The negative axis is fixed; the positive axis is corpus-keyed. That dissociation is the artifact-grain signature — a property of how the frame meets two corpora, not a property of a person between them.
+
+**What the convergence structure adds at the property grain.** The recurrence convergence tail (= 01KTMV1SBQ1PPH8A2WM4TSNX1N) observed that window-2's recurrences converge at the *campaign* grain (four campaigns each carrying 2–4 shapes), the inverse of window-1's PR-grain convergences. That scaling-up of the convergence unit is visible in this catalogue too: the window-1 properties were largely one-observable-per-property (one count, one matrix, one cadence); the window-2 properties cluster on the same four campaigns — MVU and gix instantiate Properties 8, 11, 13; the decomposition instantiates Properties 9, 10, 13; the plan docs instantiate Properties 7, 10, 12. The properties co-occur on campaigns because the recurrences they interpret do. The unit of emergent-property evidence scaled up with the unit of recurrence — a meta-observation the two-window reading surfaces that neither window's property catalogue carries alone.
+
+**What this leaves for any final-narrative session.** The network now holds two property catalogues, thirteen properties, each tier-disciplined, each citing down through trajectory/recurrence/drift to per-moment entries to the spine. The cross-window contrast is the durable contribution: an invariant (negative-honor) legible only against changes (positive fidelity, growth direction, migration architecture), with the discipline that the changes are corpus-grain, not worker-grain. A final narrative's job — what no single property entry does — is to read the two windows *as one trajectory of an artifact through a scale and convention shift*, holding the line that what changed is the work and the corpus, never the inference about the mind behind them. From here, the two-window record carries its own weight; the narrative's job is to read it.
+
+The thread is left OPEN — like window-1, and like the three lower tiers' window-2 continuations.
+
+Provenance:
+- window-2 property entries: framing 01KTMVF4MK9N37Y731FQ7XBGB7; P7 01KTMVGQPG64A1YK7M5M07TW37; P8 01KTMVJ5B5DWEPR9CHFS7PRMWW; P9 01KTMVKP814X8MHX1427R0EBW3; P10 01KTMVN7JZ7T5HG6T6RP8HQWB9; P11 01KTMVPK0QRK3CYNCV0V6NN9TD; P12 01KTMVR9Z5SZ0T0HX8WTNX22NT; P13 01KTMVST4Q84SNSG6RY4SV3SFJ; closure 01KTMVW39P5RAZ15CVAAKEKBFW.
+- window-1 property entries: P1 01KR3HG2GEBH1W8BKGT3CW6S9P; P2 01KR3HJ9ZVA966149ME2TBTB5B; P3 01KR3HMF3F7A5EBXBQYEWHYR3Z; P4 01KR3HQCRV761KG6CVD6T11QNM; P5 01KR3HSK97596MXH0V41K7TYM2; P6 01KR3HW4T1GQKFFWNYSRT0639S; window-1 Property-3 discipline tail 01KR3J3GGK8SFKMA3ZMGX2JK0R.
+- lower-tier guardrail citations: trajectory asymmetry tail (the "never a law of the project" corpus-not-worker framing) = 01KTMV1Q0XJNSWM08XAGJ08T4D; drift negative-space tail (the asymmetry holds-and-sharpens) = 01KTMV0RPDEBMH87MB89JRE0BR; recurrence convergence tail (campaign-grain convergence) = 01KTMV1SBQ1PPH8A2WM4TSNX1N; recurrence synthesis-legibility tail = 01KTMV38HW8N06YTPG0VQS5NYH.
+
+<!-- Entry-ID: 01KTMVXW7EAX12CED9NWHXKB0Z -->
