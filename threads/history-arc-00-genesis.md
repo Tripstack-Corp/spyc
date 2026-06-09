@@ -66,3 +66,34 @@ Provenance:
 - 63b728db, 833e3fa6 (2026-04-15) — help overlay/CI/lints; J jump.
 
 <!-- Entry-ID: 01KTNB9PK8J16N5H5QVDX0DER4 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:48:02.539648+00:00
+Role: scribe
+Type: Note
+Title: M6 + M4 — pure-Rust file ops and the config/keymap DSL (feeds arc-06)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: file operations move into pure Rust (M6) and the config + keymap DSL is born (M4)   [kind: new-capability]
+When: 2026-04-15 · commits 8f931cd4 (M6), 5b1e09a4 (M4), f30386f2 (vi marks)
+Recorded rationale: "M6: file operations (c, m, R, M, ^W, ^X) in pure Rust; L and f via in-app pager" (8f931cd4); "M4: .cspyrc.toml config, keymap DSL, live reload, theme + masks from config" (5b1e09a4)
+Inferred intent: two architectural seams open same-day — (a) file mutations done natively rather than shelling out, (b) configuration externalized into a TOML + a keymap DSL with live reload. Both are durable subsystems. confidence: high — evidence: src/config/{dsl,mod}.rs and the keymap user-binding path exist from M4 onward (visible in the 28c4d329 rename touching src/config/dsl.rs, src/keymap/user.rs).
+Supersedes: partially supersedes the initial commit's shell-out chmod (^W/^X) by adding native c/m/R/M copy/move/rename ops.
+
+M6 (8f931cd4) brings copy/move/rename/mkdir into Rust rather than spawning cp/mv; L (long listing) and f route through the in-app pager — the first use of the pager as an output surface, which becomes the arc-05 pager subsystem. M4 (5b1e09a4) externalizes configuration: a `.cspyrc.toml` (note the cspy-era name), a keymap DSL allowing user rebinds, live reload on save, and theme/ignore-masks sourced from config. This is the genesis of the input/config subsystem that arc-06 later builds on — the keymap resolver (present since the root commit) now gains a user-binding layer fed by the DSL.
+
+f30386f2 (same day) adds vi-style marks (m{a-z} / '{a-z}) and rebinds move→M, mkdir→+. The marks + the J jump (from the prior moment) are the two roots of the vi marks + jump-history subsystem that feeds arc-06.
+
++1 folded: 9a3c59df (2026-04-15 14:52) "Auto-refresh listing dir on filesystem changes" — first filesystem-watcher wiring; the git-status watcher (later in this thread) is built on this same notify-based watch path.
++1 folded: ae07e336 (2026-04-15 15:16) "Add info commands: D date, V version, I session, C color toggle, s setenv" — the colon-less info-command family (V later moves to gV/:version in commit 3e73b300).
+
+Provenance:
+- 8f931cd4 (2026-04-15 14:11) — M6 native file ops; L/f via pager.
+- 5b1e09a4 (2026-04-15 14:42) — M4 .cspyrc.toml + keymap DSL + live reload (src/config/, src/keymap/user.rs).
+- f30386f2 (2026-04-15 15:03) — vi marks; move→M, mkdir→+.
+- 9a3c59df, ae07e336 (2026-04-15) — fs auto-refresh; info commands.
+
+<!-- Entry-ID: 01KTNBAXG9MHQ0G014X7K127QK -->

@@ -1,3 +1,5 @@
 {"source":"thread:history-arc-00-genesis","target":"entry:01KTNB8Q0AH5GBS0V13PQRV1SR","type":"contains"}
 {"source":"thread:history-arc-00-genesis","target":"entry:01KTNB9PK8J16N5H5QVDX0DER4","type":"contains"}
 {"source":"entry:01KTNB8Q0AH5GBS0V13PQRV1SR","target":"entry:01KTNB9PK8J16N5H5QVDX0DER4","type":"followed_by"}
+{"source":"thread:history-arc-00-genesis","target":"entry:01KTNBAXG9MHQ0G014X7K127QK","type":"contains"}
+{"source":"entry:01KTNB9PK8J16N5H5QVDX0DER4","target":"entry:01KTNBAXG9MHQ0G014X7K127QK","type":"followed_by"}
