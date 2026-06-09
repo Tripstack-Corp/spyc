@@ -719,3 +719,42 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTVGN940DGM1WTG61T8JDN -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:00:49.847177+00:00
+Role: critic
+Type: Note
+Title: Pattern E′: "aislop" description-layer cruft — stale/process-narrating comments left by agentic code movement; a drift TYPE window 1 did not have, detected→tooled→gated in #293/#294/#296
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+**Pattern statement.** A drift *type* with no window-1 analogue: **in-code description that drifts out of sync with the code around it as a byproduct of heavy agentic refactoring.** Window 1's drift was all at the PR-artifact level (subjects, CHANGELOG buckets, BUGS.md). This window's enormous code-movement campaigns (gix migration, MVU extraction, 800-LoC decomposition) leave behind a different residue: source comments that still narrate the *old* state or the *process* of the move, and `.unwrap()`s / TODO stubs that the movement stranded. The project names this class "aislop" and runs a detect→tool→gate trilogy against it (#293/#294/#296, all 2026-06-06).
+
+**Instance enumeration with moment-entry citations.** All three PRs live in the arc-01 hygiene continuation; the moment entry is 01KTMN0F2B7PDYT29J4YG2GN99.
+
+1. **#293 (chore/comment-hygiene) — the detection: 50 confirmed comment fixes whose taxonomy *is* the drift inventory.** The segment quotes the commit body: a semantic audit "flagged comments that drifted out of date during the recent heavy code movement — the gix migration, the impl-extraction sweep, and the 800-LoC decomposition. Comment-only changes; no behavior change." The taxonomy names exactly the second-window drift residue: comments still claiming `git` subprocess calls where the code now runs in-process gix (drift left by seg-gix-migration); relocation narration like "extracted verbatim from mod.rs" and "MVU Phase 5 … ahead of the GitState reunion (PR 1/2)" (drift left by seg-refactor-mvu); displaced doc blocks; and two stale `#[allow(dead_code)]` attributes now that the symbols are live. The drift here is *comment-vs-current-code*: the comment describes a prior reality the refactor superseded.
+
+2. **#294 (chore/aislop-cleanup) — the tooling + one-time sweep.** Adds the `aislop` advisory scanner ("quality gate for agentic coding"), deliberately *not* wired into `make check` because its lint/format/security engines duplicate clippy+rustfmt — "its value here is the comment-slop + unwrap audit only." The sweep converts 16 production `.unwrap()` → `.expect("<invariant>")` (the unwraps being a second slop sub-type — assertions without a documented invariant), removes 4 trivial comments, resolves 2 TODO stubs. The drift class is widened from comments to *un-justified panics + resolved-but-lingering stubs* left by code movement.
+
+3. **#296 (chore/aislop-baseline) — the gate, which itself surfaces a meta-drift.** Turns the advisory scan into a regression gate via a committed `.aislop/baseline.json` recording accepted findings as per-(rule,file) *counts*, reporting only net-new slop. Notably the baseline entry records a *tension between two project conventions*: aislop's comment engine "over-fires on spyc's mandated dense 'why' docs," so a raw scan "buried ~2 real findings under ~78 accepted/false-positive ones." The 78 documented FPs include "40 narrative-comment docs" — i.e. spyc's own dense-comment mandate registers as slop to the slop detector. The gate rewords 2 genuine meta-comments (bootstrap.rs, run.rs) and baselines the rest.
+
+**Instance count: one drift *type* (in-code description drift from agentic movement), surfaced across the three PRs of its detect→tool→gate trilogy.** Counting the trilogy as one type-instance (not three) is faithful to its shape — it is one coordinated response to one drift class, the same convention window-1 Pattern A used when counting PR #5's two sub-drifts as one PR-instance.
+
+**Notes on counting convention and the window-1 contrast.**
+
+- *Why this type is window-2-only.* Window-1's negative-space tail (= 01KR3BT6MNZMWRMHX14QMYZ86Y) explicitly recorded that the first window had *no* stub-then-fill-in drift and no commit-body/CHANGELOG/BUGS disagreement outside the one Pattern-E case — its drift was "how the work is talked about," and the talk was PR-artifact talk. Window 2 introduces *in-source* description (comments, expect-strings) drifting from code as a scale effect of agentic refactoring: when thousands of lines relocate verbatim, the comments riding along narrate the *origin*, not the *destination*. The drift type is a direct consequence of the A′/structural-scale movement.
+
+- *The detector-vs-convention tension is itself an observable, not an interpretation.* #296's baseline records that spyc's "mandated dense 'why' docs" trip the slop detector (40 narrative-comment FPs). That two project conventions (write dense why-comments; gate against comment-slop) disagree at the artifact level is observable from the committed baseline; the catalogue notes it factually and declines to rank the conventions.
+
+- *Relationship to window-1 Pattern D (documented-vs-wired).* Pattern D was *user-facing docs promise a capability the code lacks* (functional drift, observable to the user typing the command). Pattern E′ is *in-code comments describe a prior implementation the code no longer has* (description drift, observable only to a code reader). Both are description-vs-code, but D′-of-window-1 affected the running program; aislop affects only the source's self-description. Different reader, different failure mode.
+
+Provenance:
+- arc-01 continuation: 01KTMN0F2B7PDYT29J4YG2GN99 (#293/#294/#296; the 50-fix taxonomy, the unwrap/TODO sweep, the baseline-vs-dense-doc tension, all commit-body-quoted).
+- arc-01 continuation framing = 01KTMMKT8E97SAHMKW6GJHTX6E (the hygiene-segment-matures frame this closes).
+- cross-ref the campaigns whose residue #293 cleans: seg-gix-migration 01KTMMHJ879C24FY2WYYT9F1SF, seg-refactor-mvu 01KTMM1A4SE4HRHFQ97PRJCZYD ("MVU Phase 5 … GitState reunion" narration), seg-module-decomposition 01KTMMJVZMX3SJCBSK8YF896YP (800-LoC campaign).
+- window-1 negative-space tail = 01KR3BT6MNZMWRMHX14QMYZ86Y (recorded the absence of this drift type in window 1).
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMTWZ1424S5QYT2HS1K97B3 -->
