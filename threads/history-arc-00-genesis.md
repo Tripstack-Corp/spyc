@@ -641,3 +641,32 @@ Provenance:
 - 89524393 (2026-04-29 06:58) — v1.27.3 ^C→less via job control.
 
 <!-- Entry-ID: 01KTNBVN2QBNDGGK63PS630XFP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:57:44.648109+00:00
+Role: scribe
+Type: Note
+Title: v1.28–v1.34 — the jump-history popup iteration cluster (per-bucket history, double-Esc UX churn)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: prompt history splits into per-context buckets and the J jump-history popup is iterated heavily — wiring, dismissal-key UX, and promotion to a full vi-line-editor prompt   [kind: refactor]
+When: 2026-04-29 · commits f4b24248 (v1.28 buckets) → 6bc680a4 (v1.33 vi promotion) → 98914ae0 (v1.34 Esc-Space)
+Recorded rationale: "prompt history: separate buckets for J, :, !/;, pane (v1.28.0)" (f4b24248); "J history popup, ^C cancels in prompt, Option+Enter newline (v1.29.0)" (12d825a2); "J: promote to vi-line-editor prompt for full editing (v1.33.0)" (6bc680a4); "history popup: Esc Space (was double-Esc) (v1.34.0)" (98914ae0)
+Inferred intent: prompt history is refactored from one shared list into per-context buckets (J / : / !,; / pane), then the J jump-history popup is iterated through ~10 commits to get wiring and the open/dismiss gesture right — exactly the "forgot to clear pending_X / wire the handler" churn REFACTOR_PLAN cites as the seam-is-wrong signal. confidence: high — evidence: the v1.29.1–v1.29.3 fixes ("x deletes was ^D", "actually wire to handle_prompt_key", "submissions actually push to jump_history now") are sequential corrections to the same handler.
+Supersedes: f4b24248 (per-bucket history) supersedes the single shared prompt history (83ea8137, genesis day 1); the J popup work supersedes the frecency-J prompt (v1.9.0, d2c55fb5) by adding an editable popup over it.
+
+This is the densest fold in the segment and the most on-the-nose evidence for REFACTOR_PLAN's thesis. After splitting history into buckets (v1.28), the J jump-history popup is built and re-built across the day: v1.29.0 adds it, then v1.29.1 (x deletes, was ^D), v1.29.2 ("actually wire to handle_prompt_key"), v1.29.3 ("submissions actually push to jump_history now"), v1.30.0 (inline Up/Down + j/k in popup), v1.31.0/v1.32.0 (double-Esc opens popup, matched across vi prompts), v1.33.0 (promote J to a full vi-line-editor prompt), v1.34.0 (Esc-Space replaces double-Esc). REFACTOR_PLAN.md (authored hours later, 265d2816) names precisely this run: "The 'forgot to clear pending_X when cancelling Y' bug we hit several times in v1.27.x–v1.32.x is structurally impossible [under MVU]." The genesis maintainer's own decision log thus cites this cluster as motivation.
+
++10 folded jump-history-popup iteration commits (v1.28.0–v1.34.0): f4b24248, 12d825a2, 14ab646b, 5b3fe32e, 8c0171f1, 8428caf3, 5eeff1ee, cbc4f49c, 6bc680a4, 98914ae0 — each one moves the same popup/prompt-history subsystem; no new subsystem, much re-wiring.
+
+Provenance:
+- f4b24248 (2026-04-29 07:28) — v1.28.0 per-bucket prompt history.
+- 12d825a2 (2026-04-29 10:27) — v1.29.0 J history popup.
+- 6bc680a4 (2026-04-29 13:22) — v1.33.0 J promoted to vi-line-editor prompt.
+- 98914ae0 (2026-04-29 13:32) — v1.34.0 Esc-Space dismiss gesture.
+- REFACTOR_PLAN.md @265d2816 — "the ... bug we hit several times in v1.27.x–v1.32.x".
+
+<!-- Entry-ID: 01KTNBWMS8SC9FH0JDX2GP8C3R -->
