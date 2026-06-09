@@ -27,6 +27,16 @@ use super::{
     sh_c, strip_ansi_escapes,
 };
 
+/// Wrap `text` in bracketed-paste markers so the receiving child app (claude,
+/// an editor, …) sees it as one paste block rather than line-by-line.
+fn bracketed_paste(text: &str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(text.len() + 12);
+    buf.extend_from_slice(b"\x1b[200~");
+    buf.extend_from_slice(text.as_bytes());
+    buf.extend_from_slice(b"\x1b[201~");
+    buf
+}
+
 impl App {
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<Vec<Effect>> {
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
@@ -321,13 +331,14 @@ impl App {
         self.state.flash_info("command finished");
     }
 
-    /// MVU Phase 6 PR-C: route a bracketed-paste event. Into the active prompt
-    /// buffer/editor when prompting; else to the `V`/`D` top-overlay subprocess
-    /// (unless the bottom pane is explicitly focused); else to the active pane
-    /// (focusing it + tracking the text for `yP`), wrapped in bracketed-paste
-    /// markers; else flash a "nowhere to paste" hint. Verbatim move of the
-    /// loop's `Event::Paste` arm.
-    pub(crate) fn handle_paste(&mut self, text: String) -> Result<()> {
+    /// Route a bracketed-paste event through the SAME authority as keys
+    /// (`route_input`), matching `InputSink` exhaustively so paste and keys
+    /// cannot diverge: a paste lands wherever a non-meta key would. The leaf
+    /// behavior differs per kind (a paste is a block; a key is one stroke),
+    /// but the routing is shared. Returns effects for the sole executor
+    /// (`run_effects`); a paste is infallible, so no `Result` (unlike
+    /// `handle_key`, which can fail inside `update`).
+    pub(crate) fn handle_paste(&mut self, text: String) -> Vec<Effect> {
         if crate::key_trace::is_enabled() {
             crate::key_trace::log(&format!(
                 "RX paste len={} pane_focused={} mode={:?}",
@@ -336,77 +347,116 @@ impl App {
                 std::mem::discriminant(&self.state.mode),
             ));
         }
-        if let Some(picker) = self.runtime.find_picker.as_mut() {
-            // The F-finder is modal — it swallows every key for type-to-filter
-            // (`handle_find_picker_key`, run first in `handle_key`). A paste
-            // while it's open is a filename to filter by, not input for the
-            // bottom pane; without this it fell through to the pane arm and the
-            // text landed in claude/shell. Strip newlines: the query is a
-            // single-line fuzzy filter over paths.
-            let clean = text.replace(['\n', '\r'], "");
-            if !clean.is_empty() {
-                picker.query.push_str(&clean);
-                picker.refilter();
-                self.render_find_picker();
+        let snap = self.route_snapshot();
+        match route::route_input(snap, route::InputKind::Paste) {
+            // ── modal sinks ──
+            route::InputSink::FindPicker => {
+                // A paste while the F-finder is open is a filename to filter
+                // by, not input for the bottom pane. Strip newlines: the query
+                // is a single-line fuzzy filter over paths.
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
+                    let clean = text.replace(['\n', '\r'], "");
+                    if !clean.is_empty() {
+                        picker.query.push_str(&clean);
+                        picker.refilter();
+                        self.render_find_picker();
+                    }
+                }
+                Vec::new()
             }
-            return Ok(());
+            route::InputSink::Capture => {
+                // Forward to the running `!` capture child RAW — no bracketed
+                // markers. Captures are usually sudo / ssh / password prompts
+                // that never enable bracketed-paste mode (DECSET 2004), so
+                // wrapping would inject literal `\e[200~` escapes into the
+                // answer. Matches the raw keystroke forwarding in
+                // `handle_capture_key`. (Previously this leaked to the pane.)
+                if let Some(capture) = self.runtime.pending_capture.as_mut() {
+                    use std::io::Write as _;
+                    let _ = capture.host.writer.write_all(text.as_bytes());
+                    let _ = capture.host.writer.flush();
+                }
+                Vec::new()
+            }
+            route::InputSink::OverlayDismiss => {
+                // Any input dismisses a held, exited overlay — a paste too.
+                self.dismiss_overlay();
+                Vec::new()
+            }
+            // No text sink — swallow (don't leak to the bottom pane). Quick-
+            // select / harpoon are single-key label menus; pane-scrollback is
+            // effectively dead (scroll routes via PagerKey).
+            route::InputSink::QuickSelect
+            | route::InputSink::Harpoon
+            | route::InputSink::PaneScroll => Vec::new(),
+            // ── content sinks ──
+            route::InputSink::Prompt => {
+                // Splice into the active prompt buffer. Strip newlines (prompts
+                // are single-line).
+                if let Mode::Prompting(ref mut p) = self.state.mode {
+                    let clean = text.replace(['\n', '\r'], " ");
+                    if let Some(ed) = p.editor.as_mut() {
+                        // Editor (`!` / `;` / `:`): splice at the cursor, then
+                        // sync the canonical buffer from the editor.
+                        ed.insert_str(&clean);
+                        p.buffer = ed.text();
+                    } else {
+                        // Simple prompt (search, mkdir, …): no cursor, append.
+                        p.buffer.push_str(&clean);
+                    }
+                }
+                Vec::new()
+            }
+            route::InputSink::PagerKey => {
+                // Into the pager's `/`-search buffer when typing one; else a
+                // pager has no text input, so it flashes a hint. (Previously a
+                // paste here leaked to the bottom pane.)
+                self.handle_pager_paste(&text);
+                Vec::new()
+            }
+            route::InputSink::OverlayPty => {
+                // Route to the `V`/`;` top-overlay subprocess, bracketed so it
+                // arrives as one block. Don't steal focus.
+                vec![Effect::SendToPane {
+                    target: PaneTarget::Overlay,
+                    input: PaneInput::Bytes(bracketed_paste(&text)),
+                    on_ok: None,
+                    err_prefix: None,
+                }]
+            }
+            route::InputSink::BottomPane => {
+                // The user is interacting with the bottom pane — focus it (as a
+                // keystroke there would), track the text for `yP`, and forward
+                // bracketed so claude/codex/shell sees one paste block.
+                if !self.state.pane_focused() {
+                    self.set_pane_focus(true);
+                }
+                self.state.pane.pane_prompt_buf.push_str(&text);
+                vec![Effect::SendToPane {
+                    target: PaneTarget::Active,
+                    input: PaneInput::Bytes(bracketed_paste(&text)),
+                    on_ok: None,
+                    err_prefix: None,
+                }]
+            }
+            route::InputSink::PaneExitedFlash => {
+                // An exited tab has no live pty — flash, never write bytes to a
+                // dead pane (the former leak).
+                self.state
+                    .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
+                Vec::new()
+            }
+            route::InputSink::Resolver => {
+                // File-list normal mode — nowhere sensible to send a paste.
+                // Some terminals wrap rapid-fire keystrokes in bracketed paste,
+                // so flash rather than silently drop.
+                let n = text.chars().count();
+                self.state.flash_info(format!(
+                    "paste ignored ({n} chars) — open `:` or `^\\` to paste"
+                ));
+                Vec::new()
+            }
         }
-        if let Mode::Prompting(ref mut p) = self.state.mode {
-            // Paste into the active prompt buffer. Strip newlines (prompts
-            // are single-line).
-            let clean = text.replace(['\n', '\r'], " ");
-            if let Some(ed) = p.editor.as_mut() {
-                // Editor present (`!` / `;` / `:`): splice at the cursor so a
-                // mid-line paste lands where the user is, then sync the
-                // canonical buffer from the editor.
-                ed.insert_str(&clean);
-                p.buffer = ed.text();
-            } else {
-                // Simple prompt (search, mkdir, etc.) -- no cursor, append.
-                p.buffer.push_str(&clean);
-            }
-        } else if let Some(overlay) = self
-            .runtime
-            .top_overlay
-            .as_mut()
-            .filter(|_| !(self.runtime.pane_tabs.is_some() && self.state.pane_focused()))
-        {
-            // `V`/`D` top-overlay is the foreground subprocess (editor or
-            // pager). Route the paste to it rather than the bottom pane — the
-            // bottom pane only wins when explicitly focused (`^a-j`); without
-            // this guard, pasting into a `V`-launched $EDITOR sent the text to
-            // claude *and* yanked focus there. Don't steal focus here.
-            let mut buf = Vec::with_capacity(text.len() + 12);
-            buf.extend_from_slice(b"\x1b[200~");
-            buf.extend_from_slice(text.as_bytes());
-            buf.extend_from_slice(b"\x1b[201~");
-            overlay.send_bytes(&buf)?;
-        } else if self.runtime.pane_tabs.is_some() {
-            // Switch focus to the pane — the user clearly intends to interact
-            // with it if they're pasting.
-            if !self.state.pane_focused() {
-                self.set_pane_focus(true);
-            }
-            // Track pasted text for yP (yank last prompt).
-            self.state.pane.pane_prompt_buf.push_str(&text);
-            // Wrap in bracketed paste so the child app (e.g. claude) receives
-            // the block as a single paste, not line-by-line.
-            let pane = self.runtime.pane_tabs.as_mut().unwrap().active_mut();
-            let mut buf = Vec::with_capacity(text.len() + 12);
-            buf.extend_from_slice(b"\x1b[200~");
-            buf.extend_from_slice(text.as_bytes());
-            buf.extend_from_slice(b"\x1b[201~");
-            pane.send_bytes(&buf)?;
-        } else {
-            // No prompt and no pane — nowhere sensible to send it. Some
-            // terminals wrap rapid-fire keystrokes in bracketed paste, so
-            // silently dropping could swallow real input; flash a hint.
-            let n = text.chars().count();
-            self.state.flash_info(format!(
-                "paste ignored ({n} chars) — open `:` or `^\\` to paste"
-            ));
-        }
-        Ok(())
     }
 
     /// MVU Phase 6 PR-C: handle a terminal resize — immediately resize all pty

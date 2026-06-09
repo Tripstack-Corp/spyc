@@ -218,7 +218,10 @@ impl App {
                         let effects = self.handle_key(key)?;
                         self.run_effects(effects, terminal, foreground_exec)?;
                     }
-                    Event::Paste(text) => self.handle_paste(text)?,
+                    Event::Paste(text) => {
+                        let effects = self.handle_paste(text);
+                        self.run_effects(effects, terminal, foreground_exec)?;
+                    }
                     Event::Resize(cols, rows) => self.handle_resize(cols, rows),
                     _ => {}
                 }

@@ -195,7 +195,7 @@ fn paste_into_open_finder_filters_not_pane() {
             walk_rx: None,
             walk_complete: true,
         });
-        app.handle_paste("foo\n".to_string()).unwrap();
+        app.handle_paste("foo\n".to_string());
         let picker = app
             .runtime
             .find_picker

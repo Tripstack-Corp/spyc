@@ -43,6 +43,24 @@ impl App {
         None
     }
 
+    /// Route a paste into the active pager. While typing a `/` search the
+    /// text extends the search buffer (newline-stripped, so a multi-line
+    /// paste stays one query); otherwise a pager has no text input, so flash
+    /// a hint inside it. Uses the `active_pager_mut!` macro so the borrow
+    /// stays field-level (a `&mut self` accessor would borrow all of `*self`).
+    pub fn handle_pager_paste(&mut self, text: &str) {
+        let Some(view) = active_pager_mut!(self) else {
+            return;
+        };
+        if view.is_typing_search() {
+            for c in text.chars().filter(|c| *c != '\n' && *c != '\r') {
+                view.search_push_char(c);
+            }
+        } else {
+            view.flash = Some("paste ignored — press `/` to search".into());
+        }
+    }
+
     /// While typing a `/` search query, most keys feed the buffer.
     pub(super) fn handle_pager_search_typing(
         &mut self,
