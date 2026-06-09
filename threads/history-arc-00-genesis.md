@@ -220,3 +220,34 @@ Provenance:
 - ec8689d6 (2026-04-16 19:13) — git file-status colors in listing.
 
 <!-- Entry-ID: 01KTNBE56ZYMGFZ592XT4A1BF5 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:50:25.404102+00:00
+Role: scribe
+Type: Note
+Title: M10–M12 — context piping, git worktrees, git diff-view in pager
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the planned ROADMAP milestones M10/M11/M12 ship in sequence — context piping, worktrees, diff-view   [kind: new-capability]
+When: 2026-04-16 · commits a74d3a66 (M10), 816ac2b2 (M11), 54d7691c (M12)
+Recorded rationale: "M10: Context piping — send file contents to pane with ^W p / ^W i" (a74d3a66); "M11: Git worktree integration, pending key indicator in prompt line" (816ac2b2); "M12: Git diff view in pager with gd (unstaged) and gD (staged)" (54d7691c)
+Inferred intent: these execute, in order, the exact M10/M11/M12 the genesis ROADMAP enumerated — the milestone plan is being followed as written. M10 is the file-manager→pane bridge that justifies the embedded-pane design; M12 reuses the pager's existing ANSI/search infra for diffs. confidence: high — evidence: each commit subject matches its ROADMAP milestone entry verbatim (ROADMAP.md at 14ee484 quotes M10 "^W p sends picks, ^W i sends inventory", M12 "d on a modified file ... opens a diff view").
+Supersedes: M10 builds on the ^W prefix (31a36e01); M12 builds on the pager ANSI/search (3bb95e9e).
+
+M10 (a74d3a66) wires context-piping: ^W p sends picks, ^W i sends inventory items, as paths or contents, into the active pane tab — the browse→prompt bridge the ROADMAP framed as "we're already a file manager with multi-select." M11 (816ac2b2) adds git-worktree integration plus a pending-key indicator in the prompt line (the multi-key chord feedback). M12 (54d7691c) adds git diff-view in the pager (gd unstaged / gD staged), reusing the pager's line-numbering and search — an arc-05/arc-04 crossover. gd later grows to include new files (v1.15, baa31de2) and gb blame.
+
++1 folded: 7dea52bf (2026-04-16) "Help overlay now uses the pager" — the help text becomes a pager buffer (scrollable/searchable), unifying two surfaces.
++1 folded: 6bcbb95d (2026-04-16) "Pager: v opens buffer in $EDITOR, returns to pager on quit".
++1 folded: a cluster of 6 startup-robustness commits (4719ae1e, 30902126, 34310dac, c2c67fb6, plus 157ebd50/be627741 resize fixes) hardening "never crash on permission denied / unreadable cwd — flash error and stay put" (2026-04-16).
++1 folded: e48f7c02 (2026-04-16) "Code review cleanup: hot-path fixes".
+
+Provenance:
+- a74d3a66 (2026-04-16 13:11) — M10 context piping ^W p / ^W i.
+- 816ac2b2 (2026-04-16 16:04) — M11 git worktree integration.
+- 54d7691c (2026-04-16 16:24) — M12 git diff-view gd/gD in pager.
+- ROADMAP.md @14ee484 — M10/M11/M12 enumerated as the forward plan.
+
+<!-- Entry-ID: 01KTNBF97DDYPGFFS9SJ9MHB9M -->
