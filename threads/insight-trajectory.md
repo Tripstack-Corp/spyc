@@ -1197,3 +1197,44 @@ Provenance:
 - supporting seg threads: `history-seg-docs-planning`, `history-seg-refactor-mvu`, `history-seg-module-decomposition`, `history-arc-05-pager-surface`, `history-arc-03-pane-behavior`.
 
 <!-- Entry-ID: 01KTMV0966Y4EGA3D07XN0PZKY -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:03:23.509101+00:00
+Role: critic
+Type: Note
+Title: Window-2 Tail: the positive-side break restated — window-1's fifteen-and-zero becomes window-2's negatives-still-uniformly-honored-but-two-near-exact-positive-executions; the asymmetry didn't vanish, it moved to the positive axis and split by document kind
+
+Spec: critic
+
+tags: #insight #trajectory #window-2 #tail
+
+Restated cleanly because it spans six per-document entries and the closure listed it without ceremony: the window-2 asymmetry, set directly against window-1's fifteen-and-zero.
+
+**Window-1's shape (= 01KR3FEAYFQS8QVXCPN4KQ8QYK).** Across three independent stated-plan documents, negatives were honored uniformly (4 catalogue skips + 6 charter non-goals + 5 advisory ignores = 15, zero divergences) and positives never executed cleanly (0 exactly-as-specified across the lazygit catalogue and ROADMAP additions). The surprise was the *clean split by recommendation register*: negative → honored, positive → modified shape, with **zero** on the positive-clean side.
+
+**Window-2's shape.** The negative side is unchanged — every negative-register element is still honored at exact-state grain (AUTO_APPROVAL's pty-interception rejection; PANE_RECOVERY's scope-boundary; PANE_STARTUP's splits-deferral; YAZI's Lua-plugins + image-preview non-goals; V1_5's three non-goals including "no MVU here"; ≥8 instances, zero violations). The negative-honor discipline is *invariant* across the two windows.
+
+The positive side BROKE. Window-1 had zero clean positive executions; window-2 has **two near-exact ones** — MVU_PLAN's 8 phases (−1…6) and V1_5_PLAN's 6 phases, each executed in the stated order against named done-criteria — plus one executed-and-tightened (REFACTOR_PLAN's decomposition, whose line-target moved *down* to ~800 rather than being abandoned). **Zero-to-two is the window-2 headline number, the way fifteen-and-zero was window-1's.**
+
+**The asymmetry didn't disappear; it moved axes and acquired a splitting variable.** In window-1 the splitting variable was *recommendation register* (negative vs positive). In window-2 the negative-vs-positive split is no longer clean — because the positive side itself splits on a second variable: **document kind.** Numbered-phase plans with done-criteria that *activated* in-window (MVU, V1_5) executed near-exactly. Loose-recommendation documents (window-1's lazygit catalogue) landed in modified shape. Feature plans filed but not activated (AUTO_APPROVAL / PANE_RECOVERY / PANE_STARTUP) deferred their positives entirely. So window-2's positive disposition is *trimodal* — near-exact / modified / deferred — keyed to document kind, where window-1's was *unimodal* — all-modified.
+
+**What makes the number surprising at trajectory grain.** It is surprising that the positive-clean-execution count moved from zero to two across the window boundary while the negative-honor count stayed uniform. Two things changed and one didn't:
+- *What changed (1):* the corpus acquired a document kind it previously lacked — the numbered-phase executable-spec (MVU_PLAN, V1_5_PLAN), with per-phase done-criteria and recorded adversarial-review provenance.
+- *What changed (2):* those specs *self-corrected during execution* (MVU's "zero test edits" relaxation; REFACTOR_PLAN's `wc -l ≤4500` correction) — the plan moved to meet the code rather than the code diverging from the plan. At trajectory grain this reads as EXECUTED, not MODIFIED, because the divergence is the spec amending itself, not the execution drifting.
+- *What didn't change:* the negative register. Nothing forbidden was built in either window.
+
+**The competing reading, kept.** The two near-exact executions are exactly the two plans that *activated*; five positive plans sit deferred. So "the positive side broke" may understate a selection effect — the honest narrow claim is *activated executable-specs execute near-exactly; un-activated plans don't execute at all*, which leaves the aggregate positive-execution rate bimodal rather than uniformly improved. Window-2's catalogue does not adjudicate between "mode-shift" and "selection-effect"; it states the bimodality. (Tier-3 holds; the adjudication is `insight-emergent-properties`'s.)
+
+**What this is not.** It is not a refutation of window-1's fifteen-and-zero — that count stands for window-1's corpus. It is the observation that the *same analytic frame* applied to a different corpus yields a different positive-side number while preserving the negative-side number. The fifteen-and-zero was never a law of the project; it was the trajectory shape of a corpus made of loose-recommendation documents. Hand the frame a corpus made of executable-specs and the positive-side count moves. The negative-honor count moving *not at all* is the part that suggests something invariant underneath — but naming that invariant is the property question, reserved.
+
+The two windows together give `insight-emergent-properties` a controlled contrast it could not have had from either window alone: same maintainer, same analytic frame, two corpora differing in document kind, negative-honor held constant, positive-execution varied. That contrast is the durable contribution of running the trajectory catalogue across both windows.
+
+The thread is left OPEN.
+
+Provenance:
+- window-1 asymmetry tail (fifteen-and-zero, restated) = 01KR3FEAYFQS8QVXCPN4KQ8QYK; window-1 closure terminal count = 01KR3F9EF9WF9Q34FRAR2XPSZS.
+- window-2 closure (the 2-near-exact / ≥8-negative-honored / 5-deferred tally + competing reading) = 01KTMV0966Y4EGA3D07XN0PZKY.
+- window-2 document #1 (MVU near-exact + self-correction) = 01KTMTPYARF1GDCQHMMF9YN5J1; document #2 (REFACTOR_PLAN executed-and-tightened + wc-l self-correction) = 01KTMTR9XYV5ZW49ENMMP4CMBE; document #3 (V1_5 near-exact) = 01KTMTSTYW0ZAF94QBA9NPH340; documents #6+#7+#8 (positive-deferred/negative-honored) = 01KTMTWQ02AVXBS4DX61N8CHGV.
+- window-2 framing (mode-shift named) = 01KTMTN3M67GWM09JCK865XS9M.
+
+<!-- Entry-ID: 01KTMV1Q0XJNSWM08XAGJ08T4D -->
