@@ -751,3 +751,41 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVGQPG64A1YK7M5M07TW37 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:12:22.544865+00:00
+Role: critic
+Type: Note
+Title: Property 8 (window-2): Strangler-fig as the house migration architecture — the codebase replaces legacy implementations by grow-alongside → parity → flip → drop, instantiated twice at campaign scale
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** The codebase exhibits a single house architecture for replacing a legacy implementation: a new implementation is **grown alongside** the old one behind a facade or guard, brought to **parity** (proven behavior-equivalent / byte-for-byte), **flipped** to default, and the legacy implementation is then **dropped** with its escape hatch removed. The shape is the artifact's migration architecture, instantiated **twice at campaign scale** in the window. Reads as: spyc, as artifact, does not migrate by big-bang replacement; it carries a grow-alongside-then-retire lifecycle whose defining feature is that the new and old coexist behind a parity gate until the old is provably redundant, and the terminal diff *removes more than it adds*.
+
+**Window-1 contrast: this is genuinely new (extends, does not invert, any window-1 property).** Window-1 catalogued no migration shape at all — its Property 4 (additive-substrate / parallel-registration = 01KR3HQCRV761KG6CVD6T11QNM) named *accretion* (capability stacked atop substrate; surfaces placed side-by-side), but accretion never *replaced* a legacy implementation. The strangler-fig is the first artifact behavior in either window whose defining feature is retiring the thing it grew alongside (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF: "the first recurrence in either window where the recurring shape's defining feature is *retiring the thing it grew alongside*"). It is the migration-grain counterpart to the growth-grain inversion named separately in Property 9.
+
+**Evidence enumeration.**
+
+*Instance 1 — MVU runtime migration (#166–#274)* (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF): the MVU runtime (single Message channel, effect-as-data, off-thread workers) is grown *beside* the old busy-poll `App::run` loop, phase by phase, each phase behavior-equivalence-tested behind green CI, before the loop body is reshaped and the three update entry points collapse to one `App::update(msg)` (the terminal drop, moment = 01KTMM60KR8W18TWXPXDGT9J8Y). The recorded charter (MVU_PLAN.md, moment = 01KTMKVE85DEBMBWYCXY7YHP5E) names it a "strangler-fig migration: the MVU machinery grows alongside the existing `App::run` busy-poll loop and never replaces it in one step."
+
+*Instance 2 — gix backend migration (#283–#292)* (recurrence P1, same entry): the textbook instance, the synthesis arc naming the shape verbatim — "a planned 9-step strangler-fig replacing every `git` subprocess shell-out with the pure-Rust `gix` crate, behind a single facade." Grow-alongside = the `src/git/` facade seam built first, then gix added additively `default-features = false`; parity = the status spike "runs only from the parity tests, not the live status path," proving byte-for-byte equivalence before flip; flip = #287 behind `SPYC_GIT_BACKEND=subprocess`; drop = #292 removes the last `Command::new("git")`, deletes the escape hatch "exactly as promised," adds a `no_subprocess_git_in_production` guard test, **net diff −178** — "the migration ends by removing more than it adds, the recorded signature of a completed strangler-fig."
+
+*The drop is corroborated at the drift grain* (drift C′ = 01KTMTT2MAQQSS8780NBK097TQ): the `SPYC_GIT_BACKEND=subprocess` escape hatch is added at #287 with its own doc naming its lifespan ("a one-release-cycle safety valve … Removed in PR 9") and dropped at #292 exactly as promised — drift C′ reads the add-then-drop as a cumulative self-retraction (the artifact carries, for the interval [#287, #292), a code path its introducing PR already classifies as scheduled-for-deletion). The same observable is the migration architecture's flip→drop tail at recurrence grain and the planned-retraction at drift grain.
+
+**A sub-shape preserved factually: the escape-hatch register differs across the two instances** (recurrence P1). gix uses an explicit runtime flag (`SPYC_GIT_BACKEND`) with a one-release-cycle soak window closed on schedule — rollback unit is a flag flip. MVU uses green CI + behavior-equivalence tests with no runtime flag — the old loop running alongside *is* the hatch, phase by phase, each phase individually revertable — rollback unit is a per-phase PR revert. Two instances, two safety-valve registers, one migration shape. The recurrence is the shape; the register varies. (The recurrence thread flagged that *why* the maintainer chose a flag for one and CI-phases for the other is tier-4-as-motive and refused it; this property holds the same line — it names the artifact's two-register migration architecture, not a maintainer preference.)
+
+**Strongest evidence.** The gix drop's recorded signature — net diff −178, escape hatch removed, guard test added — is the cleanest single observation that the shape is a *completed* lifecycle and not merely a parallel-implementation accretion. The migration is observable in the artifact as a terminal-subtractive diff guarded by a test that fails if any production source spawns `git`: the "drop" is machine-checkable, not an analyst reading.
+
+**Where the property would falsify.** A legacy implementation replaced in a single big-bang diff (old removed and new added in one PR, no grow-alongside interval, no parity gate) would weaken the property — the artifact would have a migration that is not a strangler-fig. None observed across the two campaign-scale migrations. A strangler-fig that flipped without dropping (the escape hatch surviving indefinitely past its stated soak window) would weaken the drop-half; the gix hatch was dropped on schedule, the MVU old loop fully collapsed. A third migration in the window replacing a legacy implementation by some other shape would weaken the "house architecture" claim; the two campaign-scale migrations both instantiate the same lifecycle.
+
+**Tier-5 forward prediction.** Citing recurrence P1's two grow→parity→flip→drop instances and the two escape-hatch registers: the next legacy-implementation replacement in the codebase will run the same grow-alongside → parity → flip → drop lifecycle behind a parity gate, terminating in a subtractive drop with a guard test, rather than a single-PR big-bang swap. (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF.)
+
+Provenance:
+- recurrence window-2: P1 strangler-fig (two campaign-scale instances; the two escape-hatch registers; the −178 drop signature) = 01KTMTNYS83V5A7PY2MJVV60MF; campaign moment anchors cited therein (MVU charter 01KTMKVE85DEBMBWYCXY7YHP5E, MVU drop 01KTMM60KR8W18TWXPXDGT9J8Y, gix drop 01KTMMTF0MQ96P7BVN7QQPVBNS).
+- drift window-2: C′ cumulative-self-retraction (the #287→#292 hatch add-then-drop) = 01KTMTT2MAQQSS8780NBK097TQ.
+- window-1 contrast: Property 4 (additive-substrate / parallel-registration — accretion without replacement) = 01KR3HQCRV761KG6CVD6T11QNM.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVJ5B5DWEPR9CHFS7PRMWW -->
