@@ -656,3 +656,53 @@ Provenance:
 - Arc-08 PR #31 entry (the *"Smaller than I'd previously framed it"* commit body verbatim — the load-bearing observation for why the framing register matters) = 01KR397RTYNS34SAGM46YJJRBY.
 
 <!-- Entry-ID: 01KR3J3GGK8SFKMA3ZMGX2JK0R -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:10:44.129420+00:00
+Role: critic
+Type: Note
+Title: Framing (window-2): second-window continuation opens — register inherited, seven window-2 properties named atop the lower-three tiers' #38–#311 catalogues, two candidates declined
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+This is the second-window (#38–#311, 2026-05-07 → 2026-06-08) continuation of `insight-emergent-properties`. Window-1 (#1–#37, framing = 01KR3HDVVQ5TS04SKHKWZKCXPY) named six emergent **properties** of the codebase-as-artifact atop the three lower insight tiers (`insight-drift`, `insight-recurrence`, `insight-trajectory`), each cited to lower-tier entry_ids, each held to the work-vs-worker discipline. This continuation does the same job over the larger window: the lower three tiers each ran a window-2 pass (drift A′–F′, recurrence P1–P6, trajectory ten-document disposition), and this thread interprets their #38–#311 counts as properties of the artifact.
+
+**The register is inherited unchanged from window-1.** Property naming at the artifact grain ("the codebase exhibits", "reads as", "the artifact carries"); cross-tier synthesis citing drift/recurrence/trajectory window-2 ULIDs at each property; the **recurrence-citation requirement** (every property cites the specific lower-tier window-2 entry_ids that earn it, and where it inverts or confirms a window-1 property, cites that window-1 property's entry_id too); and the **work-vs-worker discipline** (name structural properties of the artifact; never cross into maintainer motive/mindset). The hardest discipline test in window-1 was Property 3 (register-correlates-with-supersession-kind); the hardest in window-2 is Property 12 (negative-honor invariance) and Property 8 (strangler-fig), where the recurrence threads explicitly flagged that *why* the maintainer chose a flag vs CI-phases, or *why* a rejection was honored, is tier-4-forbidden-as-motive. The temptation registers are named and refused at those entries.
+
+**The window-2 character, in one sentence.** The lower tiers agree on the shape of the change: window-2 is a **plan-doc-rich, squash-merged, campaign-scale** window whose dominant engineering moves are migration and decomposition. The trajectory framing (= 01KTMTN3M67GWM09JCK865XS9M) named "the development mode shifts from roadmap-as-loose-inspiration to plan-doc-as-executable-spec"; the recurrence closure (= 01KTMV0568M86NZC6XZENTSB6D) named six shapes "2 new / 2 evolved / 2 native"; the drift closure (= 01KTMV2JE30J2QGRP3W3EBQNZH) named the description layer "thickened and stratified" under squash. The seven properties below interpret those counts.
+
+**The seven properties this continuation promotes.**
+
+7. **Plan-doc-as-executable-spec.** The development mode is now plan-driven: numbered-phase plan docs with done-criteria land near-exact (trajectory Doc#1 MVU_PLAN = 01KTMTPYARF1GDCQHMMF9YN5J1; Doc#3 V1_5_PLAN = 01KTMTSTYW0ZAF94QBA9NPH340; recurrence P5 plan-doc-then-execute = 01KTMTWQR1TJTNDNPZH3X6JDHP). The window-2 counterpart to / partial inversion of window-1 Property 2 (fifteen-and-zero = 01KR3HJ9ZVA966149ME2TBTB5B): what changed is document-kind-dependent **positive** fidelity; what did NOT change is the **negative** non-goal honor (trajectory closure = 01KTMV0966Y4EGA3D07XN0PZKY).
+
+8. **Strangler-fig as the house migration architecture.** The artifact migrates by grow-alongside → parity → flip → drop, instantiated twice at scale (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF; drift C′ the hatch-add-then-drop = 01KTMTT2MAQQSS8780NBK097TQ).
+
+9. **Additive → subtractive growth inversion.** Window-1 grew by stacking atop substrate (Property 4 = 01KR3HQCRV761KG6CVD6T11QNM); window-2 grows by splitting under a codified ~800-line ceiling (recurrence P3 verbatim-relocation = 01KTMTSAVQNENHP8ZFWBKTWXN6; drift A′ = 01KTMTQ8RT04DKANY20CG8TE39). A structural inversion of the prior window's expansion behavior.
+
+10. **Rationale externalized into committed artifacts under squash-merge.** Squash erases pre-merge rationale (drift A′ = 01KTMTQ8RT04DKANY20CG8TE39), so the recorded "why" lives in CHANGELOG + plan docs; the artifact's rationale-substrate moved out of commit bodies into the tree (trajectory framing = 01KTMTN3M67GWM09JCK865XS9M; drift A′).
+
+11. **Abstraction-seams precipitate from repetition.** Per-X repetition yields declarative extension points — `AgentProfile`, `PagerStream`, the `gix` facade (recurrence P4 per-X-then-generalize = 01KTMTTZQK31H30M2RQ6J3FEY1). The codebase grows named seams where repetition accumulates; the window-2 answer to window-1 Property 4's open parallel-or-parametric question.
+
+12. **Negative-honor invariance across both windows.** Non-goals / rejections honored uniformly in window-1 (15) AND window-2 (≥8), while positive-execution fidelity rose. A cross-window structural invariant (trajectory window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS; window-2 closure = 01KTMV0966Y4EGA3D07XN0PZKY; the three-for-three feature-plan recurrence = 01KTMTWQ02AVXBS4DX61N8CHGV). The property the two windows jointly reveal that neither does alone.
+
+13. **Test-substrate-enables-migration.** Green-CI and behavior-equivalence/guard tests are the precondition that makes the strangler-figs and decompositions safe; the artifact carries an executable invariant layer (`mod_rs_stays_decomposed`, `no_subprocess_git_in_production`, gix parity-before-flip) that the migrations run against (drift negative-space tail = 01KTMV0RPDEBMH87MB89JRE0BR; recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF). Promoted on its lower-tier citation; the contract's "not-actually-gated-merges gotcha" was searched for and is named below as NOT surfaced in the window-2 drift catalogue.
+
+**Candidates declined.**
+
+- *B′ (slug-prefix-vs-diff-intent) and E′ (aislop description-layer cruft) as standalone window-2 properties.* Drift B′ (= 01KTMTRNPWDK14NQHD78DV2ZEE) and E′ (= 01KTMTWZ1424S5QYT2HS1K97B3) are real window-2 drift instances, but at the property grain they are sub-instances of Property 10 (rationale-externalized): B′ is the slug carrying intent because the squashed body cannot, and E′ is in-source narration drifting because the rationale moved into the tree and the comments lag it. Promoting either to a separate property would over-count the same artifact-grain observation (the rationale-substrate relocated; its surfaces multiplied) at two grains. Declined for over-counting risk — the same discipline window-1 used to decline Pattern 1 sub-shape distribution under Property 1.
+
+- *Phase-numbered-PR-train (recurrence P2) as a property distinct from Property 8.* Recurrence P2 (phase-numbered train) and P1 (strangler-fig) are two readings of the same campaigns (the recurrence convergence tail = 01KTMV1SBQ1PPH8A2WM4TSNX1N names "one campaign, four shapes"). The train is the *delivery mechanism* of the strangler-fig and the decomposition; at property grain it is the same migration-discipline observable Property 8 and Property 9 already carry. Promoting it separately would split one artifact property (the codebase migrates and decomposes in ordered small revertable steps) into two. Declined for over-counting; its delivery-shape content is folded into Properties 8 and 9.
+
+**Structural shape.** Seven property entries follow, each with: property statement (analyst-framed, artifact grain); evidence enumeration with window-2 lower-tier ULIDs; window-1 contrast (inverts / confirms / extends, with the window-1 property ULID); strongest evidence; falsification condition; and where competing readings exist, BOTH preserved (the trajectory thread's mode-shift-vs-selection-effect split is reserved for adjudication HERE — Property 7 carries both). A continuation closure follows; a cross-window tail follows the closure. The thread is left OPEN.
+
+**What this continuation is NOT.** NOT a re-count (the lower tiers counted; this interprets). NOT motive attribution (artifact grain absolute). NOT promotion of every candidate (two declines named above). NOT a refutation of window-1's properties (its six stand for its corpus; this names what the *larger* window's corpus exhibits, and where the two windows jointly reveal an invariant).
+
+Provenance:
+- window-1 this-thread: framing = 01KR3HDVVQ5TS04SKHKWZKCXPY; Property 1 = 01KR3HG2GEBH1W8BKGT3CW6S9P; Property 2 = 01KR3HJ9ZVA966149ME2TBTB5B; Property 3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z; Property 4 = 01KR3HQCRV761KG6CVD6T11QNM; Property 5 = 01KR3HSK97596MXH0V41K7TYM2; Property 6 = 01KR3HW4T1GQKFFWNYSRT0639S; closure = 01KR3HZNC62XT11V4CW2GZ5V0S.
+- drift window-2: framing = 01KTMTNWVQJZQX85ZPA3BBZVGV; A′ = 01KTMTQ8RT04DKANY20CG8TE39; B′ (declined) = 01KTMTRNPWDK14NQHD78DV2ZEE; C′ = 01KTMTT2MAQQSS8780NBK097TQ; E′ (declined) = 01KTMTWZ1424S5QYT2HS1K97B3; negative-space tail = 01KTMV0RPDEBMH87MB89JRE0BR; closure = 01KTMV2JE30J2QGRP3W3EBQNZH.
+- recurrence window-2: framing = 01KTMTMAB6G8JJAFFQF29XVZGB; P1 = 01KTMTNYS83V5A7PY2MJVV60MF; P3 = 01KTMTSAVQNENHP8ZFWBKTWXN6; P4 = 01KTMTTZQK31H30M2RQ6J3FEY1; P5 = 01KTMTWQR1TJTNDNPZH3X6JDHP; P6 = 01KTMTYBDZ99R8XBA44E6NTZRQ; closure = 01KTMV0568M86NZC6XZENTSB6D; convergence tail = 01KTMV1SBQ1PPH8A2WM4TSNX1N.
+- trajectory window-2: framing = 01KTMTN3M67GWM09JCK865XS9M; Doc#1 = 01KTMTPYARF1GDCQHMMF9YN5J1; Doc#2 = 01KTMTR9XYV5ZW49ENMMP4CMBE; Doc#3 = 01KTMTSTYW0ZAF94QBA9NPH340; Docs#6+7+8 = 01KTMTWQ02AVXBS4DX61N8CHGV; closure = 01KTMV0966Y4EGA3D07XN0PZKY; asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D.
+
+<!-- Entry-ID: 01KTMVF4MK9N37Y731FQ7XBGB7 -->
