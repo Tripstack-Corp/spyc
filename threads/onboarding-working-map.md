@@ -63,3 +63,47 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-architecture = 01KR0P4W3ED1QZ8F44PFB2WPDZ`.
 
 <!-- Entry-ID: 01KR0P6W0YEPJTT0C3CP48NGKV -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:19:37.683032+00:00
+Role: scribe
+Type: Note
+Title: Onboarding refresh: #37 → #311 working map (decomposed src/ tree, entrypoints, MCP tool surface)
+
+Spec: docs
+
+Purpose: Refresh of onboarding-working-map from #37 to #311 (v1.56.0). The #37-era map listed 55 `.rs` files in a mostly-flat `src/` with two giant files (`app/mod.rs` 9087, `state.rs` 2671). The whole tree was reshaped by the MVU migration + the 800-LoC decomposition campaign: it's now 162 `.rs` files across directory modules. This entry re-enumerates the real subsystems, entrypoints, and public surfaces, and points each at its history thread.
+
+Observed:
+- **Scale churn #37→#311:** `find src -name '*.rs' | wc -l` → **162** (was 55); ~53,818 LoC; **949** test fns (was 577). The two former monoliths are gone: `app/mod.rs` is now **1009** lines (was 9087 — it's just the `App`/`Runtime`/`ViewState` struct defs + the `Message` enum + glue), and the old `app/state.rs` 2671-line file was split into `src/app/state/{apply,dispatch,git,listing,mod,navigation,selection}.rs` (campaign close at PR #307-308). Integration tests grew from 2 to 3: `tests/{filesystem,keymap_roundtrip,pane_roundtrip}.rs`.
+- **Decomposed `src/` subsystem map (verified by `ls -R src`):**
+  - `src/app/` — application layer (MVU). Root `mod.rs` (struct defs + `Message`). Lifecycle siblings: `bootstrap.rs` (constructor), `run.rs` (event loop), `proc.rs` (process I/O), `util.rs` (leaf helpers), `loop_steps.rs`, `scheduler.rs`. MVU machinery: `update.rs` (single `App::update` entry), `effect.rs` (the `Effect` enum + `run_effects`), `actions.rs` (`apply_inner`), `command_table.rs` (`COMMAND_TABLE`), `commands.rs`, `route.rs`, `focus.rs`. Child dirs: `key_dispatch/{confirms,prompts}`, `pager_handler/{modes,motion,pickers}`, `render/{chrome,inner,overlays}`, `state/{apply,dispatch,git,listing,navigation,selection,tests}`. Plus the pager-stream seam: `pager_stream.rs`, `grep_session.rs`, `git_view_session.rs`, `git_state.rs`, `pager_history.rs`, `tasks.rs`, `agent_status.rs`.
+  - `src/git/` — in-process gix facade: `discovery.rs`, `status.rs`, `worktree.rs`, `model.rs`, `blame.rs`, `diff_model/{blob,build,mod}`. Pure infra (paths in, owned `Send` data out). Production is 100% gix; a `#[cfg(test)]` guard asserts no git subprocess in non-test code.
+  - `src/ui/` — pure renderers (`model + &Theme → Vec<Line>`): `list_view`, `status`, `prompt`, `line_edit`, `help`, `theme`, `syntax`, `json`, `scrollback`, plus child dirs `markdown/{renderer,wrap,tests}`, `pager/{construct,layout,render,scroll_search,selection,tests}`, `diff_render/`, and `blame_render.rs` (the in-house git diff/show/blame view).
+  - `src/agent/` — AgentProfile registry (`mod.rs` + `resume.rs`): one `AgentProfile` impl per hosted agent (claude/codex/gemini/agy/zot), `detect`/`profile_for` dispatch.
+  - `src/keymap/` — `action.rs` (`Action` enum), `user.rs` (DSL), `resolver/` (binding resolution + tests).
+  - `src/mcp/` — MCP server, split into `mod.rs` (facade), `server.rs` (socket transport), `protocol.rs` (JSON-RPC handlers), `config.rs` (`.mcp.json`/codex management + enterprise policy + takeover), `readers.rs` (context-file readers). (Was a single `src/mcp.rs`, 2154 lines, at #37.)
+  - `src/state/` — persistence: `cursor`, `marks`, `picks`, `inventory`, `history`, `ignore`, `frecency`, `harpoon`, `graveyard`, `health`, `session_names`, `pager_positions`, the three per-agent transcript parsers (`claude_transcript`, `codex_transcript`, `agy_transcript`), and `sessions/` (dir module + tests).
+  - `src/config/` — `mod.rs`, `dsl.rs`, `default.spycrc.toml`. `src/fs/` — `entry`, `listing`, `long_listing`, `ops`, `finder` (`F` picker), `grep` (`:grep`), `waking_sender` (the `fs::WakingSender` powering PagerStream wakeups). `src/pane/` — `mod` (`Pane`), `input`, `widget`, `quick_select`, `pathref`, `pty_host`, `tabs`. `src/shell/` — `mod`, `expand`.
+- **Entrypoints:** the only `[[bin]]` is `spyc` at `src/main.rs` (`Cargo.toml:10-12`); `src/main.rs` (417 lines) is terminal setup/teardown + `suspend_tui`/`resume_tui` + CLI. `build.rs` (25 lines) is the build script. No library crate target yet (the `spyc-proto`/`spyc-pty`/`spyc-os` split is 2.x, not landed).
+- **Public surfaces:** (1) the CLI flags in `src/main.rs`; (2) the **MCP RPC tool surface** in `src/mcp/` — verified tool names in `src/mcp/protocol.rs`: `get_spyc_context`, `navigate_to`, `pick_files`, `clear_picks`, `search_paths`, `search_inventory`, `search_content`, `search_picks`, `set_filter`, `get_file_content` (matches the `mcp__spyc__*` tools exposed to agents). The MCP module is 1574 LoC across 5 files.
+- **Authoritative index is still `AGENTS.md` — and it is now current.** `AGENTS.md:38-99` already describes the decomposed tree, the three-field MVU split, the gix-migration-complete state, the `COMMAND_TABLE` registration rule, and the doc-sync checklist. Use it as the live per-module index; this entry is the history-thread cross-reference layer on top of it.
+
+Inferred:
+- The #37 working-map's "add a feature" recipe (`action.rs` → `resolver` → `app/mod.rs`/`state.rs`) is now **stale in its last step**: the handler goes in `src/app/actions.rs` (`apply_inner`) or the pure half in `AppState::apply` — **never** back into `mod.rs` (a guard test `mod_rs_stays_decomposed` enforces this), and `:`-commands register via `COMMAND_TABLE` not a hand-synced punt list. — confidence: high — basis: `AGENTS.md:83-85`.
+- Each subsystem maps to a history thread, so "why is this module shaped this way" is answerable: app→`history-seg-refactor-mvu`, git→`history-seg-gix-migration`, the directory-module shape→`history-seg-module-decomposition`, agent→`history-arc-07-codex-and-mcp-bridge`, ui/pager→`history-arc-05-pager-surface`, ui/markdown→`history-seg-markdown-rendering`. — confidence: high — basis: thread titles + entry headers consulted this session.
+
+Next query: `watercooler_search(query="module decomposition directory split src tree", thread_topic="history-seg-module-decomposition", code_path=".")`
+
+Related:
+- `onboarding-architecture` — the engine principles (MVU/gix/PagerStream) this index is realized against (also refreshed).
+- `onboarding-docs-contracts` — the doc-sync surfaces; note `AGENTS.md` is now the live authoritative index.
+- the history/insight corpus — `history-seg-module-decomposition` (the directory-module split, 6 entries) is the deep detail for this map; `insight-emergent-properties` covers the registration/additive-substrate growth patterns visible in the tree.
+
+Provenance:
+- Commands run: `find src -name '*.rs' | wc -l` (162), `find src -name '*.rs' | xargs wc -l | sort -rn | head` (top 1009/794/792/782), `grep -rE '#\[test\]' src tests | wc -l` (949), `ls -R src/{app,git,ui,agent,keymap,mcp,state,config,fs,pane,shell}`, `wc -l src/main.rs build.rs src/mcp/*.rs`, `grep tool-names src/mcp/protocol.rs`.
+- Files read: `AGENTS.md:36-99` (current module index + conventions), `Cargo.toml:10-12` (bin target).
+- History entry_ids consulted: module-decomposition campaign close (state.rs split) 01KTMMPARGNTSQB2Z67G6KBKQ0 + 800-line ceiling decision 01KTMMJVZMX3SJCBSK8YF896YP + UI/render dir split 01KTMMM1322W32NGAH5H7MWYEP + core-subsystems split 01KTMMN1CSG84TPZ4ZEFN9K62B; mcp-bridge 01KR2J1R3HXNZPAHE9118BGBQJ.
+- Prior #37-era entry: 01KR0P6W0YEPJTT0C3CP48NGKV (left intact as point-in-time snapshot).
+
+<!-- Entry-ID: 01KTND4NDENP31NJSSWC2ATZZ9 -->
