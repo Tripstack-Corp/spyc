@@ -727,3 +727,34 @@ Provenance:
 - cross-ref: history-seg-refactor-mvu, history-seg-module-decomposition.
 
 <!-- Entry-ID: 01KTNBYJVDJMGACCH7G0GE9RN8 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:59:23.926168+00:00
+Role: scribe
+Type: Closure
+Title: Closure — genesis segment complete (244 commits → 18 moments; cspy→spyc; throughline to MVU)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Closure of the pre-PR segment   [kind: segment-topology]
+When: covers 2026-04-15 (57ae2733) → 2026-04-29 (265d2816), the 244 direct-to-main commits before merge d9b9360 (PR #2)
+Recorded rationale: per-moment commit subjects + genesis docs (REFACTOR_PLAN.md, ROADMAP.md, ARCHITECTURE.md, DESIGN.md, FEATURES.md, CLAUDE.md), all cited inline.
+Supersedes: (none — segment boundary)
+
+Segment recap. In 14 days the project went from an 843-line src/app.rs ("cspy — c(laude)+spy", clone of SideFX's `spy`) to a ~7400-line src/app/mod.rs spyc with: an embedded pty pane (M8) that became multi-tab (M9); a native pager with search/ANSI/hex/syntax-highlighting/diff/markdown; a config+keymap DSL with live reload; vi marks + jump-history + per-bucket prompt history; project-wide search (F/:grep) exposed over an MCP bridge that went read-only→writable→Unix-socket; background tasks with job control; and a git-status integration that survived a multi-commit watcher-debounce saga.
+
+THE RENAME (topology). Born `cspy` at 57ae2733 (2026-04-15); renamed once to `spyc` at 28c4d329 (2026-04-17, v1.0.0): "cspy is now spyc (spy + claude = spicy 🌶️)". Pickaxe-confirmed: 28c4d329 is the first commit introducing the token "spyc". Everything before it is cspy (.cspyrc.toml, $CSPY_PANE_CMD); everything after is spyc with pepper branding.
+
+THE THROUGHLINE. The final genesis commit (265d2816) authored REFACTOR_PLAN.md, naming the central tension — app/mod.rs (7421 lines verified) → MVU — on day 14, before PR #1. It is the recorded ancestor of history-seg-refactor-mvu (Phase 3 MVU) and history-seg-module-decomposition (Phases 1–2). The plan even cites this segment's own v1.27–v1.32 jump-history churn as motivation, and anticipates the PR workflow ("hesitate to take an outside contributor's PR against the megafile") that begins immediately after this segment.
+
+CADENCE contrast. v0.9→v1.37 in 14 days, often several minor bumps/day, with a formalized version-bump-per-feature convention (9b49016c). This is the high-velocity baseline against which the later windows' patch-corridor cadence (cf. insight-recurrence Pattern 5 / window-2) is measured.
+
+Coverage accounting: 18 narrative moments (1 framing + 16 body + 1 REFACTOR_PLAN Decision... counted as: framing + 15 thematic moments + the rename Decision + the REFACTOR_PLAN Decision) + this closure. All 244 commits are accounted for — each is either a named moment or inside an explicit +N fold line. 2 entries are typed Decision (the rename topology + the REFACTOR_PLAN authoring), both carrying quoted scoped rationale; the rest are Notes.
+
+Provenance:
+- full chronological range: `git log --reverse 6f981bc..265d2816` (244 commits).
+- segment boundary: 265d2816 is d9b9360~1 (the commit before the first merged PR).
+
+<!-- Entry-ID: 01KTNBZPPXB773X30V34JQV7KM -->
