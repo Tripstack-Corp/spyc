@@ -77,14 +77,6 @@ impl App {
         // Any keypress clears a lingering flash message.
         self.state.flash = None;
 
-        // F-finder is modal: while open, swallow all keys for picker
-        // navigation (type-to-filter, Up/Down, Enter, Esc). Runs
-        // before the capture / pager / file-list dispatch so the
-        // picker can't be accidentally double-routed.
-        if self.handle_find_picker_key(key) {
-            return Ok(Vec::new());
-        }
-
         // ^C is intentionally a no-op at the spyc-normal level (we
         // don't quit on Ctrl+C, that footgun's too easy with one
         // stray chord). Flash a hint so the user isn't left
@@ -122,89 +114,38 @@ impl App {
             return Ok(Vec::new());
         }
 
-        // While a `!` capture is running, forward typed keys to the
-        // child via the master PTY writer so the user can answer
-        // prompts (sudo password, ssh password, etc.). Ctrl+\ kills
-        // the child outright; Ctrl+C is forwarded as 0x03 so the
-        // child's tty driver can deliver SIGINT (matches a normal
-        // terminal's behavior, and lets sudo cancel its prompt
-        // cleanly).
-        if let Some(capture) = &mut self.runtime.pending_capture {
-            use std::io::Write as _;
-            // Hard-kill escape: Ctrl+\ tears the child down even if
-            // it has somehow detached from the controlling tty.
-            if matches!(key.code, KeyCode::Char('\\'))
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                let _ = capture.host.child.kill();
-                let _ = capture.host.child.wait();
-                // ✗ — interrupted is a non-clean termination, same
-                // glyph the bottom-status-bar uses for bg tasks that
-                // exited non-zero.
-                let title = format!("\u{2717} {} — interrupted", capture.title);
-                if let Some(view) = self.view.pager.as_mut() {
-                    view.title = title;
-                    view.saveable = true;
-                    view.streaming = false;
-                }
-                // MVU Phase 3c: clear the wake slot before dropping the
-                // host, so the kill-driven EOF close-wake fires through a
-                // None slot rather than spuriously waking the loop for a
-                // capture that's already gone.
-                capture.host.clear_wake_slot();
-                self.runtime.pending_capture = None;
-                return Ok(Vec::new());
-            }
-            // ^Z: send to background. Reader thread keeps draining; the
-            // pager closes; user can resume with `:fg`.
-            if matches!(key.code, KeyCode::Char('z'))
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                self.background_capture();
-                return Ok(Vec::new());
-            }
-            let bytes = crate::pane::input::encode_key(key);
-            if !bytes.is_empty() {
-                let _ = capture.host.writer.write_all(&bytes);
-                let _ = capture.host.writer.flush();
-            }
-            return Ok(Vec::new());
-        }
-
-        // Top overlay: once the subprocess exits, hold the screen until
-        // any key so short-lived commands (`;ls`) don't flash and vanish.
-        if self.view.overlay_awaiting_dismiss {
-            self.runtime.top_overlay = None;
-            self.view.overlay_awaiting_dismiss = false;
-            self.view.needs_full_repaint = true;
-            self.state.flash_info("command finished");
-            return Ok(Vec::new());
-        }
-
-        // Quick Select picker eats all keys until dismissed.
-        // Earlier than the harpoon menu so it'll never collide
-        // with chord state.
-        if self.view.quick_select.is_some() {
-            return Ok(self.handle_quick_select_key(key));
-        }
-
-        // Harpoon menu eats all keys until dismissed (Esc/q).
-        if self.view.harpoon_menu.is_some() {
-            return Ok(self.handle_harpoon_menu_key(key));
-        }
-
-        // Key routing. The destination decision lives in
-        // `route::route_key` — a pure function over a small state
-        // snapshot. Five separate routing-shape bugs shipped within
-        // a week (#75, #78, #80, #81, plus the original V-key bug)
-        // because every routing site reinvented the (focus, mount,
-        // key-type) decision. The router collapses those guards into
-        // one place; each destination here is a thin dispatch arm.
-        // See `src/app/route.rs` for the routing rules and the test
-        // matrix encoding the five regression cases.
+        // Input routing. The destination decision lives in
+        // `route::route_input` — a pure function over a small state
+        // snapshot covering BOTH the modal overlays (finder, capture,
+        // overlay-dismiss, quick-select, harpoon — which eat all input)
+        // and the content destinations. Several routing-shape bugs
+        // shipped within a week (#75, #78, #80, #81, plus the original
+        // V-key bug) because every routing site reinvented the
+        // (focus, mount, key-type) decision; the router collapses those
+        // guards into one place and each sink here is a thin dispatch
+        // arm. `handle_paste` matches the same `InputSink` exhaustively,
+        // so keys and paste cannot drift. (The `^C` flash above stays
+        // inline — it's a key-only side effect on the Resolver path, not
+        // a sink; its guards already exclude every modal/content context,
+        // and a paste never triggers it.) See `src/app/route.rs`.
         let snap = self.route_snapshot();
-        match route::route_key(snap, key) {
-            route::KeyDestination::OverlayPty => {
+        match route::route_input(snap, route::InputKind::Key(key)) {
+            // ── modal sinks: eat all input, checked before content ──
+            route::InputSink::FindPicker => {
+                // The finder always mounts its pager, so the `^C` flash
+                // above (gated on `pager.is_none()`) never pre-empts it.
+                self.handle_find_picker_key(key);
+                return Ok(Vec::new());
+            }
+            route::InputSink::Capture => return Ok(self.handle_capture_key(key)),
+            route::InputSink::OverlayDismiss => {
+                self.dismiss_overlay();
+                return Ok(Vec::new());
+            }
+            route::InputSink::QuickSelect => return Ok(self.handle_quick_select_key(key)),
+            route::InputSink::Harpoon => return Ok(self.handle_harpoon_menu_key(key)),
+            // ── content sinks ──
+            route::InputSink::OverlayPty => {
                 // Forward the keystroke to the overlay pty via the sole
                 // executor (no flash — result was always ignored).
                 return Ok(vec![Effect::SendToPane {
@@ -214,18 +155,18 @@ impl App {
                     err_prefix: None,
                 }]);
             }
-            route::KeyDestination::PagerKey => {
+            route::InputSink::PagerKey => {
                 return Ok(self.handle_pager_key(key));
             }
-            route::KeyDestination::PaneScroll => {
+            route::InputSink::PaneScroll => {
                 return Ok(self.handle_pane_scroll_key(key));
             }
-            route::KeyDestination::PaneExitedFlash => {
+            route::InputSink::PaneExitedFlash => {
                 self.state
                     .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
                 return Ok(Vec::new());
             }
-            route::KeyDestination::BottomPane => {
+            route::InputSink::BottomPane => {
                 // Track what the user types so `yP` can yank the
                 // last prompt.
                 match key.code {
@@ -258,10 +199,10 @@ impl App {
                     err_prefix: None,
                 }]);
             }
-            route::KeyDestination::Prompt => {
+            route::InputSink::Prompt => {
                 return Ok(self.handle_prompt_key(key));
             }
-            route::KeyDestination::Resolver => {
+            route::InputSink::Resolver => {
                 // Fall through to the inventory/graveyard view
                 // special cases and the resolver invocation below.
             }
@@ -316,6 +257,68 @@ impl App {
             ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
         }
         Ok(Vec::new())
+    }
+
+    /// Forward a keystroke to a running `!` capture child via its master
+    /// PTY writer so the user can answer prompts (sudo / ssh password,
+    /// etc.). Ctrl+\ kills the child outright; Ctrl+Z backgrounds it;
+    /// Ctrl+C is forwarded as 0x03 so the child's tty driver delivers
+    /// SIGINT. Reached via the `InputSink::Capture` dispatch arm, which
+    /// guarantees `pending_capture` is `Some`.
+    fn handle_capture_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        if let Some(capture) = &mut self.runtime.pending_capture {
+            use std::io::Write as _;
+            // Hard-kill escape: Ctrl+\ tears the child down even if
+            // it has somehow detached from the controlling tty.
+            if matches!(key.code, KeyCode::Char('\\'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                let _ = capture.host.child.kill();
+                let _ = capture.host.child.wait();
+                // ✗ — interrupted is a non-clean termination, same
+                // glyph the bottom-status-bar uses for bg tasks that
+                // exited non-zero.
+                let title = format!("\u{2717} {} — interrupted", capture.title);
+                if let Some(view) = self.view.pager.as_mut() {
+                    view.title = title;
+                    view.saveable = true;
+                    view.streaming = false;
+                }
+                // MVU Phase 3c: clear the wake slot before dropping the
+                // host, so the kill-driven EOF close-wake fires through a
+                // None slot rather than spuriously waking the loop for a
+                // capture that's already gone.
+                capture.host.clear_wake_slot();
+                self.runtime.pending_capture = None;
+                return Vec::new();
+            }
+            // ^Z: send to background. Reader thread keeps draining; the
+            // pager closes; user can resume with `:fg`.
+            if matches!(key.code, KeyCode::Char('z'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                self.background_capture();
+                return Vec::new();
+            }
+            let bytes = crate::pane::input::encode_key(key);
+            if !bytes.is_empty() {
+                let _ = capture.host.writer.write_all(&bytes);
+                let _ = capture.host.writer.flush();
+            }
+            return Vec::new();
+        }
+        Vec::new()
+    }
+
+    /// Tear down a top-overlay subprocess that has exited and is being
+    /// held on screen awaiting any input (so short-lived commands like
+    /// `;ls` don't flash and vanish). Reached via the
+    /// `InputSink::OverlayDismiss` dispatch arm.
+    fn dismiss_overlay(&mut self) {
+        self.runtime.top_overlay = None;
+        self.view.overlay_awaiting_dismiss = false;
+        self.view.needs_full_repaint = true;
+        self.state.flash_info("command finished");
     }
 
     /// MVU Phase 6 PR-C: route a bracketed-paste event. Into the active prompt
