@@ -186,3 +186,37 @@ Provenance:
 - a3f7831b (2026-04-15 23:59) — Makefile build/release/cross-compile/install/deploy.
 
 <!-- Entry-ID: 01KTNBDAPBCB80SNR6K3N42608 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:49:48.738279+00:00
+Role: scribe
+Type: Note
+Title: M9 — multi-tab pane + powerline status bar with git branch (feeds arc-03, arc-04)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the pane becomes multi-tab and the status bar becomes a powerline showing git branch + activity   [kind: new-capability]
+When: 2026-04-16 · commits 9fae4eba (M9 tabs), 06bc1ed4 (M9 status bar), then a3935d0f (focus indicators)
+Recorded rationale: "M9: Multi-tab pane, pager full-width/yank, remove mouse capture" (9fae4eba); "M9: Tab rename, powerline status bar, git branch, activity indicators, ESC cancel" (06bc1ed4)
+Inferred intent: two distinct births here — (a) the multi-tab pane (src/pane/tabs.rs, 154 new lines) which is the "multi-pane = tabs" model that recurs through the whole project, and (b) the powerline status bar carrying git branch + activity, which seeds the arc-04 git-in-status line. confidence: high — evidence: src/pane/tabs.rs created in 9fae4eba; status bar git-branch added in 06bc1ed4.
+Supersedes: supersedes the single-pane M8 model (bbdcebb9) by making the pane a tab container.
+
+M9 lands across two commits. 9fae4eba creates src/pane/tabs.rs (154 lines) — the multi-tab pane. This is the canonical "tabs, not splits" pane model. It also removes mouse capture (restoring native terminal text selection — a recurring tension; mouse capture is re-enabled then re-removed several times later, e.g. fd131b9c then 72921b4d). 06bc1ed4 adds tab rename, the powerline status bar, the git-branch display, and activity indicators. The git-branch-in-status is the seed of the arc-04 git-status line, complemented two days later by git file-status colors in the listing (ec8689d6, 2026-04-16: "Git file status colors in listing: modified, added, untracked, deleted").
+
+a3935d0f (2026-04-16) adds focus indicators (dim cursor when unfocused, blinking pane cursor when focused) — the focus-model polish on top of M9.
+
+ROADMAP context (FEATURES.md added at 14ee484, 2026-04-16, "update ROADMAP.md to reflect M9 completion"): the genesis ROADMAP enumerates M10 context-piping, M11 worktrees, M12 diff-view, plus session-forking and demo-mode as the forward plan — confirming the milestone numbering was a deliberate, documented sequence.
+
++1 folded: a20664ca (2026-04-16) "Update FEATURES.md ... add INSTALL.md".
++1 folded: f5e34dce (2026-04-16) "Fix Alt+Enter newline ... add dw/cw to vi line editor" — line-editor operators.
++1 folded: ec8689d6 (2026-04-16) git file-status colors in listing (arc-04 seed).
+
+Provenance:
+- 9fae4eba (2026-04-16 07:46) — M9 multi-tab pane; src/pane/tabs.rs 154 lines.
+- 06bc1ed4 (2026-04-16 09:00) — M9 powerline status bar + git branch + activity.
+- 14ee484 (2026-04-16 11:25) — FEATURES.md added; ROADMAP marks M9 done.
+- ec8689d6 (2026-04-16 19:13) — git file-status colors in listing.
+
+<!-- Entry-ID: 01KTNBE56ZYMGFZ592XT4A1BF5 -->
