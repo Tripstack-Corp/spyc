@@ -1098,3 +1098,46 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
 
 <!-- Entry-ID: 01KTMTWQ02AVXBS4DX61N8CHGV -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:01:35.602002+00:00
+Role: critic
+Type: Note
+Title: Window-2 Documents #9 and #10: YAZI_COMPETITIVE_REVIEW (the window-1 UX-catalogue parallel — adopts acted-on same-day, non-goals skipped) and the roadmap-reorg-to-2.0 #179 (decomposition promoted onto the 2.0 path, MVU held-then-reversed)
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+**Document #9 — `docs/YAZI_COMPETITIVE_REVIEW.md`** (added PR #157, commit 6d96e8d, 2026-05-28; `history-seg-docs-planning` entry 01KTMMVPG9JPMQ9N5CGB84KGVG). This is window-2's direct structural analogue to window-1's lazygit UX-catalogue (document #2 = 01KR3ESJ42TT0ZGJHGHJ5CTNYC): a feature-by-feature benchmark against the nearest competitor (Yazi, ~37k stars), filed the same day Yazi merged its OSC-72 drag-and-drop PR #4005, with adopt/skip standing per feature. The trajectory question is the same window-1 asked of the lazygit catalogue: which observations adopted, which skipped.
+
+The disposition differs from window-1's catalogue in a telling way — **the adopts are acted on same-day, not in modified shape over many PRs:**
+
+- **ADOPTED (acted-on same-day via #158, commit 3fe93f0):** the stale ROADMAP DnD entry is rewritten around OSC 72 + a drop-action picker (the review flagged the old "OSC 52 or path paste" entry as "stale in two ways"); cwd-export-on-quit is promoted from "Additional Ideas" into a working track. The review's recommendation — "reference OSC 72, defer native impl until at least one more terminal ships it, ship the cheap path-paste fallback first" — is taken as the new ROADMAP shape. So the review's *positive* recommendations land as ROADMAP edits the same day. This contrasts with window-1's lazygit catalogue, where all four adapt recommendations landed in modified shape over four PRs across two arcs with none executed-as-specified. Here the adopts are *roadmap-direction edits*, executed cleanly because the deliverable IS a roadmap edit, not a code feature.
+- **SKIPPED / NON-GOAL (honored):** image preview ("out of scope for spyc"); Lua plugins ("explicit non-goal, ROADMAP.md:447"); the review is honest that archive extraction, bulk rename, and visual-mode range pick are "roadmapped-not-shipped." The Lua-plugins skip re-cites the charter non-goal window-1 catalogued (document #5 = 01KR3EZDWSTW7TPWBY7KXB0KB3) — the same non-goal honored at a third independent surface.
+
+Disposition: ADOPTS-LANDED-AS-ROADMAP-EDITS-SAME-DAY; SKIPS/NON-GOALS HONORED. The review reasserts the README thesis verbatim — "The file commander is the noun the agent operates on. Yazi is not in this game." — naming itself "the reference to re-read before any 'should we copy X?' conversation."
+
+**Document #10 — the roadmap-reorg-to-2.0** (PR #179, commit 68ff8bc, 2026-05-30, "Lean 2.0" sequencing; `history-seg-docs-planning` entry 01KTMMWRE9YX58H2RXKYY58QVH). This is a stated-plan *re-sequencing* document — it does not add a feature plan, it reprioritizes the existing ones onto a 2.0 critical path. Its recorded decision, verbatim:
+
+> *"2026-05-30: Go on Phases 1–2 now, as the road-to-2.0 decomposition track (ROADMAP 'Lean 2.0' sequencing). Trigger: the file crossed ~12k lines… Decomposition also unblocks the 2.x crate split (`docs/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3 (MVU) still held until 2.0 has shipped + stabilized ~2 weeks."* — REFACTOR_PLAN.md changelog, edited PR #179.
+
+The reorg's trajectory has two halves with OPPOSITE dispositions, and that internal split is the moment's notable shape:
+
+- **The decomposition-onto-2.0-path half — EXECUTED.** #179 flips REFACTOR_PLAN's status to STARTING, relaxes Phase-1 done-criteria from a fixed `≤6500` to "down by ~1000," and names decomposition the one active Foundations item. The decomposition then landed in-window (document #2). The re-sequencing's positive half executed.
+- **The "MVU held until 2.0+2wk" half — REVERSED WITHIN THE SAME WINDOW, THEN EXECUTED.** #179 (2026-05-30) parks Phase 3 (MVU) post-2.0; MVU_PLAN (#196, *same day*) reverses that hold to pre-2.0; the MVU rewrite then executed near-exactly (document #1). So the reorg's hold-decision was superseded by a same-day sibling document and the held item went on to land in-window anyway.
+
+Disposition: RE-SEQUENCING EXECUTED ON ITS DECOMPOSITION HALF; ITS MVU-HOLD HALF SUPERSEDED SAME-DAY AND THE HELD ITEM EXECUTED IN-WINDOW. The reorg is honored where it promoted (decomposition) and reversed where it deferred (MVU) — a within-window self-correction of a stated plan, recorded in the plan's own changelog.
+
+**Trajectory note across #9/#10.** Both documents are *roadmap-shaping* rather than *capability-shipping*, and both have their direction-setting halves executed cleanly (YAZI's adopts → same-day ROADMAP edits; the reorg's decomposition promotion → landed). Where window-1's roadmap-shaping document (the three ROADMAP additions, document #3) had zero exactly-as-specified executions, window-2's roadmap-shaping edits land as written — because the deliverable is the roadmap edit itself, and because the MVU hold the reorg set was reversed-then-honored rather than left hanging.
+
+**Boundary with `insight-emergent-properties`.** Whether "roadmap-shaping documents execute their direction-setting cleanly while feature/architecture documents split into activated-vs-deferred" is a property is tier-4 and reserved. The trajectory thread states: YAZI's adopts landed same-day as ROADMAP edits and its non-goals were honored; the #179 reorg executed its decomposition promotion and same-day-reversed its MVU hold (which then executed).
+
+Provenance:
+- 6d96e8d (PR #157) YAZI_COMPETITIVE_REVIEW.md + 3fe93f0 (PR #158) ROADMAP DnD/cwd follow-up — `history-seg-docs-planning` entry = 01KTMMVPG9JPMQ9N5CGB84KGVG; non-goals (Lua plugins ROADMAP:447, image preview) verified.
+- 68ff8bc (PR #179) roadmap-reorg-2.0 — REFACTOR_PLAN changelog decision quoted; `history-seg-docs-planning` entry = 01KTMMWRE9YX58H2RXKYY58QVH.
+- decomposition executed = window-2 document #2 = 01KTMTR9XYV5ZW49ENMMP4CMBE; MVU reversal+execution = window-2 document #1 = 01KTMTPYARF1GDCQHMMF9YN5J1.
+- window-1 document #2 (lazygit catalogue, modified-shape adapts) = 01KR3ESJ42TT0ZGJHGHJ5CTNYC; window-1 document #3 (ROADMAP additions, zero-exact) = 01KR3EW3166JZ59TDR8PYMGN4T; window-1 charter non-goals = 01KR3EZDWSTW7TPWBY7KXB0KB3.
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
+
+<!-- Entry-ID: 01KTMTYD14PH98B47DYQKDK4YG -->
