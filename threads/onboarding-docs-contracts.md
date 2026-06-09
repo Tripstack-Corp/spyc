@@ -72,3 +72,49 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-risk-register = 01KR0P9JC8Z3DF6FQ1GJPF3VKA`, `onboarding-test-surface = 01KR0PBH6T1AK4VA0JSE75390F`.
 
 <!-- Entry-ID: 01KR0PDR0APW4N1QC03C8JWSQX -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:19:15.623002+00:00
+Role: scribe
+Type: Plan
+Title: Onboarding refresh: docs and contract surface map from #37 to #311 (v1.56.0)
+
+Spec: docs
+
+Purpose: Refresh of the docs / contract surface map from #37 (v1.41.24) to #311 (v1.56.0). The #37-era entry (`01KR0PDR0APW4N1QC03C8JWSQX`) stays as a snapshot; this entry re-enumerates every root + docs/ markdown file, re-assesses currency vs the MVU/gix/decomposed reality, and re-runs all five numbered cross-checks. The window's defining shift: docs became plan-doc-RICH and the recorded "why" relocated INTO committed artifacts under squash-merge.
+
+Observed (current doc/contract surfaces):
+- **Root markdown (15 files, `ls *.md`):** `README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `BUGS.md`, `CHANGELOG.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `DESIGN.md`, `FEATURES.md`, `INSTALL.md`, `LAUNCH_PREP.md`, `REFACTOR_PLAN.md`, `ROADMAP.md`, `SECURITY.md`, `TODO.md`. (`CLAUDE.md` is NEW since #37 — it carries the ~800-line ceiling convention from PR #282.)
+- **docs/ markdown (10 files + 1 html + 3 images, `ls docs/`):** `MVU_PLAN.md`, `V1_5_PLAN.md`, `V1_60_PLAN.md`, `V1_70_PLAN.md`, `REFACTOR_PLAN.md` (lives at root), `AUTO_APPROVAL_PLAN.md`, `PANE_RECOVERY_PLAN.md`, `PANE_STARTUP_TABS_PLAN.md`, `PATH_HANDOFF_PLAN.md`, `TEST_IMPROVEMENT_PLAN.md`, `YAZI_COMPETITIVE_REVIEW.md`; plus `presentation.html`, `screen_shot.png`, `spyc-logo.png`, `spyc-logo.svg`.
+- **Plan-doc set — executed vs aspirational (cite `insight-trajectory` window-2, framing `01KTMTN3M67G`):**
+  - EXECUTED: `docs/MVU_PLAN.md` — 8-phase strangler-fig migration executed phase-by-phase against named done-criteria; the window's near-exact positive execution (`01KTMTPYARF1`). `docs/V1_5_PLAN.md` — six-phase pager/task-viewer unification, shipped v1.50.0, second near-exact execution (`01KTMTSTYW0Z`). `REFACTOR_PLAN.md` — Phases 1–2 executed; its ~1500-line target was SUPERSEDED by CLAUDE.md's ~800-line ceiling, Phase 3 delegated wholesale to MVU_PLAN (`01KTMTR9XYV5`).
+  - ASPIRATIONAL (filed, "plan not yet implemented" at #311): `docs/V1_60_PLAN.md` (CounterTop) and `docs/V1_70_PLAN.md` (Mise en Place) — both forward-architecture, authoring is the in-window event, execution is beyond the window (`01KTMTV4HNBF`). `AUTO_APPROVAL_PLAN.md` / `PANE_RECOVERY_PLAN.md` / `PANE_STARTUP_TABS_PLAN.md` — three feature plans, all not-yet-implemented, each carrying an honored negative-register element (`01KTMTWQ02AV`). So a reader must NOT treat the docs/ plan set as describing shipped behavior: MVU/V1_5/REFACTOR = history; V1_60/V1_70/AUTO_APPROVAL/PANE_* = intent.
+- **ARCHITECTURE.md / DESIGN.md currency vs MVU/gix/decomposed reality:** these are the "only update when the decision changes" surfaces (per the doc-sync list). The MVU runtime, the gix backend, and the decomposed `src/app/{key_dispatch,pager_handler,render,state}` tree are all architectural decisions that landed this window — verify ARCHITECTURE.md names them before citing it as current (the module-shape source of truth is now `AGENTS.md`, which DOES enumerate the decomposed tree at `AGENTS.md:41-70` incl. `src/mcp/` facade and `src/app/state/*` handlers).
+- **CHANGELOG.md is the de-facto rationale record.** `insight-emergent-properties` Property 10 (`01KTMVN7JZ7T`, "rationale-externalized-under-squash"): squash-merge erases pre-merge commit-body rationale, so the recorded "why" relocated into CHANGELOG + plan docs in the tree. The `[Unreleased]` section (`CHANGELOG.md:6+`) currently carries dense "why" prose (e.g. the `make aislop` baseline-gate rationale, the ratatui 0.30.1 upgrade reasoning). Treat CHANGELOG as a primary design-rationale source, not just release notes.
+- **MCP tool surface (cross-check #5 surface):** `src/mcp/protocol.rs:130-285` is the source of truth (10 tools); `AGENTS.md:149-172` is the in-tree mirror Claude reads. No published manifest.
+
+Drift findings (all 5 numbered cross-checks, by name):
+- **#1 Version coherence — [done — finding].** `Cargo.toml` = 1.56.0 / rust-version 1.88. `CHANGELOG.md:28` head release = `[1.56.0] - 2026-06-06` — coherent. The #37-era README "v1.21.1" banner is resolved (README is badge-less now). NEW drift: `README.md:73` says "**Rust** 1.85+" but MSRV is **1.88** (`Cargo.toml` rust-version). MSRV-string is stale in README; update in the same commit per the doc-sync rule.
+- **#2 SECURITY.md supported-vs-shipped — [n/a — no supported-versions matrix].** `SECURITY.md` is a posture doc with a "When to revisit" trigger list (`SECURITY.md:122-136`), not a per-version table. Nothing to compare against major 1.x. Confirmed n/a (unchanged from #37).
+- **#3 Generated contracts — [done — none committed].** No `*openapi*.json`, no generated SDK, no committed contract artifact. `presentation.html` is hand-authored, not generated. Confirmed.
+- **#4 Translated docs — [n/a — no i18n].** No `i18n/`, no localized markdown. Confirmed.
+- **#5 MCP/API tool descriptions vs manifests — [done].** Compared `src/mcp/protocol.rs:130-285` (10 tool names) against `AGENTS.md:149-172`: every tool the source exposes is documented in AGENTS.md (`get_spyc_context`, `navigate_to`, `set_filter`, `pick_files`, `clear_picks`, `get_file_content`, `search_paths`, `search_content`, `search_picks`, `search_inventory`). No retired/renamed/missing tool. The two surfaces are coherent — no drift.
+
+Inferred:
+- `AGENTS.md` is now the authoritative in-tree surface for both module shape AND the MCP tool contract; when a plan doc or ARCHITECTURE.md disagrees, AGENTS.md is current. — confidence: high — basis: cross-check #5 coherence + AGENTS.md:41-70 enumerating the decomposed tree. How to apply: read AGENTS.md first when reconciling docs.
+- The docs/ plan set is bimodal (executed-history vs filed-intent) and must be read through `insight-trajectory` window-2 to avoid mistaking a filed plan for shipped behavior. — confidence: high — basis: trajectory window-2 dispositioned all ten plan docs. How to apply: before citing any `docs/*_PLAN.md` as current behavior, check its trajectory disposition.
+
+Next query: `watercooler_search(query="docs plan-doc changelog rationale mcp tools", thread_topic="onboarding-docs-contracts", code_path=".")`
+
+Related:
+- `onboarding-risk-register` — sibling logging the same README-MSRV drift with a risk lens.
+- `onboarding-security` — SECURITY.md currency (cross-check #2 surface).
+- `insight-trajectory` window-2 (`01KTMTN3M67G`) — the executed-vs-aspirational plan-doc dispositions.
+- `insight-emergent-properties` Property 10 (`01KTMVN7JZ7T`) — rationale-externalized-under-squash, why CHANGELOG is the "why" record.
+
+Provenance:
+- Commands: `ls *.md` (15 root), `ls docs/` (10 .md + html + 3 images), `grep -nE '^## \[' CHANGELOG.md` (`:6` Unreleased, `:28` 1.56.0), `grep -niE 'Rust|version' README.md` (`:73` Rust 1.85+), `grep -E '"name"' src/mcp/protocol.rs` (10 tools).
+- Files: `Cargo.toml` (1.56.0/1.88), `CHANGELOG.md:6,28`, `README.md:73`, `SECURITY.md:122-136`, `src/mcp/protocol.rs:130-285`, `AGENTS.md:41-70,149-172`.
+- History/insight entry_ids: `insight-trajectory` window-2 `01KTMTN3M67G`/`01KTMTPYARF1`/`01KTMTR9XYV5`/`01KTMTSTYW0Z`/`01KTMTV4HNBF`/`01KTMTWQ02AV`; `insight-emergent-properties` P10 `01KTMVN7JZ7T`; #37-era snapshot `01KR0PDR0APW4N1QC03C8JWSQX`.
+
+<!-- Entry-ID: 01KTND42QMQYH4HMD61DJW11DH -->
