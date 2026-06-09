@@ -7,5 +7,18 @@
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-09T04:59:23.929877+00:00",
   "summary": "",
-  "entry_count": 25
+  "entry_count": 25,
+  "annotations": {
+    "history-arc-00-genesis": {
+      "reactions": {},
+      "tags": [
+        "history"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-09T05:03:29.802805+00:00",
+      "vote_score": 0
+    }
+  }
 }
