@@ -550,3 +550,34 @@ Provenance:
 - db69d3bc (2026-04-25 23:23) — v1.18.5 trailing debounce, stale-top-bar fix.
 
 <!-- Entry-ID: 01KTNBRFXEP0R304PM7NG070VB -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:55:59.223313+00:00
+Role: scribe
+Type: Note
+Title: v1.19–v1.21 — background tasks (^Z/:fg), task viewer, L aligned-table listing
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a background-tasks subsystem (^Z to background, :fg to resume, task viewer) is added, plus L long-listing as an aligned table   [kind: new-capability]
+When: 2026-04-26 → 04-27 · commits cf755518 (v1.19 L table), 8e9a2313 (v1.20 background tasks), 4e014e54 (v1.21 task viewer)
+Recorded rationale: "L long listing as aligned table, fit-height pager (v1.19.0)" (cf755518); "Background tasks M1: ^Z to background, :fg to resume (v1.20.0)" (8e9a2313); "Task viewer (gB / [t]t / :task N) + buffer-history fixes (v1.21.0)" (4e014e54); ROADMAP entry "background tasks plan (^Z / :fg) under Thesis" (fe8a9653)
+Inferred intent: the background-tasks subsystem brings job-control semantics into the TUI — ^Z backgrounds a running pane/capture, :fg resumes, and a task viewer (gB) lists them. This is a new concern (BackgroundTasks) that REFACTOR_PLAN later names as Phase-1 extraction item #1. L gains aligned-table rendering, prefiguring the markdown table renderer. confidence: high.
+Supersedes: (none — new subsystem)
+
+The background-tasks subsystem is roadmapped (fe8a9653, "under Thesis") then built: ^Z/:fg (v1.20.0), with the running tasks rendered in the divider (v1.20.2, after first trying a status suffix), and a task viewer at gB / [t]t / :task N (v1.21.0). Notably, `BackgroundTasks` + `BackgroundTask` + `TaskStatus` is exactly extraction item #1 in REFACTOR_PLAN.md Phase 1 ("`src/app/tasks.rs` | ~250 | trivial") — this subsystem is born here and earmarked for extraction at segment-end. L (v1.19) becomes an aligned table with a fit-height pager.
+
++1 folded: 595447c4 (v1.19.1) "Reserve q for future macro recording" — q reserved (the macro-recording feature is roadmapped but not built in genesis).
++4 folded background-task fixes: 889bf512 (:fg passthrough), ed97a1a9 (bump+CHANGELOG), aa0b3b37 (render in divider not status), 42ae210f (v1.21.1 gp reopens most-recent buffer).
++1 folded: 3f051848 (2026-04-26) doc sweep for background tasks across README/CLAUDE/ARCH/DESIGN/ROADMAP — the docs-in-sync convention in action.
++4 folded capture-pager hardening (v1.21.2–v1.21.6): b9c098a1/cefb9997 (collapse bare-CR progress frames + task-viewer EOF), a41ea448 (paste at cursor), 58bf47fc (disable sub-pagers in ! captures), b7eaec17 (strip stray ASCII control bytes), b02db26b (v1.21.7 recursive listing watch), 2026-04-27.
+
+Provenance:
+- cf755518 (2026-04-26 16:41) — v1.19.0 L aligned table.
+- 8e9a2313 (2026-04-26 20:43) — v1.20.0 background tasks ^Z/:fg.
+- 4e014e54 (2026-04-26 21:34) — v1.21.0 task viewer gB.
+- REFACTOR_PLAN.md @265d2816 — names BackgroundTasks as Phase-1 extraction #1.
+
+<!-- Entry-ID: 01KTNBSEMKMZPJW51YMA5JVEZ2 -->
