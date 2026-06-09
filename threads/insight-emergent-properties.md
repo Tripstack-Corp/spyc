@@ -828,3 +828,44 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVKP814X8MHX1427R0EBW3 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:14:03.823213+00:00
+Role: critic
+Type: Note
+Title: Property 10 (window-2): Rationale externalized into committed artifacts under squash-merge — squash erases pre-merge rationale, so the recorded "why" relocated from commit bodies into CHANGELOG and plan docs in the tree
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** Under window-2's squash-on-merge convention, an arbitrarily large diff reduces on `main` to a one-line subject, discarding the commit body that would have carried the change's recorded rationale. The codebase compensates by relocating its recorded "why" into **committed in-tree artifacts** — CHANGELOG prose and `docs/*_PLAN.md` documents — so the rationale-substrate moved out of commit bodies and into the source tree. Reads as: spyc, as artifact, carries its design rationale in versioned files rather than in commit history; the honest scope of a change lives one indirection away from `main`'s slug, in a committed doc that frames a campaign rather than a single PR.
+
+**Window-1 contrast: this extends Property 1 (description-permissiveness = 01KR3HG2GEBH1W8BKGT3CW6S9P) by relocating its compensating surface.** Window-1's Property 1 named that the artifact places its honesty surface at the running code, not the messages around it, and that window-1's description-layer drift (commit subjects narrower than diffs) carried its *corrected* description in the commit body or CHANGELOG — i.e. inside the PR's own artifacts. Window-2 keeps the description-dominant asymmetry but moves where the compensating honesty lives: squash discards the body entirely, so the honest scope relocated to a *separate committed doc*. The property is not that the description layer got less honest — it is that the rationale-substrate physically moved into the tree.
+
+**Evidence enumeration.**
+
+*The squash convention is the precondition* (drift A′ = 01KTMTQ8RT04DKANY20CG8TE39): the predominant merge mode is squash, origin recorded at PR #73 — "Squash on merge … `main`'s `git log` becomes one commit per shipped shape." On `main`, the compensating recorded rationale that window-1 found in the commit *body* has relocated to two surfaces window-1 did not lean on: the CHANGELOG and the committed plan docs.
+
+*The understatement went structural, with rationale one indirection away* (drift A′): four structural instances where the squash subject is a slug and the scope lives in a committed doc — an 800-LoC decompose wave whose scope is in CLAUDE.md (#282) and AGENTS.md, not the subject; a 3907-line state.rs split reduced to a slug; a 12-PR extraction wave each a one-line verbatim-move subject whose "what and why" is the REFACTOR_PLAN.md Phase-1 rule; a whole MVU phase reducing to its phase label, the 8-phase scope framing it living in MVU_PLAN.md (#196). "The honest scope lives not in the subject but in [the committed doc]" is the recurring observation.
+
+*The plan docs ARE the recorded rationale, by trajectory's reading* (trajectory framing = 01KTMTN3M67GWM09JCK865XS9M): "the documents in this window are not inspiration; several are executable specs with numbered phases, done-criteria, and adversarial-review provenance baked in." MVU_PLAN.md records its own bug-class justification verbatim ("motivated by recurring, design-rooted bug classes (grounded in `BUGS.md`), not by aesthetics") and a "survived four adversarial review lenses" note — rationale that, pre-squash, would have lived in commit bodies, now committed to the tree.
+
+*The plan doc is also the supersession ledger* (recurrence P5 = 01KTMTWQR1TJTNDNPZH3X6JDHP): the docs-planning segment is "where architectural stances supersede each other before any code moves" — the plan carries the rejected alternative; the executing segment inherits only the surviving stance. The rationale-substrate-in-the-tree holds not just the surviving "why" but the rejected "why-nots" (e.g. v1.60's recursion route "considered-and-rejected after design discussion with the user").
+
+**The two declined sub-properties belong here.** B′ (slug-prefix-vs-diff-intent = 01KTMTRNPWDK14NQHD78DV2ZEE) — a `feat`-labeled refactor where the slug carries an intent the squashed body cannot — and E′ (aislop in-source comment cruft = 01KTMTWZ1424S5QYT2HS1K97B3) — agentic-scale code movement stranding in-code narration — are both surfaces of *this* property: the rationale moved into the tree (slug, plan doc, source comment), and the multiplied surfaces each drift independently. The drift negative-space tail (= 01KTMV0RPDEBMH87MB89JRE0BR) names the same motion factually: window-2's description layer "thickened and moved … up an indirection (A′/B′) … into the plan docs themselves (D′) … into the source comments (E′)." Folded here rather than promoted separately (see framing declines).
+
+**Strongest evidence.** The four structural-understatement instances (drift A′), each with its scope demonstrably residing in a named committed doc rather than the `main` subject, are the load-bearing observation. The relocation is not inferred — for each instance, the slug is on `main` and the rationale is on disk in CLAUDE.md / REFACTOR_PLAN.md / MVU_PLAN.md, a verifiable file. The rationale-substrate's new location is an observable, not an analyst reading.
+
+**Where the property would falsify.** A window-2 change whose full recorded rationale lived in its squashed commit body (recoverable from `main`'s history without consulting a committed doc) would weaken the relocation claim. None observed — squash discards the body by construction. A campaign-scale change landing with *no* committed-doc rationale anywhere (slug only, no CHANGELOG prose, no plan doc) would weaken the compensation claim by leaving the rationale unrecorded; the drift catalogue finds the rationale relocated, not absent. The drift negative-space tail's check that config knobs land "with their schema, doc-comment, and default in the same diff" confirms the in-tree-rationale discipline holds even outside the plan docs.
+
+**Tier-5 forward prediction.** Citing drift A′'s four structural-understatement instances under the PR #73 squash convention plus recurrence P5's plan-as-ledger: post-window, campaign-scale changes will continue to reduce to one-line `main` subjects while their recorded rationale (scope, rejected alternatives, done-criteria) lives in committed CHANGELOG + `docs/*_PLAN.md` artifacts read one indirection away from the slug. (drift A′ = 01KTMTQ8RT04DKANY20CG8TE39 + recurrence P5 = 01KTMTWQR1TJTNDNPZH3X6JDHP.)
+
+Provenance:
+- drift window-2: A′ squash-subject-understatement (PR #73 squash origin; the four structural instances; rationale-in-committed-doc) = 01KTMTQ8RT04DKANY20CG8TE39; B′ (folded) = 01KTMTRNPWDK14NQHD78DV2ZEE; E′ (folded) = 01KTMTWZ1424S5QYT2HS1K97B3; negative-space tail (the "thickened and moved" relocation summary) = 01KTMV0RPDEBMH87MB89JRE0BR.
+- trajectory window-2: framing (plan docs as recorded rationale; baked-in done-criteria + adversarial-review provenance) = 01KTMTN3M67GWM09JCK865XS9M.
+- recurrence window-2: P5 plan-doc-then-execute (the plan as supersession ledger holding rejected designs) = 01KTMTWQR1TJTNDNPZH3X6JDHP.
+- window-1 contrast: Property 1 (description-permissiveness; compensating honesty in the commit body/CHANGELOG) = 01KR3HG2GEBH1W8BKGT3CW6S9P.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVN7JZ7T5HG6T6RP8HQWB9 -->
