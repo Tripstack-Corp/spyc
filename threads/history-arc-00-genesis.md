@@ -251,3 +251,34 @@ Provenance:
 - ROADMAP.md @14ee484 — M10/M11/M12 enumerated as the forward plan.
 
 <!-- Entry-ID: 01KTNBF97DDYPGFFS9SJ9MHB9M -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:50:53.979296+00:00
+Role: scribe
+Type: Note
+Title: v0.9–v0.10 — license/edition bump, session management, streaming pager, syntax highlighting
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the project versions to v0.9/v0.10, gains session save/restore, a streaming pager, and syntect syntax highlighting   [kind: new-capability]
+When: 2026-04-17 · commits 5586b68d, 5daa3f6e, b362bc40 (sessions), b2ce7393 (streaming), bd11a3ef (syntect)
+Recorded rationale: "Bump to v0.9.0, BSD-3-Clause license, add CONTRIBUTING.md" (5586b68d); "Upgrade to Rust edition 2024, bump MSRV to 1.85" (5daa3f6e); "Session management: save on quit, restore with --resume, picker UI" (b362bc40); "Streaming pager: ! commands show output in real-time" (b2ce7393); "Syntax highlighting in pager via syntect (base16-eighties.dark theme)" (bd11a3ef)
+Inferred intent: pre-release hygiene (license, edition 2024, MSRV 1.85, CONTRIBUTING) plus three feature additions. Session save/restore is the genesis of the session subsystem that the current branch (fix/q-command-session-save) still touches. The streaming pager reworks the ! capture path from blocking to real-time. confidence: high.
+Supersedes: streaming pager (b2ce7393) supersedes the blocking ! capture from 15702012 — output now renders incrementally; subsequent fixes 19891930/36fb2520 tune the 16ms poll and stderr merge.
+
+Session management (b362bc40) introduces save-on-quit + --resume + a picker UI — durable infrastructure; conversation-aware restore with Claude session ID/name follows at v1.5 (2bd2747e). The streaming pager (b2ce7393, then 19891930 "16ms poll during capture, suppress EOF while running" and 36fb2520 "merge stderr, hourglass timer") converts ! from capture-then-show to show-as-it-runs. syntect (bd11a3ef) adds syntax highlighting (base16-eighties.dark) to the pager. By this point the codebase is self-reported at "14k lines, 64 commits" (6074b0fd).
+
++3 folded pager-clear artifact iterations: b5b2f237 → 73d761f7 (revert to inner_area) → 39a7fbf9 (no border in full-width) — the recurring "clear the right region" pager bug, fixed/reverted/refixed (2026-04-17).
++1 folded: 1040cc88 (2026-04-17) "Fix grid pagination oscillation; add --debug flag and debug_log module" — the debug_log subsystem.
++1 folded: 9b49016c (2026-04-17) "v0.10.0: ... add version-bump convention" — the version-bump-per-feature convention that explains this thread's dense cadence is formalized here.
+
+Provenance:
+- 5586b68d, 5daa3f6e (2026-04-17) — v0.9.0, BSD-3-Clause, edition 2024, MSRV 1.85.
+- b362bc40 (2026-04-17 06:44) — session save/restore + --resume + picker.
+- b2ce7393 (2026-04-17 06:48) — streaming pager (real-time !).
+- bd11a3ef (2026-04-17 09:58) — syntect syntax highlighting.
+- 9b49016c — version-bump convention formalized.
+
+<!-- Entry-ID: 01KTNBG5C73G8HPRTA74KQNJEK -->
