@@ -41,3 +41,40 @@ Provenance:
 - Sibling entry_id (pending back-fill): `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`.
 
 <!-- Entry-ID: 01KR0P18MCE1H57Q5ZTAGKAJNH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:18:23.899672+00:00
+Role: pm
+Type: Note
+Title: Onboarding refresh: product charter matured at #311 — multi-agent registry + the MVU/architecture turn
+
+Spec: pm
+
+Purpose: Refresh of onboarding-product-charter from #37 (v1.41.24) to #311 (v1.56.0). The #37-era entry (01KR0P18MCE1H57Q5ZTAGKAJNH) stands; this entry records that the thesis is stable but the product framing has matured along two axes — the multi-agent expansion and the MVU/architectural-maturity turn — and re-confirms the non-goals.
+
+Thesis (stable): spyc is a vi-keyboard-driven file commander that exposes itself to an AI coding agent as a queryable context source — "a file manager that Claude can query — current directory, cursor, picks, inventory, filter, git branch — via a standard protocol. That bidirectional awareness is the positioning that differentiates spyc from `tmux` + `claude`" (`ROADMAP.md:11-15`). README sharpens the one-liner: "puts a local MCP socket next to the file view, so the agent can ask spyc what is the cursor on, what is staged, what is pinned, what is in this directory" and "the file commander is the noun the agent operates on, not the chrome around it" (`README.md:24-33`). Every other feature is "supporting infrastructure that makes the split-pane workflow fast and comfortable" (`ROADMAP.md:17-22`).
+
+Observed (what matured since #37):
+- Multi-agent expansion. The #37 charter framed the bridge as Claude-Code (+ codex via `.codex/config.toml`). At #311 the agent surface is a registry: each agent (claude/codex/gemini/agy/zot, else Other) is an `AgentProfile` impl (`src/agent/mod.rs:1-4` registry note; `ClaudeProfile`/`CodexProfile`/`GeminiProfile`/`AgyProfile`/`ZotProfile` at `src/agent/mod.rs:150-433`; statics `AGY`/`ZOT` at `:451-452`; detection asserts at `:485-494`). README now says agents are "by default Claude Code or codex (both first-class; Gemini and Antigravity also supported)" (`README.md:38-40`). Deep detail: `history-arc-07-codex-and-mcp-bridge` (shared data model + parallel session-resume parsers; CLAUDE.md→AGENTS rename).
+- MVU / architectural-maturity turn. The project shifted from feature-accretion to plan-driven architecture: a Model-View-Update runtime (`history-seg-refactor-mvu`), the 800-LoC module decomposition (`history-seg-module-decomposition`), and gix in-process git (`history-seg-gix-migration`). The forward thesis is now itself a plan document: `docs/V1_70_PLAN.md` proposes making spyc "programmatically addressable" under "one protocol, three clients" — the same daemon protocol consumed by an in-process Rust SDK, a `spyc` CLI subcommand, and the MCP server (`docs/V1_70_PLAN.md:1-60`). This is the natural extension of the query-bridge bet from read-only context to typed drive-and-wait orders/bells.
+- Distribution posture: README header now reads "macOS and Linux · actively developed" (`README.md:12-14`) — the public-launch framing has firmed up versus the #37 "internal Tripstack tool" framing, though Bitbucket-clone + `make install` remains the install path.
+
+Inferred:
+- The product is mid-transition from internal tool to public, agent-agnostic file-commander-as-context-source. — confidence: high — basis: AgentProfile registry generalizes past Claude (`src/agent/mod.rs:150-433`); V1_70 "one protocol, three clients" generalizes past MCP (`docs/V1_70_PLAN.md:38-60`); README "actively developed" public framing (`README.md:12-14`).
+- The MCP-bridge bet is now load-bearing AND being deepened, not just preserved — the roadmap pulls the integration toward a typed daemon surface rather than treating it as done. — confidence: high — basis: `docs/V1_70_PLAN.md` thesis + `insight-trajectory` window-2 mode-shift (feature-accretion → plan-driven); `insight-emergent-properties` Property 7 (plan-doc-as-executable-spec).
+
+Non-goals (still hold — re-confirmed against current ROADMAP): Native Windows support (WSL is the supported story), Plugin system, Telemetry ("not even anonymized opt-in"), plus localization / full SLSA L3 / mouse-beyond-existing (`ROADMAP.md:520-533`). These are stable across #37→#311; the negative-honor invariance (the project keeps its stated "we will NOT" boundaries) is itself a documented pattern — `insight-trajectory` (negative-honor invariance).
+
+Next query: `watercooler_search(query="V1_70 one protocol three clients daemon SDK CLI", thread_topic="history-seg-docs-planning", code_path=".")`
+
+Related:
+- `onboarding-overview` — front door + reading order (refreshed this run).
+- `onboarding-team-map` — the "single-developer" framing shares the same maintainer-authored sources.
+- the history/insight corpus — `history-arc-07-codex-and-mcp-bridge` (multi-agent), `history-seg-refactor-mvu` + `history-seg-module-decomposition` + `history-seg-gix-migration` (the architecture turn), `insight-trajectory` (mode-shift + negative-honor invariance), `insight-emergent-properties` (Property 7).
+
+Provenance:
+- Files read: `README.md:12-14,21-40`, `ROADMAP.md:1-45` (thesis/tracks), `ROADMAP.md:520-533` (non-goals), `docs/V1_70_PLAN.md:1-60`, `src/agent/mod.rs:1-4,150-494` (AgentProfile registry + agent kinds).
+- Prior seed entry read in full: onboarding-product-charter 01KR0P18MCE1H57Q5ZTAGKAJNH.
+- History/insight threads consulted: history-arc-07-codex-and-mcp-bridge, history-seg-refactor-mvu, history-seg-module-decomposition, history-seg-gix-migration, history-seg-docs-planning, insight-trajectory, insight-emergent-properties.
+
+<!-- Entry-ID: 01KTND2E95BZB6AE4158JK0QNG -->
