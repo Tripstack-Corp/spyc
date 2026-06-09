@@ -49,3 +49,50 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-product-charter = 01KR0P18MCE1H57Q5ZTAGKAJNH`.
 
 <!-- Entry-ID: 01KR0P2PC2GBFJ9Z0GPGXZ48Y4 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:19:04.785934+00:00
+Role: pm
+Type: Note
+Title: Onboarding refresh: team map at #311 — still single-developer, no CODEOWNERS, 820 commits/6mo
+
+Spec: pm
+
+Purpose: Refresh of onboarding-team-map from #37 (321 commits/6mo) to #311 (v1.56.0). The #37-era entry (01KR0P2PC2GBFJ9Z0GPGXZ48Y4) stands; this entry re-runs the ownership checks at #311. Short answer is unchanged: spyc is a single-developer project, there is still no CODEOWNERS, one human (Derek Marshall / caleb) owns every recently-touched path.
+
+Observed:
+- `CODEOWNERS` is still absent. `find . -name CODEOWNERS -not -path './target/*'` returns nothing; no `.github/CODEOWNERS`, `docs/CODEOWNERS`, or root `CODEOWNERS`. There is no `.github/` workflows dir at all — CI is `bitbucket-pipelines.yml` only.
+- Recent committers (since 2025-12-09, ~6mo). `git shortlog -sn --use-mailmap` is unsupported in this git config (errors on `--use-mailmap`); `git -c log.mailmap=true shortlog -sn --since="2025-12-09" HEAD` and the fallback `git log --use-mailmap --since="2025-12-09" --format='%an' | sort | uniq -c | sort -rn` both give:
+  ```
+   820  Derek Marshall
+     3  caleb howard
+     1  Jonathon Robinson
+  ```
+  820 commits dominated by one author. All-time author identities (mailmap not collapsing the two Derek emails): `Derek Marshall <derek.marshall@tripstack.com>` (803), `Derek Marshall <derekmarshall@Dereks-MacBook-Pro.local>` (17), `caleb howard <caleb.howard@koananalytics.com>` (3), `Jonathon Robinson <jonathon.robinson@tripstack.com>` (1). Derek Marshall and caleb are the same maintainer (per CLAUDE.md context); the topology is effectively single-developer.
+- Authorship topology (Bitbucket vs GitHub). Commits land as Bitbucket squash-merges from PRs into `main` (Bitbucket is canonical; "squash-merge preferred", one approval). The GitHub remotes (`origin`=git@github.com:calebjacksonhoward/spyc.git, `tripstack-corp`=Tripstack-Corp) are stale mirrors, not the authorship source — so GitHub contributor graphs will not match `git shortlog`. Deep detail: `history-three-repo-lineage` (Bitbucket origin / personal-GH bridge / Tripstack-Corp future home).
+- Pulse aggregates: n/a — premium daemon not available. `watercooler_pulse_snapshot(code_path=".")` returned `{"status":"unavailable","reason":"disabled"}` (with the absolute path it returned `invalid_code_path`; with "." it is `disabled`).
+
+Inferred:
+- All paths are effectively owned by the single maintainer (Derek Marshall / caleb). — confidence: high — basis: 820/824 recent commits by Derek Marshall, the rest by caleb (same person) plus one Jonathon Robinson commit.
+- A CODEOWNERS file is still not warranted at this team size. — confidence: medium — basis: solo project with PR-required squash-merge into `main`; the auto-request-review signal a CODEOWNERS carries has no second reviewer to address. Revisit when contributor count crosses one durably, or when the GitHub move makes an org reviewer pool real.
+
+Drift findings (3 ownership checks):
+1. CODEOWNERS path existence — [n/a — no CODEOWNERS]. No CODEOWNERS file exists anywhere in the repo, so there are no owned paths to validate against the tree. This absence is the primary finding and is unchanged from #37.
+2. Recent committers absent from CODEOWNERS — [done — finding recorded]. Recent committers (Derek Marshall 820, caleb howard 3, Jonathon Robinson 1) cannot be "absent from CODEOWNERS" because no CODEOWNERS exists. Substantive finding: single-maintainer repo (Derek/caleb) with one stray external commit (Jonathon Robinson, 1) — not enough to warrant ownership rules.
+3. CODEOWNERS owners with no recent commits — [n/a — no CODEOWNERS]. No owners are declared, so none can be stale.
+- Staleness vs #37 seed: the recent-commit count moved 321 → 820 over the ~6mo window (commit velocity roughly doubled), but the ownership conclusion is identical. The #37 entry's `CONTRIBUTING.md` "Project structure lists src/app.rs as a single file" drift was a risk-register item and is not re-audited here.
+
+Next query: `watercooler_search(query="three repo lineage bitbucket github mirror authorship", thread_topic="history-three-repo-lineage", code_path=".")`
+
+Related:
+- `onboarding-overview` — front door + reading order (refreshed this run).
+- `onboarding-product-charter` — the "single-developer / internal-becoming-public" framing shares these sources.
+- the history/insight corpus — `history-three-repo-lineage` carries the Bitbucket-canonical vs GitHub-mirror authorship topology in full.
+
+Provenance:
+- Commands run: `find . -name CODEOWNERS -not -path './target/*'` (none); `git -c log.mailmap=true shortlog -sn --since="2025-12-09" HEAD`; `git log --use-mailmap --since="2025-12-09" --format='%an' | sort | uniq -c | sort -rn`; `git log --format='%an <%ae>' | sort | uniq -c | sort -rn`; `git remote -v`.
+- Watercooler tools: `watercooler_pulse_snapshot(code_path=".")` → disabled.
+- Prior seed entry read in full: onboarding-team-map 01KR0P2PC2GBFJ9Z0GPGXZ48Y4.
+- History thread consulted: history-three-repo-lineage.
+
+<!-- Entry-ID: 01KTND3QQSRA9WMDX1E3ZZBTHF -->
