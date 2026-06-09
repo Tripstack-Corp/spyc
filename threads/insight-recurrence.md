@@ -863,3 +863,45 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 3 = 01KTMTSAVQNENHP8ZFWBKTWXN6.
 
 <!-- Entry-ID: 01KTMTTZQK31H30M2RQ6J3FEY1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:00:44.459540+00:00
+Role: critic
+Type: Note
+Title: Pattern 5 (window-2): Plan-doc-then-execute — a committed plan doc lands in docs-planning, then a segment executes it; recurs ~5× and is the recorded-rationale spine of the whole window
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement.** A committed planning document lands in `history-seg-docs-planning` (a `docs/*_PLAN.md` or a ROADMAP/CHANGELOG decision block), and a **separate engineering segment then executes it**. The plan precedes the code, the plan is the recorded design rationale, and the execution lives in a different thread from the planning. The shape recurs across the window as the **plan→execute handoff between the docs-planning segment and the engineering segments**. This is the recurrence that makes the entire #38–#311 reconstruction *recorded-dominant* rather than inference-dominant (the second-window spine notes the maintainer's "habit of committing plan docs and detailed CHANGELOG prose left a dense recorded record").
+
+**Instance enumeration — five plan→execute handoffs across segment boundaries.**
+
+1. **MVU_PLAN.md (#196) → `history-seg-refactor-mvu`.** The plan doc is filed as a typed Decision ("APPROVED — pre-2.0 / road-to-2.0 track") with the full eight-phase (−1..6) migration recorded; the seg-refactor-mvu phases then execute it phase by phase. The plan even records its own bug-class justification verbatim ("motivated by recurring, design-rooted bug classes (grounded in `BUGS.md`), not by aesthetics"). *Plan side: 01KTMKVE85DEBMBWYCXY7YHP5E (in seg-refactor-mvu, where the Decision lives); roadmap-reorg authorizing it: docs-planning 01KTMMWRE9YX58H2RXKYY58QVH ("take the low-risk decomposition now, hold only the deep MVU rewrite").*
+
+2. **PANE_RECOVERY_PLAN + PANE_STARTUP_TABS_PLAN (#92/#93) → `history-arc-03`.** "Two pane plans land from external-contributor analysis: PANE_RECOVERY_PLAN tiers recovery by program kind, PANE_STARTUP_TABS_PLAN adds config-driven startup tabs while deferring real splits" (docs-planning 01KTMMRKSSJ8EN3RC6RB36RSM3). arc-03's toggle/recovery work executes against them, and the arc-03 synthesis explicitly hands the quit→relaunch recovery story to "docs/PANE_RECOVERY_PLAN.md (#92) / history-seg-docs-planning" (01KTMMSVHSFYKGPSD9R8NRFCZY). *Plan→execute across two threads.*
+
+3. **V1_5_PLAN.md → `history-arc-05`.** The pager/task-viewer unification executes a recorded plan: "The recorded plan states the motivation: 'The same pager that handles `! cmd` capture should handle pane history'" (arc-05 01KTMMRS83NW2K9GASEKF5R1T1); the synthesis notes "landed host-first then promote then demote per the plan" in arc-03 (01KTMMMHWAHASBVT11Y96RBKSA). *Plan in docs/V1_5_PLAN.md, execution in the pager and pane arcs.*
+
+4. **AUTO_APPROVAL_PLAN (#86) → deferred-but-recorded execution.** "PR #86 promotes a one-line BUGS wish into the v1.51 AUTO_APPROVAL plan and records a rejection on a security argument: 'Security features should not be built on regex against another tool's UI'" (docs-planning 01KTMMPA6HBDB91KMZPTBPNHX3). The execute side is named-and-deferred (the `:approvals` pager) — a plan→(deferred)execute instance where the handoff is recorded even though the code is pending.
+
+5. **V1_70_PLAN "Mise en Place" (#114) → crate-split / MCP daemon protocol.** "reframes the MCP socket from v1.60's informal peer-discovery channel into a formal typed daemon protocol … and sequences a crate split before the protocol work" (docs-planning 01KTMMSRJ3DEDE2S4VWY5JHEND); the decomposition segment then carries the crate-split groundwork.
+
+**Instance count: five plan→execute handoffs.** All five share the defining property: the plan is committed and recorded *before* the executing PRs, and the execution lands in a different segment thread. The positioning burst (#72/#73/#74, the "noun the agent operates on" thesis, 01KTMMKHEYZ540PV6VVZR33K79) is *not* counted as a plan→execute instance — it is a positioning/thesis doc with no single executing engineering segment; it propagates as a thesis (the synthesis arc's throughline) rather than handing off to one executor. The catalogue declines it as an instance and notes it as the thesis-propagation shape instead.
+
+**The recurrence reading no single segment owns: the plan doc is the supersession ledger.** The docs-planning segment is where architectural *stances supersede each other before any code moves* — "architectural churn recorded before code." The v1.60 "CounterTop" plan is filed on a recursive-composition thesis (#76), reversed within ~4.5h to "siblings + mirror" (#77), then hardened (#79), "the recursion route … 'considered-and-rejected after design discussion with the user'" (01KTMMMQ1VY8ZERQ3NQAF89DN4); the whole v1.60→v1.70→Lean-2.0 plan spine is "each superseding the prior stance." So the plan→execute recurrence has a recorded-supersession sub-property: the *plan* carries the rejected-alternative, and the executing segment inherits only the surviving stance. The recurrence is not just "plan then build" — it is "the plan thread holds the rejected designs so the engineering thread doesn't have to." That division of recorded labor is the cumulative-grain observation.
+
+**Tier boundary — load-bearing for this pattern.** Whether the executing segments *actually track* their plans (did MVU execute all eight phases? did the pane work match PANE_RECOVERY_PLAN's tiers?) is **tier-3, `insight-trajectory`'s question**, not this thread's. This pattern counts the *recurrence of the plan-precedes-execute-across-threads shape*; it does not assess fidelity. The five instances are counted by "a plan doc landed and a segment executed against it," not by "the execution matched the plan." (window-1 had no equivalent because window-1's planning was thinner — the gap analysis at PR #5 was the lone plan-doc; window-2's committed-plan-doc habit is itself new at this density, which is why the shape recurs.)
+
+**Boundary notes.**
+- *Drift boundary.* Plan slugs and CHANGELOG decision blocks describe their content accurately; the recorded rejections are honest. No misnaming-at-merge. Recurrence-only.
+- *Relationship to Pattern 1/2.* MVU_PLAN.md (instance 1 here) is *also* the charter of the Pattern 1 strangler-fig and the Pattern 2 phase-train. The plan-doc is the upstream of the campaign shapes; this pattern reads the *plan→execute handoff*, Patterns 1/2 read the *campaign that results*. See convergence tail.
+
+Provenance:
+- `history-seg-docs-planning` (synthesis 01KTMNHGWSQK3S2QZ68D3WBCGC): 01KTMMRKSSJ8EN3RC6RB36RSM3 (pane plans #92/#93), 01KTMMPA6HBDB91KMZPTBPNHX3 (AUTO_APPROVAL #86), 01KTMMSRJ3DEDE2S4VWY5JHEND (V1_70 #114), 01KTMMWRE9YX58H2RXKYY58QVH (Lean-2.0 roadmap-reorg #179 authorizing decomposition+MVU), 01KTMMMQ1VY8ZERQ3NQAF89DN4 (v1.60 plan supersession churn), 01KTMMKHEYZ540PV6VVZR33K79 (positioning thesis — declined as instance, noted as thesis-propagation).
+- Execute sides: `history-seg-refactor-mvu` 01KTMKVE85DEBMBWYCXY7YHP5E (MVU_PLAN Decision); `history-arc-03` 01KTMMMHWAHASBVT11Y96RBKSA (V1.5 host-first-per-plan) + 01KTMMSVHSFYKGPSD9R8NRFCZY (hands recovery to PANE_RECOVERY_PLAN); `history-arc-05` 01KTMMRS83NW2K9GASEKF5R1T1 (V1_5_PLAN motivation executed).
+- Tier-3 handoff: `insight-trajectory` owns plan-fidelity (does execution track the plan); this pattern counts the handoff shape only.
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 4 = 01KTMTTZQK31H30M2RQ6J3FEY1.
+
+<!-- Entry-ID: 01KTMTWQR1TJTNDNPZH3X6JDHP -->
