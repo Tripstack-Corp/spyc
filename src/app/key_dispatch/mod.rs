@@ -333,6 +333,21 @@ impl App {
                 std::mem::discriminant(&self.state.mode),
             ));
         }
+        if let Some(picker) = self.runtime.find_picker.as_mut() {
+            // The F-finder is modal — it swallows every key for type-to-filter
+            // (`handle_find_picker_key`, run first in `handle_key`). A paste
+            // while it's open is a filename to filter by, not input for the
+            // bottom pane; without this it fell through to the pane arm and the
+            // text landed in claude/shell. Strip newlines: the query is a
+            // single-line fuzzy filter over paths.
+            let clean = text.replace(['\n', '\r'], "");
+            if !clean.is_empty() {
+                picker.query.push_str(&clean);
+                picker.refilter();
+                self.render_find_picker();
+            }
+            return Ok(());
+        }
         if let Mode::Prompting(ref mut p) = self.state.mode {
             // Paste into the active prompt buffer. Strip newlines (prompts
             // are single-line).
