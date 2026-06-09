@@ -1,3 +1,5 @@
 {"source":"thread:onboarding-team-map","target":"entry:01KR0P2PC2GBFJ9Z0GPGXZ48Y4","type":"contains"}
 {"source":"thread:onboarding-team-map","target":"entry:01KTND3QQSRA9WMDX1E3ZZBTHF","type":"contains"}
 {"source":"entry:01KR0P2PC2GBFJ9Z0GPGXZ48Y4","target":"entry:01KTND3QQSRA9WMDX1E3ZZBTHF","type":"followed_by"}
+{"source":"thread:onboarding-team-map","target":"entry:01KTNDF6QH7D1FQPRXTDM8SBW9","type":"contains"}
+{"source":"entry:01KTND3QQSRA9WMDX1E3ZZBTHF","target":"entry:01KTNDF6QH7D1FQPRXTDM8SBW9","type":"followed_by"}

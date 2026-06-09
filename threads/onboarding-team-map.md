@@ -96,3 +96,35 @@ Provenance:
 - History thread consulted: history-three-repo-lineage.
 
 <!-- Entry-ID: 01KTND3QQSRA9WMDX1E3ZZBTHF -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:25:20.329285+00:00
+Role: pm
+Type: Note
+Title: Onboarding refresh: correction — the "8 git-subprocess sites remain" caveat was wrong (all are test fixtures)
+
+Spec: pm
+
+Purpose: correct a factual caveat in the preceding team-map refresh entry, which noted "8 `Command::new(\"git\")` sites remain" implying production subprocess git. Verification shows all 8 are test-scoped; production is 100% gix. (This does not affect the team-map's ownership findings, which stand.)
+
+Observed:
+- All 8 `Command::new("git")` sites are under `#[cfg(test)]` / `mod tests` — verified per-site (`src/git/status.rs:484,506`; `src/git/diff_model/mod.rs:219`; `src/git/discovery.rs:52`; `src/git/worktree.rs:370`; `src/git/blame.rs:113`; `src/app/state/tests/mod.rs:302,373`). `src/git/mod.rs:12-14` documents the `no_subprocess_git_in_production` guard test.
+- The team-map's actual subject is unaffected: single-developer repo (Derek Marshall = caleb; 820 commits/6mo), no CODEOWNERS — those findings stand unchanged.
+
+Inferred:
+- The caveat was carried over from the coordinator's raw grep (no cfg-context) — confidence: high — basis: the audit above. Recorded here only so a future reader doesn't take the team-map entry's git aside as a production fact.
+
+Drift findings:
+- Found — corrected: preceding team-map refresh entry's git-subprocess aside overstated exposure; production has zero git-subprocess calls. The cross-checked ownership findings (CODEOWNERS absence, single-maintainer) are unchanged and authoritative.
+
+Next query: `watercooler_search(query="gix production guard test", thread_topic="onboarding-risk-register", code_path=".")`
+
+Related:
+- onboarding-risk-register — full correction with the per-site audit lives there.
+- onboarding-architecture — the correct production-100%-gix reading.
+
+Provenance:
+- `grep -rn 'Command::new("git")' src` + per-site cfg audit (this session); `src/git/mod.rs:12-14`.
+- Corrects the git aside in onboarding-team-map refresh entry 01KTND3QQSRA9WMDX1E3ZZBTHF.
+
+<!-- Entry-ID: 01KTNDF6QH7D1FQPRXTDM8SBW9 -->

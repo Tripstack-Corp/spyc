@@ -5,9 +5,9 @@
   "title": "onboarding team map",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-06-09T05:19:04.797231+00:00",
+  "last_updated": "2026-06-09T05:25:20.330509+00:00",
   "summary": "The onboarding team map was created using the CODEOWNERS file and recent committers, revealing that Derek Marshall is the sole owner of all recent changes. The map highlights the lack of a CODEOWNERS file and the absence of a team structure, indicating a potential lack of clarity in responsibility. The outcome is a lack of clear ownership and team structure, which may affect onboarding and maintenance of code.",
-  "entry_count": 2,
+  "entry_count": 3,
   "annotations": {
     "onboarding-team-map": {
       "reactions": {},
