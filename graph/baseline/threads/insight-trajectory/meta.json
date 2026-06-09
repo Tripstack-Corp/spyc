@@ -8,5 +8,18 @@
   "last_updated": "2026-06-09T00:03:23.514215+00:00",
   "summary": "The thread focuses on the analysis of eight stated-plan documents across six per-document entries, highlighting observations and insights related to the trajectory of development. The documents include gap analyses, UX catalogues, ROADMAP additions, product charters, and advisory ignores, with some entries noting the absence of stated plans or the presence of long-lived ignores. The thread does not include any decisions or plans but rather discusses the observed developments and their implications.",
   "entry_count": 20,
-  "summary_schema_version": 3
+  "summary_schema_version": 3,
+  "annotations": {
+    "insight-trajectory": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-09T00:20:10.739664+00:00",
+      "vote_score": 0
+    }
+  }
 }
