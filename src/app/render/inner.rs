@@ -79,39 +79,19 @@ impl App {
                 );
             }
 
-            // Divider + bottom pane still render normally.
+            // Divider + bottom region still render normally. The bottom region
+            // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
+            // live pane — so a top overlay and a bottom scrollback coexist (the
+            // shared helper is what makes `^a v` work while an editor is open).
             if let Some(divider_rect) = layout.divider {
                 self.render_pane_status_line(frame, divider_rect);
             }
-            let bottom_pane_rect: Option<ratatui::layout::Rect> =
-                if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_ref(), layout.pane) {
-                    // Pane resize/drain settled in `prepare_panes`.
-                    let focused = self.state.pane_focused();
-                    // Single lock window: render the pane AND place
-                    // the OS cursor under the same screen snapshot,
-                    // so a worker-thread parse landing between the
-                    // two can't produce a cursor that's ahead of the
-                    // rendered grid (off-by-one tearing in claude
-                    // backspace was the symptom).
-                    let want_cursor = focused && !self.view.overlay_awaiting_dismiss;
-                    tabs.active().with_screen(|screen| {
-                        frame.render_widget(PaneWidget { screen, focused }, rect);
-                        if want_cursor {
-                            place_pty_cursor_from_screen(frame, screen, rect);
-                        }
-                    });
-                    Some(rect)
-                } else {
-                    None
-                };
-            // Cursor placement is now folded into the overlay and
-            // bottom-pane with_screen blocks above, so the rendered
-            // grid and the cursor share a single lock acquisition.
-            // (Pre-v1.50.84 they were two separate calls; the worker
-            // thread could parse a chunk between them, leaving the
-            // cursor ahead of the rendered grid — visible as
-            // off-by-one tearing during fast input.)
-            let _ = bottom_pane_rect;
+            if let Some(rect) = layout.pane {
+                // Suppress the pty cursor while the overlay awaits dismissal so
+                // the "[process exited — press any key]" frame shows no stray
+                // cursor (the overlay's own cursor is suppressed the same way).
+                self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
+            }
             return;
         }
 
@@ -159,7 +139,7 @@ impl App {
                 self.render_pane_status_line(frame, divider_rect);
             }
             if let Some(rect) = layout.pane {
-                self.render_bottom_region(frame, rect);
+                self.render_bottom_region(frame, rect, false);
             }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
@@ -216,7 +196,7 @@ impl App {
         // overlay's `view.pager` stash.
         let bottom_is_pager = self.view.scroll_pager.is_some();
         let bottom_pane_rect: Option<ratatui::layout::Rect> = if let Some(rect) = layout.pane {
-            self.render_bottom_region(frame, rect);
+            self.render_bottom_region(frame, rect, false);
             // output_dirty cleared in `prepare_panes`.
             // Quick Select labels paint *over* the live pane widget so the user
             // keeps the output as context. Skipped when the scrollback owns it.
@@ -295,11 +275,20 @@ impl App {
 
     /// Draw the bottom region into `rect`: the `^a v` scrollback pager
     /// (`view.scroll_pager`) when one is open, else the live pty pane. Shared
-    /// by the TopPane-pager branch and the standard branch so a top-region `D`
-    /// pager and a bottom scrollback coexist. Cursor placement folds into the
-    /// pane's `with_screen` lock (grid + cursor from one snapshot — no
-    /// off-by-one tear during fast input).
-    fn render_bottom_region(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+    /// by all three top-region branches (file list, `D` TopPane pager, and the
+    /// `;cmd`/`$EDITOR` overlay) so a top surface and a bottom scrollback
+    /// coexist — routing it through here is what keeps `^a v` working under an
+    /// open overlay. Cursor placement folds into the pane's `with_screen` lock
+    /// (grid + cursor from one snapshot — no off-by-one tear during fast
+    /// input). `suppress_cursor` hides the pty cursor even when the pane is
+    /// focused — the overlay branch passes `overlay_awaiting_dismiss` so the
+    /// "[process exited — press any key]" frame shows no stray cursor.
+    fn render_bottom_region(
+        &self,
+        frame: &mut Frame,
+        rect: ratatui::layout::Rect,
+        suppress_cursor: bool,
+    ) {
         if let Some(view) = self.view.scroll_pager.as_ref() {
             // The scrollback snapshot owns this rect; the pty runs off-screen.
             // The first-frame scroll snap (pending) is settled in `prepare_panes`.
@@ -308,7 +297,7 @@ impl App {
             let focused = self.state.pane_focused();
             tabs.active().with_screen(|screen| {
                 frame.render_widget(PaneWidget { screen, focused }, rect);
-                if focused {
+                if focused && !suppress_cursor {
                     place_pty_cursor_from_screen(frame, screen, rect);
                 }
             });

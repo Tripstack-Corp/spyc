@@ -270,16 +270,19 @@ impl App {
             }
         }
 
-        // Bottom-scrollback first-frame snap (default draw path only): the
-        // opener can't know the viewport height, so it sets
-        // `pending_scroll_to_bottom` and the snap happens here, before the draw
-        // — so the user never sees a jump frame. The scrollback lives in its
-        // own `view.scroll_pager` slot (independent of the help overlay), and
+        // Bottom-scrollback first-frame snap: the opener can't know the viewport
+        // height, so it sets `pending_scroll_to_bottom` and the snap happens
+        // here, before the draw — so the user never sees a jump frame.
         // `TranscriptStream::drain` re-arms the flag when its lines arrive
-        // off-thread. Skipped under a top-overlay (the scrollback isn't drawn
-        // there; the pending flag survives until it is).
-        if !overlay_active
-            && let Some(rect) = layout.pane
+        // off-thread. Keyed only on the scrollback's presence + its rect, NOT on
+        // which top region is up: `render_bottom_region` draws the scrollback
+        // identically under the file list, a `D` TopPane pager, and a
+        // `;cmd`/`$EDITOR` overlay, so the snap must fire in all three. (Gating
+        // this on `!overlay_active` is what left the scrollback parked at the
+        // top under an open editor — the draw and the snap have to agree on the
+        // one fact "the bottom region is the scrollback", which is exactly
+        // `scroll_pager.is_some()`.)
+        if let Some(rect) = layout.pane
             && let Some(view) = self.view.scroll_pager.as_mut()
             && view.pending_scroll_to_bottom.get()
         {
