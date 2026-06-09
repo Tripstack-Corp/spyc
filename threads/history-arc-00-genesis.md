@@ -490,3 +490,34 @@ Provenance:
 - 042d1684 (2026-04-23 16:49) — INSTALL.md managed-mcp.json enterprise docs.
 
 <!-- Entry-ID: 01KTNBPQ97DQKF20Q6QVM0R8RT -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:54:59.511335+00:00
+Role: scribe
+Type: Note
+Title: v1.11–v1.17 — PROJECT_HOME/named sessions, PTY-backed capture, gb blame; ARCHITECTURE.md + DESIGN.md authored
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: named sessions + PROJECT_HOME, PTY-backed ! capture (password prompts work), gb blame; the ARCHITECTURE.md/DESIGN.md design docs are authored   [kind: new-capability]
+When: 2026-04-23 → 04-25 · commits 2a07feae (v1.11), 2371066e (v1.12 PTY capture), 06a553f6 (v1.13), 05e2cf55 (v1.14), baa31de2 (v1.15 gb), 525b2874 (v1.16), 11e59357 (ARCH/DESIGN docs), a3755a3f (v1.17.9)
+Recorded rationale: "Add PROJECT_HOME, named sessions, and editable start dir (v1.11.0)" (2a07feae); "PTY-back ! captures so sudo/ssh password prompts work (v1.12.0)" (2371066e); "Prompt before MCP takeover from another live spyc (v1.14.0)" (05e2cf55); "gd includes new files; add gb git blame (v1.15.0)" (baa31de2); "Add ARCHITECTURE.md and DESIGN.md; pin sync-only stance" (11e59357)
+Inferred intent: session infrastructure matures (named sessions, PROJECT_HOME). The PTY-backed ! capture (v1.12) is a notable supersession — the capture path moves from pipe to a real PTY so interactive password prompts (sudo/ssh) work. The ARCHITECTURE.md/DESIGN.md authoring (v1.16-era) is the first standalone design doc, and "pin sync-only stance" records a scoped design decision: spyc syncs, it does not own/replicate state. confidence: high.
+Supersedes: 2371066e (PTY-backed capture) supersedes the pipe-based ! capture from the streaming-pager era (b2ce7393) — needed for programs that detect a TTY (sudo/ssh).
+
+Session work: v1.11 (2a07feae) adds PROJECT_HOME, named sessions, and an editable start dir; v1.14 (05e2cf55) prompts before MCP takeover from another live spyc (multi-instance arbitration); resume-via-/resume + enterprise MCP + term-title roll up in v1.17.9 (a3755a3f). The PTY-backed capture (v1.12, 2371066e) is the key supersession — ! now runs under a PTY so password prompts render. v1.15 (baa31de2) extends gd to new files and adds gb (git blame) — arc-04/arc-05. The design docs (11e59357) author ARCHITECTURE.md + DESIGN.md and record the "sync-only" stance as a pinned decision.
+
++2 folded: dc3054fb (`make check` green: fmt/clippy/single-threaded tests), 3b5935c7/1cc7b57e (help-pager multi-column fix + share layout constants), 2026-04-23.
++2 folded: e217be59 (v1.11.2 Claude resume via exit-banner scrollback), e3f32582 (v1.11.3 ~ path shortening), 2026-04-24.
++1 folded: f7aa2712 (v1.12.1 verify Claude session JSONL exists before saving), 401132c2 (post-/simplify config-test cleanup), 06a553f6 (v1.13 --print-config + status bar position).
+
+Provenance:
+- 2a07feae (2026-04-23 22:13) — v1.11.0 PROJECT_HOME / named sessions.
+- 2371066e (2026-04-24 21:30) — v1.12.0 PTY-backed ! capture.
+- baa31de2 (2026-04-24 22:19) — v1.15.0 gd new-files + gb blame.
+- 11e59357 (2026-04-24 22:57) — ARCHITECTURE.md + DESIGN.md authored, sync-only stance pinned.
+- a3755a3f (2026-04-25 21:11) — v1.17.9 resume/enterprise-MCP/term-title roll-up.
+
+<!-- Entry-ID: 01KTNBQN49XQY7PAPNTB310M5B -->

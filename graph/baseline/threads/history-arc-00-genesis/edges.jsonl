@@ -29,3 +29,5 @@
 {"source":"entry:01KTNBMXVMNF3CWFR2D0DVCCEG","target":"entry:01KTNBNTPHF5N5WTYY8YN8H6T1","type":"followed_by"}
 {"source":"thread:history-arc-00-genesis","target":"entry:01KTNBPQ97DQKF20Q6QVM0R8RT","type":"contains"}
 {"source":"entry:01KTNBNTPHF5N5WTYY8YN8H6T1","target":"entry:01KTNBPQ97DQKF20Q6QVM0R8RT","type":"followed_by"}
+{"source":"thread:history-arc-00-genesis","target":"entry:01KTNBQN49XQY7PAPNTB310M5B","type":"contains"}
+{"source":"entry:01KTNBPQ97DQKF20Q6QVM0R8RT","target":"entry:01KTNBQN49XQY7PAPNTB310M5B","type":"followed_by"}
