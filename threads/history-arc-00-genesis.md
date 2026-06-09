@@ -157,3 +157,32 @@ Provenance:
 - 0ed22736 (2026-04-16 00:26) — pane scroll mode + ROADMAP.md created.
 
 <!-- Entry-ID: 01KTNBCHN5019NVA29V97ZH26D -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:49:21.022427+00:00
+Role: scribe
+Type: Note
+Title: vi marks + jump-history navigation; shared shell prompt with vi editing
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: navigation history ('' jump-back, backtick start-dir) and a vi-editable shell prompt with shared history land   [kind: new-capability]
+When: 2026-04-15 · commits 07937d5d, 83ea8137
+Recorded rationale: "Navigation: '' jump-back (cd -), backtick jump to start dir" (07937d5d); "Vi-editable shell prompt with shared persistent history" (83ea8137)
+Inferred intent: the input subsystem (arc-06) gains two pillars same-day — directory jump-history (the '' / backtick pair, complementing the m{a-z} marks from f30386f2) and a vi-modal prompt editor with persistent shared history. confidence: high — evidence: these are the navigation/input primitives the v1.28–v1.34 jump-history popup cluster later reworks.
+Supersedes: extends the vi marks (f30386f2) and J jump (833e3fa6) into a coherent jump/back navigation model.
+
+07937d5d adds '' (jump-back, cd - semantics) and backtick (jump to the start dir) — directory-level history navigation that sits alongside the per-file m{a-z} marks. 83ea8137 makes the shell prompt vi-editable with shared persistent history across invocations — the line-editor surface that later acquires dw/cw (f5e34dce), word-boundary tuning (v1.35.1), and the J-prompt promotion (v1.33).
+
+This is the input/marks/jump-history root that feeds arc-06. The jump-history data structure introduced here (and the J prompt) is the exact thing reworked across the dense v1.28–v1.34 run folded later in this thread — pickaxe `git log -S 'jump_history'` confirms continuity from this era into that cluster.
+
++1 folded: a3f7831b (2026-04-15 23:59) "Makefile: build, release, cross-compile, install, deploy" — the Makefile build surface (later split so only install needs sudo, 7e04132e).
+
+Provenance:
+- 07937d5d (2026-04-15 23:24) — '' jump-back, backtick start-dir.
+- 83ea8137 (2026-04-15 23:45) — vi-editable shell prompt + shared persistent history.
+- a3f7831b (2026-04-15 23:59) — Makefile build/release/cross-compile/install/deploy.
+
+<!-- Entry-ID: 01KTNBDAPBCB80SNR6K3N42608 -->
