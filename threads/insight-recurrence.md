@@ -1006,3 +1006,35 @@ Provenance:
 - Convention anchor cited above: history-seg-module-decomposition CLAUDE.md ceiling Decision 01KTMMJVZMX3SJCBSK8YF896YP; BUGS→ROADMAP echo 01KTMMYFCAPJDTD83XH66BE7P8.
 
 <!-- Entry-ID: 01KTMV0568M86NZC6XZENTSB6D -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:03:25.686088+00:00
+Role: critic
+Type: Note
+Title: Tail (window-2): convergence shapes — the MVU campaign and #176/#309–#311 sit at the intersection of multiple window-2 shapes; the convergences cluster on the architectural spine
+
+Spec: critic
+
+tags: #insight #recurrence #window-2 #tail
+
+The continuation holds six shapes and ~60 instances. As in window-1, a small set of campaigns surface in two or three shapes at once, and the convergences are not noise — they cluster on the window's single architectural spine (route_key → MVU → decomposition → gix, per the segment map's cross-segment topology, 01KTMN9MRB31A0C8ZWSXX5M5ZQ).
+
+**The MVU campaign is the most-converged-upon work in the window-2 record.** It carries Pattern 1 (strangler-fig: grow-alongside the old `App::run` loop → behavior-equivalence parity → flip → collapse to one `App::update`), Pattern 2 (phase-numbered train: phases −1..6 + D/E + last-mile), Pattern 3 (verbatim-relocation: the ~10 Phase-1&2 leaf/handler extractions are verbatim cuts), and Pattern 5 (plan-doc-then-execute: MVU_PLAN.md #196 is the charter the seg executes). **Four shapes converge on one campaign.** The convergence is structural, not coincidental: the strangler-fig *needs* the phase-train to stay revertable; the phase-train's early phases *are* verbatim relocations; and the whole thing executes a committed plan. One campaign, four shapes, because the migration's risk-management *is* the small-revertable-PR delivery *is* the verbatim-cut groundwork *is* the plan. Citations: P1/P2/P5 charter 01KTMKVE85DEBMBWYCXY7YHP5E; P3 extraction 01KTMKTBHT9G2VBZNJZFY5EJM4; P1 drop 01KTMM60KR8W18TWXPXDGT9J8Y.
+
+**The gix campaign is the second triple-convergence.** It carries Pattern 1 (the textbook strangler-fig, facade→parity-spike→flip-behind-flag→drop), Pattern 2 (the "9-step" pre-numbered sequence, "Removed in PR 9"), and Pattern 6 (its drop is released as v1.56.0, a capability-marking minor cut). **Three shapes converge.** Like MVU, the convergence has a structural reason: the migration *is* the numbered sequence *is* what the minor-version bump marks. Citations: P1 facade/flip/drop 01KTMMHJ879C24FY2WYYT9F1SF / 01KTMMMBVCGADASG74RTHKWY97 / 01KTMMTF0MQ96P7BVN7QQPVBNS; P2 pre-numbering 01KTMMJB955RF16D842WFFEBYP; P6 v1.56.0 at the same drop moment 01KTMMTF0MQ96P7BVN7QQPVBNS.
+
+**The module-decomposition campaign converges Patterns 2 and 3.** mod-extract pr1..12 is one Pattern-2 phase-train whose every element is a Pattern-3 verbatim relocation — the cleanest "train-of-verbatim-cuts" convergence, governed by one CLAUDE.md ceiling Decision (01KTMMJVZMX3SJCBSK8YF896YP) that is itself a recorded convention (Pattern 5's cousin). Citation: 01KTMMGZWER9304EZM82KTEZMQ.
+
+**The #176 / #309–#311 generalizations converge Pattern 4 with the spine.** AgentProfile (#176) and PagerStream (#309–#311) are each a Pattern-4 repeat-then-generalize, and both land *on* the MVU-era substrate — PagerStream lives in `src/app/pager_stream.rs` (post-MVU app module) and AgentProfile's status resolution is noted as "downstream in history-seg-refactor-mvu (#234)." The two product-surface payoffs (arc-05, arc-07) reach their abstraction *because* the spine's runtime work made the seam available. Citations: P4 AgentProfile 01KTMMZWBVK4X3QJP7SJW3ZEG2; P4 PagerStream 01KTMN2XSH67BNFQPAMTSFD81X.
+
+**Convergence-density observation (the class-level reading no per-shape entry owns).** Four campaigns (MVU, gix, decomposition, the #176/#309 generalizations) carry between 2 and 4 shapes each; the verbatim-relocation instances *outside* those campaigns are near-zero (the shape barely exists except inside the decomposition/MVU trains). This is the inverse of window-1's convergence profile: window-1's convergences were a *handful of individual PRs* (PR #29, #18, #31, #15) sitting at pattern intersections, with most PRs carrying one pattern (01KR3DJ9KJY1T9FFP8KDEPTBJ1). Window-2's convergences are *whole campaigns* — the shapes co-occur at the campaign grain, not the PR grain, because window-2's recurrences are themselves campaign-scale. The unit of convergence scaled up with the unit of recurrence.
+
+Five of the six shapes share at least one campaign with another shape; only Pattern 6 (release cadence) holds partly-separate instances (the v1.41.x/v1.50.x corridors are not themselves campaigns) — exactly as window-1's Pattern 5 (the only window-1 pattern with fully separate instances) was the release-cadence pattern. The release cadence is the "spans the others without being one of them" shape in both windows. A reader entering at any one shape can follow the convergence cross-references and find the same four campaigns reappear: MVU in P1/P2/P3/P5, gix in P1/P2/P6, decomposition in P2/P3, the generalizations in P4 + the spine.
+
+Provenance:
+- P1 01KTMTNYS83V5A7PY2MJVV60MF; P2 01KTMTQSTE7QSH8WJ442ADX02F; P3 01KTMTSAVQNENHP8ZFWBKTWXN6; P4 01KTMTTZQK31H30M2RQ6J3FEY1; P5 01KTMTWQR1TJTNDNPZH3X6JDHP; P6 01KTMTYBDZ99R8XBA44E6NTZRQ; closure 01KTMV0568M86NZC6XZENTSB6D.
+- Campaign moment anchors: MVU 01KTMKVE85DEBMBWYCXY7YHP5E / 01KTMKTBHT9G2VBZNJZFY5EJM4 / 01KTMM60KR8W18TWXPXDGT9J8Y; gix 01KTMMHJ879C24FY2WYYT9F1SF / 01KTMMMBVCGADASG74RTHKWY97 / 01KTMMJB955RF16D842WFFEBYP / 01KTMMTF0MQ96P7BVN7QQPVBNS; decomposition 01KTMMGZWER9304EZM82KTEZMQ / 01KTMMJVZMX3SJCBSK8YF896YP; generalizations 01KTMMZWBVK4X3QJP7SJW3ZEG2 / 01KTMN2XSH67BNFQPAMTSFD81X.
+- Cross-segment topology: history-overview segment map 01KTMN9MRB31A0C8ZWSXX5M5ZQ (route_key → MVU → decomposition → gix spine).
+- Window-1 convergence tail for contrast: 01KR3DJ9KJY1T9FFP8KDEPTBJ1 (PR-grain convergences; Pattern 5 the only fully-separate-instances pattern).
+
+<!-- Entry-ID: 01KTMV1SBQ1PPH8A2WM4TSNX1N -->

@@ -5,7 +5,7 @@
   "title": "insight recurrence",
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
-  "last_updated": "2026-06-09T00:02:32.584635+00:00",
+  "last_updated": "2026-06-09T00:03:25.688594+00:00",
   "summary": "The thread explores recurring event-shape patterns in PRs, focusing on how insights and issues are structured across multiple commits. Key patterns include bundling of concerns, supersession of issues, and the use of BUGS.md for tracking unresolved issues. The catalogue of patterns reveals how insights evolve over time, with arc-story-tails helping to make cumulative-grain recurrence legible.",
-  "entry_count": 18
+  "entry_count": 19
 }
