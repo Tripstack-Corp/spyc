@@ -670,3 +670,32 @@ Provenance:
 - REFACTOR_PLAN.md @265d2816 — "the ... bug we hit several times in v1.27.x–v1.32.x".
 
 <!-- Entry-ID: 01KTNBWMS8SC9FH0JDX2GP8C3R -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:58:12.236930+00:00
+Role: scribe
+Type: Note
+Title: v1.35–v1.37 — markdown table rendering with box-drawing borders; :pause/:resume
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the markdown renderer gains real box-drawing table rendering (feeds history-seg-markdown-rendering); backgrounded tasks gain :pause/:resume   [kind: new-capability]
+When: 2026-04-29 · commits b7c15390 (v1.35 tables), 6e602c95 (v1.36 cell wrap), 322f01b1 (v1.37 :pause/:resume)
+Recorded rationale: "markdown: real table rendering with box-drawing borders (v1.35.0)" (b7c15390); "markdown: tables wrap cells instead of truncating (v1.36.0)" (6e602c95); ":pause / :resume for backgrounded tasks (v1.37.0)" (322f01b1)
+Inferred intent: the markdown table renderer (src/ui/markdown.rs +319 lines) is the direct ancestor of history-seg-markdown-rendering — born here as box-drawing tables (┌┐└┘┼ glyphs, verified by the commit's named tests renders_simple_table_with_borders / table_truncates_overlong_cells), then refined to wrap cells rather than truncate (v1.36). :pause/:resume completes the background-tasks job-control surface (^Z/:fg from v1.20). confidence: high — evidence: b7c15390 adds 319 lines to src/ui/markdown.rs with the two named table tests.
+Supersedes: 6e602c95 (cell wrapping) supersedes b7c15390's truncate-on-overflow behavior (the v1.35 test table_truncates_overlong_cells is the behavior v1.36 replaces); :pause/:resume extends the background-tasks subsystem (8e9a2313, v1.20).
+
+The markdown subsystem reaches table rendering here: v1.35.0 (b7c15390) renders real tables with box-drawing borders; v1.36.0 (6e602c95) switches from truncating overlong cells to wrapping them. This is the exact lineage history-seg-markdown-rendering picks up. :pause/:resume (v1.37.0, 322f01b1) closes the background-tasks control set. The current branch context (recent commit b0a321c "fix/markdown-loose-list-bullet-attach") confirms src/ui/markdown.rs is still an active, evolving file descended from this genesis birth.
+
++1 folded: c3dffb6d (2026-04-29 v1.35.1) "line editor: punctuation is a word boundary" — line-editor word-motion refinement (the dw/cw operators from f5e34dce).
++1 folded: cf52e222 (2026-04-29 v1.35.2) "pager: streaming auto-tail uses real viewport".
++1 folded: ae787249 (2026-04-29 v1.34.1) "pager / no matches flash: render in pager, not file list".
+
+Provenance:
+- b7c15390 (2026-04-29 14:37) — v1.35.0 markdown box-drawing tables; src/ui/markdown.rs +319.
+- 6e602c95 (2026-04-29 16:33) — v1.36.0 table cell wrapping.
+- 322f01b1 (2026-04-29 17:16) — v1.37.0 :pause/:resume for background tasks.
+
+<!-- Entry-ID: 01KTNBXH839DF5R9X15SMJBARF -->
