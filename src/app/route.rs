@@ -23,6 +23,7 @@ use crossterm::event::KeyEvent;
 use crate::ui::pager::Mount;
 
 use super::modal::{Modal, ModalSnapshot, active_modal};
+use super::state::Focus;
 use super::{App, Mode};
 
 /// Which kind of input event is being routed. A key may be a meta-chord
@@ -94,16 +95,22 @@ pub(super) struct RouteSnapshot {
     pub modal: Option<Modal>,
     /// `state.mode` is `Mode::Prompting(_)`.
     pub is_prompting: bool,
-    /// `App::top_overlay.is_some()` — `V`/`;` overlay pty alive.
-    pub has_top_overlay: bool,
-    /// `view.pager`'s `Mount`, if any (top region: Overlay / TopPane).
+    /// The authoritative focused region (`state.focus`, recomputed each loop
+    /// top). Drives the overlay-pty arm (`Focus::Overlay`) and pane-focus
+    /// (`Focus::Pane`); the `Pager`/`FileList` variants fall through to the
+    /// `pager_mount` / resolver arms. Replaces the old `has_top_overlay` +
+    /// `pane_focused` flags with one source of truth.
+    pub focus: Focus,
+    /// `view.pager`'s `Mount`, if any (top region: Overlay / TopPane). Kept
+    /// separate from `focus`: a single `focus` value names only the focused
+    /// region, but a `D` TopPane pager can be mounted *above* a focused bottom
+    /// scrollback (the coexistence case), so the router still needs to know
+    /// what's mounted up top regardless of focus.
     pub pager_mount: Option<Mount>,
     /// A bottom-region `^a v` scrollback (`view.scroll_pager`) is open.
     pub has_scroll_pager: bool,
     /// `App::pane_tabs.is_some()`.
     pub has_pane_tabs: bool,
-    /// `state.pane_focused`.
-    pub pane_focused: bool,
     /// Active pane is in scrollback (vt100 reverse-mode) mode.
     pub pane_scrolling: bool,
     /// Active pane's subprocess has exited.
@@ -139,12 +146,14 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         InputKind::Key(key) => super::is_spyc_meta_when_pane_focused(key, snap.resolver_pending),
         InputKind::Paste => false,
     };
-    let bottom_owns = snap.has_pane_tabs && snap.pane_focused;
+    let pane_focused = matches!(snap.focus, Focus::Pane);
+    let bottom_owns = snap.has_pane_tabs && pane_focused;
 
-    // 1. Top-overlay pty (V editor, ; command). Meta chords and
-    //    bottom-pane-focused keys fall through so the user can
-    //    `^a-j` into claude while the editor stays visible above.
-    if snap.has_top_overlay && !is_meta && !bottom_owns {
+    // 1. Top-overlay pty (V editor, ; command). `Focus::Overlay` already means
+    //    the overlay is alive AND neither the pane nor a pager is focused (a
+    //    `^a-j` into claude makes focus `Pane` instead, so the keystroke flows
+    //    to the bottom pane below). Meta chords still escape.
+    if matches!(snap.focus, Focus::Overlay) && !is_meta {
         return InputSink::OverlayPty;
     }
 
@@ -177,7 +186,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     // 3. Pane scrollback mode. Non-meta keys with the pane focused
     //    drive the scroll handler; meta keys escape to the resolver
     //    so pane commands (`^a-x`, focus switch) still work.
-    if snap.has_pane_tabs && snap.pane_scrolling && snap.pane_focused && !is_meta {
+    if snap.has_pane_tabs && snap.pane_scrolling && pane_focused && !is_meta {
         return InputSink::PaneScroll;
     }
 
@@ -185,7 +194,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     //    discarded; only meta chords (`^a-R`, `^a-x`, …) reach the
     //    resolver. Closes the v1.50.28 race where `^a` itself
     //    silently dropped the tab.
-    if snap.has_pane_tabs && snap.pane_focused && snap.pane_closed && !is_meta {
+    if snap.has_pane_tabs && pane_focused && snap.pane_closed && !is_meta {
         return InputSink::PaneExitedFlash;
     }
 
@@ -219,11 +228,12 @@ impl App {
                 has_harpoon: self.view.harpoon_menu.is_some(),
             }),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
-            has_top_overlay: self.runtime.top_overlay.is_some(),
+            // The authoritative focus, recomputed at the loop top before this
+            // read. Subsumes the old `has_top_overlay` + `pane_focused` reads.
+            focus: self.state.focus,
             pager_mount: self.view.pager.as_ref().map(|v| v.mount),
             has_scroll_pager: self.view.scroll_pager.is_some(),
             has_pane_tabs: self.runtime.pane_tabs.is_some(),
-            pane_focused: self.state.pane_focused(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
             // loop-top), not the live host — decouples routing from Runtime.
             pane_scrolling: self.state.pane.pane_snapshot.is_scrolling,
@@ -243,11 +253,10 @@ mod tests {
         RouteSnapshot {
             modal: None,
             is_prompting: false,
-            has_top_overlay: false,
+            focus: Focus::FileList,
             pager_mount: None,
             has_scroll_pager: false,
             has_pane_tabs: false,
-            pane_focused: false,
             pane_scrolling: false,
             pane_closed: false,
             resolver_pending: false,
@@ -289,7 +298,7 @@ mod tests {
     fn focused_pane_routes_to_bottom_pane() {
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
@@ -301,7 +310,7 @@ mod tests {
         // it must reach the resolver to start the chord.
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
@@ -313,7 +322,7 @@ mod tests {
         // complete the chord, not be forwarded to the pane.
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             resolver_pending: true,
             ..idle()
         };
@@ -341,7 +350,7 @@ mod tests {
         let snap = RouteSnapshot {
             pager_mount: Some(Mount::TopPane),
             has_pane_tabs: true,
-            pane_focused: false, // pager has focus
+            focus: Focus::Pager(Mount::TopPane), // pager has focus
             ..idle()
         };
         assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
@@ -352,7 +361,7 @@ mod tests {
         let snap = RouteSnapshot {
             pager_mount: Some(Mount::TopPane),
             has_pane_tabs: true,
-            pane_focused: false,
+            focus: Focus::Pager(Mount::TopPane),
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
@@ -365,7 +374,7 @@ mod tests {
         let snap = RouteSnapshot {
             pager_mount: Some(Mount::TopPane),
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
@@ -383,7 +392,7 @@ mod tests {
         let snap = RouteSnapshot {
             has_scroll_pager: true,
             has_pane_tabs: true,
-            pane_focused: true,   // pane is the underlying owner
+            focus: Focus::Pane,   // pane is the underlying owner
             pane_scrolling: true, // entered scroll mode
             ..idle()
         };
@@ -398,7 +407,7 @@ mod tests {
         let snap = RouteSnapshot {
             has_scroll_pager: true,
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
@@ -415,7 +424,7 @@ mod tests {
         let snap = RouteSnapshot {
             has_scroll_pager: true,
             has_pane_tabs: true,
-            pane_focused: false, // ^a-k flipped focus to top
+            focus: Focus::FileList, // ^a-k flipped focus to the file list
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::Resolver);
@@ -434,14 +443,14 @@ mod tests {
             pager_mount: Some(Mount::TopPane),
             has_scroll_pager: true,
             has_pane_tabs: true,
-            pane_focused: true, // bottom scrollback owns input
+            focus: Focus::Pane, // bottom scrollback owns input
             ..idle()
         };
         assert_eq!(route_key(bottom, key('j')), InputSink::PagerKey);
         assert_eq!(route_key(bottom, ctrl('a')), InputSink::Resolver);
 
         let top = RouteSnapshot {
-            pane_focused: false, // top `D` pager owns input
+            focus: Focus::Pager(Mount::TopPane), // top `D` pager owns input
             ..bottom
         };
         assert_eq!(route_key(top, key('j')), InputSink::PagerKey);
@@ -455,9 +464,8 @@ mod tests {
         // V editor is open; user types into it (j key, no chord).
         // Goes to the overlay pty, NOT the bottom pane.
         let snap = RouteSnapshot {
-            has_top_overlay: true,
+            focus: Focus::Overlay,
             has_pane_tabs: true,
-            pane_focused: false,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::OverlayPty);
@@ -467,9 +475,8 @@ mod tests {
     fn top_overlay_meta_chord_escapes_to_resolver() {
         // V editor is open; user wants to focus claude with `^a-j`.
         let snap = RouteSnapshot {
-            has_top_overlay: true,
+            focus: Focus::Overlay,
             has_pane_tabs: true,
-            pane_focused: false,
             ..idle()
         };
         assert_eq!(route_key(snap, ctrl('a')), InputSink::Resolver);
@@ -477,11 +484,12 @@ mod tests {
 
     #[test]
     fn top_overlay_with_bottom_focus_routes_typing_to_pane() {
-        // V editor up, but user focused claude. Typing goes to claude.
+        // V editor up, but user focused claude (focus == Pane). Typing goes to
+        // claude — the overlay's presence no longer matters to routing once
+        // focus is on the pane.
         let snap = RouteSnapshot {
-            has_top_overlay: true,
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::BottomPane);
@@ -493,7 +501,7 @@ mod tests {
     fn exited_pane_non_meta_flashes() {
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             pane_closed: true,
             ..idle()
         };
@@ -509,7 +517,7 @@ mod tests {
         // `^a-R` and `^a-x` must work on an exited tab.
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             pane_closed: true,
             ..idle()
         };
@@ -522,7 +530,7 @@ mod tests {
     fn pane_scroll_eats_non_meta_keys() {
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             pane_scrolling: true,
             ..idle()
         };
@@ -534,7 +542,7 @@ mod tests {
     fn pane_scroll_meta_chord_escapes() {
         let snap = RouteSnapshot {
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             pane_scrolling: true,
             ..idle()
         };
@@ -550,24 +558,22 @@ mod tests {
         let snap = RouteSnapshot {
             is_prompting: true,
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::Prompt);
     }
 
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
-    // normal key and a meta chord go to the pager even with a focused pane
-    // present. The existing `overlay_pager_eats_all_keys` uses bare `idle()`
-    // (no pane, unfocused), leaving the coexistence case open; this pins it
-    // ahead of the MVU `Focus::Pager(Overlay)` phase. Behavior is unchanged
-    // (route_key is untouched) — this is a regression guard, not a new rule.
+    // normal key and a meta chord go to the pager even with `focus == Pane`.
+    // The modal Overlay pager is routed via `pager_mount` (focus-independent),
+    // so it owns input whatever the focused region; this pins that.
     #[test]
     fn overlay_pager_eats_all_keys_even_with_pane_focus() {
         let snap = RouteSnapshot {
             pager_mount: Some(Mount::Overlay),
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::PagerKey);
@@ -592,7 +598,7 @@ mod tests {
         let snap = RouteSnapshot {
             modal: Some(Modal::FindPicker),
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::FindPicker);
@@ -605,7 +611,7 @@ mod tests {
         let snap = RouteSnapshot {
             modal: Some(Modal::Capture),
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::Capture);
@@ -617,7 +623,6 @@ mod tests {
     fn overlay_dismiss_eats_all_input() {
         let snap = RouteSnapshot {
             modal: Some(Modal::OverlayDismiss),
-            has_top_overlay: true,
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::OverlayDismiss);
@@ -633,7 +638,7 @@ mod tests {
         let snap = RouteSnapshot {
             modal: Some(Modal::QuickSelect),
             has_pane_tabs: true,
-            pane_focused: true,
+            focus: Focus::Pane,
             ..idle()
         };
         assert_eq!(route_key(snap, key('a')), InputSink::QuickSelect);
@@ -673,34 +678,43 @@ mod tests {
             Some(Mount::TopPane),
             Some(Mount::LowerPane),
         ];
+        let focuses = [
+            Focus::FileList,
+            Focus::Pane,
+            Focus::Overlay,
+            Focus::Pager(Mount::Overlay),
+            Focus::Pager(Mount::TopPane),
+            Focus::Pager(Mount::LowerPane),
+        ];
         let plain = key('x'); // non-meta printable
-        // Sweep each modal value × each pager mount × every combination of the
-        // 7 remaining boolean bits (a flat bit-decode beats a deep `for`
-        // pyramid: bit `i` of `bits` drives the i-th field). `resolver_pending`
-        // is held false on purpose: with a chord pending, EVERY key (incl. `x`)
-        // is meta and escapes to the resolver, while a paste is never meta — so
-        // "paste == non-meta key" only holds when no chord pends.
+        // Sweep each modal × focus × pager mount × every combination of the 5
+        // remaining boolean bits (a flat bit-decode beats a deep `for` pyramid:
+        // bit `i` of `bits` drives the i-th field). `resolver_pending` is held
+        // false on purpose: with a chord pending, EVERY key (incl. `x`) is meta
+        // and escapes to the resolver, while a paste is never meta — so "paste
+        // == non-meta key" only holds when no chord pends.
         let on = |bits: u32, i: u32| bits & (1 << i) != 0;
         for &modal in &modals {
-            for &pager_mount in &mounts {
-                for bits in 0..(1u32 << 7) {
-                    let snap = RouteSnapshot {
-                        modal,
-                        is_prompting: on(bits, 0),
-                        has_top_overlay: on(bits, 1),
-                        pager_mount,
-                        has_scroll_pager: on(bits, 2),
-                        has_pane_tabs: on(bits, 3),
-                        pane_focused: on(bits, 4),
-                        pane_scrolling: on(bits, 5),
-                        pane_closed: on(bits, 6),
-                        resolver_pending: false,
-                    };
-                    assert_eq!(
-                        route_input(snap, InputKind::Paste),
-                        route_input(snap, InputKind::Key(plain)),
-                        "paste must agree with a non-meta key for {snap:?}"
-                    );
+            for &focus in &focuses {
+                for &pager_mount in &mounts {
+                    for bits in 0..(1u32 << 5) {
+                        let snap = RouteSnapshot {
+                            modal,
+                            is_prompting: on(bits, 0),
+                            focus,
+                            pager_mount,
+                            has_scroll_pager: on(bits, 1),
+                            has_pane_tabs: on(bits, 2),
+                            pane_scrolling: on(bits, 3),
+                            pane_closed: on(bits, 4),
+                            resolver_pending: false,
+                        };
+                        assert_eq!(
+                            route_input(snap, InputKind::Paste),
+                            route_input(snap, InputKind::Key(plain)),
+                            "paste must agree with a non-meta key for {snap:?}"
+                        );
+                    }
                 }
             }
         }
