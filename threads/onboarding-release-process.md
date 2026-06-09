@@ -55,3 +55,41 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-developer-experience = 01KR0PFHHCNVJPNJSTPA3VW62J`, `onboarding-product-charter = 01KR0P18MCE1H57Q5ZTAGKAJNH`.
 
 <!-- Entry-ID: 01KR0PHNA4XW7CWPQ2D93K24HC -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:19:32.159867+00:00
+Role: scribe
+Type: Note
+Title: Onboarding refresh: release/versioning at #311 — now v1.56.0 (gix-drop release), Bitbucket squash-merge PR as the vehicle, three-remote topology, patch-corridor cadence
+
+Spec: docs
+
+Purpose: Refresh of the release/versioning flow from #37 (~v1.41.24, "Unreleased stack tracking v1.41.x") to #311 / v1.56.0. The release vehicle is still the Bitbucket squash-merge PR with a Cargo.toml version bump + CHANGELOG promotion; what moved is the version (15 minor versions on), the now-visible release-tag history, and the confirmed three-remote topology with the GitHub mirrors frozen.
+
+Observed:
+- **Now at v1.56.0** (`Cargo.toml:3` `version = "1.56.0"`), up from the ~v1.41.24 the #37 entry recorded. CHANGELOG head shows the cadence: `## [Unreleased]` (ratatui 0.30.1 bump, aislop baseline gate) → `## [1.56.0] - 2026-06-06` → `## [1.51.4] - 2026-05-29` → `## [1.50.0] - 2026-05-08` (`CHANGELOG.md:6,28,140,1852`). The intervening v1.50.x patch corridor (.0→.82) and v1.51.x are collapsed into squashed CHANGELOG sections.
+- **v1.56.0 is the gix-drop release.** Its CHANGELOG entry leads with "spyc no longer runs the `git` binary at all" — repo discovery, status, diff, show, blame, worktree all run in-process via `gix`; "A guard test enforces zero `git`-subprocess usages in production code. (The `git` binary is still used to build fixtures when running spyc's own test suite.)" (`CHANGELOG.md:29-37`). VERIFIED accurate: the 8 remaining `Command::new("git")` sites in `src/` are all inside `#[cfg(test)]` modules — `run_git`/`porcelain` fixture helpers in `src/git/{discovery,blame,status,worktree,diff_model}.rs` and `src/app/state/tests/mod.rs`. Production is clean; the binary is a test-fixture dependency only. (#37 predates gix entirely; cross-ref `history-seg-gix-migration`.)
+- **The release vehicle is the Bitbucket squash-merge PR**, not a tag pipeline. SemVer is enforced in-PR: the version lives in `Cargo.toml` and is bumped in the PR that ships a user-visible change — patch for fixes, minor for features, major for stable/public-API (`CONTRIBUTING.md:117-126`; `AGENTS.md` "always bump the version when shipping user-visible changes"). CHANGELOG follows Keep-a-Changelog (`CHANGELOG.md:1-4`); `Unreleased` → versioned section is promoted in the bump commit.
+- **Release tags exist now.** Local tags: `v1.50.0` (#51) and `v1.51.4` (#170). v1.56.0 is the CHANGELOG head dated 2026-06-06 (the gix-drop, #292) — its tag, if cut, lives on the Bitbucket canonical remote (only two release tags are present in the local clone). The #37 entry could cite no tags at all.
+- **Three-remote topology confirmed** (`git remote -v`): `bitbucket` = `git@bitbucket.org:tripstack/spyc.git` (canonical, fetch+push), `origin` = `git@github.com:calebjacksonhoward/spyc.git`, `tripstack-corp` = `git@github.com:Tripstack-Corp/spyc.git`. Bitbucket is the only live remote; both GitHub remotes are stale mirrors frozen at #87 / 2026-05-14 (cross-ref `history-three-repo-lineage` 01KRX2YRNMPARTPFK3CW3R50FG and the repoint plan `migration-github-origin-to-tripstack-corp` 01KRM5G544P02SNE96D6HWTEWX — origin was a temporary personal-GH bridge; tripstack-corp the intended permanent home; neither is the release surface today).
+- **CI still runs no release automation.** `bitbucket-pipelines.yml:203-222` defines only `branches.main`, `pull-requests:'**'` (each quality+coverage), and the `custom: weekly-deps` schedule. No tag-triggered (`v[0-9]+.*`) cross-compile-and-upload pipeline — that, plus crates.io/Homebrew/AUR publish, macOS Developer-ID signing, SBOM, and the GitHub public mirror, remain the in-flight Distribution scope tracked in `ROADMAP.md` / `LAUNCH_PREP.md`.
+- **Distribution scaffolding is pre-staged but unused for public release:** `make dist` (musl x86/arm + macOS universal → `dist/`), `make dist-checksums` (SHA-256), `make dist-sign` (detached GPG, `GPG_KEY=<id>`) — `Makefile:175-205`. macOS install is ad-hoc `codesign -s -`, not Developer-ID. No prebuilt-binary distribution today; install is still clone + `make install`.
+
+Inferred:
+- The release cadence is a **patch-corridor under one minor**: a short v1.41.x corridor (window-1, to .37), then a long v1.50.x corridor (.0→.82), then v1.51.4 and v1.56.0 — the same patch-under-one-minor shape at larger scale across the #38–#311 window. — confidence: high — basis: `insight-recurrence` window-2 Pattern 6, entry 01KTMTYBDZ99R8XBA44E6NTZRQ; corroborated by the collapsed CHANGELOG sections.
+- Adopting a new version on a teammate's machine is still a person-touches-the-machine flow (`git pull` + `make install`); the GPG/signing posture only becomes meaningful when prebuilt binaries actually ship. — confidence: high — basis: no tag pipeline; ad-hoc codesign; dist-sign gated on an uncommitted `GPG_KEY`.
+
+Next query: `watercooler_search(query="release version tag distribution gix-drop three-remote", thread_topic="onboarding-release-process", code_path=".")`
+
+Related:
+- `onboarding-developer-experience` — `make install`/`dist`/`dist-checksums`/`dist-sign` are the dev-side surfaces this generalizes.
+- `onboarding-security` — supply-chain controls and the signing threat model release must preserve.
+- the history corpus — `history-three-repo-lineage` (01KRX2YRNMPARTPFK3CW3R50FG) + `migration-github-origin-to-tripstack-corp` (01KRM5G544P02SNE96D6HWTEWX) for the remote topology; `insight-recurrence` Pattern 6 (01KTMTYBDZ99R8XBA44E6NTZRQ) for the patch-corridor cadence; `history-seg-gix-migration` for the v1.56.0 gix drop.
+
+Provenance:
+- Files read: `Cargo.toml:3`, `CHANGELOG.md:1-37,140,1852`, `CONTRIBUTING.md:117-126`, `Makefile:175-205`, `bitbucket-pipelines.yml:203-222`.
+- Commands run: `git remote -v` (three remotes), `git tag` (v1.50.0, v1.51.4), `grep -rn 'Command::new("git")' src` (8 sites, all under `#[cfg(test)]` — verified production-clean).
+- History entry_ids consulted: 01KRX2YRNMPARTPFK3CW3R50FG (three-repo lineage), 01KRM5G544P02SNE96D6HWTEWX (github→tripstack-corp repoint), 01KTMTYBDZ99R8XBA44E6NTZRQ (patch-corridor Pattern 6).
+- Prior #37 entry refreshed: 01KR0PHNA4XW7CWPQ2D93K24HC.
+
+<!-- Entry-ID: 01KTND4J8QW64BPE7NKWBDXG6E -->
