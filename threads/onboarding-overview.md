@@ -62,3 +62,67 @@ Provenance:
 - Sibling entry_ids: pending for every sibling at write time; back-fill is the responsibility of subsequent seed writers.
 
 <!-- Entry-ID: 01KR0NZNJ3KM6BJY09Q4P9D0NE -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:17:41.622113+00:00
+Role: scribe
+Type: Note
+Title: Onboarding refresh: front door re-stated at #311 (v1.56.0), deep-history corpus as the way in
+
+Spec: pm
+
+Purpose: Refresh of onboarding-overview from #37 (v1.41.24, 2026-05-07) to #311 (v1.56.0, 2026-06-08). The #37-era entry (01KR0NZNJ3KM6BJY09Q4P9D0NE) stands as a point-in-time snapshot; this entry re-states the front-door framing at #311, re-points the sibling index and reading order, and — most importantly — routes readers to the deep-history + insight corpus as the canonical way to understand how the codebase got here.
+
+Plain-language framing (#311): spyc is a vi-keyboard-driven file commander that AI agents can BOTH pair with in a pane AND query over MCP. Two panes: the top is a keyboard-driven, vim-flavoured, git-aware file commander; the bottom is a child agent process (Claude Code or codex first-class; Gemini and Antigravity also supported) (`README.md:30-40`). The differentiator is not "Claude in a pane" — it is that "the file commander is the noun the agent operates on, not the chrome around it" (`README.md:21-33`): the agent queries spyc over a local MCP socket for cursor/picks/inventory/filter/git-branch instead of you copy-pasting paths. It was born as `cspy` and the architecture was formed pre-PR-#1 — see `history-arc-00-genesis`.
+
+Observed:
+- Identity at #311: name `spyc`, version `1.56.0`, edition `2024`, MSRV `rust-version = 1.88` (`Cargo.toml`). 162 `.rs` files / ~53,818 LoC across a decomposed tree (`src/app/{key_dispatch,pager_handler,render,state}`, `src/git/diff_model`, `src/ui/{diff_render,markdown,pager}`, `src/agent`, `src/config`, `src/keymap/resolver`, `src/mcp`, `src/pane`, `src/state/sessions`).
+- CI is `bitbucket-pipelines.yml` only; no `.github/workflows`. Bitbucket is canonical; the GitHub remotes (`origin`=calebjacksonhoward, `tripstack-corp`=Tripstack-Corp) are stale mirrors — see `history-three-repo-lineage`.
+- The deep-history corpus now exists and is the refresh's advantage. Window #1–#311 + pre-#1 genesis is fully reconstructed. Front-door readers should use it in this order:
+  1. `history-overview` — the reconstruction spine (8 arcs + segment threads, two-layer code/decision history).
+  2. `history-arc-00-genesis` — origin (cspy→spyc; architecture formed before PR #1).
+  3. Arc threads `history-arc-01`..`history-arc-08` and segment threads `history-seg-*` (refactor-mvu, module-decomposition, gix-migration, docs-planning, performance, markdown-rendering) for per-area depth.
+  4. `history-synthesis` — cross-arc synthesis.
+  5. The 4 insight tiers — `insight-recurrence`, `insight-drift`, `insight-emergent-properties`, `insight-trajectory` — for the patterns/forces above any single PR.
+
+Sibling index (refreshed seeds; reference by topic — their refresh entries exist):
+- `onboarding-product-charter` — what spyc is and the MCP-bridge bet, now matured (multi-agent registry, MVU/architectural-maturity turn).
+- `onboarding-team-map` — single-developer project (Derek Marshall / caleb); no CODEOWNERS; Bitbucket-squash authorship topology.
+- `onboarding-architecture` — the MVU runtime + sync `std::thread + mpsc` + MCP socket (deep detail in `history-seg-refactor-mvu`).
+- `onboarding-working-map` — module index across the decomposed 162-file tree.
+- `onboarding-risk-register` — version/size drift; the 800-LoC ceiling not yet fully met.
+- `onboarding-test-surface` — 949 test fns + integration/property/snapshot/pty-roundtrip.
+- `onboarding-docs-contracts` — the keep-in-sync doc surfaces.
+- `onboarding-developer-experience`, `onboarding-release-process`, `onboarding-security`, `onboarding-entry-path`.
+
+Reading order for a first-time engineer (#311): `onboarding-product-charter` → `onboarding-team-map` → `history-overview` (skim) → `onboarding-architecture` → `onboarding-working-map` → `onboarding-entry-path`; pull `history-seg-*` / `insight-*` threads on demand for any area you touch. Security reviewer: start at `onboarding-security` + `onboarding-risk-register`.
+
+Five questions this seed answers:
+- What does this product do? → `onboarding-product-charter` (+ `README.md:21-40`).
+- Who owns which path? → `onboarding-team-map`.
+- How is the code shaped, and how did it get that shape? → `onboarding-architecture` + `onboarding-working-map` + the history corpus (`history-overview` spine).
+- What runs in CI / what is the validation surface? → `onboarding-test-surface` (+ `bitbucket-pipelines.yml`).
+- Where do docs drift from code? → `onboarding-risk-register` + `onboarding-docs-contracts` (+ `insight-drift`).
+
+Inferred:
+- The history/insight corpus is now the highest-leverage onboarding asset, above the static seed prose. — confidence: high — basis: 8 arc threads + 6+ seg threads + 4 insight tiers reconstruct the full #1–#311 window with PR-level provenance; the seeds are now an index into it, not the primary record.
+
+Major #37→#311 shifts (each carries deep detail in a history/insight thread):
+- MVU runtime introduced — the project moved from ad-hoc state mutation toward a Model-View-Update loop (`history-seg-refactor-mvu`).
+- gix migration — `gix = 0.84` in-process git for status/diff/blame/worktree (`history-seg-gix-migration`); subprocess git scoped-down but NOT fully removed (8 `Command::new("git")` sites remain in `src/git/*` + one test).
+- Module decomposition — the ~12k-line `app/mod.rs` and friends split under an 800-LoC ceiling (`history-seg-module-decomposition`); largest remaining is `src/app/mod.rs` at 1009 lines (a live drift item).
+- Multi-agent expansion — claude→codex→gemini→agy→zot via the AgentProfile registry (`history-arc-07-codex-and-mcp-bridge`; `src/agent/mod.rs`).
+- v1.41 → v1.56 — feature accretion gave way to plan-driven architecture (`insight-trajectory` window-2 mode-shift; `insight-emergent-properties` Property 7 plan-doc-as-executable-spec).
+
+Next query: `watercooler_search(query="history overview arcs reading order", thread_topic="history-overview", code_path=".")`
+
+Related:
+- `onboarding-product-charter`, `onboarding-team-map` — refreshed siblings this run.
+- the history/insight corpus — `history-overview` (spine), `history-arc-00-genesis` (origin), `history-synthesis` (cross-arc), and the 4 insight tiers carry the deep "why" the seeds only index.
+
+Provenance:
+- Files read: `README.md:1-40,21-40`, `ROADMAP.md:1-45`, `Cargo.toml`, `src/agent/mod.rs` (AgentProfile registry), `bitbucket-pipelines.yml` (presence). Commands: `find ... CODEOWNERS` (none), `find src -name '*.rs' | wc -l` (162), `grep -rn 'Command::new("git")' src` (8 sites).
+- Prior seed entry read in full: onboarding-overview 01KR0NZNJ3KM6BJY09Q4P9D0NE.
+- History/insight threads consulted (existence verified via watercooler_search): history-overview, history-arc-00-genesis, history-synthesis, history-seg-refactor-mvu, history-seg-module-decomposition, history-seg-gix-migration, history-arc-07-codex-and-mcp-bridge, history-three-repo-lineage, insight-recurrence, insight-drift, insight-emergent-properties, insight-trajectory.
+
+<!-- Entry-ID: 01KTND16ZTZXV11FR8KY25MSMJ -->
