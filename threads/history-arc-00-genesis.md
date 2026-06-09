@@ -611,3 +611,33 @@ Provenance:
 - 0622ff34 (2026-04-28 13:10) — v1.24.2 custom-code reduction sweep.
 
 <!-- Entry-ID: 01KTNBTK6MG9R8XNTAY9G95EQE -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:57:11.873840+00:00
+Role: scribe
+Type: Note
+Title: v1.25–v1.27 — markdown viewer (source/rendered toggle) + pager large-file/^C hardening
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a markdown viewer with source/rendered toggle is born (feeds history-seg-markdown-rendering); the pager gains a large-file cap and ^C job-control hardening   [kind: new-capability]
+When: 2026-04-28 → 04-29 · commits 7a542c17 (v1.26 markdown viewer), 1c61c38a (v1.27 large-file cap), 89524393 (v1.27.3 ^C→less)
+Recorded rationale: "markdown viewer with source/rendered toggle (v1.26.0)" (7a542c17); "pager: large-file cap + p-to-PAGER escape hatch (v1.27.0)" (1c61c38a); "^C during p/v/; takeover no longer kills spyc (v1.27.2)" (54732a12); "^C in p → less now reaches less cleanly via job control (v1.27.3)" (89524393)
+Inferred intent: the markdown renderer (src/ui/markdown.rs) is the genesis of the markdown subsystem that history-seg-markdown-rendering later extends — born here as a source/rendered toggle, table rendering follows at v1.35 (next moment). The pager hardening addresses two real gotchas: huge files (cap + escape hatch to real $PAGER) and ^C during a takeover killing the whole app (a signal-handling bug fixed via job control). confidence: high.
+Supersedes: 1c61c38a (large-file cap + p-to-PAGER) supersedes unbounded in-app pager loading from the pager-genesis era — large files now cap and offer escape to less.
+
+The markdown viewer (7a542c17, then f7b71f7b "80-col wrap, brighter colors, Y yank-visible") creates src/ui/markdown.rs with a source↔rendered toggle — the seed cross-referenced to history-seg-markdown-rendering. Pager hardening: v1.27.0 caps large files and adds a p-to-real-$PAGER escape hatch; v1.27.2/v1.27.3 fix ^C during p/v/; takeover killing spyc, routing the signal through job control so less is reached cleanly — a signal-handling correctness fix that REFACTOR_PLAN cites as the kind of effect best modeled as data.
+
++1 folded: 116c8912 (2026-04-28 v1.25.0) "pager: bring back line wrap" — line-wrap re-enabled (it had been toggled before).
++1 folded: b5a78279 (2026-04-29 v1.26.3) "!cmd capture: advertise TERM=dumb instead of xterm-256color" — capture-environment fix so captured programs don't emit cursor escapes.
++3 folded pager polish (v1.27.1/v1.27.4 + Cargo.lock): 65b50274 (truncation flash/help-Esc/^C hint), 6f9dd8bef (Cargo.lock), 19404d04 (teal flash messages).
+
+Provenance:
+- 7a542c17 (2026-04-28 19:57) — v1.26.0 markdown viewer source/rendered toggle; src/ui/markdown.rs.
+- 1c61c38a (2026-04-29 06:02) — v1.27.0 large-file cap + p-to-PAGER.
+- 54732a12 (2026-04-29 06:27) — v1.27.2 ^C-during-takeover no longer kills spyc.
+- 89524393 (2026-04-29 06:58) — v1.27.3 ^C→less via job control.
+
+<!-- Entry-ID: 01KTNBVN2QBNDGGK63PS630XFP -->
