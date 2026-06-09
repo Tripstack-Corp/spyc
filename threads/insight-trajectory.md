@@ -1141,3 +1141,59 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
 
 <!-- Entry-ID: 01KTMTYD14PH98B47DYQKDK4YG -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:02:37.942602+00:00
+Role: critic
+Type: Closure
+Title: Window-2 Closure: ten stated-plan documents dispositioned across six per-document entries; the asymmetry shifts — TWO near-exact positive executions (vs window-1's zero); the development mode moves from roadmap-as-loose-inspiration to plan-doc-as-executable-spec
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+The window-2 (#38–#311) continuation is assembled. Ten stated-plan documents across six per-document entries plus framing. Per-document trajectory dispositions:
+
+- **Document #1 (docs/MVU_PLAN.md, PR #196)** — NEAR-EXACT EXECUTION. All 8 phases (−1…6) plus last-mile landed in order, against named done-criteria, with two self-corrections recorded *in the plan* (the "zero test edits" relaxation; the "vacuous grep" metric fix). The "hold until 2.0+2wk → pre-2.0" sequencing reversal was honored in the strong sense (reversed-then-executed).
+- **Document #2 (REFACTOR_PLAN.md)** — EXECUTED-AND-TIGHTENED. Phases 1–2 landed (mod.rs 12,450→8,427); the ~1500-line target SUPERSEDED downward to CLAUDE.md's ~800-line ceiling (PR #282); Phase 3 delegated wholesale to MVU_PLAN and executed there.
+- **Document #3 (docs/V1_5_PLAN.md)** — NEAR-EXACT EXECUTION (second). Five of six phases executed as specified across arc-05 (1/2/3/5) and arc-03 (6), in the stated order; Phase 4 direction-landed-across-windows; non-goals (incl. "no MVU here") honored. Shipped v1.50.0.
+- **Documents #4 + #5 (V1_60 CounterTop, V1_70 Mise en Place)** — AUTHORED-NOT-EXECUTED. Both "plan, not yet implemented" at #311. V1_60 carries a same-day internal recursive→siblings reversal (#76→#77); V1_70's crate-split PREREQUISITE (the decomposition) DID execute in-window, the protocol work did not.
+- **Documents #6 + #7 + #8 (AUTO_APPROVAL, PANE_RECOVERY, PANE_STARTUP_TABS)** — POSITIVE DEFERRED / NEGATIVE HONORED, three for three. Capabilities unexecuted at #311; each plan's rejection or scope-exclusion (pty-interception rejection; the in-session-fix scope-boundary, whose excluded fix DID land at #94; the splits-deferral) honored at exact-state grain.
+- **Documents #9 + #10 (YAZI_COMPETITIVE_REVIEW, roadmap-reorg-#179)** — ROADMAP-DIRECTION EXECUTED CLEANLY. YAZI's adopts landed same-day as ROADMAP edits (#158); its non-goals (Lua plugins, image preview) honored. The #179 reorg executed its decomposition-onto-2.0 promotion and same-day-reversed its MVU-hold (which then executed).
+
+**The window-2 asymmetry tally, and the EXPLICIT contrast with window-1's fifteen-and-zero.**
+
+Window-1's terminal count: *Skip-or-non-goal-or-stated-state honored: 15. Exactly-as-specified positive-recommendation execution: 0.* Its load-bearing observation was the negative-vs-positive asymmetry — negatives uniformly honored, positives all in modified shape, **zero clean positive executions**.
+
+Window-2's count:
+
+- **Near-exact positive-recommendation executions: 2** (MVU_PLAN's 8 phases; V1_5_PLAN's 6 phases) — plus 1 executed-and-tightened (REFACTOR_PLAN decomposition). **This is the headline contrast: window-1 had zero clean positive executions; window-2 has at least two near-exact ones, both multi-phase capability-shipping plans.**
+- **Negative / rejection / non-goal / scope-exclusion honored: at least 8** — AUTO_APPROVAL pty-rejection (1); PANE_RECOVERY scope-boundary (1); PANE_STARTUP splits-deferral (1); YAZI non-goals Lua-plugins + image-preview (2); V1_5 non-goals cursor-shape + pane-mouse + "no MVU here" (3). The negative-honor pattern from window-1 RECURS uniformly — every negative-register element in window-2 is honored at exact-state grain, zero violated.
+- **Positive capability deferred-beyond-window (authored-not-executed): 5** — V1_60, V1_70, and the AUTO_APPROVAL / PANE_RECOVERY / PANE_STARTUP positive halves.
+
+So the two windows agree on the NEGATIVE side (negatives uniformly honored: 15 in window-1, ≥8 in window-2, zero violations in either) and DIVERGE sharply on the POSITIVE side: window-1 zero clean positive executions; window-2 two near-exact ones. **The window-2 trajectory finding is that the development mode shifted from *roadmap-as-loose-inspiration* (window 1) to *plan-doc-as-executable-spec* (window 2).** In window-1 the maintainer's forward-statements were borrow/adapt/skip rankings and ROADMAP one-liners — none executed exactly. In window-2 the forward-statements that *activated* were numbered-phase plans with done-criteria and adversarial-review provenance (MVU, V1_5) — and those executed near-exactly. The disposition profile tracks the document kind: executable-spec → near-exact; loose-recommendation/feature-plan-not-activated → deferred or modified; negative-register → honored exactly (unchanged across both windows).
+
+**A competing reading, preserved (the evidence is partly mixed).** One could read window-2's "two near-exact executions" as NOT a mode-shift but a *selection effect*: the documents that executed near-exactly (MVU, V1_5) are precisely the ones that were *activated* in-window, while five positive plans (V1_60, V1_70, and three feature plans) sit deferred — so the window's *aggregate* positive-execution rate is not obviously higher than window-1's; it is bimodal (activated plans execute cleanly; un-activated plans don't execute at all). Under this reading the finding is narrower: *when an executable-spec document is activated, it executes near-exactly* — which is a conditional claim, not a blanket "positives now land." Both readings fit the evidence. The trajectory thread states the bimodality factually: 2 near-exact executions among activated phase-plans; 5 positive deferrals among un-activated plans; the negative register honored uniformly throughout. Which reading (mode-shift vs selection-effect) names the truth is a property question — reserved for `insight-emergent-properties`.
+
+**What this contributes to the network.** Window-1 named the fifteen-and-zero asymmetry as its most surprising number. Window-2 names the *positive-side break* (two near-exact executions where window-1 had zero) as its most surprising number, while confirming the negative side holds. The cross-window comparison is itself the contribution: the negative-honor discipline is *invariant* across both windows; the positive-execution disposition is *document-kind-dependent*, and the window-2 corpus contains the document kind (numbered phase-plan with done-criteria) that window-1's corpus lacked.
+
+**Cross-thread observation for `insight-emergent-properties`.** Tier-4 candidates flagged with explicit data:
+- *The document-kind-vs-disposition correlation.* Executable-spec documents (MVU, V1_5) executed near-exactly; loose-recommendation documents (window-1's lazygit catalogue) landed in modified shape; un-activated feature plans (AUTO_APPROVAL/PANE_*) deferred their positives. Rich enough to name a property; the trajectory thread states only the correlation.
+- *The negative-honor invariance across both windows.* 15 honored in window-1, ≥8 in window-2, zero violations in either. The *kind* of negative differs (non-goals, advisory ignores, rejections, scope-exclusions); the uniform honor is invariant. Property name reserved.
+- *The plan-self-correction pattern.* MVU_PLAN and REFACTOR_PLAN both recorded their own criterion-misses mid-execution (the "zero test edits" relaxation; the `wc -l ≤4500` correction). Whether "the plan corrects itself rather than the execution diverging" is a property of executable-spec discipline is tier-4.
+- *The mode-shift-vs-selection-effect competing reading.* The trajectory thread preserved both; naming which is correct is the emergent-properties thread's job.
+
+**The thread is left OPEN.** Cross-thread references from `insight-emergent-properties` will cite this continuation's per-document entry IDs.
+
+Provenance:
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
+- window-2 document #1 (MVU_PLAN near-exact) = 01KTMTPYARF1GDCQHMMF9YN5J1.
+- window-2 document #2 (REFACTOR_PLAN executed-and-tightened) = 01KTMTR9XYV5ZW49ENMMP4CMBE.
+- window-2 document #3 (V1_5_PLAN near-exact) = 01KTMTSTYW0ZAF94QBA9NPH340.
+- window-2 documents #4+#5 (V1_60/V1_70 authored-not-executed) = 01KTMTV4HNBFHZGZ5HF895YFYS.
+- window-2 documents #6+#7+#8 (feature plans, positive-deferred/negative-honored) = 01KTMTWQ02AVXBS4DX61N8CHGV.
+- window-2 documents #9+#10 (YAZI + roadmap-reorg) = 01KTMTYD14PH98B47DYQKDK4YG.
+- window-1 closure (terminal 15-and-0) = 01KR3F9EF9WF9Q34FRAR2XPSZS; window-1 asymmetry tail = 01KR3FEAYFQS8QVXCPN4KQ8QYK; window-1 framing = 01KR3EJ0RWZXEBMYHY9EEZQX4A.
+- supporting seg threads: `history-seg-docs-planning`, `history-seg-refactor-mvu`, `history-seg-module-decomposition`, `history-arc-05-pager-surface`, `history-arc-03-pane-behavior`.
+
+<!-- Entry-ID: 01KTMV0966Y4EGA3D07XN0PZKY -->
