@@ -194,21 +194,25 @@ pub struct GitStatusCache {
     pub entries: Vec<crate::git::status::StatusEntry>,
 }
 
-/// Which surface owns the keyboard — the single focus axis that replaces
-/// the scattered `pane_focused: bool` writes. In Phase 0 the only
-/// observable derived from this is `pane_focused()`
-/// (== `matches!(self, Focus::Pane)`); the FileList / Overlay / Pager
-/// distinction is carried for the render label and future phases, but
-/// every non-Pane variant collapses to `pane_focused() == false`, exactly
-/// as the old bool did.
+/// Which surface owns the keyboard — the single focus axis, and the
+/// **authority** the router reads for the persistent regions. Kept correct
+/// at every loop top by `recompute_focus` (re-derived from the live surfaces
+/// via the pure `decide_focus`), so `route::route_input` maps `Overlay` →
+/// overlay-pty and `Pane` → bottom-pane directly rather than reconstructing
+/// from `top_overlay.is_some()` / a separate `pane_focused` flag.
+/// `pane_focused()` (== `matches!(self, Focus::Pane)`) is the same value,
+/// now sourced here. The *transient* modal overlays
+/// (finder/capture/quick-select/…) are the orthogonal `route::Modal` axis,
+/// not `Focus` variants. A single `Focus` names only the focused region; a
+/// `D` TopPane pager mounted above a focused bottom scrollback is tracked
+/// separately (see `route::RouteSnapshot`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     /// File-list area owns input (no pane focused, no overlay/pager
     /// owning keys). Idle / default.
     #[default]
     FileList,
-    /// Bottom pty pane owns input. Unit variant for now; a `SinkId`
-    /// payload arrives in a later MVU phase.
+    /// Bottom pty pane owns input.
     Pane,
     /// Top overlay subprocess (`V` editor / `;cmd` / huge-file `$PAGER`)
     /// owns input.

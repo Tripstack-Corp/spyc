@@ -1,4 +1,4 @@
-//! Pure key-event routing. Where does an incoming `KeyEvent` go?
+//! Pure input routing. Where does an incoming key OR paste go?
 //!
 //! Before this module, every dispatch decision lived as an inline
 //! guard inside `App::handle_key`. Five separate routing-shape bugs
@@ -9,14 +9,16 @@
 //! first place). The cleanup filed in v1.50.25 called for centralizing
 //! these into one place — this is that place.
 //!
-//! The routing is a **pure function** of a small `RouteSnapshot` —
-//! no `&App`, no side effects. That lets us unit-test every routing
-//! decision without spinning up a TUI, and lets the test file double
-//! as the regression matrix for the bugs we've already seen.
-//!
-//! `App::handle_key` builds a snapshot, calls `route_key`, and
-//! dispatches by destination. The inline guards collapse into a
-//! single `match`.
+//! `route_input(snap, kind)` is a **pure function** of a small `Copy`
+//! `RouteSnapshot` — no `&App`, no side effects. It returns an
+//! [`InputSink`] covering BOTH the transient modal overlays (the
+//! [`Modal`] axis — finder, capture, dismiss-hold, quick-select,
+//! harpoon, which eat all input) and the content destinations of the
+//! focused region (driven by the authoritative `state.focus`). Both
+//! `handle_key` and `handle_paste` dispatch on it via an **exhaustive
+//! match**, so the two input kinds cannot drift — a paste lands wherever
+//! a non-meta key would (it's never a meta-chord). The test module
+//! doubles as the regression matrix for the bugs above.
 
 use crossterm::event::KeyEvent;
 
