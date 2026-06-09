@@ -8,5 +8,18 @@
   "last_updated": "2026-06-09T00:18:46.387405+00:00",
   "summary": "The thread discusses six properties related to emergent behaviors in codebases, focusing on structural and functional asymmetries, registration patterns, and the evolution of code through additive-substrate growth. The properties highlight how the codebase's structure and history reflect both intentional and unintentional design choices, with some aspects being more prominent than others. The thread concludes with a catalog of six properties, two of which were declined, emphasizing the cumulative nature of insight threads.",
   "entry_count": 20,
-  "summary_schema_version": 3
+  "summary_schema_version": 3,
+  "annotations": {
+    "insight-emergent-properties": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-09T00:20:27.753071+00:00",
+      "vote_score": 0
+    }
+  }
 }
