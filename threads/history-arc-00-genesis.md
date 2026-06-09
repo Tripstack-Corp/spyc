@@ -125,3 +125,35 @@ Provenance:
 - 31a36e01 (2026-04-15 21:35) — pane polish: ^W prefix, focus model, divider, 30/70 split.
 
 <!-- Entry-ID: 01KTNBBP6KWVSW542TEBQ5R58S -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:48:55.736086+00:00
+Role: scribe
+Type: Note
+Title: The pager subsystem — search, ANSI, hex-dump, shell-mode capture (feeds arc-05)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the in-app pager grows from a delegate into a full viewer; shell modes (! capture / ; overlay) defined   [kind: new-capability]
+When: 2026-04-15 → 04-16 · commits 3bb95e9e, c48ef7fe, 15702012, 8368b6f9, 0ed22736
+Recorded rationale: "Enhanced in-app pager: search, ANSI colors, text-file viewing, whitespace markers" (3bb95e9e); "Hex-dump view for binary files" (c48ef7fe); "Shell modes: ! captures to pager, ; runs interactive in top overlay" (15702012)
+Inferred intent: the pager stops being a thin $PAGER delegate and becomes a native viewer with its own feature surface (search/ANSI/hex/line-numbers/save) — the arc-05 pager. The !/; shell-mode dichotomy (capture-to-pager vs interactive-overlay) is fixed here and never changes. confidence: high — evidence: these are sequential single-concern commits each adding one pager capability.
+Supersedes: supersedes the root commit's "d/Enter on text → $PAGER → less" delegation by replacing it with a native pager for in-app viewing.
+
+The native pager subsystem assembles over two days. 3bb95e9e adds in-pager search, ANSI color interpretation, text viewing, and whitespace markers. c48ef7fe adds hex-dump for binary files (the root commit had binary files as no-ops). 15702012 fixes the two shell-execution modes that persist for the whole project: `!` captures stdout to the pager, `;` runs interactively in a top overlay. 8368b6f9 adds pager line-numbers (l), save-output (s), page-back (b), and the [V] mode tag. 0ed22736 adds pane scroll mode, one-shot repaint, ^L redraw, and creates ROADMAP.md.
+
+This is the arc-05 pager's genesis: search infrastructure (/) reused later by diff-view and help; the capture path (!) that becomes the streaming pager (v0.10), the PTY-backed capture (v1.12), and the large-file cap (v1.27).
+
++1 folded: 14989f60 (2026-04-15 23:18) "UX polish: double-press quit, any-key dismiss, partial capture, F9 resume" — the double-press-quit guard (later expanded to warn on running pane processes, v1.7) and F9 capture-resume.
++1 folded: c48ef7fe whitespace/marker color tuning.
+
+Provenance:
+- 3bb95e9e (2026-04-15 21:59) — pager search/ANSI/text/whitespace.
+- c48ef7fe (2026-04-15 22:09) — hex-dump for binaries.
+- 15702012 (2026-04-15 22:54) — shell modes ! (capture→pager) / ; (interactive overlay).
+- 8368b6f9 (2026-04-15 23:51) — pager line numbers / save / page-back / [V] tag.
+- 0ed22736 (2026-04-16 00:26) — pane scroll mode + ROADMAP.md created.
+
+<!-- Entry-ID: 01KTNBCHN5019NVA29V97ZH26D -->
