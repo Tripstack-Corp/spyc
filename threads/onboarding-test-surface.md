@@ -63,3 +63,44 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-architecture = 01KR0P4W3ED1QZ8F44PFB2WPDZ`, `onboarding-risk-register = 01KR0P9JC8Z3DF6FQ1GJPF3VKA`.
 
 <!-- Entry-ID: 01KR0PBH6T1AK4VA0JSE75390F -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:17:54.833778+00:00
+Role: tester
+Type: Plan
+Title: Onboarding refresh: test and CI surface at #311 (v1.56.0) — 577 → 949 test fns, snapshot/property/pty axes, and the honest "CI is not a merge gate" caveat
+
+Spec: tester
+
+Purpose: Refresh of the test/CI surface from #37 (577 test fns, snapshot infra "wired but only status-bar covered") to #311 / v1.56.0 — the suite roughly doubled and the snapshot/property/pty axes the #37 entry tracked as TODO are now landed. The canonical local gate (`make check`) and the Bitbucket-only CI shape are unchanged in spirit; the counts and inventory are what moved.
+
+Observed:
+- **949 test fns** today (`grep -rE "#\[(tokio::)?test\]" --include="*.rs" src tests | wc -l` = 949), up from the 577 the #37 entry recorded. The `make check` gate is unchanged: `Makefile:37` `check: fmt-check lint test deny`; `test` = `cargo test --locked --all-targets` (`Makefile:42-43`), `lint` = `cargo clippy --locked --all-targets -- -D warnings` (`Makefile:46-47`), `deny` = `cargo deny --all-features check` (`Makefile:84`). Pedantic+nursery clippy with a documented allow-list still lives in `Cargo.toml`.
+- **Integration tests are now three** (#37 had two): `tests/filesystem.rs`, `tests/keymap_roundtrip.rs`, and the new `tests/pane_roundtrip.rs` — the pty/vt100 roundtrip from PR #60 (`#[cfg(unix)]`, spawns `cat` via portable-pty, drains through vt100, asserts row 0).
+- **Snapshot tests expanded from 4 to 14** glyph-level insta snapshots under `src/ui/snapshots/`: list_view (3), prompt (3: simple / vi-insert / vi-normal), status (4: mono/powerline × basic/suffix-or-agent) — the original status-bar 4 plus PR #56's 10 new widget snapshots. Pager-specific test logic lives in `src/ui/pager/tests.rs` (which is itself a large file, 794 LoC — also a 800-LoC-ceiling watch item).
+- **Property tests landed (#59):** `proptest` dev-dep + 5 properties across `src/shell/expand.rs` (`shell_quote` round-trip via a test-only POSIX decoder), `src/state/ignore.rs` (`Mask` union/self-match), and `src/keymap/resolver/tests/bindings.rs` (count composition, leading-zero handling). The #37 entry tracked these as "not in CI today / TODO.md [S]".
+- **App-harness regression tests (#199/#200)** drive the full resolver→route→dispatch path pty-free (routing/focus, overlay key-consumption, esc-closes-overlay) plus per-agent session-restore coverage — TEST_IMPROVEMENT_PLAN Phase 2.
+- **CI is Bitbucket-only**, `bitbucket-pipelines.yml` (no `.github/workflows`). Image is now `rust:1.85` (non-slim, bakes in make/git/curl; was `rust:1.85-slim` at #37) — `bitbucket-pipelines.yml:22`. Three pipeline triggers: `branches.main` and `pull-requests:'**'` each run parallel `quality` (`make check`) + `coverage` steps (`bitbucket-pipelines.yml:203-213`); a `custom: weekly-deps` schedule runs the advisory/outdated drift report (`bitbucket-pipelines.yml:215-222`). Still **no `default:` block** — a branch push without an open PR runs no CI.
+- **Coverage gate** is still the ratcheting `--fail-under-lines 35` floor, now invoked as `CARGO_TARGET_DIR=target-cov CARGO_INCREMENTAL=0 cargo llvm-cov --locked --all-targets --fail-under-lines 35` (`bitbucket-pipelines.yml:191`). The instrumented build was isolated into its own `target-cov` cache (PR #64/#65) and `CARGO_INCREMENTAL=0` (PR #69) disables stale-across-runner incremental metadata.
+- **Validation commands a contributor runs** (from the Makefile): `make doctor` (preflight), `make` (debug build), `make test`, `make check` (the exact CI gate), optionally `make lint-linux` (clippy for the musl target — catches OS-gated lints the host clippy compiles out; needs zig + cargo-zigbuild, `Makefile:59-68`) and `make install-hooks` (pre-commit runs `make check`). `make aislop` is an advisory net-new-slop scan, deliberately NOT part of `check` (`Makefile:86-106`).
+
+Inferred:
+- The MVU refactor's "behavior-equivalence behind green CI (all 786 tests → now 949)" claim is load-bearing on exactly this surface. — confidence: high — basis: `docs/MVU_PLAN.md:13,318-320,549` repeatedly asserts each phase "behavior-equivalent behind green CI (all 786 tests passing)"; that oracle is the snapshot/property/harness build-out reconstructed in `history-arc-01` entry 01KTMMQN283Z4FYP184WT4015X ("a large internal rewrite can only be asserted as no-behavior-change if there is a behavior oracle"). MVU_PLAN's frozen "786" is a point-in-time figure; the live count is 949.
+- **Coverage gap:** the 35% line floor almost certainly trails real coverage (suite doubled since the floor was set) and there is no branch-coverage gate. `docs/TEST_IMPROVEMENT_PLAN.md` is still "plan, not yet implemented" (`docs/TEST_IMPROVEMENT_PLAN.md:1-4`, citing "732 tests" — itself now stale vs 949) and names the remaining risk as workflow-composition (full `App` orchestration, pane/pty, background tasks, session restore, MCP socket lifecycle), only partially closed by #199/#200. — confidence: medium — basis: floor unchanged at `--fail-under-lines 35`; TEST_IMPROVEMENT_PLAN status line.
+
+IMPORTANT honest caveat (carry this forward): **this repo does NOT gate merges on green CI.** A broken pipeline can and did reach `main`: PR #64 shipped an invalid `--target-dir` flag to `cargo llvm-cov` and broke main's Coverage step; #65 was a fix-forward. Per `history-arc-01` entry 01KTMMPDE6S4PA834YDR24SX1H: "The repo doesn't gate merges on green pipelines so it landed and broke main's Coverage step." Treat `make check` green locally as the real gate, not the PR pipeline status.
+
+Next query: `watercooler_search(query="ci coverage make-check tests snapshot property pty", thread_topic="onboarding-test-surface", code_path=".")`
+
+Related:
+- `onboarding-developer-experience` — `make check` / `make lint-linux` / `make doctor` local mirror of the CI quality step.
+- `onboarding-architecture` — state-side (Update half) is still where most unit tests sit; MVU runtime detail in `history-seg-refactor-mvu`.
+- the history corpus — `history-arc-01-foundation-hygiene` carries the deep detail: test-surface expansion 01KTMMQN283Z4FYP184WT4015X (#56/#59/#60/#199/#200), CI-caching campaign + "CI is not a merge gate" 01KTMMPDE6S4PA834YDR24SX1H.
+
+Provenance:
+- Files read: `Makefile:37-106,59-68`, `bitbucket-pipelines.yml:22,191,203-222`, `Cargo.toml:1-8`, `docs/MVU_PLAN.md:13,318-320,549`, `docs/TEST_IMPROVEMENT_PLAN.md:1-30`. Listed `src/ui/snapshots/` (14 .snap), `src/ui/pager/tests.rs`, `tests/*.rs` (filesystem, keymap_roundtrip, pane_roundtrip).
+- Commands run: test-fn count = 949; integration-test ls; snapshot ls.
+- History entry_ids consulted: 01KTMMQN283Z4FYP184WT4015X (test-surface expansion), 01KTMMPDE6S4PA834YDR24SX1H (CI-caching + no-merge-gate), 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 (toolchain pin / INSTALL MSRV reconcile).
+- Prior #37 entry refreshed: 01KR0PBH6T1AK4VA0JSE75390F.
+
+<!-- Entry-ID: 01KTND1M6375FEN2AH79JJT7RN -->
