@@ -22,6 +22,7 @@ use crossterm::event::KeyEvent;
 
 use crate::ui::pager::Mount;
 
+use super::modal::{Modal, ModalSnapshot, active_modal};
 use super::{App, Mode};
 
 /// Which kind of input event is being routed. A key may be a meta-chord
@@ -86,17 +87,11 @@ pub(super) enum InputSink {
 /// fields in update-syntax (`RouteSnapshot { foo: true, ..idle() }`).
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RouteSnapshot {
-    /// `F` fuzzy-finder picker is open (`runtime.find_picker`).
-    pub has_find_picker: bool,
-    /// A `!` capture child is running (`runtime.pending_capture`).
-    pub has_capture: bool,
-    /// A top-overlay subprocess has exited and awaits a dismiss keypress
-    /// (`view.overlay_awaiting_dismiss`).
-    pub overlay_awaiting_dismiss: bool,
-    /// Quick-select label overlay is open (`view.quick_select`).
-    pub has_quick_select: bool,
-    /// Harpoon menu is open (`view.harpoon_menu`).
-    pub has_harpoon: bool,
+    /// The transient modal overlay swallowing input, if any (the finder,
+    /// a running capture, an overlay-dismiss hold, quick-select, harpoon).
+    /// Decided by [`active_modal`] over the backing fields. Checked before
+    /// the content layer.
+    pub modal: Option<Modal>,
     /// `state.mode` is `Mode::Prompting(_)`.
     pub is_prompting: bool,
     /// `App::top_overlay.is_some()` — `V`/`;` overlay pty alive.
@@ -128,21 +123,15 @@ pub(super) struct RouteSnapshot {
 /// be a meta-chord that escapes to the resolver, but a paste is always
 /// content (`is_meta == false`) so it lands wherever a non-meta key would.
 pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSink {
-    // Modal layer — order mirrors the old pre-check ladder.
-    if snap.has_find_picker {
-        return InputSink::FindPicker;
-    }
-    if snap.has_capture {
-        return InputSink::Capture;
-    }
-    if snap.overlay_awaiting_dismiss {
-        return InputSink::OverlayDismiss;
-    }
-    if snap.has_quick_select {
-        return InputSink::QuickSelect;
-    }
-    if snap.has_harpoon {
-        return InputSink::Harpoon;
+    // Modal layer — a single typed value (precedence decided by `active_modal`)
+    // maps straight to its sink. Eats every input kind before the content layer.
+    match snap.modal {
+        Some(Modal::FindPicker) => return InputSink::FindPicker,
+        Some(Modal::Capture) => return InputSink::Capture,
+        Some(Modal::OverlayDismiss) => return InputSink::OverlayDismiss,
+        Some(Modal::QuickSelect) => return InputSink::QuickSelect,
+        Some(Modal::Harpoon) => return InputSink::Harpoon,
+        None => {}
     }
 
     // Content layer.
@@ -222,11 +211,13 @@ impl App {
     /// Pure read of the fields the router cares about.
     pub(super) fn route_snapshot(&self) -> RouteSnapshot {
         RouteSnapshot {
-            has_find_picker: self.runtime.find_picker.is_some(),
-            has_capture: self.runtime.pending_capture.is_some(),
-            overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
-            has_quick_select: self.view.quick_select.is_some(),
-            has_harpoon: self.view.harpoon_menu.is_some(),
+            modal: active_modal(ModalSnapshot {
+                has_find_picker: self.runtime.find_picker.is_some(),
+                has_capture: self.runtime.pending_capture.is_some(),
+                overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
+                has_quick_select: self.view.quick_select.is_some(),
+                has_harpoon: self.view.harpoon_menu.is_some(),
+            }),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             has_top_overlay: self.runtime.top_overlay.is_some(),
             pager_mount: self.view.pager.as_ref().map(|v| v.mount),
@@ -250,11 +241,7 @@ mod tests {
     /// Snapshot with every flag at its quiescent default.
     fn idle() -> RouteSnapshot {
         RouteSnapshot {
-            has_find_picker: false,
-            has_capture: false,
-            overlay_awaiting_dismiss: false,
-            has_quick_select: false,
-            has_harpoon: false,
+            modal: None,
             is_prompting: false,
             has_top_overlay: false,
             pager_mount: None,
@@ -594,10 +581,16 @@ mod tests {
     // plain key, a `^a` meta chord, AND a paste to its sink, even with a
     // focused pane present.
 
+    // Each modal maps to its sink and eats a plain key, a `^a` meta chord, AND
+    // a paste — even with a focused pane present. (The finder/capture/etc.
+    // PRECEDENCE among simultaneously-set modals lives in `modal::active_modal`
+    // and is table-tested there; `RouteSnapshot.modal` carries the single
+    // decided value.)
+
     #[test]
     fn find_picker_eats_all_input() {
         let snap = RouteSnapshot {
-            has_find_picker: true,
+            modal: Some(Modal::FindPicker),
             has_pane_tabs: true,
             pane_focused: true,
             ..idle()
@@ -610,7 +603,7 @@ mod tests {
     #[test]
     fn capture_eats_all_input() {
         let snap = RouteSnapshot {
-            has_capture: true,
+            modal: Some(Modal::Capture),
             has_pane_tabs: true,
             pane_focused: true,
             ..idle()
@@ -623,7 +616,7 @@ mod tests {
     #[test]
     fn overlay_dismiss_eats_all_input() {
         let snap = RouteSnapshot {
-            overlay_awaiting_dismiss: true,
+            modal: Some(Modal::OverlayDismiss),
             has_top_overlay: true,
             ..idle()
         };
@@ -638,7 +631,7 @@ mod tests {
     #[test]
     fn quick_select_eats_all_input() {
         let snap = RouteSnapshot {
-            has_quick_select: true,
+            modal: Some(Modal::QuickSelect),
             has_pane_tabs: true,
             pane_focused: true,
             ..idle()
@@ -651,48 +644,12 @@ mod tests {
     #[test]
     fn harpoon_eats_all_input() {
         let snap = RouteSnapshot {
-            has_harpoon: true,
+            modal: Some(Modal::Harpoon),
             ..idle()
         };
         assert_eq!(route_key(snap, key('1')), InputSink::Harpoon);
         assert_eq!(route_key(snap, ctrl('a')), InputSink::Harpoon);
         assert_eq!(route_input(snap, InputKind::Paste), InputSink::Harpoon);
-    }
-
-    /// Modal precedence: with several modal flags set at once, the order
-    /// is find_picker > capture > dismiss > quick_select > harpoon —
-    /// mirroring the historical `handle_key` pre-check ladder.
-    #[test]
-    fn modal_precedence_order() {
-        let all = RouteSnapshot {
-            has_find_picker: true,
-            has_capture: true,
-            overlay_awaiting_dismiss: true,
-            has_quick_select: true,
-            has_harpoon: true,
-            ..idle()
-        };
-        assert_eq!(route_key(all, key('j')), InputSink::FindPicker);
-        let no_finder = RouteSnapshot {
-            has_find_picker: false,
-            ..all
-        };
-        assert_eq!(route_key(no_finder, key('j')), InputSink::Capture);
-        let no_capture = RouteSnapshot {
-            has_capture: false,
-            ..no_finder
-        };
-        assert_eq!(route_key(no_capture, key('j')), InputSink::OverlayDismiss);
-        let no_dismiss = RouteSnapshot {
-            overlay_awaiting_dismiss: false,
-            ..no_capture
-        };
-        assert_eq!(route_key(no_dismiss, key('j')), InputSink::QuickSelect);
-        let only_harpoon = RouteSnapshot {
-            has_quick_select: false,
-            ..no_dismiss
-        };
-        assert_eq!(route_key(only_harpoon, key('j')), InputSink::Harpoon);
     }
 
     /// The unifying invariant: a paste lands wherever a non-meta printable
@@ -702,6 +659,14 @@ mod tests {
     /// the guard that keeps `handle_paste` and `handle_key` from drifting.
     #[test]
     fn paste_agrees_with_non_meta_key() {
+        let modals = [
+            None,
+            Some(Modal::FindPicker),
+            Some(Modal::Capture),
+            Some(Modal::OverlayDismiss),
+            Some(Modal::QuickSelect),
+            Some(Modal::Harpoon),
+        ];
         let mounts = [
             None,
             Some(Mount::Overlay),
@@ -709,36 +674,34 @@ mod tests {
             Some(Mount::LowerPane),
         ];
         let plain = key('x'); // non-meta printable
-        // Sweep every combination of the 12 boolean snapshot bits crossed
-        // with each pager mount. A flat bit-decode beats a 12-deep `for`
-        // pyramid: bit `i` of `bits` drives the i-th field. `resolver_pending`
-        // is held false on purpose: with a chord pending, EVERY key (incl.
-        // `x`) is meta and escapes to the resolver, while a paste is never
-        // meta — so "paste == non-meta key" only holds when no chord pends.
+        // Sweep each modal value × each pager mount × every combination of the
+        // 7 remaining boolean bits (a flat bit-decode beats a deep `for`
+        // pyramid: bit `i` of `bits` drives the i-th field). `resolver_pending`
+        // is held false on purpose: with a chord pending, EVERY key (incl. `x`)
+        // is meta and escapes to the resolver, while a paste is never meta — so
+        // "paste == non-meta key" only holds when no chord pends.
         let on = |bits: u32, i: u32| bits & (1 << i) != 0;
-        for &pager_mount in &mounts {
-            for bits in 0..(1u32 << 12) {
-                let snap = RouteSnapshot {
-                    has_find_picker: on(bits, 0),
-                    has_capture: on(bits, 1),
-                    overlay_awaiting_dismiss: on(bits, 2),
-                    has_quick_select: on(bits, 3),
-                    has_harpoon: on(bits, 4),
-                    is_prompting: on(bits, 5),
-                    has_top_overlay: on(bits, 6),
-                    pager_mount,
-                    has_scroll_pager: on(bits, 7),
-                    has_pane_tabs: on(bits, 8),
-                    pane_focused: on(bits, 9),
-                    pane_scrolling: on(bits, 10),
-                    pane_closed: on(bits, 11),
-                    resolver_pending: false,
-                };
-                assert_eq!(
-                    route_input(snap, InputKind::Paste),
-                    route_input(snap, InputKind::Key(plain)),
-                    "paste must agree with a non-meta key for {snap:?}"
-                );
+        for &modal in &modals {
+            for &pager_mount in &mounts {
+                for bits in 0..(1u32 << 7) {
+                    let snap = RouteSnapshot {
+                        modal,
+                        is_prompting: on(bits, 0),
+                        has_top_overlay: on(bits, 1),
+                        pager_mount,
+                        has_scroll_pager: on(bits, 2),
+                        has_pane_tabs: on(bits, 3),
+                        pane_focused: on(bits, 4),
+                        pane_scrolling: on(bits, 5),
+                        pane_closed: on(bits, 6),
+                        resolver_pending: false,
+                    };
+                    assert_eq!(
+                        route_input(snap, InputKind::Paste),
+                        route_input(snap, InputKind::Key(plain)),
+                        "paste must agree with a non-meta key for {snap:?}"
+                    );
+                }
             }
         }
     }

@@ -186,6 +186,7 @@ mod loop_steps;
 mod mcp;
 #[cfg(test)]
 mod mod_tests;
+mod modal;
 mod navigate;
 mod pager_handler;
 mod pager_history;
