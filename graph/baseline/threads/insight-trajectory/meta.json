@@ -13,12 +13,13 @@
     "insight-trajectory": {
       "reactions": {},
       "tags": [
-        "onboarding"
+        "onboarding",
+        "insight"
       ],
       "flags": [],
       "xrefs": [],
       "pinned": false,
-      "last_touched": "2026-06-09T00:20:10.739664+00:00",
+      "last_touched": "2026-06-09T00:20:18.029087+00:00",
       "vote_score": 0
     }
   }
