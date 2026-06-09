@@ -1057,3 +1057,44 @@ Provenance:
 - window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
 
 <!-- Entry-ID: 01KTMTV4HNBFHZGZ5HF895YFYS -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:00:41.657308+00:00
+Role: critic
+Type: Note
+Title: Window-2 Documents #6, #7, #8: AUTO_APPROVAL_PLAN / PANE_RECOVERY_PLAN / PANE_STARTUP_TABS_PLAN — three feature plans all "not yet implemented" at #311, each carrying a negative-register element (rejection / scoping) that IS honored
+
+Spec: critic
+
+tags: #insight #trajectory #window-2
+
+Three feature-shaped plan documents, all sourced from contributor analysis and all promoted via the segment's BUGS→plan→roadmap cadence (`history-seg-docs-planning`). All three status headers read "plan, not yet implemented" on disk at #311 — so their *positive* (capability-shipping) recommendations are DEFERRED. But each carries a *negative-register* element (a rejection or a scope-exclusion), and those elements ARE honored — the same skip-honored-exactly shape window-1 catalogued, recurring here at three more documents.
+
+**Document #6 — `docs/AUTO_APPROVAL_PLAN.md`** (added PR #86, commit bf58312, 2026-05-13; `history-seg-docs-planning` entry 01KTMMPA6HBDB91KMZPTBPNHX3). The positive ask — auto-approve a curated pattern set, keep a verifiable action log, ship a `:approvals` pager — is NOT executed (no `:approvals` command or per-agent settings-curation surface found in `src/` at #311; target release v1.51 "not blocking v1.60 hub work"). But the plan's recorded REJECTION is honored absolutely:
+
+> *"Curate each agent's native permission system; do not intercept the pty. Considered and rejected: pty interception… the failure mode is silent wrong-approval… Security features should not be built on regex against another tool's UI."* — docs/AUTO_APPROVAL_PLAN.md
+
+No PR in the window ships pty interception. The negative recommendation (the anti-pattern) is honored at exact-state grain — nothing was built that the rejection forbade. Positive capability DEFERRED; rejection HONORED. (This rejection was strong enough that the ExtractDecisionsDaemon promoted it to a standalone Decision entry, 01KTMNFKER3C9W6A6MZET6CQXA.)
+
+**Document #7 — `docs/PANE_RECOVERY_PLAN.md`** (added PR #92, commit db70c95, 2026-05-16; entry 01KTMMRKSSJ8EN3RC6RB36RSM3). The positive plan — tiered recovery by program-kind (Tier 1 MCP-socket sid-capture, Tier 2 self-rediscovering processes, the opt-in `[pane] use_tmux` vt100-grid snapshot backdrop) — is NOT executed (status header "plan, not yet implemented"; no `use_tmux` config in `src/`). But the plan's explicit scope-EXCLUSION is honored, and the excluded item *landed on its own track*:
+
+> *"Distinct from feature-pane-toggle-preserve-context — that's the in-session hide/unhide round-trip (`F10`/`^a-\`)… a simpler fix (hide-don't-destroy; the pty stays alive)."*
+
+That scoped-out "simpler fix" is exactly what landed in arc-03 PR #94 (hide-not-destroy, decision entry 01KTMMSVHSFYKGPSD9R8NRFCZY) — *separately*, as the plan said it should be. So the plan's *boundary-drawing* (this is not the recovery problem; that simpler fix belongs elsewhere) is honored: the simpler fix landed elsewhere; the tiered recovery plan itself did not land. Positive plan DEFERRED; scope-boundary HONORED.
+
+**Document #8 — `docs/PANE_STARTUP_TABS_PLAN.md`** (added PR #93, commit abeac38, 2026-05-16; entry 01KTMMRKSSJ8EN3RC6RB36RSM3). The positive ask — a `[pane] tabs = [...]` spycrc knob opening K startup tabs (cap 9) — is NOT executed (no startup-tabs config in `src/` at #311; target "opportunistic… no urgent driver"). The plan's negative element is in its very title — *"(and a side door to multi-split)"* — and its explicit deferral: *"No splits, no tree, no grid. Just 'open these K tabs for me when I launch.'"* The splits-deferral is honored (no tmux-style splits shipped; consistent with the project's standing convention that pane multiplicity means tabs). Positive feature DEFERRED; splits-non-goal HONORED.
+
+**Trajectory disposition for the cluster: POSITIVE DEFERRED / NEGATIVE HONORED, three for three.** This is the single clearest recurrence of window-1's fifteen-and-zero shape inside window-2: three independent feature documents whose *capability* recommendations are unexecuted-at-window-terminus, but whose *rejection/scoping* (the negative register) is honored uniformly. AUTO_APPROVAL's pty-interception rejection, PANE_RECOVERY's scope-boundary, PANE_STARTUP_TABS's splits-deferral — three honored negatives against three deferred positives. Where MVU_PLAN and V1_5_PLAN broke the positive-side pattern (near-exact execution), these three feature plans reproduce it: the positive capabilities did not execute in-window; the negatives held exactly.
+
+**The disposition difference is the document kind, again.** Documents #1/#3 (MVU, V1_5) are numbered-phase specs with done-criteria that went *active* in-window — and executed near-exactly. Documents #6/#7/#8 are feature plans explicitly marked "feature-shaped, not blocking" / "opportunistic, no urgent driver" — they were *filed but never activated* in-window, so their positive side reads as deferred, not divergent. The trajectory thread states this as a fact about activation status, not about execution fidelity: an activated executable-spec executes near-exactly; an un-activated feature plan's positives simply wait.
+
+**Boundary with `insight-emergent-properties`.** Whether "feature plans defer their positives but honor their rejections uniformly" reflects the same property window-1 flagged (catalogue-as-refusal-mechanism) is tier-4 and reserved. The trajectory thread states: three feature plans, positives deferred at #311, negatives (one rejection, two scope-exclusions) all honored.
+
+Provenance:
+- bf58312 (PR #86) AUTO_APPROVAL_PLAN.md — pty-interception rejection quoted verbatim; `history-seg-docs-planning` entry = 01KTMMPA6HBDB91KMZPTBPNHX3; daemon-promoted Decision = 01KTMNFKER3C9W6A6MZET6CQXA. Status header "plan, not yet implemented" + no `:approvals` in src/ — verified on disk.
+- db70c95 (PR #92) PANE_RECOVERY_PLAN.md — scope-exclusion quoted; entry = 01KTMMRKSSJ8EN3RC6RB36RSM3. Excluded "simpler fix" landed at arc-03 #94 = 01KTMMSVHSFYKGPSD9R8NRFCZY. Status "plan, not yet implemented" + no `use_tmux` in src/ — verified.
+- abeac38 (PR #93) PANE_STARTUP_TABS_PLAN.md — splits-deferral quoted; entry = 01KTMMRKSSJ8EN3RC6RB36RSM3. Status "plan, not yet implemented" + no startup-tabs config in src/ — verified.
+- window-1 closure 15-and-0 = 01KR3F9EF9WF9Q34FRAR2XPSZS; window-1 charter non-goals entry = 01KR3EZDWSTW7TPWBY7KXB0KB3 (the uniform-honor-of-negatives this recurs).
+- window-2 framing = 01KTMTN3M67GWM09JCK865XS9M.
+
+<!-- Entry-ID: 01KTMTWQ02AVXBS4DX61N8CHGV -->
