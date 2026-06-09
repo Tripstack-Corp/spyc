@@ -947,3 +947,62 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 5 = 01KTMTWQR1TJTNDNPZH3X6JDHP.
 
 <!-- Entry-ID: 01KTMTYBDZ99R8XBA44E6NTZRQ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:02:32.582238+00:00
+Role: critic
+Type: Closure
+Title: Closure (window-2): #38–#311 recurrence continuation assembled — six shapes (2 new, 2 evolved, 2 native), ~60 instances; observations flagged for insight-trajectory and insight-emergent-properties
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+The second-window continuation is assembled. Six recurrence shapes across the #38–#311 record (7 extended arcs + 6 new seg threads, ~123 moments). Per-shape instance counts:
+
+- **Pattern 1: Strangler-fig migration** — 2 campaign-scale instances (MVU, gix), each full grow→parity→flip→drop, with a 2-register sub-shape (runtime-flag escape hatch for gix vs revertable-phases-behind-CI for MVU). **NEW shape; no window-1 equivalent.** Entry 01KTMTNYS83V5A7PY2MJVV60MF.
+- **Pattern 2: Phase-numbered PR-train** — 3 campaign-trains (MVU phases −1..6/D/E, mod-extract pr1..12, gix 9-step), 1 folded near-miss (CI-caching burst, no explicit ordering), 2-1 risk-ordered/flat sub-split. **EVOLUTION of window-1 Pattern 6 (implicit→explicit-and-numbered).** Entry 01KTMTQSTE7QSH8WJ442ADX02F.
+- **Pattern 3: Verbatim-relocation** — ~40–45 instances across module-decomposition + MVU extraction; identified by `+N/-N` diff-balance signature (machine-checkable), with a prep-then-verbatim exception sub-shape (state.rs #307). **Highest instance count in either window. Native to window-2.** Entry 01KTMTSAVQNENHP8ZFWBKTWXN6.
+- **Pattern 4: Per-X-repetition-then-generalize** — 2 surfaces (AgentProfile #176, PagerStream #309–#311), each a full repeat→collapse cycle, payoff measured by next-instance cost (zot +18min; 3 sources migrated), partial-generalization-during-repetition sub-shape. **Successor to window-1 Pattern 6's accretion (accrete-then-collapse vs accrete-and-stop). Native to window-2.** Entry 01KTMTTZQK31H30M2RQ6J3FEY1.
+- **Pattern 5: Plan-doc-then-execute** — 5 plan→execute handoffs across segment boundaries (MVU_PLAN, pane plans, V1_5_PLAN, AUTO_APPROVAL, V1_70), positioning-thesis declined as instance, recorded-supersession sub-property (plan thread holds rejected designs). **Native to window-2 (window-1's planning was too thin to recur).** Entry 01KTMTWQR1TJTNDNPZH3X6JDHP.
+- **Pattern 6: Patch-corridor release cadence** — v1.41.x corridor extends to .37, v1.50.x corridor .0→.82, v1.51.4/v1.56.0 minors; ledger-verified; minor-cut-marks-capability sub-shape. **EVOLUTION of window-1 Pattern 5 (same shape, confirmed standing + corridors lengthen).** Entry 01KTMTYBDZ99R8XBA44E6NTZRQ.
+
+**Six shapes, ~60 instances total** (2 strangler-figs + 3 phase-trains + ~45 verbatim relocations + 2 generalizations + 5 plan-executes + ~3 release corridors/minors), depending on how the folded waves are tallied — the verbatim-relocation count carries the imprecision and is stated as ~45.
+
+**Window-1 → window-2 lineage of the catalogue itself.** The six window-2 shapes split 2 new / 2 evolved / 2 native:
+- **New (no window-1 vantage):** Pattern 1 strangler-fig. Window-1 had no migration shape; the larger window's defining engineering move is replacing legacy implementations behind parity gates.
+- **Evolved from a window-1 pattern:** Pattern 2 (from window-1 Pattern 6 implicit-machinery-chain — the chain went explicit and numbered) and Pattern 6 (from window-1 Pattern 5 v1.41.x cadence — same corridor, now shown standing and lengthening). Pattern 4 is a *successor* to window-1 Pattern 6's accretion without being a strict evolution — it is the collapse window-1's accretion never reached.
+- **Native to window-2 (no window-1 precursor, born of the window's scale):** Pattern 3 verbatim-relocation (the decomposition campaign did not exist in 22 days) and Pattern 5 plan-doc-then-execute (window-1 had one plan doc, not a recurring plan→execute handoff).
+
+Three of window-1's six patterns (bundle-as-shape, supersession-acknowledgement, BUGS.md SMALL→FIXED lift) are not re-catalogued here — they are per-PR shapes that surely still occur in window-2, but the continuation's job is the *new and evolved campaign-scale* shapes the larger window surfaces, not re-counting window-1's per-PR shapes across 273 PRs. (BUGS→ROADMAP promotion does recur — docs-planning 01KTMMYFCAPJDTD83XH66BE7P8 — and is the window-2 echo of the SMALL→FIXED lift, folded into Pattern 5's recorded-supersession sub-property rather than given its own entry.)
+
+**Cross-thread observation for `insight-trajectory`'s author (tier-3).** The window-2 shapes differ in plan-correlation, sharply:
+- **Pattern 5 (plan-doc-then-execute) is the trajectory thread's primary fuel.** It *counts the handoff*; whether each execution tracked its plan (all eight MVU phases? PANE_RECOVERY's tiers?) is the tier-3 question this thread explicitly declined. The five plan docs (MVU_PLAN, V1_5/V1_60/V1_70_PLAN, AUTO_APPROVAL, PANE_RECOVERY) are the stated-trajectory substrate.
+- **Pattern 1 (strangler-fig) is highly plan-correlated** for MVU (MVU_PLAN records the full lifecycle) and gix (the "9-step … Removed in PR 9" plan is in-code). The trajectory thread can ask: did the flip/drop land where the plan said?
+- **Pattern 6 (release cadence) is plan-uncorrelated** — no doc states "patches dominate; minors mark capability." Observed everywhere, stated nowhere (carried over from window-1's closure flag).
+- **Patterns 2/3/4 are governed by recorded conventions** (REFACTOR_PLAN Phase-1 verbatim rule, the CLAUDE.md ~800-line ceiling at 01KTMMJVZMX3SJCBSK8YF896YP) rather than roadmap trajectory; the trajectory thread can treat those conventions as micro-plans.
+
+**Cross-thread observation for `insight-emergent-properties`'s author (tier-4).** Which shapes carry tier-4 weight:
+- **Pattern 1 (strangler-fig) carries heavy tier-4 weight** — two instances with two escape-hatch registers (flag vs CI-phases) is a rich substrate for naming a risk-management property. The temptation to name *why parity-behind-a-flag is this maintainer's habit* was this thread's most acute tier-2-discipline test; declined here.
+- **Pattern 3 (verbatim-relocation, ~45×) carries tier-4 weight** — a micro-shape recurring 45× with a machine-checkable diff signature invites a property at the working-discipline grain (the ceiling-driven decomposition reflex).
+- **Pattern 4 (repeat-then-generalize) carries tier-4 weight** — the measured-next-instance-payoff signature across two surfaces is an abstraction-discipline property candidate.
+- **Pattern 6 (release cadence) carries heavy tier-4 weight** — two long corridors + capability-marking minors is the release-dynamics property window-1's closure already pre-flagged, now with more data.
+- **Pattern 2/5** carry tier-3-shared weight (plan-and-convention-governed); emergent-properties should not collapse the plan-execute property into the trajectory reading.
+
+**Per-shape counts, final.**
+- Pattern 1: 2 instances (MVU, gix), 1 fractal sub-instance (gix diff sub-arc).
+- Pattern 2: 3 campaign-trains, 1 folded near-miss.
+- Pattern 3: ~40–45 verbatim relocations, 1 prep-exception.
+- Pattern 4: 2 surfaces, full cycles.
+- Pattern 5: 5 plan→execute handoffs, 1 declined (thesis).
+- Pattern 6: 2 patch corridors (v1.41.x→.37, v1.50.x→.82) + capability-marking minors (v1.50.0, v1.56.0).
+
+**The thread is left OPEN.** Cross-references from an extended `insight-trajectory` / `insight-emergent-properties` window-2 pass will cite this continuation's per-shape entry IDs.
+
+Provenance:
+- Window-2 entries: framing 01KTMTMAB6G8JJAFFQF29XVZGB; P1 01KTMTNYS83V5A7PY2MJVV60MF; P2 01KTMTQSTE7QSH8WJ442ADX02F; P3 01KTMTSAVQNENHP8ZFWBKTWXN6; P4 01KTMTTZQK31H30M2RQ6J3FEY1; P5 01KTMTWQR1TJTNDNPZH3X6JDHP; P6 01KTMTYBDZ99R8XBA44E6NTZRQ.
+- Window-1 lineage: window-1 closure 01KR3DFHA7FRV3BXEH2Z8SFJQN; Pattern 5 01KR3D8RH5DNYC37WSGFVETXT3; Pattern 6 01KR3DC7E4B0JC1NN212PYVT56.
+- Substrate spine: history-overview second-window framing 01KTMN7X7FV45E8E05DN1RV719 + segment map 01KTMN9MRB31A0C8ZWSXX5M5ZQ; history-synthesis opener 01KTMNAVSB3410Y59S3FDMZCHQ.
+- Convention anchor cited above: history-seg-module-decomposition CLAUDE.md ceiling Decision 01KTMMJVZMX3SJCBSK8YF896YP; BUGS→ROADMAP echo 01KTMMYFCAPJDTD83XH66BE7P8.
+
+<!-- Entry-ID: 01KTMV0568M86NZC6XZENTSB6D -->
