@@ -33,10 +33,6 @@ use super::{App, Mode};
 #[derive(Debug, Clone, Copy)]
 pub(super) enum InputKind {
     Key(KeyEvent),
-    // Dead-code bridge: constructed by `handle_paste` once paste is
-    // migrated onto `route_input` (next PR). The route tests already
-    // exercise it; the `allow` is removed when the paste reader lands.
-    #[allow(dead_code)]
     Paste,
 }
 
@@ -697,5 +693,53 @@ mod tests {
             ..no_dismiss
         };
         assert_eq!(route_key(only_harpoon, key('j')), InputSink::Harpoon);
+    }
+
+    /// The unifying invariant: a paste lands wherever a non-meta printable
+    /// key would. Sweep a representative snapshot matrix and assert
+    /// `route_input(snap, Paste) == route_input(snap, Key(non_meta))` for
+    /// every combination — the executable form of "paste == content key", and
+    /// the guard that keeps `handle_paste` and `handle_key` from drifting.
+    #[test]
+    fn paste_agrees_with_non_meta_key() {
+        let mounts = [
+            None,
+            Some(Mount::Overlay),
+            Some(Mount::TopPane),
+            Some(Mount::LowerPane),
+        ];
+        let plain = key('x'); // non-meta printable
+        // Sweep every combination of the 12 boolean snapshot bits crossed
+        // with each pager mount. A flat bit-decode beats a 12-deep `for`
+        // pyramid: bit `i` of `bits` drives the i-th field. `resolver_pending`
+        // is held false on purpose: with a chord pending, EVERY key (incl.
+        // `x`) is meta and escapes to the resolver, while a paste is never
+        // meta — so "paste == non-meta key" only holds when no chord pends.
+        let on = |bits: u32, i: u32| bits & (1 << i) != 0;
+        for &pager_mount in &mounts {
+            for bits in 0..(1u32 << 12) {
+                let snap = RouteSnapshot {
+                    has_find_picker: on(bits, 0),
+                    has_capture: on(bits, 1),
+                    overlay_awaiting_dismiss: on(bits, 2),
+                    has_quick_select: on(bits, 3),
+                    has_harpoon: on(bits, 4),
+                    is_prompting: on(bits, 5),
+                    has_top_overlay: on(bits, 6),
+                    pager_mount,
+                    has_scroll_pager: on(bits, 7),
+                    has_pane_tabs: on(bits, 8),
+                    pane_focused: on(bits, 9),
+                    pane_scrolling: on(bits, 10),
+                    pane_closed: on(bits, 11),
+                    resolver_pending: false,
+                };
+                assert_eq!(
+                    route_input(snap, InputKind::Paste),
+                    route_input(snap, InputKind::Key(plain)),
+                    "paste must agree with a non-meta key for {snap:?}"
+                );
+            }
+        }
     }
 }
