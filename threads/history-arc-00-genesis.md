@@ -341,3 +341,32 @@ Provenance:
 - 14e2ab1c (2026-04-17 20:27) — v1.3.1, .git/index live watch.
 
 <!-- Entry-ID: 01KTNBJ345J5SFWXZA2YN5M6K5 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:52:28.167655+00:00
+Role: scribe
+Type: Note
+Title: Test suite + AppState extraction — app.rs becomes app/mod.rs (first decomposition, prefigures REFACTOR_PLAN)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a comprehensive test suite lands and App is split into a testable AppState; src/app.rs becomes the src/app/ directory   [kind: refactor]
+When: 2026-04-17 → 04-18 · commits 130b4664 (tests), 0961a82b (CI gating), 488ae17b (AppState), b787715e (Phase 3), 37279fc1 (Phase 4)
+Recorded rationale: "Add comprehensive test suite (74→224 tests), fix all 71 clippy errors, fix CI MSRV" (130b4664); "Extract AppState from App: 23 domain methods now testable without a terminal" (488ae17b); "Phase 3: Extract dispatch_command/dispatch_prompt to AppState (25 new tests)" (b787715e); "Phase 4: Extract apply() action dispatcher to AppState (28 new tests)" (37279fc1)
+Inferred intent: this is the first real decomposition pressure — domain logic is pulled out of the terminal-bound App into an AppState so it can be unit-tested without a TTY. The "Phase 3 / Phase 4" naming here directly anticipates the phased REFACTOR_PLAN authored at segment-end (265d2816). confidence: high — evidence: src/app.rs (single file) becomes src/app/mod.rs (directory) — `git show 488ae17:src/app/mod.rs | wc -l` = 3896, while the pre-split file was src/app.rs.
+Supersedes: restructures the monolithic src/app.rs (843→~3900 lines by this point) into src/app/{mod,state}.rs with extracted dispatch.
+
+This is the seam the REFACTOR_PLAN later formalizes. 130b4664 takes tests 74→224 and clears 71 clippy errors; 0961a82b adds a panic hook, cargo-audit, and coverage gating to CI. Then 488ae17b extracts AppState (23 domain methods testable without a terminal), b787715e extracts dispatch_command/dispatch_prompt (+25 tests), 37279fc1 extracts the apply() action dispatcher (+28 tests). The "Phase N" vocabulary and the testability-without-a-PTY goal are exactly the rationale REFACTOR_PLAN.md (265d2816) restates two weeks later: "Side effects modeled as data ... so handlers are unit-testable without a real PTY." Note app/mod.rs is 3896 lines here and grows to 7421 by segment-end — the monolith re-accretes faster than it's split, which is the tension the final REFACTOR_PLAN names.
+
++1 folded: 3118be41 (2026-04-17) BUGS.md update; the BUGS.md triage file becomes the running issue log for the rest of genesis.
+
+Provenance:
+- 130b4664 (2026-04-17 21:49) — 74→224 tests, 71 clippy fixes, CI MSRV.
+- 0961a82b (2026-04-17 22:07) — panic hook, cargo-audit, coverage gating.
+- 488ae17b (2026-04-17 22:32) — AppState extraction; src/app.rs → src/app/mod.rs (3896 lines).
+- b787715e (2026-04-17 22:41) — Phase 3 dispatch extraction.
+- 37279fc1 (2026-04-17 22:50) — Phase 4 apply() extraction.
+
+<!-- Entry-ID: 01KTNBK0V3M9HGE654CBDR4276 -->
