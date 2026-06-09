@@ -1,1 +1,3 @@
 {"source":"thread:onboarding-entry-path","target":"entry:01KR0PP11NEC9JF0PT9F7FZPG2","type":"contains"}
+{"source":"thread:onboarding-entry-path","target":"entry:01KTND6JNSJVXVCXK1BCXVFDR0","type":"contains"}
+{"source":"entry:01KR0PP11NEC9JF0PT9F7FZPG2","target":"entry:01KTND6JNSJVXVCXK1BCXVFDR0","type":"followed_by"}
