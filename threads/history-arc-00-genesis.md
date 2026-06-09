@@ -461,3 +461,32 @@ Provenance:
 - 2b28a2a2 (2026-04-21 21:05) — quit warns on running panes.
 
 <!-- Entry-ID: 01KTNBNTPHF5N5WTYY8YN8H6T1 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:54:29.455219+00:00
+Role: scribe
+Type: Note
+Title: v1.10 — MCP transport rewrite (HTTP → Unix domain sockets) + enterprise MCP docs
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the MCP transport is rewritten from HTTP to Unix domain sockets; enterprise MCP deployment is documented   [kind: refactor]
+When: 2026-04-23 · commits f81e7ade (v1.10.0), ec60b4ce (security fix), then INSTALL.md MCP cluster
+Recorded rationale: "v1.10.0: MCP transport rewrite — HTTP to Unix domain sockets" (f81e7ade); "Fix MCP socket permissions and get_file_content path traversal" (ec60b4ce); "INSTALL.md: document managed-mcp.json for enterprise MCP deployment" (042d1684)
+Inferred intent: the MCP bridge's transport is swapped from a local HTTP server to Unix domain sockets — tighter security boundary and no port. The same-day path-traversal + socket-permission fix (ec60b4ce) reads as hardening the new transport. Enterprise deployment (managed-mcp.json) is documented for locked-down environments. confidence: high.
+Supersedes: f81e7ade supersedes the HTTP-based MCP transport introduced with the M14/v1.8 MCP work — the wire protocol changes from HTTP to UDS while keeping the tool surface.
+
+The MCP subsystem's plumbing is replaced here. f81e7ade moves transport from HTTP to Unix domain sockets; ec60b4ce immediately hardens it (socket permissions + get_file_content path-traversal guard — a security-relevant fix on the file-read tool). A documentation cluster (9e3db11b, aa77c3ec, 2213523, 042d1684, 3807776d) builds out INSTALL.md/.mcp.json/managed-mcp.json for unmanaged vs enterprise environments. 7e04132e decouples `make install` from `make release` so only install needs sudo.
+
++1 folded: 8b9ab84f (2026-04-23) "CLAUDE.md: full refresh — architecture, conventions, feature summary".
++2 folded: 3939a1cd (help-pager wrapping / disable search in multi-column), 922824fb (Cargo.lock for v1.10.2).
++1 folded: 6d8aec93 (2026-04-23) BUGS triage + commit Cargo.lock for libc dep.
+
+Provenance:
+- f81e7ade (2026-04-23 11:21) — v1.10.0 MCP HTTP→UDS transport rewrite.
+- ec60b4ce (2026-04-23 16:59) — socket-permission + path-traversal fix on get_file_content.
+- 042d1684 (2026-04-23 16:49) — INSTALL.md managed-mcp.json enterprise docs.
+
+<!-- Entry-ID: 01KTNBPQ97DQKF20Q6QVM0R8RT -->
