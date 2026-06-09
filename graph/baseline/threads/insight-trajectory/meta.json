@@ -6,6 +6,7 @@
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-09T00:03:23.514215+00:00",
-  "summary": "The development thread focuses on the management of stated-plan documents in a project, with key decisions including the declaration of a tier-3 register, the enumeration of eight documents, and the handling of boundary rules. The main outcomes involve the integration of these documents into the roadmap, with observations flagged for insight-emergent-properties. The thread also highlights the absence of a clear trajectory for certain versions and the importance of maintaining a consistent back-reference architecture for cross-document readability.",
-  "entry_count": 20
+  "summary": "The thread focuses on the analysis of eight stated-plan documents across six per-document entries, highlighting observations and insights related to the trajectory of development. The documents include gap analyses, UX catalogues, ROADMAP additions, product charters, and advisory ignores, with some entries noting the absence of stated plans or the presence of long-lived ignores. The thread does not include any decisions or plans but rather discusses the observed developments and their implications.",
+  "entry_count": 20,
+  "summary_schema_version": 3
 }

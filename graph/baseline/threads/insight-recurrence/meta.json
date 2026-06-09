@@ -6,6 +6,7 @@
   "status": "OPEN",
   "ball": "Claude Code (caleb)",
   "last_updated": "2026-06-09T00:04:14.398755+00:00",
-  "summary": "The thread explores recurring event-shape patterns in PRs, focusing on how insights and issues are structured across multiple commits. Key patterns include bundling of concerns, supersession of issues, and the use of BUGS.md for tracking unresolved issues. The catalogue of patterns reveals how insights evolve over time, with arc-story-tails helping to make cumulative-grain recurrence legible.",
-  "entry_count": 20
+  "summary": "The thread discusses the identification of recurring event-shape patterns across multiple PRs, focusing on how these patterns emerge in the context of project development. Key patterns include bundling of concerns, supersedence of earlier PRs, tracking of unresolved issues, and incremental infrastructure development. The analysis reveals that these patterns form a cumulative-grain recurrence, with arc-story-tails helping to make the recurrence visible.",
+  "entry_count": 20,
+  "summary_schema_version": 3
 }
