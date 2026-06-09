@@ -1,10 +1,12 @@
-//! Pure focus decision: which [`Focus`] does a directional focus change
-//! (`^W j` / `^W k`) select?
+//! Pure focus decision: which [`Focus`] does a focus change / surface
+//! settle select?
 //!
 //! Mirrors [`super::route`] — a pure function of a small `Copy` snapshot, no
 //! `&App` and no side effects, so every branch is unit-testable without a TUI.
-//! The test module doubles as the regression pin for the Phase-0 invariant
-//! that *every* non-`Pane` arm collapses to `pane_focused() == false`.
+//! Used by `set_pane_focus` (`^W j` / `^W k`) and by `recompute_focus`, which
+//! re-runs it at the loop top to keep `state.focus` correct as surfaces open
+//! and close. The test module pins the invariant that *every* non-`Pane` arm
+//! collapses to `pane_focused() == false`.
 
 use crate::ui::pager::Mount;
 
@@ -25,10 +27,10 @@ pub(super) struct FocusSnapshot {
 ///
 /// `want_pane` always selects [`Focus::Pane`]. Otherwise the "non-pane" side is
 /// the front-most surface: a top overlay, else the pager (tagged with its
-/// mount), else the file list. Branch order is the Phase-0 contract — every
-/// non-`Pane` arm yields `Focus::pane_focused() == false`, so the
-/// Overlay/Pager distinction is invisible to current consumers (router, render
-/// DIM, flash, `^C` gate) and carried only for later MVU phases.
+/// mount), else the file list. Branch order is a contract — every non-`Pane`
+/// arm yields `pane_focused() == false`. The `Overlay` / `Pager` discriminant
+/// is now read for real: `route::route_input` routes `Focus::Overlay` to the
+/// overlay pty, and the render label / DIM read the focused region from it.
 pub(super) const fn decide_focus(snap: FocusSnapshot, want_pane: bool) -> Focus {
     if want_pane {
         Focus::Pane
