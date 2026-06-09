@@ -282,3 +282,34 @@ Provenance:
 - 9b49016c — version-bump convention formalized.
 
 <!-- Entry-ID: 01KTNBG5C73G8HPRTA74KQNJEK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:51:26.141518+00:00
+Role: scribe
+Type: Decision
+Title: : command line + the cspy→spyc rename at v1.0.0 (segment-topology)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the colon command-line is added, then the project renames cspy→spyc at v1.0.0   [kind: segment-topology]
+When: 2026-04-17 · commits 4fb0ad1a (!? editor), 4fb0ad1a→4fb0ad1a, 489c800a (v0.13), then 28c4d329 (rename → spyc v1.0.0)
+Recorded rationale: ": command line, = limit filter, numeric prefix display" (4fb0ad1a, commit subject); rename — "The 1.0 release. cspy is now spyc (spy + claude = spicy 🌶️). Rename package, binary, config (.spycrc.toml), state dirs, env vars, debug macro, all source comments, docs, build files, and CI config. Add 🌶️ pepper emoji ... New logo: Twemoji pepper (CC-BY 4.0) ... Version 0.13.0 → 1.0.0" (28c4d329 body)
+Inferred intent: the `:` command line (4fb0ad1a) opens the colon-command dispatch surface (:cd, :sort, :marks, :set, :version, :grep, :task, :pause/:resume all hang off it later). The rename (28c4d329) is the single topology pivot of the whole segment. confidence: high — evidence: pickaxe `git log -S 'spyc'` returns 28c4d329 as the first commit introducing the token; rename touches src/app.rs, src/config/dsl.rs, src/keymap/{action,resolver,user}.rs, build files, CI.
+Supersedes: the rename supersedes every cspy-era identifier — .cspyrc.toml→.spycrc.toml, $CSPY_PANE_CMD→$SPYC_PANE_CMD, the cspy! debug macro, docs/logo.svg→docs/spyc-logo.svg.
+
+This is THE topology moment named in the framing note. Before 28c4d329 the binary, package, config file (.cspyrc.toml), env vars, and the logo are all `cspy` — the etymology "c(laude) + spy" (clone of SideFX's `spy`). At v1.0.0 the letters reverse to `spyc`, re-glossed as "spy + claude = spicy 🌶️", and the pepper branding enters (status-bar prefix, Twemoji pepper logo CC-BY 4.0). 0535ae6f immediately follows to update the repo URL to bitbucket.org/tripstack/spyc, and 3be7989a adds the pepper to version strings.
+
+The `:` command-line (4fb0ad1a, immediately before the rename) is the other lasting addition here — the dispatch table for colon commands. The genesis run between v0.11 and v1.0 also delivered the !? history picker/editor (462f7a4a v0.11, 3759e63c "vi-editable lines, /search, :N jump, dedup").
+
++1 folded: 489c800a (2026-04-17) "Bump version to 0.13.0 (catch up missed bumps)" — explicitly reconciling the version cadence.
++1 folded: 03113fad (2026-04-17) doc sync (CLAUDE/FEATURES/ROADMAP).
+
+Provenance:
+- 4fb0ad1a (2026-04-17 17:00) — : command line, = limit filter, numeric prefix.
+- 28c4d329 (2026-04-17 18:13) — RENAME cspy→spyc, v0.13.0→v1.0.0, pepper branding (verified via `git show --stat`: package/binary/config/env/source/docs/CI all renamed).
+- 0535ae6f (2026-04-17 18:17) — repo URL → bitbucket.org/tripstack/spyc.
+- 3be7989a (2026-04-17 18:20) — 🌶️ pepper in version strings.
+
+<!-- Entry-ID: 01KTNBH4F01YB3YNV9JT6MM8QH -->
