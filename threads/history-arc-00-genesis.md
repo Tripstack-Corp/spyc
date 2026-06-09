@@ -36,3 +36,33 @@ Provenance:
 - 265d2816 (2026-04-29 21:14) — REFACTOR_PLAN.md authored; app/mod.rs measured at 7421 lines (verified `git show 265d2816:src/app/mod.rs | wc -l`).
 
 <!-- Entry-ID: 01KTNB8Q0AH5GBS0V13PQRV1SR -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:47:22.843161+00:00
+Role: scribe
+Type: Note
+Title: cspy is born — M1–M3 file commander (column listing, vi motion, picks, shell-out)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: the entire file-commander core lands in one initial commit as `cspy`   [kind: new-capability]
+When: 2026-04-15 (commit 57ae2733; repo-root sibling 6f981bc is the empty "Initial commit")
+Recorded rationale: "A Rust clone of SideFX's in-house `spy` tool, targeted at macOS and Linux with static musl/universal builds. Designed to pair with Claude Code (embedded pty pane) — hence the name: c(laude) + spy." — commit 57ae2733 body
+Inferred intent: the foundational shape (file list + vi keys + shell-out + EDITOR/PAGER delegation) is fully present at t=0; the project starts as a working tool, not a skeleton. confidence: high — evidence: src/app.rs is 843 lines in the initial commit.
+Supersedes: (none — earliest code)
+
+The root commit declares milestones M1–M3 already done. Recorded feature set (commit 57ae2733): column-major file list ("`ls -C` style", per-page width packing so one long filename widens only its column); full vi motion (hjkl / arrows / Space / Enter, counts like 5j/10k, gg/G, ^B/^F pagination); navigation (e/v edit, d/Enter display, u/- climb, H/~ home); picks (t, T pattern, ^T all/clear) and cross-directory inventory (y take, p drop, i view, z empty); shell-out with % substitution (! / ; prompt, $ drops to $SHELL, ^W/^X chmod, TUI suspend/resume to avoid alt-screen flash); EDITOR/PAGER delegation (v/e → $EDITOR, d/Enter on text → $PAGER → less); incremental search with / (case-insensitive prefix, glob on * ? [, n/N wraparound); ignore masks; Tokyo-Night-ish palette with a terracotta cursor bar (src/ui/theme.rs).
+
+Module topology at birth: src/app.rs (843 lines), src/fs/{entry,listing,mod}.rs, src/keymap/{action,mod,resolver}.rs, src/shell/{expand,mod}.rs, src/main.rs. The keymap resolver (251 lines) is already a separate concern — the input subsystem that later grows into arc-06 starts here as a resolver table. The fs listing and the shell-expansion split (%-substitution) are present from line zero.
+
++1 folded: 63b728db (2026-04-15 13:30) "Add ? help overlay; adopt clippy pedantic/nursery lints; add Bitbucket Pipelines CI" — establishes the lint stance and CI that persist through the whole history.
++1 folded: 833e3fa6 (2026-04-15 13:48) "Add J jump; column-aware cursor motion" — first appearance of J (jump-to-dir), a subsystem that gets heavily reworked in the v1.28–v1.34 jump-history cluster later in this thread.
+
+Provenance:
+- 6f981bc (2026-04-15 17:07) — repo-root empty "Initial commit".
+- 57ae2733 (2026-04-15 13:09) — cspy M1–M3; src/app.rs 843 lines + fs/keymap/shell modules.
+- 63b728db, 833e3fa6 (2026-04-15) — help overlay/CI/lints; J jump.
+
+<!-- Entry-ID: 01KTNB9PK8J16N5H5QVDX0DER4 -->
