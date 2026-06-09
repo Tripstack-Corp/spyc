@@ -848,3 +848,56 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMV0RPDEBMH87MB89JRE0BR -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:03:51.404875+00:00
+Role: critic
+Type: Closure
+Title: Continuation closure (window 2): six patterns A′–F′ over #38–#311 — counts, the profile shift vs window 1, and the cross-references for the deferred recurrence/trajectory/emergent tiers
+
+Spec: critic
+
+tags: #insight #drift #window-2
+
+The second-window drift catalogue is assembled. Six patterns over the #38–#311 substrate (13 history threads), each cited to real moment entry_ids verified against the segment workers' diff/CHANGELOG/plan-doc citations.
+
+**Per-pattern counts, final (window 2).**
+
+- **A′ — Squash-subject understatement at structural scale: 4 structural instances** (800-LoC decompose #275–#281; state.rs −3907 split #308; 12-PR mod-extract wave #248–#259; MVU phases #201/#218–#232). vs window-1 Pattern A's 5 single-PR instances. *(entry 01KTMTQ8RT04DKANY20CG8TE39)*
+- **B′ — Slug-prefix-vs-diff-intent (feat-labeled refactor): 3 drifting swap PRs** (#285/#287/#288) + 1 partial (#289 feat-but-unwired); bounded by the `refactor/` bookends (#283/#292) that prove the convention carries intent elsewhere. *(entry 01KTMTRNPWDK14NQHD78DV2ZEE)*
+- **C′ — Cumulative self-retraction: 2 true** (#139/#140→#141 vestigial; #287→#292 escape-hatch add-then-drop) + 1 prep-then-execute flagged-not-tallied (#307→#308). vs window-1 Pattern E's 1 strict intra-diff. *(entry 01KTMTT2MAQQSS8780NBK097TQ)*
+- **D′ — Same-day plan self-reversal: 1** (V1_60_PLAN #76→#77 in ~4.5h) + 2 across-time stance revisions flagged as boundary-not-counted (#179, #196). No window-1 analogue (thin doc layer). *(entry 01KTMTVGN940DGM1WTG61T8JDN)*
+- **E′ — "aislop" description-layer cruft: 1 drift TYPE** surfaced across its detect→tool→gate trilogy (#293/#294/#296). No window-1 analogue; window-1 tail recorded its absence. *(entry 01KTMTWZ1424S5QYT2HS1K97B3)*
+- **F′ — Fix-on-feature regression waves: 3** (arc-05 #49–#53; markdown #103→#108; markdown #107→#110) + the gix model→render→wire arc flagged as the no-wave control. vs window-1 Pattern D's 1 single-capability instance. *(entry 01KTMTYJPVVVRNZB79ESVSBTZH)*
+
+**Instances citing real moment ULIDs: all six pattern entries + framing + tail + this closure.** Every pattern entry cites between three and seven distinct #38–#311 moment entry_ids (verified ULIDs from the 13 segment/arc threads), plus the contrasting window-1 pattern entry. The framing (01KTMTNWVQJZQX85ZPA3BBZVGV) and tail (01KTMV0RPDEBMH87MB89JRE0BR) likewise cite real ULIDs throughout. No instance is asserted without a moment-entry citation.
+
+**The window-2-vs-window-1 profile shift, summarized.**
+
+Window 1 (#1–#37, per-PR merges): six patterns, sixteen instances, drift living at the *PR-artifact* layer (commit subject/body, CHANGELOG bucket, BUGS.md), almost never functional. Window 2 (#38–#311, squash merges + plan-doc discipline): the same description-dominant asymmetry holds, but the description layer **thickened and stratified**, and the drift grain **shifted from per-PR/intra-diff to cumulative**:
+
+- A′ and B′ are window-1 Pattern A intensified by squash (honest scope relocated out of the discarded commit body into CHANGELOG + plan docs; the understatement went structural).
+- C′ is window-1 Pattern E re-grained: not a diff contradicting itself, but a diff retracting an *earlier* diff's planned-obsolete scaffold.
+- D′ is genuinely new: a plan-doc layer thick enough to self-reverse same-day, impossible in window 1.
+- E′ is genuinely new: in-source comment/unwrap drift from agentic-scale code movement — the drift type window 1's tail named as absent.
+- F′ is window-1 Pattern D recast from one documented-but-unwired *capability* to a feature-generalization-with-N-stranded-assumptions *wave*.
+
+The one functional-drift class window 1 carried (Pattern D's dual-dispatch `:undo`/`:limit` footgun) was *architecturally retired* in this window by the MVU `COMMAND_TABLE` (#233), which the MVU_PLAN names as regression-testing that exact footgun. So the window's net motion is: functional drift down (one class eliminated by design), description-layer drift surfaces up (commit subject → CHANGELOG → plan doc → source comment).
+
+**Cross-references for the deferred higher tiers.** The coordinator's second-window segmentation entry (history-overview 01KTMN9MRB31A0C8ZWSXX5M5ZQ) explicitly defers an equivalent insight pass over the 13 threads and lists the drift seed set this continuation drew from. Where window-2 observables are *also* recurrence/trajectory/emergent material, the placement recommendation (mirroring window-1's closure discipline):
+
+1. **The worker-thread + generation-counter discard pattern** (git-status #100 → vt100 parser #141) is a *recurrence* shape, not drift. C′ touches #141 only for its *retraction* of #139/#140; the reuse-of-the-pattern reading belongs to `insight-recurrence`. Cross-ref C′ = 01KTMTT2MAQQSS8780NBK097TQ.
+2. **The strangler-fig migration shape** (gix parity→flip→drop; MVU grow-alongside-then-supersede) recurs across two segments and is a *trajectory-against-stated-plan* observable (each followed its committed plan doc's phase sequence). That is `insight-trajectory` material; B′ and C′ note only the per-PR prefix/retraction drift. Cross-ref B′ = 01KTMTRNPWDK14NQHD78DV2ZEE.
+3. **Plan-churn-before-code** (D′'s V1_60 reversal; the V1_5→V1_60→V1_70 sequence; the BUGS→ROADMAP promotion ladder) is a candidate *recurrence/emergent-property* — "the project plans in committed docs and revises them as artifacts." D′ claims only the single same-day self-reversal as drift. Cross-ref D′ = 01KTMTVGN940DGM1WTG61T8JDN.
+4. **The detector-vs-convention tension** (E′: spyc's dense-why-comment mandate trips its own aislop slop gate) is an *emergent property* of two conventions colliding — `insight-emergent-properties` material. E′ records it as a factual artifact only. Cross-ref E′ = 01KTMTWZ1424S5QYT2HS1K97B3.
+
+The boundary rule inherited from window-1's closure (= 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4) holds: *a recurrence/trajectory shape is also a drift only where it carries a misnaming-or-self-disagreement aspect at the artifact level that distinguishes it from the project-shape reading.* A′/B′ qualify (the subject/slug misnames the diff). C′/D′/F′ qualify (a diff/plan disagrees with an earlier diff/plan, or a feature's merge-boundary framing disagrees with the repair wave). E′ qualifies as a new drift *type* (in-code description disagreeing with code). The recurrence/trajectory/emergent readings of the same observables are left to those tiers, with the cross-references above.
+
+**Six patterns, fourteen+ instances across the 13 second-window threads.** The thread is left OPEN; the higher-tier continuations, if written, will cite these A′–F′ entry IDs.
+
+Provenance:
+- window-2 pattern entries: A′ 01KTMTQ8RT04DKANY20CG8TE39, B′ 01KTMTRNPWDK14NQHD78DV2ZEE, C′ 01KTMTT2MAQQSS8780NBK097TQ, D′ 01KTMTVGN940DGM1WTG61T8JDN, E′ 01KTMTWZ1424S5QYT2HS1K97B3, F′ 01KTMTYJPVVVRNZB79ESVSBTZH; framing 01KTMTNWVQJZQX85ZPA3BBZVGV; tail 01KTMV0RPDEBMH87MB89JRE0BR.
+- window-1 catalogue: framing 01KR3B7KW5QNRWHG6YTV9QSF07, Pattern A 01KR3BA3CZWA6TZCDKNJZDPAGH, D 01KR3BGMAKS4AZNZE2QFXH10W4, E 01KR3BK1VP3SZ5DM9VAQ01FFYX, F 01KR3BN3N6YF60414FFVHAM50Y, closure 01KR3BQHTCQ7YGHWQJ2ZE4PJQ4, tail 01KR3BT6MNZMWRMHX14QMYZ86Y.
+- coordinator second-window spine: history-overview framing 01KTMN7X7FV45E8E05DN1RV719, segmentation 01KTMN9MRB31A0C8ZWSXX5M5ZQ (the deferred-insight-pass seed list).
+
+<!-- Entry-ID: 01KTMV2JE30J2QGRP3W3EBQNZH -->

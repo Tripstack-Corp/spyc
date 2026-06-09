@@ -33,3 +33,5 @@
 {"source":"entry:01KTMTWZ1424S5QYT2HS1K97B3","target":"entry:01KTMTYJPVVVRNZB79ESVSBTZH","type":"followed_by"}
 {"source":"thread:insight-drift","target":"entry:01KTMV0RPDEBMH87MB89JRE0BR","type":"contains"}
 {"source":"entry:01KTMTYJPVVVRNZB79ESVSBTZH","target":"entry:01KTMV0RPDEBMH87MB89JRE0BR","type":"followed_by"}
+{"source":"thread:insight-drift","target":"entry:01KTMV2JE30J2QGRP3W3EBQNZH","type":"contains"}
+{"source":"entry:01KTMV0RPDEBMH87MB89JRE0BR","target":"entry:01KTMV2JE30J2QGRP3W3EBQNZH","type":"followed_by"}
