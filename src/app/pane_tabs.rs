@@ -271,6 +271,30 @@ impl App {
         }
     }
 
+    /// Re-derive `state.focus` from the live surfaces, preserving the current
+    /// pane-vs-not intent.
+    ///
+    /// The pane-intent (is the bottom region focused?) is the stable bit set by
+    /// `set_pane_focus` / pane opens / scrollback; the *non-pane* variant
+    /// (`Overlay` / `Pager` / `FileList`) is simply whichever surface is
+    /// front-most right now, derived by the same pure [`super::focus::decide_focus`]
+    /// `set_pane_focus` uses. Called at the loop top (and on surface close) so
+    /// `state.focus` always reflects reality with **no per-open-site
+    /// bookkeeping** — most pager opens (`:grep`, git-view, help, …) never touch
+    /// focus, and closes left a stale `Overlay`/`Pager` behind. Behavior-
+    /// preserving while routing/render still read only `pane_focused()`: this
+    /// only refines the non-`Pane` discriminant, which `pane_focused()` ignores.
+    pub(super) fn recompute_focus(&mut self) {
+        let want_pane = matches!(self.state.focus, state::Focus::Pane);
+        self.state.focus = super::focus::decide_focus(
+            super::focus::FocusSnapshot {
+                has_top_overlay: self.runtime.top_overlay.is_some(),
+                pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+            },
+            want_pane,
+        );
+    }
+
     /// `:dump-scrollback` diagnostic. Runs the same drain +
     /// snapshot path as `^a-v`, then writes the captured lines as
     /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to

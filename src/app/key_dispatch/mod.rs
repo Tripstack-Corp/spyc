@@ -328,6 +328,8 @@ impl App {
         self.runtime.top_overlay = None;
         self.view.overlay_awaiting_dismiss = false;
         self.view.needs_full_repaint = true;
+        // The overlay just closed — drop the stale `Overlay` focus this frame.
+        self.recompute_focus();
         self.state.flash_info("command finished");
     }
 

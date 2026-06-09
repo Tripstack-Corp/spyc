@@ -141,6 +141,9 @@ impl App {
     pub fn clear_pager(&mut self) {
         self.remember_pager_position();
         self.view.pager = None;
+        // The top pager just closed — drop any stale `Pager(_)` focus this
+        // frame (the loop top would catch it next tick regardless).
+        self.recompute_focus();
     }
 
     /// Tear down a `^a-v` scrollback pager: snap the pty back to
@@ -160,6 +163,7 @@ impl App {
         // (if any) stays put.
         self.view.scroll_pager = None;
         self.view.needs_full_repaint = true;
+        self.recompute_focus();
         self.state.flash_info("scroll: off");
     }
 
