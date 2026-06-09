@@ -8,5 +8,18 @@
   "last_updated": "2026-06-09T00:04:14.398755+00:00",
   "summary": "The thread discusses the identification of recurring event-shape patterns across multiple PRs, focusing on how these patterns emerge in the context of project development. Key patterns include bundling of concerns, supersedence of earlier PRs, tracking of unresolved issues, and incremental infrastructure development. The analysis reveals that these patterns form a cumulative-grain recurrence, with arc-story-tails helping to make the recurrence visible.",
   "entry_count": 20,
-  "summary_schema_version": 3
+  "summary_schema_version": 3,
+  "annotations": {
+    "insight-recurrence": {
+      "reactions": {},
+      "tags": [
+        "onboarding"
+      ],
+      "flags": [],
+      "xrefs": [],
+      "pinned": false,
+      "last_touched": "2026-06-09T00:19:55.451829+00:00",
+      "vote_score": 0
+    }
+  }
 }
