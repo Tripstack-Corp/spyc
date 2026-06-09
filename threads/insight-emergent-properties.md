@@ -869,3 +869,40 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVN7JZ7T5HG6T6RP8HQWB9 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:14:48.161406+00:00
+Role: critic
+Type: Note
+Title: Property 11 (window-2): Abstraction-seams precipitate from repetition — the codebase grows named extension points (AgentProfile, PagerStream, gix facade) where per-X repetition accumulates, with payoff measured by the next instance's cost
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** The codebase exhibits a repetition-then-precipitation behavior at the registration/abstraction layer: a capability is implemented per-instance, the same shape copied N times across near-identical files or `match` arms, and once the repetition cost is visibly paid the copies **collapse into a single named seam** — a trait + registry or a shared core — whose payoff is measured immediately by how cheaply the *next* instance lands. Reads as: spyc, as artifact, grows declarative extension points precisely where repetition has accumulated; the abstraction is not designed up front, it precipitates out of N paid repetitions, and the artifact records the marginal cost of the next consumer as the seam's proof.
+
+**Window-1 contrast: this is the window-2 successor that answers Property 4's open question (= 01KR3HQCRV761KG6CVD6T11QNM).** Window-1's Property 4 named *parallel-registration* — peer surfaces placed side-by-side rather than factored over a parametric base (two `ensure_*` functions; two parallel pickers; no `trait MCPRegistrationFile`) — and its tier-5 prediction was that a third MCP peer would arrive as a *third parallel function*, not a parametric refactor. Window-2 resolves that open parallel-or-parametric question in the parametric direction: recurrence P4 (= 01KTMTTZQK31H30M2RQ6J3FEY1) records arc-07's framing that the AgentProfile collapse is "answering the arc-07 tail's open question about whether a per-peer registration layer would stay parallel or become parametric — the window-1 question, answered parametric in window-2." Window-1 accreted parallel copies and stopped; window-2 accretes the copies, then collapses them into a seam. The property is the *termination of accretion in an abstraction*, which window-1's Property 4 reached the edge of but never crossed.
+
+**Evidence enumeration.**
+
+*Seam 1 — per-agent dispatch → `AgentProfile` registry (#176)* (recurrence P4 = 01KTMTTZQK31H30M2RQ6J3FEY1): the repetition is recorded explicitly — gemini arrives as "the third `AgentKind`, carrying its own detection, resume, and session-discovery functions"; the transcript renderer is "reimplemented once per agent across three near-identical files (`codex_transcript.rs`, `claude_transcript.rs`, `agy_transcript.rs`)"; agy onboards "the expensive way." Then the collapse: #176 folds "~10 per-agent `match AgentKind` dispatch sites" into "one `AgentProfile` trait plus `REGISTRY`," behavior-preserving ("all existing agent tests pass verbatim").
+
+*Seam 2 — per-source pager sessions → `PagerStream` (#309–#311)* (recurrence P4, same entry): the repetition is the "hand-rolled session skeletons" each pager-filling feature carried; the collapse is "an object-safe trait plus shared spawn/wake/id-gate/drain core in `src/app/pager_stream.rs`," onto which transcript scrollback (#309), `:grep` (#310), and git-view diff/show/blame (#311) migrate, collapsing their hand-rolled skeletons. The recorded ARCHITECTURE.md line names the generalized result: "Off-thread read/parse is the default architecture for any feature that fills a pager from disk or compute."
+
+*The gix facade as a seam* (recurrence P1 = 01KTMTNYS83V5A7PY2MJVV60MF): the `src/git/` facade — "behind a single facade" — is the named seam built around the legacy organism first so the migration can run through one indirection point; it is the same declarative-extension-point shape at the migration layer (the facade is the seam the strangler-fig flips behind).
+
+*The seam's payoff is measured the same way on both surfaces — by the cost of the next instance* (recurrence P4, the load-bearing cross-surface observation): AgentProfile's payoff is measured at +18 minutes — zot becomes the fifth agent "via 'one impl + one registry line, no dispatch-site edits,' with zero `src/app/mod.rs` changes against agy's tree-wide sweep hours earlier." PagerStream's payoff is the three same-day migrations landing *onto* the new trait in immediate succession. Both surfaces validate the abstraction by the *marginal cost of the next consumer*, recorded as proof — "not just 'abstract after N repeats' but 'abstract after N repeats *and the very next instance is cheap, recorded as proof*.'"
+
+**Strongest evidence.** The measured-next-instance payoff identical across two surfaces (recurrence P4) is the load-bearing observation. The before/after is explicit and observable: agy (pre-collapse) touched the tree everywhere; zot (post-collapse, +18 min) touched one impl + one line. The seam's value is recorded in the artifact as a measured cost differential, not asserted — and the same measurement shape recurs on the unrelated PagerStream surface (three consumers absorbed at once). The cross-surface recurrence of the *measurement*, not just the abstraction, is what makes this a property rather than two coincidences.
+
+**Where the property would falsify.** An abstraction designed up-front and imposed *before* the repetition accumulated (a trait introduced for one consumer, no paid repetition phase) would weaken the precipitate-from-repetition claim. Both seams show the N-repetition phase preceding the collapse. A collapse whose *next* instance was *not* cheaper (a seam that abstracted N copies but left the N+1th instance as expensive as before) would weaken the measured-payoff signature; both surfaces record the next instance as cheap. A window-2 capability that stayed parallel-by-replication without ever collapsing (Property 4's window-1 shape persisting) would weaken the "termination in a seam" claim — recurrence P4 notes the foreshadowing sub-shape (shared helpers emerge mid-repetition: the `SessionCandidate` trait, the tail-read helper) but both surfaces reach a full collapse.
+
+**Tier-5 forward prediction.** Citing recurrence P4's two repeat-then-generalize surfaces with their measured-next-instance payoffs: the next capability implemented per-instance across N near-identical files or match-arms will collapse into a named trait+registry seam once the repetition cost is paid, and the artifact will record the marginal cost of the next consumer as the seam's proof. (recurrence P4 = 01KTMTTZQK31H30M2RQ6J3FEY1.)
+
+Provenance:
+- recurrence window-2: P4 per-X-then-generalize (AgentProfile #176; PagerStream #309–#311; the +18min and three-same-day payoffs; the parallel-or-parametric question answered parametric) = 01KTMTTZQK31H30M2RQ6J3FEY1; P1 (the gix `src/git/` facade seam) = 01KTMTNYS83V5A7PY2MJVV60MF.
+- window-1 contrast: Property 4 (additive-substrate / parallel-registration — the parallel-by-replication this terminates; the open parallel-or-parametric question) = 01KR3HQCRV761KG6CVD6T11QNM.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVPK0QRK3CYNCV0V6NN9TD -->
