@@ -986,3 +986,58 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7; sibling Property 8 (strangler-fig) = 01KTMVJ5B5DWEPR9CHFS7PRMWW; Property 9 (decomposition) = 01KTMVKP814X8MHX1427R0EBW3.
 
 <!-- Entry-ID: 01KTMVST4Q84SNSG6RY4SV3SFJ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:17:47.756934+00:00
+Role: critic
+Type: Closure
+Title: Continuation Closure (window-2): seven properties promoted (7–13), two candidates declined; the window-2 catalogue confirms three window-1 properties, inverts two, and reveals one cross-window invariant
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+The window-2 (#38–#311) continuation is assembled: seven properties promoted (numbered 7–13 continuing the window-1 catalogue of six), two candidates declined. Each property cites the lower-tier window-2 entry_ids that earn it, and each that inverts/confirms/extends a window-1 property cites that window-1 property's entry_id.
+
+**Properties promoted, with strongest-evidence anchor and window-1 relation.**
+
+7. *Plan-doc-as-executable-spec* (= 01KTMVGQPG64A1YK7M5M07TW37). Two near-exact positive executions (MVU_PLAN 8 phases, V1_5_PLAN 6 phases) + one executed-and-tightened; positive fidelity became document-kind-dependent. **Partial inversion of window-1 Property 2** (the positive axis moved; the negative axis held). Strongest: two near-exact executions sharing the numbered-phase-with-done-criteria document kind. Both competing readings (mode-shift vs selection-effect) preserved; the conditional both license is the property statement. Lower-tier citations: 5 (trajectory Doc#1, Doc#2, Doc#3, Docs#6+7+8, closure/asymmetry-tail) + recurrence P5.
+
+8. *Strangler-fig as the house migration architecture* (= 01KTMVJ5B5DWEPR9CHFS7PRMWW). Grow-alongside → parity → flip → drop, twice at scale (MVU, gix), two escape-hatch registers. **New; extends window-1 Property 4** (accretion never replaced; strangler-fig retires what it grows alongside). Strongest: gix's −178 terminal drop + `no_subprocess_git_in_production` guard. Lower-tier citations: recurrence P1 + drift C′.
+
+9. *Additive → subtractive growth inversion* (= 01KTMVKP814X8MHX1427R0EBW3). Window-1 stacked atop substrate; window-2 splits under a ~800-line ceiling via ~45 verbatim relocations. **Direct inversion of window-1 Property 4's additive half.** Strongest: the ~45× verbatim-relocation count (order of magnitude over window-1's densest) with machine-checkable `+N/-N` signature. Competing net-additive reading preserved. Lower-tier citations: recurrence P3 + drift A′ + trajectory Doc#2.
+
+10. *Rationale externalized into committed artifacts under squash-merge* (= 01KTMVN7JZ7T5HG6T6RP8HQWB9). Squash discards commit bodies; the recorded "why" relocated into CHANGELOG + plan docs in the tree. **Extends window-1 Property 1** (the compensating honesty surface relocated). Strongest: four structural-understatement instances each with scope residing in a named committed doc, not the `main` subject. Absorbs declined B′ and E′. Lower-tier citations: drift A′ + B′ + E′ + negative-space-tail, trajectory framing, recurrence P5.
+
+11. *Abstraction-seams precipitate from repetition* (= 01KTMVPK0QRK3CYNCV0V6NN9TD). AgentProfile, PagerStream, gix facade — seams precipitate where repetition accumulates; payoff measured by next-instance cost. **Successor answering window-1 Property 4's open parallel-or-parametric question, parametric.** Strongest: the measured-next-instance payoff identical across two surfaces (zot +18min; three same-day migrations). Lower-tier citations: recurrence P4 + P1.
+
+12. *Negative-honor invariance across both windows* (= 01KTMVR9Z5SZ0T0HX8WTNX22NT). 15 negatives honored window-1, ≥8 window-2, zero violations either, across four negative registers, while positive fidelity rose. **The cross-window joint property anchoring on window-1 Property 2's negative axis.** Strongest: the cross-window constancy of the negative count against the diverging positive count. Trivial-absence vs active-discipline reading preserved (with active-honor instances flagged). Work-vs-worker temptation named and refused. Lower-tier citations: trajectory window-1 closure + window-2 closure + asymmetry-tail + Docs#6+7+8.
+
+13. *Test-substrate-enables-migration* (= 01KTMVST4Q84SNSG6RY4SV3SFJ). Green CI + behavior-equivalence + standing guard tests are the precondition the strangler-figs and decompositions run against. **New; the test-layer counterpart to Properties 8/9.** Strongest: the two standing guard tests fencing the post-campaign state in CI. The contract's "merges-not-actually-gated" gotcha searched and named as NOT surfaced in the window-2 drift catalogue. Lower-tier citations: recurrence P1 + P3 + synthesis-legibility-tail, drift negative-space-tail + closure.
+
+**Candidates declined, with reasoning (the discipline window-1 used at its two declines).**
+
+- *B′ slug-prefix-vs-diff-intent and E′ aislop as standalone properties.* Both are real window-2 drift instances but are sub-instances of Property 10 (rationale-externalized) at the property grain — the slug carries intent the squashed body cannot (B′); in-source narration drifts because rationale moved into the tree (E′). Promoting either would over-count the rationale-relocation observable at two surface grains. Declined for over-counting; folded into Property 10.
+
+- *Phase-numbered-PR-train (recurrence P2) as a property distinct from Properties 8/9.* The phase-train is the *delivery mechanism* of the same campaigns Properties 8 and 9 already carry (the recurrence convergence tail names "one campaign, four shapes"). Promoting it would split one migration-discipline property into two readings of the same campaigns. Declined for over-counting; its delivery-shape content folded into Properties 8 and 9.
+
+**The window-1 → window-2 property relation, summarized.**
+
+- **Confirmed/extended:** Property 1 → Property 10 (description-permissiveness extends as rationale-relocation under squash); Property 4 → Property 8 (accretion extends into a replace-by-strangler-fig migration architecture) and → Property 11 (parallel-registration's open question answered parametric).
+- **Inverted:** Property 2 → Property 7 (positive axis broke zero-to-two, document-kind-dependent); Property 4 → Property 9 (additive growth inverted to subtractive-under-a-ceiling).
+- **Revealed jointly:** Property 12 (negative-honor invariance) — visible only across both windows, because it takes a corpus whose positive axis *moved* to show the negative axis *didn't*.
+- **New, native to the larger window:** Property 8 (strangler-fig), Property 13 (test-substrate) — both born of the campaign-scale migration/decomposition the 22-day window never contained.
+
+Three window-1 properties have **no window-2 successor entry here** and are named factually rather than silently dropped: Property 3 (acknowledgement-register-correlates-with-supersession-kind), Property 5 (front-loaded-minors/patch-corridor), Property 6 (BUGS.md drained working-surface). Property 5's release-cadence does recur (recurrence P6 = 01KTMTYBDZ99R8XBA44E6NTZRQ extends the v1.41.x corridor to .37 and adds a v1.50.x .0→.82 corridor) and Property 6's BUGS→FIXED lift echoes as BUGS→ROADMAP promotion (folded into recurrence P5) — but the continuation's job is the *new and inverted* campaign-scale properties the larger window surfaces, not re-counting window-1's per-PR-grain properties across 273 PRs. Property 3's supersession-register matrix is a per-PR-grain shape the recurrence window-2 pass did not re-catalogue; named here as not-re-promoted, not as refuted.
+
+**Tier-5 forward predictions, total: seven, each one-line, each citing its recurrence.** P7 (executable-spec executes near-exact when activated; loose/un-activated defers/modifies); P8 (next legacy-replacement runs grow→parity→flip→drop); P9 (file crossing ~800 lines is decomposed by verbatim relocation under guard); P10 (campaign-scale changes reduce to slug + rationale-in-committed-doc); P11 (next per-X repetition collapses into a measured-payoff seam); P12 (negative-register items honored at exact-state grain independent of positive disposition); P13 (campaign migration lands behind a parity gate + standing guard test).
+
+**What the two-window cumulative reading enables that neither window does alone.** Window-1 named six properties of a 22-day, per-PR-merged, feature-additive artifact. Window-2 names seven properties of a 33-day, squash-merged, migration-and-decomposition artifact. Read together, the network gains the controlled cross-window contrast the trajectory thread identified: same artifact, same analytic frame, two corpora differing in document kind and merge convention and campaign scale — and against that variation, the negative-honor discipline (Property 12) held constant while the positive-execution fidelity (Property 7) and the growth direction (Property 9) and the migration architecture (Property 8) all changed. The invariant is legible *only* against the changes. The catalogue is closed at thirteen properties across two windows; the thread is left OPEN.
+
+Provenance:
+- window-2 property entries (this continuation): framing = 01KTMVF4MK9N37Y731FQ7XBGB7; P7 = 01KTMVGQPG64A1YK7M5M07TW37; P8 = 01KTMVJ5B5DWEPR9CHFS7PRMWW; P9 = 01KTMVKP814X8MHX1427R0EBW3; P10 = 01KTMVN7JZ7T5HG6T6RP8HQWB9; P11 = 01KTMVPK0QRK3CYNCV0V6NN9TD; P12 = 01KTMVR9Z5SZ0T0HX8WTNX22NT; P13 = 01KTMVST4Q84SNSG6RY4SV3SFJ.
+- window-1 property entries: P1 = 01KR3HG2GEBH1W8BKGT3CW6S9P; P2 = 01KR3HJ9ZVA966149ME2TBTB5B; P3 = 01KR3HMF3F7A5EBXBQYEWHYR3Z; P4 = 01KR3HQCRV761KG6CVD6T11QNM; P5 = 01KR3HSK97596MXH0V41K7TYM2; P6 = 01KR3HW4T1GQKFFWNYSRT0639S; closure = 01KR3HZNC62XT11V4CW2GZ5V0S.
+- lower-tier window-2 closures: drift = 01KTMV2JE30J2QGRP3W3EBQNZH; recurrence = 01KTMV0568M86NZC6XZENTSB6D; trajectory = 01KTMV0966Y4EGA3D07XN0PZKY.
+- lower-tier window-2 shapes cited across the seven properties: drift A′ 01KTMTQ8RT04DKANY20CG8TE39, B′ 01KTMTRNPWDK14NQHD78DV2ZEE, C′ 01KTMTT2MAQQSS8780NBK097TQ, E′ 01KTMTWZ1424S5QYT2HS1K97B3, negative-space-tail 01KTMV0RPDEBMH87MB89JRE0BR; recurrence P1 01KTMTNYS83V5A7PY2MJVV60MF, P3 01KTMTSAVQNENHP8ZFWBKTWXN6, P4 01KTMTTZQK31H30M2RQ6J3FEY1, P5 01KTMTWQR1TJTNDNPZH3X6JDHP, P6 01KTMTYBDZ99R8XBA44E6NTZRQ, synthesis-tail 01KTMV38HW8N06YTPG0VQS5NYH; trajectory Doc#1 01KTMTPYARF1GDCQHMMF9YN5J1, Doc#2 01KTMTR9XYV5ZW49ENMMP4CMBE, Doc#3 01KTMTSTYW0ZAF94QBA9NPH340, Docs#6+7+8 01KTMTWQ02AVXBS4DX61N8CHGV, asymmetry-tail 01KTMV1Q0XJNSWM08XAGJ08T4D.
+
+<!-- Entry-ID: 01KTMVW39P5RAZ15CVAAKEKBFW -->
