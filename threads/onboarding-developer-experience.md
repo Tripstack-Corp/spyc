@@ -58,3 +58,46 @@ Provenance:
 - Sibling entry_ids: `onboarding-overview = 01KR0NZNJ3KM6BJY09Q4P9D0NE`, `onboarding-test-surface = 01KR0PBH6T1AK4VA0JSE75390F`, `onboarding-risk-register = 01KR0P9JC8Z3DF6FQ1GJPF3VKA`.
 
 <!-- Entry-ID: 01KR0PFHHCNVJPNJSTPA3VW62J -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:18:42.127673+00:00
+Role: scribe
+Type: Note
+Title: Onboarding refresh: local build/dev flow at #311 (v1.56.0) — edition 2024, MSRV 1.88, toolchain pinned to 1.96.0, make doctor / lint-linux current
+
+Spec: docs
+
+Purpose: Refresh of the local build/lint/test/cross-compile dev flow from #37 to #311 / v1.56.0. The Makefile-vs-Justfile split and the first-run sequence are unchanged in shape; what moved is the Rust edition/MSRV/pinned-toolchain trio, the now-real `make doctor`, the `lint-linux` cross-compile clippy target, and CI's sccache-style cache tuning.
+
+Observed:
+- **edition 2024, MSRV `rust-version = "1.88"`** (`Cargo.toml:4,8`) — the #37 prerequisites story said "Rust 1.85+" and flagged INSTALL.md's "1.80" as stale. That stale-ness is now resolved: `INSTALL.md:57` states "Minimum supported Rust version: **1.88** (for `if let` chains)" and `INSTALL.md:59-61` documents the exact pinned toolchain.
+- **Toolchain pinned to 1.96.0** (`rust-toolchain.toml:2` `channel = "1.96.0"`, with `rustfmt`+`clippy` components and the four cross-compile targets pre-listed). rustup auto-installs/selects it on first build — no manual `rustup default`. The pin (PR #164) exists so a new stable Rust release cannot silently tighten lints; CI builds against the same pin (cross-ref `history-arc-01` entry 01KTMMVZKGKKZ0Z8VY1Q8TW3D2).
+- **Two task runners, still not in lockstep.** `Makefile` is canonical (what CI runs); `Justfile` is the lighter alternative covering build/run/test/clippy/fmt + the three static cross-compile recipes (`Justfile:1-49`). The Makefile has substantially more targets and has grown since #37: it now adds `lint-linux`, `aislop`/`aislop-baseline`, `release-debug`, `install-debug`, and `dist-sign` on top of the #37 set.
+- **`make doctor` is real and current** (`Makefile:263-294`): prints rustup/rustc/cargo/zig/cargo-zigbuild versions, lists installed targets, computes the four required cross-compile targets vs installed and prints a `rustup target add` fix-line, prints the sysroot, and warns if Homebrew rust is detected (it shadows rustup). This is the "is my dev env ready?" command (PR #117).
+- **Install / run / lint / typecheck / test / cross-compile command set:**
+  - install: `make install` → builds release, `install -m 755` into `$(PREFIX)/bin` (default `~/.local`, no sudo); macOS runs `codesign -s - -v` ad-hoc (`Makefile:211-223`). Quickstart in `README.md` is still `git clone …bitbucket.org/tripstack/spyc.git && cd spyc && make install`.
+  - run / build: `make` or `make build` (debug), `make run`, `cargo run -- <args>`.
+  - lint: `make lint` = `cargo clippy --locked --all-targets -- -D warnings`; **`make lint-linux`** = the same clippy for `x86_64-unknown-linux-musl` via zig as the C cross-compiler — the only way to lint `cfg(target_os="linux")` code (e.g. `clipboard.rs`'s wl-copy/xclip path) from a Mac before it fails in CI (`Makefile:49-68`, PR #188). fmt: `make fmt` / `make fmt-check`.
+  - typecheck: no separate step — `cargo check` ad-hoc, or rely on `make lint` (clippy compiles). The committed gate is `make check` = `fmt-check + lint + test + deny` (`Makefile:37`).
+  - test: `make test` = `cargo test --locked --all-targets` (forced single-threaded by the harness due to the XDG_STATE_HOME race).
+  - supply-chain: `make deny` = `cargo deny --all-features check` (advisories + licenses + sources + bans).
+  - cross-compile: `make release-macos-universal` (lipo arm+x86), `make release-linux-x86` / `release-linux-arm` (cargo-zigbuild static musl; both `touch src/main.rs` first because the zigbuild cache is separate from cargo's and can go stale, `Makefile:159-171`), `make dist` (all platforms → `dist/`), `make dist-checksums`, `make dist-sign` (detached GPG sig, `GPG_KEY=<id>`).
+- **CI build tuning** (relevant to "why does my local build differ from CI"): CI runs against the pinned toolchain with four Bitbucket caches ($CARGO_HOME, target, target-cov, $RUSTUP_HOME) all keyed on `rust-toolchain.toml` + `.ci-cache-version`, cargo-deny installed as a sha256-verified prebuilt (not `cargo install`), and `CARGO_INCREMENTAL=0` to keep warm-cache hits deterministic across runners — "Local dev keeps incremental on (this is a CI-only override)" (`bitbucket-pipelines.yml:122-132`, PRs #69/#71; cross-ref 01KTMMPDE6S4PA834YDR24SX1H).
+
+Inferred:
+- The "right" first-run sequence is unchanged: `make doctor` → `make` → `make test` → `make check` → optional `make install-hooks` (+ `make lint-linux` before pushing platform-gated code). — confidence: high — basis: every step is a documented Makefile target; `doctor` exists to flag missing prerequisites first.
+- Justfile↔Makefile drift continues to widen (Justfile gained nothing while the Makefile added lint-linux/aislop/dist-sign/install-debug). — confidence: medium — basis: target diff. How to apply: when adding a Make target, decide explicitly whether it belongs in Justfile too, or retire the Justfile.
+
+Next query: `watercooler_search(query="local build cross-compile doctor toolchain pin", thread_topic="onboarding-developer-experience", code_path=".")`
+
+Related:
+- `onboarding-test-surface` — `make check` / `make lint-linux` are the local mirror of CI's quality step; the no-merge-gate caveat lives there.
+- `onboarding-release-process` — `make install`/`dist`/`dist-checksums`/`dist-sign` are the dev-side surfaces release generalizes.
+- the history corpus — `history-arc-01-foundation-hygiene` carries the toolchain-pin/INSTALL-MSRV reconcile (01KTMMVZKGKKZ0Z8VY1Q8TW3D2) and the CI cache/incremental tuning (01KTMMPDE6S4PA834YDR24SX1H).
+
+Provenance:
+- Files read: `Cargo.toml:4,8`, `rust-toolchain.toml:1-4`, `Makefile:37,49-68,159-171,211-223,263-294` (+ full pass), `Justfile:1-49`, `INSTALL.md:49-61,115-116`, `CONTRIBUTING.md:117-126`, `bitbucket-pipelines.yml:122-132`.
+- History entry_ids consulted: 01KTMMVZKGKKZ0Z8VY1Q8TW3D2 (toolchain pin / INSTALL MSRV), 01KTMMPDE6S4PA834YDR24SX1H (CI cache + CARGO_INCREMENTAL tuning).
+- Prior #37 entry refreshed: 01KR0PFHHCNVJPNJSTPA3VW62J.
+
+<!-- Entry-ID: 01KTND327KGZ2KWHA28HSV31CH -->
