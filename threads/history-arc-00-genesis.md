@@ -370,3 +370,34 @@ Provenance:
 - 37279fc1 (2026-04-17 22:50) — Phase 4 apply() extraction.
 
 <!-- Entry-ID: 01KTNBK0V3M9HGE654CBDR4276 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:53:01.604411+00:00
+Role: scribe
+Type: Note
+Title: M13–M14 + v1.5–v1.6 — gf/gF path-jump, MCP context handoff, inventory rewrite
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: gf/gF path-jumping from pane output, the first MCP bridge (context handoff), and the inventory becomes a file-backed cache   [kind: new-capability]
+When: 2026-04-18 → 04-19 · commits c39c4180 (M13 gf/gF), a31c3b84 (M14 MCP), 2bd2747e (session restore), b7ad6ee8 (inventory rewrite)
+Recorded rationale: "Add gf/gF: jump to file paths in pane output (M13); bump to 1.4.0" (c39c4180); "Add MCP context handoff and exited-tab UX fix (M14); bump to v1.5.0" (a31c3b84); "Add conversation-aware session restore with Claude session ID/name" (2bd2747e); "Rewrite inventory as file-backed cache with graveyard, tags, and put" (b7ad6ee8)
+Inferred intent: M13 closes the loop from the pane back to the file manager (Claude prints a path, gf jumps to it). M14 is the genesis of the MCP subsystem — first version is a one-way context handoff, expanded to writable actions at v1.8 and a full transport rewrite at v1.10. The inventory rewrite moves from in-memory to a file-backed cache with a graveyard + tags. confidence: high.
+Supersedes: 2bd2747e extends session restore (b362bc40) with conversation-aware Claude session ID/name; b7ad6ee8 supersedes the de9caa59 inventory-UX-persistence approach with a full file-backed cache rewrite.
+
+M13 (c39c4180, then 016bdfcc/88873045 fixing Claude-CLI output patterns and scroll-mode) makes pane output addressable: gf/gF jump to file paths printed in the pane — the inverse of M10's context-piping. M14 (a31c3b84) is the first MCP bridge: context handoff so an external Claude can read spyc's workspace state. This MCP line then runs: writable actions (v1.8, c473e673 "Claude can mutate the TUI workspace"), the proactive-use CLAUDE.md instruction (d218e882), the HTTP→Unix-socket transport rewrite (v1.10, f81e7ade), and the search MCP exposure (v1.24, covered later). The inventory rewrite (b7ad6ee8) introduces the file-backed cache with graveyard/tags/put.
+
++1 folded: 0ce26578 (2026-04-19) "Add unicode-width for correct CJK/emoji column alignment" — column-width correctness.
++1 folded: 8ec589e2 (2026-04-19) "Add CHANGELOG.md and --version --verbose" — CHANGELOG.md begins here, maintained per-version for the rest of genesis.
++5 folded README/docs/status-bar polish (2026-04-19): 5a42f192, 727ee55c, 0af2c4cc, c80406f1, 7a5c7f22.
+
+Provenance:
+- c39c4180 (2026-04-18 18:03) — M13 gf/gF path-jump, v1.4.0.
+- a31c3b84 (2026-04-18 21:10) — M14 MCP context handoff, v1.5.0.
+- 2bd2747e (2026-04-18 21:55) — conversation-aware session restore.
+- b7ad6ee8 (2026-04-19 06:31) — inventory as file-backed cache.
+- 8ec589e2 (2026-04-19) — CHANGELOG.md introduced.
+
+<!-- Entry-ID: 01KTNBM19MB1PT31ZZMZHE3T59 -->
