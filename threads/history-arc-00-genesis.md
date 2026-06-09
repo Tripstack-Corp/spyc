@@ -581,3 +581,33 @@ Provenance:
 - REFACTOR_PLAN.md @265d2816 — names BackgroundTasks as Phase-1 extraction #1.
 
 <!-- Entry-ID: 01KTNBSEMKMZPJW51YMA5JVEZ2 -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:56:36.756197+00:00
+Role: scribe
+Type: Note
+Title: v1.22–v1.24 — project-wide search (F finder, :grep, MCP exposure) + custom-code reduction sweep
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: a three-milestone project-wide search subsystem (F fuzzy-finder, :grep content search, MCP exposure); a dependency-adoption sweep trims hand-rolled code   [kind: new-capability]
+When: 2026-04-28 · commits 915c8ee2 (M1 F finder), 10347b8a (M2 :grep), f9458a2c (M3 MCP), 1ff0d34a/0622ff34 (dep sweep)
+Recorded rationale: "F filename finder (project-wide fuzzy search M1) (v1.22.0)" (915c8ee2); ":grep content search (project-wide search M2) (v1.23.3)" (10347b8a); "search MCP exposure (project-wide search M3) (v1.24.0)" (f9458a2c); "sysinfo: swap hand-rolled Hinnant algorithm for jiff (v1.24.1)" (1ff0d34a); "custom-code reduction sweep -- uzers, uuid, strip-ansi-escapes (v1.24.2)" (0622ff34)
+Inferred intent: project-wide search is built as a deliberate 3-milestone track — F (fuzzy filename finder on a streaming worker thread), :grep (content search), then exposing search through MCP so an external Claude can query the project. The dep sweep replaces hand-rolled date math (Hinnant→jiff) and other custom code with crates. confidence: high — evidence: f9458a2c touches src/fs/{finder,grep}.rs and adds 353 lines to src/mcp.rs ("fs::grep tests + 16 mcp tests green ... ROADMAP M3 done").
+Supersedes: f9458a2c extends the MCP tool surface (born M14, made writable at v1.8) with search tools — search_content/search_paths/search_inventory as seen in the current MCP server.
+
+The project-wide-search track is roadmapped first (3aab7f9b "F finder, :grep, MCP exposure") then executed M1→M2→M3 in one day. M1 (915c8ee2, then 023b6103 streaming walker on a worker thread, 424de3c8 descend into sibling-clone subrepos) is the F fuzzy finder. M2 (10347b8a) adds :grep content search (src/fs/grep.rs). M3 (f9458a2c) exposes both through MCP (src/mcp.rs +353 lines). The same day, a custom-code-reduction sweep (1ff0d34a jiff, 0622ff34 uzers/uuid/strip-ansi-escapes) trades hand-rolled implementations for maintained crates — an arc-01/hygiene precursor.
+
++1 folded: 076243349 (2026-04-28) "LAUNCH_PREP: working doc for spyc 2.0 launch hygiene" — the 2.0 launch-prep doc, the hygiene framing REFACTOR_PLAN later references ("Pre-2.0. Architectural rewrite delays launch").
++1 folded: df5d6fc7 (2026-04-28) BUGS triage (3 SMALL items from dogfooding).
++1 folded: 0759b972 (2026-04-28) ROADMAP Yazi-inspired entries (bulk rename, cwd export, visual pick, event stream) — forward plan beyond genesis.
+
+Provenance:
+- 915c8ee2 (2026-04-28 08:57) — v1.22.0 F finder (M1).
+- 10347b8a (2026-04-28 11:03) — v1.23.3 :grep (M2).
+- f9458a2c (2026-04-28 11:11) — v1.24.0 search MCP exposure (M3); src/mcp.rs +353.
+- 0622ff34 (2026-04-28 13:10) — v1.24.2 custom-code reduction sweep.
+
+<!-- Entry-ID: 01KTNBTK6MG9R8XNTAY9G95EQE -->
