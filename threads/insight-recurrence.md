@@ -905,3 +905,45 @@ Provenance:
 - `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 4 = 01KTMTTZQK31H30M2RQ6J3FEY1.
 
 <!-- Entry-ID: 01KTMTWQR1TJTNDNPZH3X6JDHP -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:01:33.081199+00:00
+Role: critic
+Type: Note
+Title: Pattern 6 (window-2): Patch-corridor release cadence — window-1's v1.41.x corridor extends to .37, then a longer v1.50.x corridor (.0→.82), then v1.51.4 and v1.56.0; the same patch-under-one-minor shape at larger scale
+
+Spec: critic
+
+tags: #insight #recurrence #window-2
+
+**Pattern statement (EVOLUTION of window-1 Pattern 5).** Window-1 Pattern 5 (= 01KR3D8RH5DNYC37WSGFVETXT3) named the v1.41.x patch cadence: after v1.41.0 shipped, "no more minor cuts land in the 22-day window — every subsequent merge is a v1.41.x patch," verified as a 24-patch ladder (v1.41.0 → ~v1.41.24). Window-2 extends *the very same corridor* further and then recurs the shape at a larger scale: the patch-under-one-minor cadence is the project's standing release shape, and minor cuts stay rare across the whole #38–#311 window.
+
+**Instance enumeration — verified against the release ledger (`git log main --format='%s' | grep -oiE 'v1\.[0-9]+\.[0-9]+'`).**
+
+1. **The v1.41.x corridor continues past window-1's cut-off.** Window-1's Pattern 5 caught the corridor at v1.41.24 (its 22-day boundary). The ledger shows the *same corridor* runs on into window-2 to **v1.41.37** — 13 more patches under the same minor, with no v1.42–v1.49 minor cut in between. The window-1 recurrence was not a 22-day artifact; it was the leading edge of a corridor that kept running.
+
+2. **A longer v1.50.x corridor opens and recurs the shape at larger scale.** v1.50.0 cuts in window-2 (`history-arc-01` #51, 01KTMMMPZDCN2D25KSX9G1R6Y1), and the ledger shows the v1.50.x corridor running from **.0 to .82** — a *longer* patch ladder under one minor than the v1.41.x corridor window-1 catalogued. The patch-under-one-minor shape recurs, and the corridor length grows.
+
+3. **v1.51.4 — the cadence is recorded as ritual.** PRs #143/#170 "add a `release-debug` profile and cut v1.51.4 — 'the first tagged release since v1.50.0,' now purely a CHANGELOG ritual" (`history-arc-01` 01KTMMY535PG8SJAN371WVMKPN). The recorded "purely a CHANGELOG ritual" line is the cadence naming itself.
+
+4. **v1.56.0 — a minor cut tied to a campaign completion.** The gix migration closes with "released as 1.56.0" (`history-seg-gix-migration` 01KTMMTF0MQ96P7BVN7QQPVBNS). This is one of the rare minor-cut moments, and it is tied to a strangler-fig *drop* (Pattern 1) — the minor bump marks a capability-replacement landing, consistent with a "minor = capability-level change" working shape.
+
+**Instance/scale claim: minor cuts stay rare; patch corridors recur and lengthen.** The ledger confirms the minor cuts in the relevant span are sparse — v1.41.0 and v1.50.0 are the `.0` cuts across the core window, with v1.51.0 and v1.56.0 the only other minors named, against ~120 patch versions. The recurrence is the **patch-corridor-under-one-minor**, instantiated at v1.41.x (now .37), v1.50.x (.82), and bracketed by the v1.51/v1.56 minors. The shape window-1 caught is the same; window-2 shows it is a *standing* cadence, not a window-bounded one, and that the corridors grow longer.
+
+**The recurrence reading window-1 could not have: the corridor outlives the observation window.** Window-1's Pattern 5 was epistemically careful — it claimed "24 patches in the 22-day window" and flagged that whether the cadence would continue was tier-5 (forbidden, reserved for emergent-properties). Window-2's ledger now *retrospectively* shows the v1.41.x corridor did continue (to .37), and that a second corridor (v1.50.x) replicated the shape at greater length. This is not window-2 *predicting* — it is window-2 *counting what the larger ledger now contains*, which the smaller window could not see. The recurrence is confirmed at the cumulative grain: two long patch corridors, both under one minor, with rare capability-marking minor cuts between them. (Stating *why* the corridors lengthen — release-pressure? a SemVer-minor=capability policy stated nowhere but observed everywhere, as window-1's closure flagged — is tier-4, `insight-emergent-properties`'s.)
+
+**Sub-shape: the minor cut correlates with a campaign/capability landing.** v1.50.0 opens the V1.5 pager-unification era; v1.56.0 marks the gix-migration drop; v1.41.0 (window-1) marked the first feature-complete cut. The recurring sub-observation: **minor cuts in this project bracket capability-level changes, patches carry everything else.** Three minor-cut instances across both windows fit this; the catalogue notes the sub-shape factually (the policy is observed, never stated — window-1's closure already flagged "the SemVer policy that exists nowhere as a stated plan but is observed everywhere").
+
+**Boundary notes.**
+- *Tier boundary.* "Was the patch-only cadence anticipated or did it emerge?" is tier-3/tier-4 (window-1's closure routed it to both `insight-trajectory` and `insight-emergent-properties`). This pattern counts the corridors; it does not assess intent or name the property.
+- *Drift boundary.* Version bumps in slugs/CHANGELOG match the diffs; no misnaming-at-merge. Recurrence-only.
+
+Provenance:
+- Release ledger verified this session: `git log main --format='%s' | grep -oiE 'v1\.[0-9]+\.[0-9]+' | sort -u` → v1.41.x to .37, v1.50.x to .82, plus v1.51.4, v1.56.0; `.0` minor cuts in span = v1.41.0, v1.50.0 (+ v1.51.0, v1.56.0).
+- `history-arc-01` (synthesis 01KTMNMAPV4N1KFHSPAVYN9VP4): 01KTMMMPZDCN2D25KSX9G1R6Y1 (#51 cuts v1.50.0), 01KTMMY535PG8SJAN371WVMKPN (#143/#170 v1.51.4 "first tagged release since v1.50.0 … purely a CHANGELOG ritual").
+- `history-seg-gix-migration`: 01KTMMTF0MQ96P7BVN7QQPVBNS (#292 released as 1.56.0, tied to the strangler-fig drop).
+- EVOLVES: `insight-recurrence` window-1 Pattern 5 = 01KR3D8RH5DNYC37WSGFVETXT3 (v1.41.0→.24 corridor, 22-day window); window-1 closure cross-tier flag for cadence = 01KR3DFHA7FRV3BXEH2Z8SFJQN.
+- Sub-shape cross-ref: Pattern 1 strangler-fig drop = 01KTMTNYS83V5A7PY2MJVV60MF (v1.56.0 marks the gix drop).
+- `insight-recurrence` window-2 framing = 01KTMTMAB6G8JJAFFQF29XVZGB; Pattern 5 = 01KTMTWQR1TJTNDNPZH3X6JDHP.
+
+<!-- Entry-ID: 01KTMTYBDZ99R8XBA44E6NTZRQ -->
