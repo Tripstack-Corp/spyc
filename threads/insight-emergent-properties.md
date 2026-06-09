@@ -906,3 +906,46 @@ Provenance:
 - window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
 
 <!-- Entry-ID: 01KTMVPK0QRK3CYNCV0V6NN9TD -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:15:43.641795+00:00
+Role: critic
+Type: Note
+Title: Property 12 (cross-window): Negative-honor invariance — non-goals and rejections honored uniformly in window-1 (15) AND window-2 (≥8) while positive-execution fidelity rose; the property the two windows reveal jointly that neither does alone
+
+Spec: critic
+
+tags: #insight #emergent-properties #window-2
+
+**Property statement.** Across both reconstruction windows, the codebase honors its **negative-register** stated items — non-goals, rejections, scope-exclusions, advisory ignores, deferrals — at exact-state grain, uniformly, with zero violations, while its **positive-execution** fidelity *varied* (window-1: zero clean executions; window-2: two near-exact). The negative-honor discipline is **invariant** across the two windows; the positive disposition is document-kind-dependent. Reads as: spyc, as artifact, anchors what should-NOT-happen stably regardless of corpus or window, while what should-happen is anchored variably. This is a cross-window structural invariant — the one property the two windows reveal *jointly* that neither reveals alone, because it takes two corpora differing in document kind, with the negative-honor count holding constant across both, to distinguish an invariant from a single corpus's quirk.
+
+**Window contrast: this is the cross-window joint observation, anchoring on window-1 Property 2 (= 01KR3HJ9ZVA966149ME2TBTB5B) and confirming its negative axis.** Window-1's Property 2 (fifteen-and-zero) named a within-corpus asymmetry: 15 negatives honored, 0 positives executed exactly. Window-2's Property 7 (= 01KTMVGQPG64A1YK7M5M07TW37) broke the positive side (zero-to-two). What neither window names alone is the *invariance of the negative side across the boundary* — and the trajectory thread explicitly reserved that adjudication for this tier (asymmetry tail = 01KTMV1Q0XJNSWM08XAGJ08T4D: "The negative-honor count moving *not at all* is the part that suggests something invariant underneath — but naming that invariant is the property question, reserved").
+
+**Evidence enumeration.**
+
+*Window-1 negative-honor: 15, zero violations* (trajectory window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS, carried into window-2 closure's restatement): 4 catalogue skips + 6 charter non-goals + 5 advisory ignores, each honored at exact-state grain across three independent stated-plan documents.
+
+*Window-2 negative-honor: ≥8, zero violations* (trajectory window-2 closure = 01KTMV0966Y4EGA3D07XN0PZKY): AUTO_APPROVAL's pty-interception rejection (1); PANE_RECOVERY's scope-boundary (1); PANE_STARTUP's splits-deferral (1); YAZI's Lua-plugins + image-preview non-goals (2); V1_5's three non-goals including "no MVU here" (3). "Every negative-register element in window-2 is honored at exact-state grain, zero violated."
+
+*The three-for-three feature-plan recurrence is the cleanest window-2 instance* (trajectory Docs#6+7+8 = 01KTMTWQ02AVXBS4DX61N8CHGV): three independent feature documents whose *capability* recommendations are unexecuted at window-terminus, but whose *negative* element is honored uniformly — AUTO_APPROVAL's pty-rejection quoted verbatim ("Security features should not be built on regex against another tool's UI"; no PR ships pty interception); PANE_RECOVERY's scope-exclusion (the excluded "simpler fix" landed *separately* at #94 exactly as the plan said it should); PANE_STARTUP's splits-deferral (no tmux-style splits shipped). "The single clearest recurrence of window-1's fifteen-and-zero shape inside window-2."
+
+*The kind of negative differs; the uniform honor does not* (trajectory window-2 closure): "the *kind* of negative differs (non-goals, advisory ignores, rejections, scope-exclusions); the uniform honor is invariant." The negatives span four registers across two windows and are honored uniformly in all four.
+
+**The work-vs-worker discipline test, named and refused.** The acute temptation here is to attribute the invariance to a maintainer disposition — "the maintainer is disciplined about not building forbidden things," "rejection is a working-style tell." Those are worker-grain framings (about how the person works / what they value) and are forbidden absolutely. The property holds only at artifact grain: *the codebase, across both windows, exhibits exact-state honor of its negative-register stated items* — observable by checking, for each negative element, that the forbidden/excluded/deferred thing is absent from `src/` at window-terminus (which the trajectory thread verified on disk: "no `:approvals` in src/," "no `use_tmux` in src/," "no startup-tabs config in src/," "no pty interception"). The invariance is a count of artifact-state checks, not an inference about a mind. The trajectory asymmetry tail makes the same move: "It is the observation that the *same analytic frame* applied to a different corpus yields a different positive-side number while preserving the negative-side number" — a property of the frame-applied-to-the-artifact, not of the worker.
+
+**A competing reading, preserved.** The invariance could be read as *trivial* rather than structural — honoring a non-goal requires *doing nothing*, so "≥8 negatives honored" may be the absence of an event rather than the presence of a discipline. Under this reading the property is weaker: not-building-X is the default, and the count merely records that no PR happened to build the forbidden things. The trajectory thread's counter is partly in the evidence: several negatives are *active* honor, not passive absence — PANE_RECOVERY's scope-exclusion required the excluded "simpler fix" to land *on its own separate track* (#94) exactly as the plan drew the boundary, which is a positive action honoring a negative boundary, not mere inaction; and the advisory-ignore stability (window-1) survived "the window's largest dep change" with an empty `deny.toml` diff, an active non-reduction under pressure. Both readings are kept: the property statement asserts the *uniformity and zero-violation* across four negative registers and two windows, which holds under either the trivial-absence or active-discipline reading; which of those names the truth is left open, with the active-honor instances (separate-track landing; non-reduction under dep pressure) flagged as the evidence resisting the trivial reading.
+
+**Strongest evidence.** The cross-window constancy itself is the load-bearing observation: 15 in window-1, ≥8 in window-2, zero violations in either, across four negative registers and two corpora that differ in document kind and that diverge sharply on the *positive* axis. The trajectory thread frames it as a controlled contrast — "same maintainer, same analytic frame, two corpora differing in document kind, negative-honor held constant, positive-execution varied." That the variable axis varied while the invariant axis did not, across the boundary, is what no single window could establish.
+
+**Where the property would falsify.** A single negative-register item *violated* in either window — a non-goal built, a rejected pattern shipped, an advisory ignore opened or a deferred split landed against its plan — would refute the zero-violation invariance. None observed across 15 + ≥8 instances. A window-3 corpus honoring its negatives at less-than-uniform grain would weaken the cross-window invariance; outside this reconstruction's scope, named as the open extension.
+
+**Tier-5 forward prediction.** Citing the cross-window negative-honor count (15 window-1, ≥8 window-2, zero violations) across four registers: future negative-register stated items (non-goals, rejections, scope-exclusions, deferrals) will continue to be honored at exact-state grain, independent of the positive-execution disposition of the documents that carry them. (trajectory window-1 closure = 01KR3F9EF9WF9Q34FRAR2XPSZS + window-2 closure = 01KTMV0966Y4EGA3D07XN0PZKY + Docs#6+7+8 = 01KTMTWQ02AVXBS4DX61N8CHGV.)
+
+Provenance:
+- trajectory window-1: closure (terminal 15-and-0; the 15 negatives honored) = 01KR3F9EF9WF9Q34FRAR2XPSZS.
+- trajectory window-2: closure (≥8 negatives honored, zero violations; "the kind of negative differs, the uniform honor is invariant"; the controlled-contrast framing) = 01KTMV0966Y4EGA3D07XN0PZKY; asymmetry tail (the negative-side-not-moving observation reserved for property naming) = 01KTMV1Q0XJNSWM08XAGJ08T4D; Docs#6+7+8 (the three-for-three positive-deferred/negative-honored recurrence; on-disk verification) = 01KTMTWQ02AVXBS4DX61N8CHGV.
+- window-1 contrast / anchor: Property 2 (fifteen-and-zero) = 01KR3HJ9ZVA966149ME2TBTB5B.
+- this-thread sibling: Property 7 (plan-doc-as-executable-spec, the positive-side break this property's negative-side invariance is set against) = 01KTMVGQPG64A1YK7M5M07TW37.
+- window-2 this-thread framing = 01KTMVF4MK9N37Y731FQ7XBGB7.
+
+<!-- Entry-ID: 01KTMVR9Z5SZ0T0HX8WTNX22NT -->
