@@ -175,6 +175,40 @@ fn overlay_pager_consumes_keys_not_list() {
     });
 }
 
+/// Routing: a paste while the F-finder is open feeds the text into the
+/// picker query (type-to-filter), not the bottom pane. Regression for the
+/// key/paste dispatch asymmetry — keys hit the modal finder first
+/// (`handle_find_picker_key`) but paste used to fall through to the pane arm
+/// and land in claude/shell. Newlines are stripped (single-line fuzzy query).
+#[test]
+fn paste_into_open_finder_filters_not_pane() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+        app.runtime.find_picker = Some(super::find_picker::FindPicker {
+            candidates: vec![std::path::PathBuf::from("src/app/foo.rs")],
+            root: std::path::PathBuf::from("/tmp/harness"),
+            query: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            limit: 200,
+            walk_rx: None,
+            walk_complete: true,
+        });
+        app.handle_paste("foo\n".to_string()).unwrap();
+        let picker = app
+            .runtime
+            .find_picker
+            .as_ref()
+            .expect("finder stays open after paste");
+        assert_eq!(
+            picker.query, "foo",
+            "paste feeds the query, newline stripped"
+        );
+        assert_eq!(picker.filtered.len(), 1, "query refilters the candidates");
+    });
+}
+
 /// Routing: Esc on an open overlay pager closes it.
 #[test]
 fn esc_closes_overlay_pager() {
