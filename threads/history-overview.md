@@ -425,3 +425,35 @@ Provenance:
 - First-window segmentation (8-arc, #1–#37): history-overview index 1 = 01KR0TWHTC1MPK4KJ08Y9SPE6P.
 
 <!-- Entry-ID: 01KTMN9MRB31A0C8ZWSXX5M5ZQ -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T05:03:17.824332+00:00
+Role: scribe
+Type: Note
+Title: Addendum: genesis arc-00 added + insight layer completed (spine index update)
+
+Spec: scribe
+
+tags: #history #segmentation
+
+This addendum keeps the spine's index accurate after two additions made the same session as the #38–#311 reconstruction. Both are recorded here so the overview remains a complete table of contents.
+
+**1. Pre-PR genesis reconstructed — `history-arc-00-genesis` (25 entries).** The #38–#311 framing entry (01KTMN7X7FV45E8E05DN1RV719) noted the reconstruction is keyed to merged PRs and that the pre-PR-workflow period was out of scope. That gap is now filled: `history-arc-00-genesis` reconstructs the **244 direct commits from 2026-04-15 (root `6f981bc` "Initial commit"; substantive cspy birth at `57ae273`, 4 minutes later) through 2026-04-29** (`265d2816`, the REFACTOR_PLAN authoring), i.e. everything before the first merged PR (#2, `d9b9360`, 2026-04-30). Coverage is commit-keyed (no PR numbers/bodies that early; recorded rationale = commit subjects + genesis-era docs), heavily folded (244 commits → 18 moments), and flagged as such. The `00` prefix sorts it before `history-arc-01` in the dashboard. Two load-bearing findings: (a) the project was born as **`cspy`** and renamed to **`spyc`** exactly once at `28c4d329` (2026-04-17, v1.0.0, "spy + claude = spicy"); (b) the final genesis commit **authored `REFACTOR_PLAN.md`** naming `app/mod.rs` at ~7400 lines → MVU — the very plan that `history-seg-refactor-mvu` and `history-seg-module-decomposition` execute two windows later. The whole application's architecture was essentially formed (v1.0→v1.37, milestones M1–M14) before the PR workflow began; window-1's "first 22 days" was polish atop an already-rich genesis.
+
+So the arc spine now reads **arc-00 (genesis) → arc-01..08 (first window #1–#37, extended with #38–#311 continuations) + the six `history-seg-*` segments**. The thread history is complete from the repo's Initial commit through the canonical HEAD at PR #311.
+
+**2. Insight layer completed (the segmentation entry's "deferred" note is now superseded).** The #38–#311 segment-map entry (01KTMN9MRB31A0C8ZWSXX5M5ZQ) stated the insight pass over this window was "NOT written this session." That has since been done: all four tiers carry a window-2 continuation appended to the first-window catalogue —
+- `insight-drift` (19 entries) — Patterns A′–F′ (squash-subject understatement at structural scale; feat-labeled refactor; cumulative self-retraction; same-day plan self-reversal; "aislop" cruft; fix-on-feature waves).
+- `insight-recurrence` (20) — strangler-fig migration, phase-numbered PR-trains, verbatim-relocation, per-X-then-generalize, plan-doc-then-execute, patch-corridor cadence.
+- `insight-trajectory` (20) — 10 plan docs dispositioned; the **mode-shift finding**: window-2 has near-exact plan executions (MVU_PLAN's 8 phases, V1.5's 6) vs window-1's fifteen-and-zero.
+- `insight-emergent-properties` (20) — Properties 7–13 (2 declined): plan-doc-as-executable-spec, strangler-fig as house style, additive→subtractive growth inversion, rationale-externalized-under-squash, abstraction-seams-from-repetition, cross-window negative-honor invariance, test-substrate-enables-migration.
+
+The four-tier ladder now spans both windows; emergent Properties 7–13 cite the lower-tier window-2 entries per the recurrence-citation rule.
+
+Provenance:
+- history-arc-00-genesis entries 0–24 (framing 01KTNB8Q0AH5GBS0V13PQRV1SR; cspy→spyc Decision 01KTNBH4F01YB3YNV9JT6MM8QH; REFACTOR_PLAN Decision 01KTNBYJVDJMGACCH7G0GE9RN8; closure 01KTNBZPPXB773X30V34JQV7KM).
+- `git rev-list --max-parents=0 main` = single root `6f981bc`; `28c4d329` = first commit introducing the token "spyc" (pickaxe-verified).
+- Prior spine entries this window: framing 01KTMN7X7FV45E8E05DN1RV719; segment map 01KTMN9MRB31A0C8ZWSXX5M5ZQ.
+- Insight thread counts verified against origin entries.jsonl this session (19/20/20/20).
+
+<!-- Entry-ID: 01KTNC6VRF3RB7K7CKKG2EPS1T -->
