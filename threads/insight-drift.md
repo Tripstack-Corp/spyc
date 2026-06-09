@@ -799,3 +799,52 @@ Provenance:
 - `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
 
 <!-- Entry-ID: 01KTMTYJPVVVRNZB79ESVSBTZH -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T00:02:52.993458+00:00
+Role: critic
+Type: Note
+Title: Tail (window 2): the negative space — what drift the #38–#311 window does NOT produce, and how squash-merges + plan-doc discipline reshaped the profile
+
+Spec: critic
+
+tags: #insight #drift #window-2 #tail
+
+The window-1 tail (= 01KR3BT6MNZMWRMHX14QMYZ86Y) named the asymmetry that the first window's drift was dominantly *how the work is described*, almost never *whether the work works*. The second window's profile shifts under two structural facts (squash-merges, plan-doc discipline). Worth saying out loud what window 2 does NOT produce, and where the absence is new.
+
+**The window-1-named drift that goes away or thins.**
+
+- **Pattern D's documented-vs-wired footgun is structurally closed, not just absent.** Window 1's single functional drift was `:undo` documented-but-unrouted for 25 minutes — the dual-dispatch `:command` punt-list footgun (also bitten historically on `:limit`). Window 2 does not merely lack a recurrence: MVU Phase 6 PR #233 *replaces* the three-way punt list with one `COMMAND_TABLE` registry, and the MVU_PLAN names this as closing that exact bug class — "adding an App-handled `:command` can no longer flash 'unknown command' (regression-tests the `:undo`/`:limit` footgun)." The window-1 functional-drift class was retired by an architectural change, not avoided by luck. *Cite: seg-refactor-mvu 01KTMM27M59N08NB1HSWCESQTR (#233–#239, COMMAND_TABLE) and 01KTMKVE85DEBMBWYCXY7YHP5E (#196 MVU_PLAN bug-class table).*
+
+- **Pattern A's version-tag drift (PR #5's wrong `(v1.37.2)`) has no window-2 analogue in this catalogue.** Releases in this window (v1.50.0, v1.51.4, 1.56.0) are cut by dedicated release PRs (#51, #170, #292) whose subjects and Cargo bumps agree. The mislabeled-version sub-shape did not recur in the moments read.
+
+**What window 2 does NOT produce (new negative space).**
+
+- **No stub-then-fill-in drift, even under enormous code movement.** The decomposition campaigns are verbatim relocations with insertion≈deletion balance and zero test edits; the MVU strangler-fig is "behavior-equivalent behind green CI (all 786 tests, no assertion edits)." Across #166–#308 the catalogue finds no `todo!()`/`unimplemented!()` shipped into a live path. The closest shape is *deliberately-unwired* model layers (#289 "no UI flip yet", #290 "pure; not yet wired") — but those are staged-flip discipline, explicitly labeled, wired within the same sub-arc, not abandoned stubs.
+
+- **No test-asserts-wrong-thing drift; the opposite — tests are the safety substrate.** The window's signature is green-CI-as-precondition: arc-01's test-surface expansion (#56/#59/#60/#199/#200) is named "the green-CI substrate for the refactor"; the decomposition adds executable invariants (`mod_rs_stays_decomposed` ceiling test, `no_subprocess_git_in_production` guard); the gix flip ships byte-for-byte parity tests *before* flipping. Tests in window 2 pin the post-change reality and *enforce* the conventions, the inverse of asserting a stale contract.
+
+- **No config-vs-code-default drift surfaced.** New config knobs in the window (`[markdown] open_as_rendered`, `table_width_hint` plumbing, `[pane] tabs`) land with their schema, doc-comment, and default in the same diff; no README-default-vs-code-default disagreement is flagged.
+
+- **No half-renamed drift across the campaigns.** The 800-LoC decomposition's per-PR AGENTS.md/ARCHITECTURE.md module-index bumps ride in the same commit as each file move ("update affected docs in the same commit" — CLAUDE.md), so the doc index does not lag the directory layout. *(This is the very rule whose violation #293 then cleans up at comment grain — see Pattern E′. The structural rename stayed coherent; the comment-level narration did not, which is precisely why aislop exists.)*
+
+**The profile shift, named factually.**
+
+Window 1's drift lived almost entirely at the *PR-artifact* layer (subjects, CHANGELOG buckets, BUGS.md) and almost never affected the running program. Window 2 keeps that asymmetry — its drift is still dominantly description-layer — but the *description layer thickened and moved*:
+
+1. **Up an indirection (A′, B′):** the honest scope relocated from commit bodies (discarded by squash) into CHANGELOG + plan docs, so subject-vs-diff understatement went structural.
+2. **Into the plan docs themselves (D′):** thick committed plans created a new self-disagreement surface (V1_60 same-day reversal) the thin window-1 doc layer could not host.
+3. **Into the source comments (E′):** agentic code-movement at scale stranded in-code narration, a drift type window 1's tail explicitly recorded as *absent*.
+4. **Across PRs by design (C′) and at merge boundaries (F′):** the per-PR/intra-diff drift grain of window 1 (Patterns E, D) re-expressed as cumulative shapes — planned retractions and post-feature repair waves.
+
+The asymmetry window 1 named — drift in *how the work is talked about*, not in *what the work does* — holds in window 2 and arguably sharpens: the one functional-drift class window 1 had (Pattern D) was architecturally retired, while the description-layer surfaces multiplied (commit subject → CHANGELOG → plan doc → source comment). Whether that multiplication is the cost of agentic-scale refactoring or of the squash-merge convention or both is a question for the higher insight tiers; the drift catalogue records only that the surfaces grew and the functional-drift class shrank.
+
+Provenance:
+- seg-refactor-mvu: 01KTMM27M59N08NB1HSWCESQTR (#233 COMMAND_TABLE closes the Pattern-D footgun), 01KTMKVE85DEBMBWYCXY7YHP5E (#196 MVU_PLAN, "no assertion edits"), 01KTMKTBHT9G2VBZNJZFY5EJM4 (#180–#191, anti-monolith guard test).
+- arc-01: 01KTMMQN283Z4FYP184WT4015X (#56/#59/#60/#199/#200 green-CI substrate), 01KTMN0F2B7PDYT29J4YG2GN99 (#293/#294/#296 aislop — the comment-level narration the same-commit-doc rule did not cover).
+- seg-gix-migration: 01KTMMTF0MQ96P7BVN7QQPVBNS (#292 guard test), 01KTMMMBVCGADASG74RTHKWY97 (#286 parity tests before flip), 01KTMMPRPTSP0J1MTJCT3WW6N1 (#289 "no UI flip yet").
+- seg-module-decomposition: 01KTMMJVZMX3SJCBSK8YF896YP (#282 CLAUDE.md "update affected docs in the same commit").
+- window-1 negative-space tail = 01KR3BT6MNZMWRMHX14QMYZ86Y; window-1 Pattern D = 01KR3BGMAKS4AZNZE2QFXH10W4.
+- `insight-drift` window-2 framing = 01KTMTNWVQJZQX85ZPA3BBZVGV.
+
+<!-- Entry-ID: 01KTMV0RPDEBMH87MB89JRE0BR -->
