@@ -206,6 +206,20 @@ fn renders_simple_table_with_borders() {
 }
 
 #[test]
+fn table_fences_each_body_row_with_a_separator() {
+    // Every body row is fenced by a `├─┼─┤` separator (not just the
+    // header), so rows read as distinct cells. A two-row body yields two
+    // separator lines: one after the header, one between the body rows.
+    let src = "| H1 | H2 |\n|----|----|\n| a | b |\n| c | d |\n";
+    let lines = render_plain(src);
+    let separators = lines.iter().filter(|l| l.contains('\u{253c}')).count();
+    assert_eq!(
+        separators, 2,
+        "expected a separator after the header AND between the two body rows; got {lines:?}"
+    );
+}
+
+#[test]
 fn table_wraps_overlong_cells_to_multiple_visual_rows() {
     // A cell long enough that wrapping at column width produces
     // multiple visual rows. We should see the same column-border

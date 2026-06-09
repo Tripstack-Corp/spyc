@@ -514,9 +514,19 @@ impl<'t> Renderer<'t> {
         self.lines.push(Line::from(Span::styled(top, frame_style)));
         if let Some(h) = head {
             self.render_table_row(h, &widths, true, frame_style);
-            self.lines.push(Line::from(Span::styled(mid, frame_style)));
+            self.lines
+                .push(Line::from(Span::styled(mid.clone(), frame_style)));
         }
-        for row in &t.body {
+        for (i, row) in t.body.iter().enumerate() {
+            // Fence each body row with the same `├─┼─┤` separator that follows
+            // the header, so rows read as distinct grid cells rather than a
+            // run-together block. Skipped before the first body row (the header
+            // separator already sits there; for a headerless table the top
+            // border does).
+            if i > 0 {
+                self.lines
+                    .push(Line::from(Span::styled(mid.clone(), frame_style)));
+            }
             self.render_table_row(row, &widths, false, frame_style);
         }
         self.lines.push(Line::from(Span::styled(bot, frame_style)));
