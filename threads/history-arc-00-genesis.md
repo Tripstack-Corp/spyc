@@ -97,3 +97,31 @@ Provenance:
 - 9a3c59df, ae07e336 (2026-04-15) — fs auto-refresh; info commands.
 
 <!-- Entry-ID: 01KTNBAXG9MHQ0G014X7K127QK -->
+
+---
+Entry: Claude Code (caleb) 2026-06-09T04:48:27.615806+00:00
+Role: scribe
+Type: Note
+Title: M8 — the embedded pty pane (split-under-listing); birth of the pane subsystem (feeds arc-03)
+
+Spec: scribe
+
+tags: #history #genesis
+
+Moment: genesis — Reconstructed: an embedded pty pane is spiked as a horizontal split under the file listing   [kind: new-capability]
+When: 2026-04-15 · commit bbdcebb9 (M8 spike), followed by polish 31a36e01
+Recorded rationale: "M8 v1 spike: embedded pty pane (horizontal split under the listing)" (bbdcebb9). Body: "Deps added: portable-pty 0.8, vt100 0.15. ... Main loop polls at 16ms while the pane is open (snappy for interactive TUIs like claude's visual mode); 250ms otherwise. ... Pane command defaults to `$CSPY_PANE_CMD` if set, else `$SHELL`, else /bin/sh."
+Inferred intent: this is the load-bearing differentiator — the embedded Claude pane the project was named for ("pair with Claude Code (embedded pty pane)", root commit). The whole pane/pty subsystem (arc-03) begins here. confidence: high — evidence: src/pane/{mod,input,widget}.rs created in this commit (mod.rs 160, input.rs 118, widget.rs 79 lines).
+Supersedes: (none — new subsystem)
+
+The M8 spike (bbdcebb9) introduces the architecture that defines spyc: a portable-pty + vt100 terminal embedded as a horizontal split beneath the listing. The adaptive poll cadence (16ms open / 250ms idle) and the toggle-chord-forwards-everything-else input model are set here and persist. Note the env var is `$CSPY_PANE_CMD` — pre-rename; it becomes SPYC_PANE_CMD at 28c4d329. Tests step 59→64.
+
+31a36e01 (same day, "Pane polish") adds the ^W prefix, send-selection, the focus model, the divider, and the default 30/70 split — the pane's interaction surface. The ^W prefix established here is the namespace under which context-piping (M10), restart, and yank-scrollback all later hang.
+
+This pane subsystem is the single largest downstream-arc feeder: pane recovery, startup tabs, scroll mode, cwd-in-divider, and the MCP-pane bridge all trace to this commit. See history-seg threads for the pane line (arc-03).
+
+Provenance:
+- bbdcebb9 (2026-04-15 16:46) — M8 spike; src/pane/{mod,input,widget}.rs; portable-pty 0.8 + vt100 0.15 added; 16ms/250ms poll.
+- 31a36e01 (2026-04-15 21:35) — pane polish: ^W prefix, focus model, divider, 30/70 split.
+
+<!-- Entry-ID: 01KTNBBP6KWVSW542TEBQ5R58S -->
