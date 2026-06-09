@@ -1,29 +1,52 @@
 # Changelog
 
-All notable changes to spyc are documented here.
-Format: [Keep a Changelog](https://keepachangelog.com/).
+All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
-## [Unreleased]
+## [1.57.0] - 2026-06-09
 
-### Changed
-- **`make aislop` is now a baseline'd regression gate** rather than a raw
-  scan. aislop 0.10.2 has no native baseline and its comment engine
-  over-fires on spyc's mandated dense "why" docs (plus it misreads `.unwrap()`
-  inside large test modules), so the raw scan was ~78 accepted/false-positive
-  findings drowning ~2 real ones. `scripts/aislop-baseline.py` records the
-  accepted findings as per-(rule, file) counts in `.aislop/baseline.json` and
-  reports only NET-NEW slop; counts (not line numbers) are the key so moved or
-  reflowed comments don't resurface. Refresh the snapshot with `make
-  aislop-baseline`. Also reworded two genuine meta-comments that narrated
-  removed/historical state instead of current behavior.
-- **Upgraded ratatui to 0.30.1** and **deduplicated crossterm onto 0.29** (we
-  pinned 0.28 directly while ratatui pulled 0.29, so the dependency tree
-  carried two copies). ratatui 0.30.1 brings an allocation-free buffer-flush
-  diff (less heap churn per frame), a CJK half-width katakana width fix, and
-  fixes to `Clear` (no longer panics when its area is outside the buffer),
-  `Scrollbar` (consistent thumb size while scrolling), and inline-viewport
-  resizing — all on widgets spyc already uses. No behavior change beyond those
-  upstream fixes; the render-output snapshot tests are unchanged.
+### Features
+- **scrollback**: Off-thread PagerStream + Claude full-screen transcript scrollback
+- **transcript**: Render agent prose as markdown in ^a v scrollback
+- **markdown**: Fence every table body row with a separator
+
+### Bug Fixes
+- **pager**: Coexisting top pager + bottom scrollback (dedicated scroll_pager slot)
+- **finder**: Route paste into the F-finder query, not the bottom pane
+- **paste**: Route paste through route_input; fix 5 sink leaks
+- **scrollback**: Render + bottom-park ^a v under an open top overlay
+
+### Refactors
+- **ui**: Decompose markdown.rs into a directory module
+- **ui**: Split diff_render.rs test mod into a directory module
+- **state**: Split sessions.rs test mod into a directory module
+- **keymap**: Decompose resolver.rs; thematically split its test mod
+- **mcp**: Decompose mcp.rs into a directory module
+- **app**: Decompose key_dispatch.rs into a directory module
+- **app**: Decompose render.rs into a directory module
+- **pane**: Extract unit tests into pane/tests.rs
+- **pager**: Decompose handle_pager_key into per-context sub-handlers
+- **pager**: Relocate pager_handler sub-handlers into a directory module
+- **ui**: Decompose pager.rs into a directory module
+- **state**: Group loose git-cache + pane fields into sub-structs
+- **state**: Decompose state.rs into a directory module (PR-B)
+- **grep**: Migrate :grep onto the PagerStream abstraction
+- **git-view**: Migrate diff/show/blame onto PagerStream + collapse the wake/id
+- **route**: Unify key dispatch onto route_input/InputSink
+- **route**: Model the modal axis as a typed Modal decision
+- **focus**: Recompute state.focus from live surfaces at the loop top
+- **route**: Route the overlay/pane distinction from state.focus
+
+### Documentation
+- **comments**: Fix 50 stale comments left behind by the refactors
+- **roadmap**: Park ollama harness scrollback under "Needs investigation"
+- **focus**: Retire the Phase-0 caveats; document Focus as routing authority
+
+### Build & Tooling
+- **deps**: Ratatui 0.30.1 + dedupe crossterm onto 0.29
+
+### Miscellaneous
+- **hygiene**: Aislop advisory tooling + one-time slop cleanup
+- **aislop**: Baseline make aislop to net-new findings only
 
 ## [1.56.0] - 2026-06-06
 

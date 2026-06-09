@@ -1,0 +1,66 @@
+# git-cliff configuration — generates CHANGELOG.md sections from the
+# conventional-commit history (the `feat:` / `fix:` / `refactor:` / `docs:`
+# messages the repo already uses). Cut a release with `make release-tag`, which
+# *prepends* the new version's section and leaves prior entries untouched —
+# versions <= 1.56.0 are frozen hand-written history; git-cliff owns >= 1.57.0.
+# This is a release-time / local tool — NOT part of `make check` or CI.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to spyc. Entries from v1.57.0 onward are generated from the \
+conventional-commit history by [git-cliff](https://git-cliff.org) (config in \
+`cliff.toml`); regenerate the pending section with `make changelog` and cut a \
+release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are \
+the original hand-written log, kept verbatim.
+
+"""
+# Tera template. Groups carry a hidden `<!-- N -->` sort key so they render in a
+# sensible order (Features first) regardless of alphabetical grouping; the
+# template strips it with `striptags`.
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}\
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }}
+{% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+# Drop anything that isn't a conventional commit — filters out the Bitbucket
+# "Merged in <branch> (pull request #N)" merge commits so each feature is listed
+# once (from its real `feat:`/`fix:` commit), not twice.
+filter_unconventional = true
+filter_commits = true
+split_commits = false
+protect_breaking_commits = false
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
+topo_order = false
+
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^refactor", group = "<!-- 3 -->Refactors" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^build", group = "<!-- 5 -->Build & Tooling" },
+  { message = "^test", group = "<!-- 6 -->Tests" },
+  # Release-bump commits are noise in a per-version changelog — drop them.
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(version\\)", skip = true },
+  { message = "^chore\\(deps\\)", group = "<!-- 5 -->Build & Tooling" },
+  { message = "^chore", group = "<!-- 7 -->Miscellaneous" },
+  # Belt-and-suspenders: skip Bitbucket merge commits even if one ever parses.
+  { message = "^Merged in", skip = true },
+]

@@ -122,14 +122,21 @@ on this repo tend to drift.
   branch). Future forensic readers — including watercooler-style
   retrospective passes — get a cleaner story per change.
 
-- **CHANGELOG bucket = user-observable nature, not file location.**
-  A version bump shipped alongside a feature still belongs under
-  `Added`. A CI tweak that happens to touch `Cargo.lock` still belongs
-  under `Internal`. Don't pick the bucket by which directory the diff
-  landed in (watercooler's *bucket-vs-content asymmetry*). When a PR
-  legitimately spans multiple user-observable categories — e.g. a
-  feature plus a doc rewrite — split into multiple entries under the
-  correct headers rather than dropping everything in one bucket.
+- **`CHANGELOG.md` is git-cliff-generated from v1.57.0 onward.** Entries
+  are produced from the conventional-commit history by
+  [git-cliff](https://git-cliff.org) (config in `cliff.toml`): the section
+  comes from the commit *type* (`feat:` → Features, `fix:` → Bug Fixes,
+  `refactor:`/`perf:`/`docs:`/`build:` → their sections) and the line is the
+  commit's `scope: subject`. So **the commit message _is_ the changelog
+  entry** — which is exactly why the first bullet (subject = actual scope)
+  matters, and why a category-spanning PR wants multiple well-typed commits
+  rather than one. Bitbucket "Merged in …" merge commits are filtered out.
+  Entries at **v1.56.0 and earlier are frozen hand-written history** (Keep a
+  Changelog `Added`/`Changed`/`Fixed`) — left verbatim, never reformatted.
+  Preview the pending section with `make changelog`; cut a release with
+  `make release-tag VERSION=x.y.z` (bumps `Cargo.toml`, *prepends* the new
+  version's section, commits, tags `vX.Y.Z`). Both are local/release-time —
+  not in CI.
 
 ## Building
 
@@ -139,6 +146,8 @@ cargo build --release  # release build
 make release           # release build via Makefile
 make install           # build release + copy to ~/.local/bin
 make check             # fmt + clippy + test (CI gate)
+make changelog         # preview the pending (unreleased) CHANGELOG section
+make release-tag VERSION=x.y.z   # bump + prepend changelog + commit + tag
 make                   # see Makefile for all targets
 ```
 
