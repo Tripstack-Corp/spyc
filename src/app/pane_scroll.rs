@@ -169,11 +169,18 @@ impl App {
                     str::to_string,
                 );
                 let title = format!(" {label} (transcript)");
+                // Markdown-render width hint: the scrollback pager fills the
+                // full-width lower pane with the gutter off, so the body is the
+                // terminal width minus the block's two border columns. Computed
+                // on the main thread (the worker has no terminal handle) and
+                // captured into the producer; `r` re-runs this after a resize.
+                let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+                let width = Some(usize::from(term_w.saturating_sub(2)));
                 self.spawn_pager_stream(
                     PagerStreamMount::LowerPane { title },
                     move |tx| {
                         let lines = match resolve(&cwd, spawn) {
-                            Some(path) => render(&path, &theme),
+                            Some(path) => render(&path, &theme, width),
                             None => Vec::new(),
                         };
                         let _ = tx.send(lines);

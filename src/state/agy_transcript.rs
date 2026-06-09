@@ -28,8 +28,10 @@ pub fn resolve_active_jsonl(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathBuf
 }
 
 /// Parse an Agy conversation JSONL into styled pager lines, in
-/// chronological order. Returns empty on read failure.
-pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
+/// chronological order. Returns empty on read failure. Model prose is
+/// rendered through the Markdown viewer (`width` hints prose/table
+/// reflow); user prompts and tool calls stay plain.
+pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -37,7 +39,6 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
-    let agent_style = Style::default().fg(theme.file);
     let tool_style = Style::default().fg(theme.take);
 
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -94,14 +95,14 @@ pub fn render_transcript(path: &Path, theme: &Theme) -> Vec<Line<'static>> {
             }
             last_was_blank = false;
         } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
-            if let Some(content) = val["content"].as_str()
-                && !content.is_empty()
-            {
-                push_blank(&mut out, &mut last_was_blank);
-                for l in content.lines() {
-                    out.push(Line::from(Span::styled(l.to_string(), agent_style)));
-                }
-                last_was_blank = false;
+            if let Some(content) = val["content"].as_str() {
+                crate::state::push_agent_markdown(
+                    &mut out,
+                    &mut last_was_blank,
+                    content,
+                    theme,
+                    width,
+                );
             }
 
             // Format tool_calls
@@ -126,7 +127,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty() {
-        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default());
+        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default(), None);
         assert!(lines.is_empty());
     }
 
@@ -165,7 +166,7 @@ mod tests {
         }
         f.flush().unwrap();
 
-        let lines = render_transcript(f.path(), &Theme::default());
+        let lines = render_transcript(f.path(), &Theme::default(), None);
         let text = flatten(&lines);
 
         assert!(text.contains("hello there"), "user content rendered");

@@ -92,6 +92,36 @@ pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Resul
     })
 }
 
+/// Append an agent prose block to a transcript view, rendered through
+/// the Markdown viewer so headings / lists / code / emphasis show as
+/// formatting instead of raw `#` / `**` source. Inserts a single blank
+/// separator before the block (unless one is already pending) and sets
+/// `last_was_blank` to whether the rendered block ended on a blank
+/// line, so the caller's inter-turn spacing stays single-blank.
+/// `width` is the pager body-width hint (cells) for prose/table reflow;
+/// `None` falls back to the renderer's default. Empty bodies are a
+/// no-op. Shared by the claude / codex / agy transcript renderers — the
+/// only structured-conversation lines that are Markdown source (user
+/// prompts and tool calls stay plain, agent-styled).
+pub fn push_agent_markdown(
+    out: &mut Vec<ratatui::text::Line<'static>>,
+    last_was_blank: &mut bool,
+    body: &str,
+    theme: &crate::ui::theme::Theme,
+    width: Option<usize>,
+) {
+    if body.is_empty() {
+        return;
+    }
+    if !*last_was_blank {
+        out.push(ratatui::text::Line::from(""));
+    }
+    out.extend(crate::ui::markdown::render(body, theme, width));
+    *last_was_blank = out
+        .last()
+        .is_some_and(|l| l.spans.iter().all(|s| s.content.trim().is_empty()));
+}
+
 /// Test-only: run `body` with `state_root()` pinned to `root`. The
 /// override is unwound when `body` returns *or panics* (RAII guard).
 #[cfg(test)]
