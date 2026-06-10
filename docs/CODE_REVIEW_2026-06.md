@@ -114,7 +114,7 @@ Config::load_default unconditionally loads `<cwd>/.spycrc.toml` (src/config/mod.
 > verifier: hand-verified: <cwd>/.spycrc.toml auto-loaded with project-wins precedence; DSL `unix <cmd>` binds keys to shell commands
 
 ### `src/fs/ops.rs:101` — copy_tree recurses without bound when the destination is inside the source tree
-`high` · `correctness` · `fs` · **confirmed**
+`high` · `correctness` · `fs` · **confirmed** · ✅ **fixed in #329**
 
 copy_tree(src, dst) does fs::create_dir_all(dst) and then iterates fs::read_dir(src), recursing into every child. If dst lies under src (user picks /proj, navigates into /proj/backup, pastes — dispatch_selection produces copy_tree(/proj, /proj/backup/proj)), the create_dir_all plants new directories inside the tree being read, and the recursion re-discovers them: /proj/backup/proj/backup/proj/... It keeps descending and re-copying sibling files at every level until the absolute path exceeds PATH_MAX and a syscall fails with ENAMETOOLONG. By then it has created hundreds of nested directories and duplicated file payloads many times over (multi-GB garbage for a large source dir), then surfaces only a cryptic 'File name too long' flash, leaving the user a deep tree to clean up. cp(1) rejects this case with 'cannot copy a directory into itself'. The move_tree EXDEV fallback (line 123) hits the same code path.
 
@@ -123,7 +123,7 @@ copy_tree(src, dst) does fs::create_dir_all(dst) and then iterates fs::read_dir(
 > verifier: hand-verified: copy_tree has no dst-inside-src guard
 
 ### `src/fs/ops.rs:149` — No same-file / dir-into-itself guard: copying a file onto itself truncates it to zero bytes
-`high` · `security` · `fs` · **confirmed**
+`high` · `security` · `fs` · **confirmed** · ✅ **fixed in #329**
 
 dispatch_selection (ops.rs:149-180) and copy_tree (ops.rs:85-113) never compare src and dst. Two concrete failure modes, both guarded against by real cp(1) and both reachable from the UI copy-to prompt (src/app/prompt.rs:512 and src/app/key_dispatch/mod.rs:519 -> run_selection_to in src/app/clipboard.rs:227, which calls op(&paths, &dest) synchronously with no path checks): (1) Pick a file in the current dir and give '.' (or the dir itself) as the dest: dest is an existing dir, so dispatch_selection calls copy_tree(src, dest.join(name)) where dest.join(name) is the same inode as src. std::fs::copy opens the destination with create+truncate before reading, so the file is truncated to 0 and then 'copied' from the now-empty fd — silent data loss on both Linux and macOS. (2) Copy a directory into its own subtree (dest = a/backup with src = a): copy_tree creates a/backup, then read_dir(a) enumerates the just-created 'backup' entry (it exists before opendir), recursing into a/backup/backup/... — each level re-copies the directory contents — until ENAMETOOLONG stops it. This duplicates the tree contents once per nesting level (hundreds of levels before PATH_MAX), can fill the disk for a large source dir, and blocks the event loop the whole time since run_selection_to is synchronous.
 
@@ -132,7 +132,7 @@ dispatch_selection (ops.rs:149-180) and copy_tree (ops.rs:85-113) never compare 
 > verifier: hand-verified: same cluster as ops.rs:167
 
 ### `src/fs/ops.rs:167` — Copying a selection into its own directory truncates the source file to 0 bytes and reports success
-`high` · `correctness` · `fs` · **confirmed**
+`high` · `correctness` · `fs` · **confirmed** · ✅ **fixed in #329**
 
 dispatch_selection has no same-path guard: if dest is an existing directory it calls one(src, &dest.join(name)). When the user picks a file in /dir and gives /dir (or '.', resolved via listing.dir.join in clipboard.rs run_selection_to, which also has no guard) as the copy destination, dst == src and copy_tree falls through to fs::copy(src, src) at line 111. std::fs::copy opens the destination with O_TRUNC before copying (both Linux kernel_copy and macOS fcopyfile paths), so the shared inode is truncated to zero and the subsequent copy reads 0 bytes from the now-empty file. The operation returns Ok, run_and_flash shows 'copied 1 item(s)...', and the user's file content is silently destroyed. GNU cp guards exactly this ('X and X are the same file'); spyc does not. Move is safe (rename to self is a POSIX no-op), copy is not.
 
