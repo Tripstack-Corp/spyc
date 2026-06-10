@@ -80,10 +80,10 @@ pub struct Match {
     pub label: String,
     /// 0-based row in the snapshot (= row in the visible pane).
     pub row: usize,
-    /// 0-based column where the match begins. Bytes ≈ terminal
-    /// cells for ASCII content (URLs, SHAs, IPs, paths almost
-    /// always); wide-char content beyond the match start would
-    /// drift, but rare in pickable output.
+    /// 0-based terminal column where the match begins — the display
+    /// width of the line content preceding it, not a byte offset, so a
+    /// label over a line with wide/multibyte chars still lands on the
+    /// match (the overlay renders at `pane_rect.x + col`).
     pub col: usize,
 }
 
@@ -220,7 +220,10 @@ pub fn scan(lines: &[String], patterns: &[(Regex, MatchKind)]) -> Vec<Match> {
                     kind: kind.clone(),
                     label: String::new(), // assigned below
                     row,
-                    col: start,
+                    // Display column, not byte offset: `start` is a char
+                    // boundary (regex match), so the width of everything
+                    // before it is where the match sits on screen.
+                    col: crate::ui::display_width(&line[..start]),
                 });
             }
         }
@@ -335,6 +338,20 @@ mod tests {
         let mut sorted = cols.clone();
         sorted.sort_unstable();
         assert_eq!(cols, sorted, "matches not in reading order: {matches:?}");
+    }
+
+    #[test]
+    fn col_is_display_column_not_byte_offset() {
+        // "日本 " is 5 columns but 7 bytes. The match must report the
+        // column (5) so its label lands on the URL, not 2 cells too far
+        // right (the byte-offset bug).
+        let lines = vec!["日本 https://example.com".to_string()];
+        let matches = scan(&lines, &defaults());
+        let url = matches
+            .iter()
+            .find(|m| matches!(m.kind, MatchKind::Url))
+            .expect("url match");
+        assert_eq!(url.col, 5, "col should be a display column: {url:?}");
     }
 
     #[test]

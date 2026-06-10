@@ -93,7 +93,10 @@ impl App {
                     entry.info.label.clone()
                 };
                 let tab_text = format!("[{}{star}{activity}] {label} ", i + 1);
-                let tab_len = sep.len() + tab_text.len();
+                // Measure in display columns, not bytes — `sep` ("─") is 3
+                // bytes but 1 column, and a label can carry multibyte chars;
+                // `used`/`width` are column budgets.
+                let tab_len = crate::ui::display_width(sep) + crate::ui::display_width(&tab_text);
                 if used + tab_len > width {
                     break;
                 }
@@ -121,13 +124,20 @@ impl App {
             let cwd_prefix = if drift { "── ↪ " } else { "── " };
             let avail = width.saturating_sub(used + 12); // room for [SCROLL] + trailing rule
             if avail > 4 {
-                let truncated = if cwd_display.len() > avail {
-                    format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])
+                // Truncate by display columns on a char boundary, keeping the
+                // tail (the leaf dirs). A byte slice here panics on a
+                // non-ASCII cwd ("résumé", "日本語") when the cut lands
+                // mid-codepoint.
+                let truncated = if crate::ui::display_width(&cwd_display) > avail {
+                    format!(
+                        "…{}",
+                        crate::ui::display_truncate_tail(&cwd_display, avail.saturating_sub(1))
+                    )
                 } else {
                     cwd_display
                 };
                 let cwd_fragment = format!("{cwd_prefix}{truncated} ");
-                used += cwd_fragment.len();
+                used += crate::ui::display_width(&cwd_fragment);
                 let style = if drift {
                     active_tab_style
                 } else {
@@ -159,7 +169,7 @@ impl App {
             ""
         };
         let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
-        let tag_len = zoom_tag.len() + scroll_tag.len();
+        let tag_len = crate::ui::display_width(zoom_tag) + crate::ui::display_width(scroll_tag);
         // Reserve room for at least 4 dashes + the tag(s).
         let bg_budget = width.saturating_sub(used + tag_len + 4);
         for task in self.runtime.background_tasks.tasks.iter().rev() {
@@ -178,10 +188,13 @@ impl App {
                 }
             };
             let text = format!(" [{}{glyph}]", task.id);
-            if bg_width + text.len() > bg_budget {
+            // Column width, not bytes — the status glyphs (●✓✗⏸) are 3-byte,
+            // 1-column chars.
+            let text_w = crate::ui::display_width(&text);
+            if bg_width + text_w > bg_budget {
                 break;
             }
-            bg_width += text.len();
+            bg_width += text_w;
             bg_pieces_rev.push((text, color));
         }
 
@@ -195,7 +208,7 @@ impl App {
         // Render bg tasks left-to-right (id-ascending) by reversing the
         // collection we built right-to-left.
         for (text, color) in bg_pieces_rev.into_iter().rev() {
-            used += text.len();
+            used += crate::ui::display_width(&text);
             spans.push(Span::styled(
                 text,
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -209,7 +222,7 @@ impl App {
                     .fg(self.view.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ));
-            used += zoom_tag.len();
+            used += crate::ui::display_width(zoom_tag);
         }
         if is_scrolling {
             spans.push(Span::styled(
@@ -218,7 +231,7 @@ impl App {
                     .fg(self.view.theme.dir)
                     .add_modifier(Modifier::BOLD),
             ));
-            used += scroll_tag.len();
+            used += crate::ui::display_width(scroll_tag);
         }
         // If anything's left (shouldn't be), pad.
         let _ = used;
