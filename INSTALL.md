@@ -150,8 +150,16 @@ Claude Code installation is managed by an organization or not.
 
 ### Unmanaged (personal) environments
 
-No configuration is needed. spyc writes a `.mcp.json` in the working
-directory on startup and Claude Code discovers it automatically.
+No configuration is needed. On startup spyc writes two config files
+in the working directory so each agent discovers it automatically:
+
+- **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
+- **`.codex/config.toml`** for the codex CLI (TOML,
+  `[mcp_servers.spyc]` shape — spyc ensures the entry, preserving
+  the rest of the file).
+
+Both registrations re-exec `spyc --mcp` as a stdio proxy to the same
+socket, so a single server backs both agents.
 
 The generated `.mcp.json` looks like this:
 
@@ -177,21 +185,22 @@ The generated `.mcp.json` looks like this:
 - **`env.SPYC_MCP_SOCK`** — tells the proxy which socket to
   connect to (PID-scoped, so multiple instances don't collide).
 
-**You should not need to edit this file.** spyc manages it
+**You should not need to edit these files.** spyc manages them
 automatically, including:
 
 - **Instance takeover** — if a second spyc opens in the same
-  directory, it updates `.mcp.json` to point at its own socket and
+  directory, it updates both files to point at its own socket and
   notifies the old instance.
 - **Cleanup** — the socket file is removed on normal exit.
 
-`.mcp.json` is a runtime artifact — add it to `.gitignore`:
+Both are runtime artifacts — add them to `.gitignore`:
 
 ```
 .mcp.json
+.codex/
 ```
 
-spyc's own repo already has this entry.
+spyc's own repo already has these entries.
 
 ### Enterprise managed environments
 
@@ -227,9 +236,14 @@ For per-user installs, the path is `$HOME/.local/bin/spyc`.)
 
 Note that the centrally deployed entry does **not** include
 `env.SPYC_MCP_SOCK` (IT doesn't know the PID of each user's running
-instance). The stdio proxy handles this automatically via **discovery
-mode**: it scans `~/.local/state/spyc/mcp-*.sock` for any live
-instance and connects to the first one it finds.
+instance). The stdio proxy handles this automatically via
+**project-scoped discovery**: it walks the caller's working directory
+upward looking for `.spyc-context-<pid>.json` markers (each written
+by a running spyc rooted at that directory) and connects to a live
+socket from the first ancestor that has one. A spyc running in a
+*different* project tree is never picked up — cross-project
+attachment is refused — and if no marker matches, the proxy falls
+back to read-only direct mode.
 
 When spyc is deployed via `managed-mcp.json`, the per-directory
 `.mcp.json` that spyc writes on startup is still useful — it carries

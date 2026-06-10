@@ -1,7 +1,7 @@
 # spyc v1.60 — CounterTop
 
 **Status:** plan, not yet implemented.
-**Predecessor:** [`V1_5_PLAN.md`](V1_5_PLAN.md) (six-phase pager / task-viewer
+**Predecessor:** [`archive/V1_5_PLAN.md`](archive/V1_5_PLAN.md) (six-phase pager / task-viewer
 unification, shipped at v1.50.0).
 
 ## Thesis

@@ -17,9 +17,9 @@ Why:
   thread that pushes into a channel. There is no fan-out workload
   that would benefit from a task scheduler.
 - An async runtime would force every blocking-stdlib call site
-  (file reads, libc `proc_pidinfo`, `lsof`, git shell-outs) to be
-  re-plumbed or wrapped with `spawn_blocking` indirection — pure
-  cost, zero benefit at our scale.
+  (file reads, `proc_pidinfo` via the safe `libproc` crate, `lsof`)
+  to be re-plumbed or wrapped with `spawn_blocking` indirection —
+  pure cost, zero benefit at our scale.
 - Build times and binary size matter for a CLI. tokio is large.
 - Cancellation we need (background directory loads, etc.) is well
   served by a generation counter on the receiver side; we drop
@@ -32,6 +32,14 @@ Where threads exist today:
 - MCP socket listener — accepts stdio-proxy connections.
 - `!` shell-capture reader thread — feeds bytes into the pager
   while the captured child runs.
+- Git worker — a long-lived thread (spawned in `app/bootstrap.rs`)
+  that runs gix status/branch work off the loop and pushes
+  `GitWorkerResult` messages back.
+- Agent-status worker — a short-lived thread per refresh
+  (`app/agent_status.rs`) that resolves the pane agent's short-id
+  off the loop and wakes it on completion.
+- `F`-finder walker — a gitignore-aware streaming directory walk
+  (`fs/finder.rs`) feeding the fuzzy filename picker.
 - **Pager-stream workers** (`app/pager_stream.rs`) — the unified seam
   for "read/parse off the UI thread, stream styled lines into a pager."
   A worker resolves / reads / renders and pushes payloads through a
@@ -62,7 +70,7 @@ directory loading" entry.
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration
 **and** the last-mile purity pass have landed (decision logs in
-`REFACTOR_PLAN.md` / `docs/MVU_PLAN.md`). The shape today:
+`docs/archive/REFACTOR_PLAN.md` / `docs/archive/MVU_PLAN.md`). The shape today:
 
 - **Three-type state split.** `App` owns three disjoint fields
   (`src/app/mod.rs`): `state: AppState` (the **Model** — pure domain:
@@ -99,7 +107,7 @@ The last-mile purity pass is **done**: the single `App::update` entry above
 (the former `ApplyResult` / `CommandResult` / `PromptResult` split collapsed into
 one `Update`), the mutation-free render behind snapshots, the `:command` surface
 compile-checked via `COMMAND_TABLE` handler fn-pointers, and a one-way
-`app → agent` dependency. See `docs/MVU_PLAN.md` for the decision logs.
+`app → agent` dependency. See `docs/archive/MVU_PLAN.md` for the decision logs.
 
 ## Repaint strategy: event-driven, dirty-frame
 
@@ -150,17 +158,42 @@ ongoing tuning.
   is head-truncated at 1 MB (the tail of a `cargo build` is what
   the user wants).
 
+## Git: 100% in-process gix
+
+Production git is entirely in-process via `gix` (gitoxide) — status,
+diff/show/blame models, worktrees, discovery. **No `git` subprocess
+in production code**, and that's enforced: the
+`no_subprocess_git_in_production` guard test in `src/git/mod.rs`
+asserts zero `git`-binary spawns outside test fixtures. `src/git/` is
+the single boundary owning every git operation (pure infra: paths in,
+owned `Send` data out — no `App`, no ratatui); heavier model builds
+run off-thread via the `pager_stream` seam.
+
+**Hot-path rule:** the 1 Hz git mtime poll reads the cached
+`current_gitdir` — no gix repo open on the poll. gix opens only on
+chdir into a new repo and on HEAD change.
+
 ## State persistence (XDG)
 
 All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
 `~/.local/state/spyc/`):
 
-- `inventory.json` — file-backed yank cache + graveyard.
-- `marks.json` — vi-style `m{a-z}` marks.
-- `history.json` — prompt history (shell + spyc commands).
+- `inventory/` — file-backed yank cache; one `<uuid>.json`
+  (metadata) + `<uuid>.dat` (content) pair per entry.
+- `graveyard/` — soft-delete cache; `<uuid>.json` +
+  `<uuid>.tar.zst` pairs, FIFO-pruned at 500 MB.
+- `harpoon/` — per-project pinned lists (`<basename>.<hash>.toml`).
+- `marks.toml` — vi-style `m{a-z}` marks.
+- `history` / `pane_history` — plain-text prompt history files
+  (one entry per line).
+- `frecency.json` — directory frecency scores for the `J` jump.
+- `pager_positions.json` — persisted pager scroll offsets (LRU).
 - `sessions/<epoch-ms>.json` — workspace snapshots from quit.
 - `mcp-<pid>.sock` — PID-scoped MCP socket.
-- `debug.log` — `spyc_debug!` output when `--debug` is set.
+
+The debug log is the exception: `spyc_debug!` output goes to
+`/tmp/spyc-debug-<ts>.log` (timestamped per run, not under XDG) so
+a log can be attached to a bug report without digging in state dirs.
 
 Configuration lives at `~/.spycrc.toml` (user) and
 `<cwd>/.spycrc.toml` (project, wins). Both are watched for live

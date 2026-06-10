@@ -219,8 +219,9 @@ A checklist for adding a feature with UI surface:
 3. Pick a key from a chord family that already has a theme. Avoid
    inventing a new prefix.
 4. Wire an `Action` enum variant in `keymap/action.rs`, default
-   binding in the resolver, handler in `app/mod.rs`, help row in
-   `ui/help.rs`.
+   binding in the resolver, handler in the matching `src/app/`
+   child module (or `command_table.rs` for a `:`-command), help
+   row in `ui/help.rs`.
 5. Confirm it reads in mono. If color carries meaning, also use a
    modifier (BOLD / DIM / REVERSED).
 6. Update CHANGELOG, BUGS (if it closes one), and any user-facing
