@@ -129,6 +129,35 @@ release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `per
 	@echo "→ target/release-debug/$(BINARY)"
 	@ls -lh target/release-debug/$(BINARY)
 
+# --- Changelog & release tagging (git-cliff) ---------------------------------
+# CHANGELOG.md is git-cliff-generated from v1.57.0 onward (older entries are
+# frozen hand-written history). `make changelog` PREVIEWS the pending section;
+# `make release-tag VERSION=x.y.z` cuts a release by *prepending* the new
+# version's section (never rewriting prior entries), bumping, committing, and
+# tagging. Both are LOCAL / release-time — neither is part of `make check` or CI.
+
+.PHONY: changelog
+changelog: ## Preview the pending (unreleased) CHANGELOG section from commits since the last tag
+	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff MISSING — brew install git-cliff"; exit 1; }
+	@git cliff --config cliff.toml --unreleased
+
+.PHONY: release-tag
+release-tag: ## Cut a release: VERSION=x.y.z → bump Cargo.toml, prepend changelog section, commit, tag (local; push yourself)
+	@test "$(origin VERSION)" = "command line" || { echo "usage: make release-tag VERSION=x.y.z (VERSION defaults to the Cargo.toml value, so it must be passed explicitly)"; exit 1; }
+	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be semver x.y.z (got '$(VERSION)')"; exit 1; }
+	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff MISSING — brew install git-cliff"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit or stash first"; exit 1; }
+	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
+	@echo "→ bumping to v$(VERSION) and prepending its changelog section…"
+	@tmp=$$(mktemp); sed 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml > $$tmp && mv $$tmp Cargo.toml
+	cargo update -p $(BINARY)
+	git cliff --config cliff.toml --unreleased --tag v$(VERSION) --prepend CHANGELOG.md
+	git add Cargo.toml Cargo.lock CHANGELOG.md
+	git commit -m "chore(release): v$(VERSION)"
+	git tag v$(VERSION)
+	@echo "✓ committed + tagged v$(VERSION). Push per your flow, e.g.:"
+	@echo "    git push origin HEAD && git push origin v$(VERSION)"
+
 # --- macOS ---
 
 .PHONY: release-macos-arm
@@ -269,6 +298,7 @@ doctor: ## Check build prerequisites
 	@printf "  %-24s" "cargo:" && (cargo --version 2>/dev/null || echo "MISSING — install via rustup")
 	@printf "  %-24s" "zig:" && (zig version 2>/dev/null || echo "MISSING — brew install zig")
 	@printf "  %-24s" "cargo-zigbuild:" && (cargo zigbuild --help >/dev/null 2>&1 && echo "ok" || echo "MISSING — cargo install cargo-zigbuild")
+	@printf "  %-24s" "git-cliff:" && (git-cliff --version 2>/dev/null || echo "MISSING — brew install git-cliff (only needed for changelog/releases)")
 	@echo ""
 	@echo "  Installed targets:"
 	@rustup target list --installed 2>/dev/null | sed 's/^/    /' || echo "    (rustup not available)"
