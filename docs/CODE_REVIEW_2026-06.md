@@ -47,7 +47,7 @@ When the active pager is the bottom scrollback (`view.scroll_pager`, pane focuse
 2. The program is exec'd directly, not via sh -c, for exactly the claimed paths: `Command::new(program)` (proc.rs:222). `ActivateIntent::Edit` (src/app/navigate.rs:240-252) and the prompt path (src/app/prompt.rs:564) pass `shell::resolve_editor()` — $VISU …
 
 ### `src/app/render/chrome.rs:125` — Pane-divider cwd truncation byte-slices a String — panics on non-ASCII cwd
-`high` · `correctness` · `app-render` · **confirmed**
+`high` · `correctness` · `app-render` · **confirmed** · ✅ **fixed in #331**
 
 render_pane_status_line truncates the active tab's live cwd with `format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])` (chrome.rs:124-126). `cwd_display` comes from `display_tilde(&live)` and contains whatever bytes the directory path has; `cwd_display.len()` and `avail` are byte counts. If the path contains any multi-byte character (accented letters, CJK, Cyrillic — e.g. a project dir named "résumé" or "日本語"), the slice start `len - avail + 1` can land in the middle of a UTF-8 code point, and `&str[start..]` panics ("byte index N is not a char boundary") in the middle of the render pass — the app crashes. Reachable whenever the pane divider is drawn and the cwd is longer than the available width (narrow terminal, several tabs, or just a deep path), which is exactly when truncation triggers. Even for paths that happen to slice on a boundary, mixing bytes with display columns over-truncates non-ASCII paths.
 
@@ -472,7 +472,7 @@ PromptKind::Jump submission does `let _ = self.state.jump_to(trimmed);` (line 59
 2. The failure is reachable and unguarded. `jump_to …
 
 ### `src/app/render/chrome.rs:96` — Divider width accounting mixes UTF-8 byte lengths with terminal columns
-`medium` · `maintainability` · `app-render` · **confirmed**
+`medium` · `maintainability` · `app-render` · **confirmed** · ✅ **fixed in #331**
 
 `render_pane_status_line` budgets the line with byte lengths throughout: `tab_len = sep.len() + tab_text.len()` where `sep` is "─" (3 bytes, 1 column), the bg-task glyphs ● ✓ ✗ ⏸ are 3 bytes/1 column each (`bg_width += text.len()`, line 184), and `used += cwd_fragment.len()` (line 130) counts the 3-byte "…" ellipsis and any multibyte path chars as 3+ columns. Since `fill = width.saturating_sub(used + tag_len + bg_width)` (line 189) is computed from these inflated counts, the dash fill comes up short by exactly the byte-vs-column overhead — with even one pane tab the right-anchored bg-tags/[ZOOM]/[SCROLL] group ends ~2+ columns left of the right edge, and the gap grows with tabs and bg tasks. The codebase already has the correct helper: `crate::ui::display_width` is used for exactly this in overlays.rs:237.
 
@@ -782,7 +782,7 @@ When debug_dump is enabled (SPYC_PTY_DEBUG set, gated at src/pane/mod.rs:148), b
 **Fix:** Write the dump under a per-user, per-process path instead of a fixed /tmp name — e.g. $XDG_RUNTIME_DIR or ~/.cache/spyc/pty-debug-<pid>.bin — created with mode 0600 (OpenOptionsExt::mode(0o600)) and, if /tmp must stay supported, O_NOFOLLOW/create_new to defeat symlink pre-creation. Truncate or rotate at startup.
 
 ### `src/pane/quick_select.rs:223` — Quick Select Match.col is a byte offset but is rendered as a terminal-cell column, misplacing labels on lines with multibyte characters
-`medium` · `correctness` · `pane-pty` · **confirmed**
+`medium` · `correctness` · `pane-pty` · **confirmed** · ✅ **fixed in #331**
 
 scan() records `col: start` (line 223) where start is regex::Match::start() — a *byte* offset into the line. The overlay renderer uses it directly as a cell coordinate: src/app/quick_select.rs:235 does `x: pane_rect.x + m.col as u16`. Any multibyte character before the match shifts the label right by (utf8_len − display_width) cells. This is not a rare case in the primary use environment: Claude panes routinely prefix lines with U+23FA '⏺' and U+23BF '⎿' (3 bytes, 1 cell → 2-cell drift each), and box-drawing-heavy output (e.g. tables full of '│', 3 bytes/1 cell each) drifts by 2 cells per character — a path after ten box-drawing cells renders its label 20 cells to the right, on top of unrelated text or a *different* match, so the user can press the label they see over match A and actually yank/open match B. Labels can also be silently dropped by the `m.col >= pane_rect.width` guard (app/quick_select.rs:207) even though the match is visible. The struct comment (lines 82-87) acknowledges the approximation but underestimates how common non-ASCII prefixes are in agent-pane output.
 
