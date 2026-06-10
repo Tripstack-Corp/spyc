@@ -275,6 +275,42 @@ mod layout_tests {
         // pane ends at the row above prompt.
         assert!(pane.y + pane.height <= l.prompt.y);
     }
+
+    /// The top overlay / TopPane pager paints `top_unit`; it must always sit
+    /// inside the frame. The bug: it was built as `status.y + Σheights`, so
+    /// with bottom status (status on the last row) it anchored off-screen and
+    /// panicked in `Buffer::set_string`.
+    #[test]
+    fn top_unit_stays_within_frame_all_configs() {
+        for pane_open in [false, true] {
+            for status_pos in [StatusPosition::Top, StatusPosition::Bottom] {
+                let l = App::compute_layout(area(80, 24), pane_open, 50, status_pos);
+                let tu = l.top_unit;
+                assert_eq!(tu.x, 0);
+                assert_eq!(tu.y, 0, "top_unit must anchor at the frame top");
+                assert!(
+                    tu.y + tu.height <= 24,
+                    "top_unit overflows the frame: {tu:?} ({pane_open}, {status_pos:?})"
+                );
+                assert!(tu.height > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn top_unit_is_the_region_above_the_divider() {
+        // With a pane open, the overlay region ends exactly at the divider
+        // under both status positions.
+        for status_pos in [StatusPosition::Top, StatusPosition::Bottom] {
+            let l = App::compute_layout(area(80, 24), true, 50, status_pos);
+            let div = l.divider.unwrap();
+            assert_eq!(
+                l.top_unit.y + l.top_unit.height,
+                div.y,
+                "top_unit should span up to the divider ({status_pos:?})"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

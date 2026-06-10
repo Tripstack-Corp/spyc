@@ -26,13 +26,10 @@ impl App {
         // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
         if let Some(overlay) = self.runtime.top_overlay.as_ref() {
-            // The overlay occupies status + list + prompt area.
-            let overlay_area = ratatui::layout::Rect {
-                x: layout.status.x,
-                y: layout.status.y,
-                width: layout.status.width,
-                height: layout.status.height + layout.list.height + layout.prompt.height,
-            };
+            // The overlay occupies the spyc unit above the divider
+            // (`top_unit`) — not `status.y + Σheights`, which lands
+            // off-screen and panics with `status_position = "bottom"`.
+            let overlay_area = layout.top_unit;
             // Overlay resize/drain + the dismissal flag are settled in
             // `prepare_panes` before this draw (MVU Stage 2).
             // Visual focus tracks `state.pane_focused`: false ⇒
@@ -118,12 +115,10 @@ impl App {
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
         if top_pager {
-            let top_area = ratatui::layout::Rect {
-                x: layout.status.x,
-                y: layout.status.y,
-                width: layout.status.width,
-                height: layout.status.height + layout.list.height + layout.prompt.height,
-            };
+            // Same spyc-unit region as the `;cmd` overlay above (see the
+            // `top_unit` note); anchoring at `status.y` panics under
+            // `status_position = "bottom"`.
+            let top_area = layout.top_unit;
             let underlying = if in_help {
                 self.view.pager_help_stash.as_ref()
             } else {

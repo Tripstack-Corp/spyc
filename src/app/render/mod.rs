@@ -84,6 +84,14 @@ impl App {
                 divider: None,
                 pane: None,
                 prompt,
+                // No pane: the spyc unit is the whole frame, regardless of
+                // where the status row sits within it.
+                top_unit: Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: w,
+                    height: h,
+                },
             };
         }
 
@@ -139,6 +147,15 @@ impl App {
                 divider: Some(divider),
                 pane: Some(pane),
                 prompt,
+                // Bottom status + pane: only the list sits above the divider;
+                // prompt and status are below the pane. A top overlay occupies
+                // just the list region.
+                top_unit: Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: w,
+                    height: list_h,
+                },
             };
         }
 
@@ -182,6 +199,14 @@ impl App {
             divider: Some(divider),
             pane: Some(pane),
             prompt,
+            // Top status + pane: status+list+prompt are contiguous above the
+            // divider (== top_h rows starting at area.y).
+            top_unit: Rect {
+                x: area.x,
+                y: area.y,
+                width: w,
+                height: top_h,
+            },
         }
     }
 
@@ -250,8 +275,11 @@ impl App {
         // Top overlay (`;cmd`/`V`/`D`): resize to the spyc area, drain, and
         // flag dismissal once the child exits.
         if let Some(overlay) = self.runtime.top_overlay.as_mut() {
-            let h = layout.status.height + layout.list.height + layout.prompt.height;
-            let w = layout.status.width;
+            // Resize to the region the overlay actually paints (`top_unit`),
+            // so the pty's row count matches what render_inner draws under
+            // both status positions.
+            let h = layout.top_unit.height;
+            let w = layout.top_unit.width;
             let _ = overlay.resize(h, w);
             overlay.drain_output();
             if overlay.is_closed() && !self.view.overlay_awaiting_dismiss {
