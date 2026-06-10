@@ -21,6 +21,7 @@ use std::io;
 use std::io::BufRead as _;
 use std::io::Read as _;
 use std::path::Path;
+use std::path::PathBuf;
 
 /// Soft cap above which the in-app pager loads only the first
 /// `MAX_PAGER_LINES` lines of a file instead of the whole content.
@@ -82,7 +83,17 @@ pub fn remove_tree(path: &Path) -> io::Result<()> {
 
 /// Recursively copy `src` to `dst`. Symlinks are re-created as symlinks
 /// pointing at the same target; they are **not** followed.
+///
+/// Refuses, like `cp(1)`, when `dst` is the same file as `src` (else
+/// `fs::copy` would open it with `O_TRUNC` and silently zero it) or when
+/// `dst` lies inside the `src` tree (else the recursion re-discovers the
+/// directories it just created and descends until `ENAMETOOLONG`).
 pub fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
+    reject_self_or_nested(src, dst, "copy")?;
+    copy_tree_recursive(src, dst)
+}
+
+fn copy_tree_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     let md = fs::symlink_metadata(src)?;
     if md.file_type().is_symlink() {
         #[cfg(unix)]
@@ -104,7 +115,7 @@ pub fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
             let entry = entry?;
             let child_src = entry.path();
             let child_dst = dst.join(entry.file_name());
-            copy_tree(&child_src, &child_dst)?;
+            copy_tree_recursive(&child_src, &child_dst)?;
         }
         return Ok(());
     }
@@ -117,6 +128,10 @@ pub fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
 /// (cross-filesystem). All other rename errors propagate — we never mask
 /// a permissions or destination-exists error with a sneaky copy.
 pub fn move_tree(src: &Path, dst: &Path) -> io::Result<()> {
+    // Refuse same-file / dir-into-itself up front, matching `mv(1)`.
+    // (A bare `rename(src, src)` is a silent no-op and an EXDEV move into
+    // the source's own subtree would fall through to `copy_tree`.)
+    reject_self_or_nested(src, dst, "move")?;
     match fs::rename(src, dst) {
         Ok(()) => Ok(()),
         Err(e) if e.raw_os_error() == Some(EXDEV) => {
@@ -124,6 +139,83 @@ pub fn move_tree(src: &Path, dst: &Path) -> io::Result<()> {
             remove_tree(src)
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Refuse a copy/move whose destination is the same file as the source,
+/// or lies inside the source directory tree — the two cases `cp(1)` itself
+/// rejects ("X and Y are the same file" / "cannot copy a directory into
+/// itself"). Both are silent data-loss in `std::fs`: `fs::copy(src, src)`
+/// opens the destination with `O_TRUNC` before reading and zeroes the file,
+/// and a dir-into-its-own-subtree copy keeps re-discovering the directories
+/// it just created until the path exceeds `PATH_MAX`.
+fn reject_self_or_nested(src: &Path, dst: &Path, verb: &str) -> io::Result<()> {
+    if same_file(src, dst) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot {verb}: '{}' and '{}' are the same file",
+                src.display(),
+                dst.display()
+            ),
+        ));
+    }
+    if let (Ok(csrc), Some(cdst)) = (fs::canonicalize(src), canonical_target(dst))
+        && cdst != csrc
+        && cdst.starts_with(&csrc)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot {verb}: '{}' is inside '{}'",
+                dst.display(),
+                src.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// True when `a` and `b` resolve to the same on-disk file. Uses a `dev`+`ino`
+/// comparison on Unix (robust across `.`, trailing slashes, hard links, and
+/// symlinks); both paths must exist, so a not-yet-created destination is never
+/// "the same file".
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => ma.dev() == mb.dev() && ma.ino() == mb.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
+}
+
+/// Best-effort absolute, symlink-resolved form of a path that may not exist
+/// yet: canonicalize the deepest existing ancestor and re-append the trailing
+/// components that don't exist. Returns `None` only when no ancestor resolves.
+fn canonical_target(path: &Path) -> Option<PathBuf> {
+    if let Ok(c) = fs::canonicalize(path) {
+        return Some(c);
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path;
+    loop {
+        let parent = cur.parent()?;
+        tail.push(cur.file_name()?.to_owned());
+        if let Ok(mut out) = fs::canonicalize(parent) {
+            for comp in tail.iter().rev() {
+                out.push(comp);
+            }
+            return Some(out);
+        }
+        cur = parent;
     }
 }
 
@@ -539,6 +631,83 @@ mod tests {
         let dest = tmp.path().join("notyet"); // does not exist
         let err = copy_selection_to(&[&a, &b], &dest).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn copy_tree_refuses_same_file_without_truncating() {
+        // `fs::copy(src, src)` would open the file with O_TRUNC and zero it.
+        let tmp = tempdir().unwrap();
+        let p = tmp.path().join("data.txt");
+        File::create(&p).unwrap().write_all(b"important").unwrap();
+        let err = copy_tree(&p, &p).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            fs::read(&p).unwrap(),
+            b"important",
+            "source must be untouched after a refused same-file copy"
+        );
+    }
+
+    #[test]
+    fn copy_selection_into_own_dir_refuses_and_preserves_content() {
+        // Pick a file and give its own directory as the destination: the
+        // computed target (dir/<name>) is the same inode as the source.
+        let tmp = tempdir().unwrap();
+        let f = tmp.path().join("note.txt");
+        File::create(&f).unwrap().write_all(b"keep me").unwrap();
+        let err = copy_selection_to(&[&f], tmp.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(&f).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn copy_tree_refuses_dest_inside_source() {
+        // Copying a dir into its own subtree would recurse until ENAMETOOLONG.
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("proj");
+        fs::create_dir(&src).unwrap();
+        File::create(src.join("file"))
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
+        let backup = src.join("backup");
+        fs::create_dir(&backup).unwrap();
+        let dst = backup.join("proj"); // proj/backup/proj — inside src
+        let err = copy_tree(&src, &dst).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(
+            !dst.exists(),
+            "no nested copy should have been created before the refusal"
+        );
+    }
+
+    #[test]
+    fn move_tree_refuses_same_file() {
+        // `mv a a` is an error in cp/mv land; a bare rename(src, src) is a
+        // silent no-op, so guard it for a clear message.
+        let tmp = tempdir().unwrap();
+        let p = tmp.path().join("m.txt");
+        File::create(&p).unwrap().write_all(b"m").unwrap();
+        let err = move_tree(&p, &p).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(p.exists(), "source must survive a refused same-file move");
+    }
+
+    #[test]
+    fn copy_tree_into_sibling_dir_still_works() {
+        // Regression guard: the self/nested check must not reject a legitimate
+        // copy whose destination merely shares a parent with the source.
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir(&src).unwrap();
+        File::create(src.join("a"))
+            .unwrap()
+            .write_all(b"A")
+            .unwrap();
+        let dst = tmp.path().join("dst");
+        copy_tree(&src, &dst).unwrap();
+        assert_eq!(fs::read(dst.join("a")).unwrap(), b"A");
+        assert!(src.join("a").exists());
     }
 
     #[test]
