@@ -122,6 +122,18 @@ pub fn push_agent_markdown(
         .is_some_and(|l| l.spans.iter().all(|s| s.content.trim().is_empty()));
 }
 
+/// Char-boundary-safe truncation with a `…` suffix, for one-line
+/// transcript summaries (tool labels, result previews). Shared by the
+/// claude / codex transcript renderers.
+pub fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max).collect();
+        format!("{truncated}\u{2026}")
+    }
+}
+
 /// Test-only: run `body` with `state_root()` pinned to `root`. The
 /// override is unwound when `body` returns *or panics* (RAII guard).
 #[cfg(test)]

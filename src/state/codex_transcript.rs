@@ -210,7 +210,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
             ("response_item", "function_call_output") => {
                 let output = payload["output"].as_str().unwrap_or("");
                 let first = output.lines().next().unwrap_or("");
-                let summary = truncate_chars(first, 100);
+                let summary = crate::state::truncate_chars(first, 100);
                 out.push(Line::from(Span::styled(
                     format!("  \u{2514} {summary}"),
                     dim_style,
@@ -227,16 +227,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
 /// the transcript. Long/multiline args are truncated.
 fn summarize_args(args: &str) -> String {
     let flat = args.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_chars(&flat, 80)
-}
-
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max).collect();
-        format!("{truncated}\u{2026}")
-    }
+    crate::state::truncate_chars(&flat, 80)
 }
 
 #[cfg(test)]
@@ -254,8 +245,8 @@ mod tests {
 
     #[test]
     fn truncate_respects_char_boundaries() {
-        assert_eq!(truncate_chars("hello", 10), "hello");
-        assert_eq!(truncate_chars("hello", 3), "hel\u{2026}");
+        assert_eq!(crate::state::truncate_chars("hello", 10), "hello");
+        assert_eq!(crate::state::truncate_chars("hello", 3), "hel\u{2026}");
     }
 
     #[test]
