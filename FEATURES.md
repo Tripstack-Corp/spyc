@@ -173,7 +173,11 @@ spyc's workflow: browse files above, talk to Claude below.
     (`agy`, under `~/.gemini/antigravity-cli/`) — get the actual
     conversation instead of a screen capture: user turns, agent
     replies, and tool calls rendered in the pager, titled
-    `(transcript)` rather than `(history)`. The transcript is
+    `(transcript)` rather than `(history)`. Tool calls are
+    labelled with their salient argument — `⚙ Bash(Find foo call
+    sites)`, `⚙ Edit(src/lib.rs)` — and each result shows a dim
+    one-line output preview with a `(+N lines)` count. The
+    transcript is
     resolved and read **off-thread** (no UI stall on a big
     session), and **`r`** reloads it — the agent keeps appending
     while you read. If no transcript exists yet (brand-new
