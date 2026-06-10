@@ -163,6 +163,12 @@ pub struct FrameLayout {
     divider: Option<ratatui::layout::Rect>,
     pane: Option<ratatui::layout::Rect>,
     prompt: ratatui::layout::Rect,
+    /// The contiguous spyc-unit region a top overlay (`;cmd`/`$EDITOR`) or
+    /// a `TopPane` pager paints over: everything above the divider when a
+    /// pane is open, else the whole frame. NOT `status.y + Σheights` —
+    /// with `status_position = "bottom"` the status row is the *last* row,
+    /// so that construction anchors the overlay off-screen and panics.
+    top_unit: ratatui::layout::Rect,
 }
 
 /// Follow-up side effect a key handler asks the main loop to perform.
