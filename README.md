@@ -37,8 +37,8 @@ A two-pane terminal program.
 - The **top pane** is a keyboard-driven, vim-flavoured file commander
   with git-aware listings.
 - The **bottom pane** is a child process — by default Claude Code or
-  codex (both first-class; Gemini and Antigravity also supported), but in practice any
-  program.
+  codex (both first-class; Gemini, Antigravity, and zot also supported),
+  but in practice any program.
 
 The two panes share focus through a chord-prefix system (`^a` /
 screen-style), and the file commander exposes a local Unix-domain
@@ -70,7 +70,7 @@ The name: **spy** (inspired by SideFX's in-house file manager) +
 
 ### Prerequisites
 
-- **Rust** 1.85+ -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Rust** 1.88+ -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - **Nerd Font** recommended for the powerline status bar; press `C`
   inside spyc to toggle a mono fallback if you don't have one.
   Install one with: `brew install --cask font-meslo-lg-nerd-font`
@@ -93,7 +93,7 @@ make install          # builds release + copies to ~/.local/bin (no sudo)
 ```sh
 spyc            # opens in the current directory
 spyc -r         # resume a previous session (restores each pane to its own
-                # Claude / Codex / Gemini / Antigravity conversation, identified per-tab)
+                # Claude / Codex / Gemini / Antigravity / zot conversation, identified per-tab)
 ```
 
 spyc opens with your cwd in a multi-column listing. Move with `hjkl`,
@@ -133,8 +133,11 @@ picked files, or the persistent yanked-file cache — the last two
 are state Claude can't see through generic filesystem tools.
 
 Sessions are auto-saved on quit. `spyc -r` opens a session picker that
-restores all pane tabs and resumes Claude conversations via
-`--resume <sessionId>`.
+restores all pane tabs and resumes each agent's conversation. Claude
+tabs spawn a fresh `claude` and type `/resume <sessionId>` into it once
+it settles, verifying the submit landed and re-sending Enter if Claude's
+async startup ate it (the `--resume` CLI flag has a mount-crash
+regression).
 
 ## Keybindings
 
@@ -150,7 +153,7 @@ restores all pane tabs and resumes Claude conversations via
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental, glob-aware) |
-| `H` / `~` | Jump to home |
+| `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
 | `J` | Jump to any path |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
 | `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
@@ -191,6 +194,19 @@ trash so OS-native recovery still works.
 | `P` (in view) | Restore cursor entry to original path |
 | `dd` / `x` (in view) | Purge cursor entry to system trash |
 | `Z` (in view) | Purge ALL entries to system trash (confirm) |
+
+### Git views
+
+In-house gix-backed diff / show / blame pager views (in-process, no
+`git` subprocess) — syntax-highlighted, side-by-side or unified (`|`
+toggles), word-level intra-line change highlighting.
+
+| Key | Action |
+|-----|--------|
+| `gd` | Diff vs HEAD for the selection (staged + unstaged + new) |
+| `gD` | Staged-only diff (`git diff --cached`) |
+| `gb` | Blame the cursor file |
+| `\|` (in view) | Toggle side-by-side ⇄ unified layout |
 
 ### Split pane
 

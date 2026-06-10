@@ -7,7 +7,7 @@ Yazi reference point: github.com/sxyazi/yazi @ ~37k stars; PR #4005
 ## Why this doc exists
 
 Yazi is the closest neighbour in the TUI file-commander space and is
-already cited by `LAUNCH_PREP.md` as the gold-standard "reputable,
+already cited by `ROADMAP.md` ("Launch plan") as the gold-standard "reputable,
 install-and-rely-on TUI tool" we benchmark launch hygiene against.
 `ROADMAP.md` carries four Yazi-inspired entries (bulk rename, cwd
 export, visual-mode range pick, structured event stream) but there is
@@ -107,12 +107,12 @@ daily and line numbers go stale fast.
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Pre-built binaries on tagged release   | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md`)  |
-| Homebrew tap                           | Yes     | Roadmap for 2.0 (`LAUNCH_PREP.md`)  |
+| Pre-built binaries on tagged release   | Yes     | Roadmap for 2.0 (`ROADMAP.md` ("Launch plan"))  |
+| Homebrew tap                           | Yes     | Roadmap for 2.0 (`ROADMAP.md` ("Launch plan"))  |
 | Signed artifacts                       | Partial | Minisign roadmap (`ROADMAP.md`)    |
-| Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred (`LAUNCH_PREP.md`) |
-| Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap (`LAUNCH_PREP.md`) |
-| GitHub presence                        | Yes (37k stars) | Bitbucket today; GitHub move is 2.0 blocker (`LAUNCH_PREP.md`) |
+| Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred (`ROADMAP.md` ("Launch plan")) |
+| Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap (`ROADMAP.md` ("Launch plan")) |
+| GitHub presence                        | Yes (37k stars) | Bitbucket today; GitHub move is 2.0 blocker (`ROADMAP.md` ("Launch plan")) |
 
 ## Where Yazi clearly leads
 
@@ -193,7 +193,7 @@ Concrete actions falling out of this review:
    path is kitty-only today and defer until ≥1 more terminal adopts
    OSC 72; keep the path-paste fallback as an independent, cheap win.
 2. **Add an "image preview" row to the migration page**
-   (`LAUNCH_PREP.md`). Honest framing: "Yazi has it; spyc doesn't;
+   (`ROADMAP.md` ("Launch plan")). Honest framing: "Yazi has it; spyc doesn't;
    if you live in image-heavy directories, Yazi may suit you better."
    Trying to hide the gap will burn trust faster than naming it.
 3. **In the same migration page, lead the differentiator paragraph

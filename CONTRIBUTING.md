@@ -28,10 +28,14 @@ We use Bitbucket pull requests. The target branch is `main`.
 
 3. **Run the quality gate** before pushing:
    ```sh
-   make check    # fmt + clippy + test
+   make check    # fmt-check + lint + test + deny
    ```
-   All three must pass. Clippy runs with `pedantic` and `nursery`
-   lints — warnings are errors in CI.
+   All four must pass. Clippy runs with `pedantic` and `nursery`
+   lints — warnings are errors in CI. `deny` is cargo-deny
+   (advisories, licenses, sources, bans). If you touched
+   `cfg(target_os = "linux")` code, also run `make lint-linux` —
+   host clippy compiles that code out. `make aislop` is an advisory
+   AI-slop scan (net-new findings vs the baseline).
 
 4. **Push and open a PR** on Bitbucket:
    ```sh
@@ -66,8 +70,25 @@ Every user-visible feature maps to an `Action` enum variant in
 
 1. Add a variant to `Action` with a doc comment.
 2. Add a `describe()` entry (used in the help overlay).
-3. Wire the keybinding in `src/keymap/resolver.rs`.
-4. Handle it in the `apply()` match in `src/app.rs`.
+3. Wire the keybinding in `src/keymap/resolver/mod.rs`.
+4. Handle it in the matching `src/app/` child module — or, for the
+   pure-domain half, in `AppState::apply` (`src/app/state/apply.rs`).
+
+`:`-commands are `COMMAND_TABLE` entries (`src/app/command_table.rs`);
+each entry carries its handler, so a registered command with no
+handler is a compile error. Side effects are `Effect` variants
+(`src/app/effect.rs`) returned as data — handlers never touch the OS
+directly. `CLAUDE.md` is the full architectural contract (MVU
+invariants); read it before adding behavior.
+
+### File size
+
+No `.rs` file over ~800 lines without a solid reason (a module root
+holding its own core type definitions qualifies; a pile of helpers
+does not). When a file grows, extract a cohesive child/sibling module
+— verbatim relocation, behavior-identical. `app/mod.rs` has a
+ceiling-guard test (`app::guard_tests::mod_rs_stays_decomposed`):
+if you hit it, extract a module, don't bump the number.
 
 ### Error handling
 
@@ -117,26 +138,41 @@ This is a hard requirement, not a nice-to-have. Stale docs are bugs.
 ## Versioning
 
 We use [SemVer](https://semver.org/). The version lives in
-`Cargo.toml`.
+`Cargo.toml` (currently 1.x).
 
-- **Patch** (0.9.1): bug fixes, doc updates, minor polish
-- **Minor** (0.10.0): new features, new keybindings, new milestones
-- **Major** (1.0.0): stable release, public API commitment
+- **Patch** (1.57.1): bug fixes, doc updates, minor polish
+- **Minor** (1.58.0): new features, new keybindings, new milestones
+- **Major** (2.0.0): breaking changes to config, state files, or
+  the command surface
 
 Bump the version in your PR if your change is user-visible.
 
 ## Commit messages
 
-Format:
-```
-Short summary (under 72 chars)
+Conventional commits, enforced by use: since v1.57.0 the
+`CHANGELOG.md` is git-cliff-generated from the commit history
+(config in `cliff.toml`), so **the commit subject IS the changelog
+entry**. Format:
 
-Optional longer description. Focus on the "why" not the "what".
+```
+type(scope): subject — the literal changelog line
+
+Optional body. Focus on the "why" not the "what".
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-Include the `Co-Authored-By` trailer when Claude Code contributed.
+- `type` picks the section: `feat:` → Features, `fix:` → Bug Fixes,
+  `refactor:`/`perf:`/`docs:`/`build:` → theirs.
+- The subject must cover the *actual* diff scope, not just its
+  headline. A category-spanning PR wants multiple well-typed
+  commits, not one.
+- Preview the pending section with `make changelog`; cut a release
+  with `make release-tag VERSION=x.y.z`.
+- Include the `Co-Authored-By` trailer when Claude Code contributed.
+
+See `AGENTS.md` ("Commits, merges, and CHANGELOG") for the longer
+rationale.
 
 ## CI
 
@@ -159,17 +195,28 @@ cross-compile caches.
 
 ```
 src/
-  app.rs          — event loop, layout, key dispatch (the big file)
+  app/            — the application layer (MVU): mod.rs is the module
+                    root (App/Runtime/ViewState + Message); ~40 child
+                    modules incl. state/ (the Model), render/,
+                    key_dispatch/, pager_handler/, run.rs, effect.rs,
+                    command_table.rs
   keymap/         — Action enum, resolver, user keymap DSL
   pane/           — pty subprocess, multi-tab, vt100 rendering
   ui/             — list view, pager, status bar, prompt, theme
-  fs/             — directory listing, file operations
-  state/          — cursor, marks, picks, inventory, history
+  fs/             — directory listing, file operations, finder, grep
+  state/          — cursor, marks, picks, inventory, history, sessions
+  git/            — git facade, 100% in-process gix (no subprocess)
+  agent/          — agent profiles (claude/codex/gemini/agy/zot)
+  mcp/            — MCP server (PID-scoped socket + stdio proxy)
   config/         — TOML config, DSL parser
   shell/          — shell expansion, command execution
-  sysinfo.rs      — git status, worktree helpers, system info
+  clipboard.rs    — cross-platform clipboard copy
+  proc_cwd.rs     — live "cwd of pid N" lookup for the pane divider
+  sysinfo.rs      — RSS / PID / thread-count info for the I overlay
   main.rs         — terminal setup/teardown
 ```
+
+See `AGENTS.md` for the full per-module index.
 
 ## Questions?
 

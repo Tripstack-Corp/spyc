@@ -39,7 +39,7 @@ Everything is keyboard-driven with vi motions as the foundation.
   scroll the doc. Files past 5 MB fall back to `$PAGER` as a top
   overlay (streaming from disk wins for multi-GB logs)
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
-- **H / ~** jump to home
+- **~ / Home** jump to home (`H` is the harpoon prefix — see Harpoon)
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
   suggestions from visit history)
 - **F** project-wide fuzzy filename finder. Walks `PROJECT_HOME` (or
@@ -63,6 +63,25 @@ Everything is keyboard-driven with vi motions as the foundation.
   hold-to-cycle. Flashes "no git changes in this directory" when
   there's nothing to land on.
 
+## Git views — diff / show / blame
+
+In-house, gix-backed git pager views (v1.56) — built in-process (no
+`git` subprocess), syntax-highlighted, with word-level intra-line
+change highlighting on modified lines.
+
+- **gd** — diff vs HEAD for the selection (cursor file or picks):
+  staged + unstaged + new files, everything different from HEAD
+- **gD** — staged-only diff (`git diff --cached`): what would commit
+- **gb** — blame the cursor file (selection ignored)
+- **|** inside a diff / show view toggles **side-by-side ⇄ unified**
+  layout. Side-by-side is the default, falling back to unified when
+  the viewport is too narrow; a no-op for blame
+- All pager keys work: `/` search, `:N` jump, visual yank, `gf`/`gF`
+  path jumps, buffer history
+
+Quick Select's uppercase **Git SHA** label opens the same in-house
+`show` view for that commit (see "Quick Select" below).
+
 ## Picks and inventory
 
 Two levels of selection for flexible file management.
@@ -80,6 +99,7 @@ Two levels of selection for flexible file management.
   use without a pane (`git restore $(pbpaste)` etc.)
 - **yp** yank visible pane output to the system clipboard
 - **yP** yank the last prompt you typed into the pane to the clipboard
+- **ya** yank the full pane scrollback (up to 10K lines) to the clipboard
 
   *Clipboard backend:* macOS uses built-in `pbcopy`; Linux uses
   `wl-copy` (Wayland) or `xclip` / `xsel` (X11) — see INSTALL.md
@@ -140,40 +160,36 @@ spyc's workflow: browse files above, talk to Claude below.
   block, `y` yanks the selection, `l` toggles line numbers, `w`
   whitespace markers. The pty keeps running off-screen — output
   you miss while reading lands in scrollback for the next view.
-  `Esc` snaps back to live. Alt-screen apps (vim, htop, lazygit)
-  skip the pager and flash a hint pointing at the app's own
-  history viewer.
+  `Esc` snaps back to live.
   - The fundamental limit is that full-screen TUIs do *virtual
     scrolling* inside a fixed grid — old content lives in app
     memory, not the terminal — so even a parallel vt100 parser
-    can't recover it. This applies whether the app uses the
-    alternate screen (vim, htop) *or* keeps its history in a
-    DECSTBM scroll region in inline mode.
-  - **Agent-aware scrollback (codex):** rather than screen-scrape,
-    `^a v` on a codex pane reads codex's on-disk rollout
-    transcript (`~/.codex/sessions/.../rollout-*.jsonl`, the
-    source of truth, flushed per turn) and renders the actual
-    conversation — user turns, agent replies, tool calls — in the
-    pager. Works in both alt-screen and `--no-alt-screen` modes,
-    since it doesn't depend on terminal capture at all. Titled
-    `(transcript)` rather than `(history)`. If no rollout is found
-    yet (brand-new session), spyc flashes a hint.
-  - **Claude Code** runs inline and lets its output scroll into
-    the main buffer, so `^a v` captures its history from the
-    terminal normally (the default). Claude also writes a JSONL
-    transcript; set `[pane] claude_transcript_scrollback = true`
-    to make `^a v` render that structured transcript instead —
-    cleaner (no grid/repaint artifacts), at the cost of the
-    verbatim terminal capture. Off by default.
-  - **Agent-aware scrollback (agy):** `^a v` on an Antigravity
-    (`agy`) pane reads agy's on-disk conversation transcript
-    (under `~/.gemini/antigravity-cli/`, located by matching the
-    pane's cwd + spawn time against `history.jsonl`) and renders
-    the user turns, model replies, and tool calls in the pager —
-    same `(transcript)` treatment as codex. On by default
-    (`[pane] agy_transcript_scrollback = true`); set it `false` to
-    fall back to the verbatim terminal capture. Falls back
-    automatically when no transcript is found yet.
+    can't recover it. `^a v` on a *non-agent* alt-screen app
+    (vim, htop, lazygit) is therefore a dead end: it flashes a
+    hint pointing at the app's own history viewer.
+  - **Agent transcripts.** Agents that keep an on-disk JSONL
+    transcript — Claude Code, codex
+    (`~/.codex/sessions/.../rollout-*.jsonl`), and Antigravity
+    (`agy`, under `~/.gemini/antigravity-cli/`) — get the actual
+    conversation instead of a screen capture: user turns, agent
+    replies, and tool calls rendered in the pager, titled
+    `(transcript)` rather than `(history)`. The transcript is
+    resolved and read **off-thread** (no UI stall on a big
+    session), and **`r`** reloads it — the agent keeps appending
+    while you read. If no transcript exists yet (brand-new
+    session), spyc flashes a hint.
+  - **Alt-screen agents always use the transcript.** When an
+    agent with a transcript runs on the alternate screen (e.g.
+    Claude Code's full-screen mode), `^a v` auto-engages the
+    transcript view unconditionally — there's no usable vt100
+    capture to fall back to, so the config gate is bypassed.
+  - **Inline panes are config-gated.** When the agent runs inline
+    (output scrolls into the main buffer), the verbatim terminal
+    capture works, so the transcript view is a per-agent choice:
+    `[pane] claude_transcript_scrollback` (off by default —
+    inline claude captures fine from the terminal) and
+    `[pane] agy_transcript_scrollback` (on by default). Codex
+    transcripts are always on — there is no config gate.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
@@ -190,6 +206,8 @@ Multiple tabs, each running an independent pty:
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")
 - **^a r** rename the active tab
+- **^a R** restart the active tab — closes it and respawns the same
+  command in the same working directory
 - Activity indicator (**+**) on background tabs that have new output
 - **Default command** for `^a c` resolves in this order:
   `$SPYC_PANE_CMD` env var → `[pane] default_command` in
@@ -300,7 +318,8 @@ end).
 **`:`** opens a vim-style command prompt with vi editing and history:
 
 - **`:cd <path>`** — change directory (`~` and `$VAR` expanded, bare `:cd` goes home)
-- **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext` (persists across chdir)
+- **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
+  (persists across chdir); **`gs`** toggles reverse order for the current sort
 - **`:marks`** — show all marks in a pager popup
 - **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
@@ -409,7 +428,8 @@ match is overlaid with a 1- or 2-letter label.
   - **URL** → hand to the system handler (`open` on macOS,
     `xdg-open` on Linux)
   - **Path** → cursor-jump in spyc (chdir to parent + place cursor)
-  - **Git SHA** → `git show <sha>` in the in-app pager
+  - **Git SHA** → open the commit in the in-house gix-backed
+    `show` view (same pager as `gd`; `|` toggles layout)
   - **Custom pattern** with a `url = "..."` template → fill `{}`
     with the match, then `open`/`xdg-open`
   - Other kinds (IPv4, custom without template) → fall back to
@@ -443,7 +463,7 @@ flag, etc.), mtime, and best-effort UID/GID; restore preserves all
 of them. xattrs / ACLs / macOS resource forks are NOT preserved
 (out of scope for v1).
 
-- **`gy`** — open the graveyard view (newest entries first)
+- **`gy`** / **`:graveyard`** — open the graveyard view (newest entries first)
 - **`:undo`** — restore the most-recent entry to its original path
 - Inside the graveyard view:
   - **`p`** — restore the cursor entry to the current dir (cwd)
@@ -718,6 +738,9 @@ jump from Claude's output back to the file list.
   breakdown (pane/event/other), and poll interval
 - **C** toggle between color and mono themes
 - **s** set an environment variable (`NAME=VALUE`)
+- **:dump-scrollback** write the active pane's scrollback snapshot
+  (one line per row) to `/tmp/spyc-scrollback.txt` — diagnostic for
+  the `^a v` capture path when visible content seems to go missing
 
 ## Building
 
