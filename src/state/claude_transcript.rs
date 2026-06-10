@@ -65,9 +65,10 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
     let tool_style = Style::default().fg(theme.take);
-    let dim_style = Style::default()
-        .fg(theme.status_suffix)
-        .add_modifier(Modifier::DIM);
+    // Muted but NOT Modifier::DIM: status_suffix is already a
+    // comment-gray, and DIM stacked on top of it rendered the result
+    // previews near-invisible on dark backgrounds (dogfood report).
+    let dim_style = Style::default().fg(theme.status_suffix);
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true;
