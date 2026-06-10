@@ -49,6 +49,28 @@ pub fn display_truncate(s: &str, max: usize) -> &str {
     s
 }
 
+/// Truncate a string to at most `max` display columns, keeping the
+/// **tail** (rightmost columns) — the mirror of [`display_truncate`].
+/// Walks characters from the end on `char` boundaries, so a multi-byte
+/// path is never sliced mid-codepoint. Used for path displays that elide
+/// the head (`…/deep/leaf`).
+pub fn display_truncate_tail(s: &str, max: usize) -> &str {
+    if s.width() <= max {
+        return s;
+    }
+    let mut width = 0;
+    for (i, c) in s.char_indices().rev() {
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if width + cw > max {
+            // `i` is the byte offset of the char that would overflow;
+            // the kept tail starts at the next char boundary.
+            return &s[i + c.len_utf8()..];
+        }
+        width += cw;
+    }
+    s
+}
+
 /// Pad a string with spaces to `width` display columns.
 pub fn display_pad_right(s: &str, width: usize) -> String {
     let w = display_width(s);
@@ -93,5 +115,30 @@ mod tests {
     #[test]
     fn truncate_fits() {
         assert_eq!(display_truncate("abc", 10), "abc");
+    }
+
+    #[test]
+    fn truncate_tail_ascii() {
+        assert_eq!(display_truncate_tail("hello world", 5), "world");
+    }
+
+    #[test]
+    fn truncate_tail_cjk_no_split() {
+        // "日本語" is 6 cols; keeping 5 can only fit the last 2 (4 cols).
+        assert_eq!(display_truncate_tail("日本語", 5), "本語");
+    }
+
+    #[test]
+    fn truncate_tail_fits() {
+        assert_eq!(display_truncate_tail("abc", 10), "abc");
+    }
+
+    #[test]
+    fn truncate_tail_never_splits_codepoint() {
+        // A byte-slice tail of width-1 on a multibyte path used to panic.
+        let s = "/home/résumé/café";
+        let out = display_truncate_tail(s, 6);
+        assert!(s.ends_with(out));
+        assert!(display_width(out) <= 6);
     }
 }
