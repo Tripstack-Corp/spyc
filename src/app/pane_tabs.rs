@@ -9,8 +9,9 @@
 use std::time::Duration;
 
 use super::{
-    App, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY, StatusPosition,
-    TabEntry, TabInfo, state,
+    App, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
+    RESTORE_RESUME_VERIFY_DELAY, RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
+    StatusPosition, TabEntry, TabInfo, state,
 };
 
 impl App {
@@ -111,20 +112,27 @@ impl App {
     /// mount; the slash-command path goes through `tM_` and works
     /// fine.
     ///
-    /// Two phases:
+    /// Three phases:
     /// - `Text` (after banner-settle): write `/resume <sid>` with no
     ///   trailing Enter and transition to `Enter`.
-    /// - `Enter` (after a small additional delay): write `\r`.
+    /// - `Enter` (after a small additional delay): write `\r` and
+    ///   transition to `Verify`.
+    /// - `Verify` (closed-loop): if `/resume <sid>` is still sitting
+    ///   unsubmitted in the pane tail, re-send `\r` and re-arm, up to
+    ///   `RESTORE_RESUME_VERIFY_RETRIES` times.
     ///
-    /// Splitting the writes avoids an intermittent race where
+    /// Splitting the text/Enter writes narrows the race where
     /// Claude's TUI was still mid-render when the original combined
-    /// `/resume <sid>\r` arrived: the chars landed in the prompt
-    /// but the trailing `\r` got dropped, leaving the command
-    /// sitting unsubmitted. Reported by a user who could "just hit
-    /// Enter" to recover. The delay between phases lets the prompt
-    /// absorb the typed chars before we tell it to submit.
+    /// `/resume <sid>\r` arrived, but no fixed delay closes it —
+    /// async startup work (MCP connects, version check, org-message
+    /// fetch) can remount the input component and eat a lone `\r`
+    /// seconds after spawn. The `Verify` phase makes the submit
+    /// observed rather than hoped-for: the sid vanishing from the
+    /// screen tail is the success signal, and while it's visible a
+    /// retry `\r` is harmless. (The v1.70 "bells" design subsumes
+    /// this; delete the phase when that lands.)
     pub fn send_pending_resumes(&mut self, now: std::time::Instant) {
-        use crate::pane::tabs::PendingResumeSend;
+        use crate::pane::tabs::{PendingResumeSend, resume_still_unsubmitted};
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             return;
         };
@@ -133,12 +141,35 @@ impl App {
                 Some(PendingResumeSend::Text { sid, after }) if now >= after => {
                     let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());
                     entry.info.pending_resume_send = Some(PendingResumeSend::Enter {
+                        sid,
                         after: now + RESTORE_RESUME_ENTER_DELAY,
                     });
                 }
-                Some(PendingResumeSend::Enter { after }) if now >= after => {
+                Some(PendingResumeSend::Enter { sid, after }) if now >= after => {
                     let _ = entry.pane.send_bytes(b"\r");
-                    // Cleared by take().
+                    entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
+                        sid,
+                        after: now + RESTORE_RESUME_VERIFY_DELAY,
+                        retries_left: RESTORE_RESUME_VERIFY_RETRIES,
+                    });
+                }
+                Some(PendingResumeSend::Verify {
+                    sid,
+                    after,
+                    retries_left,
+                }) if now >= after => {
+                    let tail = entry.pane.recent_lines(RESTORE_RESUME_VERIFY_TAIL);
+                    if resume_still_unsubmitted(&tail, &sid) && retries_left > 0 {
+                        let _ = entry.pane.send_bytes(b"\r");
+                        entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
+                            sid,
+                            after: now + RESTORE_RESUME_VERIFY_DELAY,
+                            retries_left: retries_left - 1,
+                        });
+                    }
+                    // Submitted (sid gone from the tail) or retries
+                    // exhausted: cleared by take(). On exhaustion the
+                    // user recovers by pressing Enter themselves.
                 }
                 other => {
                     // Not yet due, or empty — put back what we took.

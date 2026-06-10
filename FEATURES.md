@@ -637,7 +637,10 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 - **Agent session resume** — for tabs running `claude`, `codex`,
   `gemini`, `agy`, or `zot`, quitting spyc and launching with `spyc -r`
   will restore. Claude tabs spawn a fresh `claude` and type
-  `/resume <id>` once it's settled (the CLI flag has a regression).
+  `/resume <id>` once it's settled (the CLI flag has a regression),
+  then verify the submit landed — re-sending Enter while the command
+  is still visibly unsubmitted, since Claude's async startup can eat
+  a lone `\r`.
   Codex tabs spawn `codex resume <UUID>` directly. When no UUID was
   captured (pane killed before exit), codex falls back to `codex resume
   --last`, which uses codex's native cwd-filtered picker. `zot` tabs

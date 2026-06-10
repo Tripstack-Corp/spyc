@@ -35,6 +35,10 @@ pub enum Deadline {
     /// Resume enter-delay (300 ms) before submitting `/resume`. Per-tab in
     /// `pending_resume_send`. PRE-recv.
     ResumeEnter,
+    /// Resume verify tick (1 s): re-check that the `/resume` actually
+    /// submitted and retry the `\r` if not. Per-tab in
+    /// `pending_resume_send`. PRE-recv.
+    ResumeVerify,
     /// MVU Phase 3d: ~1 Hz tick for a streaming capture / running-`:task`
     /// viewer's elapsed-timer title. Armed only while such a view is live
     /// (`capture_tick_should_arm`), disarmed the instant it finishes. With
@@ -74,25 +78,30 @@ impl Scheduler {
     }
 }
 
-/// Arm `RestoreSettle`/`ResumeEnter` at the earliest pending resume
-/// across all tabs, or disarm when none is pending. The absolute fire
-/// instants already live per-tab in `pending_resume_send`; the scheduler
-/// only needs the min so the wait can wake for it (the floor dominates
-/// when a pane is present, so this is byte-identical on the real restore
-/// path — it only tightens the no-pane edge). Re-scanned every iteration
-/// since `Text → Enter` transitions change which is pending.
+/// Arm `RestoreSettle`/`ResumeEnter`/`ResumeVerify` at the earliest
+/// pending resume across all tabs, or disarm when none is pending. The
+/// absolute fire instants already live per-tab in `pending_resume_send`;
+/// the scheduler only needs the min so the wait can wake for it (the
+/// floor dominates when a pane is present, so this is byte-identical on
+/// the real restore path — it only tightens the no-pane edge).
+/// Re-scanned every iteration since `Text → Enter → Verify` transitions
+/// change which is pending.
 pub fn arm_resume_deadlines(scheduler: &mut Scheduler, tabs: Option<&PaneTabs>) {
     use crate::pane::tabs::PendingResumeSend;
     let mut settle: Option<Instant> = None;
     let mut enter: Option<Instant> = None;
+    let mut verify: Option<Instant> = None;
     if let Some(tabs) = tabs {
         for entry in tabs.tabs() {
             match &entry.info.pending_resume_send {
                 Some(PendingResumeSend::Text { after, .. }) => {
                     settle = Some(settle.map_or(*after, |m: Instant| m.min(*after)));
                 }
-                Some(PendingResumeSend::Enter { after }) => {
+                Some(PendingResumeSend::Enter { after, .. }) => {
                     enter = Some(enter.map_or(*after, |m: Instant| m.min(*after)));
+                }
+                Some(PendingResumeSend::Verify { after, .. }) => {
+                    verify = Some(verify.map_or(*after, |m: Instant| m.min(*after)));
                 }
                 None => {}
             }
@@ -105,5 +114,9 @@ pub fn arm_resume_deadlines(scheduler: &mut Scheduler, tabs: Option<&PaneTabs>) 
     match enter {
         Some(t) => scheduler.arm(Deadline::ResumeEnter, t),
         None => scheduler.disarm(Deadline::ResumeEnter),
+    }
+    match verify {
+        Some(t) => scheduler.arm(Deadline::ResumeVerify, t),
+        None => scheduler.disarm(Deadline::ResumeVerify),
     }
 }

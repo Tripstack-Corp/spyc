@@ -134,6 +134,25 @@ const RESTORE_BANNER_SETTLE: Duration = Duration::from_secs(2);
 /// apart gives the prompt time to settle in between.
 const RESTORE_RESUME_ENTER_DELAY: Duration = Duration::from_millis(300);
 
+/// Cadence of the post-Enter verify pass: each tick checks whether
+/// `/resume <sid>` is still sitting unsubmitted in the pane tail and
+/// re-sends `\r` if so. Claude eats a lone `\r` whenever its async
+/// startup work (MCP connects, version check, org-message fetch)
+/// remounts the input component — which can happen seconds after the
+/// banner looks settled, so the fixed delays above can't close the
+/// race on their own.
+const RESTORE_RESUME_VERIFY_DELAY: Duration = Duration::from_secs(1);
+
+/// How many retry `\r`s the verify pass may send before giving up
+/// (≈5 s of cover past the first Enter). Retries are guarded by the
+/// typed command still being visible, so a generous count is safe.
+const RESTORE_RESUME_VERIFY_RETRIES: u8 = 5;
+
+/// How many trailing pane lines the verify pass scans for the
+/// unsubmitted `/resume <sid>`. The input box lives in the bottom few
+/// rows; a margin covers the status line and any popup below it.
+const RESTORE_RESUME_VERIFY_TAIL: usize = 15;
+
 /// Precomputed rects for the current frame. Built by `App::compute_layout`.
 /// `pub` so the `pub fn compute_layout` (now in the `render` child
 /// module) doesn't expose a more-private return type; fields stay
