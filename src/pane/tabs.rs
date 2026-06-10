@@ -12,7 +12,7 @@ use std::sync::{
 
 use super::Pane;
 
-/// Two-phase scheduling for the `/resume <sid>` keystroke injection
+/// Three-phase scheduling for the `/resume <sid>` keystroke injection
 /// that session restore uses to recover a Claude conversation. Each
 /// variant carries the time the next write should fire so the App
 /// event loop can drain pending sends each tick without per-tab
@@ -31,7 +31,35 @@ pub enum PendingResumeSend {
     /// write avoids the intermittent race where Claude's TUI was
     /// mid-render and dropped the trailing `\r` from a combined
     /// send.
-    Enter { after: std::time::Instant },
+    Enter {
+        sid: String,
+        after: std::time::Instant,
+    },
+    /// Enter has been written, but Claude's TUI intermittently drops
+    /// a `\r` that lands during async startup work (MCP connects,
+    /// version check, org-message fetch — each can remount the input
+    /// component). No fixed delay wins that race, so we close the
+    /// loop: at the deadline, scan the pane tail for the still-typed
+    /// `/resume <sid>` and re-send `\r` while it's visible. The guard
+    /// makes retries safe — once the prompt submits the sid leaves
+    /// the screen, and a stray `\r` can't fire into the resumed
+    /// session. Gives up after `retries_left` attempts (the user can
+    /// recover by pressing Enter themselves).
+    Verify {
+        sid: String,
+        after: std::time::Instant,
+        retries_left: u8,
+    },
+}
+
+/// True when the typed `/resume <sid>` is still sitting unsubmitted
+/// in the pane's prompt — i.e. the sid is visible in the screen tail.
+/// On submit Claude clears the input line, so the sid disappearing is
+/// the "it worked" signal. Per-line `contains` doesn't survive a
+/// hard wrap mid-sid, but the command is ~45 cols and real panes are
+/// wider; a missed match just means no retry (today's behavior).
+pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
+    tail_lines.iter().any(|l| l.contains(sid))
 }
 
 /// Per-tab metadata displayed in the status line.
@@ -54,12 +82,11 @@ pub struct TabInfo {
     /// trips a known regression that crashes at mount), then once
     /// claude has had time to finish its banner, type `/resume <sid>`
     /// followed by Enter — the slash-command path doesn't hit the bug.
-    /// Two-phase to avoid an intermittent race where Claude's TUI was
-    /// mid-render when our bytes arrived: the chars were absorbed by
-    /// the prompt but the trailing `\r` got dropped, leaving the
-    /// command sitting unsubmitted. Sending text and Enter as
-    /// separate writes a few hundred ms apart lets the prompt settle
-    /// between them.
+    /// Three-phase: text and Enter go as separate writes (Claude's
+    /// TUI mid-render would drop the trailing `\r` from a combined
+    /// send), then a verify pass re-sends `\r` while the typed
+    /// command is still visibly unsubmitted — async startup work can
+    /// eat a lone Enter seconds after the banner looks settled.
     pub pending_resume_send: Option<PendingResumeSend>,
     /// When the tab's subprocess was launched. Bounds the
     /// restore-fallback window so a real user-driven exit much later
@@ -489,6 +516,45 @@ impl PaneTabs {
 
     pub fn tabs(&self) -> &[TabEntry] {
         &self.tabs
+    }
+}
+
+#[cfg(test)]
+mod resume_verify_tests {
+    use super::resume_still_unsubmitted;
+
+    const SID: &str = "6b52fc7f-22f3-45e5-a3cd-32df70953197";
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn detects_unsubmitted_prompt() {
+        let tail = lines(&[
+            "  You've used 79% of your usage credits",
+            "",
+            &format!("> /resume {SID}"),
+            "",
+            "  -- INSERT --",
+        ]);
+        assert!(resume_still_unsubmitted(&tail, SID));
+    }
+
+    #[test]
+    fn clear_prompt_means_submitted() {
+        // After submit the input line clears and the transcript
+        // renders — the sid is gone from the tail.
+        let tail = lines(&["  Resuming conversation…", "", "> ", "  -- INSERT --"]);
+        assert!(!resume_still_unsubmitted(&tail, SID));
+    }
+
+    #[test]
+    fn autocomplete_popup_without_sid_does_not_match() {
+        // The slash-command popup shows "/resume" but never the sid;
+        // only the input line carries it.
+        let tail = lines(&["> /res", "  /resume  Resume a conversation"]);
+        assert!(!resume_still_unsubmitted(&tail, SID));
     }
 }
 
