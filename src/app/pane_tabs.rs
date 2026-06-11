@@ -83,7 +83,12 @@ impl App {
         self.open_pane_tab_in(cmd, &cwd);
     }
 
-    pub fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) {
+    /// Spawn a pane tab running `cmd` in `cwd`. Returns `true` iff the pty
+    /// actually spawned and a tab was pushed — callers that arm follow-up
+    /// state on "the tab we just added" (restart flash, restore `/resume`
+    /// injection) MUST gate on this, or they act on the wrong tab when the
+    /// spawn fails. On failure this flashes the error and returns `false`.
+    pub fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) -> bool {
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
@@ -100,8 +105,12 @@ impl App {
                 } else {
                     self.runtime.pane_tabs = Some(PaneTabs::new(entry));
                 }
+                true
             }
-            Err(e) => self.state.flash_error(format!("pane spawn failed: {e}")),
+            Err(e) => {
+                self.state.flash_error(format!("pane spawn failed: {e}"));
+                false
+            }
         }
     }
 
@@ -257,9 +266,13 @@ impl App {
             self.runtime.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
         }
-        // Spawn a replacement with the same command and cwd.
-        self.open_pane_tab_in(&cmd, &cwd);
-        self.state.flash_info(format!("pane: restarted {cmd}"));
+        // Spawn a replacement with the same command and cwd. Only claim
+        // "restarted" if it actually spawned — otherwise leave
+        // open_pane_tab_in's "pane spawn failed" flash in place rather than
+        // clobbering it with a false success (the old tab is already gone).
+        if self.open_pane_tab_in(&cmd, &cwd) {
+            self.state.flash_info(format!("pane: restarted {cmd}"));
+        }
     }
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
