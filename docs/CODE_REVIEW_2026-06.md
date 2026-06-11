@@ -316,7 +316,7 @@ FindPicker::refilter (lines 50-56) always does `self.selected = 0`. It is called
 > verifier: confirmed: Verified directly in code. (1) `FindPicker::refilter` (src/app/find_picker.rs:55) unconditionally sets `selected = 0`. (2) The run loop (src/app/run.rs:468-474) calls `refilter()` on every drained walker batch — batches are 256 paths (STREAM_BATCH, src/fs/finder.rs:39), so on a large repo the loop refilters many times over a multi-second scan; additionally `drain_walk` returns true on channel Disconnected (find_picker.rs:74-78), so the selection is reset one final time at walk completion too. (3) Up/Down (find_picker.rs:211-228) mutate `selected` with no preservation across refilter …
 
 ### `src/app/key_dispatch/mod.rs:32` — Pasted text is wrapped in bracketed-paste markers without stripping an embedded end-marker, enabling paste-injection into the child pane
-`medium` · `security` · `app-input` · **confirmed**
+`medium` · `security` · `app-input` · **confirmed** · ✅ **fixed in #339**
 
 `bracketed_paste(text)` wraps the raw paste payload verbatim between `\x1b[200~` and `\x1b[201~` (lines 33-37) and the result is forwarded to a child pty via `Effect::SendToPane` in two places in `handle_paste`: the `OverlayPty` arm (line 424) and the `BottomPane` arm (line 439). The payload is never scanned for an embedded `\x1b[201~`. If pasted content contains that end marker, the receiving child (claude/codex/shell) sees the paste terminate early and treats every byte after it as live keystrokes — the classic bracketed-paste breakout. In this app's threat model that is meaningful: a user copies poisoned text from a malicious source (web page, file) and pastes it into the bottom pane; embedded `\x1b[201~\nrm -rf ~\n` escapes the paste block and runs in their shell/agent. The same un-sanitized wrap is duplicated in `pipe_content_to_pane` (src/app/clipboard.rs:206-208), which reads arbitrary on-disk file content and is an even cleaner injection vector since file bytes are fully attacker-controlled.
 
@@ -717,7 +717,7 @@ search_paths and search_content resolve their root via readers.rs::search_root (
 **Fix:** Resolve get_file_content's relative paths against the same root search_root() returns (project_home, falling back to cwd), and widen the containment check to canonical project_home instead of canonical cwd, so the three tools share one root.
 
 ### `src/mcp/protocol.rs:476` — read_lsp_message allocates an attacker/garbage-controlled Content-Length with no cap — alloc failure aborts the whole TUI
-`medium` · `security` · `mcp-agent` · **unverified**
+`medium` · `security` · `mcp-agent` · **unverified** · ✅ **verified + fixed in #339**
 
 read_lsp_message parses Content-Length from the header and does `let mut buf = vec![0u8; len];` with no upper bound. This function services the in-process socket server threads (handle_socket_connection, src/mcp/server.rs:370): one malformed frame such as `Content-Length: 18446744073709551615` makes the allocation fail, and Rust's default allocator failure path calls handle_alloc_error → abort() — taking down the entire spyc TUI process (all live agent panes, unsaved session state), not just the connection thread. The socket is owner-only so the sender is the user's own tooling, but a buggy MCP client, a stray `nc -U`/curl against the socket, or a corrupted frame is enough; this is exactly the "panic reachable from malformed external input" class, and the blast radius is process-wide data loss.
 
@@ -849,7 +849,7 @@ rss_kb() (lines 26-60) forks `ps -o rss= -p <pid>` on macOS, justified by the co
 **Fix:** Make rss_kb() delegate to the sysinfo-crate path (e.g. extract the System::refresh_processes_specifics block and have both rss_kb and proc_rss_threads use it), delete the macOS `ps` arm and its stale comment, and update the clipboard.rs cross-reference.
 
 ### `src/term_title.rs:54` — Terminal escape injection into OSC title from hostile directory names
-`medium` · `security` · `platform` · **unverified**
+`medium` · `security` · `platform` · **unverified** · ✅ **verified + fixed in #339**
 
 `set` emits `\x1b]2;{title}\x07` with the title interpolated raw (src/term_title.rs:54), and `compose` (line 58-64) builds the title from the basename of PROJECT_HOME or the browsed cwd via `to_str()`, which passes through valid-UTF-8 control characters (Unix filenames may contain any byte except `/` and NUL). The composed title is written verbatim to the host terminal by the effect executor (src/app/effect.rs:434, fired on every directory change via src/app/run.rs:661). A hostile archive containing a directory named e.g. `x\x07\x1b]52;c;<b64>\x07` terminates the OSC 2 early at the embedded BEL and the remainder reaches the host terminal as raw escape sequences — clipboard write via OSC 52, title-query response injection (CSI 21t answers become shell input on some terminals), etc. This is exactly the "escape sequences from untrusted file contents reaching the host terminal unsanitized" class; spyc's whole purpose is browsing untrusted directories.
 
@@ -943,7 +943,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 
 | Where | Title | Lens | Status |
 |---|---|---|---|
-| `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified |
+| `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified ✅ #339 |
 | `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed |
 | `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed |
 | `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed |
