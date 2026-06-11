@@ -177,7 +177,7 @@ mcp_log() appends to the hardcoded path /tmp/spyc-mcp.log with OpenOptions::crea
 > verifier: hand-verified: vt100 0.16 visible_rows() yields one screen-height window at the scrollback offset; set_scrollback(max)+contents() returns the OLDEST viewport
 
 ### `src/pane/pty_host.rs:352` — reap_exit can block the main thread indefinitely: EOF on the pty master does not imply the direct child exited
-`high` · `security` · `pane-pty` · **confirmed-edge**
+`high` · `security` · `pane-pty` · **confirmed-edge** · ✅ **fixed in #340**
 
 reap_exit's contract comment says "the reader saw EOF on the pty master, which means every fd to the slave is closed, so the direct child has already exited and this returns immediately". That inference is wrong: a child that closes or redirects all of its slave fds while continuing to run (e.g. a capture/task command like `exec myserver </dev/null >log 2>&1`, or a shell that exec-optimizes `-c 'cmd </dev/null >log 2>&1'`, or any server that detaches its stdio in place) makes the reader see EOF while the child is still alive. drain() then reports newly_closed, try_wait() returns Ok(None) (still running), and the fallback `self.child.wait()` (line 356) blocks. Both callers — drain_streaming_capture (src/app/streaming.rs:197) and drain_background_tasks (src/app/streaming.rs:249) — run on the main event loop, so the entire UI freezes for the child's remaining lifetime. Because spyc installs a no-op SIGINT handler (src/main.rs:319), the user cannot ^C out; only kill -9 recovers. This violates the documented "bounded synchronous reap" exception to the no-blocking-IO rule.
 
