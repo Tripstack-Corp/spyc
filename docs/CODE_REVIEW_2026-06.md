@@ -159,7 +159,7 @@ remove() treats repo_status(path) == None as removable (the `_ => {}` arm falls 
 > verifier: hand-verified: the fail-open on status failure is explicit and commented (avoid stranding un-removable worktrees) — a deliberate, debatable call, not an oversight
 
 ### `src/mcp/mod.rs:42` — Full MCP traffic, including file contents, logged to fixed world-readable /tmp/spyc-mcp.log
-`high` · `security` · `mcp-agent` · **confirmed-partial**
+`high` · `security` · `mcp-agent` · **confirmed-partial** · ✅ **fixed in #337**
 
 mcp_log() appends to the hardcoded path /tmp/spyc-mcp.log with OpenOptions::create(true).append(true) — no mode restriction, no O_NOFOLLOW. With a default umask the file is created 0644 (world-readable) in world-writable /tmp. run_proxy logs every request body (src/mcp/server.rs:222-226, "proxy: stdin → socket ...: {msg}") and every response body (src/mcp/server.rs:262-266, "proxy: socket → stdout ...: {response}") — the response to get_file_content is the full text of the file read, so any file the agent reads via MCP is mirrored into a world-readable /tmp file. This directly defeats the shared-machine hardening the code itself commits to at src/mcp/server.rs:296-298, where the socket is deliberately bound owner-only "so other users on a shared machine cannot connect and read files". Additionally, because the path is fixed in /tmp, another local user can pre-create the file (capturing the victim's traffic in a file the attacker owns) or plant a symlink, causing spyc to follow it and append log lines to an attacker-chosen file owned by the victim.
 
@@ -689,7 +689,7 @@ The IwItem::Rewrite arm keys a single entry on the destination with unstaged=Ren
 **Fix:** Wrap the post-`create_dir_all` steps so that on `Err` a best-effort cleanup runs: `remove_dir_all(&target)` (only if `add` created it — it may pre-exist empty), `remove_dir_all(&admin_dir)`, and optionally delete the loose ref if this call created the branch. A small guard struct with `Drop` (disarmed on success) keeps this from sprawling.
 
 ### `src/key_trace.rs:39` — Key-trace log records every keystroke (incl. pane input) to a world-readable predictable file in /tmp
-`medium` · `security` · `platform` · **unverified**
+`medium` · `security` · `platform` · **unverified** · ✅ **verified + fixed in #337**
 
 key_trace::init opens `/tmp/spyc-key-trace-<epoch>.log` with `OpenOptions::new().create(true).append(true)` (src/key_trace.rs:39-43) — default umask, so typically 0644 world-readable in the shared /tmp. The trace logs the literal content of every key event (`RX ... code={:?}` includes `Char('x')` per src/app/key_dispatch/mod.rs:47-55) and a printable preview of every byte sequence written to pty panes (`send_key`/`send_bytes` at src/pane/mod.rs:307,353 via `preview_bytes`). A user who enables `--key-trace` to reproduce an input bug — the documented use case is "flip the flag, reproduce, and ship the log" — and then types a sudo/ssh password into an agent or shell pane has that secret persisted world-readable in /tmp. Additionally `create(true)` without `O_EXCL`/`O_NOFOLLOW` on a to-the-second-predictable path follows pre-planted symlinks.
 
@@ -775,7 +775,7 @@ pathref.rs hand-rolls a 30-line ANSI stripper while the project already depends 
 **Fix:** Use `mpsc::sync_channel` with a bounded depth (e.g. a few hundred chunks): a blocked `send` stops the reader, the kernel pty buffer fills, and the child blocks on write — natural flow control with no protocol change (`send` still errors out when the receiver is dropped, so teardown is unaffected). Alternatively coalesce: when the channel is over a threshold, concatenate chunks before sending.
 
 ### `src/pane/pty_host.rs:317` — SPYC_PTY_DEBUG dumps raw pty bytes to a fixed, world-readable, symlink-followable path in /tmp
-`medium` · `security` · `pane-pty` · **unverified**
+`medium` · `security` · `pane-pty` · **unverified** · ✅ **verified + fixed in #337**
 
 When debug_dump is enabled (SPYC_PTY_DEBUG set, gated at src/pane/mod.rs:148), both PtyHost::drain (src/pane/pty_host.rs:312-319) and the pane parser_worker (src/pane/mod.rs:579-585) open "/tmp/spyc_pty_debug.bin" with OpenOptions::new().create(true).append(true) and append every raw byte the pty produces — i.e. the full terminal stream, including any secrets echoed or printed in any pane. Problems: (1) the file is created with default umask permissions (typically 0644) in the world-writable shared /tmp, so any other local account can read the accumulated terminal contents; (2) open() follows symlinks, so a pre-planted /tmp/spyc_pty_debug.bin -> <victim file> symlink turns the debug dump into an append to an arbitrary file owned by the user; (3) the fixed name means multiple spyc instances (or multiple users) interleave into one ever-growing file that is never truncated or cleaned up. The threat-model brief explicitly calls out world-readable files holding sensitive data; this is opt-in debug tooling, which bounds it, but a developer who flips the flag once leaves their terminal history readable in /tmp indefinitely.
 
@@ -966,7 +966,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |
 | `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed |
 | `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed ✅ #336 |
-| `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed |
+| `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed ✅ #337 |
 | `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed |
 | `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed |
 | `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed |
