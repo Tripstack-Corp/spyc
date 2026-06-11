@@ -33,16 +33,22 @@ const CONTEXT_URI: &str = "spyc://context";
 /// only a genuine indefinite stall trips it.
 const PROXY_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// Log to /tmp/spyc-mcp.log for debugging MCP connection issues.
+/// Append a line to `<state>/mcp.log` for debugging MCP connection issues.
+/// Owner-only (0600) in the XDG state dir — not the old world-readable,
+/// symlink-followable `/tmp/spyc-mcp.log`.
 fn mcp_log(msg: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/spyc-mcp.log")
-    {
+    if let Some(mut f) = crate::state::open_state_file_append("mcp.log") {
         let _ = writeln!(f, "spyc-mcp: {msg}");
     }
+}
+
+/// Whether to log full MCP message/response *bodies* (opt-in). Off by
+/// default: a `get_file_content` response is the entire file text, so
+/// logging bodies mirrors every file the agent reads into the log. Set
+/// `SPYC_MCP_DEBUG=1` to include bodies when diagnosing a protocol issue.
+fn log_bodies() -> bool {
+    std::env::var_os("SPYC_MCP_DEBUG").is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 // ── Shared JSON-RPC dispatch ────────────────────────────────────

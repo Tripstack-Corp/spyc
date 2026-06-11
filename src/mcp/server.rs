@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::McpRequest;
 
 use super::protocol::{dispatch, read_lsp_message, send_message};
-use super::{PROXY_IO_TIMEOUT, mcp_log, resolve_context_path, socket_path, socket_path_for};
+use super::{
+    PROXY_IO_TIMEOUT, log_bodies, mcp_log, resolve_context_path, socket_path, socket_path_for,
+};
 
 /// Project-scoped discovery: walk `caller_cwd` upward looking for any
 /// `.spyc-context-<pid>.json` markers (each is written by a running
@@ -219,11 +221,15 @@ pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
         if msg.is_empty() {
             continue; // skip blank lines
         }
-        mcp_log(&format!(
-            "proxy: stdin → socket ({} bytes): {}",
-            msg.len(),
-            msg
-        ));
+        if log_bodies() {
+            mcp_log(&format!(
+                "proxy: stdin → socket ({} bytes): {}",
+                msg.len(),
+                msg
+            ));
+        } else {
+            mcp_log(&format!("proxy: stdin → socket ({} bytes)", msg.len()));
+        }
 
         // Check if this is a request (has "id") or notification (no "id").
         let is_request = serde_json::from_str::<Value>(msg).map_or(true, |v| v.get("id").is_some()); // assume request if parse fails
@@ -259,11 +265,18 @@ pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
                     break;
                 }
             };
-            mcp_log(&format!(
-                "proxy: socket → stdout ({} bytes): {}",
-                response.len(),
-                response
-            ));
+            if log_bodies() {
+                mcp_log(&format!(
+                    "proxy: socket → stdout ({} bytes): {}",
+                    response.len(),
+                    response
+                ));
+            } else {
+                mcp_log(&format!(
+                    "proxy: socket → stdout ({} bytes)",
+                    response.len()
+                ));
+            }
             // Write back as newline-delimited JSON (what Claude Code expects).
             writeln!(stdout_writer, "{response}")?;
             stdout_writer.flush()?;
