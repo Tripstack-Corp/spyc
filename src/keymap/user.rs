@@ -134,6 +134,20 @@ impl BoundAction {
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
         }
     }
+
+    /// True for bindings that, on a single keypress, run a shell command or
+    /// act on an arbitrary baked-in path — the capabilities an untrusted
+    /// project-local `.spycrc.toml` must not be able to introduce (see
+    /// `Config::load_default`). `Plain` built-in actions (incl. the
+    /// copy/move/remove *prompts*, which carry no payload — the user still
+    /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
+    /// are not executing.
+    pub const fn is_executing(&self) -> bool {
+        matches!(
+            self,
+            Self::UnixCmd(_) | Self::Jump(_) | Self::Copy(_) | Self::Move(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

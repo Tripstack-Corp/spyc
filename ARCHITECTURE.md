@@ -200,6 +200,14 @@ Configuration lives at `~/.spycrc.toml` (user) and
 reload. `spyc --print-config` emits a fully-commented default
 template suitable for `>` redirect.
 
+The project file is **untrusted** (spyc is routinely pointed at
+hostile content): its cosmetic/behavioral settings and plain
+rebindings are honored, but *executing* keymap bindings (`unix`
+shell commands, `jump`) are dropped — those take effect only from
+`~/.spycrc.toml`. `^R` reload re-reads the project file from the
+**startup** cwd, never the browsed directory, so browsing into a
+hostile tree can't load its rc.
+
 Startup runs a health check that validates inventory / marks /
 sessions / graveyard, cleans up orphaned files, and warns on
 corrupt JSON.

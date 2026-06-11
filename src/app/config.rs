@@ -14,7 +14,14 @@ impl App {
     /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
     /// config in place on failure and flashes the error.
     pub fn reload_config(&mut self) {
-        match Config::load_default(&self.state.listing.dir) {
+        // Reload the project rc from the **startup** cwd, not the directory
+        // the user has browsed into (`listing.dir`). Otherwise `^R` while
+        // sitting in a hostile directory would load that directory's
+        // `.spycrc.toml` — re-opening the very keypress-RCE vector that
+        // load_default's project-trust gating closes. (Executing project
+        // bindings are dropped regardless; pinning the dir keeps even the
+        // cosmetic settings load anchored to where spyc was launched.)
+        match Config::load_default(&self.state.start_dir) {
             Ok(new_config) => {
                 self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
                 self.view.theme = Theme::default().with_overrides(&new_config.colors);
@@ -41,7 +48,11 @@ impl App {
         if let Some(home) = std::env::var_os("HOME") {
             out.push(PathBuf::from(home).join(".spycrc.toml"));
         }
-        out.push(self.state.listing.dir.join(".spycrc.toml"));
+        // Anchor on the startup cwd, not the browsed `listing.dir`, so the
+        // project rc we watch (and reload on change) matches what
+        // `reload_config` actually loads — and browsing into a hostile
+        // directory never causes us to watch/react to its `.spycrc.toml`.
+        out.push(self.state.start_dir.join(".spycrc.toml"));
         out
     }
 

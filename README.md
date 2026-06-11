@@ -335,6 +335,14 @@ on the top bar and persist across `spyc -r`.
 spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 (project). Changes are picked up live -- no restart needed (`^R` to force).
 
+> **Project configs are sandboxed.** A `./.spycrc.toml` can set colors,
+> layout, ignore masks, and rebind keys to built-in actions, but its
+> *executing* bindings (`unix` shell commands and `jump`) are ignored --
+> only your `~/.spycrc.toml` may bind those, so opening spyc in a cloned
+> repo can't run commands a malicious `.spycrc.toml` planted there. `^R`
+> reloads the project file from the directory you launched in, not the one
+> you've browsed to.
+
 To bootstrap a config with every option commented out at its default:
 
 ```sh
