@@ -499,7 +499,7 @@ run_setup watches each config candidate's parent directory (candidate_config_pat
 > verifier: confirmed: Every element of the finding holds against the code and the vendored notify 6.1.1 source. (1) config.rs:41-43 always yields $HOME/.spycrc.toml, so run.rs:48-56 watches $HOME NonRecursive on the shared watcher; (2) run.rs:632-641 calls sync_listing_watch (sources.rs:385-388) on every chdir, which does w.unwatch(old) on the previous listing dir with no knowledge of config parents, and nothing in the repo ever re-watches them (already_watched is run_setup-local); (3) notify 6.1.1 has no refcounting on either backend — inotify keeps one HashMap entry per path (second watch overwrites, r …
 
 ### `src/app/session.rs:119` — save_session ignores the write result but reports "session saved" in the exit summary
-`medium` · `correctness` · `app-proc` · **confirmed**
+`medium` · `correctness` · `app-proc` · **confirmed** · ✅ **fixed in #336**
 
 `let _ = crate::state::sessions::save_session(&session);` drops any persistence failure (read-only/unwritable state dir, disk full, ENOSPC), then the code unconditionally builds `parts = vec![format!("session saved — {cwd_display}")]` plus "restore with spyc -r" and sets `self.exit_summary`. The user quits believing their tabs and agent session ids were persisted; `spyc -r` later has no such session and there is no trace of why. For daily drivers whose claude conversations are recovered via this path, the silent loss is exactly the failure class the error-handling lens targets: a dropped Result the user must see.
 
@@ -965,7 +965,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed |
 | `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |
 | `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed |
-| `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed |
+| `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed ✅ #336 |
 | `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed |
 | `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed |
 | `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed |
@@ -976,7 +976,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed |
 | `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed |
 | `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
-| `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed |
+| `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed ✅ #336 |
 | `src/app/sources.rs:91` | coalesce_recv repeats the identical coalesce-and-synthesize-Timeout tail in five match arms | maintainability | confirmed |
 | `src/app/state/apply.rs:73` | HOME resolved from raw process env, bypassing :setenv overrides honored elsewhere | correctness | confirmed |
 | `src/app/state/apply.rs:95` | Take success/error classified by string-prefix match on the flash message | maintainability | confirmed |
