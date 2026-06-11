@@ -304,7 +304,7 @@ impl App {
         effects: Vec<Effect>,
         terminal: &mut Tui,
         fg: &ForegroundExec,
-    ) -> Result<()> {
+    ) {
         // `ForegroundExec` tears the TUI down, so it must be the sole or
         // last effect in a tick (the wider `Vec<Effect>` newly permits a
         // violation the single-`PostAction` return could not).
@@ -480,9 +480,20 @@ impl App {
                     args,
                     pause_after,
                 } => {
-                    fg.run(terminal, &program, &args, pause_after)?;
+                    // Capture the result instead of `?`-propagating it: a
+                    // failed spawn (missing/misspelled $EDITOR/$SHELL) used to
+                    // bubble out of run_effects → App::run and exit spyc,
+                    // dropping every pane PtyHost (SIGKILL on the agent
+                    // children) without saving the session. `run` already
+                    // restored the TUI on the spawn-error path, so here we just
+                    // flash it (below) and carry on.
+                    let fg_result = fg.run(terminal, &program, &args, pause_after);
                     // --- after-work (moved verbatim from the run loop's
                     // former `if let PostAction::Spawn` call site) ---
+                    // Runs regardless of the spawn result: the pager
+                    // round-trip still needs unwinding (the temp file holds the
+                    // pre-edit content when the editor never launched) and the
+                    // listing refresh is harmless.
                     // Child may have clobbered our title; force a
                     // re-emit on next draw.
                     self.view.last_term_title = None;
@@ -498,17 +509,30 @@ impl App {
                                 mount,
                                 pane_scroll,
                             } => {
-                                if let Ok(content) = std::fs::read_to_string(&path) {
-                                    let lines: Vec<String> =
-                                        content.lines().map(String::from).collect();
-                                    let mut view = PagerView::new_plain(title, lines);
-                                    view.scroll = scroll;
-                                    view.saveable = true;
-                                    view.mount = mount;
-                                    view.pane_scroll = pane_scroll;
-                                    self.set_pager(view);
+                                match std::fs::read_to_string(&path) {
+                                    Ok(content) => {
+                                        let lines: Vec<String> =
+                                            content.lines().map(String::from).collect();
+                                        let mut view = PagerView::new_plain(title, lines);
+                                        view.scroll = scroll;
+                                        view.saveable = true;
+                                        view.mount = mount;
+                                        view.pane_scroll = pane_scroll;
+                                        self.set_pager(view);
+                                        let _ = std::fs::remove_file(&path);
+                                    }
+                                    Err(e) => {
+                                        // Reading the edited buffer back failed.
+                                        // Do NOT delete the temp file — it holds
+                                        // the user's edits; deleting it (the old
+                                        // behavior) silently discarded them. Tell
+                                        // the user where to recover them.
+                                        self.state.flash_error(format!(
+                                            "couldn't read back edits ({e}); preserved at {}",
+                                            path.display()
+                                        ));
+                                    }
                                 }
-                                let _ = std::fs::remove_file(&path);
                             }
                             PagerReturn::SourceFile {
                                 path,
@@ -538,10 +562,15 @@ impl App {
                             }
                         }
                     }
+                    // Flash a failed spawn last (so it's the message left on
+                    // screen) — never fatal. The TUI and pager were already
+                    // restored above.
+                    if let Err(e) = fg_result {
+                        self.state.flash_error(format!("{program}: {e}"));
+                    }
                 }
             }
         }
-        Ok(())
     }
 }
 

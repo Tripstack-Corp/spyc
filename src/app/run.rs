@@ -216,11 +216,11 @@ impl App {
                         // (the ForegroundExec arm carries the former
                         // inline spawn + its after-work).
                         let effects = self.handle_key(key)?;
-                        self.run_effects(effects, terminal, foreground_exec)?;
+                        self.run_effects(effects, terminal, foreground_exec);
                     }
                     Event::Paste(text) => {
                         let effects = self.handle_paste(text);
-                        self.run_effects(effects, terminal, foreground_exec)?;
+                        self.run_effects(effects, terminal, foreground_exec);
                     }
                     Event::Resize(cols, rows) => self.handle_resize(cols, rows),
                     _ => {}
@@ -279,7 +279,8 @@ impl App {
     /// per-iteration `pending_clear`, times the build/whole-frame for the
     /// activity monitor, and counts the draw (skipping `activity_only` frames
     /// so the stats don't oscillate — H6). Resets `ctx.draw` for the next
-    /// iteration. `?`-propagates `run_effects` / `terminal.draw` / `clear`.
+    /// iteration. `?`-propagates `terminal.draw` / `clear` (`run_effects` is
+    /// infallible — a failed foreground spawn flashes, never aborts).
     fn render_frame(
         &mut self,
         terminal: &mut Tui,
@@ -296,7 +297,7 @@ impl App {
         // Title compose + dedup stay loop-side; only the
         // `term_title::set` IO runs through the sole executor.
         let title_fx: Vec<Effect> = self.term_title_effect().into_iter().collect();
-        self.run_effects(title_fx, terminal, foreground_exec)?;
+        self.run_effects(title_fx, terminal, foreground_exec);
         // Wrap in DEC 2026 synchronized update so the terminal emulator
         // (iTerm2, etc.) buffers the entire frame and paints it atomically —
         // eliminates tearing and reduces terminal-side CPU.
