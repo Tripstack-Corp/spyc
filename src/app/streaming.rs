@@ -37,6 +37,17 @@ enum ExitEvent {
     TaskExited { id: u32, status: ExitOutcome },
 }
 
+/// Front-trim a streaming output buffer to `TASK_BUFFER_CAP`, dropping the
+/// oldest bytes. Shared by the background-task and foreground-`!`-capture
+/// drains so both stay memory-bounded — and so the per-tick `into_text()`
+/// rebuild that re-parses the whole buffer stays O(CAP), not O(total output).
+fn cap_stream_buffer(buf: &mut Vec<u8>) {
+    if buf.len() > TASK_BUFFER_CAP {
+        let drop_n = buf.len() - TASK_BUFFER_CAP;
+        buf.drain(..drop_n);
+    }
+}
+
 impl App {
     /// MVU Phase 5 PR8: finalize a child exit. The single handler the two
     /// streaming drains dispatch into once they've detected `newly_closed`
@@ -134,6 +145,15 @@ impl App {
             let drain = capture.host.drain(|bytes| chunks.push(bytes.to_vec()));
             for chunk in chunks {
                 capture.buffer.extend_from_slice(&chunk);
+                // Cap the capture buffer exactly like a background task's
+                // (drain_background_tasks). Without this, a chatty `!cargo
+                // build` / `!make test` grows `capture.buffer` without bound,
+                // and the per-tick `into_text()` rebuild below re-parses the
+                // ENTIRE accumulated buffer every chunk — O(total output)
+                // memory and O(n^2) cumulative ANSI parse on the input thread.
+                // Front-trimming to TASK_BUFFER_CAP bounds both to parity with
+                // the (already-capped) task path: steady-state O(CAP) per tick.
+                cap_stream_buffer(&mut capture.buffer);
                 got_data = true;
             }
             redraw |= got_data;
@@ -228,10 +248,7 @@ impl App {
             for chunk in chunks {
                 task.buffer.extend_from_slice(&chunk);
                 task.has_unread_output = true;
-                if task.buffer.len() > TASK_BUFFER_CAP {
-                    let drop_n = task.buffer.len() - TASK_BUFFER_CAP;
-                    task.buffer.drain(..drop_n);
-                }
+                cap_stream_buffer(&mut task.buffer);
             }
             // The `[N+]` glyph reflects has_unread_output yes/no, so only its
             // false→true transition needs a redraw — not every chunk.
@@ -356,5 +373,37 @@ impl App {
             draw_reason = 3;
         }
         (needs_draw, draw_reason)
+    }
+}
+
+#[cfg(test)]
+mod cap_buffer_tests {
+    use super::{TASK_BUFFER_CAP, cap_stream_buffer};
+
+    #[test]
+    fn leaves_small_buffer_untouched() {
+        let mut buf = vec![b'x'; 100];
+        cap_stream_buffer(&mut buf);
+        assert_eq!(buf.len(), 100);
+    }
+
+    #[test]
+    fn front_trims_oversized_buffer_to_cap_keeping_the_tail() {
+        // Oldest bytes (b'A') are dropped; the most-recent CAP bytes survive.
+        let mut buf = vec![b'A'; TASK_BUFFER_CAP];
+        buf.extend(std::iter::repeat_n(b'B', 4096));
+        cap_stream_buffer(&mut buf);
+        assert_eq!(buf.len(), TASK_BUFFER_CAP);
+        // The retained window is the tail: all the new B's plus the most
+        // recent A's, with the oldest 4096 A's dropped from the front.
+        assert_eq!(buf[buf.len() - 4096..], [b'B'; 4096]);
+        assert_eq!(buf[0], b'A');
+    }
+
+    #[test]
+    fn exactly_cap_is_not_trimmed() {
+        let mut buf = vec![b'z'; TASK_BUFFER_CAP];
+        cap_stream_buffer(&mut buf);
+        assert_eq!(buf.len(), TASK_BUFFER_CAP);
     }
 }
