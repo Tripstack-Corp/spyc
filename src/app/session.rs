@@ -302,27 +302,29 @@ impl App {
                 // agent.
                 let spawned = self.open_pane_tab_in(&plan.command, cwd);
                 if spawned
-                    && let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume
                     && let Some(tabs) = self.runtime.pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()
                 {
-                    entry.info.pending_resume_send =
-                        Some(crate::pane::tabs::PendingResumeSend::Text {
-                            sid: session_id,
-                            after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
-                        });
+                    // Label the tab we just pushed from ITS saved entry.
+                    // Setting labels inline (rather than zipping tabs ↔
+                    // session.tabs after the loop) keeps them aligned even
+                    // when an earlier tab's spawn failed and the two vectors
+                    // diverge. Defensive `strip_exit_suffix` heals older
+                    // session files saved before the save-side strip landed.
+                    entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
+                    if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
+                        entry.info.pending_resume_send =
+                            Some(crate::pane::tabs::PendingResumeSend::Text {
+                                sid: session_id,
+                                after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
+                            });
+                    }
                 }
             }
-            // Restore active tab.
+            // Restore the active tab. (On a partial-spawn-failure restore the
+            // saved index may not line up 1:1; switch_to clamps.)
             if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                 tabs.switch_to(session.active_tab);
-                // Restore custom labels. Defensive strip of any
-                // `[exited N]` suffix so older session files
-                // (saved before the save-side strip landed) heal
-                // automatically the first time they load.
-                for (entry, saved) in tabs.tabs_mut().iter_mut().zip(&session.tabs) {
-                    entry.info.label = crate::pane::tabs::strip_exit_suffix(&saved.label);
-                }
             }
             self.state.focus = if session.pane_focused {
                 Focus::Pane
