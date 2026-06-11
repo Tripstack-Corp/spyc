@@ -973,7 +973,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed |
 | `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed |
 | `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed |
-| `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed |
+| `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed ✅ #342 |
 | `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed |
 | `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
 | `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed ✅ #336 |
