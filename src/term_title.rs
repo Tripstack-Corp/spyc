@@ -51,7 +51,21 @@ pub fn pop() -> io::Result<()> {
 /// (which also sets the icon name) so the macOS Dock label and the
 /// iTerm2 tab icon name aren't churned on every state change.
 pub fn set(title: &str) -> io::Result<()> {
-    emit(&wrap(&format!("\x1b]2;{title}\x07"), in_tmux()))
+    emit(&wrap(
+        &format!("\x1b]2;{}\x07", sanitize_title(title)),
+        in_tmux(),
+    ))
+}
+
+/// Strip control characters from a title before it goes into an OSC
+/// sequence. The title is derived from directory / session names, which an
+/// attacker controls; an embedded `\x07` (the OSC terminator), `\x1b`, or a
+/// newline could otherwise close the OSC early and inject arbitrary terminal
+/// escapes (title-report → fake input, clipboard writes via OSC 52, etc.).
+/// `char::is_control` covers C0/C1 + DEL; the emoji logo and `·` separator
+/// are not control chars, so legitimate titles are unchanged.
+fn sanitize_title(title: &str) -> String {
+    title.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Compose the title from project + session info.
@@ -113,5 +127,19 @@ mod tests {
     fn wrap_doubles_esc_inside_tmux() {
         let w = wrap("\x1b]2;hi\x07", true);
         assert_eq!(w, "\x1bPtmux;\x1b\x1b]2;hi\x07\x1b\\");
+    }
+
+    #[test]
+    fn sanitize_title_strips_control_chars_keeps_normal() {
+        // A directory named to inject an OSC terminator + a second escape.
+        let hostile = "proj\x07\x1b]52;c;ZXZpbA==\x07";
+        let safe = sanitize_title(hostile);
+        assert!(!safe.contains('\x07') && !safe.contains('\x1b'));
+        assert_eq!(safe, "proj]52;c;ZXZpbA==");
+        // The real composed title (emoji + middle dot) is untouched.
+        assert_eq!(
+            sanitize_title("\u{1f336}\u{fe0f}: spyc \u{b7} SAGE"),
+            "\u{1f336}\u{fe0f}: spyc \u{b7} SAGE"
+        );
     }
 }
