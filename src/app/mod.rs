@@ -852,12 +852,42 @@ impl Matcher {
     }
 
     pub fn matches(&self, name: &str) -> bool {
-        let lower = name.to_lowercase();
         match self {
-            Self::Substring(q) => lower.contains(q.as_str()),
-            Self::Glob(p) => p.matches(&lower),
+            Self::Substring(q) => ascii_or_lower_contains(name, q),
+            Self::Glob(p) => {
+                // Glob matching needs an owned &str; skip the lowercasing
+                // allocation for the common case of an already-lowercase ASCII
+                // name. Non-ASCII (or any uppercase) names fall back to
+                // `to_lowercase` to preserve Unicode case-folding semantics.
+                if name.is_ascii() && !name.bytes().any(|b| b.is_ascii_uppercase()) {
+                    p.matches(name)
+                } else {
+                    p.matches(&name.to_lowercase())
+                }
+            }
             Self::Never => false,
         }
+    }
+}
+
+/// Case-insensitive substring test that avoids allocating a lowercased copy of
+/// `name` on the filter/search hot path (called once per listing row per
+/// keystroke). `needle` is already lowercased by `Matcher::build`. The ASCII
+/// fast path is allocation-free; non-ASCII names fall back to `to_lowercase`
+/// so Unicode case folding stays identical to the old behavior.
+fn ascii_or_lower_contains(name: &str, needle: &str) -> bool {
+    if name.is_ascii() && needle.is_ascii() {
+        let (h, n) = (name.as_bytes(), needle.as_bytes());
+        if n.is_empty() {
+            return true;
+        }
+        if n.len() > h.len() {
+            return false;
+        }
+        h.windows(n.len())
+            .any(|w| w.iter().zip(n).all(|(&a, &b)| a.to_ascii_lowercase() == b))
+    } else {
+        name.to_lowercase().contains(needle)
     }
 }
 

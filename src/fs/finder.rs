@@ -209,45 +209,74 @@ fn walk(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+thread_local! {
+    /// Reused nucleo scratch for `rank`. A fresh `Matcher` allocates internal
+    /// scratch slabs per construction; `rank` is the synchronous per-keystroke
+    /// (and per-walk-batch) path, so rebuilding it each call burned allocation
+    /// on the input thread. `rank` only ever runs on the main event loop, so a
+    /// thread-local is the simplest safe hoist — and if it were ever called off
+    /// that thread, each thread just gets its own scratch.
+    static RANK_SCRATCH: std::cell::RefCell<(Matcher, Vec<char>)> =
+        std::cell::RefCell::new((Matcher::new(Config::DEFAULT.match_paths()), Vec::new()));
+}
+
 /// Rank `candidates` against `query`, returning the top `limit`
 /// paths in score order (best first). An empty query returns the
 /// candidates in their natural walk order, truncated. Scoring is
 /// path-aware: matches that hit the basename score higher than
 /// matches buried in a parent dir, which mirrors fzf-style intent.
 pub fn rank(candidates: &[PathBuf], query: &str, limit: usize) -> Vec<(PathBuf, u32)> {
-    if query.is_empty() {
+    if query.is_empty() || limit == 0 {
         return candidates
             .iter()
             .take(limit)
             .map(|p| (p.clone(), 0))
             .collect();
     }
-    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
     let pattern = Pattern::parse(
         query,
         nucleo_matcher::pattern::CaseMatching::Smart,
         nucleo_matcher::pattern::Normalization::Smart,
     );
-    let mut buf: Vec<char> = Vec::new();
-    let mut scored: Vec<(PathBuf, u32)> = candidates
-        .iter()
-        .filter_map(|path| {
-            let s = path.to_string_lossy();
-            buf.clear();
-            let haystack = Utf32Str::new(&s, &mut buf);
-            pattern
-                .score(haystack, &mut matcher)
-                .map(|sc| (path.clone(), sc))
-        })
-        .collect();
-    // Highest score first; tie-break by shorter path (more specific
-    // typically beats deeply-nested in user intent).
-    scored.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| a.0.as_os_str().len().cmp(&b.0.as_os_str().len()))
+    // Score into (score, candidate_index): no PathBuf clone for non-winners.
+    // At the 100K-candidate cap with a short query this avoids ~100K heap
+    // clones per keystroke; we clone only the surviving `limit` at the end.
+    let mut scored: Vec<(u32, usize)> = RANK_SCRATCH.with_borrow_mut(|(matcher, buf)| {
+        candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(i, path)| {
+                let s = path.to_string_lossy();
+                buf.clear();
+                let haystack = Utf32Str::new(&s, buf);
+                pattern.score(haystack, matcher).map(|sc| (sc, i))
+            })
+            .collect()
     });
-    scored.truncate(limit);
+    // Highest score first; tie-break by shorter path (more specific
+    // typically beats deeply-nested in user intent). Captures only the
+    // candidates slice by shared ref, so the closure is `Copy` and can be
+    // reused for both the partial-select and the final sort.
+    let by = |a: &(u32, usize), b: &(u32, usize)| {
+        b.0.cmp(&a.0).then_with(|| {
+            candidates[a.1]
+                .as_os_str()
+                .len()
+                .cmp(&candidates[b.1].as_os_str().len())
+        })
+    };
+    // Keep the top `limit` without a full sort of the whole match set:
+    // `select_nth_unstable_by` partitions in O(n), then we sort only the
+    // `limit` survivors (O(limit log limit)) instead of O(n log n).
+    if scored.len() > limit {
+        scored.select_nth_unstable_by(limit - 1, by);
+        scored.truncate(limit);
+    }
+    scored.sort_by(by);
     scored
+        .into_iter()
+        .map(|(sc, i)| (candidates[i].clone(), sc))
+        .collect()
 }
 
 #[cfg(test)]
@@ -329,6 +358,35 @@ mod tests {
         let result = rank(&candidates, "foo", 10);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, PathBuf::from("foo.rs"));
+    }
+
+    #[test]
+    fn rank_partial_select_keeps_global_best_under_limit() {
+        // limit < match count exercises the select_nth_unstable_by partition.
+        // The best basename match must survive truncation and land at the
+        // front — i.e. the partial-select keeps the *globally* top-`limit`,
+        // not just whatever happened to fall in the first `limit` candidates.
+        let mut candidates: Vec<PathBuf> = (0..50)
+            .map(|i| PathBuf::from(format!("deep/nested/dir/zzz_{i}_match.rs")))
+            .collect();
+        // The strongest match is a bare basename, placed last so a naive
+        // truncate-before-rank would drop it.
+        candidates.push(PathBuf::from("match.rs"));
+        let result = rank(&candidates, "match", 5);
+        assert_eq!(result.len(), 5);
+        assert_eq!(
+            result[0].0,
+            PathBuf::from("match.rs"),
+            "the global best match must survive the top-K partial select"
+        );
+        // Returned slice is sorted best-first.
+        assert!(result.windows(2).all(|w| w[0].1 >= w[1].1));
+    }
+
+    #[test]
+    fn rank_limit_zero_returns_empty() {
+        let candidates = vec![PathBuf::from("foo.rs")];
+        assert!(rank(&candidates, "foo", 0).is_empty());
     }
 
     #[test]

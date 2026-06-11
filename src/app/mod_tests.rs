@@ -549,3 +549,53 @@ mod listing_watch_tests {
         assert_eq!(count_subdirs_capped(tmp.path(), 10), 3);
     }
 }
+
+#[cfg(test)]
+mod matcher_tests {
+    use super::super::Matcher;
+
+    // The allocation-free ASCII fast path in `Matcher::matches` must stay
+    // behaviorally identical to the old `name.to_lowercase().contains(q)`.
+    #[test]
+    fn substring_is_case_insensitive_both_directions() {
+        let m = Matcher::build("env");
+        assert!(m.matches(".ENV"));
+        assert!(m.matches(".envrc"));
+        assert!(m.matches("Environment.toml"));
+        assert!(!m.matches("readme.md"));
+
+        // Uppercase query lowercases at build time.
+        let m = Matcher::build("ENV");
+        assert!(m.matches(".env"));
+    }
+
+    #[test]
+    fn substring_empty_query_matches_everything() {
+        let m = Matcher::build("");
+        assert!(m.matches("anything"));
+        assert!(m.matches(""));
+    }
+
+    #[test]
+    fn substring_unicode_falls_back_to_lowercase() {
+        // Non-ASCII names take the to_lowercase path; case folding must hold.
+        let m = Matcher::build("café");
+        assert!(m.matches("CAFÉ.txt"));
+        assert!(m.matches("le-café"));
+        assert!(!m.matches("coffee"));
+    }
+
+    #[test]
+    fn substring_needle_longer_than_name_is_no_match() {
+        let m = Matcher::build("readme");
+        assert!(!m.matches("rd"));
+    }
+
+    #[test]
+    fn glob_skips_alloc_for_lowercase_ascii_but_stays_case_insensitive() {
+        let m = Matcher::build("*.RS");
+        assert!(m.matches("main.rs")); // already-lowercase fast path
+        assert!(m.matches("MAIN.RS")); // uppercase → lowercase fallback
+        assert!(!m.matches("main.py"));
+    }
+}
