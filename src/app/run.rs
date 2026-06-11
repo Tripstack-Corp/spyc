@@ -406,7 +406,17 @@ impl App {
         // the worker had finished an echo, which manifested as
         // off-by-one input lag. Removed.)
 
-        while !self.state.should_quit {
+        // Single exit funnel: every termination path (normal quit, reader
+        // death, a `DispatchFlow::Exit`, or a `?` error from dispatch/render)
+        // `break`s its result out of this loop so `run_teardown` ALWAYS runs.
+        // The early `return`s that used to live here skipped teardown,
+        // orphaning pane children (no graceful SIGTERM) and leaking the
+        // `.spyc-context-<pid>.json` marker on reader-death / handler-error
+        // exits.
+        let exit_result: Result<()> = loop {
+            if self.state.should_quit {
+                break Ok(());
+            }
             // MVU Phase 3d: authoritative reader-death exit. With the poll
             // floor gone, the loop blocks on `recv()`; the reader sends a
             // `ReaderExited` wake on death to kick that recv, but this
@@ -414,7 +424,7 @@ impl App {
             // consumed by `coalesce_pending` (which drops the wake), so it
             // catches death even when the edge wake races a real message.
             if reader_done.load(std::sync::atomic::Ordering::Acquire) {
-                return take_reader_result(&read_err);
+                break take_reader_result(&read_err);
             }
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
@@ -595,10 +605,11 @@ impl App {
                 &reader_done,
                 &read_err,
                 &mut ctx,
-            )? {
-                DispatchFlow::Continue => continue,
-                DispatchFlow::Exit(result) => return result,
-                DispatchFlow::Proceed => {}
+            ) {
+                Ok(DispatchFlow::Continue) => continue,
+                Ok(DispatchFlow::Exit(result)) => break result,
+                Ok(DispatchFlow::Proceed) => {}
+                Err(e) => break Err(e),
             }
 
             // MVU Phase 2: clock for POST-recv timers (activity rollover,
@@ -622,13 +633,15 @@ impl App {
             // Render the frame iff dirty (see `render_frame`): title effect,
             // DEC 2026 synchronized-update wrap, optional clear, the timed
             // draw, and the activity stats.
-            self.render_frame(
+            if let Err(e) = self.render_frame(
                 terminal,
                 &foreground_exec,
                 pending_clear,
                 activity_only_draw,
                 &mut ctx,
-            )?;
+            ) {
+                break Err(e);
+            }
 
             // Only re-sync the filesystem watcher when the cwd actually changed.
             if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
@@ -645,9 +658,9 @@ impl App {
             // suppressed, with ContextWrite deadline arming (see
             // `maybe_write_context`).
             self.maybe_write_context(now_post, &mut ctx);
-        }
+        };
         self.run_teardown();
-        Ok(())
+        exit_result
     }
 
     /// Recompute the host-terminal window title from project / session
