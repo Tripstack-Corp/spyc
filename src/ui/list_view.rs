@@ -170,11 +170,24 @@ impl ListView<'_> {
         let rows_per_col = height;
         let tail_start = self.view_top.min(self.rows.len());
         let tail = &self.rows[tail_start..];
-        let widths: Vec<usize> = tail
-            .iter()
-            .map(|row| super::display_width(&row.display))
-            .collect();
-        let count = widths.len();
+        let count = tail.len();
+
+        // Max display width of column `col`'s rows, measured lazily. Only the
+        // columns that actually fit on screen are measured below, so the work
+        // is O(items_per_page + one overflow column) — NOT O(rows to the end
+        // of the listing). The old code collected display_width for *every*
+        // tail row on *every* frame: a 100k-entry dir near the top meant 100k
+        // width calls + an ~800 KB Vec per frame (typing jank / agent-stream
+        // redraw cost that grew linearly with directory size).
+        let col_max_width = |col: usize| -> usize {
+            let start = col * rows_per_col;
+            let end = (start + rows_per_col).min(count);
+            tail[start..end]
+                .iter()
+                .map(|r| super::display_width(&r.display))
+                .max()
+                .unwrap_or(0)
+        };
 
         let mut col_widths: Vec<u16> = Vec::new();
         let mut total = 0usize;
@@ -184,8 +197,7 @@ impl ListView<'_> {
             if start >= count {
                 break;
             }
-            let end = (start + rows_per_col).min(count);
-            let col_w = widths[start..end].iter().copied().max().unwrap_or(0) + MARKER_W as usize;
+            let col_w = col_max_width(col_idx) + MARKER_W as usize;
             let addition = col_w + if col_idx > 0 { COL_GAP as usize } else { 0 };
             if total + addition > width {
                 break;
@@ -195,12 +207,10 @@ impl ListView<'_> {
             col_idx += 1;
         }
         if col_idx == 0 {
-            // Screen narrower than one cell. Render one clamped column.
-            let widest = widths
-                .iter()
-                .copied()
-                .max()
-                .unwrap_or(MIN_NAME_WIDTH as usize);
+            // Screen narrower than one cell. Render one clamped column —
+            // measured from the first column's rows only (what's drawn), not
+            // the whole tail.
+            let widest = col_max_width(0).max(MIN_NAME_WIDTH as usize);
             col_widths.push((widest + MARKER_W as usize).min(width.max(1)) as u16);
             col_idx = 1;
         }
@@ -493,6 +503,18 @@ mod tests {
     fn narrow_screen_falls_back_to_one_column() {
         let g = grid_for(&["apple", "banana", "cherry"], 10, 10);
         assert_eq!(g.cols, 1);
+    }
+
+    #[test]
+    fn offscreen_wide_row_does_not_affect_visible_columns() {
+        // height 2 → 2 rows/col. Only column 0 ([aa, bb]) fits in width 20;
+        // the huge name lands in column 1, which doesn't fit. The visible
+        // column's width must come from column 0 alone — and with lazy
+        // measurement the huge (off-screen) name is never even measured.
+        let huge = "x".repeat(100);
+        let g = grid_for(&["aa", "bb", &huge, "cc"], 20, 2);
+        assert_eq!(g.cols, 1);
+        assert_eq!(g.col_widths, vec![2 + MARKER_W]); // "aa"/"bb" = 2 cols + marker
     }
 
     // ── snapshot tests (TestBackend) ──────────────────────────────
