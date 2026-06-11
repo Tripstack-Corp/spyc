@@ -283,6 +283,10 @@ impl App {
                     view.lines = new_view.lines;
                     view.title = new_view.title;
                     view.streaming = new_view.streaming;
+                    // The task buffer front-trims at TASK_BUFFER_CAP, so the
+                    // rebuilt line count can shrink — drop/clamp a stale
+                    // visual selection or search before the next yank/render.
+                    view.clamp_state_to_lines();
                 }
                 return true;
             }

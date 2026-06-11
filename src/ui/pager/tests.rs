@@ -268,6 +268,83 @@ fn visual_jump_to_clamps_and_scrolls() {
 }
 
 #[test]
+fn clamp_state_to_lines_clamps_visual_past_end() {
+    // A selection made when the buffer was long, then the buffer shrank
+    // under it (streaming task viewer front-trim).
+    let mut view = PagerView::new_plain("v", vec!["a".to_string(), "b".to_string()]);
+    view.visual = Some(VisualSelection {
+        anchor: 10,
+        cursor: 15,
+        anchor_col: 0,
+        cursor_col: 0,
+        kind: VisualKind::Line,
+    });
+    view.clamp_state_to_lines();
+    let sel = view.visual.unwrap();
+    assert_eq!(
+        (sel.anchor, sel.cursor),
+        (1, 1),
+        "clamped to last valid row"
+    );
+}
+
+#[test]
+fn clamp_state_to_lines_drops_state_on_empty_buffer() {
+    let mut view = PagerView::new_plain("v", Vec::<String>::new());
+    view.visual = Some(VisualSelection {
+        anchor: 3,
+        cursor: 5,
+        anchor_col: 0,
+        cursor_col: 0,
+        kind: VisualKind::Line,
+    });
+    view.clamp_state_to_lines();
+    assert!(view.visual.is_none(), "selection dropped on empty buffer");
+}
+
+#[cfg(unix)]
+#[test]
+fn yank_visual_past_end_clamps_instead_of_panicking() {
+    use std::os::unix::fs::PermissionsExt;
+    // Selection sits entirely past the (shrunk) buffer: range() returns
+    // lo=10,hi=15 but len=3. Pre-fix this slice panicked.
+    let mut view = PagerView::new_plain(
+        "v",
+        vec![
+            "line 0".to_string(),
+            "line 1".to_string(),
+            "line 2".to_string(),
+        ],
+    );
+    view.visual = Some(VisualSelection {
+        anchor: 10,
+        cursor: 15,
+        anchor_col: 0,
+        cursor_col: 0,
+        kind: VisualKind::Line,
+    });
+
+    let tmp = tempfile::tempdir().unwrap();
+    let stub = tmp.path().join("clip.sh");
+    let sidecar = tmp.path().join("out.txt");
+    std::fs::write(&stub, format!("#!/bin/sh\ncat > {}\n", sidecar.display())).unwrap();
+    let mut perms = std::fs::metadata(&stub).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&stub, perms).unwrap();
+
+    let n =
+        crate::clipboard::with_clipboard_override(&stub, || view.yank_visual_to_clipboard(false))
+            .expect("yank should not panic or error");
+    assert_eq!(n, 1, "clamped to the single last line");
+    let captured = std::fs::read_to_string(&sidecar).unwrap();
+    assert!(
+        captured.contains("line 2"),
+        "yanked the clamped tail: {captured:?}"
+    );
+    assert!(!captured.contains("line 0"));
+}
+
+#[test]
 fn cancel_visual_clears_state() {
     let mut view = sample_view();
     view.enter_visual();
