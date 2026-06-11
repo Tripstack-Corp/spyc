@@ -452,6 +452,10 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
 /// Used by `search_paths` and `search_content` so the MCP tools
 /// scope themselves the same way the in-TUI `F` and `:grep`
 /// commands do.
+/// Upper bound on a single MCP message body. The header's `Content-Length`
+/// is untrusted; we refuse anything larger rather than pre-allocate it.
+const MAX_LSP_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
 pub(super) fn read_lsp_message(reader: &mut impl BufRead) -> io::Result<String> {
     let mut content_length: Option<usize> = None;
     let mut header = String::new();
@@ -472,6 +476,16 @@ pub(super) fn read_lsp_message(reader: &mut impl BufRead) -> io::Result<String> 
 
     let len = content_length
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
+    // Cap the declared length before allocating: `len` is attacker/garbage
+    // controlled, so `vec![0u8; len]` for a multi-GB Content-Length would
+    // abort the whole process on allocation failure. 64 MiB is far above any
+    // real MCP message (tool args / file slices) but small enough to refuse.
+    if len > MAX_LSP_MESSAGE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Content-Length {len} exceeds {MAX_LSP_MESSAGE_BYTES}-byte cap"),
+        ));
+    }
 
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
@@ -502,4 +516,27 @@ fn send_error(w: &mut impl Write, id: Value, code: i32, message: &str) -> io::Re
         }
     });
     send_message(w, &msg.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn read_lsp_message_reads_framed_body() {
+        let mut c = Cursor::new(b"Content-Length: 5\r\n\r\nhello".to_vec());
+        assert_eq!(read_lsp_message(&mut c).unwrap(), "hello");
+    }
+
+    #[test]
+    fn read_lsp_message_rejects_oversized_content_length() {
+        // A hostile/garbage header must not trigger a multi-GB allocation;
+        // it errors before `vec![0u8; len]`.
+        let header = format!("Content-Length: {}\r\n\r\n", u64::from(u32::MAX) * 16);
+        let mut c = Cursor::new(header.into_bytes());
+        let err = read_lsp_message(&mut c).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds"));
+    }
 }

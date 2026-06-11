@@ -219,8 +219,13 @@ pub fn resolve_claude_resume_target(
                     return (Some(tok), name);
                 }
                 // Banner UUID has no JSONL — fall through.
-            } else {
-                // Named sessions: claude resolves names itself, trust it.
+            } else if !tok.chars().any(char::is_control) {
+                // Named sessions: claude resolves names itself, trust it —
+                // but `tok` came from untrusted pane scrollback, so reject
+                // control characters first. A spoofed banner with a newline
+                // or ESC in the "token" would otherwise be typed verbatim as
+                // `/resume <tok>` into the pane, injecting a second command
+                // line or a terminal escape.
                 return (Some(tok.clone()), Some(tok));
             }
         }

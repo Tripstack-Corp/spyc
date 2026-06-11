@@ -29,10 +29,16 @@ use super::{
 
 /// Wrap `text` in bracketed-paste markers so the receiving child app (claude,
 /// an editor, …) sees it as one paste block rather than line-by-line.
+///
+/// Any bracketed-paste markers already inside `text` are stripped first: a
+/// paste containing a literal `\x1b[201~` would otherwise close the block
+/// early, and the child would interpret the tail as keystrokes/commands
+/// (paste injection — the reason terminals sanitize paste content too).
 fn bracketed_paste(text: &str) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(text.len() + 12);
+    let cleaned = text.replace("\u{1b}[200~", "").replace("\u{1b}[201~", "");
+    let mut buf = Vec::with_capacity(cleaned.len() + 12);
     buf.extend_from_slice(b"\x1b[200~");
-    buf.extend_from_slice(text.as_bytes());
+    buf.extend_from_slice(cleaned.as_bytes());
     buf.extend_from_slice(b"\x1b[201~");
     buf
 }
@@ -537,3 +543,25 @@ impl App {
 
 mod confirms;
 mod prompts;
+
+#[cfg(test)]
+mod paste_tests {
+    use super::bracketed_paste;
+
+    #[test]
+    fn wraps_plain_text() {
+        assert_eq!(bracketed_paste("hello"), b"\x1b[200~hello\x1b[201~");
+    }
+
+    #[test]
+    fn strips_embedded_end_marker_to_block_injection() {
+        // A paste carrying its own end marker must not be able to close the
+        // block early and have its tail run as keystrokes/commands.
+        let out = bracketed_paste("safe\x1b[201~rm -rf /\x1b[200~more");
+        assert_eq!(out, b"\x1b[200~saferm -rf /more\x1b[201~");
+        // Exactly one opening and one closing marker remain.
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(s.matches("\x1b[200~").count(), 1);
+        assert_eq!(s.matches("\x1b[201~").count(), 1);
+    }
+}
