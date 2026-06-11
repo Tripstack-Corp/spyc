@@ -45,14 +45,22 @@ pub struct FindPicker {
 }
 
 impl FindPicker {
-    /// Re-rank `candidates` against the current `query`, store in
-    /// `filtered`, reset `selected` to 0.
+    /// Re-rank `candidates` against the current `query` and store in
+    /// `filtered`, keeping the cursor on the same path if it survives the
+    /// re-rank. The walker streams candidates in batches and re-ranks on
+    /// each; resetting `selected` to 0 every batch (the old behavior) yanked
+    /// the cursor back to the top under the user, so a batch arriving just
+    /// before Enter opened the wrong file. On a query change the previously
+    /// selected path usually isn't in the new results, so it falls back to 0.
     pub fn refilter(&mut self) {
+        let prev = self.filtered.get(self.selected).cloned();
         self.filtered = crate::fs::finder::rank(&self.candidates, &self.query, self.limit)
             .into_iter()
             .map(|(p, _score)| p)
             .collect();
-        self.selected = 0;
+        self.selected = prev
+            .and_then(|p| self.filtered.iter().position(|q| *q == p))
+            .unwrap_or(0);
     }
 
     /// Drain any batches that have arrived since the last tick.
@@ -249,5 +257,53 @@ impl App {
             }
             _ => true, // Swallow other keys while picker is open.
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FindPicker;
+    use std::path::PathBuf;
+
+    fn picker(candidates: &[&str]) -> FindPicker {
+        FindPicker {
+            candidates: candidates.iter().map(PathBuf::from).collect(),
+            root: PathBuf::from("/"),
+            query: String::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            limit: 200,
+            walk_rx: None,
+            walk_complete: false,
+        }
+    }
+
+    #[test]
+    fn refilter_preserves_selection_across_streaming_batches() {
+        let mut p = picker(&["a.rs", "b.rs", "c.rs"]);
+        p.refilter();
+        // Park the cursor on the second result.
+        p.selected = 1;
+        let target = p.filtered[1].clone();
+        // A new batch streams in (drain_walk appends, then refilters).
+        p.candidates.push(PathBuf::from("d.rs"));
+        p.refilter();
+        // Cursor still on the same path — not yanked back to the top.
+        assert_eq!(p.filtered[p.selected], target);
+    }
+
+    #[test]
+    fn refilter_resets_to_top_when_selected_path_is_filtered_out() {
+        let mut p = picker(&["alpha.rs", "beta.rs"]);
+        p.refilter();
+        p.selected = p
+            .filtered
+            .iter()
+            .position(|x| x.ends_with("beta.rs"))
+            .unwrap();
+        // A query change that excludes the previously-selected path.
+        p.query = "alpha".to_string();
+        p.refilter();
+        assert_eq!(p.selected, 0);
     }
 }

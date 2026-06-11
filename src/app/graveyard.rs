@@ -5,7 +5,7 @@
 //! `handle_graveyard_view_key` is `pub` (called from `key_dispatch`); the
 //! restore/purge helpers stay private to this module.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, Effect, Mode, Prompt, PromptKind};
 
@@ -30,6 +30,14 @@ impl App {
         // directly rather than reusing RemoveConfirm because the
         // semantics are distinct (we're cascading to system trash,
         // not unlinking).
+        //
+        // The destructive verbs (restore p/P, purge x/dd/Z) require a *bare*
+        // key — matching `key.code` alone let a Ctrl-chord (`^p`, `^d`, `^x`)
+        // trigger an irreversible purge/restore. A modified key falls through
+        // to the `_` arm (no-op + clears the `dd` arming).
+        let bare = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         match key.code {
             KeyCode::Char('?') | KeyCode::F(1) => {
                 // Reported: graveyard view had no `?` help, so the
@@ -71,22 +79,22 @@ impl App {
                     self.state.cursor.index = self.state.rows.len() - 1;
                 }
             }
-            KeyCode::Char('p') => {
+            KeyCode::Char('p') if bare => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
                 self.graveyard_restore(false);
             }
-            KeyCode::Char('P') => {
+            KeyCode::Char('P') if bare => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
                 self.graveyard_restore(true);
             }
-            KeyCode::Char('x') => {
+            KeyCode::Char('x') if bare => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
                 self.graveyard_purge_cursor_entry();
             }
-            KeyCode::Char('d') => {
+            KeyCode::Char('d') if bare => {
                 self.view.graveyard_pending_g = false;
                 if self.view.graveyard_pending_d {
                     self.view.graveyard_pending_d = false;
@@ -95,7 +103,7 @@ impl App {
                     self.view.graveyard_pending_d = true;
                 }
             }
-            KeyCode::Char('Z') => {
+            KeyCode::Char('Z') if bare => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
                 self.state.mode = Mode::Prompting(Prompt::simple(
