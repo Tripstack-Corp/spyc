@@ -429,8 +429,11 @@ impl App {
             self.state.cursor.index = saved_cursor;
             self.state.cursor.clamp(self.state.rows.len());
         }
-        // Clear any Tab-applied filter (search or shell prompt).
-        if self.state.temp_filter.is_some() {
+        // Clear a Tab-applied preview filter — but NOT a user-set `=`/`:limit`
+        // filter. Both live in `temp_filter`; only the Tab preview is paired
+        // with `tab_state`, so gate on it. Without this, cancelling any
+        // unrelated prompt wiped the active limit filter.
+        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }
@@ -447,8 +450,10 @@ impl App {
     pub fn dispatch_prompt(&mut self, prompt: Prompt) -> Vec<Effect> {
         use state::Update;
 
-        // Clear any Tab-applied filter before dispatching.
-        if self.state.temp_filter.is_some() {
+        // Clear a Tab-applied preview filter before dispatching — but NOT a
+        // user-set `=`/`:limit` filter (only the Tab preview is paired with
+        // `tab_state`; see cancel_prompt).
+        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
             self.state.temp_filter = None;
             self.state.rebuild_rows();
         }

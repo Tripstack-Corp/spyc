@@ -223,18 +223,25 @@ impl App {
                 // special cases and the resolver invocation below.
             }
         }
-        // Inventory view: special key handling.
+        // Inventory view: special key handling. The verb arms require a
+        // *bare* key (no Ctrl/Alt) — matching `key.code` alone let `^d`/`^x`
+        // (common half-page-scroll chords) hit the `Char('x'|'d')` arm and
+        // destructively drop the cursor item. A modified key falls through to
+        // the resolver instead.
         if self.state.view == View::Inventory {
+            let bare = !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
             match key.code {
                 KeyCode::Esc => {
                     self.state.toggle_inventory_view();
                     return Ok(Vec::new());
                 }
-                KeyCode::Char('x' | 'd') => {
+                KeyCode::Char('x' | 'd') if bare => {
                     self.state.drop_cursor();
                     return Ok(Vec::new());
                 }
-                KeyCode::Char(' ' | 't') => {
+                KeyCode::Char(' ' | 't') if bare => {
                     self.state.inventory.toggle_pick(self.state.cursor.index);
                     self.state.list_generation = self.state.list_generation.wrapping_add(1);
                     let rpc = self.state.grid_dims.rows_per_col as usize;
@@ -242,7 +249,7 @@ impl App {
                         .cursor_move_vertical(1, rpc, self.state.rows.len());
                     return Ok(Vec::new());
                 }
-                KeyCode::Char('p') => {
+                KeyCode::Char('p') if bare => {
                     return Ok(self.put_inventory_to_cwd());
                 }
                 _ => {}
