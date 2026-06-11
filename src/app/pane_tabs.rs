@@ -357,7 +357,6 @@ impl App {
         }
         active.drain_output();
         let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
-        let path = std::path::Path::new("/tmp/spyc-scrollback.txt");
         let mut out = String::new();
         for line in &lines {
             for span in &line.spans {
@@ -365,15 +364,25 @@ impl App {
             }
             out.push('\n');
         }
-        match std::fs::write(path, &out) {
-            Ok(()) => {
-                self.state
-                    .flash_info(format!("wrote {} lines to {}", lines.len(), path.display()));
-            }
-            Err(e) => {
-                self.state
-                    .flash_error(format!("dump-scrollback: write failed: {e}"));
-            }
+        // Owner-only (0600) in the state dir, not the old world-readable,
+        // symlink-followable `/tmp/spyc-scrollback.txt` (pane scrollback can
+        // contain anything the agent printed). Truncate so each dump is a
+        // fresh snapshot.
+        let name = "spyc-scrollback.txt";
+        let display = crate::state::state_file_path(name)
+            .map_or_else(|| name.to_string(), |p| p.display().to_string());
+        match crate::state::open_state_file_truncate(name) {
+            Some(mut f) => match std::io::Write::write_all(&mut f, out.as_bytes()) {
+                Ok(()) => self
+                    .state
+                    .flash_info(format!("wrote {} lines to {display}", lines.len())),
+                Err(e) => self
+                    .state
+                    .flash_error(format!("dump-scrollback: write failed: {e}")),
+            },
+            None => self
+                .state
+                .flash_error("dump-scrollback: no state dir for the output file".to_string()),
         }
     }
 

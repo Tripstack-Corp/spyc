@@ -11,7 +11,6 @@
 //! event annotated with the elapsed time since spyc start, the
 //! key+modifiers, and where the dispatch sent it.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -35,12 +34,14 @@ pub fn init(flag: bool) -> Option<String> {
         return None;
     }
     let ts = crate::sysinfo::epoch_secs();
-    let path = format!("/tmp/spyc-key-trace-{ts}.log");
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok()?;
+    // Owner-only (0600) in the XDG state dir, not the old world-readable,
+    // symlink-followable `/tmp/spyc-key-trace-*.log` — the trace records
+    // every keystroke (incl. pane input), so on a shared machine /tmp let
+    // another user read it or redirect it via a planted symlink.
+    let name = format!("spyc-key-trace-{ts}.log");
+    let file = crate::state::open_state_file_append(&name)?;
+    let display_path =
+        crate::state::state_file_path(&name).map_or(name, |p| p.display().to_string());
     {
         let mut slot = TRACE.lock().expect("key-trace mutex poisoned");
         *slot = Some(TraceState {
@@ -49,7 +50,7 @@ pub fn init(flag: bool) -> Option<String> {
             last_rx_at: None,
         });
     }
-    Some(path)
+    Some(display_path)
 }
 
 /// Returns true when the trace is armed. Callers can guard expensive

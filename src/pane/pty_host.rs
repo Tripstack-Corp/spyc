@@ -311,11 +311,11 @@ impl PtyHost {
         while let Ok(event) = rx.try_recv() {
             if self.debug_dump
                 && let PtyEvent::Bytes(ref bytes) = event
-                && let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/spyc_pty_debug.bin")
+                && let Some(mut f) = crate::state::open_state_file_append("spyc_pty_debug.bin")
             {
+                // Owner-only in the state dir, not the old world-readable,
+                // symlink-followable `/tmp/spyc_pty_debug.bin` (raw pty bytes
+                // can carry secrets the child printed).
                 let _ = f.write_all(bytes);
             }
             match event {

@@ -59,6 +59,73 @@ pub fn state_root() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
 }
 
+/// Path of a file named `name` directly under the state root, if one
+/// resolves. Does not create anything — for display / existence checks.
+pub fn state_file_path(name: &str) -> Option<PathBuf> {
+    state_root().map(|d| d.join(name))
+}
+
+/// Open `<state_root>/<name>` for writing as an **owner-only** file,
+/// creating the state dir. This is the safe replacement for the old fixed
+/// `/tmp/spyc-*` debug/log paths: `/tmp` is world-writable, so on a shared
+/// machine another user could pre-create the file (capturing our output in
+/// a file they own) or plant a symlink to redirect our writes to a
+/// victim-owned path. The XDG state dir is owner-owned; `0600` keeps the
+/// contents unreadable by other users and `O_NOFOLLOW` refuses to open the
+/// final component if it's a symlink. Returns `None` when no state dir
+/// resolves (no `$HOME`/`$XDG_STATE_HOME`) or the open fails.
+///
+/// `open_state_file_append` keeps existing content (logs); `_truncate`
+/// replaces it (one-shot dumps).
+#[cfg(unix)]
+fn open_state_file(name: &str, write: rustix::fs::OFlags) -> Option<std::fs::File> {
+    use rustix::fs::{Mode, OFlags};
+    let dir = state_root()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    let fd = rustix::fs::open(
+        dir.join(name),
+        OFlags::CREATE | OFlags::WRONLY | OFlags::NOFOLLOW | write,
+        Mode::RUSR | Mode::WUSR, // 0600 (applied only when CREATE makes the file)
+    )
+    .ok()?;
+    Some(std::fs::File::from(fd))
+}
+
+#[cfg(unix)]
+pub fn open_state_file_append(name: &str) -> Option<std::fs::File> {
+    open_state_file(name, rustix::fs::OFlags::APPEND)
+}
+
+#[cfg(unix)]
+pub fn open_state_file_truncate(name: &str) -> Option<std::fs::File> {
+    open_state_file(name, rustix::fs::OFlags::TRUNC)
+}
+
+/// Non-unix fallback (spyc targets Linux/macOS; this keeps the crate
+/// buildable elsewhere without the mode/O_NOFOLLOW hardening).
+#[cfg(not(unix))]
+fn open_state_file(name: &str, truncate: bool) -> Option<std::fs::File> {
+    let dir = state_root()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(!truncate)
+        .truncate(truncate)
+        .open(dir.join(name))
+        .ok()
+}
+
+#[cfg(not(unix))]
+pub fn open_state_file_append(name: &str) -> Option<std::fs::File> {
+    open_state_file(name, false)
+}
+
+#[cfg(not(unix))]
+pub fn open_state_file_truncate(name: &str) -> Option<std::fs::File> {
+    open_state_file(name, true)
+}
+
 /// Cap on bytes read from an agent transcript for `^a v` scrollback.
 /// Real Claude conversation JSONLs reach 100+ MB; reading the whole
 /// file froze the render thread and allocated hundreds of MB.
@@ -176,5 +243,64 @@ mod tests {
             got.lines().all(|l| l.len() == 4),
             "no partial leading line: {got:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_file_is_owner_only_and_appends() {
+        use super::{open_state_file_append, with_state_root};
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        with_state_root(tmp.path(), || {
+            {
+                let mut f = open_state_file_append("log.txt").unwrap();
+                writeln!(f, "one").unwrap();
+            }
+            {
+                let mut f = open_state_file_append("log.txt").unwrap();
+                writeln!(f, "two").unwrap();
+            }
+            let p = tmp.path().join("log.txt");
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "must be created 0600 (owner-only)");
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), "one\ntwo\n");
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_file_truncate_replaces_content() {
+        use super::{open_state_file_truncate, with_state_root};
+        let tmp = tempfile::tempdir().unwrap();
+        with_state_root(tmp.path(), || {
+            {
+                let mut f = open_state_file_truncate("dump.txt").unwrap();
+                std::io::Write::write_all(&mut f, b"first dump").unwrap();
+            }
+            {
+                let mut f = open_state_file_truncate("dump.txt").unwrap();
+                std::io::Write::write_all(&mut f, b"second").unwrap();
+            }
+            assert_eq!(
+                std::fs::read_to_string(tmp.path().join("dump.txt")).unwrap(),
+                "second"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_file_refuses_symlink() {
+        use super::{open_state_file_append, with_state_root};
+        let tmp = tempfile::tempdir().unwrap();
+        with_state_root(tmp.path(), || {
+            let target = tmp.path().join("victim");
+            std::fs::write(&target, b"private").unwrap();
+            std::os::unix::fs::symlink(&target, tmp.path().join("link.log")).unwrap();
+            // O_NOFOLLOW: opening through a planted symlink must fail, so we
+            // never append to (or truncate) an attacker-chosen target.
+            assert!(open_state_file_append("link.log").is_none());
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "private");
+        });
     }
 }
