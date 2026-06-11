@@ -231,7 +231,18 @@ fn run_child_in_foreground(
         cmd.process_group(0);
     }
 
-    let mut child = cmd.spawn()?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            // A missing / misspelled $EDITOR or $SHELL (ENOENT) must not tear
+            // the session down. We've already suspended the TUI, so restore it
+            // before returning the error — otherwise the `?` would skip
+            // `resume_tui` and leave the terminal in raw/alt-screen mode on the
+            // way out. The caller turns this Err into a flash, not an abort.
+            resume_tui(terminal)?;
+            return Err(e.into());
+        }
+    };
 
     // Make the child's process group the foreground group of the
     // controlling tty. Now ^C / ^\ from the kernel's tty driver go
