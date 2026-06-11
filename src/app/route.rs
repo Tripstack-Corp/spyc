@@ -131,6 +131,14 @@ pub(super) struct RouteSnapshot {
 /// modal active the content layer decides by focus + key-kind: a key may
 /// be a meta-chord that escapes to the resolver, but a paste is always
 /// content (`is_meta == false`) so it lands wherever a non-meta key would.
+///
+/// One invariant cuts across the bottom-owned content arms: **an open
+/// prompt wins.** A prompt is the file-list area's active region, so every
+/// non-meta arm the bottom pane / scrollback / scroll-pager would otherwise
+/// own (2b, 3, 4, 5) carries `!snap.is_prompting` and falls through to the
+/// Prompt arm. Without it, a prompt opened while the pane is focused and
+/// closed/scrolling (e.g. the `claude` crash-recovery `[Y/n]`) is shadowed
+/// and unanswerable.
 pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSink {
     // Modal layer — a single typed value (precedence decided by `active_modal`)
     // maps straight to its sink. Eats every input kind before the content layer.
@@ -181,14 +189,14 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     //     With the top focused instead, keys fall through to the file list so
     //     j/k navigate it while the scrollback stays visible (`^a-k` workflow);
     //     meta chords always escape.
-    if snap.has_scroll_pager && bottom_owns && !is_meta {
+    if snap.has_scroll_pager && bottom_owns && !is_meta && !snap.is_prompting {
         return InputSink::PagerKey;
     }
 
     // 3. Pane scrollback mode. Non-meta keys with the pane focused
     //    drive the scroll handler; meta keys escape to the resolver
     //    so pane commands (`^a-x`, focus switch) still work.
-    if snap.has_pane_tabs && snap.pane_scrolling && pane_focused && !is_meta {
+    if snap.has_pane_tabs && snap.pane_scrolling && pane_focused && !is_meta && !snap.is_prompting {
         return InputSink::PaneScroll;
     }
 
@@ -196,7 +204,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     //    discarded; only meta chords (`^a-R`, `^a-x`, …) reach the
     //    resolver. Closes the v1.50.28 race where `^a` itself
     //    silently dropped the tab.
-    if snap.has_pane_tabs && pane_focused && snap.pane_closed && !is_meta {
+    if snap.has_pane_tabs && pane_focused && snap.pane_closed && !is_meta && !snap.is_prompting {
         return InputSink::PaneExitedFlash;
     }
 
@@ -564,6 +572,55 @@ mod tests {
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::Prompt);
+    }
+
+    #[test]
+    fn prompt_wins_over_exited_pane() {
+        // The headline bug: a saved-focused pane crashes, the
+        // ClaudeCrashRecover `[Y/n]` prompt opens — but focus is still
+        // Pane and pane_closed is true, so arm 4 (PaneExitedFlash) used to
+        // swallow every y/n/Enter/Esc, making the prompt unanswerable.
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            has_pane_tabs: true,
+            focus: Focus::Pane,
+            pane_closed: true,
+            ..idle()
+        };
+        for c in ['y', 'n'] {
+            assert_eq!(route_key(snap, key(c)), InputSink::Prompt);
+        }
+        assert_eq!(
+            route_key(snap, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            InputSink::Prompt
+        );
+    }
+
+    #[test]
+    fn prompt_wins_over_pane_scrollback() {
+        // A prompt opened via a `^a` chord while the pane is in scroll mode
+        // must capture the typed text, not feed it to the scroll handler.
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            has_pane_tabs: true,
+            focus: Focus::Pane,
+            pane_scrolling: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('g')), InputSink::Prompt);
+    }
+
+    #[test]
+    fn prompt_wins_over_scroll_pager() {
+        // Likewise with a `^a v` scrollback pager open over the focused pane.
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            has_pane_tabs: true,
+            focus: Focus::Pane,
+            has_scroll_pager: true,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('g')), InputSink::Prompt);
     }
 
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
