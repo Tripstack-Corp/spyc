@@ -34,7 +34,7 @@ When the active pager is the bottom scrollback (`view.scroll_pager`, pane focuse
 (1) Reachability: `^a v` mounts the scrollback into the dedicated slot `view.scroll_pager` with `pane_scroll=true`, `mount=LowerPane`, and — verified by grep — NO `source_path` ever set (src/app/pane_scroll.rs:239-259 `mount_scroll_pager`; the streaming transcript path in src/app/pager_stream.rs LowerPane branch likewise sets `pane_scroll=true`, no source_path). With the pane focused, route.rs:184 sends non-meta keys (including plain `v`) to `InputSink::PagerKey`, and `active_pager_mut!` …
 
 ### `src/app/proc.rs:234` — Failed $EDITOR/$SHELL spawn aborts the whole spyc session (and kills all pane children)
-`high` · `correctness` · `app-proc` · **confirmed**
+`high` · `correctness` · `app-proc` · **confirmed** · ✅ **fixed in #335**
 
 `run_child_in_foreground` does `let mut child = cmd.spawn()?;` after `suspend_tui`. The program here is exec'd directly, not via `sh -c`: `ActivateIntent::Edit` (navigate.rs:247) and the touch-and-edit prompt (prompt.rs:571) pass `shell::resolve_editor()` ($VISUAL/$EDITOR split on whitespace, default `vi`), and `Action::StartShell` (state/apply.rs:164) passes `$SHELL`. If the binary is missing or misspelled (e.g. `EDITOR=nvim` on a box without nvim), spawn fails with ENOENT and the Err propagates: ForegroundExec::run returns it, `fg.run(...)?` at effect.rs:483 propagates out of `run_effects`, through `dispatch_effective` (run.rs:219), and out of `App::run` — spyc exits. All pane PtyHosts are dropped (SIGKILL on claude/codex children) and the session is NOT saved (save_session only runs in request_quit). Pressing `e` on a file with a bad $EDITOR therefore destroys every in-flight agent conversation. The error path also skips `resume_tui` (only outer teardown restores the terminal).
 
@@ -285,7 +285,7 @@ The doc comment on `impl From<PostAction> for Vec<Effect>` (effect.rs:271-275) s
 > verifier: confirmed: Every factual claim verifies. (1) The doc comment at src/app/effect.rs:271-275 justifies `From<PostAction> for Vec<Effect>` by citing "a live `ApplyResult::Post(PostAction::None)` site", but `ApplyResult::Post` carries `Vec<Effect>` (src/app/state/mod.rs:68), so that expression cannot compile, and grep confirms `PostAction::None` is constructed only inside the From impl itself (effect.rs:279) and its test (effect.rs:554) — the comment is false today. (2) `PostAction` (src/app/mod.rs:173) has exactly four production construction sites, all `Spawn` and each immediately `.into()`-conve …
 
 ### `src/app/effect.rs:483` — Foreground spawn failure aborts the entire app (and skips resume_tui)
-`medium` · `correctness` · `app-mvu-state` · **confirmed**
+`medium` · `correctness` · `app-mvu-state` · **confirmed** · ✅ **fixed in #335**
 
 Effect::ForegroundExec is the one arm that `?`-propagates: `fg.run(terminal, &program, &args, pause_after)?` (src/app/effect.rs:483). Inside run_child_in_foreground, `let mut child = cmd.spawn()?` (src/app/proc.rs:234) returns Err after suspend_tui has already run but before resume_tui, so the error path leaves the TUI torn down; the error then propagates through run_effects → the run loop (`?` at src/app/run.rs:219/223) and App::run exits. Concrete trigger: $VISUAL/$EDITOR set to a missing binary (typo, or `code --wait` without code on PATH — resolve_editor at src/shell/mod.rs:17 passes it through verbatim) and pressing the edit key, or `:setenv SHELL=/bad/path` then `s`. Result: the whole file manager terminates mid-session, killing every pty pane (live agent conversations die via PtyHost Drop) because of a config typo — where every other effect arm deliberately flashes and survives.
 
@@ -298,7 +298,7 @@ Effect::ForegroundExec is the one arm that `?`-propagates: `fg.run(terminal, &pr
 2. It is the unique propagating arm. eff …
 
 ### `src/app/effect.rs:501` — Pager edit round-trip silently discards edits and deletes the temp file when read-back fails
-`medium` · `correctness` · `app-mvu-state` · **confirmed**
+`medium` · `correctness` · `app-mvu-state` · **confirmed** · ✅ **fixed in #335**
 
 In the ForegroundExec after-work, the PagerReturn::TempFile arm does `if let Ok(content) = std::fs::read_to_string(&path)` (src/app/effect.rs:501) and then unconditionally `let _ = std::fs::remove_file(&path)` (line 511). std::fs::read_to_string fails on any non-UTF-8 content, so if the user edits a saveable pager buffer via $EDITOR and the editor writes bytes that aren't valid UTF-8 (latin-1 paste, copied binary fragment) — or any transient IO error occurs — the pager is not restored, no error is flashed, and the temp file holding the user's just-saved edits is deleted. The edits are irrecoverably lost with zero feedback.
 
