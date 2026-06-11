@@ -32,6 +32,14 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use super::PaneWake;
 
+/// How long [`PtyHost::reap_exit`] polls for a cleanly-exiting child after
+/// EOF before it concludes the child is the EOF-but-alive case and SIGKILLs
+/// the group. Short enough that a pathological detached child stalls the
+/// main loop only briefly (once), long enough to cover the normal
+/// "try_wait raced the exit" window without killing a child that was about
+/// to exit on its own.
+const REAP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// MVU Phase 3b/3c: the wake half of a pty consumer — a lost-wakeup-safe
 /// edge flag plus the closure fired on its 0→1 transition. Used by Pane's
 /// parser worker (3b, via `adopt`) AND, in 3c, by the `PtyHost` reader
@@ -338,23 +346,50 @@ impl PtyHost {
         DrainResult { newly_closed }
     }
 
-    /// MVU Phase 5 PR8: the loop's single, bounded exit reap. Call ONLY
-    /// after a drain observed `newly_closed` — the reader saw EOF on the
-    /// pty master, which means every fd to the slave is closed, so the
-    /// direct child has already exited and this returns immediately. It is
-    /// never a speculative `wait()`. Prefers an already-harvested
-    /// `exit_status` (the non-blocking `try_wait` in [`Self::drain`]),
-    /// falling back to one `wait()` for the brief race where `try_wait`
-    /// returned `None` just as the child exited. This is the documented
-    /// Phase-5 "bounded synchronous reap" exception to the
-    /// no-blocking-IO-in-`update` rule (Design B: the child stays on the
-    /// main thread; no per-child waiter thread).
+    /// The loop's single, bounded exit reap. Call ONLY after a drain
+    /// observed `newly_closed` (the reader saw EOF on the pty master).
+    ///
+    /// Fast path: return the status already harvested by the non-blocking
+    /// `try_wait` in [`Self::drain`]. Otherwise the contract used to assume
+    /// "EOF ⇒ the direct child has exited" and fall back to an unconditional
+    /// `self.child.wait()` — but that inference is wrong: a child that
+    /// redirects/closes all of its slave fds while continuing to run
+    /// (`exec srv </dev/null >log 2>&1`, a server detaching its stdio in
+    /// place) makes the reader see EOF while alive, and the `wait()` then
+    /// freezes the **main loop** for the child's remaining lifetime (the
+    /// no-op SIGINT handler means only `kill -9` recovers). So bound it:
+    /// poll briefly for the common just-exited race, then SIGKILL the
+    /// process group and reap — mirroring [`Self::shutdown`]'s escalation.
+    /// The kill targets the pgid portable_pty `setsid`'d at spawn, so it
+    /// reaches an `exec`'d server (same PID) too.
     pub fn reap_exit(&mut self) -> ExitOutcome {
-        digest_exit(
-            self.exit_status
-                .take()
-                .map_or_else(|| self.child.wait(), Ok),
-        )
+        if let Some(status) = self.exit_status.take() {
+            return digest_exit(Ok(status));
+        }
+        let deadline = std::time::Instant::now() + REAP_GRACE;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return digest_exit(Ok(status)),
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => return digest_exit(Err(e)),
+            }
+        }
+        // Still alive past the grace — EOF did not mean exit. Force it so
+        // the reap (and the main loop) can't block indefinitely.
+        #[cfg(unix)]
+        if let Some(pid) = self.child.process_id() {
+            kill_group(pid, rustix::process::Signal::KILL);
+        } else {
+            let _ = self.child.kill();
+        }
+        #[cfg(not(unix))]
+        let _ = self.child.kill();
+        digest_exit(self.child.wait())
     }
 
     /// Tell the pty about a new size. Coalesces redundant calls so
