@@ -116,12 +116,20 @@ impl App {
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
         };
-        let _ = crate::state::sessions::save_session(&session);
+        let save_result = crate::state::sessions::save_session(&session);
 
-        // Build exit summary for post-TUI output.
+        // Build exit summary for post-TUI output. Report the write result
+        // truthfully — the old code ignored it and always said "session
+        // saved", so a failed write (disk full, unwritable state dir) told
+        // the user their session was safe when it wasn't, and `spyc -r`
+        // would later find nothing.
         let cwd_display = crate::paths::display_tilde(&session_cwd);
         let tab_count = session.tabs.len();
-        let mut parts = vec![format!("session saved — {cwd_display}")];
+        let saved_ok = save_result.is_ok();
+        let mut parts = match &save_result {
+            Ok(()) => vec![format!("session saved — {cwd_display}")],
+            Err(e) => vec![format!("session NOT saved ({e}) — {cwd_display}")],
+        };
         if tab_count > 0 {
             parts.push(format!(
                 "{tab_count} pane tab{}",
@@ -163,7 +171,10 @@ impl App {
                 crate::agent::ExitSummaryMode::None => {}
             }
         }
-        parts.push("restore with spyc -r".to_string());
+        // Only advertise `spyc -r` when there's actually something to restore.
+        if saved_ok {
+            parts.push("restore with spyc -r".to_string());
+        }
         self.exit_summary = Some(parts.join(" · "));
     }
 
@@ -284,8 +295,14 @@ impl App {
                     tab.agent_session_id.as_deref(),
                     cwd,
                 );
-                self.open_pane_tab_in(&plan.command, cwd);
-                if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume
+                // Only arm the `/resume` injection when the spawn actually
+                // added a tab — `last_mut()` is "the tab we just pushed". If
+                // the spawn failed, the last tab is a *different*, already-
+                // restored pane, and we'd type `/resume <sid>` into the wrong
+                // agent.
+                let spawned = self.open_pane_tab_in(&plan.command, cwd);
+                if spawned
+                    && let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume
                     && let Some(tabs) = self.runtime.pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()
                 {
