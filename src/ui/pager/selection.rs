@@ -1,7 +1,7 @@
 //! `PagerView` visual / placement selection: Line and Block visual modes, the
 //! placement cursor (vi-motion positioning), and visual-range yank. Verbatim.
 
-use super::{PagerView, PlacementCursor, VisualKind, VisualSelection};
+use super::{PagerView, PlacementCursor, Search, VisualKind, VisualSelection};
 
 use super::layout::{last_word_start, line_plain_text, next_word_start, prev_word_start};
 
@@ -321,8 +321,18 @@ impl PagerView {
         let Some(sel) = self.visual else {
             return Ok(0);
         };
+        if self.lines.is_empty() {
+            self.visual = None;
+            return Ok(0);
+        }
+        // Clamp BOTH ends to the current buffer. The buffer can shrink under
+        // an active selection (a streaming task viewer front-trims at
+        // TASK_BUFFER_CAP), and `range()` may then return `lo`/`hi` past the
+        // end. Clamping only `hi` leaves `lo > hi`, so `self.lines[lo..=hi]`
+        // panics. Clamping both to the same ceiling preserves `lo <= hi`.
+        let max = self.lines.len() - 1;
         let (lo, hi) = sel.range();
-        let hi = hi.min(self.lines.len().saturating_sub(1));
+        let (lo, hi) = (lo.min(max), hi.min(max));
         let text = match sel.kind {
             VisualKind::Line => self.lines[lo..=hi]
                 .iter()
@@ -349,5 +359,45 @@ impl PagerView {
         let count = hi - lo + 1;
         self.visual = None;
         Ok(count)
+    }
+
+    /// Clamp any state holding line indices into the buffer after `lines`
+    /// has been replaced wholesale (e.g. a streaming task viewer front-trims
+    /// at `TASK_BUFFER_CAP`, or `apply_exit_event` rebuilds the view). A
+    /// visual selection / placement cursor whose rows now point past the end
+    /// would otherwise yank the wrong content (or, before the yank clamp,
+    /// panic), and `Search::Active` match indices would highlight the wrong
+    /// lines. Call this at every site that reassigns `self.lines` under a
+    /// potentially-active selection or search.
+    pub fn clamp_state_to_lines(&mut self) {
+        let len = self.lines.len();
+        if len == 0 {
+            self.visual = None;
+            self.placement = None;
+        } else {
+            let max = len - 1;
+            if let Some(sel) = self.visual.as_mut() {
+                sel.anchor = sel.anchor.min(max);
+                sel.cursor = sel.cursor.min(max);
+            }
+            if let Some(p) = self.placement.as_mut() {
+                p.row = p.row.min(max);
+            }
+        }
+        let cleared = if let Search::Active {
+            matches, cursor, ..
+        } = &mut self.search
+        {
+            matches.retain(|&m| m < len);
+            if *cursor >= matches.len() {
+                *cursor = matches.len().saturating_sub(1);
+            }
+            matches.is_empty()
+        } else {
+            false
+        };
+        if cleared {
+            self.search = Search::Off;
+        }
     }
 }
