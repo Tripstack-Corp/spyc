@@ -944,7 +944,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | Where | Title | Lens | Status |
 |---|---|---|---|
 | `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified ✅ #339 |
-| `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed |
+| `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed · ✅ #363 |
 | `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed · ✅ #358 |
 | `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed · ✅ #355 |
 | `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed · ✅ #355 |
@@ -982,7 +982,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/state/apply.rs:95` | Take success/error classified by string-prefix match on the flash message | maintainability | confirmed |
 | `src/app/state/dispatch.rs:66` | HOME read bypasses envset in :cd and gh, inconsistent with StartShell in the same producers | maintainability | confirmed · ✅ #362 |
 | `src/app/state/dispatch.rs:236` | Sort-apply logic triplicated across :sort reverse, :sort <mode>, and :set sort= | maintainability | confirmed |
-| `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed |
+| `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed · ✅ #363 |
 | `src/app/state/mod.rs:153` | PagerLines is a single-variant enum that every consumer irrefutably destructures | maintainability | confirmed |
 | `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed |
 | `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed · ✅ #353 |
