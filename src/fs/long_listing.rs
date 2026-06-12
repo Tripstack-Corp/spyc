@@ -308,12 +308,30 @@ fn format_mode(md: &fs::Metadata) -> String {
 fn kind_char(md: &fs::Metadata) -> char {
     let ft = md.file_type();
     if ft.is_dir() {
-        'd'
-    } else if ft.is_symlink() {
-        'l'
-    } else {
-        '-'
+        return 'd';
     }
+    if ft.is_symlink() {
+        return 'l';
+    }
+    // Special files render with their `ls -l` glyph rather than collapsing to
+    // a plain `-` (which mislabels FIFOs/sockets/devices as regular files).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+        if ft.is_fifo() {
+            return 'p';
+        }
+        if ft.is_socket() {
+            return 's';
+        }
+        if ft.is_char_device() {
+            return 'c';
+        }
+        if ft.is_block_device() {
+            return 'b';
+        }
+    }
+    '-'
 }
 
 #[cfg(test)]
@@ -322,6 +340,18 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn kind_char_detects_socket_not_regular_file() {
+        // A unix-domain socket is a non-regular file; kind_char must report
+        // `s`, not collapse it to `-` like a plain file.
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let md = std::fs::symlink_metadata(&path).unwrap();
+        assert_eq!(kind_char(&md), 's');
+    }
 
     #[cfg(unix)]
     #[test]
