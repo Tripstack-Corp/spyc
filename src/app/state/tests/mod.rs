@@ -431,3 +431,29 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
         "request-sent timestamp stamped for the activity overlay"
     );
 }
+
+// ── count_files_in_dir_capped (R blast-radius walk, bounded) ──────
+#[test]
+fn count_files_capped_counts_under_cap_and_stops_at_cap() {
+    use std::fs;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // 3 files at top + 2 in a subdir = 5 regular files (the dir itself
+    // is not counted, matching what `remove_tree` unlinks).
+    for i in 0..3 {
+        fs::write(root.join(format!("f{i}")), "x").unwrap();
+    }
+    let sub = root.join("sub");
+    fs::create_dir(&sub).unwrap();
+    for i in 0..2 {
+        fs::write(sub.join(format!("g{i}")), "x").unwrap();
+    }
+
+    // Under the cap → exact recursive count.
+    assert_eq!(count_files_in_dir_capped(root, 100), 5);
+    // Cap reached → walk stops; a return == cap means "at least cap"
+    // (the prompt then shows `N+`).
+    assert_eq!(count_files_in_dir_capped(root, 3), 3);
+    // A zero cap walks nothing.
+    assert_eq!(count_files_in_dir_capped(root, 0), 0);
+}

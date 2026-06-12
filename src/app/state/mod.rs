@@ -600,23 +600,41 @@ pub(super) fn format_age(epoch: u64) -> String {
     }
 }
 
-/// Recursively count regular-file entries inside `dir`. Used by the
-/// `R` confirm prompt to surface the actual blast radius before the
-/// user types `y`. Symlinks count as a single entry (not followed)
-/// to match what `remove_tree` will actually unlink.
-pub(super) fn count_files_in_dir(dir: &Path) -> u64 {
+/// Count regular-file entries inside `dir`, **stopping once `cap` is reached**.
+/// Used by the `R` confirm prompt to surface the blast radius before the user
+/// types `y`. Symlinks count as a single entry (not followed) to match what
+/// `remove_tree` will actually unlink.
+///
+/// Runs on the input thread (inside the pure `apply`), so it is bounded: the
+/// old version was a fully-recursive, uncapped `read_dir` walk that froze
+/// the event loop for the whole tree when the cursor sat on a `node_modules`
+/// / `target/` (~100k+ files) — exactly the blocking-IO-on-input scaling
+/// pitfall the project has been bitten by. Iterative bounded-DFS (no recursion
+/// → no stack blow-up on a deep tree either), same early-termination shape as
+/// [`crate::app::util::count_subdirs_capped`]. Returns a value `<= cap`; a
+/// return of exactly `cap` means "at least `cap`" (the caller shows `N+`).
+pub(super) fn count_files_in_dir_capped(dir: &Path, cap: u64) -> u64 {
     let mut n = 0u64;
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return n;
-    };
-    for ent in rd.flatten() {
-        let Ok(md) = std::fs::symlink_metadata(ent.path()) else {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if n >= cap {
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else {
             continue;
         };
-        if md.file_type().is_symlink() || md.is_file() {
-            n += 1;
-        } else if md.is_dir() {
-            n += count_files_in_dir(&ent.path());
+        for ent in rd.flatten() {
+            let Ok(md) = std::fs::symlink_metadata(ent.path()) else {
+                continue;
+            };
+            if md.file_type().is_symlink() || md.is_file() {
+                n += 1;
+                if n >= cap {
+                    return n;
+                }
+            } else if md.is_dir() {
+                stack.push(ent.path());
+            }
         }
     }
     n
