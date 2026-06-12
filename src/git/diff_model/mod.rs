@@ -25,7 +25,7 @@
 mod blob;
 mod build;
 
-pub use blob::format_git_time_pub;
+pub use blob::format_git_time;
 
 use crate::git::model::DiffModel;
 use std::path::Path;

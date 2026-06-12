@@ -16,7 +16,6 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::fs;
 use crate::keymap::{Action, BoundAction, ResolverOutcome};
 use crate::shell;
 
@@ -527,12 +526,6 @@ impl App {
             }
             BoundAction::Jump(path) => {
                 let _ = self.state.jump_to(path);
-            }
-            BoundAction::Copy(dest) => {
-                self.run_selection_to(dest, fs::ops::copy_selection_to, "copied");
-            }
-            BoundAction::Move(dest) => {
-                self.run_selection_to(dest, fs::ops::move_selection_to, "moved");
             }
             BoundAction::ToggleMaskFixed(n) => {
                 if *n == 1 {

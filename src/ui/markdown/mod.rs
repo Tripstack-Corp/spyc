@@ -16,7 +16,7 @@
 //! and the language is recognized; unrecognized languages render
 //! plain in the code-block style.
 
-use pulldown_cmark::{Alignment, HeadingLevel, Options, Parser};
+use pulldown_cmark::{HeadingLevel, Options, Parser};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 
@@ -138,8 +138,6 @@ fn force_hard_breaks_before_keyed_lines(source: &str) -> std::borrow::Cow<'_, st
 }
 
 struct TableBuilder {
-    #[allow(dead_code)]
-    alignments: Vec<Alignment>,
     /// Header cells (one row). Set on `End(TableHead)`.
     head: Option<Vec<Vec<Span<'static>>>>,
     /// Body rows.

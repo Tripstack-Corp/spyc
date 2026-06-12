@@ -307,12 +307,11 @@ impl<'t> Renderer<'t> {
                     Style::default().fg(self.theme.status_suffix),
                 ));
             }
-            Tag::Table(alignments) => {
+            Tag::Table(_alignments) => {
                 if !self.current.is_empty() {
                     self.flush_line();
                 }
                 self.table = Some(TableBuilder {
-                    alignments,
                     head: None,
                     body: Vec::new(),
                     in_head: false,

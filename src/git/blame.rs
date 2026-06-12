@@ -89,7 +89,7 @@ fn commit_meta(repo: &gix::Repository, id: gix::ObjectId) -> (String, String, St
             let date = sig
                 .time()
                 .ok()
-                .map(crate::git::diff_model::format_git_time_pub)
+                .map(crate::git::diff_model::format_git_time)
                 .unwrap_or_default();
             (name, date)
         }

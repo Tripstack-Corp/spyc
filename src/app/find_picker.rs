@@ -175,22 +175,21 @@ impl App {
         self.set_pager(view);
     }
 
-    /// Intercept keys when the F-finder is open. Returns true when
-    /// the key was consumed by the picker (so the caller skips
-    /// normal pager / file-list dispatch). Esc closes; Enter chdirs
-    /// to the matched file's parent and places the cursor on it;
-    /// Up/Down move selection; printable chars + Backspace edit
-    /// the query and re-rank.
-    pub fn handle_find_picker_key(&mut self, key: KeyEvent) -> bool {
+    /// Handle a key while the F-finder is open. The picker owns all input in
+    /// this state — `route_input` routes here via `InputSink::FindPicker` and
+    /// the caller returns unconditionally — so every key is swallowed and there
+    /// is nothing to report back. Esc closes; Enter chdirs to the matched
+    /// file's parent and places the cursor on it; Up/Down move selection;
+    /// printable chars + Backspace edit the query and re-rank.
+    pub fn handle_find_picker_key(&mut self, key: KeyEvent) {
         if self.runtime.find_picker.is_none() {
-            return false;
+            return;
         }
         match key.code {
             KeyCode::Esc => {
                 self.runtime.find_picker = None;
                 self.clear_pager();
                 self.view.needs_full_repaint = true;
-                true
             }
             KeyCode::Enter => {
                 let target = self.runtime.find_picker.as_ref().and_then(|p| {
@@ -214,7 +213,6 @@ impl App {
                         }
                     }
                 }
-                true
             }
             KeyCode::Up => {
                 if let Some(picker) = self.runtime.find_picker.as_mut()
@@ -223,7 +221,6 @@ impl App {
                     picker.selected -= 1;
                     self.render_find_picker();
                 }
-                true
             }
             KeyCode::Down => {
                 if let Some(picker) = self.runtime.find_picker.as_mut()
@@ -232,7 +229,6 @@ impl App {
                     picker.selected += 1;
                     self.render_find_picker();
                 }
-                true
             }
             KeyCode::Backspace => {
                 if let Some(picker) = self.runtime.find_picker.as_mut()
@@ -242,7 +238,6 @@ impl App {
                     picker.refilter();
                     self.render_find_picker();
                 }
-                true
             }
             KeyCode::Char(c)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -253,9 +248,8 @@ impl App {
                     picker.refilter();
                     self.render_find_picker();
                 }
-                true
             }
-            _ => true, // Swallow other keys while picker is open.
+            _ => {} // Swallow other keys while picker is open.
         }
     }
 }

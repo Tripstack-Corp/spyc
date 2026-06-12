@@ -53,11 +53,6 @@ impl Entry {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn is_dir(&self) -> bool {
-        self.kind == EntryKind::Dir
-    }
-
     /// Display name with a trailing `/` for directories or `*` for
     /// executables (both are classic spy / `ls -F` conventions).
     pub fn display_name(&self) -> String {

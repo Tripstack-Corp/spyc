@@ -946,8 +946,8 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified ✅ #339 |
 | `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed |
 | `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed |
-| `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed |
-| `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed |
+| `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed · ✅ #355 |
+| `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed · ✅ #355 |
 | `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed |
 | `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed |
 | `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed |
@@ -995,7 +995,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | unverified |
 | `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | unverified |
 | `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed |
-| `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | unverified |
+| `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | confirmed · ✅ #355 |
 | `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | unverified |
 | `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
 | `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
@@ -1005,7 +1005,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
 | `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | unverified |
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
-| `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | unverified |
+| `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
 | `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | unverified |
 | `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |
 | `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | unverified |
@@ -1014,7 +1014,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | confirmed · ✅ #354 |
 | `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | confirmed · ✅ #354 |
 | `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | unverified |
-| `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | unverified |
+| `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | confirmed · ✅ #355 |
 | `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
 | `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | unverified |
 | `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | unverified |
@@ -1025,7 +1025,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
 | `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | unverified |
 | `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed |
-| `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | unverified |
+| `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | confirmed · ✅ #355 |
 | `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
 | `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed |
 | `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | unverified |
@@ -1043,7 +1043,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | unverified |
 | `src/ui/line_edit.rs:63` | Stale pending_op survives history navigation and set_content — next motion key silently deletes text | correctness | unverified |
 | `src/ui/line_edit.rs:253` | Normal mode ignores the CONTROL modifier — ^A enters Insert mode, ^D arms the delete operator | correctness | unverified |
-| `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | unverified |
+| `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | confirmed · ✅ #355 |
 | `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | unverified |
 | `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
 | `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | unverified |

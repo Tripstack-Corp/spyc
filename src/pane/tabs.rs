@@ -264,7 +264,6 @@ pub struct PaneTabs {
     last_active: Option<usize>,
 }
 
-#[allow(dead_code)]
 impl PaneTabs {
     /// Create a new tab container with one initial tab.
     pub fn new(entry: TabEntry) -> Self {
@@ -395,27 +394,6 @@ impl PaneTabs {
                 entry.info.has_activity = true;
             }
         }
-    }
-
-    /// Remove all tabs whose subprocess has exited. Returns `true` if
-    /// any tabs remain, `false` if the container is now empty.
-    pub fn remove_closed(&mut self) -> bool {
-        let before = self.tabs.len();
-        self.tabs.retain(|entry| !entry.pane.is_closed());
-        // A `retain` can drop tabs from anywhere, shifting every index
-        // after them. Rather than reconstruct the mapping, drop the
-        // `last_active` hint when anything was removed — losing the
-        // `^a ^a` target after a background tab exits is benign.
-        if self.tabs.len() != before {
-            self.last_active = None;
-        }
-        if self.tabs.is_empty() {
-            return false;
-        }
-        if self.active >= self.tabs.len() {
-            self.active = self.tabs.len() - 1;
-        }
-        true
     }
 
     /// Fix up `last_active` after the tab at `removed` is dropped:
