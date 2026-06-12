@@ -1,10 +1,10 @@
 //! Bottom-pane / tab lifecycle: create / hide / close / restart tabs,
 //! directional focus, resize + zoom, the pane/overlay sizing helpers,
 //! the session-restore resume driver + crashed-restore detection, and
-//! the `:dump-scrollback` diagnostic. Every method
-//! here is called from at least one sibling module (`actions`,
-//! `key_dispatch`, `commands`, `tasks`, `render`, `pager_handler`,
-//! `loop_steps`, `session`), so all are `pub`.
+//! the `:dump-scrollback` diagnostic. The methods here are called from
+//! sibling modules (`actions`, `key_dispatch`, `commands`, `tasks`, `render`,
+//! `pager_handler`, `loop_steps`, `session`), so they're `pub` (or
+//! `pub(super)` for the one that only a sibling needs).
 
 use std::time::Duration;
 

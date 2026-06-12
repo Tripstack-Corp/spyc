@@ -40,8 +40,10 @@ impl App {
     /// Mint a `SinkId` and build the pane's wake closure: a cheap
     /// non-blocking send of `Message::PaneOutput { tab }` onto the unified
     /// channel. Before `run()` installs `pane_wake_tx` (the test harness and
-    /// any pre-run spawn) this returns a no-op — harmless, since the poll
-    /// floor (or, post-PR2, `MAX_IDLE_CAP`) still services such panes.
+    /// any pre-run spawn) this returns a no-op — harmless, because nothing is
+    /// running the event loop yet, so there is no idle to service (the poll
+    /// floor / `MAX_IDLE_CAP` that once backstopped this were removed in MVU
+    /// Phase 3c/3d).
     pub(crate) fn make_pane_wake(&mut self) -> PaneWake {
         let tab = self.alloc_sink_id();
         match &self.runtime.pane_wake_tx {
@@ -60,7 +62,8 @@ impl App {
     /// the fresh `pending` flag is the edge the `PtyHost` reader CASes and
     /// the main loop clears (`clear_wake_pending`). Install it on the host
     /// via `host.set_wake(...)`. No-op fire before `run()` installs the
-    /// sender (the floor / `MAX_IDLE_CAP` still services such hosts).
+    /// sender — harmless: nothing is looping pre-`run()` (the old poll floor /
+    /// `MAX_IDLE_CAP` backstop is gone, MVU Phase 3c/3d).
     pub(crate) fn make_sink_wake(&mut self) -> crate::pane::pty_host::Wake {
         let sink = self.alloc_sink_id();
         let fire: PaneWake = match &self.runtime.pane_wake_tx {
