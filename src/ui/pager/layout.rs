@@ -99,26 +99,6 @@ pub(super) fn prev_word_start(chars: &[char], col: usize) -> Option<usize> {
     Some(i)
 }
 
-/// Index of the last word-start char in `chars`. Used by `b` when
-/// the cursor wraps to the previous row.
-pub(super) fn last_word_start(chars: &[char]) -> Option<usize> {
-    if chars.is_empty() {
-        return None;
-    }
-    let mut i = chars.len() - 1;
-    while i > 0 && word_class(chars[i]) == 0 {
-        i -= 1;
-    }
-    if word_class(chars[i]) == 0 {
-        return None;
-    }
-    let cur_class = word_class(chars[i]);
-    while i > 0 && word_class(chars[i - 1]) == cur_class {
-        i -= 1;
-    }
-    Some(i)
-}
-
 /// Count the number of visual rows `line` will occupy when wrapped
 /// at `width`. Mirrors `wrap_line`'s greedy hard-break policy
 /// (cells are filled left-to-right, breaks happen at the first

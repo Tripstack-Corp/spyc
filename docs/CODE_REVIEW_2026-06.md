@@ -950,7 +950,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed · ✅ #355 |
 | `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed |
 | `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed |
-| `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed |
+| `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed · ✅ #356 |
 | `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed |
 | `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
 | `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed |
@@ -1001,7 +1001,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
 | `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | unverified |
 | `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | unverified |
-| `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | unverified |
+| `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | confirmed · ✅ #356 |
 | `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
 | `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | unverified |
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
@@ -1036,7 +1036,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
 | `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | unverified |
-| `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | unverified |
+| `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | confirmed · ✅ #356 |
 | `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | unverified |
 | `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | unverified |
 | `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | unverified |
@@ -1047,7 +1047,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | unverified |
 | `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
 | `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | unverified |
-| `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | unverified |
+| `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | confirmed · ✅ #356 |
 | `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | unverified |
 | `src/ui/pager/render.rs:25` | Position indicator and title strings computed unconditionally but dead in borderless mode (and use a viewport off by 2 there) | maintainability | unverified |
 | `src/ui/pager/render.rs:249` | Multi-column mode recomputes partition_lines_static up to 3x per keystroke (render, position indicator, clamp) | perf | unverified |

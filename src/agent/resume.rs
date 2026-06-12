@@ -215,7 +215,7 @@ pub fn resolve_claude_resume_target(
         if let Some(tok) = s::extract_claude_resume_token(&banner_lines) {
             if s::is_uuid(&tok) {
                 if s::claude_jsonl_exists(cwd, &tok) {
-                    let name = s::find_claude_session_name_public(&tok);
+                    let name = s::find_claude_session_name(&tok);
                     return (Some(tok), name);
                 }
                 // Banner UUID has no JSONL — fall through.
@@ -249,7 +249,7 @@ pub fn resolve_claude_resume_target(
         if let Some(id) = s::most_recent_jsonl_for_cwd(cwd)
             && !claimed.contains(&id)
         {
-            let name = s::find_claude_session_name_public(&id);
+            let name = s::find_claude_session_name(&id);
             return (Some(id), name);
         }
         (None, None)

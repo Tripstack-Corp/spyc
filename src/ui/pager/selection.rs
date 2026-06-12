@@ -3,7 +3,7 @@
 
 use super::{PagerView, PlacementCursor, Search, VisualKind, VisualSelection};
 
-use super::layout::{last_word_start, line_plain_text, next_word_start, prev_word_start};
+use super::layout::{line_plain_text, next_word_start, prev_word_start};
 
 impl PagerView {
     /// True while the user is selecting a line range with `V`.
@@ -206,7 +206,9 @@ impl PagerView {
             p.col = prev_col;
         } else if let Some(prev_chars) = prev_row_chars {
             p.row = row - 1;
-            p.col = last_word_start(&prev_chars).unwrap_or(0);
+            // End-of-line: the previous word-start is `prev_word_start` from
+            // one-past-the-last char (equivalent to a dedicated last-word scan).
+            p.col = prev_word_start(&prev_chars, prev_chars.len()).unwrap_or(0);
         }
     }
 

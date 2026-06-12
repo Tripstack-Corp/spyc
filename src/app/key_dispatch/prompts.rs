@@ -67,9 +67,9 @@ impl App {
 
         // Tab completion.
         if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
-            // Extract kind and buffer before taking &mut self.
-            let (_kind, buffer) = if let Mode::Prompting(p) = &self.state.mode {
-                (std::mem::discriminant(&p.kind), p.buffer.clone())
+            // Extract the buffer before taking &mut self.
+            let buffer = if let Mode::Prompting(p) = &self.state.mode {
+                p.buffer.clone()
             } else {
                 return Vec::new();
             };
