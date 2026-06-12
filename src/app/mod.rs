@@ -552,6 +552,14 @@ pub struct ViewState {
     pub activity_git_last_ms: u32,
     /// `App::run` process start (activity-monitor uptime).
     pub started_at: std::time::Instant,
+    /// Process-lifetime constants for the activity HUD, snapshotted ONCE at
+    /// construction so the pure `&self` render pass never reads the OS / env
+    /// per frame (the render-purity contract): the pid (for `sample`/lldb),
+    /// the terminal's `$TERM`, and its truecolor capability. None of these
+    /// change after startup.
+    pub hud_pid: u32,
+    pub hud_term: String,
+    pub hud_truecolor: bool,
     /// Cached proc stats refreshed once per 1 s A-monitor tick.
     pub activity_proc_rss_kb: u64,
     pub activity_proc_threads: u32,
@@ -627,6 +635,10 @@ impl ViewState {
             activity_git_results_snap: 0,
             activity_git_last_ms: 0,
             started_at: std::time::Instant::now(),
+            hud_pid: std::process::id(),
+            hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
+            hud_truecolor: std::env::var("COLORTERM")
+                .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
             activity_proc_rss_kb: 0,
             activity_proc_threads: 0,
             tab_state: None,
