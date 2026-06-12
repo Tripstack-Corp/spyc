@@ -117,6 +117,14 @@ enum Message {
     /// pre-recv scan's `agent_status_pending` check, not by this message
     /// surviving — the actual apply stays in `active_agent_status` (render).
     AgentStatusReady,
+    /// Tier 5: an off-thread graveyard op (archive / restore / purge-all,
+    /// `Effect::Graveyard`) finished and pushed its outcome onto
+    /// `runtime.graveyard_results`. Payloadless wake — the outcome rides the
+    /// slot, drained unconditionally by `apply_graveyard_outcomes` in the
+    /// pre-recv scan. Collapses to a Timeout like the other re-scan wakes
+    /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
+    /// message surviving. Same shape as `AgentStatusReady`.
+    GraveyardDone,
 }
 
 /// How long to wait after spawning a restored Claude pane before
@@ -202,6 +210,7 @@ mod focus;
 mod git_state;
 mod git_view_session;
 mod graveyard;
+mod graveyard_ops;
 mod grep_session;
 #[cfg(test)]
 mod harness_tests;
@@ -439,6 +448,12 @@ struct Runtime {
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
     agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Tier 5: landing slot for off-thread graveyard ops (archive / restore /
+    /// purge-all). Each `Effect::Graveyard` worker pushes its
+    /// `GraveyardOutcome` here and wakes the loop with `Message::GraveyardDone`;
+    /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
+    /// concurrent ops never clobber each other — no in-flight guard needed).
+    graveyard_results: std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
 }
 
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived

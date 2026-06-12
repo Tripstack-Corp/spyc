@@ -26,7 +26,7 @@ use crate::Tui;
 use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
-use super::{App, ForegroundExec, PagerReturn, PostAction};
+use super::{App, ForegroundExec, Message, PagerReturn, PostAction, graveyard_ops};
 
 /// A side effect for the run loop to execute. Producers (handlers) return
 /// a `Vec<Effect>` describing *what* should happen; `run_effects` is the
@@ -128,6 +128,15 @@ pub enum Effect {
         on_ok: Option<String>,
         err_prefix: &'static str,
     },
+
+    /// Tier 5. Run a graveyard mutation (archive / restore / purge-all) on a
+    /// detached worker thread — its tar+zstd / trash IO is proportional to the
+    /// tree size and must never block the event loop. The worker pushes a
+    /// `GraveyardOutcome` onto `runtime.graveyard_results` and wakes the loop
+    /// with `Message::GraveyardDone`; `apply_graveyard_outcomes` (pre-recv
+    /// scan) does the flash + listing/graveyard refresh. The cheap prep (which
+    /// paths, which entry, the in-memory entry list) is done by the producer.
+    Graveyard(graveyard_ops::GraveyardOp),
 }
 
 /// Which slice of the active pane's text to materialize (MVU Phase 5).
@@ -568,6 +577,23 @@ impl App {
                     if let Err(e) = fg_result {
                         self.state.flash_error(format!("{program}: {e}"));
                     }
+                }
+                // Tier 5: run the tar+zstd / trash IO on a detached worker —
+                // never the event loop. The worker pushes its outcome onto the
+                // shared slot and wakes the loop; `apply_graveyard_outcomes`
+                // (pre-recv scan) does the flash + refresh. `pane_wake_tx` is
+                // `None` only before `run()` / in the test harness, where there
+                // is no loop to wake — the outcome still lands in the slot.
+                Effect::Graveyard(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.graveyard_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = graveyard_ops::run_graveyard_op(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::GraveyardDone);
+                        }
+                    });
                 }
             }
         }
