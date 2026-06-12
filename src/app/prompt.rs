@@ -26,7 +26,6 @@ pub struct Prompt {
     pub prefix: String,
     pub buffer: String,
     /// When set, this prompt uses the vi line editor with history.
-    #[allow(dead_code)]
     pub editor: Option<LineEditor>,
 }
 
@@ -65,8 +64,8 @@ pub enum PromptKind {
     MoveTo,
     MakeDir,
     NewFile,
-    /// Confirm removal. Only `y` / `yes` (case-insensitive) proceeds;
-    /// anything else is treated as a cancel.
+    /// Confirm removal. Only a single `y`/`Y` keypress proceeds; anything
+    /// else (including Enter/Esc) cancels.
     RemoveConfirm,
     /// Confirm purge-all from the graveyard view (cascade
     /// everything to system trash). Same single-key shape as

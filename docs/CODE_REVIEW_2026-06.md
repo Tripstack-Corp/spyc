@@ -955,7 +955,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
 | `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed |
 | `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed · ✅ #352 |
-| `src/app/mod.rs:491` | Dead ViewState field: pending_overlay_close is never set true | maintainability | confirmed |
+| `src/app/mod.rs:491` | Dead ViewState field: pending_overlay_close is never set true | maintainability | confirmed · ✅ #353 |
 | `src/app/mod.rs:849` | Matcher::matches allocates a lowercased String per candidate name — O(n) allocation churn per filter/search pass | perf | confirmed · ✅ fixed in #344 (allocation-free ASCII case-insensitive substring fast path; glob skips the lowercasing alloc for already-lowercase ASCII names; non-ASCII keeps `to_lowercase` fallback) |
 | `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed · ✅ #352 |
 | `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed · ✅ #352 |
@@ -968,10 +968,10 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed ✅ #336 |
 | `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed ✅ #337 |
 | `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed · ✅ #352 |
-| `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed |
+| `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed · ✅ #353 |
 | `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed |
 | `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed · ✅ #352 |
-| `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed |
+| `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed · ✅ #353 |
 | `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed · ✅ fixed in #348 (pid + `$TERM` + truecolor are process-lifetime constants — snapshotted once into ViewState at construction; render reads the cache, no per-frame OS/env access) |
 | `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed ✅ #342 |
 | `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed · ✅ #352 |
@@ -985,7 +985,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed |
 | `src/app/state/mod.rs:153` | PagerLines is a single-variant enum that every consumer irrefutably destructures | maintainability | confirmed |
 | `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed |
-| `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed |
+| `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed · ✅ #353 |
 | `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
 | `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed |
 | `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | unverified |
