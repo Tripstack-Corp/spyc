@@ -477,9 +477,10 @@ impl PaneTabs {
     /// stops being a tab and becomes a `BackgroundTask`. Returns
     /// `None` when there are no tabs.
     ///
-    /// The active index is fixed up the same way `remove_at` does
-    /// for closed tabs (slide left when removed-idx < active;
-    /// clamp to last otherwise).
+    /// Because the removed index is always `self.active`, the only fixup
+    /// needed is clamping when it was the last tab — `remove_at`'s
+    /// `removed-idx < active` slide-left case can't occur here (idx == active),
+    /// so it's omitted.
     pub fn take_active(&mut self) -> Option<TabEntry> {
         if self.tabs.is_empty() {
             return None;
@@ -487,12 +488,8 @@ impl PaneTabs {
         let idx = self.active;
         let entry = self.tabs.remove(idx);
         self.fixup_last_active_after_remove(idx);
-        if !self.tabs.is_empty() {
-            if idx < self.active {
-                self.active -= 1;
-            } else if self.active >= self.tabs.len() {
-                self.active = self.tabs.len() - 1;
-            }
+        if !self.tabs.is_empty() && self.active >= self.tabs.len() {
+            self.active = self.tabs.len() - 1;
         }
         Some(entry)
     }

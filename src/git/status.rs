@@ -111,6 +111,13 @@ fn decode_porcelain(porcelain: &str) -> Vec<StatusEntry> {
 #[must_use]
 pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, GitFileStatus> {
     let mut map: HashMap<String, GitFileStatus> = HashMap::new();
+    // Loop-invariant: the trailing-slash-normalized prefix only depends on
+    // `prefix`, so build it once instead of per entry.
+    let pfx = if prefix.is_empty() || prefix.ends_with('/') {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/")
+    };
     for entry in entries {
         let raw_path = entry.rela_path.as_str();
         // Strip the directory prefix to get a path relative to the current
@@ -118,11 +125,6 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
         let filename = if prefix.is_empty() {
             raw_path
         } else {
-            let pfx = if prefix.ends_with('/') {
-                prefix.to_string()
-            } else {
-                format!("{prefix}/")
-            };
             match raw_path.strip_prefix(&pfx) {
                 Some(rest) => rest,
                 None => continue, // not under this directory
