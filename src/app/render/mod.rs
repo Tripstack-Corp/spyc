@@ -535,3 +535,62 @@ mod render_tests {
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 }
+
+#[cfg(test)]
+mod purity_guard {
+    //! Mechanical guard for the CLAUDE.md contract "Render is pure (`&self`);
+    //! the draw pass reads … and mutates nothing." The June-2026 deep review
+    //! found three OS-in-draw violations (`agent_status.rs:80`, `tabs.rs:239`,
+    //! `overlays.rs:215`) where the `&self` draw spawned threads / forked
+    //! `lsof` / read env per frame — each individually plausible, collectively
+    //! a documented invariant that had silently eroded. The fixes (#346–#348)
+    //! moved every side effect to the `&mut` `prepare_*` settle steps or an
+    //! `Effect`. This test stops the regression at write time, the same way
+    //! `mod_rs_stays_decomposed` / the `COMMAND_TABLE` build-error guard turn
+    //! prose rules into failures.
+    //!
+    //! Scope: the PURE DRAW modules only — `inner` / `chrome` / `overlays`.
+    //! `render/mod.rs` is deliberately NOT covered: it holds the `&mut`
+    //! settle (`prepare_frame` / `prepare_panes`), which is exactly where the
+    //! OS kicks legitimately live. As further off-thread fixes land (e.g. the
+    //! remaining Tier-5 `apply.rs` / `clipboard.rs` items), add each newly-pure
+    //! module to `PURE_DRAW` to lock the fix in.
+    //!
+    //! Why a grep test and not clippy `disallowed-methods`: that config is
+    //! crate-global, so it would also fire on the executor / worker bodies that
+    //! SHOULD do this IO. Per-module scoping needs a source scan.
+
+    /// `(label, source)` for each module that must stay free of OS access.
+    const PURE_DRAW: &[(&str, &str)] = &[
+        ("render/inner.rs", include_str!("inner.rs")),
+        ("render/chrome.rs", include_str!("chrome.rs")),
+        ("render/overlays.rs", include_str!("overlays.rs")),
+    ];
+
+    /// High-signal tokens for blocking IO / OS access / thread spawning that
+    /// must never appear in a pure draw pass. Not exhaustive — a backstop for
+    /// the realistic full-path style spyc uses, not a formal proof.
+    const FORBIDDEN: &[&str] = &[
+        "thread::spawn",
+        "std::fs::",
+        "crate::fs::",
+        "read_to_string",
+        "env::var",
+        "Command::new",
+        "process::id",
+    ];
+
+    #[test]
+    fn pure_draw_modules_touch_no_os() {
+        for (label, src) in PURE_DRAW {
+            for pat in FORBIDDEN {
+                assert!(
+                    !src.contains(pat),
+                    "`{label}` contains `{pat}` — the draw pass must stay pure (&self). \
+                     Move the side effect to a `prepare_*` settle step (&mut) or an `Effect`; \
+                     see CLAUDE.md \"Render is pure\" and the #346–#348 fixes."
+                );
+            }
+        }
+    }
+}
