@@ -37,7 +37,10 @@ pub const fn centered_col_width(term_w: u16, ncols: u16) -> u16 {
 /// columns actually fit before calling `centered_col_width`).
 #[must_use]
 pub const fn centered_body_width(term_w: u16) -> u16 {
-    (term_w * CENTERED_W_PCT / 100).saturating_sub(2)
+    // Compute in u32: `term_w * 90` overflows u16 for terminals wider than
+    // 728 columns (panic in debug, silent wrap in release). The result is
+    // always ≤ 0.9·u16::MAX, so the cast back to u16 never truncates.
+    ((term_w as u32 * CENTERED_W_PCT as u32 / 100) as u16).saturating_sub(2)
 }
 
 /// Vi `w`-style word class: alphanumeric + `_`. Whitespace and
@@ -298,5 +301,29 @@ pub(super) fn fit_height_rect(area: Rect, view: &PagerView) -> Rect {
         y: centered.y,
         width: centered.width,
         height,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_body_width_does_not_overflow_on_wide_terminals() {
+        // `term_w * 90` overflows u16 past ~728 columns; the u32 widening
+        // must keep it from panicking (debug) / wrapping (release).
+        for term_w in [728u16, 729, 1000, 4096, u16::MAX] {
+            let w = centered_body_width(term_w);
+            assert!(w <= term_w, "body width {w} exceeds term width {term_w}");
+        }
+        // 100 * 90 / 100 - 2
+        assert_eq!(centered_body_width(100), 88);
+    }
+
+    #[test]
+    fn centered_col_width_does_not_overflow_on_wide_terminals() {
+        // Same multiply, reached via centered_col_width — just must not panic.
+        let _ = centered_col_width(u16::MAX, 3);
+        assert!(centered_col_width(u16::MAX, 1) > 0);
     }
 }

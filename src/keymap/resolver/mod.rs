@@ -361,7 +361,16 @@ impl Resolver {
                     // Treat bare `0` as "start of line" — not meaningful yet; ignore.
                     ResolverOutcome::Ignored
                 } else {
-                    self.count = Some(self.count.unwrap_or(0) * 10 + digit);
+                    // Saturate rather than overflow: a pathologically long digit
+                    // run (e.g. holding a key) would otherwise panic in debug and
+                    // silently wrap in release. A count of u32::MAX is already far
+                    // past any real listing, so saturation is harmless.
+                    self.count = Some(
+                        self.count
+                            .unwrap_or(0)
+                            .saturating_mul(10)
+                            .saturating_add(digit),
+                    );
                     ResolverOutcome::Pending
                 }
             }
