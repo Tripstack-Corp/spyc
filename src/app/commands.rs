@@ -158,18 +158,39 @@ pub(super) fn cmd_graveyard(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// Outcome of parsing an optional numeric task-id `:command` argument.
+enum TaskIdArg {
+    /// No argument — use the command's "most-recent / default" path.
+    Default,
+    /// A valid numeric id.
+    Id(u32),
+    /// Non-numeric arg — `parse_task_id_arg` has already flashed the error;
+    /// the caller should no-op.
+    Invalid,
+}
+
+/// Parse the optional task-id argument shared by `:fg` / `:task` /
+/// `:task-to-pane` / `:pause` / `:resume`. On a non-numeric arg, flashes
+/// "`cmd`: expected task id (got …)" and returns [`TaskIdArg::Invalid`].
+fn parse_task_id_arg(app: &mut App, args: &str, cmd: &str) -> TaskIdArg {
+    if args.is_empty() {
+        TaskIdArg::Default
+    } else if let Ok(id) = args.parse::<u32>() {
+        TaskIdArg::Id(id)
+    } else {
+        app.state
+            .flash_error(format!("{cmd}: expected task id (got {args:?})"));
+        TaskIdArg::Invalid
+    }
+}
+
 /// `:fg [N]` — bring a backgrounded task back to the foreground. No arg =
 /// most-recently-backgrounded task; numeric arg = id.
 pub(super) fn cmd_fg(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.is_empty() {
-        app.foreground_task(None);
-    } else {
-        match args.parse::<u32>() {
-            Ok(id) => app.foreground_task(Some(id)),
-            Err(_) => app
-                .state
-                .flash_error(format!("fg: expected task id (got {args:?})")),
-        }
+    match parse_task_id_arg(app, args, "fg") {
+        TaskIdArg::Default => app.foreground_task(None),
+        TaskIdArg::Id(id) => app.foreground_task(Some(id)),
+        TaskIdArg::Invalid => {}
     }
     Vec::new()
 }
@@ -178,15 +199,10 @@ pub(super) fn cmd_fg(app: &mut App, args: &str) -> Vec<Effect> {
 /// pty keeps running through the transition; we attach a vt100 emulator and
 /// register it in `pane_tabs`. No arg = most-recent task; numeric arg = id.
 pub(super) fn cmd_task_to_pane(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.is_empty() {
-        app.promote_task_to_pane(None);
-    } else {
-        match args.parse::<u32>() {
-            Ok(id) => app.promote_task_to_pane(Some(id)),
-            Err(_) => app
-                .state
-                .flash_error(format!("task-to-pane: expected task id (got {args:?})")),
-        }
+    match parse_task_id_arg(app, args, "task-to-pane") {
+        TaskIdArg::Default => app.promote_task_to_pane(None),
+        TaskIdArg::Id(id) => app.promote_task_to_pane(Some(id)),
+        TaskIdArg::Invalid => {}
     }
     Vec::new()
 }
@@ -236,15 +252,10 @@ pub(super) fn cmd_grep(app: &mut App, args: &str) -> Vec<Effect> {
 /// `:task [N]` — open the task viewer (peek mode). No arg picks the most-recent
 /// task; numeric arg targets a specific id.
 pub(super) fn cmd_task(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.is_empty() {
-        app.open_task_viewer(None);
-    } else {
-        match args.parse::<u32>() {
-            Ok(id) => app.open_task_viewer(Some(id)),
-            Err(_) => app
-                .state
-                .flash_error(format!("task: expected task id (got {args:?})")),
-        }
+    match parse_task_id_arg(app, args, "task") {
+        TaskIdArg::Default => app.open_task_viewer(None),
+        TaskIdArg::Id(id) => app.open_task_viewer(Some(id)),
+        TaskIdArg::Invalid => {}
     }
     Vec::new()
 }
@@ -252,27 +263,19 @@ pub(super) fn cmd_task(app: &mut App, args: &str) -> Vec<Effect> {
 /// `:pause [N]` — pause a backgrounded task via SIGSTOP to its process group.
 /// No arg = most-recent task; numeric = id.
 pub(super) fn cmd_pause(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.is_empty() {
-        app.pause_task(None)
-    } else if let Ok(id) = args.parse::<u32>() {
-        app.pause_task(Some(id))
-    } else {
-        app.state
-            .flash_error(format!("pause: expected task id (got {args:?})"));
-        Vec::new()
+    match parse_task_id_arg(app, args, "pause") {
+        TaskIdArg::Default => app.pause_task(None),
+        TaskIdArg::Id(id) => app.pause_task(Some(id)),
+        TaskIdArg::Invalid => Vec::new(),
     }
 }
 
 /// `:resume [N]` — resume a paused backgrounded task via SIGCONT.
 pub(super) fn cmd_resume(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.is_empty() {
-        app.resume_task(None)
-    } else if let Ok(id) = args.parse::<u32>() {
-        app.resume_task(Some(id))
-    } else {
-        app.state
-            .flash_error(format!("resume: expected task id (got {args:?})"));
-        Vec::new()
+    match parse_task_id_arg(app, args, "resume") {
+        TaskIdArg::Default => app.resume_task(None),
+        TaskIdArg::Id(id) => app.resume_task(Some(id)),
+        TaskIdArg::Invalid => Vec::new(),
     }
 }
 

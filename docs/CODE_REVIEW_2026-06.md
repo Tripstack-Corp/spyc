@@ -945,7 +945,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 |---|---|---|---|
 | `src/agent/resume.rs:224` | Claude resume token from untrusted pane scrollback is stored unvalidated in the non-UUID branch | security | unverified ✅ #339 |
 | `src/app/bootstrap.rs:36` | Double-failure startup flash concatenates two error messages with no separator | correctness | confirmed |
-| `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed |
+| `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed · ✅ #358 |
 | `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed · ✅ #355 |
 | `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed · ✅ #355 |
 | `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed |
