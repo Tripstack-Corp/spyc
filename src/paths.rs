@@ -61,6 +61,12 @@ fn expand_tilde(s: &str, home: Option<&str>) -> String {
     let Some(rest) = s.strip_prefix('~') else {
         return s.to_string();
     };
+    // Only a bare `~` or `~/…` expands to $HOME. `~user` (tilde followed by
+    // anything other than `/`) names *another* user's home, which we don't
+    // resolve — leave it verbatim rather than mangling it into `$HOME/user`.
+    if !rest.is_empty() && !rest.starts_with('/') {
+        return s.to_string();
+    }
     let Some(home) = home else {
         return s.to_string();
     };
@@ -191,6 +197,17 @@ mod tests {
             expand("~/foo/bar"),
             PathBuf::from(format!("{home}/foo/bar"))
         );
+    }
+
+    #[test]
+    fn tilde_user_is_left_verbatim_not_mangled() {
+        // `~user` names another user's home, which we don't resolve — it must
+        // be returned unchanged, never rewritten to `$HOME/user`.
+        assert_eq!(expand_tilde("~alice/foo", Some("/home/me")), "~alice/foo");
+        assert_eq!(expand_tilde("~root", Some("/home/me")), "~root");
+        // Bare `~` and `~/…` still expand.
+        assert_eq!(expand_tilde("~", Some("/home/me")), "/home/me");
+        assert_eq!(expand_tilde("~/foo", Some("/home/me")), "/home/me/foo");
     }
 
     #[test]

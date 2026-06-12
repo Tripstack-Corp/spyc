@@ -999,7 +999,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | unverified |
 | `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
 | `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
-| `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | unverified |
+| `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | confirmed · ✅ #361 |
 | `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | confirmed · ✅ #357 |
 | `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | confirmed · ✅ #356 |
 | `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
@@ -1028,7 +1028,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | confirmed · ✅ #355 |
 | `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
 | `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed · ✅ #357 |
-| `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | unverified |
+| `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | confirmed · ✅ #361 |
 | `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | unverified |
 | `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | unverified |
 | `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | confirmed · ✅ #354 |
