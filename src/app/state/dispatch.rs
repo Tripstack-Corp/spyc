@@ -279,13 +279,18 @@ impl AppState {
     pub fn dispatch_prompt(&mut self, kind: &PromptKind, buffer: &str) -> PromptResult {
         match kind {
             PromptKind::PatternPick => {
-                if let Ok(pat) = glob::Pattern::new(buffer) {
-                    for e in &self.listing.entries {
-                        if pat.matches(&e.name) {
-                            self.picks.insert(&e.path);
+                match glob::Pattern::new(buffer) {
+                    Ok(pat) => {
+                        for e in &self.listing.entries {
+                            if pat.matches(&e.name) {
+                                self.picks.insert(&e.path);
+                            }
                         }
+                        self.list_generation = self.list_generation.wrapping_add(1);
                     }
-                    self.list_generation = self.list_generation.wrapping_add(1);
+                    // Don't swallow an invalid glob — tell the user why nothing
+                    // got picked instead of silently no-op'ing.
+                    Err(e) => self.flash_error(format!("bad pattern: {e}")),
                 }
                 PromptResult::Handled
             }

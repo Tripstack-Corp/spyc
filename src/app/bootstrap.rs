@@ -31,10 +31,15 @@ impl App {
         };
         let (listing, start_error) = match Listing::read(&cwd) {
             Ok(l) => (l, start_error),
-            Err(e) => (
-                Listing::empty(cwd.clone()),
-                Some(start_error.unwrap_or_default() + &format!("{e}")),
-            ),
+            Err(e) => {
+                // Join with a separator when a cwd-fallback note is already
+                // present, else the two messages run together ("…$HOMEfailed…").
+                let combined = match start_error {
+                    Some(prev) => format!("{prev}; {e}"),
+                    None => format!("{e}"),
+                };
+                (Listing::empty(cwd.clone()), Some(combined))
+            }
         };
         // Defer the initial git-status read to the background worker
         // (kicked off after AppState is built, below). Previously

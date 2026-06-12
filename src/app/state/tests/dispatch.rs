@@ -9,6 +9,28 @@ fn cmd_empty_is_handled() {
 }
 
 #[test]
+fn pattern_pick_bad_glob_flashes_error() {
+    let mut s = state_with_rows(&["foo.rs", "bar.txt"]);
+    // `[` is an unterminated character class — an invalid glob.
+    let r = s.dispatch_prompt(&PromptKind::PatternPick, "[");
+    assert!(matches!(r, PromptResult::Handled));
+    assert!(
+        s.flash.as_ref().is_some_and(|f| f.text.contains("pattern")),
+        "expected a bad-pattern flash, got {:?}",
+        s.flash
+    );
+}
+
+#[test]
+fn pattern_pick_good_glob_selects_and_no_error() {
+    let mut s = state_with_rows(&["foo.rs", "bar.txt", "baz.rs"]);
+    let r = s.dispatch_prompt(&PromptKind::PatternPick, "*.rs");
+    assert!(matches!(r, PromptResult::Handled));
+    // A valid pattern doesn't flash an error.
+    assert!(s.flash.is_none(), "unexpected flash: {:?}", s.flash);
+}
+
+#[test]
 fn cmd_quit_defers_to_app() {
     // :q / :quit are App-layer commands now — they need save_session
     // and the double-tap confirm, neither of which the pure-domain
