@@ -1,8 +1,8 @@
 //! Key sequence resolution.
 //!
-//! Designed to grow: today it handles counts (e.g. `5j`) and a small set of
-//! motion/verb keys. Future milestones will add operators, marks (`m{a-z}` /
-//! `'{a-z}`), search (`/`, `n`, `N`), and user-defined maps from `.spycrc`.
+//! Handles counts (e.g. `5j`), motion/verb keys, vi-style marks (`m{a-z}` /
+//! `'{a-z}`), search (`/`, `n`), and user-defined maps from `.spycrc` (parsed
+//! by the `config::dsl` module). Operators (e.g. `d{motion}`) are not modelled.
 
 pub mod action;
 pub mod resolver;

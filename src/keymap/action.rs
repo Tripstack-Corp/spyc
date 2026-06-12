@@ -112,7 +112,7 @@ pub enum Action {
 
     // Split pane (M8).
     TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
-    ResumePane,         // F11 — open pane with `claude --resume`
+    ResumePane,         // F9 — open pane with `claude --resume`
     PaneFocusDown,      // ^W j — move focus down (to pane)
     PaneFocusUp,        // ^W k — move focus up (to list)
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin

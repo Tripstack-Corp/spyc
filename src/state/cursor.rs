@@ -1,4 +1,4 @@
-/// Cursor position within a listing, plus the grid width used for h/l motion.
+/// Cursor position within a listing: the selected index and the viewport's top row.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Cursor {
     /// Flat index into the listing.

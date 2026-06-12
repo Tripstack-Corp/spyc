@@ -54,8 +54,9 @@ impl Marks {
         toml::from_str(&text).unwrap_or_default()
     }
 
-    /// Serialize and write atomically-ish. Creates the parent directory
-    /// if needed.
+    /// Serialize and write the marks file. Creates the parent directory if
+    /// needed. Not atomic — a plain `fs::write`, like the other state saves; a
+    /// crash mid-write can leave a truncated file (acceptable for marks).
     pub fn save(&self) -> std::io::Result<()> {
         let Some(path) = Self::disk_path() else {
             return Ok(());
