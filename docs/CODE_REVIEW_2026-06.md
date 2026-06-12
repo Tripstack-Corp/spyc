@@ -978,9 +978,9 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
 | `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed ✅ #336 |
 | `src/app/sources.rs:91` | coalesce_recv repeats the identical coalesce-and-synthesize-Timeout tail in five match arms | maintainability | confirmed |
-| `src/app/state/apply.rs:73` | HOME resolved from raw process env, bypassing :setenv overrides honored elsewhere | correctness | confirmed |
+| `src/app/state/apply.rs:73` | HOME resolved from raw process env, bypassing :setenv overrides honored elsewhere | correctness | confirmed · ✅ #362 |
 | `src/app/state/apply.rs:95` | Take success/error classified by string-prefix match on the flash message | maintainability | confirmed |
-| `src/app/state/dispatch.rs:66` | HOME read bypasses envset in :cd and gh, inconsistent with StartShell in the same producers | maintainability | confirmed |
+| `src/app/state/dispatch.rs:66` | HOME read bypasses envset in :cd and gh, inconsistent with StartShell in the same producers | maintainability | confirmed · ✅ #362 |
 | `src/app/state/dispatch.rs:236` | Sort-apply logic triplicated across :sort reverse, :sort <mode>, and :set sort= | maintainability | confirmed |
 | `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed |
 | `src/app/state/mod.rs:153` | PagerLines is a single-variant enum that every consumer irrefutably destructures | maintainability | confirmed |

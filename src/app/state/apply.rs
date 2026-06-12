@@ -78,7 +78,10 @@ impl AppState {
             // -- Navigation --
             Action::Climb => return ApplyResult::Post(self.climb()),
             Action::Home => {
-                if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+                // Resolve HOME through the envset layer so a `:setenv HOME=…`
+                // override is honored here just as it is for `:cd` and the
+                // shell spawn (envset::var falls back to the real env).
+                if let Some(home) = crate::envset::var("HOME").map(PathBuf::from) {
                     return ApplyResult::Post(vec![Effect::ChangeDir {
                         path: home,
                         focus: None,
