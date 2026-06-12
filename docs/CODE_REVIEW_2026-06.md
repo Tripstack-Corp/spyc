@@ -1013,7 +1013,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/git/status.rs:121` | map_to_listing rebuilds the loop-invariant prefix string for every status entry | maintainability | confirmed · ✅ #357 |
 | `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | confirmed · ✅ #354 |
 | `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | confirmed · ✅ #354 |
-| `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | unverified |
+| `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | confirmed · ✅ #359 |
 | `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | confirmed · ✅ #355 |
 | `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
 | `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | unverified |
@@ -1046,7 +1046,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | confirmed · ✅ #355 |
 | `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | unverified |
 | `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
-| `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | unverified |
+| `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | confirmed · ✅ #359 |
 | `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | confirmed · ✅ #356 |
 | `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | unverified |
 | `src/ui/pager/render.rs:25` | Position indicator and title strings computed unconditionally but dead in borderless mode (and use a viewport off by 2 there) | maintainability | unverified |

@@ -148,4 +148,18 @@ fn large_count() {
     );
 }
 
+#[test]
+fn pathological_count_saturates_without_overflow() {
+    // A digit run far longer than u32 can hold must not panic (debug) or
+    // wrap (release) — the accumulator saturates at u32::MAX.
+    let mut r = Resolver::new();
+    for _ in 0..40 {
+        feed(&mut r, key('9'));
+    }
+    assert_eq!(
+        feed(&mut r, key('j')),
+        ResolverOutcome::Action(Action::Down(u32::MAX as usize))
+    );
+}
+
 // ── gg sequence ───────────────────────────────────────────────
