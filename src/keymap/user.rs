@@ -114,10 +114,6 @@ pub enum BoundAction {
     UnixCmd(String),
     PatternPick(String),
     Jump(String),
-    #[allow(dead_code)]
-    Copy(String),
-    #[allow(dead_code)]
-    Move(String),
     ToggleMaskFixed(u8),
 }
 
@@ -129,8 +125,6 @@ impl BoundAction {
             Self::UnixCmd(cmd) => format!("shell: {cmd}"),
             Self::PatternPick(pat) => format!("pick pattern {pat}"),
             Self::Jump(path) => format!("jump to {path}"),
-            Self::Copy(dest) => format!("copy to {dest}"),
-            Self::Move(dest) => format!("move to {dest}"),
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
         }
     }
@@ -143,10 +137,7 @@ impl BoundAction {
     /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
     /// are not executing.
     pub const fn is_executing(&self) -> bool {
-        matches!(
-            self,
-            Self::UnixCmd(_) | Self::Jump(_) | Self::Copy(_) | Self::Move(_)
-        )
+        matches!(self, Self::UnixCmd(_) | Self::Jump(_))
     }
 }
 

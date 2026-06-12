@@ -157,16 +157,6 @@ impl Listing {
             })
         });
     }
-
-    #[allow(dead_code)]
-    pub const fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    #[allow(dead_code)]
-    pub const fn len(&self) -> usize {
-        self.entries.len()
-    }
 }
 
 #[cfg(test)]

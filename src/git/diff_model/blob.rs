@@ -54,13 +54,7 @@ pub fn commit_meta(commit: &gix::Commit<'_>) -> Option<CommitMeta> {
 /// Shared with [`crate::git::blame`] for the blame date column. (`pub`, not
 /// `pub(crate)`: the enclosing `git` module is private, so clippy's
 /// `redundant_pub_crate` rejects `pub(crate)` here.)
-pub fn format_git_time_pub(time: gix::date::Time) -> String {
-    format_git_time(time)
-}
-
-/// Format a gix commit/author time as `YYYY-MM-DD HH:MM:SS ±HH:MM` in the
-/// recorded timezone offset (matching `git`'s default date display), via jiff.
-fn format_git_time(time: gix::date::Time) -> String {
+pub fn format_git_time(time: gix::date::Time) -> String {
     let secs = time.seconds;
     let offset = jiff::tz::Offset::from_seconds(time.offset).unwrap_or(jiff::tz::Offset::UTC);
     let Ok(ts) = jiff::Timestamp::from_second(secs) else {

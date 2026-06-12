@@ -30,11 +30,8 @@ use super::{App, ForegroundExec, Message, PagerReturn, PostAction, graveyard_ops
 
 /// A side effect for the run loop to execute. Producers (handlers) return
 /// a `Vec<Effect>` describing *what* should happen; `run_effects` is the
-/// only place that *does* it. `#[non_exhaustive]` so Phase 5 can add the
-/// class-D subscription variants (`SpawnPane`, `ResizePane`, …) without a
-/// breaking match. The empty `Vec` is the no-op (there is no `None`
-/// variant) — see `From<PostAction>`.
-#[non_exhaustive]
+/// only place that *does* it. The empty `Vec` is the no-op (there is no
+/// `None` variant) — see `From<PostAction>`.
 #[derive(Debug)]
 pub enum Effect {
     /// Tear the TUI down, run a child in the foreground, restore. The
