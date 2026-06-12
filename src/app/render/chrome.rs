@@ -184,7 +184,7 @@ impl App {
                     (TaskStatus::Running, true) => ("+", bg_unread_color),
                     (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
                     (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
-                    (TaskStatus::Exited(_) | TaskStatus::Killed | TaskStatus::Crashed(_), _) => {
+                    (TaskStatus::Exited(_) | TaskStatus::Crashed(_), _) => {
                         ("\u{2717}", bg_err_color)
                     }
                 }

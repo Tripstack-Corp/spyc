@@ -443,10 +443,6 @@ impl App {
             // any draft prompt the user has typed, even when focus is on the
             // file list (the text is still in Claude's input buffer).
 
-            // Overlay dismissal goes through overlay_awaiting_dismiss (stays
-            // visible until Enter); pending_overlay_close is inert here.
-            let _ = self.view.pending_overlay_close;
-
             // MVU Phase 3c: drain the streaming pull sources (extracted to
             // streaming.rs). Each returns whether it needs a redraw. These
             // wake the channel themselves now (`SinkOutput`), so the poll

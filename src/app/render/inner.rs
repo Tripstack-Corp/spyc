@@ -190,7 +190,7 @@ impl App {
         // The scrollback lives in its own slot, independent of the help
         // overlay's `view.pager` stash.
         let bottom_is_pager = self.view.scroll_pager.is_some();
-        let bottom_pane_rect: Option<ratatui::layout::Rect> = if let Some(rect) = layout.pane {
+        if let Some(rect) = layout.pane {
             self.render_bottom_region(frame, rect, false);
             // output_dirty cleared in `prepare_panes`.
             // Quick Select labels paint *over* the live pane widget so the user
@@ -198,15 +198,9 @@ impl App {
             if self.view.quick_select.is_some() && !bottom_is_pager {
                 self.render_quick_select_overlay(frame, rect);
             }
-            Some(rect)
-        } else {
-            None
-        };
-        // Cursor placement for the bottom-pane branch is folded into
-        // the `with_screen` block above (single lock window for grid
-        // + cursor). `bottom_pane_rect` is still computed so other
-        // branches that need the geometry can read it.
-        let _ = bottom_pane_rect;
+        }
+        // Cursor placement for the bottom-pane branch is folded into the
+        // `with_screen` block above (single lock window for grid + cursor).
 
         if let Some(divider_rect) = layout.divider {
             self.render_pane_status_line(frame, divider_rect);

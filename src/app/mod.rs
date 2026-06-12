@@ -511,7 +511,6 @@ pub struct ViewState {
     /// `gg` arming for the graveyard view (jump to top).
     pub graveyard_pending_g: bool,
     pub overlay_awaiting_dismiss: bool,
-    pub pending_overlay_close: bool,
     /// TTL cache for the active pane's status-line session short-id.
     // Module-private (type `AgentStatusCache` is module-private); the
     // `app::*` descendant modules still reach it via `self.view.…`.
@@ -613,7 +612,6 @@ impl ViewState {
             graveyard_pending_d: false,
             graveyard_pending_g: false,
             overlay_awaiting_dismiss: false,
-            pending_overlay_close: false,
             agent_status_cache: None,
             pending_history_pick: None,
             pending_jump_history: None,

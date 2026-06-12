@@ -23,11 +23,7 @@ pub enum TaskStatus {
     Running,
     /// Child exited cleanly (or with non-zero status); inner is the code.
     Exited(i32),
-    /// User killed the task (M2's `:bg` `R`-action).
-    #[allow(dead_code)]
-    Killed,
     /// `child.wait()` returned an error -- inner is the message.
-    #[allow(dead_code)]
     Crashed(String),
 }
 
@@ -54,7 +50,7 @@ pub struct BackgroundTask {
     /// fresh output to look at.
     pub has_unread_output: bool,
     /// Set true once the user opens the task in the task viewer
-    /// (`[t`/`]t`, `gB`, or `:task N`). Combined with `Exited`/`Killed`
+    /// (`[t`/`]t`, `gB`, or `:task N`). Combined with `Exited`/`Crashed`
     /// status, this is what triggers the on-close promotion to buffer
     /// history -- viewing acts as the user's "I've seen this" ack.
     pub viewed_in_task_viewer: bool,
@@ -558,7 +554,7 @@ impl App {
                     .flash_info(format!("task #{id} resumed — ^Z to background again"));
             }
             status => {
-                // Exited / Killed / Crashed -- open a static pager with
+                // Exited / Crashed -- open a static pager with
                 // the buffered output and a final-state title.
                 use ansi_to_tui::IntoText;
                 let normalized = strip_crlf(&task.buffer);
@@ -570,7 +566,6 @@ impl App {
                 let status_text = match &status {
                     TaskStatus::Exited(0) => "exit 0".to_string(),
                     TaskStatus::Exited(code) => format!("exit {code}"),
-                    TaskStatus::Killed => "killed".to_string(),
                     TaskStatus::Crashed(msg) => format!("error: {msg}"),
                     TaskStatus::Running => unreachable!(),
                 };
@@ -614,7 +609,6 @@ impl App {
             TaskStatus::Running => ("\u{23f3}", format!("running ({elapsed}s)")), // ⏳
             TaskStatus::Exited(0) => ("\u{2713}", format!("exit 0 ({elapsed}s)")), // ✓
             TaskStatus::Exited(code) => ("\u{2717}", format!("exit {code} ({elapsed}s)")), // ✗
-            TaskStatus::Killed => ("\u{2717}", format!("killed ({elapsed}s)")),
             TaskStatus::Crashed(msg) => ("\u{2717}", format!("error: {msg} ({elapsed}s)")),
         };
         let title = format!("{glyph} [task #{id}] {} — {status_text}", task.cmd_display);
