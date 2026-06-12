@@ -10,7 +10,15 @@ use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
 
 use super::{AppState, ApplyResult, PagerLines, PagerRequest};
 
-use super::count_files_in_dir;
+use super::count_files_in_dir_capped;
+
+/// Upper bound on the recursive file count surfaced by the `R` confirm prompt.
+/// The count is purely informational ("remove DIR (recursive, N file(s))?"), so
+/// once the tree is "obviously huge" the exact number stops mattering — we cap
+/// the walk here to keep the pure `apply` off the blocking-IO-on-input path
+/// (a `node_modules` / `target/` would otherwise freeze the loop). At/over the
+/// cap the prompt shows `N+`.
+const REMOVE_COUNT_CAP: u64 = 50_000;
 
 impl AppState {
     /// Handle the pure-domain arms of `Action` dispatch.
@@ -278,20 +286,30 @@ impl AppState {
                     match std::fs::symlink_metadata(p) {
                         Ok(md) if md.is_dir() => {
                             dir_count += 1;
-                            dir_files += count_files_in_dir(p);
+                            // Walk only up to the remaining budget so the whole
+                            // count stays bounded by REMOVE_COUNT_CAP across all
+                            // selected dirs (one huge tree can't freeze the loop).
+                            let remaining = REMOVE_COUNT_CAP.saturating_sub(dir_files);
+                            dir_files += count_files_in_dir_capped(p, remaining);
                         }
                         _ => file_count += 1,
                     }
                 }
+                // At/over the cap the exact number is unknown — show `N+`.
+                let files_str = if dir_files >= REMOVE_COUNT_CAP {
+                    format!("{REMOVE_COUNT_CAP}+")
+                } else {
+                    dir_files.to_string()
+                };
                 let prompt = if dir_count == 0 {
                     format!("remove {file_count} file(s)? (y/N): ")
                 } else if file_count == 0 && dir_count == 1 {
-                    format!("remove DIR (recursive, {dir_files} file(s))? (y/N): ")
+                    format!("remove DIR (recursive, {files_str} file(s))? (y/N): ")
                 } else if file_count == 0 {
-                    format!("remove {dir_count} dir(s) (recursive, {dir_files} file(s))? (y/N): ")
+                    format!("remove {dir_count} dir(s) (recursive, {files_str} file(s))? (y/N): ")
                 } else {
                     format!(
-                        "remove {file_count} file(s) + {dir_count} dir(s) (recursive, {dir_files} file(s))? (y/N): "
+                        "remove {file_count} file(s) + {dir_count} dir(s) (recursive, {files_str} file(s))? (y/N): "
                     )
                 };
                 // Capture the targeted paths so the list view can
