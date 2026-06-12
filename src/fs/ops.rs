@@ -402,6 +402,21 @@ fn magic_label(head: &[u8]) -> Option<&'static str> {
 /// binary into memory.
 const HEX_CAP: usize = 64 * 1024;
 
+/// Read up to `cap` bytes from `path` for the hex view. The second tuple
+/// element is whether the file has *more* content beyond `cap` (so the caller
+/// can flag the dump as truncated). Uses `read_to_end` over a `take(cap)` so a
+/// short `read()` doesn't under-fill the buffer, then probes one extra byte: a
+/// file that ends exactly at `cap` is complete, not truncated.
+fn read_hex_window(path: &Path, cap: usize) -> io::Result<(Vec<u8>, bool)> {
+    use std::io::Read as _;
+    let mut f = fs::File::open(path)?;
+    let mut buf = Vec::new();
+    (&mut f).take(cap as u64).read_to_end(&mut buf)?;
+    let mut probe = [0u8; 1];
+    let truncated = matches!(f.read(&mut probe), Ok(n) if n > 0);
+    Ok((buf, truncated))
+}
+
 /// Read up to `HEX_CAP` bytes from `path` and format as a hex dump.
 /// Returns styled lines ready for the pager: each line split into
 /// offset (dim), hex bytes (default), and ASCII sidebar (warm).
@@ -415,10 +430,7 @@ pub fn hex_dump_lines(
         text::{Line, Span},
     };
 
-    let mut f = fs::File::open(path)?;
-    let mut buf = vec![0u8; HEX_CAP];
-    let n = f.read(&mut buf)?;
-    buf.truncate(n);
+    let (buf, truncated) = read_hex_window(path, HEX_CAP)?;
 
     let hex_str = config_hex(
         &buf,
@@ -464,9 +476,9 @@ pub fn hex_dump_lines(
         }
     }
 
-    if n >= HEX_CAP {
+    if truncated {
         lines.push(Line::from(Span::styled(
-            format!("... truncated at {HEX_CAP} bytes ({n} read)"),
+            format!("... truncated at {HEX_CAP} bytes"),
             offset_style,
         )));
     }
@@ -480,6 +492,32 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn read_hex_window_not_truncated_when_file_ends_exactly_at_cap() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("exact.bin");
+        File::create(&path)
+            .unwrap()
+            .write_all(&[0xABu8; 8])
+            .unwrap();
+        let (buf, truncated) = read_hex_window(&path, 8).unwrap();
+        assert_eq!(buf.len(), 8);
+        assert!(!truncated, "a file ending exactly at cap is complete");
+    }
+
+    #[test]
+    fn read_hex_window_truncated_when_file_exceeds_cap() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("over.bin");
+        File::create(&path)
+            .unwrap()
+            .write_all(&[0xABu8; 9])
+            .unwrap();
+        let (buf, truncated) = read_hex_window(&path, 8).unwrap();
+        assert_eq!(buf.len(), 8);
+        assert!(truncated);
+    }
 
     #[test]
     fn read_truncated_returns_full_content_when_under_cap() {

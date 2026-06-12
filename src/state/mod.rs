@@ -141,18 +141,23 @@ pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Resul
     let mut f = std::fs::File::open(path)?;
     let len = f.metadata()?.len();
     let start = len.saturating_sub(max_bytes);
-    if start > 0 {
-        f.seek(SeekFrom::Start(start))?;
+    if start == 0 {
+        // Whole file fits in the budget — return it verbatim.
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf)?;
+        return Ok(String::from_utf8_lossy(&buf).into_owned());
     }
+    // Seek to one byte *before* the window so we can tell whether the window
+    // begins exactly at a line boundary: read from `start - 1` and then drop
+    // everything up to and including the first '\n'. If `start - 1` is itself
+    // a '\n' (window starts a fresh line), that newline is at index 0 and we
+    // keep the whole first in-window line; otherwise we land mid-line and the
+    // first '\n' correctly bounds the partial head we discard. (`\n` is one
+    // byte, so `nl + 1` is always a char boundary.)
+    f.seek(SeekFrom::Start(start - 1))?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf).into_owned();
-    if start == 0 {
-        return Ok(text);
-    }
-    // Seek landed mid-line; discard the partial head so the first
-    // parsed line is whole. (`\n` is one byte, so `nl + 1` is always
-    // a char boundary.)
     Ok(match text.find('\n') {
         Some(nl) => text[nl + 1..].to_string(),
         None => String::new(),
@@ -243,6 +248,21 @@ mod tests {
             got.lines().all(|l| l.len() == 4),
             "no partial leading line: {got:?}"
         );
+    }
+
+    #[test]
+    fn tail_keeps_whole_line_when_window_starts_at_line_boundary() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        for i in 0..10 {
+            writeln!(f, "{i:04}").unwrap(); // 5 bytes each, 50 total
+        }
+        // max_bytes = 25 makes the window start at byte 25 = the first byte of
+        // "0005", a clean line boundary. The whole "0005" line must be kept,
+        // not mistaken for a partial head and discarded.
+        let got = read_tail_lossy(f.path(), 25).unwrap();
+        assert!(got.starts_with("0005\n"), "kept the boundary line: {got:?}");
+        assert!(got.ends_with("0009\n"));
+        assert!(got.lines().all(|l| l.len() == 4));
     }
 
     #[cfg(unix)]

@@ -1003,7 +1003,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | confirmed · ✅ #357 |
 | `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | confirmed · ✅ #356 |
 | `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
-| `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | unverified |
+| `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | confirmed · ✅ #360 |
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
 | `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
 | `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | unverified |
@@ -1035,7 +1035,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
-| `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | unverified |
+| `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | confirmed · ✅ #360 |
 | `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | confirmed · ✅ #356 |
 | `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | unverified |
 | `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | unverified |
