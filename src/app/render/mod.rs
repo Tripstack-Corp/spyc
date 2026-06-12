@@ -296,6 +296,13 @@ impl App {
             if !overlay_active {
                 tabs.active_mut().output_dirty = false;
             }
+            // Pick up any landed live-cwd + kick a stale refresh HERE (the
+            // &mut settle point), so the active pane's status line can read
+            // the cache purely in the draw — `cwd_for_pid` is an `lsof`
+            // fork-exec that must never run on the render thread. Only the
+            // active tab's cwd is shown (render_pane_status_line), so only it
+            // is refreshed.
+            tabs.active_tab_mut().refresh_live_cwd();
         }
 
         // Bottom-scrollback first-frame snap: the opener can't know the viewport

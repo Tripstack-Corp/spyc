@@ -3,7 +3,6 @@
 //! `PaneTabs` wraps a `Vec<TabEntry>` and an active-tab index, keeping
 //! all tab lifecycle logic out of `App`.
 
-use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex,
@@ -127,12 +126,12 @@ impl TabInfo {
 pub struct TabEntry {
     pub pane: Pane,
     pub info: TabInfo,
-    /// Last-known live cwd of the child. Interior-mutable so `live_cwd` can
-    /// read/refresh it behind `&self` (it's a cache accessor, not a state
-    /// transition — keeps the render path's `render_pane_status_line` pure).
-    /// Updated from `live_cwd_pending` whenever a background refresh has
-    /// landed. `None` until the first refresh succeeds.
-    live_cwd_cache: RefCell<Option<PathBuf>>,
+    /// Last-known live cwd of the child. A plain cache field: the pure
+    /// `live_cwd` draw read clones it, and the `&mut refresh_live_cwd` kick
+    /// (driven from `prepare_panes`, the pre-draw settle point) updates it
+    /// from `live_cwd_pending` when a background refresh lands. `None` until
+    /// the first refresh succeeds.
+    live_cwd_cache: Option<PathBuf>,
     /// Slot a detached refresh thread writes a freshly-resolved cwd into.
     /// `cwd_for_pid` is a `lsof` fork-exec on macOS (~5–17 ms); running it
     /// inline in the render path stalled the whole event loop once per
@@ -142,9 +141,8 @@ pub struct TabEntry {
     /// True while a background cwd refresh is in flight, so we kick at most
     /// one at a time.
     live_cwd_refreshing: Arc<AtomicBool>,
-    /// When we last kicked a refresh — the `LIVE_CWD_TTL` gate. `Cell` so
-    /// `live_cwd` can update it behind `&self`.
-    live_cwd_kicked_at: Cell<Option<std::time::Instant>>,
+    /// When we last kicked a refresh — the `LIVE_CWD_TTL` gate.
+    live_cwd_kicked_at: Option<std::time::Instant>,
     /// Stashed `^a-v` scrollback pager. Holds the whole `PagerView`
     /// (scroll position, search state, visual selection, line buffer
     /// snapshot — everything) while the user is on another tab so a
@@ -198,41 +196,50 @@ impl TabEntry {
         Self {
             pane,
             info,
-            live_cwd_cache: RefCell::new(None),
+            live_cwd_cache: None,
             live_cwd_pending: Arc::new(Mutex::new(None)),
             live_cwd_refreshing: Arc::new(AtomicBool::new(false)),
-            live_cwd_kicked_at: Cell::new(None),
+            live_cwd_kicked_at: None,
             stashed_scrollback_pager: None,
         }
     }
 
-    /// Live cwd of the subprocess. Returns the last resolved value (or the
-    /// spawn-time cwd until the first refresh lands) **without ever
-    /// blocking**: the actual `cwd_for_pid` lookup — a `lsof` fork-exec on
-    /// macOS — runs on a detached thread, kicked at most once per
-    /// `LIVE_CWD_TTL`. The render path used to call it inline and stall the
-    /// event loop ~once per second; now the result is just picked up on a
-    /// later frame.
+    /// PURE `&self` read for the draw pass: the last resolved live cwd of the
+    /// subprocess, or the spawn-time cwd until the first refresh lands. Never
+    /// blocks, never spawns, never mutates — the landed-result pickup and the
+    /// off-thread `cwd_for_pid` kick live in `refresh_live_cwd`, run from
+    /// `prepare_panes` (the `&mut` pre-draw settle point). Keeping this pure is
+    /// what lets `render_pane_status_line` honor the "render mutates nothing"
+    /// contract (a TestBackend snapshot render no longer forks `lsof`).
     pub fn live_cwd(&self) -> std::path::PathBuf {
-        // Pick up a result a background refresh has landed. Bind the
-        // `take()` first so the `MutexGuard` drops before the body (no lock
-        // held across it).
+        self.live_cwd_cache
+            .clone()
+            .unwrap_or_else(|| self.info.cwd.clone())
+    }
+
+    /// `&mut` settle step (called from `prepare_panes`, NOT the draw): pick up
+    /// any cwd a background refresh has landed, then kick a fresh lookup when
+    /// the cached value is stale and none is in flight. `cwd_for_pid` is a
+    /// `lsof` fork-exec on macOS (~5–17 ms) — it runs on a detached thread, so
+    /// this never blocks the loop; the result is picked up here on a later
+    /// frame. The render path used to do all this inline behind `&self`,
+    /// stalling the event loop ~once per `LIVE_CWD_TTL`.
+    pub fn refresh_live_cwd(&mut self) {
+        // Pick up a result a background refresh has landed. Bind the `take()`
+        // first so the `MutexGuard` drops before the body (no lock held).
         let landed = self.live_cwd_pending.lock().unwrap().take();
-        if let Some(cwd) = landed {
-            *self.live_cwd_cache.borrow_mut() = Some(cwd);
+        if landed.is_some() {
+            self.live_cwd_cache = landed;
         }
-        // Kick a background refresh when the value is stale and none is in
-        // flight — never run the lookup on this (render) thread.
         let now = std::time::Instant::now();
         let stale = self
             .live_cwd_kicked_at
-            .get()
             .is_none_or(|at| now.duration_since(at) >= LIVE_CWD_TTL);
         if stale
             && !self.live_cwd_refreshing.load(Ordering::Acquire)
             && let Some(pid) = self.pane.process_id()
         {
-            self.live_cwd_kicked_at.set(Some(now));
+            self.live_cwd_kicked_at = Some(now);
             self.live_cwd_refreshing.store(true, Ordering::Release);
             let pending = Arc::clone(&self.live_cwd_pending);
             let refreshing = Arc::clone(&self.live_cwd_refreshing);
@@ -243,10 +250,6 @@ impl TabEntry {
                 refreshing.store(false, Ordering::Release);
             });
         }
-        self.live_cwd_cache
-            .borrow()
-            .clone()
-            .unwrap_or_else(|| self.info.cwd.clone())
     }
 }
 
@@ -290,6 +293,13 @@ impl PaneTabs {
 
     pub fn active_mut(&mut self) -> &mut Pane {
         &mut self.tabs[self.active].pane
+    }
+
+    /// `&mut` access to the active tab (not just its pane) — used by the
+    /// pre-draw `prepare_panes` settle step to kick the active tab's live-cwd
+    /// refresh off the render thread.
+    pub fn active_tab_mut(&mut self) -> &mut TabEntry {
+        &mut self.tabs[self.active]
     }
 
     pub fn active_info(&self) -> &TabInfo {
@@ -681,5 +691,25 @@ mod tests {
     fn requires_terminating_bracket() {
         // No closing `]` means it wasn't our suffix; leave alone.
         assert_eq!(strip_exit_suffix("claude [exited 0"), "claude [exited 0");
+    }
+
+    #[test]
+    fn live_cwd_reads_cache_purely_and_refresh_picks_up_landed() {
+        use std::path::PathBuf;
+        use std::sync::atomic::Ordering;
+        let mut entry = dummy_tab();
+        let spawn_cwd = entry.info.cwd.clone();
+        // The pure `&self` draw read returns the spawn-time cwd until the
+        // first refresh lands — and never mutates / spawns.
+        assert_eq!(entry.live_cwd(), spawn_cwd);
+
+        // Seed a landed result and mark a refresh already in flight, so the
+        // `&mut` settle step only PICKS UP the landed value (no
+        // nondeterministic `lsof` kick), then the pure read reflects it.
+        let landed = PathBuf::from("/tmp/spyc-live-cwd-test");
+        *entry.live_cwd_pending.lock().unwrap() = Some(landed.clone());
+        entry.live_cwd_refreshing.store(true, Ordering::Release);
+        entry.refresh_live_cwd();
+        assert_eq!(entry.live_cwd(), landed);
     }
 }
