@@ -470,6 +470,12 @@ impl App {
             if self.apply_landed_agent_status() {
                 ctx.draw.mark(3);
             }
+            // Kick the off-thread refresh HERE (the &mut settle point), not from
+            // the &self draw pass — the resolver spawns a worker that walks
+            // `~/.claude/sessions`, which render must never do (render-purity
+            // contract). No-ops fast when the cache is fresh or a walk is
+            // already in flight.
+            self.kick_agent_status_refresh();
 
             // F-finder: drain any candidate batches the walker
             // worker has pushed since the last tick. Re-rank +
