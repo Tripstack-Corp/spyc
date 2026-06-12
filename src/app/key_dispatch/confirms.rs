@@ -1,146 +1,99 @@
 //! Modal confirm-key handlers (remove, graveyard purge-all, Claude
 //! crash-recover) + undo_last_remove. Split from key_dispatch.rs verbatim.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::fs;
 use crate::pane::{Pane, TabEntry, TabInfo};
-use crate::spyc_debug;
 
-use crate::app::{App, Effect, Mode, Prompt, PromptKind, View};
+use crate::app::graveyard_ops::GraveyardOp;
+use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
 impl App {
     /// Single-key confirmation for `R`. `y` / `Y` triggers the delete;
     /// anything else — including Enter, Esc, or any other letter — cancels.
     /// The prompt closes in every case.
+    ///
+    /// The archive + unlink is the heavy part (tar+zstd of the whole tree,
+    /// seconds-to-minutes for a `target/` / `node_modules/`), so it runs
+    /// OFF-thread via `Effect::Graveyard` — the loop stays live and the result
+    /// flash + listing refresh land later via `apply_graveyard_outcomes`. Only
+    /// the cheap prep (which paths) happens here.
     pub fn handle_remove_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
         self.state.mode = Mode::Normal;
-        // Pull the targeted paths out of the preview slot. This is
-        // the authoritative list (it was computed at prompt time so
-        // `Ndd` ignores any cursor wiggle that might have happened);
-        // selection_paths() would re-derive from current state and
-        // could disagree.
+        // Pull the targeted paths out of the preview slot. This is the
+        // authoritative list (computed at prompt time so `Ndd` ignores any
+        // cursor wiggle); selection_paths() would re-derive from current state
+        // and could disagree. Owned `PathBuf`s so they can move onto the worker.
         let preview = self.state.pending_delete_preview.take();
         if !confirmed {
             return Vec::new();
         }
-        let paths: Vec<&Path> = preview.as_ref().map_or_else(
-            || self.state.selection_paths(),
-            |v| v.iter().map(PathBuf::as_path).collect(),
-        );
+        let paths: Vec<PathBuf> = preview.unwrap_or_else(|| {
+            self.state
+                .selection_paths()
+                .iter()
+                .map(|p| p.to_path_buf())
+                .collect()
+        });
         if paths.is_empty() {
             return Vec::new();
         }
-        // Route through the graveyard: archive each path into
-        // `<uuid>.tar.zst` first, then unlink the source. If the
-        // archive step fails for any path we skip the unlink for
-        // *that* path and surface a clear error — the user keeps
-        // the file. Per-path failures don't stop the rest of the
-        // batch; we report the count at the end.
-        let mut archived = 0usize;
-        let mut failures: Vec<String> = Vec::new();
-        for p in &paths {
-            match crate::state::graveyard::Graveyard::write_entry(p) {
-                Ok(_entry) => match fs::ops::remove_tree(p) {
-                    Ok(()) => archived += 1,
-                    Err(e) => {
-                        failures.push(format!("{}: archived but unlink failed: {e}", p.display()));
-                    }
-                },
-                Err(e) => {
-                    // Archive failed — fall back to a hard delete
-                    // would surprise the user (they expect undo);
-                    // instead, leave the file alone and report.
-                    failures.push(format!(
-                        "{}: graveyard archive failed: {e} — file NOT removed",
-                        p.display()
-                    ));
-                }
-            }
-        }
-        if failures.is_empty() {
-            self.state
-                .flash_info(format!("removed {archived} item(s) (recoverable: gy)"));
-        } else {
-            // First failure goes in the flash; remainder in debug log.
-            self.state.flash_error(failures[0].clone());
-            for msg in &failures[1..] {
-                spyc_debug!("R: {msg}");
-            }
-        }
+        // The picks are the items being removed — clear them now (they're
+        // gone from the user's intent); the listing still shows the files
+        // until the worker unlinks them and the refresh lands.
         self.state.picks.clear();
-        self.state.refresh_listing();
-        Vec::new()
+        self.state
+            .flash_info(format!("removing {} item(s)…", paths.len()));
+        vec![Effect::Graveyard(GraveyardOp::Archive { paths })]
     }
 
-    /// `:undo` — restore the most-recent graveyard entry to its
-    /// original path. Best-effort recovery for the very common
-    /// "I just deleted the wrong thing" case. If the original
-    /// path is occupied (rare; user recreated it), tar's
-    /// `set_overwrite(false)` errors and we surface that — the
-    /// user can open `gy` and pick `p` to restore-to-cwd instead.
-    pub fn undo_last_remove(&mut self) {
+    /// `:undo` — restore the most-recent graveyard entry to its original path.
+    /// Best-effort recovery for the very common "I just deleted the wrong
+    /// thing" case. The cheap part (load the inventory, pick the latest entry)
+    /// runs here; the un-tar runs OFF-thread via `Effect::Graveyard` and
+    /// reports via `apply_graveyard_outcomes` (which surfaces a tar
+    /// `set_overwrite(false)` error if the original path is now occupied —
+    /// the user can then `gy` + `p` to restore-to-cwd instead).
+    pub fn undo_last_remove(&mut self) -> Vec<Effect> {
         let g = crate::state::graveyard::Graveyard::load();
         let Some(latest) = g.entries.into_iter().next() else {
             self.state.flash_info("undo: graveyard is empty");
-            return;
+            return Vec::new();
         };
-        let dest = latest.orig_path.parent().map_or_else(
-            || std::path::PathBuf::from("/"),
-            std::path::Path::to_path_buf,
-        );
-        match crate::state::graveyard::Graveyard::restore(&latest, &dest) {
-            Ok(()) => {
-                crate::state::graveyard::Graveyard::delete_entry(&latest);
-                self.state.flash_info(format!(
-                    "undo: restored {} → {}",
-                    latest.filename,
-                    dest.display()
-                ));
-                if matches!(self.state.view, View::Graveyard) {
-                    self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-                    self.state.cursor.clamp(self.state.graveyard.len());
-                    self.state.rebuild_rows();
-                }
-                self.state.refresh_listing();
-            }
-            Err(e) => self
-                .state
-                .flash_error(format!("undo: {e} — try `gy` then `p` to restore to cwd")),
-        }
+        let dest = latest
+            .orig_path
+            .parent()
+            .map_or_else(|| PathBuf::from("/"), std::path::Path::to_path_buf);
+        self.state
+            .flash_info(format!("undo: restoring {}…", latest.filename));
+        vec![Effect::Graveyard(GraveyardOp::Restore {
+            entry: Box::new(latest),
+            dest,
+        })]
     }
 
-    /// Single-key confirmation for "purge ALL graveyard entries to
-    /// system trash". Bound on `Z` from the graveyard view; routes
-    /// to a separate prompt kind so the wording stays accurate.
+    /// Single-key confirmation for "purge ALL graveyard entries to system
+    /// trash". Bound on `Z` from the graveyard view; routes to a separate
+    /// prompt kind so the wording stays accurate. The cascade-to-trash (one
+    /// extract per entry) runs OFF-thread via `Effect::Graveyard`; the count +
+    /// graveyard-view refresh land via `apply_graveyard_outcomes`.
     pub(super) fn handle_graveyard_purge_all_confirm(&mut self, key: KeyEvent) -> Vec<Effect> {
         let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
         self.state.mode = Mode::Normal;
         if !confirmed {
             return Vec::new();
         }
-        let mut trashed = 0usize;
-        let mut errors = 0usize;
-        for entry in self.state.graveyard.clone() {
-            match crate::state::graveyard::Graveyard::cascade_entry_to_trash(&entry) {
-                Ok(()) => trashed += 1,
-                Err(_) => errors += 1,
-            }
+        let entries = self.state.graveyard.clone();
+        if entries.is_empty() {
+            self.state.flash_info("graveyard: nothing to purge");
+            return Vec::new();
         }
-        if errors > 0 {
-            self.state
-                .flash_error(format!("graveyard: trashed {trashed}, {errors} failed"));
-        } else {
-            self.state
-                .flash_info(format!("graveyard: trashed {trashed} item(s)"));
-        }
-        self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-        self.state.cursor.clamp(self.state.graveyard.len());
-        self.state.rebuild_rows();
-        Vec::new()
+        self.state
+            .flash_info(format!("purging {} item(s) to trash…", entries.len()));
+        vec![Effect::Graveyard(GraveyardOp::PurgeAll { entries })]
     }
 
     /// Single-key confirmation for the auto-fired claude crash recovery

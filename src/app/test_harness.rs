@@ -42,6 +42,7 @@ impl App {
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
                 )),
+                graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             },
         };
         app.state.rebuild_rows();

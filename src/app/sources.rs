@@ -62,6 +62,10 @@ pub fn coalesce_pending(
             // scan's pending-check (not this wake surviving) is what forces the
             // redraw that applies the landed short-id.
             | Message::AgentStatusReady
+            // Tier 5: graveyard-op-done is the same payloadless-wake shape —
+            // the outcome rides `runtime.graveyard_results`, drained
+            // unconditionally by `apply_graveyard_outcomes` in the pre-recv scan.
+            | Message::GraveyardDone
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
@@ -163,7 +167,10 @@ pub fn coalesce_recv(
             Message::PagerStreamOutput
             | Message::FindOutput
             | Message::ReaderExited
-            | Message::AgentStatusReady,
+            | Message::AgentStatusReady
+            // Tier 5: graveyard-op-done — payloadless, drained by the pre-recv
+            // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
+            | Message::GraveyardDone,
         ) => coalesce_pending(
             rx,
             &mut ctx.fs_pending,

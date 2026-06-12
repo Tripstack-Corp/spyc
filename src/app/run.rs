@@ -263,7 +263,8 @@ impl App {
                 | Message::PagerStreamOutput
                 | Message::FindOutput
                 | Message::ReaderExited
-                | Message::AgentStatusReady,
+                | Message::AgentStatusReady
+                | Message::GraveyardDone,
             ) => {
                 unreachable!(
                     "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -476,6 +477,14 @@ impl App {
             // contract). No-ops fast when the cache is fresh or a walk is
             // already in flight.
             self.kick_agent_status_refresh();
+
+            // Tier 5: drain any off-thread graveyard op (archive / restore /
+            // purge-all) that landed (it woke us via `Message::GraveyardDone`).
+            // Always drained here — the slot holds the outcome regardless of
+            // which wake survived coalescing; the apply does the flash + refresh.
+            if self.apply_graveyard_outcomes() {
+                ctx.draw.mark(3);
+            }
 
             // F-finder: drain any candidate batches the walker
             // worker has pushed since the last tick. Re-rank +

@@ -132,8 +132,7 @@ impl App {
 /// `:undo` — restore the most-recent graveyard entry to its original path. The
 /// "did I mean to do that?" escape hatch for `R`.
 pub(super) fn cmd_undo(app: &mut App, _args: &str) -> Vec<Effect> {
-    app.undo_last_remove();
-    Vec::new()
+    app.undo_last_remove()
 }
 
 /// `:date` — flash current date/time. Used to be bound to `D` but `D` now opens
