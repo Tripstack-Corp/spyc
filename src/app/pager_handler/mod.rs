@@ -150,8 +150,8 @@ impl App {
     /// live, clear the pager, force a repaint, and flash the
     /// status change. Mirrors the Esc/q close path so chord-driven
     /// and focus-switch escapes land in the same final state. No-op
-    /// when no pane_scroll pager is open — safe to call from
-    /// `Action::PaneFocusUp` / `PaneFocusDown` unconditionally.
+    /// when no pane_scroll pager is open — so the scrollback Esc/`q`
+    /// close path (`pager_handler::motion`) can call it unconditionally.
     pub fn close_pane_scroll_pager(&mut self) {
         if self.view.scroll_pager.is_none() {
             return;
@@ -327,8 +327,8 @@ impl App {
             // bytes, `lines` holds the pretty version and `alt_lines`
             // holds the raw (`m` toggles). Re-uses the alt-view
             // machinery currently named for markdown (`alt_lines`,
-            // `markdown_rendered`); a rename to a generic name is
-            // queued for the folding work in v1.50.73.
+            // `markdown_rendered`) — the name stays markdown-specific even
+            // though JSON pretty-print also rides it.
             let json_pretty: Option<String> = if !truncated && crate::ui::json::is_json_path(path) {
                 crate::ui::json::pretty_print(&content)
             } else {

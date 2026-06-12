@@ -72,8 +72,10 @@ impl App {
             .add_modifier(Modifier::BOLD);
 
         // Tab indicators: ─[1*] claude ─[2+] bash, then "── <live cwd>".
-        // We render the indicators first (immutable iter) and capture
-        // the active index, then re-borrow mut to fetch the live cwd.
+        // We render the indicators first (immutable iter) and capture the
+        // active index, then read the active tab's live cwd below — a pure
+        // `&self` `live_cwd()` cache read (the refresh kick moved to
+        // `prepare_panes`, #347), so no `&mut` re-borrow is involved.
         let mut active_idx: Option<usize> = None;
         if let Some(tabs) = &self.runtime.pane_tabs {
             for (i, entry) in tabs.tabs().iter().enumerate() {

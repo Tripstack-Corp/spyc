@@ -113,9 +113,11 @@ enum Message {
     /// WAKE the loop — the event-driven loop blocks on a bare `recv()` at idle,
     /// so a landed result would otherwise sit unread (and unrendered) until an
     /// unrelated event. Payloadless: collapses to a Timeout like the other
-    /// re-scan wakes (drop-safe in coalesce). The redraw is driven by the
-    /// pre-recv scan's `agent_status_pending` check, not by this message
-    /// surviving — the actual apply stays in `active_agent_status` (render).
+    /// re-scan wakes (drop-safe in coalesce). The redraw + apply both happen
+    /// in the pre-recv scan: `apply_landed_agent_status` drains the slot into
+    /// the cache and `kick_agent_status_refresh` re-arms — NOT in the draw
+    /// (`active_agent_status` is a pure `&self` cache read since #346). Driven
+    /// by the scan, not by this message surviving coalesce.
     AgentStatusReady,
     /// Tier 5: an off-thread graveyard op (archive / restore / purge-all,
     /// `Effect::Graveyard`) finished and pushed its outcome onto

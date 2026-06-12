@@ -954,27 +954,27 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed |
 | `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
 | `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed |
-| `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed |
+| `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed · ✅ #352 |
 | `src/app/mod.rs:491` | Dead ViewState field: pending_overlay_close is never set true | maintainability | confirmed |
 | `src/app/mod.rs:849` | Matcher::matches allocates a lowercased String per candidate name — O(n) allocation churn per filter/search pass | perf | confirmed · ✅ fixed in #344 (allocation-free ASCII case-insensitive substring fast path; glob skips the lowercasing alloc for already-lowercase ASCII names; non-ASCII keeps `to_lowercase` fallback) |
-| `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed |
-| `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed |
+| `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed · ✅ #352 |
+| `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed · ✅ #352 |
 | `src/app/pager_handler/modes.rs:119` | Jump buffer state mirrored in ViewState and PagerView, hand-synced at eight sites | maintainability | confirmed |
 | `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed |
 | `src/app/pager_handler/modes.rs:178` | handle_pager_bracket: '[' and ']' arms are 15-line mirror copies | maintainability | confirmed |
 | `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed |
 | `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |
-| `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed |
+| `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed · ✅ #352 |
 | `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed ✅ #336 |
 | `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed ✅ #337 |
-| `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed |
+| `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed · ✅ #352 |
 | `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed |
 | `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed |
-| `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed |
+| `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed · ✅ #352 |
 | `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed |
 | `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed · ✅ fixed in #348 (pid + `$TERM` + truecolor are process-lifetime constants — snapshotted once into ViewState at construction; render reads the cache, no per-frame OS/env access) |
 | `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed ✅ #342 |
-| `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed |
+| `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed · ✅ #352 |
 | `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
 | `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed ✅ #336 |
 | `src/app/sources.rs:91` | coalesce_recv repeats the identical coalesce-and-synthesize-Timeout tail in five match arms | maintainability | confirmed |

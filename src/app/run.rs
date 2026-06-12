@@ -448,9 +448,9 @@ impl App {
             let _ = self.view.pending_overlay_close;
 
             // MVU Phase 3c: drain the streaming pull sources (extracted to
-            // streaming.rs). Each returns whether it needs a redraw. The
-            // poll floor still backstops them this PR; PR3 deletes it once
-            // these wake the channel.
+            // streaming.rs). Each returns whether it needs a redraw. These
+            // wake the channel themselves now (`SinkOutput`), so the poll
+            // floor that once backstopped them is gone (see below).
             if self.drain_pending_capture() {
                 ctx.draw.mark(3);
             }
@@ -566,18 +566,16 @@ impl App {
             // waiting for the next event.
             self.flush_git_requests();
 
-            // MVU Phase 3c: the last poll floor is GONE. Every event source
-            // now wakes the channel — panes via `PaneOutput`, captures/tasks
-            // via `SinkOutput`, fs/git (3a) directly. The only remaining
-            // pull sources are MCP + finder/grep (3d), serviced by the
-            // MVU Phase 3d: the last poll (`MAX_IDLE_CAP`) is GONE — every
-            // source now wakes the channel (input, fs, git, panes, captures/
-            // tasks, MCP, finder, grep, and reader-death). The loop blocks on
-            // `recv()` when no deadline is armed; an armed deadline only
-            // SHORTENS the wait (it never lengthens it, and there's no ceiling
-            // clamp — a 1s GitPoll now drives a 1s wait, a 10s huge-tree poll a
-            // 10s wait). Fresh clock JUST before recv so a deadline-driven
-            // sleep lands on the deadline, not deadline + body-cost.
+            // MVU Phase 3c/3d: the poll floor AND the `MAX_IDLE_CAP` poll
+            // ceiling are both GONE. Every event source now wakes the channel —
+            // input, fs, git (3a), panes (`PaneOutput`), captures/tasks
+            // (`SinkOutput`), MCP, finder, grep (3d), and reader-death. The
+            // loop blocks on `recv()` when no deadline is armed; an armed
+            // deadline only SHORTENS the wait (it never lengthens it, and
+            // there's no ceiling clamp — a 1s GitPoll drives a 1s wait, a 10s
+            // huge-tree poll a 10s wait). Fresh clock JUST before recv so a
+            // deadline-driven sleep lands on the deadline, not deadline +
+            // body-cost.
             let wait_now = std::time::Instant::now();
             // If the pre-recv drains already dirtied the frame, DON'T block —
             // a zero-timeout recv falls straight through to the ctx.draw this
