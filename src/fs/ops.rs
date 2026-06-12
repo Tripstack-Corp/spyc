@@ -1,6 +1,9 @@
-//! Mutating file-system operations, pure Rust.
+//! File-system operations, pure Rust: both the *mutating* ops
+//! (`copy_tree`/`move_tree`/`remove_tree`/`*_selection_to`/`chmod_add_bits`)
+//! and the read-side *viewer* helpers the file-display path needs
+//! (`read_truncated`, `format_size`, `file_type_label`, `hex_dump_lines`).
 //!
-//! These replace the `sh -c "cp -r ..."`-style shell-outs we used
+//! The mutating ops replace the `sh -c "cp -r ..."`-style shell-outs we used
 //! originally. Benefits:
 //!
 //! - Portable: no dependency on the host's `cp`/`mv`/`rm`/`chmod` binaries.
