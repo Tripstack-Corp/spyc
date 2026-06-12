@@ -20,18 +20,20 @@
 //!   as a shell command template (with `%` expanded to the selection at
 //!   run time).
 //!
-//! Supported actions (M4 subset):
+//! Supported action verbs (the identifiers accepted after `map KEY`):
 //!
-//! - quit, redraw, help
-//! - up, down, left, right, pageup, pagedown, home, climb
-//! - enter (display), edit (enter_or_edit)
+//! - quit, redraw, help / keys
+//! - up / previous, down / nextfile, left, right, pageup, pagedown
+//! - home, climb
+//! - enter / edit (open-or-edit), display (open-or-display)
 //! - pick, unpick, take, drop, inventory, empty
-//! - search, next, previous
-//! - startshell, unix, unix_cmd
+//! - search, next  (note: `previous` above is an alias for cursor-up, *not*
+//!   search-previous; there is no search-prev verb)
+//! - startshell; unix CMD (verbatim template); unix_cmd (prompted, captured
+//!   into the pager); foreground_cmd (prompted, run in the foreground like `;`)
 //! - longlist, file, copy, move, remove, makedirs
-//! - ignoretoggle =N
-//! - patternpick =PATTERN
-//! - jump =PATH
+//! - ignoretoggle =N, patternpick =GLOB, jump =PATH
+//! - panescroll, panesave
 //! - togglepane (rebind the pane toggle if `^\` / `F10` are
 //!   intercepted by the host terminal / window manager)
 

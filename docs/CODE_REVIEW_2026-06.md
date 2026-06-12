@@ -988,7 +988,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed · ✅ #353 |
 | `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
 | `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed |
-| `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | unverified |
+| `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | confirmed · ✅ #354 |
 | `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | unverified |
 | `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | unverified |
 | `src/config/mod.rs:353` | merge_file hand-lists all 23 color fields — adding a color requires a parallel edit or it silently never merges | maintainability | unverified |
@@ -1011,8 +1011,8 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | unverified |
 | `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | unverified |
 | `src/git/status.rs:121` | map_to_listing rebuilds the loop-invariant prefix string for every status entry | maintainability | unverified |
-| `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | unverified |
-| `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | unverified |
+| `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | confirmed · ✅ #354 |
+| `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | confirmed · ✅ #354 |
 | `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | unverified |
 | `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | unverified |
 | `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
@@ -1031,9 +1031,9 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | unverified |
 | `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | unverified |
 | `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | unverified |
-| `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | unverified |
-| `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | unverified |
-| `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | unverified |
+| `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | confirmed · ✅ #354 |
+| `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | confirmed · ✅ #354 |
+| `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
 | `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | unverified |
 | `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | unverified |
@@ -1054,4 +1054,4 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | unverified |
 | `src/ui/pager/scroll_search.rs:222` | commit_search allocates two Strings per line over the entire buffer | perf | unverified |
 | `src/ui/scrollback.rs:178` | trim_trailing_whitespace_run drops styled (bg/reverse) space runs, truncating TUI color bars in the ^a-v pager | correctness | unverified |
-| `src/ui/theme.rs:210` | Doc comment references src/ui/diff_render.rs, which no longer exists | maintainability | unverified |
+| `src/ui/theme.rs:210` | Doc comment references src/ui/diff_render.rs, which no longer exists | maintainability | confirmed · ✅ #354 |

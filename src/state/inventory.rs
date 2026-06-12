@@ -31,7 +31,7 @@ pub struct CachedItem {
 /// `<id>.json` + `<id>.dat` pairs.
 #[derive(Debug, Clone)]
 pub struct Inventory {
-    /// Items keyed by ID, ordered by original path for stable display.
+    /// Items keyed by UUIDv7 id, so iteration order is roughly creation time.
     items: BTreeMap<String, CachedItem>,
     /// Picks within inventory view (set of IDs).
     pub picks: std::collections::HashSet<String>,

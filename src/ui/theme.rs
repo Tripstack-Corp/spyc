@@ -207,8 +207,8 @@ impl Theme {
 }
 
 /// Diff / show / blame renderer styles. In their own impl block grouping the
-/// diff-view color logic; consumed by `src/ui/diff_render.rs` and
-/// `src/ui/blame_render.rs` (driven into the pager by the git-view session).
+/// diff-view color logic; consumed by the `diff_render` and `blame_render`
+/// modules (driven into the pager by the git-view session).
 /// All mono-aware: in `mono` the +/- distinction is carried by the gutter
 /// glyph + BOLD rather than color, and row backgrounds are dropped (honoring
 /// the `C` colortoggle).
