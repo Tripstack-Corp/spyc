@@ -65,11 +65,6 @@ pub fn read_truncated(path: &Path, max_lines: usize) -> io::Result<(String, usiz
     Ok((buf, lines_read, truncated))
 }
 
-/// Value of the POSIX `EXDEV` errno ("cross-device link"). Same on Linux
-/// and macOS; hardcoded so we can detect cross-filesystem renames without
-/// pulling in `libc` just for this one constant.
-const EXDEV: i32 = 18;
-
 /// Remove a path, whether it is a regular file, a symlink, or a directory
 /// tree. Symlinks are never followed — we remove the link, not its target.
 pub fn remove_tree(path: &Path) -> io::Result<()> {
@@ -134,7 +129,7 @@ pub fn move_tree(src: &Path, dst: &Path) -> io::Result<()> {
     reject_self_or_nested(src, dst, "move")?;
     match fs::rename(src, dst) {
         Ok(()) => Ok(()),
-        Err(e) if e.raw_os_error() == Some(EXDEV) => {
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             copy_tree(src, dst)?;
             remove_tree(src)
         }

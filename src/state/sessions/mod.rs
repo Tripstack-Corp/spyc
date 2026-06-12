@@ -268,12 +268,6 @@ pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
         .min_by_key(|c| c.started_at_secs().abs_diff(pane_spawn_epoch_secs))
 }
 
-/// Public wrapper for `find_claude_session_name` used by save_session
-/// when the exit-banner token is a UUID.
-pub fn find_claude_session_name_public(session_id: &str) -> Option<String> {
-    find_claude_session_name(session_id)
-}
-
 /// Slug for a cwd as Claude stores its conversations:
 /// `/Users/derek/src/spyc` → `-Users-derek-src-spyc`.
 ///
@@ -566,7 +560,9 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
 
 /// Look up a Claude session's custom title from its conversation JSONL.
 /// Searches `~/.claude/projects/*/\<sessionId\>.jsonl` for `custom-title` entries.
-fn find_claude_session_name(session_id: &str) -> Option<String> {
+/// (`pub`, not `pub(crate)`: the enclosing `sessions` module is private, so
+/// clippy's `redundant_pub_crate` rejects `pub(crate)` here.)
+pub fn find_claude_session_name(session_id: &str) -> Option<String> {
     let home = std::env::var_os("HOME")?;
     let projects_dir = PathBuf::from(home).join(".claude/projects");
     let entries = std::fs::read_dir(&projects_dir).ok()?;
