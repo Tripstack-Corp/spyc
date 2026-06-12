@@ -197,8 +197,9 @@ impl App {
             pager_state,
         );
 
-        // Line 3 — process stats (PID for `sample`/lldb, RSS, threads).
-        let pid = std::process::id();
+        // Line 3 — process stats (PID for `sample`/lldb, RSS, threads). The
+        // pid is snapshotted in ViewState at startup — render reads no OS here.
+        let pid = self.view.hud_pid;
         let uptime_str = format_uptime(self.view.started_at.elapsed().as_secs());
         let pane_count = self
             .runtime
@@ -211,10 +212,10 @@ impl App {
             self.view.activity_proc_threads,
         );
 
-        // Line 4 — build identity + terminal capabilities.
-        let term = std::env::var("TERM").unwrap_or_else(|_| "?".to_string());
-        let truecolor = std::env::var("COLORTERM")
-            .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit"));
+        // Line 4 — build identity + terminal capabilities. `$TERM` + truecolor
+        // are snapshotted in ViewState at startup — render reads no env here.
+        let term = &self.view.hud_term;
+        let truecolor = self.view.hud_truecolor;
         let l4 = format!(
             " spyc v{} ({})  {term}{}  {}\u{00d7}{} ",
             env!("CARGO_PKG_VERSION"),

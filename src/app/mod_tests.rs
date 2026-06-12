@@ -599,3 +599,19 @@ mod matcher_tests {
         assert!(!m.matches("main.py"));
     }
 }
+
+#[cfg(test)]
+mod hud_constant_tests {
+    use super::super::App;
+
+    // The activity-HUD process constants must be snapshotted at construction
+    // so the pure render pass reads no OS/env per frame.
+    #[test]
+    fn view_snapshots_pid_and_term_at_construction() {
+        let app = App::test_app(std::env::temp_dir());
+        assert_eq!(app.view.hud_pid, std::process::id());
+        // `hud_term` mirrors $TERM, or "?" when unset — never reads env again.
+        let expected = std::env::var("TERM").unwrap_or_else(|_| "?".to_string());
+        assert_eq!(app.view.hud_term, expected);
+    }
+}
