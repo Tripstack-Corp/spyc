@@ -54,11 +54,19 @@ impl App {
                 self.state.open_graveyard_view(); // toggle off
             }
             KeyCode::Char('j') | KeyCode::Down => {
+                // Navigation clears the pending chord arming — the documented
+                // contract is "any other key clears it". Without this, `d` then
+                // `j` then `d` would purge the *freshly-navigated-to* entry (a
+                // surprise purge), and `g` then `j` then `g` would jump to top.
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 let rpc = self.state.grid_dims.rows_per_col as usize;
                 self.state
                     .cursor_move_vertical(1, rpc, self.state.rows.len());
             }
             KeyCode::Char('k') | KeyCode::Up => {
+                self.view.graveyard_pending_d = false;
+                self.view.graveyard_pending_g = false;
                 let rpc = self.state.grid_dims.rows_per_col as usize;
                 self.state
                     .cursor_move_vertical(-1, rpc, self.state.rows.len());
@@ -171,5 +179,57 @@ impl App {
             }
             Err(e) => self.state.flash_error(format!("purge failed: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bare(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    /// Regression: `d` arms a single-key purge; navigating with `j`/`k` must
+    /// clear that arming so a subsequent stray `d` can't purge whatever entry
+    /// the cursor landed on. (Documented contract: "any other key clears it".)
+    #[test]
+    fn navigation_clears_dd_arming() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.seed_rows(&["a", "b", "c"]);
+
+        app.handle_graveyard_view_key(bare('d'));
+        assert!(
+            app.view.graveyard_pending_d,
+            "first `d` should arm the purge"
+        );
+        app.handle_graveyard_view_key(bare('j'));
+        assert!(
+            !app.view.graveyard_pending_d,
+            "`j` must clear the `dd` arming (else `d j d` is a surprise purge)"
+        );
+
+        app.handle_graveyard_view_key(bare('d'));
+        app.handle_graveyard_view_key(bare('k'));
+        assert!(
+            !app.view.graveyard_pending_d,
+            "`k` must clear the `dd` arming"
+        );
+    }
+
+    /// Same contract for the `gg` chord: navigating between the two `g`s must
+    /// cancel the pending jump-to-top.
+    #[test]
+    fn navigation_clears_gg_arming() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.seed_rows(&["a", "b", "c"]);
+
+        app.handle_graveyard_view_key(bare('g'));
+        assert!(app.view.graveyard_pending_g, "first `g` should arm `gg`");
+        app.handle_graveyard_view_key(bare('j'));
+        assert!(
+            !app.view.graveyard_pending_g,
+            "`j` must clear the `gg` arming"
+        );
     }
 }
