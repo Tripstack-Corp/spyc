@@ -153,6 +153,20 @@ impl PagerView {
         self.scroll_to_bottom(h);
     }
 
+    /// Clamp `scroll` to the document end using the viewport height the most
+    /// recent render observed (`last_viewport_h`), falling back to a 40-row
+    /// guess before the first frame. Mirrors [`Self::scroll_to_bottom_auto`].
+    ///
+    /// Call after any wholesale `lines` replacement (e.g. the git-view `|`
+    /// layout toggle) or absolute `scroll` jump (e.g. `:N`) that doesn't
+    /// itself clamp — a stale `scroll` left past the new end renders nothing,
+    /// blanking the viewport.
+    pub fn clamp_scroll_auto(&mut self) {
+        let h = self.last_viewport_h.get();
+        let h = if h == 0 { 40 } else { h };
+        self.clamp_scroll(h);
+    }
+
     /// Position indicator: "Top", "Bot", "All", or "NN%".
     /// Percentage is based on scroll progress through the "effective"
     /// document length — in multi-col that's the longest chunk, not the
