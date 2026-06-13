@@ -243,6 +243,21 @@ impl Theme {
         }
     }
 
+    /// Style for a diff that *failed* to build (a [`DiffKind::Error`] line) —
+    /// the soft-red removal color plus bold so a broken diff stands out from
+    /// the dim metadata of a binary/submodule note. Bold-only in `mono`.
+    ///
+    /// [`DiffKind::Error`]: crate::git::model::DiffKind::Error
+    pub fn diff_error_style(&self) -> Style {
+        if self.mono {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(self.diff_del_fg)
+                .add_modifier(Modifier::BOLD)
+        }
+    }
+
     /// Gutter-glyph style for an added (`is_add`) or removed line. The glyph
     /// carries the meaning in `mono`; in color it also gets the +/- color.
     pub fn diff_gutter_style(&self, is_add: bool) -> Style {
