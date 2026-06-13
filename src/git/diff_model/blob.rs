@@ -66,8 +66,9 @@ pub fn format_git_time(time: gix::date::Time) -> String {
 
 /// Set one side (`OldOrSource` if `is_new` is false, else `NewOrDestination`)
 /// of the resource cache from a blob id + entry kind + relative path. Errors
-/// are swallowed — a failed `set_resource` leaves that side unset, and
-/// [`diff_kind_from_cache`] then reports an empty text diff rather than crash.
+/// are swallowed — a failed `set_resource` leaves that side unset, which makes
+/// the later [`diff_kind_from_cache`] `prepare_diff()` fail; that surfaces as a
+/// [`DiffKind::Error`] rather than a crash *or* a misleading empty diff.
 pub fn set_blob(
     rc: &mut gix::diff::blob::Platform,
     repo: &gix::Repository,
@@ -84,16 +85,20 @@ pub fn set_blob(
     let _ = rc.set_resource(id, kind, rela_path, resource_kind, &repo.objects);
 }
 
-/// Read the [`DiffKind`] (binary marker, or text hunks) from a resource cache
-/// whose old + new resources have already been set. Detects binary via gix's
-/// own classification and otherwise builds context-bearing hunks from the
-/// `imara-diff` token ranges.
+/// Read the [`DiffKind`] (binary marker, text hunks, or an error) from a
+/// resource cache whose old + new resources have already been set. Detects
+/// binary via gix's own classification and otherwise builds context-bearing
+/// hunks from the `imara-diff` token ranges. A failed `prepare_diff()` (e.g. a
+/// resource that couldn't be loaded — see [`set_blob`]) becomes
+/// [`DiffKind::Error`] rather than an empty text diff, so a diff that *failed*
+/// is never silently shown as an unchanged file.
 pub fn diff_kind_from_cache(rc: &mut gix::diff::blob::Platform) -> DiffKind {
     use gix::diff::blob::platform::prepare_diff::Operation;
 
     rc.options.skip_internal_diff_if_external_is_configured = false;
-    let Ok(prep) = rc.prepare_diff() else {
-        return DiffKind::Text(Vec::new());
+    let prep = match rc.prepare_diff() {
+        Ok(prep) => prep,
+        Err(e) => return DiffKind::Error(e.to_string()),
     };
     match prep.operation {
         // A binary side, or an external-diff driver we don't run, yields no
@@ -317,7 +322,7 @@ pub fn path_selected(path: &str, paths: &[String]) -> bool {
 pub fn account_file(file: &FileDiff, budget: &mut usize, truncated: &mut bool) {
     let count = match &file.kind {
         DiffKind::Text(hunks) => hunks.iter().map(|h| h.lines.len()).sum::<usize>(),
-        DiffKind::Binary | DiffKind::Submodule { .. } => 0,
+        DiffKind::Binary | DiffKind::Submodule { .. } | DiffKind::Error(_) => 0,
     };
     if count >= *budget {
         *budget = 0;

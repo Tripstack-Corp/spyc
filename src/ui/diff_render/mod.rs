@@ -143,6 +143,13 @@ fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'stati
             out.push(submodule_line(old, new, theme));
             return;
         }
+        DiffKind::Error(msg) => {
+            out.push(Line::styled(
+                format!("diff unavailable: {msg}"),
+                theme.diff_error_style(),
+            ));
+            return;
+        }
     };
 
     let (new_text, old_text) = side_texts(hunks);
@@ -231,6 +238,13 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
         }
         DiffKind::Submodule { old, new } => {
             out.push(submodule_line(old, new, theme));
+            return;
+        }
+        DiffKind::Error(msg) => {
+            out.push(Line::styled(
+                format!("diff unavailable: {msg}"),
+                theme.diff_error_style(),
+            ));
             return;
         }
     };

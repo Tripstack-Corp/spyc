@@ -244,6 +244,37 @@ fn submodule_line_rendered() {
 }
 
 #[test]
+fn error_diff_renders_explicit_message_not_clean_file() {
+    // A failed diff (e.g. a resource that couldn't be loaded) must NOT look
+    // like an unchanged file — it gets an explicit "diff unavailable" line in
+    // both layouts, styled with the error (red) style so it stands out.
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Error("object 0badc0de missing".into()),
+        Some("f.rs"),
+        Some("f.rs"),
+    );
+    for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
+        let out = render_diff(&model, &theme, layout, 80);
+        let rendered = text(&out);
+        assert!(
+            rendered.contains("diff unavailable: object 0badc0de missing"),
+            "{layout:?} layout missing error line; got {rendered:?}"
+        );
+        let err_row = out
+            .iter()
+            .find(|l| row_text(l).contains("diff unavailable"))
+            .unwrap();
+        assert_eq!(
+            err_row.style.fg,
+            Some(theme.diff_del_fg),
+            "error line should use the error (red) style in {layout:?}"
+        );
+    }
+}
+
+#[test]
 fn rename_header_shows_similarity() {
     let theme = Theme::default();
     let model = single_file(

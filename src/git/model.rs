@@ -81,6 +81,10 @@ pub enum DiffKind {
         /// The new submodule commit (hex), or empty if removed.
         new: String,
     },
+    /// Building the diff failed — a resource couldn't be loaded, the object DB
+    /// errored, etc. Carries a short message. Rendered as an explicit error
+    /// line so a failed diff is never mistaken for an unchanged (empty) file.
+    Error(String),
 }
 
 /// A contiguous region of change with surrounding context, matching the

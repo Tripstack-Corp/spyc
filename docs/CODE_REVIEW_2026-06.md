@@ -996,7 +996,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | unverified |
 | `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed |
 | `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | confirmed · ✅ #355 |
-| `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | unverified |
+| `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | confirmed · ✅ #364 |
 | `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
 | `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
 | `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | confirmed · ✅ #361 |
@@ -1006,7 +1006,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | confirmed · ✅ #360 |
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
 | `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
-| `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | unverified |
+| `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | confirmed · ✅ #365 |
 | `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |
 | `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | unverified |
 | `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | unverified |
