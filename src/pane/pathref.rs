@@ -61,6 +61,13 @@ pub fn extract_from_line(line: &str, resolve_base: &Path) -> Option<PathRef> {
 
 /// Split `path:line` or `path:line:col` into (path, Option<line>).
 fn split_path_line(s: &str) -> (&str, Option<usize>) {
+    // A *trailing* colon is never a separator — it's the punctuation
+    // gcc/clang put after the location in a diagnostic
+    // (`file.c:3:7: error: …`). Left in place, the `rsplitn(3, ':')` below
+    // sees an empty final field and folds the real line number into the
+    // path (`file.c:3`, line 7), which then fails to resolve and `gf`
+    // misses the file. Strip it first.
+    let s = s.trim_end_matches(':');
     // Try splitting from the right to handle `path:line:col` and `path:line`.
     // Be careful not to split Windows drive letters (C:\...) — but we don't
     // support Windows, so this is safe.
@@ -297,6 +304,20 @@ mod tests {
         assert_eq!(split_path_line("src/main.rs:0"), ("src/main.rs:0", None));
     }
 
+    #[test]
+    fn split_strips_trailing_colon_from_diagnostics() {
+        // gcc/clang emit "file.c:3:7: error: …"; the path token carries the
+        // trailing colon. It must not fold the line number into the path.
+        assert_eq!(
+            split_path_line("src/main.rs:3:7:"),
+            ("src/main.rs", Some(3))
+        );
+        assert_eq!(
+            split_path_line("src/main.rs:42:"),
+            ("src/main.rs", Some(42))
+        );
+    }
+
     // ── strip_ansi ────────────────────────────────────────────────
 
     #[test]
@@ -469,6 +490,16 @@ mod tests {
         let pr = extract_from_line("src/main.rs:42:5", tmp.path()).unwrap();
         assert_eq!(pr.path, tmp.path().join("src/main.rs"));
         assert_eq!(pr.line, Some(42));
+    }
+
+    #[test]
+    fn gcc_clang_diagnostic_with_trailing_colon() {
+        let tmp = setup_tree();
+        // The classic compiler diagnostic shape — `gf` must land on the file
+        // at the diagnostic's line, not miss it because of the trailing colon.
+        let pr = extract_from_line("src/main.rs:3:7: error: expected ';'", tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/main.rs"));
+        assert_eq!(pr.line, Some(3));
     }
 
     // ── Claude CLI output patterns ────────────────────────────────
