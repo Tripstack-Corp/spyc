@@ -83,7 +83,10 @@ pub fn search_streaming(
         return Ok(());
     }
 
-    if root.join(".git").is_dir() {
+    // `.exists()` (not `.is_dir()`): a worktree/submodule checkout has
+    // `.git` as a gitdir-pointer file, but is still a repo root whose
+    // pass-2 nested-clone scan should run. Mirrors finder.rs.
+    if root.join(".git").exists() {
         for extra in find_nested_git_repos(root) {
             if !search_one(&extra, root, &matcher, &tx, &mut count) {
                 return Ok(());

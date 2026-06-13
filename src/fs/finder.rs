@@ -69,7 +69,13 @@ pub fn walk_streaming(root: &Path, tx: WakingSender<Vec<PathBuf>>) {
     // Pass 2: only meaningful when root is itself a git repo --
     // find sibling-clone-style nested .git directories that pass 1's
     // gitignore would have masked, and walk each as its own root.
-    if root.join(".git").is_dir() {
+    // `.exists()` (not `.is_dir()`) so a worktree/submodule checkout,
+    // where `.git` is a *gitdir-pointer file* rather than a directory,
+    // still qualifies as a repo root -- otherwise running `F` from
+    // inside a worktree silently skips every nested sibling clone.
+    // Matches the nested-repo detector below, which already uses
+    // `.exists()`.
+    if root.join(".git").exists() {
         for extra in find_nested_git_repos(root) {
             if !walk_one(&extra, root, &tx, &mut count) {
                 return;
@@ -446,6 +452,34 @@ mod tests {
         assert!(
             !paths.iter().any(|s| s == "sibling/inner_skip.txt"),
             "sibling's own gitignore was not honored; got {paths:?}"
+        );
+    }
+
+    #[test]
+    fn walk_descends_into_sibling_clone_when_root_is_a_worktree() {
+        // A git worktree (or submodule) checkout stores `.git` as a
+        // gitdir-pointer *file*, not a directory. Pass 2 used to gate on
+        // `.git` being a dir, so running `F` from inside a worktree
+        // silently skipped every nested sibling clone. The outer-repo
+        // detection must accept a `.git` file too.
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        // Outer repo at root, but as a worktree: `.git` is a file.
+        std::fs::write(root.join(".git"), "gitdir: /somewhere/.git/worktrees/wt\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "sibling/\n").unwrap();
+        File::create(root.join("outer_kept.txt")).unwrap();
+        // Sibling clone -- its own git repo, gitignored out of the outer tree.
+        std::fs::create_dir_all(root.join("sibling/.git")).unwrap();
+        File::create(root.join("sibling/inner_kept.txt")).unwrap();
+
+        let paths: Vec<String> = walk(root)
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        assert!(paths.iter().any(|s| s == "outer_kept.txt"));
+        assert!(
+            paths.iter().any(|s| s == "sibling/inner_kept.txt"),
+            "worktree root's nested sibling clone missed; got {paths:?}"
         );
     }
 
