@@ -319,7 +319,20 @@ pub fn start_socket_server(
 
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let stream = match stream {
+                Ok(s) => s,
+                Err(e) => {
+                    // A *persistent* accept error — classically EMFILE/ENFILE
+                    // (the process or system fd table is full) — would spin
+                    // this loop at 100% CPU: `incoming()` yields the same
+                    // error immediately on every iteration. Back off briefly
+                    // so the descriptor pressure can ease, then retry instead
+                    // of busy-looping. Transient errors cost only one sleep.
+                    mcp_log(&format!("socket: accept error: {e}"));
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    continue;
+                }
+            };
             mcp_log("socket: accepted connection");
             let ctx = Arc::clone(&ctx_path);
             let tx = Arc::clone(&cmd_tx);
