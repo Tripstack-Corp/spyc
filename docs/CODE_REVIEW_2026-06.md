@@ -1019,7 +1019,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | unverified |
 | `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | unverified |
 | `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
-| `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | unverified |
+| `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | confirmed · ✅ #367 |
 | `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed |
 | `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | confirmed · ✅ #366 |
 | `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
