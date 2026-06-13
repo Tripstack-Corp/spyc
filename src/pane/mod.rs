@@ -181,16 +181,27 @@ impl Pane {
             pending: Arc::clone(&wake_pending),
             fire: wake,
         };
+        // Channel the worker ships its byte receiver back through when it
+        // exits — normal return OR panic-unwind. The receiver no longer
+        // rides the `JoinHandle` return value: a panicked thread can't
+        // hand a value back through `join()`, which would strand the
+        // receiver (see `RxReturn` / `parser_worker`). The receiver + its
+        // return path travel together as the `RxReturn` guard.
+        let (rx_home_tx, rx_home_rx) = std::sync::mpsc::channel();
+        let rx_guard = RxReturn {
+            rx: Some(event_rx),
+            home: rx_home_tx,
+        };
         let handle = thread::spawn(move || {
             parser_worker(
-                event_rx,
+                rx_guard,
                 stop_clone,
                 parser_clone,
                 gen_clone,
                 last_size,
                 debug_dump,
                 wake,
-            )
+            );
         });
         Self {
             host,
@@ -201,6 +212,7 @@ impl Pane {
             worker: ParserWorker {
                 stop,
                 handle: Some(handle),
+                rx_home_rx,
             },
             output_dirty: false,
             scroll_offset: 0,
@@ -552,14 +564,22 @@ impl Pane {
 /// briefly, then the child repaints. Same safety net as the
 /// pre-v1.50.84 main-thread `process_bytes_safe`.
 fn parser_worker(
-    rx: std::sync::mpsc::Receiver<PtyEvent>,
+    guard: RxReturn,
     stop: Arc<AtomicBool>,
     parser: Arc<Mutex<vt100::Parser>>,
     parser_gen: Arc<AtomicU64>,
     initial_size: (u16, u16),
     debug_dump: bool,
     wake: Wake,
-) -> std::sync::mpsc::Receiver<PtyEvent> {
+) {
+    // `guard` owns the byte receiver and ships it back to the pane on EVERY
+    // exit from this function — normal return AND panic-unwind. A worker
+    // that unwinds (e.g. the caller-supplied `wake.fire` closure panics)
+    // can't return its receiver through `join()`; without the guard that
+    // strands the channel, and `take_host` would then hand back a
+    // receiver-less `PtyHost` — the demoted task drains nothing forever,
+    // and a later `Pane::adopt` panics on the missing rx. The guard's
+    // `Drop` runs during the unwind, so the receiver always makes it home.
     // MVU Phase 3b: fire the wake once for the close transition too, so the
     // loop runs `drain_output` (and sees `closed`) within one wakeup after
     // the floor is gone — but ONLY on a natural EOF, never a deliberate
@@ -572,9 +592,14 @@ fn parser_worker(
     };
     loop {
         if stop.load(Ordering::Acquire) {
-            return rx;
+            return;
         }
-        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+        match guard
+            .rx
+            .as_ref()
+            .expect("rx present until worker exit")
+            .recv_timeout(std::time::Duration::from_millis(50))
+        {
             Ok(PtyEvent::Bytes(bytes)) => {
                 if debug_dump
                     && let Ok(mut f) = std::fs::OpenOptions::new()
@@ -631,12 +656,12 @@ fn parser_worker(
                 // runs `drain_output`, observes `closed`, and renders
                 // `[exited]` within one wakeup once the poll floor is gone.
                 wake_on_close();
-                return rx;
+                return;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 wake_on_close();
-                return rx;
+                return;
             }
         }
     }
@@ -651,16 +676,49 @@ fn parser_worker(
 /// `take_host` reclaims the receiver.
 struct ParserWorker {
     stop: Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>>,
+    handle: Option<thread::JoinHandle<()>>,
+    /// Receiving end of the worker's byte-receiver-return channel. The
+    /// worker ships its `Receiver<PtyEvent>` back through here (via the
+    /// [`RxReturn`] guard) when it exits — including on a panic-unwind,
+    /// which a `JoinHandle` value can't survive. Drained by
+    /// [`Self::stop_and_reclaim_rx`].
+    rx_home_rx: std::sync::mpsc::Receiver<std::sync::mpsc::Receiver<PtyEvent>>,
 }
 
 impl ParserWorker {
     /// Signal the worker to stop, join it, and hand back the byte-event
     /// receiver (so the pane→background demotion can resume draining on
-    /// the main thread). Idempotent — a second call returns `None`.
+    /// the main thread). The receiver comes back via `rx_home_rx`, not the
+    /// join value, so it survives even a panicked worker. Idempotent — a
+    /// second call returns `None`.
     fn stop_and_reclaim_rx(&mut self) -> Option<std::sync::mpsc::Receiver<PtyEvent>> {
         self.stop.store(true, Ordering::Release);
-        self.handle.take().and_then(|h| h.join().ok())
+        if let Some(h) = self.handle.take() {
+            // Wait for the worker to fully exit; its `RxReturn` guard sends
+            // the receiver into `rx_home_rx` as it unwinds/returns, so by
+            // the time `join` resolves the receiver is already home.
+            let _ = h.join();
+        }
+        self.rx_home_rx.try_recv().ok()
+    }
+}
+
+/// Carries the parser worker's byte receiver back to the pane when the
+/// worker exits. Its `Drop` fires on a normal return **and** during a
+/// panic-unwind — the latter is the point: a panicked worker thread
+/// can't return its receiver through `JoinHandle::join`, so without this
+/// the channel would be stranded and the host left receiver-less. See
+/// [`parser_worker`].
+struct RxReturn {
+    rx: Option<std::sync::mpsc::Receiver<PtyEvent>>,
+    home: std::sync::mpsc::Sender<std::sync::mpsc::Receiver<PtyEvent>>,
+}
+
+impl Drop for RxReturn {
+    fn drop(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            let _ = self.home.send(rx);
+        }
     }
 }
 

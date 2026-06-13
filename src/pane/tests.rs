@@ -40,15 +40,19 @@ mod worker_tests {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_cl = Arc::clone(&stop);
         let (_tx, rx) = std::sync::mpsc::channel::<super::super::PtyEvent>();
+        let (home_tx, home_rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             while !stop_cl.load(Ordering::Acquire) {
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
-            rx
+            // Mimic the real worker's RxReturn guard: ship the receiver
+            // home on exit rather than returning it through `join`.
+            let _ = home_tx.send(rx);
         });
         let mut worker = ParserWorker {
             stop: Arc::clone(&stop),
             handle: Some(handle),
+            rx_home_rx: home_rx,
         };
         assert!(worker.stop_and_reclaim_rx().is_some());
         assert!(stop.load(Ordering::Acquire), "stop flag must be set");
@@ -65,16 +69,17 @@ mod worker_tests {
     fn drop_stops_and_joins() {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_cl = Arc::clone(&stop);
-        let (_tx, rx) = std::sync::mpsc::channel::<super::super::PtyEvent>();
+        let (_home_tx, home_rx) =
+            std::sync::mpsc::channel::<std::sync::mpsc::Receiver<super::super::PtyEvent>>();
         let handle = std::thread::spawn(move || {
             while !stop_cl.load(Ordering::Acquire) {
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
-            rx
         });
         let worker = ParserWorker {
             stop: Arc::clone(&stop),
             handle: Some(handle),
+            rx_home_rx: home_rx,
         };
         drop(worker);
         assert!(stop.load(Ordering::Acquire), "Drop must set the stop flag");
@@ -84,7 +89,7 @@ mod worker_tests {
 #[cfg(test)]
 mod wake_tests {
     //! MVU Phase 3b: the parser worker's lost-wakeup-safe wake protocol.
-    use super::super::{PtyEvent, Wake, parser_worker};
+    use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -111,7 +116,7 @@ mod wake_tests {
         Arc<AtomicU64>,
         Arc<AtomicBool>,
         Arc<AtomicUsize>,
-        std::thread::JoinHandle<std::sync::mpsc::Receiver<PtyEvent>>,
+        std::thread::JoinHandle<()>,
     ) {
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
         let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
@@ -127,8 +132,15 @@ mod wake_tests {
         };
         let gen_cl = Arc::clone(&gen_ctr);
         let stop_cl = Arc::clone(stop);
+        // These wake tests only observe the wake counter + generation, not
+        // the reclaimed receiver, so the rx-return end is discarded.
+        let (rx_home_tx, _rx_home_rx) = std::sync::mpsc::channel();
+        let guard = RxReturn {
+            rx: Some(rx),
+            home: rx_home_tx,
+        };
         let handle = std::thread::spawn(move || {
-            parser_worker(rx, stop_cl, parser, gen_cl, (24, 80), false, wake)
+            parser_worker(guard, stop_cl, parser, gen_cl, (24, 80), false, wake);
         });
         (tx, gen_ctr, pending, count, handle)
     }
@@ -196,6 +208,41 @@ mod wake_tests {
             count.load(Ordering::Acquire),
             0,
             "deliberate stop must suppress the close wake"
+        );
+    }
+
+    /// The wake closure is caller-supplied; if it ever panics the worker
+    /// thread unwinds. The byte receiver must STILL come home via the
+    /// `RxReturn` guard — otherwise `take_host` hands back a receiver-less
+    /// host (silent dead task) and a later `adopt` panics on the missing rx.
+    #[test]
+    fn rx_returns_home_even_when_wake_closure_panics() {
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let (home_tx, home_rx) = std::sync::mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let gen_ctr = Arc::new(AtomicU64::new(0));
+        let wake = Wake {
+            pending: Arc::new(AtomicBool::new(false)),
+            fire: Arc::new(|| panic!("wake closure blew up")),
+        };
+        let guard = RxReturn {
+            rx: Some(rx),
+            home: home_tx,
+        };
+        let handle = std::thread::spawn(move || {
+            parser_worker(guard, stop, parser, gen_ctr, (24, 80), false, wake);
+        });
+        // First Bytes chunk parses, then fires the 0→1 wake edge → panic.
+        tx.send(PtyEvent::Bytes(b"x".to_vec())).unwrap();
+        assert!(
+            handle.join().is_err(),
+            "the panicking wake closure should unwind the worker"
+        );
+        // Despite the unwind, the guard shipped the receiver home.
+        assert!(
+            home_rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "byte receiver must survive a worker panic"
         );
     }
 }

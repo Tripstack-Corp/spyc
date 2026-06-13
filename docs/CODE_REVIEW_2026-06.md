@@ -1021,7 +1021,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
 | `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | unverified |
 | `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed |
-| `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | unverified |
+| `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | confirmed · ✅ #366 |
 | `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
 | `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | unverified |
 | `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed |
