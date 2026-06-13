@@ -1024,7 +1024,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | confirmed · ✅ #366 |
 | `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
 | `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | unverified |
-| `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed |
+| `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed · ✅ #369 |
 | `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | confirmed · ✅ #355 |
 | `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
 | `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed · ✅ #357 |
