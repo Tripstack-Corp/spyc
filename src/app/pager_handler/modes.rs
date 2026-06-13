@@ -139,8 +139,11 @@ impl App {
                             view.scroll =
                                 u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
                         } else {
-                            // Regular pager: jump to line N.
+                            // Regular pager: jump to line N, clamped to the
+                            // last line — a jump past EOF would otherwise leave
+                            // `scroll` past the end and blank the viewport.
                             view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
+                            view.clamp_scroll_auto();
                         }
                     }
                     view.jump_buf = None;

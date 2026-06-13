@@ -948,7 +948,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/commands.rs:164` | Five copies of the same numeric-task-id argument parser | maintainability | confirmed · ✅ #358 |
 | `src/app/effect.rs:37` | #[non_exhaustive] on Effect is a no-op in this single-crate binary, with a stale justifying comment | maintainability | confirmed · ✅ #355 |
 | `src/app/find_picker.rs:176` | handle_find_picker_key's bool return and "caller skips dispatch" doc are stale since the route_input migration | maintainability | confirmed · ✅ #355 |
-| `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed |
+| `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed · ✅ #368 |
 | `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed |
 | `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed · ✅ #356 |
 | `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed |
@@ -960,7 +960,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed · ✅ #352 |
 | `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed · ✅ #352 |
 | `src/app/pager_handler/modes.rs:119` | Jump buffer state mirrored in ViewState and PagerView, hand-synced at eight sites | maintainability | confirmed |
-| `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed |
+| `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed · ✅ #368 |
 | `src/app/pager_handler/modes.rs:178` | handle_pager_bracket: '[' and ']' arms are 15-line mirror copies | maintainability | confirmed |
 | `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed |
 | `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |

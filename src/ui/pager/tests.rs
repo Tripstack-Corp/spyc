@@ -302,6 +302,31 @@ fn clamp_state_to_lines_drops_state_on_empty_buffer() {
     assert!(view.visual.is_none(), "selection dropped on empty buffer");
 }
 
+#[test]
+fn clamp_scroll_auto_pulls_scroll_back_from_past_end() {
+    // A `:N` jump past EOF or a `|` layout toggle that shrinks the line
+    // count can leave `scroll` past the document end, which renders as a
+    // blank viewport. clamp_scroll_auto (using the last render's viewport
+    // height) must pull it back to scroll_max.
+    let mut view = PagerView::new_plain("v", (0..5).map(|i| format!("line {i}")).collect());
+    view.last_viewport_h.set(3); // 5 lines in a 3-row viewport → scroll_max == 2
+    view.scroll = 999; // jumped well past the end
+    view.clamp_scroll_auto();
+    assert_eq!(
+        view.scroll, 2,
+        "scroll must be clamped to scroll_max, not left past the end"
+    );
+}
+
+#[test]
+fn clamp_scroll_auto_leaves_in_range_scroll_untouched() {
+    let mut view = PagerView::new_plain("v", (0..10).map(|i| format!("line {i}")).collect());
+    view.last_viewport_h.set(4);
+    view.scroll = 3; // within [0, scroll_max]
+    view.clamp_scroll_auto();
+    assert_eq!(view.scroll, 3, "an already-valid scroll is left alone");
+}
+
 #[cfg(unix)]
 #[test]
 fn yank_visual_past_end_clamps_instead_of_panicking() {

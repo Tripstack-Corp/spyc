@@ -184,6 +184,10 @@ impl GitViewStream {
         view.wrap = rendered.wrap;
         view.streaming = false;
         view.title.clone_from(&self.title);
+        // The `|` toggle swaps unified↔side-by-side, which changes the line
+        // count. A `scroll` left deep into the old layout would point past
+        // the new end and blank the viewport — clamp it to the new content.
+        view.clamp_scroll_auto();
     }
 }
 
