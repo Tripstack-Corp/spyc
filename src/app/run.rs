@@ -623,7 +623,20 @@ impl App {
                 &read_err,
                 &mut ctx,
             ) {
-                Ok(DispatchFlow::Continue) => continue,
+                Ok(DispatchFlow::Continue) => {
+                    // The scroll-throttle skips this iteration's render. But
+                    // `step_pager_repaint` above already consumed
+                    // `needs_full_repaint` into `pending_clear` (clearing the
+                    // flag) — dropping it here would leave the requested screen
+                    // clear unperformed and stale cells on screen. `ctx.draw`
+                    // survives the `continue` (it's reset only inside
+                    // `render_frame`), but the consumed clear does not, so
+                    // re-arm it for the next rendered frame.
+                    if pending_clear {
+                        self.view.needs_full_repaint = true;
+                    }
+                    continue;
+                }
                 Ok(DispatchFlow::Exit(result)) => break result,
                 Ok(DispatchFlow::Proceed) => {}
                 Err(e) => break Err(e),

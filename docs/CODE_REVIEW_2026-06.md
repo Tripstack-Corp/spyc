@@ -975,7 +975,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed · ✅ fixed in #348 (pid + `$TERM` + truecolor are process-lifetime constants — snapshotted once into ViewState at construction; render reads the cache, no per-frame OS/env access) |
 | `src/app/run.rs:416` | run_teardown is skipped on every abnormal exit path (reader death, handler errors) | correctness | confirmed ✅ #342 |
 | `src/app/run.rs:543` | Garbled, self-contradicting stale comment block about the removed poll floor | maintainability | confirmed · ✅ #352 |
-| `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed |
+| `src/app/run.rs:598` | Scroll-throttle Continue drops a consumed needs_full_repaint clear, leaving stale cells | correctness | confirmed · ✅ #377 |
 | `src/app/session.rs:288` | restore_session arms /resume injection on the wrong tab (and misaligns labels) when a tab spawn fails | correctness | confirmed ✅ #336 |
 | `src/app/sources.rs:91` | coalesce_recv repeats the identical coalesce-and-synthesize-Timeout tail in five match arms | maintainability | confirmed |
 | `src/app/state/apply.rs:73` | HOME resolved from raw process env, bypassing :setenv overrides honored elsewhere | correctness | confirmed · ✅ #362 |
