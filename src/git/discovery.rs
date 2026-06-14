@@ -44,28 +44,7 @@ pub fn head_branch(repo_root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a throwaway repo and run `git` in it with a hermetic config
-    /// (no user/system `.gitconfig`) so the test is reproducible. `git` is
-    /// a test-only fixture dependency — production discovery is pure gix.
-    fn run_git(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .expect("spawn git");
-        assert!(
-            out.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    use crate::git::test_support::run_git;
 
     fn init_repo() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();

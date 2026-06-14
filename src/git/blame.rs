@@ -101,38 +101,9 @@ fn commit_meta(repo: &gix::Repository, id: gix::ObjectId) -> (String, String, St
 #[cfg(test)]
 mod tests {
     use super::blame;
+    use crate::git::test_support::run_git;
     use std::collections::HashMap;
-    use std::path::{Path, PathBuf};
-
-    /// Hermetic `git`, run from a stable cwd via `git -C <dir>` (parallel-suite
-    /// CWD-thrash safe). Mirrors `worktree::tests::run_git`.
-    fn run_git(dir: &Path, args: &[&str]) -> String {
-        let dir_str = dir.to_str().expect("utf8 dir");
-        let mut last_err = String::new();
-        for attempt in 0..3u32 {
-            let out = std::process::Command::new("git")
-                .arg("-C")
-                .arg(dir_str)
-                .args(args)
-                .current_dir(std::env::temp_dir())
-                .env("GIT_AUTHOR_NAME", "Ada")
-                .env("GIT_AUTHOR_EMAIL", "ada@example.com")
-                .env("GIT_COMMITTER_NAME", "Ada")
-                .env("GIT_COMMITTER_EMAIL", "ada@example.com")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                .output()
-                .expect("spawn git");
-            if out.status.success() {
-                return String::from_utf8(out.stdout).expect("utf8 stdout");
-            }
-            last_err = String::from_utf8_lossy(&out.stderr).into_owned();
-            std::thread::sleep(std::time::Duration::from_millis(
-                50 * u64::from(attempt + 1),
-            ));
-        }
-        panic!("git {args:?} failed after 3 attempts: {last_err}");
-    }
+    use std::path::PathBuf;
 
     fn init_repo() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();

@@ -349,51 +349,8 @@ fn admin_dir_of(path: &Path) -> std::io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{add, list, remove};
+    use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
-
-    /// Hermetic `git` (no user/system config) returning stdout on success,
-    /// panicking with stderr on failure. Mirrors `discovery::tests::run_git`.
-    /// `git` is a test-only fixture — production worktree code is pure gix +
-    /// `std::fs`; these tests prove real `git` *accepts* what we built.
-    ///
-    /// Uses `git -C <dir>` (git's own chdir at startup) rather than relying
-    /// solely on the spawn's `current_dir`: under the full suite's heavy
-    /// parallel load, a sibling test's `set_current_dir` + tempdir-drop
-    /// thrashes the *process* CWD, and the spawn's inherited cwd then can't
-    /// be trusted (the same global-CWD race noted in PR 3) — `git -C <abs>`
-    /// makes git chdir to the intended dir regardless. The retry is a
-    /// belt-and-suspenders for any other transient spawn hiccup.
-    fn run_git(dir: &Path, args: &[&str]) -> String {
-        let dir_str = dir.to_str().expect("utf8 dir");
-        let mut last_err = String::new();
-        for attempt in 0..3u32 {
-            let out = std::process::Command::new("git")
-                .arg("-C")
-                .arg(dir_str)
-                .args(args)
-                // Stable, never-deleted startup cwd; `-C <dir_str>` then
-                // moves git to the operation dir. See the
-                // `discovery::tests::run_git` note (referenced above) for why
-                // the inherited cwd can't be trusted under the parallel suite.
-                .current_dir(std::env::temp_dir())
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@x")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@x")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                .output()
-                .expect("spawn git");
-            if out.status.success() {
-                return String::from_utf8(out.stdout).expect("utf8 stdout");
-            }
-            last_err = String::from_utf8_lossy(&out.stderr).into_owned();
-            std::thread::sleep(std::time::Duration::from_millis(
-                50 * u64::from(attempt + 1),
-            ));
-        }
-        panic!("git {args:?} failed after 3 attempts: {last_err}");
-    }
 
     /// Resolve a worktree's HEAD commit (full hex) via gix, IN-PROCESS.
     ///

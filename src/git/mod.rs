@@ -21,6 +21,9 @@ pub mod status;
 pub mod worktree;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod no_subprocess_git_in_production {
     //! Strangler-fig closing guard: production code must never spawn the `git`
     //! binary — every git operation runs in-process via gix. Test fixtures may
@@ -46,7 +49,11 @@ mod no_subprocess_git_in_production {
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
                     == Some("tests");
-                if name == "tests.rs" || name.ends_with("_tests.rs") || in_tests_dir {
+                if name == "tests.rs"
+                    || name == "test_support.rs"
+                    || name.ends_with("_tests.rs")
+                    || in_tests_dir
+                {
                     continue;
                 }
                 let src = std::fs::read_to_string(&path).expect("read .rs");
