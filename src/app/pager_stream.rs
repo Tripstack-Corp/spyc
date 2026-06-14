@@ -40,13 +40,11 @@ pub enum DrainOutcome {
     /// iff [`PagerStream::retain_after_finish`] (git-view retains its model for
     /// the `|` toggle; streaming grep / one-shot transcript do not).
     Finished,
-    /// Terminal: close the stream's pager (pop back to the prior view) and
-    /// flash this as an info message (git-view "no changes"; a transcript that
-    /// resolved to nothing).
+    /// Terminal: close the stream's pager (revealing the listing underneath, not
+    /// a prior overlay) and flash this as an info message (a transcript that
+    /// resolved to nothing). git-view reports "no changes" before mounting (see
+    /// `drain_pending_git_view`), so it never reaches here.
     CloseInfo(String),
-    /// Terminal: close the stream's pager and flash this as an error (git-view
-    /// bad rev / a dead worker).
-    CloseError(String),
 }
 
 /// Render inputs handed to [`PagerStream::drain`]. **Owned** (not borrowed) so
@@ -161,7 +159,7 @@ impl App {
 
     /// Mount the initial empty pager for a freshly-spawned stream, tagged with
     /// `id` so [`App::drain_pager_stream`] id-gates the worker's output.
-    fn mount_stream_pager(&mut self, mount: PagerStreamMount, id: u32) {
+    pub(crate) fn mount_stream_pager(&mut self, mount: PagerStreamMount, id: u32) {
         match mount {
             PagerStreamMount::Overlay {
                 title,
@@ -276,12 +274,6 @@ impl App {
                 self.runtime.pager_stream = None;
                 true
             }
-            DrainOutcome::CloseError(msg) => {
-                self.close_stream_pager(in_scroll);
-                self.state.flash_error(msg);
-                self.runtime.pager_stream = None;
-                true
-            }
         }
     }
 
@@ -351,8 +343,16 @@ impl App {
     /// Close the stream-backed pager being torn down. `in_scroll` selects the
     /// region slot: the bottom transcript scrollback (`view.scroll_pager`) is
     /// cleared and scroll mode exited (it's `no_history` — nothing to pop); a
-    /// top/overlay stream pager (git-view) pops back to the prior pager so
-    /// `gd`/`g show` on a clean tree returns where the user was.
+    /// top/overlay stream pager (git-view / grep) is cleared so the dir listing
+    /// it overlaid is revealed.
+    ///
+    /// It must NOT pop `pager_history` back to the prior pager: combined with
+    /// the push-at-mount in [`Self::mount_stream_pager`], that *resurrected the
+    /// previous overlay* on an empty/failed result — e.g. `gd src/` (changes)
+    /// then `gd tests/` (no changes) re-showed `src/`'s diff instead of "no
+    /// changes". Revealing the base listing keeps `gd <clean path>` honest; the
+    /// prior diff was already pushed to `pager_history`, so `:bprev` still
+    /// reaches it for deliberate buffer navigation.
     fn close_stream_pager(&mut self, in_scroll: bool) {
         if in_scroll {
             self.view.scroll_pager = None;
@@ -365,7 +365,7 @@ impl App {
             .as_ref()
             .is_some_and(|p| p.stream_id.is_some())
         {
-            self.view.pager = self.view.pager_history.pop_back();
+            self.view.pager = None;
         }
         self.view.needs_full_repaint = true;
     }
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn close_info_pops_pager_and_drops_stream() {
+    fn close_info_clears_pager_and_drops_stream() {
         with_app(|app| {
             app.view.pager = Some(pager_with_stream_id(1));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
@@ -483,9 +483,43 @@ mod tests {
                 retain: false,
             }));
             assert!(app.drain_pager_stream());
-            // History was empty → pager clears; stream drops.
+            // The empty result reveals the base listing; stream drops.
             assert!(app.view.pager.is_none());
             assert!(app.runtime.pager_stream.is_none());
+        });
+    }
+
+    /// Regression: `gd` on a path with no changes must reveal the dir listing,
+    /// NOT resurrect whatever diff was open before. The second `gd`'s mount
+    /// pushes the prior diff onto `pager_history`; an empty result used to
+    /// `pop_back()` it straight back into view (so `gd src/` then `gd tests/`
+    /// showed `src/`'s changes). It must clear to the base view instead.
+    #[test]
+    fn close_info_does_not_resurrect_prior_diff_from_history() {
+        with_app(|app| {
+            // Prior diff sitting in the buffer history (as mount_stream_pager
+            // would have pushed it when the second git-view mounted).
+            let mut prior = pager_with_stream_id(1);
+            prior
+                .lines
+                .push(ratatui::text::Line::from("PRIOR DIFF CONTENT"));
+            app.view.pager_history.push(prior);
+            // The freshly-mounted (second) git-view stream, about to report
+            // "no changes".
+            app.view.pager = Some(pager_with_stream_id(2));
+            app.runtime.pager_stream = Some(Box::new(FakeStream {
+                id: 2,
+                outcome: Some(DrainOutcome::CloseInfo("no changes".into())),
+                retain: false,
+            }));
+            assert!(app.drain_pager_stream());
+            assert!(
+                app.view.pager.is_none(),
+                "empty git-view must reveal the listing, not pop the prior diff"
+            );
+            assert!(app.runtime.pager_stream.is_none());
+            // The prior diff is still reachable via `:bprev` (left in history).
+            assert_eq!(app.view.pager_history.back_len(), 1);
         });
     }
 }

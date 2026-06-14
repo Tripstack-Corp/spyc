@@ -241,6 +241,7 @@ impl App {
                 pager_stream: None,
                 next_stream_id: 0,
                 stashed_pager_streams: std::collections::HashMap::new(),
+                pending_git_view: None,
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,

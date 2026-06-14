@@ -495,6 +495,14 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // Resolve an in-flight git-view (deferred mount): mount the overlay
+            // on first content, or flash "no changes" on an empty result. Runs
+            // before the unified drain so a just-mounted stream is a no-op there
+            // this tick.
+            if self.drain_pending_git_view() {
+                ctx.draw.mark(3);
+            }
+
             // The unified pager-stream drain (the `pager_stream` abstraction
             // grep / git-view / transcript collapse onto). A no-op while no
             // stream is active; id-gated against the live pager's `stream_id`.
