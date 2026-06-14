@@ -1051,7 +1051,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | confirmed (correctness) · ✅ #398 (centered_body_width was #359; centered_rect sibling missed) |
 | `src/ui/pager/render.rs:25` | Position indicator and title strings computed unconditionally but dead in borderless mode (and use a viewport off by 2 there) | maintainability | unverified |
 | `src/ui/pager/render.rs:249` | Multi-column mode recomputes partition_lines_static up to 3x per keystroke (render, position indicator, clamp) | perf | unverified |
-| `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | unverified |
+| `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | ✅ #400 — confirmed a latent visual bug for the placement path (flattened syntax-highlight on the placement row); span-preserving `restyle_cursor_cell` helper, picker_edit kept solid-row identical |
 | `src/ui/pager/scroll_search.rs:222` | commit_search allocates two Strings per line over the entire buffer | perf | unverified |
 | `src/ui/scrollback.rs:178` | trim_trailing_whitespace_run drops styled (bg/reverse) space runs, truncating TUI color bars in the ^a-v pager | correctness | confirmed · ✅ #389 |
 | `src/ui/theme.rs:210` | Doc comment references src/ui/diff_render.rs, which no longer exists | maintainability | confirmed · ✅ #354 |
