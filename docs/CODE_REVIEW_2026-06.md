@@ -993,8 +993,8 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | unverified |
 | `src/config/mod.rs:353` | merge_file hand-lists all 23 color fields — adding a color requires a parallel edit or it silently never merges | maintainability | unverified |
 | `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | unverified |
-| `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | unverified |
-| `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed |
+| `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | confirmed · ✅ #373 |
+| `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed · ✅ #373 |
 | `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | confirmed · ✅ #355 |
 | `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | confirmed · ✅ #364 |
 | `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
