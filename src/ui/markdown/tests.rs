@@ -251,3 +251,27 @@ fn is_markdown_path_matches_md_and_markdown() {
     assert!(is_markdown_path(Path::new("notes.markdown")));
     assert!(!is_markdown_path(Path::new("main.rs")));
 }
+
+#[test]
+fn nested_bold_in_heading_keeps_rest_bold() {
+    use ratatui::style::Modifier;
+    let theme = Theme::default();
+    // A heading is bold; a `**strong**` span inside it must not un-bold the
+    // text that follows when the inner Strong closes (the style_mods bitflag
+    // regression — now reference-counted).
+    let lines = render("# Title **mid** tail", &theme, None);
+    let heading = lines
+        .iter()
+        .find(|l| !l.spans.is_empty())
+        .expect("a heading line");
+    let tail = heading
+        .spans
+        .iter()
+        .find(|s| s.content.contains("tail"))
+        .expect("a span containing `tail`");
+    assert!(
+        tail.style.add_modifier.contains(Modifier::BOLD),
+        "text after a nested **bold** in a heading must stay bold; style={:?}",
+        tail.style
+    );
+}

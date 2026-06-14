@@ -1044,7 +1044,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/line_edit.rs:63` | Stale pending_op survives history navigation and set_content — next motion key silently deletes text | correctness | confirmed · ✅ #383 |
 | `src/ui/line_edit.rs:253` | Normal mode ignores the CONTROL modifier — ^A enters Insert mode, ^D arms the delete operator | correctness | confirmed · ✅ #386 |
 | `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | confirmed · ✅ #355 |
-| `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | unverified |
+| `src/ui/markdown/renderer.rs:383` | style_mods is a bitflag, not a nesting counter — bold inside a heading un-bolds the rest of the heading | correctness | confirmed · ✅ #388 |
 | `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
 | `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | confirmed · ✅ #359 |
 | `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | confirmed · ✅ #356 |

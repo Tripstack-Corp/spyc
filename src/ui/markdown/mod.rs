@@ -67,12 +67,79 @@ pub fn render(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> V
     r.finish()
 }
 
+/// Reference-counted text modifiers. Markdown spans nest — e.g. `**bold**`
+/// inside an already-bold heading — and a plain `Modifier` bitflag can't track
+/// that: the inner Strong's close would `remove(BOLD)` and un-bold the rest of
+/// the heading. Counting each modifier (active while its count > 0) makes
+/// overlapping start/end pairs nest correctly.
+#[derive(Default)]
+struct StyleMods {
+    bold: u16,
+    italic: u16,
+    crossed_out: u16,
+    underlined: u16,
+}
+
+impl StyleMods {
+    /// Enter a span carrying modifier `m`.
+    const fn push(&mut self, m: Modifier) {
+        if m.contains(Modifier::BOLD) {
+            self.bold = self.bold.saturating_add(1);
+        }
+        if m.contains(Modifier::ITALIC) {
+            self.italic = self.italic.saturating_add(1);
+        }
+        if m.contains(Modifier::CROSSED_OUT) {
+            self.crossed_out = self.crossed_out.saturating_add(1);
+        }
+        if m.contains(Modifier::UNDERLINED) {
+            self.underlined = self.underlined.saturating_add(1);
+        }
+    }
+
+    /// Leave a span carrying modifier `m`. Saturating so an unbalanced close
+    /// can't wrap a counter below zero.
+    const fn pop(&mut self, m: Modifier) {
+        if m.contains(Modifier::BOLD) {
+            self.bold = self.bold.saturating_sub(1);
+        }
+        if m.contains(Modifier::ITALIC) {
+            self.italic = self.italic.saturating_sub(1);
+        }
+        if m.contains(Modifier::CROSSED_OUT) {
+            self.crossed_out = self.crossed_out.saturating_sub(1);
+        }
+        if m.contains(Modifier::UNDERLINED) {
+            self.underlined = self.underlined.saturating_sub(1);
+        }
+    }
+
+    /// The modifier set currently active (every counter that is > 0).
+    fn current(&self) -> Modifier {
+        let mut m = Modifier::empty();
+        if self.bold > 0 {
+            m |= Modifier::BOLD;
+        }
+        if self.italic > 0 {
+            m |= Modifier::ITALIC;
+        }
+        if self.crossed_out > 0 {
+            m |= Modifier::CROSSED_OUT;
+        }
+        if self.underlined > 0 {
+            m |= Modifier::UNDERLINED;
+        }
+        m
+    }
+}
+
 struct Renderer<'t> {
     theme: &'t Theme,
     lines: Vec<Line<'static>>,
     current: Vec<Span<'static>>,
-    /// Active emphasis modifiers applied to subsequent text spans.
-    style_mods: Modifier,
+    /// Active emphasis modifiers (reference-counted so nested spans, like
+    /// `**bold**` inside a bold heading, restore correctly on close).
+    style_mods: StyleMods,
     /// Nested-list bullet indent. 0 = top-level.
     list_indent: usize,
     /// True while inside any blockquote (single level — nested
