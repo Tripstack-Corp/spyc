@@ -204,7 +204,7 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
         Err(_) => fresh(),
     };
 
-    std::fs::write(&path, content + "\n")?;
+    crate::fs::write_atomic(&path, (content + "\n").as_bytes())?;
     mcp_log(&format!(
         "wrote .mcp.json (sock={}, exe={})",
         our_sock.display(),
@@ -339,7 +339,7 @@ pub fn ensure_codex_config_toml(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, content)?;
+    crate::fs::write_atomic(&path, content.as_bytes())?;
     mcp_log(&format!(
         "wrote .codex/config.toml (sock={}, exe={})",
         our_sock.display(),
@@ -408,7 +408,7 @@ fn clean_local_mcp_entry(dir: &Path) {
         return;
     }
     if let Ok(out) = serde_json::to_string_pretty(&parsed) {
-        let _ = std::fs::write(&path, out + "\n");
+        let _ = crate::fs::write_atomic(&path, (out + "\n").as_bytes());
         mcp_log(&format!(
             "cleaned spyc entry from .mcp.json (preserved other servers, {})",
             path.display()
