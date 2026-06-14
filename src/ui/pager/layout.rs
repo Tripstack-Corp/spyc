@@ -272,8 +272,12 @@ pub(super) fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
 }
 
 const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
-    let w = area.width * percent_w / 100;
-    let h = area.height * percent_h / 100;
+    // Widen to u32 for the percentage multiply: `area.width * percent_w`
+    // overflows u16 past ~728 columns (and height past ~712 rows) — panic
+    // in debug, silent wrap in release. Same overflow #359 fixed in
+    // `centered_body_width`; this is the sibling it missed.
+    let w = (area.width as u32 * percent_w as u32 / 100) as u16;
+    let h = (area.height as u32 * percent_h as u32 / 100) as u16;
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     Rect {
@@ -325,5 +329,31 @@ mod tests {
         // Same multiply, reached via centered_col_width — just must not panic.
         let _ = centered_col_width(u16::MAX, 3);
         assert!(centered_col_width(u16::MAX, 1) > 0);
+    }
+
+    #[test]
+    fn centered_rect_does_not_overflow_on_large_areas() {
+        // `area.width * percent_w` overflows u16 past ~728 cols (and height
+        // past ~712 rows). The u32 widening must keep the centered rect
+        // within its area on a very large terminal rather than panic/wrap.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: u16::MAX,
+            height: u16::MAX,
+        };
+        let r = centered_rect(area, CENTERED_W_PCT, 92);
+        assert!(r.width <= area.width, "width {} > area", r.width);
+        assert!(r.height <= area.height, "height {} > area", r.height);
+        // Centered: a non-trivial inset on both axes (not zero, not full).
+        assert!(r.x > 0 && r.y > 0, "rect not inset: {r:?}");
+        // Sanity on a normal-size area: 100 * 90 / 100 = 90 wide.
+        let small = Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        };
+        assert_eq!(centered_rect(small, CENTERED_W_PCT, 92).width, 90);
     }
 }

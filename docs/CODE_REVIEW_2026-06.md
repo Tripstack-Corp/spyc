@@ -1048,7 +1048,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/pager/construct.rs:154` | picker_move re-implements scroll_to_keep_visible; placement_move re-inlines placement_row_len | maintainability | unverified |
 | `src/ui/pager/layout.rs:40` | u16 multiply overflow in centered geometry for terminals wider than 728 columns | correctness | confirmed · ✅ #359 |
 | `src/ui/pager/layout.rs:104` | last_word_start is a verbatim duplicate of prev_word_start called at end-of-line | maintainability | confirmed · ✅ #356 |
-| `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | unverified |
+| `src/ui/pager/layout.rs:292` | centered_rect / centered_body_width overflow u16 on terminals wider than 728 columns | perf | confirmed (correctness) · ✅ #398 (centered_body_width was #359; centered_rect sibling missed) |
 | `src/ui/pager/render.rs:25` | Position indicator and title strings computed unconditionally but dead in borderless mode (and use a viewport off by 2 there) | maintainability | unverified |
 | `src/ui/pager/render.rs:249` | Multi-column mode recomputes partition_lines_static up to 3x per keystroke (render, position indicator, clamp) | perf | unverified |
 | `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | unverified |
