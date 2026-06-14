@@ -418,6 +418,27 @@ impl App {
         }
     }
 
+    /// Clear a Tab-completion preview: the cycle state (`tab_state`) **and**
+    /// its paired preview filter (`temp_filter`), atomically.
+    ///
+    /// Only the Tab preview is paired with `tab_state`, so a user-set
+    /// `=`/`:limit` filter (which has no `tab_state`) is left untouched —
+    /// without this gate, cancelling any unrelated prompt wiped the active
+    /// limit filter.
+    ///
+    /// Called wherever a Tab preview is abandoned: when a prompt is cancelled
+    /// or dispatched, **and** on the first non-Tab key after a preview. Keeping
+    /// the pair clear atomic is the invariant `cancel_prompt`/`dispatch_prompt`
+    /// rely on: if `tab_state` were nulled alone, the preview filter would
+    /// outlive the cycle and leak into the listing behind the prompt.
+    pub(crate) fn clear_tab_preview(&mut self) {
+        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
+            self.state.temp_filter = None;
+            self.state.rebuild_rows();
+        }
+        self.view.tab_state = None;
+    }
+
     /// Close the prompt without dispatching. Restores search cursor,
     /// clears Tab-applied filters.
     pub fn cancel_prompt(&mut self) {
@@ -428,15 +449,7 @@ impl App {
             self.state.cursor.index = saved_cursor;
             self.state.cursor.clamp(self.state.rows.len());
         }
-        // Clear a Tab-applied preview filter — but NOT a user-set `=`/`:limit`
-        // filter. Both live in `temp_filter`; only the Tab preview is paired
-        // with `tab_state`, so gate on it. Without this, cancelling any
-        // unrelated prompt wiped the active limit filter.
-        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
-            self.state.temp_filter = None;
-            self.state.rebuild_rows();
-        }
-        self.view.tab_state = None;
+        self.clear_tab_preview();
         // Clear any stashed state from the two-step new-tab prompt.
         self.state.pending_new_tab_cmd = None;
     }
@@ -449,14 +462,9 @@ impl App {
     pub fn dispatch_prompt(&mut self, prompt: Prompt) -> Vec<Effect> {
         use state::Update;
 
-        // Clear a Tab-applied preview filter before dispatching — but NOT a
-        // user-set `=`/`:limit` filter (only the Tab preview is paired with
-        // `tab_state`; see cancel_prompt).
-        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
-            self.state.temp_filter = None;
-            self.state.rebuild_rows();
-        }
-        self.view.tab_state = None;
+        // Clear a Tab-applied preview filter before dispatching (see
+        // `clear_tab_preview` — a user-set `=`/`:limit` filter is preserved).
+        self.clear_tab_preview();
 
         // Try the pure-domain handler first, normalized to the unified
         // `Update` (MVU Stage 3C).

@@ -98,7 +98,7 @@ impl App {
             }
             return Vec::new();
         }
-        self.view.tab_state = None;
+        self.clear_tab_preview();
 
         // Edit the buffer. Scoped borrow so we can run search afterwards.
         {
@@ -217,8 +217,10 @@ impl App {
             }
             return Vec::new();
         }
-        // Non-Tab clears double-Tab state.
-        self.view.tab_state = None;
+        // Non-Tab key ends the Tab cycle — clear the cycle state *and* its
+        // paired preview filter together, so the preview doesn't linger behind
+        // the prompt (and stays clearable on a later cancel).
+        self.clear_tab_preview();
 
         // ^C in any prompt cancels and returns to normal mode --
         // vi muscle memory. Distinct from Esc only in keystroke,
@@ -236,6 +238,11 @@ impl App {
         // For `J`, the popup exists at `show_jump_history_popup` but
         // was previously only reachable via `J <Esc> <Space>` — two
         // prerequisites a spy user is unlikely to know.
+        //
+        // Leave via `cancel_prompt`, not a bare `mode = Normal`: opening the
+        // popup abandons the prompt, so the search cursor / pending new-tab
+        // state must be restored too. (The Tab preview filter is already
+        // cleared by the non-Tab-key handler above.)
         if key.code == KeyCode::Char('?')
             && let Mode::Prompting(Prompt {
                 ref kind,
@@ -246,12 +253,12 @@ impl App {
         {
             match kind {
                 PromptKind::ShellCmdCaptured => {
-                    self.state.mode = Mode::Normal;
+                    self.cancel_prompt();
                     self.show_history_popup();
                     return Vec::new();
                 }
                 PromptKind::Jump => {
-                    self.state.mode = Mode::Normal;
+                    self.cancel_prompt();
                     self.show_jump_history_popup();
                     return Vec::new();
                 }
@@ -292,7 +299,7 @@ impl App {
                     &self.state.mode,
                     Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump)
                 );
-                self.state.mode = Mode::Normal;
+                self.cancel_prompt();
                 if is_jump {
                     self.show_jump_history_popup();
                 } else {
@@ -387,5 +394,81 @@ impl App {
             EditResult::TabComplete | EditResult::Continue => {}
         }
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn shell_prompt_app(kind: PromptKind) -> App {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.seed_rows(&["alpha", "beta"]);
+        app.state.mode = Mode::Prompting(Prompt::shell(kind, "!"));
+        app
+    }
+
+    /// Simulate the state a Tab-completion preview leaves behind: a cycle
+    /// `tab_state` paired with a `temp_filter` that's narrowing the listing.
+    fn arm_tab_preview(app: &mut App) {
+        app.view.tab_state = Some(crate::app::TabState {
+            original_buf: String::new(),
+            buf_prefix: String::new(),
+            word_base: String::new(),
+            matches: vec!["alpha".into(), "beta".into()],
+            cycle_index: 0,
+        });
+        app.state.temp_filter = Some("a*".to_string());
+    }
+
+    /// Regression: a non-Tab key ends the Tab cycle, so the paired preview
+    /// filter must be cleared with it — not left lingering behind the prompt.
+    #[test]
+    fn non_tab_key_clears_tab_preview_filter() {
+        let mut app = shell_prompt_app(PromptKind::ShellCmd);
+        arm_tab_preview(&mut app);
+        app.handle_vi_prompt_key(key('x'));
+        assert!(app.view.tab_state.is_none(), "tab_state must clear");
+        assert!(
+            app.state.temp_filter.is_none(),
+            "paired Tab-preview filter must clear with the cycle state"
+        );
+    }
+
+    /// Regression: escaping to the history popup must not leave the Tab-preview
+    /// filter (or a stale `tab_state`) behind the popup; the prompt is abandoned.
+    #[test]
+    fn history_popup_escape_clears_tab_preview() {
+        let mut app = shell_prompt_app(PromptKind::ShellCmdCaptured);
+        arm_tab_preview(&mut app);
+        // Empty buffer + `?` opens the shell-history popup.
+        app.handle_vi_prompt_key(key('?'));
+        assert!(
+            app.state.temp_filter.is_none(),
+            "preview filter must not leak past the popup escape"
+        );
+        assert!(app.view.tab_state.is_none(), "tab_state must not leak");
+        assert!(
+            matches!(app.state.mode, Mode::Normal),
+            "prompt is abandoned when the popup opens"
+        );
+    }
+
+    /// Guard the gate: a user-set `=`/`:limit` filter has no paired `tab_state`,
+    /// so ordinary prompt editing must NOT wipe it.
+    #[test]
+    fn user_limit_filter_survives_prompt_editing() {
+        let mut app = shell_prompt_app(PromptKind::ShellCmd);
+        app.state.temp_filter = Some("*.rs".to_string());
+        app.handle_vi_prompt_key(key('x'));
+        assert_eq!(
+            app.state.temp_filter.as_deref(),
+            Some("*.rs"),
+            "a user limit filter (no tab_state) must survive editing"
+        );
     }
 }
