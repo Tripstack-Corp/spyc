@@ -43,12 +43,6 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true;
-    let push_blank = |out: &mut Vec<Line<'static>>, last_was_blank: &mut bool| {
-        if !*last_was_blank {
-            out.push(Line::from(""));
-            *last_was_blank = true;
-        }
-    };
 
     for line in text.lines() {
         let line = line.trim();
@@ -85,15 +79,12 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
             };
             let display_content = display_content.trim();
 
-            push_blank(&mut out, &mut last_was_blank);
-            for (i, body) in display_content.lines().enumerate() {
-                let prefix = if i == 0 { "❯ " } else { "  " };
-                out.push(Line::from(vec![
-                    Span::styled(prefix, user_style),
-                    Span::styled(body.to_string(), user_style),
-                ]));
-            }
-            last_was_blank = false;
+            crate::state::push_transcript_prompt(
+                &mut out,
+                &mut last_was_blank,
+                display_content,
+                user_style,
+            );
         } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
             if let Some(content) = val["content"].as_str() {
                 crate::state::push_agent_markdown(

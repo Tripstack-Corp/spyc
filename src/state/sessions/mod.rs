@@ -606,23 +606,31 @@ pub fn extract_claude_resume_token(lines: &[String]) -> Option<String> {
     None
 }
 
-/// Scan pane scrollback for the exit banner codex prints on a clean exit:
-/// `To continue this session, run codex resume <UUID>`. Returns just the
-/// UUID — codex doesn't have thread-name resume tokens. Searches in
-/// reverse so the most recent banner wins.
-pub fn extract_codex_resume_token(lines: &[String]) -> Option<String> {
+/// Scan `lines` in reverse (most-recent banner wins) for the first line
+/// containing any of `markers`, returning the whitespace-delimited token
+/// immediately after the marker when it satisfies `valid`. Uses `find`
+/// (not `strip_prefix`) so a leading "To continue this session, run "
+/// prefix and any trailing color-reset bytes on the same render line are
+/// tolerated.
+///
+/// Shared by the codex / agy extractors below. (The claude extractor stays
+/// separate: it anchors with `strip_prefix` and accepts a session *name*,
+/// not just a UUID.)
+fn extract_token_after(
+    lines: &[String],
+    markers: &[&str],
+    valid: impl Fn(&str) -> bool,
+) -> Option<String> {
     for line in lines.iter().rev() {
         let trimmed = line.trim();
-        // Look for `codex resume <token>` anywhere on the line so we
-        // tolerate the leading "To continue this session, run " prefix
-        // and any trailing color-reset bytes the TUI may have left on
-        // the same render line.
-        if let Some(idx) = trimmed.find("codex resume ") {
-            let rest = &trimmed[idx + "codex resume ".len()..];
-            if let Some(tok) = rest.split_whitespace().next() {
-                let tok = tok.trim();
-                if is_uuid(tok) {
-                    return Some(tok.to_string());
+        for marker in markers {
+            if let Some(idx) = trimmed.find(marker) {
+                let rest = &trimmed[idx + marker.len()..];
+                if let Some(tok) = rest.split_whitespace().next() {
+                    let tok = tok.trim();
+                    if valid(tok) {
+                        return Some(tok.to_string());
+                    }
                 }
             }
         }
@@ -630,31 +638,17 @@ pub fn extract_codex_resume_token(lines: &[String]) -> Option<String> {
     None
 }
 
-/// Scan pane scrollback for the exit banner agy prints on exit.
-/// Returns the UUID. Searches in reverse so the most recent banner wins.
+/// Scan pane scrollback for the exit banner codex prints on a clean exit:
+/// `To continue this session, run codex resume <UUID>`. Returns just the
+/// UUID — codex doesn't have thread-name resume tokens.
+pub fn extract_codex_resume_token(lines: &[String]) -> Option<String> {
+    extract_token_after(lines, &["codex resume "], is_uuid)
+}
+
+/// Scan pane scrollback for the exit banner agy prints on exit
+/// (`agy --conversation <UUID>` or its `-c` short form). Returns the UUID.
 pub fn extract_agy_resume_token(lines: &[String]) -> Option<String> {
-    for line in lines.iter().rev() {
-        let trimmed = line.trim();
-        if let Some(idx) = trimmed.find("agy --conversation ") {
-            let rest = &trimmed[idx + "agy --conversation ".len()..];
-            if let Some(tok) = rest.split_whitespace().next() {
-                let tok = tok.trim();
-                if is_uuid(tok) {
-                    return Some(tok.to_string());
-                }
-            }
-        }
-        if let Some(idx) = trimmed.find("agy -c ") {
-            let rest = &trimmed[idx + "agy -c ".len()..];
-            if let Some(tok) = rest.split_whitespace().next() {
-                let tok = tok.trim();
-                if is_uuid(tok) {
-                    return Some(tok.to_string());
-                }
-            }
-        }
-    }
-    None
+    extract_token_after(lines, &["agy --conversation ", "agy -c "], is_uuid)
 }
 
 /// True if `token` looks like a UUID (8-4-4-4-12 hex).

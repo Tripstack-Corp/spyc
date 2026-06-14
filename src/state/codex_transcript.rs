@@ -162,12 +162,6 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true; // suppress leading blank
-    let push_blank = |out: &mut Vec<Line<'static>>, last_was_blank: &mut bool| {
-        if !*last_was_blank {
-            out.push(Line::from(""));
-            *last_was_blank = true;
-        }
-    };
 
     for line in text.lines() {
         let line = line.trim();
@@ -184,15 +178,12 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
         match (top, ptype) {
             ("event_msg", "user_message") => {
                 let msg = payload["message"].as_str().unwrap_or("");
-                push_blank(&mut out, &mut last_was_blank);
-                for (i, body) in msg.lines().enumerate() {
-                    let prefix = if i == 0 { "❯ " } else { "  " };
-                    out.push(Line::from(vec![
-                        Span::styled(prefix, user_style),
-                        Span::styled(body.to_string(), user_style),
-                    ]));
-                }
-                last_was_blank = false;
+                crate::state::push_transcript_prompt(
+                    &mut out,
+                    &mut last_was_blank,
+                    msg,
+                    user_style,
+                );
             }
             ("event_msg", "agent_message") => {
                 let msg = payload["message"].as_str().unwrap_or("");

@@ -72,26 +72,6 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true;
-    let push_blank = |out: &mut Vec<Line<'static>>, last_was_blank: &mut bool| {
-        if !*last_was_blank {
-            out.push(Line::from(""));
-            *last_was_blank = true;
-        }
-    };
-    let push_prompt = |out: &mut Vec<Line<'static>>, last_was_blank: &mut bool, text: &str| {
-        if text.is_empty() {
-            return;
-        }
-        push_blank(out, last_was_blank);
-        for (i, body) in text.lines().enumerate() {
-            let prefix = if i == 0 { "❯ " } else { "  " };
-            out.push(Line::from(vec![
-                Span::styled(prefix, user_style),
-                Span::styled(body.to_string(), user_style),
-            ]));
-        }
-        *last_was_blank = false;
-    };
 
     for line in text.lines() {
         let line = line.trim();
@@ -105,7 +85,12 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
             Some("user") => {
                 let content = &val["message"]["content"];
                 if let Some(text) = content.as_str() {
-                    push_prompt(&mut out, &mut last_was_blank, text);
+                    crate::state::push_transcript_prompt(
+                        &mut out,
+                        &mut last_was_blank,
+                        text,
+                        user_style,
+                    );
                     continue;
                 }
                 // Array content: tool results (one-line dim preview)
@@ -126,10 +111,11 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
                             }
                         }
                         Some("text") => {
-                            push_prompt(
+                            crate::state::push_transcript_prompt(
                                 &mut out,
                                 &mut last_was_blank,
                                 block["text"].as_str().unwrap_or(""),
+                                user_style,
                             );
                         }
                         _ => {}

@@ -1030,14 +1030,14 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed · ✅ #357 |
 | `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | confirmed · ✅ #361 |
 | `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | unverified |
-| `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | unverified |
+| `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | confirmed · ✅ #376 |
 | `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | confirmed · ✅ #354 |
 | `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
 | `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | confirmed · ✅ #360 |
 | `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | confirmed · ✅ #356 |
-| `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | unverified |
+| `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | confirmed · ✅ #376 (codex/agy share `extract_token_after`; claude stays separate — anchored `strip_prefix` + accepts a session name) |
 | `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | confirmed · ✅ #374 |
 | `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | confirmed · ✅ #374 |
 | `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | unverified |

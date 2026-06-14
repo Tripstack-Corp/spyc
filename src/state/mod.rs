@@ -194,6 +194,44 @@ pub fn push_agent_markdown(
         .is_some_and(|l| l.spans.iter().all(|s| s.content.trim().is_empty()));
 }
 
+/// Append a blank separator line unless the previous line was already
+/// blank (collapses runs to a single blank). Shared by the claude / codex
+/// / agy transcript renderers.
+pub fn push_transcript_blank(
+    out: &mut Vec<ratatui::text::Line<'static>>,
+    last_was_blank: &mut bool,
+) {
+    if !*last_was_blank {
+        out.push(ratatui::text::Line::from(""));
+        *last_was_blank = true;
+    }
+}
+
+/// Render a user prompt block: a single blank separator, then each line
+/// prefixed with `❯ ` (continuation lines indented two spaces), all in
+/// `user_style` (the agent-prompt style: `theme.prompt_prefix` + BOLD).
+/// Empty text is a no-op. Shared by the claude / codex / agy transcript
+/// renderers — the only structured-conversation lines rendered this way.
+pub fn push_transcript_prompt(
+    out: &mut Vec<ratatui::text::Line<'static>>,
+    last_was_blank: &mut bool,
+    text: &str,
+    user_style: ratatui::style::Style,
+) {
+    if text.is_empty() {
+        return;
+    }
+    push_transcript_blank(out, last_was_blank);
+    for (i, body) in text.lines().enumerate() {
+        let prefix = if i == 0 { "❯ " } else { "  " };
+        out.push(ratatui::text::Line::from(vec![
+            ratatui::text::Span::styled(prefix, user_style),
+            ratatui::text::Span::styled(body.to_string(), user_style),
+        ]));
+    }
+    *last_was_blank = false;
+}
+
 /// Char-boundary-safe truncation with a `…` suffix, for one-line
 /// transcript summaries (tool labels, result previews). Shared by the
 /// claude / codex transcript renderers.
@@ -223,8 +261,39 @@ pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::read_tail_lossy;
+    use super::{push_transcript_prompt, read_tail_lossy};
     use std::io::Write;
+
+    #[test]
+    fn transcript_prompt_prefixes_and_collapses_blank() {
+        let style = ratatui::style::Style::default();
+        let mut out = Vec::new();
+        let mut last_was_blank = true; // leading blank suppressed
+        push_transcript_prompt(&mut out, &mut last_was_blank, "one\ntwo", style);
+        // No leading blank (last_was_blank was true); first line `❯ `, rest `  `.
+        let glyphs: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert_eq!(glyphs, vec!["❯ one", "  two"]);
+        assert!(!last_was_blank);
+    }
+
+    #[test]
+    fn transcript_prompt_empty_is_noop() {
+        // Unified across claude/codex/agy: an empty prompt adds nothing and
+        // leaves `last_was_blank` untouched (no spurious separator).
+        let mut out = Vec::new();
+        let mut last_was_blank = false;
+        push_transcript_prompt(
+            &mut out,
+            &mut last_was_blank,
+            "",
+            ratatui::style::Style::default(),
+        );
+        assert!(out.is_empty());
+        assert!(!last_was_blank);
+    }
 
     #[test]
     fn tail_returns_whole_small_file() {
