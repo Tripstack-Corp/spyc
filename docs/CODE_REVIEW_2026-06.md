@@ -1053,5 +1053,5 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/ui/pager/render.rs:249` | Multi-column mode recomputes partition_lines_static up to 3x per keystroke (render, position indicator, clamp) | perf | unverified |
 | `src/ui/pager/render.rs:367` | Two near-identical cursor-cell splitting blocks in apply_row_styling; both discard per-span styling on the cursor row | maintainability | unverified |
 | `src/ui/pager/scroll_search.rs:222` | commit_search allocates two Strings per line over the entire buffer | perf | unverified |
-| `src/ui/scrollback.rs:178` | trim_trailing_whitespace_run drops styled (bg/reverse) space runs, truncating TUI color bars in the ^a-v pager | correctness | unverified |
+| `src/ui/scrollback.rs:178` | trim_trailing_whitespace_run drops styled (bg/reverse) space runs, truncating TUI color bars in the ^a-v pager | correctness | confirmed · ✅ #389 |
 | `src/ui/theme.rs:210` | Doc comment references src/ui/diff_render.rs, which no longer exists | maintainability | confirmed · ✅ #354 |

@@ -28,7 +28,7 @@
 //! oldest scrollback first, current live screen last.
 
 use ratatui::{
-    style::Style,
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
@@ -175,19 +175,41 @@ fn line_from_visible_row(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'s
 /// pads short rows with spaces out to the right edge, and we
 /// don't want every line to be exactly `cols` characters wide
 /// in the pager.
+///
+/// Crucially, only *visually blank* spaces are trimmed. A run of
+/// spaces carrying a background color or reverse/underline video is
+/// a TUI color bar (status lines, progress bars, selection
+/// highlights) — visible content, not grid padding. Trimming those
+/// would chop the bar's right edge in the `^a-v` pager, so a styled
+/// space run is preserved verbatim.
 fn trim_trailing_whitespace_run(spans: &mut Vec<Span<'static>>) {
     while spans
         .last()
-        .is_some_and(|s| s.content.chars().all(|c| c == ' '))
+        .is_some_and(|s| s.content.chars().all(|c| c == ' ') && is_blank_padding(&s.style))
     {
         spans.pop();
     }
-    if let Some(last) = spans.last_mut() {
+    if let Some(last) = spans.last_mut()
+        && is_blank_padding(&last.style)
+    {
         let trimmed = last.content.trim_end_matches(' ').to_string();
         if trimmed.len() != last.content.len() {
             last.content = trimmed.into();
         }
     }
+}
+
+/// True when a run of space characters in this style is grid padding
+/// rather than visible content. A space has no ink, so only the
+/// background color and the reverse/underline attributes can make it
+/// visible: `cell_style` always sets `bg` to [`Color::Reset`] for a
+/// default cell, so blank padding is `bg` ∈ {`Reset`} with no
+/// reverse/underline. Foreground color and bold/italic are invisible
+/// on a space and don't count.
+fn is_blank_padding(style: &Style) -> bool {
+    let bg_blank = matches!(style.bg, None | Some(Color::Reset));
+    let visible_mods = Modifier::REVERSED | Modifier::UNDERLINED;
+    bg_blank && !style.add_modifier.intersects(visible_mods)
 }
 
 #[cfg(test)]
@@ -394,5 +416,72 @@ mod tests {
         let lines = lines_from_scrollback(p.screen_mut());
         let plain = plain_lines(&lines);
         assert_eq!(plain, vec!["c", "d"]);
+    }
+
+    #[test]
+    fn styled_background_space_run_survives_trim() {
+        // A TUI color bar: spaces carrying a background color out to
+        // the right edge (status lines, progress bars). These are
+        // visible content, not grid padding — the trim must keep them
+        // or the bar's right edge gets chopped in the ^a-v pager.
+        // Blue background (`\x1b[44m`) across a full 8-col row.
+        let mut p = parser_with(1, 8, 0, b"\x1b[44m        ");
+        let lines = lines_from_scrollback(p.screen_mut());
+        assert_eq!(lines.len(), 1);
+        let total: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(
+            total, "        ",
+            "blue background bar truncated by trim: {:?}",
+            lines[0].spans
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|s| matches!(s.style.bg, Some(c) if c != Color::Reset)),
+            "expected a styled-background span to survive; got {:?}",
+            lines[0].spans
+        );
+    }
+
+    #[test]
+    fn reverse_video_space_run_survives_trim() {
+        // Reverse-video (`\x1b[7m`) spaces render as a solid block of
+        // the foreground color even with a default background — also a
+        // visible bar that must survive the right-edge trim.
+        let mut p = parser_with(1, 6, 0, b"\x1b[7m      ");
+        let lines = lines_from_scrollback(p.screen_mut());
+        assert_eq!(lines.len(), 1);
+        let total: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(
+            total, "      ",
+            "reverse-video bar truncated by trim: {:?}",
+            lines[0].spans
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|s| s.style.add_modifier.contains(Modifier::REVERSED)),
+            "expected a reversed span to survive; got {:?}",
+            lines[0].spans
+        );
+    }
+
+    #[test]
+    fn styled_bar_kept_but_default_padding_after_it_dropped() {
+        // A short colored bar followed by default grid padding: the
+        // bar survives, the unstyled padding to the right edge is
+        // still dropped (so the line doesn't read as full-width).
+        // 3 blue cells, reset, then default padding out to col 12.
+        let mut p = parser_with(1, 12, 0, b"\x1b[44m   \x1b[0m");
+        let lines = lines_from_scrollback(p.screen_mut());
+        assert_eq!(lines.len(), 1);
+        let total: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(
+            total, "   ",
+            "expected the blue bar kept and trailing default pad dropped: {:?}",
+            lines[0].spans
+        );
     }
 }
