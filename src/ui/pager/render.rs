@@ -367,46 +367,35 @@ fn apply_row_styling(
     if let Some(p) = view.placement
         && p.row == abs_idx
     {
-        let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-        let row_style = styled.style;
-        let before: String = plain.chars().take(p.col).collect();
-        let cursor_ch: String = plain
-            .chars()
-            .nth(p.col)
-            .map_or_else(|| " ".into(), |c| c.to_string());
-        let after: String = plain.chars().skip(p.col + 1).collect();
+        // Re-style only the cursor cell so the rest of the row keeps its
+        // syntax-highlight / search styling while the user positions the
+        // placement anchor.
         let cursor_style = Style::default()
             .bg(theme.cursor_bg)
             .fg(theme.cursor_fg)
             .add_modifier(Modifier::REVERSED | Modifier::BOLD);
-        styled = Line::from(vec![
-            Span::styled(before, row_style),
-            Span::styled(cursor_ch, cursor_style),
-            Span::styled(after, row_style),
-        ]);
+        styled = restyle_cursor_cell(&styled, p.col, cursor_style);
     }
 
     if view.picker_cursor == Some(abs_idx) {
         if let Some((col, vi_mode)) = view.picker_edit_cursor {
-            // History editor: show editing cursor on this line.
-            let plain: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+            // History editor: the whole selected row reads as solid cursor
+            // colors (like the non-edit picker row below); the edit cell on
+            // top gets a reverse/underline cue for normal/insert mode.
             let row_style = Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg);
-            let before: String = plain.chars().take(col).collect();
-            let cursor_ch: String = plain
-                .chars()
-                .nth(col)
-                .map_or_else(|| " ".into(), |c| c.to_string());
-            let after: String = plain.chars().skip(col + 1).collect();
+            let solid = Line::from(
+                styled
+                    .spans
+                    .iter()
+                    .map(|s| Span::styled(s.content.clone(), row_style))
+                    .collect::<Vec<_>>(),
+            );
             let cursor_style = if vi_mode == crate::ui::line_edit::Mode::Normal {
                 row_style.add_modifier(Modifier::REVERSED)
             } else {
                 row_style.add_modifier(Modifier::UNDERLINED)
             };
-            styled = Line::from(vec![
-                Span::styled(before, row_style),
-                Span::styled(cursor_ch, cursor_style),
-                Span::styled(after, row_style),
-            ]);
+            styled = restyle_cursor_cell(&solid, col, cursor_style);
         } else {
             styled = Line::from(
                 styled
@@ -426,6 +415,65 @@ fn apply_row_styling(
         }
     }
     styled
+}
+
+/// Re-style a single character cell at char index `col` within a styled
+/// line, leaving every other cell's styling untouched: the cursor cell gets
+/// `cursor_style`, all other cells keep their original span style. If `col`
+/// is at or past end-of-line, a synthetic space cell (styled `cursor_style`)
+/// is appended — matching how a vi cursor sits past the last char.
+///
+/// Char-indexed (Unicode scalars), matching the placement / history-editor
+/// cursor-column convention. Adjacent same-style chars coalesce into one
+/// span so we don't explode the renderer with a span per char. The line's
+/// own (line-level) style is preserved.
+fn restyle_cursor_cell(line: &Line<'static>, col: usize, cursor_style: Style) -> Line<'static> {
+    let mut new_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_style: Option<Style> = None;
+    let mut idx = 0usize;
+    let mut placed = false;
+
+    let mut push = |text: &mut String, style: &mut Option<Style>, next: Style| {
+        if Some(next) != *style {
+            if !text.is_empty() {
+                new_spans.push(Span::styled(
+                    std::mem::take(text),
+                    style.unwrap_or_default(),
+                ));
+            }
+            *style = Some(next);
+        }
+    };
+
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let style = if idx == col {
+                placed = true;
+                cursor_style
+            } else {
+                span.style
+            };
+            push(&mut current_text, &mut current_style, style);
+            current_text.push(ch);
+            idx += 1;
+        }
+    }
+    if !current_text.is_empty() {
+        new_spans.push(Span::styled(
+            current_text,
+            current_style.unwrap_or_default(),
+        ));
+    }
+    // Cursor parked at or past end-of-line: append a single styled space so
+    // it's still visible.
+    if !placed {
+        new_spans.push(Span::styled(" ".to_string(), cursor_style));
+    }
+
+    let mut out = Line::from(new_spans);
+    out.style = line.style;
+    out
 }
 
 /// Paint a block-selection rectangle's row contribution onto a
@@ -582,4 +630,75 @@ fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static
 
     out.push(Span::styled("$", ws_style));
     Line::from(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::restyle_cursor_cell;
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
+
+    /// Flatten a styled line into `(text, fg)` runs for assertion.
+    fn runs(line: &Line<'static>) -> Vec<(String, Option<Color>)> {
+        line.spans
+            .iter()
+            .map(|s| (s.content.to_string(), s.style.fg))
+            .collect()
+    }
+
+    fn two_color_line() -> Line<'static> {
+        // "ab" red, "cd" blue.
+        Line::from(vec![
+            Span::styled("ab", Style::default().fg(Color::Red)),
+            Span::styled("cd", Style::default().fg(Color::Blue)),
+        ])
+    }
+
+    #[test]
+    fn restyle_cursor_cell_preserves_other_cells_styling() {
+        let line = two_color_line();
+        let cursor = Style::default().fg(Color::Yellow);
+        // Cursor on 'c' (col 2): 'a','b' stay red, 'c' becomes the cursor
+        // style, 'd' stays blue — syntax highlight is NOT flattened.
+        let out = restyle_cursor_cell(&line, 2, cursor);
+        assert_eq!(
+            runs(&out),
+            vec![
+                ("ab".into(), Some(Color::Red)),
+                ("c".into(), Some(Color::Yellow)),
+                ("d".into(), Some(Color::Blue)),
+            ]
+        );
+    }
+
+    #[test]
+    fn restyle_cursor_cell_at_start_splits_first_span() {
+        let line = two_color_line();
+        let cursor = Style::default().fg(Color::Yellow);
+        let out = restyle_cursor_cell(&line, 0, cursor);
+        assert_eq!(
+            runs(&out),
+            vec![
+                ("a".into(), Some(Color::Yellow)),
+                ("b".into(), Some(Color::Red)),
+                ("cd".into(), Some(Color::Blue)),
+            ]
+        );
+    }
+
+    #[test]
+    fn restyle_cursor_cell_past_end_appends_styled_space() {
+        let line = two_color_line();
+        let cursor = Style::default().fg(Color::Yellow);
+        // col == len: original runs intact, plus a trailing cursor space.
+        let out = restyle_cursor_cell(&line, 4, cursor);
+        assert_eq!(
+            runs(&out),
+            vec![
+                ("ab".into(), Some(Color::Red)),
+                ("cd".into(), Some(Color::Blue)),
+                (" ".into(), Some(Color::Yellow)),
+            ]
+        );
+    }
 }
