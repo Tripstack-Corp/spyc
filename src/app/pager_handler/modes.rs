@@ -164,6 +164,39 @@ impl App {
         None
     }
 
+    /// `[b` (`forward = false`) / `]b` (`forward = true`): step the top pager's
+    /// buffer history, swapping the live pager and flashing the new depth, or a
+    /// "no older / no newer buffers" hint at the end. The back/forward arms were
+    /// 15-line mirror copies — only the history call and the end-of-list wording
+    /// differ.
+    fn nav_pager_buffer(&mut self, forward: bool) {
+        let Some(current) = self.view.pager.take() else {
+            return;
+        };
+        let step = if forward {
+            self.view.pager_history.go_forward(current)
+        } else {
+            self.view.pager_history.go_back(current)
+        };
+        match step {
+            Ok(next) => {
+                self.view.pager = Some(next);
+                self.view.needs_full_repaint = true;
+                let back = self.view.pager_history.back_len();
+                let fwd = self.view.pager_history.forward_len();
+                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+            }
+            Err(current) => {
+                self.view.pager = Some(current);
+                self.state.flash_info(if forward {
+                    "no newer buffers"
+                } else {
+                    "no older buffers"
+                });
+            }
+        }
+    }
+
     /// `[b`/`]b` buffer-history nav and `[t`/`]t` task-viewer cycle (chord follow-up).
     pub(super) fn handle_pager_bracket(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         // [b / ]b — pager buffer history navigation (two-key sequence).
@@ -178,40 +211,8 @@ impl App {
             }
             if key.code == KeyCode::Char('b') {
                 match bracket {
-                    '[' => {
-                        if let Some(current) = self.view.pager.take() {
-                            match self.view.pager_history.go_back(current) {
-                                Ok(prev) => {
-                                    self.view.pager = Some(prev);
-                                    self.view.needs_full_repaint = true;
-                                    let back = self.view.pager_history.back_len();
-                                    let fwd = self.view.pager_history.forward_len();
-                                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                                }
-                                Err(current) => {
-                                    self.view.pager = Some(current);
-                                    self.state.flash_info("no older buffers");
-                                }
-                            }
-                        }
-                    }
-                    ']' => {
-                        if let Some(current) = self.view.pager.take() {
-                            match self.view.pager_history.go_forward(current) {
-                                Ok(next) => {
-                                    self.view.pager = Some(next);
-                                    self.view.needs_full_repaint = true;
-                                    let back = self.view.pager_history.back_len();
-                                    let fwd = self.view.pager_history.forward_len();
-                                    self.state.flash_info(format!("buffer ←{back} →{fwd}"));
-                                }
-                                Err(current) => {
-                                    self.view.pager = Some(current);
-                                    self.state.flash_info("no newer buffers");
-                                }
-                            }
-                        }
-                    }
+                    '[' => self.nav_pager_buffer(false),
+                    ']' => self.nav_pager_buffer(true),
                     _ => {}
                 }
                 return Some(Vec::new());
