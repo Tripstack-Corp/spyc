@@ -951,7 +951,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/git_view_session.rs:182` | git-view `\|` layout toggle replaces `view.lines` without clamping `view.scroll`, blanking the viewport when deep-scrolled | correctness | confirmed · ✅ #368 |
 | `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed · ✅ #370 |
 | `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed · ✅ #356 |
-| `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed |
+| `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed · ✅ #371 |
 | `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
 | `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed |
 | `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed · ✅ #352 |
