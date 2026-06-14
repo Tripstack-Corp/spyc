@@ -357,6 +357,88 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     );
 }
 
+/// A working-tree edit whose fs-event lands inside `refresh_listing`'s
+/// invalidation throttle must NOT stay stale forever: the throttle defers the
+/// re-walk via `pending_worktree_rewalk`, and the next `refresh_git_state`
+/// honors it with a forced re-walk even though the `.git/index`/`HEAD` mtimes
+/// (the poll's short-circuit key) never moved. Without the flag the poll would
+/// short-circuit and the marker would only converge on a chdir.
+#[test]
+fn throttled_worktree_edit_converges_on_next_poll() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+    let run_git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run_git(&["init", "-q", "--initial-branch=main"]);
+    std::fs::write(root.join("file.txt"), "v1\n").unwrap();
+    run_git(&["add", "file.txt"]);
+    run_git(&["commit", "-q", "-m", "v1"]);
+
+    let mut s = test_state();
+    s.listing.dir = root.clone();
+    s.start_dir = root.clone();
+    s.update_huge_tree(&root);
+    s.git.info = s.compute_git_info_fast();
+
+    // Walk once (clean) to seed git_poll_cache with the current index/HEAD
+    // mtimes — this is what the poll short-circuits against.
+    s.refresh_git_state();
+    assert!(s.git.files.is_empty(), "clean baseline");
+
+    // Working-tree edit — moves the file's mtime, NOT .git/index/HEAD.
+    std::fs::write(root.join("file.txt"), "v2\n").unwrap();
+
+    // Simulate the fs-event landing inside the 1 s throttle window: a recent
+    // invalidation means refresh_listing skips the re-walk this round.
+    s.git_cache.last_git_invalidation = Some(std::time::Instant::now());
+    s.refresh_listing();
+    assert!(
+        s.git.files.is_empty(),
+        "throttled: marker not surfaced yet (got {:?})",
+        s.git.files
+    );
+    assert!(
+        s.git_cache.pending_worktree_rewalk,
+        "throttle-skip must defer a re-walk"
+    );
+
+    // The poll would normally short-circuit (index/HEAD mtimes unchanged), but
+    // the pending flag forces the re-walk — the edit converges.
+    let changed = s.refresh_git_state();
+    assert!(changed, "forced re-walk should report a change");
+    assert!(
+        s.git.files.contains_key("file.txt"),
+        "deferred re-walk must surface the M marker; got {:?}",
+        s.git.files
+    );
+    assert!(
+        !s.git_cache.pending_worktree_rewalk,
+        "flag cleared after the forced re-walk"
+    );
+
+    // And with no pending flag, the poll still short-circuits on unchanged
+    // mtimes (the throttle's perf win is intact): a second edit stays hidden
+    // until something invalidates.
+    std::fs::write(root.join("file.txt"), "v3\n").unwrap();
+    let changed2 = s.refresh_git_state();
+    assert!(
+        !changed2,
+        "no pending flag + unchanged index mtime ⇒ poll short-circuits"
+    );
+}
+
 /// With a background worker wired (`git_worker_available = true`), a
 /// cache-miss in the git-status path must NOT spawn `git status` inline.
 /// It bumps the generation, enqueues exactly one request into the outbox

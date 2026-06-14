@@ -164,6 +164,16 @@ impl AppState {
                 if should_invalidate {
                     self.git_cache.git_status_cache = None;
                     self.git_cache.last_git_invalidation = Some(std::time::Instant::now());
+                    // This walk reflects the current worktree, so any earlier
+                    // deferred re-walk is now satisfied.
+                    self.git_cache.pending_worktree_rewalk = false;
+                } else {
+                    // Throttled this round — defer the re-walk so the working-tree
+                    // change can't stay stale. The 1 Hz git poll's mtime
+                    // short-circuit won't catch it (an unstaged edit moves no
+                    // `.git/index`/`HEAD` mtime), so flag it for a forced re-walk
+                    // on the next poll instead of dropping it.
+                    self.git_cache.pending_worktree_rewalk = true;
                 }
                 let dir = self.listing.dir.clone();
                 let new_git_files = self.git_file_statuses_cached(&dir);

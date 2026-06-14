@@ -398,6 +398,15 @@ pub struct GitCache {
     /// roundtrip duration for the most recent `git status` spawn
     /// (which on huge trees can be 200-500 ms).
     pub last_git_request_at: Option<std::time::Instant>,
+    /// A working-tree fs-event arrived but `refresh_listing` *throttled* its
+    /// cache invalidation, so the new ` M`/clean state was never re-walked.
+    /// The 1 Hz poll's own mtime short-circuit can't cover it — an unstaged
+    /// edit moves no `.git/index`/`HEAD` mtime — so without this flag a change
+    /// landing inside the throttle window (with no trailing event) would stay
+    /// stale until a chdir. Set on a throttle-skip; the next `refresh_git_state`
+    /// honors it with a forced re-walk and clears it, bounding staleness to one
+    /// poll interval instead of forever.
+    pub pending_worktree_rewalk: bool,
 }
 
 /// Bottom-pane layout + prompt-echo state: the split percentage, zoom
