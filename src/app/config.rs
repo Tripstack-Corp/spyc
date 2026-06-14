@@ -31,10 +31,19 @@ impl App {
                 self.state.masks = IgnoreMasks::default();
                 self.state.masks.apply_config(&new_config.ignore_masks);
                 let count = new_config.sources.len();
+                let warnings = new_config.warnings.clone();
                 self.state.config = new_config;
                 self.state.rebuild_rows();
-                self.state
-                    .flash_info(format!("reloaded {count} config file(s)"));
+                // Non-fatal problems (bad scan-pattern regex, etc.) win over
+                // the success note so a typo is visible the moment the rc is
+                // saved, not only under --debug.
+                if warnings.is_empty() {
+                    self.state
+                        .flash_info(format!("reloaded {count} config file(s)"));
+                } else {
+                    self.state
+                        .flash_error(format!("config: {}", warnings.join("; ")));
+                }
             }
             Err(e) => self.state.flash_error(format!("config error: {e}")),
         }

@@ -272,6 +272,13 @@ impl App {
         if let Some(msg) = load_note {
             app.state.flash_info(msg);
         }
+        // Surface non-fatal config problems (e.g. a bad scan-pattern
+        // regex) so a silently-dropped setting doesn't just look broken.
+        // Takes precedence over the benign "loaded N config file(s)" note.
+        if !app.state.config.warnings.is_empty() {
+            app.state
+                .flash_error(format!("config: {}", app.state.config.warnings.join("; ")));
+        }
         // Surface any health check warnings so the user knows state
         // was repaired. Overrides the config load note if both exist.
         if !health_warnings.is_empty() {
