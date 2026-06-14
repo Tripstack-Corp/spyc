@@ -137,16 +137,21 @@ impl App {
         if !self.view.show_activity {
             return;
         }
-        use ratatui::style::{Color, Style};
+        use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line as HudLine, Span};
         use ratatui::widgets::Paragraph as ActivityP;
 
         // Line 1 — throughput + frame timing. `pk` is the whole terminal.draw
         // (build + diff + tty emission); `r` is just the render closure (CPU).
         // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
-        let l1 = format!(
-            " {} dps [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
-            self.view.activity_dps,
+        //
+        // Split into a dimmed `N dps` headline + a full-contrast remainder: the
+        // headline is the at-a-glance idle indicator and reads better
+        // de-emphasized, while the `[p e o]` reason breakdown and the timings
+        // stay sharp. Only the head carries `Modifier::DIM` (see the render loop).
+        let l1_head = format!(" {} dps", self.view.activity_dps);
+        let l1_tail = format!(
+            " [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
             self.view.activity_snap_pane,
             self.view.activity_snap_event,
             self.view.activity_snap_other,
@@ -158,6 +163,7 @@ impl App {
             // input box) we don't control; a small `echo` ⇒ spyc isn't the lag.
             self.view.activity_echo_snap as f64 / 1000.0,
         );
+        let l1 = format!("{l1_head}{l1_tail}");
 
         // Line 2 — internals digest.
         let bg_running = self.runtime.background_tasks.running_count();
@@ -249,19 +255,29 @@ impl App {
             if y >= frame_area.height {
                 break;
             }
-            let pad = maxw.saturating_sub(crate::ui::display_width(text));
-            let padded = format!("{}{text}", " ".repeat(pad));
+            let pad = " ".repeat(maxw.saturating_sub(crate::ui::display_width(text)));
             let rect = ratatui::layout::Rect {
                 x,
                 y,
                 width: block_w,
                 height: 1,
             };
-            let style = Style::default().fg(Color::Black).bg(*bg);
-            frame.render_widget(
-                ActivityP::new(HudLine::from(Span::styled(padded, style))),
-                rect,
-            );
+            let normal = Style::default().fg(Color::Black).bg(*bg);
+            // Row 0 alone splits into a dimmed `N dps` headline + a full-contrast
+            // remainder (the `[p e o]` breakdown + timings); every other row is a
+            // single span.
+            let line = if row == 0 {
+                HudLine::from(vec![
+                    Span::styled(
+                        format!("{pad}{l1_head}"),
+                        normal.add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(l1_tail.clone(), normal),
+                ])
+            } else {
+                HudLine::from(Span::styled(format!("{pad}{text}"), normal))
+            };
+            frame.render_widget(ActivityP::new(line), rect);
         }
     }
 }
