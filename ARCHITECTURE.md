@@ -190,6 +190,12 @@ All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
 - `pager_positions.json` — persisted pager scroll offsets (LRU).
 - `sessions/<epoch-ms>.json` — workspace snapshots from quit.
 - `mcp-<pid>.sock` — PID-scoped MCP socket.
+- `mcp-<pid>.root` — trusted-root sidecar: the directory that spyc
+  is rooted at. Stdio discovery cross-checks a project's
+  `.spyc-context-<pid>.json` marker against this (owner-private,
+  attacker can't forge it) so a planted marker can't redirect MCP
+  attachment to another project. Written at socket start, removed on
+  cleanup.
 
 The debug log is the exception: `spyc_debug!` output goes to
 `/tmp/spyc-debug-<ts>.log` (timestamped per run, not under XDG) so

@@ -1017,7 +1017,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | confirmed · ✅ #355 |
 | `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
 | `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | confirmed · ✅ #384 |
-| `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | unverified |
+| `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | confirmed · ✅ #393 |
 | `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
 | `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | confirmed · ✅ #367 |
 | `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed · ✅ #380 |

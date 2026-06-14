@@ -53,11 +53,29 @@ fn log_bodies() -> bool {
 
 // ── Shared JSON-RPC dispatch ────────────────────────────────────
 
+/// spyc's per-user state directory: `~/.local/state/spyc` (falling back
+/// to `/tmp` when `$HOME` is unset). Holds the MCP socket and the
+/// trusted-root sidecars — all owner-private; an attacker who can only
+/// plant files in a *cloned repo* cannot write here.
+pub fn state_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".local/state/spyc")
+}
+
 /// Socket path for a given PID: `~/.local/state/spyc/mcp-<pid>.sock`.
 pub fn socket_path_for(pid: u32) -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let state_dir = PathBuf::from(home).join(".local/state/spyc");
-    state_dir.join(format!("mcp-{pid}.sock"))
+    state_dir().join(format!("mcp-{pid}.sock"))
+}
+
+/// Trusted-root sidecar path for a PID, in the given state dir:
+/// `<state_dir>/mcp-<pid>.root`. The running spyc writes the directory
+/// it is rooted at here (next to its socket); discovery cross-checks a
+/// `.spyc-context-<pid>.json` marker's location against it so a planted
+/// marker — which an attacker *can* write into a repo, but whose pid is
+/// really rooted elsewhere — can't redirect attachment cross-project.
+/// Parameterized on `state_dir` so tests can inject a temp dir (no env).
+pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
+    state_dir.join(format!("mcp-{pid}.root"))
 }
 
 /// Socket path for the current process.

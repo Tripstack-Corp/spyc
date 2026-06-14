@@ -12,7 +12,8 @@ use crate::mcp_cmd::McpRequest;
 
 use super::protocol::{dispatch, read_lsp_message, send_message};
 use super::{
-    PROXY_IO_TIMEOUT, log_bodies, mcp_log, resolve_context_path, socket_path, socket_path_for,
+    PROXY_IO_TIMEOUT, log_bodies, mcp_log, resolve_context_path, root_marker_path_in, socket_path,
+    socket_path_for, state_dir,
 };
 
 /// Project-scoped discovery: walk `caller_cwd` upward looking for any
@@ -82,11 +83,26 @@ pub(super) fn discover_live_socket(caller_cwd: &Path) -> Option<UnixStream> {
 
 /// Walk `start` toward the filesystem root looking for
 /// `.spyc-context-<pid>.json` markers. Returns the PIDs from the
-/// first ancestor that has any matches; empty Vec otherwise.
+/// first ancestor that has any *trusted* matches; empty Vec otherwise.
 pub(super) fn collect_project_pids(start: &Path) -> Vec<u32> {
+    collect_project_pids_in(start, &state_dir())
+}
+
+/// As [`collect_project_pids`], but with the state dir injected so tests
+/// can point the trusted-root lookup at a temp dir. A marker only counts
+/// if its `.spyc-context-<pid>.json` lives in the directory the running
+/// spyc with that pid actually recorded as its root (see
+/// [`root_marker_path_in`]). Markers with no sidecar, or rooted
+/// elsewhere (the planted-marker attack), are skipped — and we keep
+/// walking up rather than letting an untrusted marker form a boundary
+/// that shadows a legitimate ancestor spyc.
+pub(super) fn collect_project_pids_in(start: &Path, state_dir: &Path) -> Vec<u32> {
     let mut here: &Path = start;
     loop {
-        let pids = read_context_pids_in_dir(here);
+        let pids: Vec<u32> = read_context_pids_in_dir(here)
+            .into_iter()
+            .filter(|&pid| marker_root_is_trusted(state_dir, pid, here))
+            .collect();
         if !pids.is_empty() {
             return pids;
         }
@@ -97,6 +113,48 @@ pub(super) fn collect_project_pids(start: &Path) -> Vec<u32> {
             return Vec::new();
         }
         here = parent;
+    }
+}
+
+/// True iff the running spyc that owns `pid` recorded `marker_dir` as its
+/// root in its trusted sidecar. A missing sidecar fails safe (untrusted).
+fn marker_root_is_trusted(state_dir: &Path, pid: u32, marker_dir: &Path) -> bool {
+    let Ok(recorded) = std::fs::read_to_string(root_marker_path_in(state_dir, pid)) else {
+        return false;
+    };
+    root_matches(Path::new(recorded.trim()), marker_dir)
+}
+
+/// Compare a recorded root against a marker directory by canonical form,
+/// so symlink / relative-path differences don't cause false rejects.
+/// Falls back to a literal compare if either path can't be canonicalized.
+fn root_matches(recorded: &Path, marker_dir: &Path) -> bool {
+    match (
+        std::fs::canonicalize(recorded),
+        std::fs::canonicalize(marker_dir),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => recorded == marker_dir,
+    }
+}
+
+/// Write the trusted-root sidecar for the current process: the directory
+/// `ctx_path` lives in (the dir where this spyc writes its
+/// `.spyc-context-<pid>.json` marker). Best-effort — discovery treats a
+/// missing sidecar as untrusted, so a failed write fails safe (refuse),
+/// never open.
+fn write_root_marker(state_dir: &Path, ctx_path: &Path) {
+    let root = ctx_path.parent().unwrap_or_else(|| Path::new("."));
+    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let path = root_marker_path_in(state_dir, std::process::id());
+    // A non-UTF-8 root would be stored lossily and later fail the
+    // canonical compare → refuse; an acceptable (and safe) edge.
+    if std::fs::write(&path, canon.to_string_lossy().as_bytes()).is_ok() {
+        // Match the socket's owner-only posture: the file only holds a
+        // directory path, but no reason to expose project roots to other
+        // local users.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
 }
 
@@ -312,6 +370,13 @@ pub fn start_socket_server(
     let bind_result = UnixListener::bind(&sock);
     rustix::process::umask(old_umask);
     let listener = bind_result?;
+
+    // Record the directory this spyc is rooted at, next to the socket, so
+    // stdio discovery can verify a `.spyc-context-<pid>.json` marker
+    // really belongs to a spyc rooted there — not a planted decoy. Done
+    // before any connection is served.
+    write_root_marker(&state_dir(), &ctx_path);
+
     let ctx_path = Arc::new(ctx_path);
     let cmd_tx = Arc::new(cmd_tx);
 
@@ -347,10 +412,10 @@ pub fn start_socket_server(
     Ok(())
 }
 
-/// Clean up the socket file on shutdown.
+/// Clean up the socket file and trusted-root sidecar on shutdown.
 pub fn cleanup_socket() {
-    let sock = socket_path();
-    let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_file(socket_path());
+    let _ = std::fs::remove_file(root_marker_path_in(&state_dir(), std::process::id()));
 }
 
 /// Status of MCP configuration for this directory.
