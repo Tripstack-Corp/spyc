@@ -6,13 +6,13 @@
 
 use std::path::Path;
 
-/// Count subdirs under `root`, terminating as soon as the running
-/// count exceeds `cap`. Two callers:
-///
-/// - **Linux** `pick_recursive_mode` (gating `RecursiveMode::Recursive`
-///   watch registration; see `MAX_RECURSIVE_WATCH_DIRS`).
-/// - **All platforms** `AppState::chdir` (setting the
-///   huge-tree warning flag).
+/// Count *every* subdir under `root` (no gitignore awareness), terminating
+/// as soon as the running count exceeds `cap`. Sole caller is the **Linux**
+/// `pick_recursive_mode` recursive-watch gate (see `MAX_RECURSIVE_WATCH_DIRS`):
+/// `notify` registers an inotify watch per directory regardless of
+/// `.gitignore`, so that decision must count what's actually on disk. The
+/// huge-tree *git* decision instead uses [`count_unignored_subdirs_capped`],
+/// which counts only what `git status` walks.
 ///
 /// Iterative DFS over a stack rather than a recursive call or an
 /// internal BFS. For an "is the count over `cap`" decision the order
@@ -24,6 +24,7 @@ use std::path::Path;
 /// is not pushed onto the walk stack. This matches `notify`'s default
 /// behavior — its recursive walker does not chase symlinks either, so
 /// the count we produce here tracks what `notify` would have walked.
+#[cfg(any(target_os = "linux", test))]
 pub fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
     let mut count = 0usize;
     let mut stack = vec![root.to_path_buf()];
@@ -39,6 +40,41 @@ pub fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
                     return count;
                 }
                 stack.push(entry.path());
+            }
+        }
+    }
+    count
+}
+
+/// Like [`count_subdirs_capped`], but counts only the directories `git
+/// status` would actually traverse — honoring `.gitignore` and the
+/// always-ignored `.git`. This is the right size signal for the
+/// **huge-tree git-poll throttle**: a Rust checkout's `target/`, an agent's
+/// `.claude/`, a JS project's `node_modules/`, etc. hold thousands of
+/// subdirs that git never walks, so counting them (as the raw walk does)
+/// mis-classifies an otherwise small repo as huge and backs its git polling
+/// off to 10 s — making the dirty markers visibly lag real git state.
+///
+/// Terminates as soon as the running count exceeds `cap` (dropping the
+/// iterator stops the walk), so it stays bounded on a genuinely huge tree.
+/// Symlinks are not followed. Built on the same `ignore` crate that powers
+/// the project-wide finder, so the exclusions match what the user sees there.
+///
+/// The raw [`count_subdirs_capped`] is still correct for the Linux
+/// recursive-watch gate: `notify` registers a watch per directory with no
+/// gitignore awareness, so that decision must count every dir on disk.
+pub fn count_unignored_subdirs_capped(root: &Path, cap: usize) -> usize {
+    let mut count = 0usize;
+    for entry in ignore::WalkBuilder::new(root).build() {
+        let Ok(entry) = entry else { continue };
+        // Depth 0 is `root` itself; count only descendant directories.
+        if entry.depth() == 0 {
+            continue;
+        }
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            count += 1;
+            if count > cap {
+                return count;
             }
         }
     }
@@ -212,4 +248,42 @@ pub fn strip_ansi_escapes(s: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gitignore-aware count must skip a gitignored build dir
+    /// (`target/`) and a hidden agent dir (`.claude/`) — the dirs that were
+    /// mis-flagging real repos (spyc itself) as huge. A `.git` dir is present
+    /// so the `ignore` crate applies the repo's `.gitignore`.
+    #[test]
+    fn count_unignored_skips_gitignored_and_hidden_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        // Counted: src, src/a, src/b.
+        std::fs::create_dir_all(root.join("src/a")).unwrap();
+        std::fs::create_dir_all(root.join("src/b")).unwrap();
+        // Excluded: gitignored build output + hidden agent dir.
+        std::fs::create_dir_all(root.join("target/x/y")).unwrap();
+        std::fs::create_dir_all(root.join(".claude/z")).unwrap();
+
+        assert_eq!(count_unignored_subdirs_capped(root, 100), 3);
+        // The raw walk, by contrast, sees every dir on disk.
+        assert!(count_subdirs_capped(root, 100) >= 8);
+    }
+
+    /// Bounded like the raw walk: stops once the count exceeds `cap`.
+    #[test]
+    fn count_unignored_terminates_past_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..10 {
+            std::fs::create_dir(tmp.path().join(format!("d{i}"))).unwrap();
+        }
+        let n = count_unignored_subdirs_capped(tmp.path(), 3);
+        assert!(n > 3 && n <= 11, "expected just past cap, got {n}");
+    }
 }

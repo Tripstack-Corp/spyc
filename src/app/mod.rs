@@ -260,8 +260,12 @@ use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 #[cfg(unix)]
 use util::kill_pg;
+// Raw subdir count: only the Linux recursive-watch gate (and its tests) use
+// it now that the huge-tree git decision counts gitignore-aware dirs instead.
+#[cfg(any(target_os = "linux", test))]
+use util::count_subdirs_capped;
 use util::{
-    count_subdirs_capped, eof_marker_line, format_uptime, path_basename_display,
+    count_unignored_subdirs_capped, eof_marker_line, format_uptime, path_basename_display,
     strip_ansi_escapes, strip_crlf, user_host_string,
 };
 
