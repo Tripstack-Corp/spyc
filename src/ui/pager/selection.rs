@@ -110,20 +110,18 @@ impl PagerView {
         if n == 0 {
             return;
         }
-        let Some(p) = self.placement.as_mut() else {
+        let Some(p) = self.placement else {
             return;
         };
         let new_row = (p.row as isize + delta_row).clamp(0, n as isize - 1) as usize;
-        p.row = new_row;
-        let row_len = self.lines.get(new_row).map_or(0, |l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.chars().count())
-                .sum::<usize>()
-        });
-        let max_col = row_len.saturating_sub(1);
+        // Compute the clamp bound via the shared row-length helper before
+        // re-borrowing `placement` mutably.
+        let max_col = self.placement_row_len(new_row).saturating_sub(1);
         let new_col = (p.col as isize + delta_col).max(0).min(max_col as isize) as usize;
-        p.col = new_col;
+        if let Some(p) = self.placement.as_mut() {
+            p.row = new_row;
+            p.col = new_col;
+        }
         self.scroll_to_keep_visible(new_row, viewport_height);
     }
 
@@ -280,7 +278,7 @@ impl PagerView {
     /// Adjust `scroll` so `line` is in the viewport. Visual cursor
     /// helper, factored out so both `visual_move` and `visual_jump_to`
     /// share the same edge logic.
-    const fn scroll_to_keep_visible(&mut self, line: usize, viewport_height: u16) {
+    pub(super) const fn scroll_to_keep_visible(&mut self, line: usize, viewport_height: u16) {
         let top = self.scroll as usize;
         let vh = viewport_height as usize;
         if vh == 0 {

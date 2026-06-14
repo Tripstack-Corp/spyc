@@ -142,23 +142,16 @@ impl PagerView {
 
     /// Move picker cursor up/down (only when `picker_cursor` is set).
     pub fn picker_move(&mut self, delta: isize, viewport_height: u16) {
-        let Some(cur) = self.picker_cursor.as_mut() else {
+        let Some(cur) = self.picker_cursor else {
             return;
         };
         let n = self.lines.len();
         if n == 0 {
             return;
         }
-        let new = (*cur as isize + delta).clamp(0, n as isize - 1) as usize;
-        *cur = new;
-        // Auto-scroll to keep the cursor visible.
-        let top = self.scroll as usize;
-        let bot = top + viewport_height as usize;
-        if new < top {
-            self.scroll = new as u16;
-        } else if new >= bot {
-            self.scroll = (new + 1).saturating_sub(viewport_height as usize) as u16;
-        }
+        let new = (cur as isize + delta).clamp(0, n as isize - 1) as usize;
+        self.picker_cursor = Some(new);
+        self.scroll_to_keep_visible(new, viewport_height);
     }
 
     pub const fn toggle_full_width(&mut self) {
