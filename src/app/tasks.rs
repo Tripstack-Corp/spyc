@@ -429,6 +429,9 @@ impl App {
             return;
         };
         let TabEntry { pane, info, .. } = entry;
+        // The demoted tab's `stashed_scrollback_pager` was just dropped (`..`);
+        // reclaim its parked stream (if any) so it doesn't leak in the map.
+        self.prune_orphaned_pager_streams();
         // MVU Phase 3c PR3: refuse to demote an already-exited pane. Its
         // reader thread has already returned, so the resulting task would
         // never wake or finalize — and with the poll floor gone, nothing

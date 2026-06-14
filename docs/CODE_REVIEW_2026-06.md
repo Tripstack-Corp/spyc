@@ -963,7 +963,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed · ✅ #368 |
 | `src/app/pager_handler/modes.rs:178` | handle_pager_bracket: '[' and ']' arms are 15-line mirror copies | maintainability | confirmed |
 | `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed · ✅ #378 |
-| `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed |
+| `src/app/pane_scroll.rs:86` | Parked pager streams leak when their tab is closed or demoted | correctness | confirmed · ✅ #379 |
 | `src/app/pane_tabs.rs:4` | pane_tabs.rs module doc claims every method is pub, contradicted by the file's own contents | maintainability | confirmed · ✅ #352 |
 | `src/app/pane_tabs.rs:262` | restart_active_tab flashes success even when the respawn failed (after already destroying the old tab) | correctness | confirmed ✅ #336 |
 | `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed ✅ #337 |
