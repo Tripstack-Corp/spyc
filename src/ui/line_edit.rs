@@ -64,6 +64,10 @@ impl LineEditor {
         self.buf = s.chars().collect();
         self.cursor = self.buf.len();
         self.mode = Mode::Insert;
+        // A half-entered operator (`d`/`c`) must not survive a buffer swap —
+        // otherwise the next motion key would silently apply it to the freshly
+        // loaded content.
+        self.pending_op = None;
     }
 
     /// Replace buffer contents, preserving the current mode.
@@ -76,6 +80,9 @@ impl LineEditor {
         } else {
             self.cursor = self.buf.len();
         }
+        // See `set_content`: drop any pending operator on a buffer swap so a
+        // stale `d`/`c` can't eat text in the newly loaded entry.
+        self.pending_op = None;
     }
 
     pub fn text(&self) -> String {
@@ -494,6 +501,30 @@ mod tests {
         assert_eq!(e.feed(k(KeyCode::Char('s'))), EditResult::Continue);
         assert_eq!(e.text(), "ls");
         assert_eq!(e.feed(k(KeyCode::Enter)), EditResult::Submit);
+    }
+
+    #[test]
+    fn pending_operator_does_not_survive_buffer_swap() {
+        // Arm `d` in Normal mode, then load a history entry via
+        // set_content_keep_mode — the stale operator must not eat text on the
+        // next motion key.
+        let mut e = LineEditor::new();
+        e.feed(k(KeyCode::Esc)); // Insert → Normal
+        e.feed(k(KeyCode::Char('d'))); // delete operator now pending
+        e.set_content_keep_mode("echo hello");
+        // Without the fix, this `w` completes `dw` and deletes the first word.
+        e.feed(k(KeyCode::Char('w')));
+        assert_eq!(e.text(), "echo hello");
+
+        // set_content (Insert-mode history load) clears a pending operator too.
+        let mut e2 = LineEditor::new();
+        e2.feed(k(KeyCode::Esc));
+        e2.feed(k(KeyCode::Char('c'))); // change operator pending
+        e2.set_content("ls -la");
+        assert_eq!(e2.mode, Mode::Insert);
+        e2.feed(k(KeyCode::Esc)); // back to Normal
+        e2.feed(k(KeyCode::Char('w'))); // plain motion, no stale `cw`
+        assert_eq!(e2.text(), "ls -la");
     }
 
     #[test]
