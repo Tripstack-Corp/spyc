@@ -2,6 +2,106 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [1.58.0] - 2026-06-14
+
+### Features
+- **transcript**: Label tool calls and preview results in Claude transcript view
+
+### Bug Fixes
+- **restore**: Verify /resume submitted and retry a dropped Enter
+- **transcript**: Drop DIM from result previews — unreadable on dark themes
+- **fs**: Refuse same-file / dest-inside-source copy & move
+- **health**: Pair graveyard json with .tar.zst, stop deleting live undo
+- **render**: Measure the pane divider & quick-select in display columns
+- **render**: Anchor the top overlay to a real top_unit rect (bottom status)
+- **pager**: Clamp visual selection so yank can't panic on a shrunk buffer
+- **route**: An open prompt wins over pane-owned input arms
+- **proc**: A failed foreground spawn flashes instead of killing the session
+- **session**: Report save/spawn outcomes truthfully, arm /resume on the real tab
+- **session**: Label restored tabs inline so a failed spawn can't misalign
+- **security**: Move debug/log files off world-readable /tmp; stop logging MCP bodies
+- **config**: Sandbox project-local .spycrc — no shell/jump bindings, pin reload
+- **security**: Harden paste, OSC title, MCP framing, and resume token vs untrusted input
+- **pane**: Bound reap_exit so EOF-but-alive children can't freeze the loop
+- **input**: Preserve finder selection, guard view verbs, keep =/:limit filter
+- **loop**: Run_teardown on every exit path, not just a clean quit
+- Guard two unchecked integer-overflow sites (2 findings)
+- Two file-read boundary off-by-ones (2 findings)
+- Two fs/path edge-case correctness bugs (2 findings)
+- Resolve HOME through envset for gh / :cd (2 findings)
+- Surface two silently-mangled/swallowed errors (2 findings)
+- Run nested-repo pass 2 from inside git worktrees
+- Surface diff-build failures instead of a clean-looking empty diff
+- Parser-worker byte receiver survives a worker panic
+- Back off on MCP socket accept errors instead of hot-spinning
+- Clamp pager scroll after a lines-replace / jump-past-EOF
+- Gf finds paths in gcc/clang diagnostics with a trailing colon
+- **graveyard**: Clear dd/gg arming on j/k navigation (1 finding)
+- **prompt**: Clear Tab-preview filter atomically with its cycle state (1 finding)
+- **git-view**: Gd on a no-change path no longer resurrects the prior diff
+- **git-view**: Defer the overlay mount — gd on a clean path just flashes
+- **debug-log**: Owner-only state-dir path + gate before format/lock
+- **diff-render**: Per-file line-number width + shared layout prologue
+- **git**: Huge-tree decision counts gitignore-aware dirs, not target/.git
+- **run**: Scroll-throttle Continue must not drop the consumed repaint clear
+- **pager**: Re-render git-view on `f` full-width toggle
+- **pane**: Reclaim parked scrollback streams when their tab is dropped
+- **pane**: Encode Ctrl/Alt/Shift modifiers on cursor + edit keys
+- **line-edit**: Clear pending d/c operator on buffer swap
+- **fs**: Write config/state files atomically (temp + rename)
+
+### Performance
+- **list**: Measure list-grid columns lazily, not the whole tail per frame
+- **matcher**: Kill per-candidate allocation on the keystroke/filter path
+- **capture**: Cap the foreground `!` buffer like background tasks
+- **apply**: Cap the R blast-radius walk so the pure Model can't freeze
+
+### Refactors
+- **render**: Move agent-status thread-kick out of the pure draw pass
+- **render**: Move live-cwd lsof kick out of the pure draw pass
+- **render**: Cache the activity-HUD process constants off the draw pass
+- **graveyard**: Run archive / restore / purge-all off the input thread
+- **state**: De-triplicate per-agent transcript + resume-token helpers
+- **pager**: Dedup [b/]b buffer-history mirror arms
+- **state**: Three low-risk maintainability cleanups
+
+### Documentation
+- Consolidate plans into ROADMAP, archive shipped plans, fix doc drift
+- Add the June 2026 deep code review report
+- **review**: Mark fs/ops self-copy findings fixed in #329
+- **review**: Mark graveyard health findings fixed in #330
+- **review**: Mark render unicode findings fixed in #331
+- **review**: Mark bottom-status overlay finding fixed in #332
+- **review**: Mark yank_visual panic finding fixed in #333
+- **review**: Mark route prompt-precedence finding fixed in #334
+- **review**: Mark foreground-spawn findings fixed in #335
+- **review**: Mark session/restart truthfulness findings fixed in #336
+- **review**: Mark /tmp predictable-path findings fixed in #337
+- **review**: Mark .spycrc trust finding fixed in #338
+- **review**: Mark injection/alloc findings fixed in #339
+- **review**: Mark reap_exit blocking finding fixed in #340
+- **review**: Mark input-correctness findings fixed in #341
+- **review**: Mark run_teardown finding fixed in #342
+- **review**: Mark list-grid perf finding fixed in #343
+- **comments**: Truth-up 7 stale comments flagged by the deep review
+- **comments**: Truth-up 7 stale comments flagged by the deep review
+- **review**: Annotate pane_scroll.rs:86 parked-stream leak fixed in #379
+- **review**: Annotate pane/input.rs:68 modifier-encoding fixed in #380
+- **review**: Annotate modes.rs:178 bracket dedup fixed in #381
+- **review**: Annotate state cleanups (apply:95, dispatch:236, mod:153) fixed in #382
+- **review**: Annotate line_edit.rs:63 stale-pending-op fixed in #383
+- **review**: Annotate atomic writes (marks:67, mcp/config:207) fixed in #384
+
+### Tests
+- **render**: Guard the &self draw pass against OS access; capture the learning
+
+### Miscellaneous
+- Remove dead code flagged by the deep review (4 findings)
+- Remove dead code flagged by the deep review (7 findings)
+- Collapse redundant indirection flagged by the deep review (4 findings)
+- Hoist loop-invariant, drop dead branch, truth-up ops doc (3 findings)
+- Dedup the optional task-id :command parser (commands.rs:164)
+
 ## [1.57.0] - 2026-06-09
 
 ### Features
