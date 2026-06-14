@@ -551,6 +551,18 @@ impl Pane {
     }
 }
 
+/// Append raw pty bytes to the `SPYC_PTY_DEBUG` dump. Owner-only in the
+/// state dir — never the old world-readable, symlink-followable
+/// `/tmp/spyc_pty_debug.bin` (raw pty bytes can carry secrets the child
+/// printed). One helper so the two dump sites (this worker and
+/// `PtyHost::drain`) can't drift: the /tmp→state-dir hardening once
+/// landed in `drain` but missed the copy in `parser_worker`.
+fn append_pty_debug(bytes: &[u8]) {
+    if let Some(mut f) = crate::state::open_state_file_append("spyc_pty_debug.bin") {
+        let _ = f.write_all(bytes);
+    }
+}
+
 /// Parser worker thread: consumes bytes from the PTY reader-thread
 /// channel and processes them into the shared vt100 parser. Runs
 /// concurrently with the main thread; main thread reads the grid
@@ -601,13 +613,8 @@ fn parser_worker(
             .recv_timeout(std::time::Duration::from_millis(50))
         {
             Ok(PtyEvent::Bytes(bytes)) => {
-                if debug_dump
-                    && let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/spyc_pty_debug.bin")
-                {
-                    let _ = f.write_all(&bytes);
+                if debug_dump {
+                    append_pty_debug(&bytes);
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut p = parser

@@ -775,7 +775,7 @@ pathref.rs hand-rolls a 30-line ANSI stripper while the project already depends 
 **Fix:** Use `mpsc::sync_channel` with a bounded depth (e.g. a few hundred chunks): a blocked `send` stops the reader, the kernel pty buffer fills, and the child blocks on write — natural flow control with no protocol change (`send` still errors out when the receiver is dropped, so teardown is unaffected). Alternatively coalesce: when the channel is over a threshold, concatenate chunks before sending.
 
 ### `src/pane/pty_host.rs:317` — SPYC_PTY_DEBUG dumps raw pty bytes to a fixed, world-readable, symlink-followable path in /tmp
-`medium` · `security` · `pane-pty` · **unverified** · ✅ **verified + fixed in #337**
+`medium` · `security` · `pane-pty` · **unverified** · ✅ **verified + fixed in #337** (drain site) · ⚠️ **parser_worker copy was missed by #337, closed in #396**
 
 When debug_dump is enabled (SPYC_PTY_DEBUG set, gated at src/pane/mod.rs:148), both PtyHost::drain (src/pane/pty_host.rs:312-319) and the pane parser_worker (src/pane/mod.rs:579-585) open "/tmp/spyc_pty_debug.bin" with OpenOptions::new().create(true).append(true) and append every raw byte the pty produces — i.e. the full terminal stream, including any secrets echoed or printed in any pane. Problems: (1) the file is created with default umask permissions (typically 0644) in the world-writable shared /tmp, so any other local account can read the accumulated terminal contents; (2) open() follows symlinks, so a pre-planted /tmp/spyc_pty_debug.bin -> <victim file> symlink turns the debug dump into an append to an arbitrary file owned by the user; (3) the fixed name means multiple spyc instances (or multiple users) interleave into one ever-growing file that is never truncated or cleaned up. The threat-model brief explicitly calls out world-readable files holding sensitive data; this is opt-in debug tooling, which bounds it, but a developer who flips the flag once leaves their terminal history readable in /tmp indefinitely.
 
@@ -1023,7 +1023,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed · ✅ #380 |
 | `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | confirmed · ✅ #366 |
 | `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
-| `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | unverified |
+| `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | confirmed · ✅ #396 (also closed a /tmp site #337 missed) |
 | `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed · ✅ #369 |
 | `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | confirmed · ✅ #355 |
 | `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
