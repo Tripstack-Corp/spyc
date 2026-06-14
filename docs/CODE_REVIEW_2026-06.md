@@ -1029,7 +1029,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/pane/tabs.rs:470` | Tab close runs a synchronous SIGTERM-grace-SIGKILL loop on the input thread (20-250 ms freeze per tab) | perf | unverified |
 | `src/pane/tabs.rs:503` | take_active duplicates remove_at's index fixup, including a branch that can never execute | maintainability | confirmed · ✅ #357 |
 | `src/paths.rs:60` | `expand_tilde` mangles `~user` paths into `$HOME/user` | correctness | confirmed · ✅ #361 |
-| `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | unverified |
+| `src/shell/expand.rs:33` | expand_percent lossy UTF-8 conversion can make `%` target a different file than selected | security | confirmed · ✅ #392 |
 | `src/state/claude_transcript.rs:65` | Transcript renderers duplicate the push_blank closure and the user-prompt rendering loop across claude/codex/agy | maintainability | confirmed · ✅ #376 |
 | `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | confirmed · ✅ #354 |
 | `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | confirmed · ✅ #354 |
