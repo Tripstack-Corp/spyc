@@ -34,7 +34,12 @@ impl AppState {
     /// surface.
     pub fn refresh_git_state(&mut self) -> bool {
         let key = self.compute_git_mtime_key_fast();
-        if key.is_some() && key == self.git_cache.git_poll_cache {
+        // A throttled working-tree change (refresh_listing deferred its
+        // invalidation) forces a re-walk: the mtime key below can't see an
+        // unstaged edit, so honoring this flag is the only thing that converges
+        // a stale ` M`/clean marker without waiting for a chdir.
+        let force_rewalk = std::mem::take(&mut self.git_cache.pending_worktree_rewalk);
+        if !force_rewalk && key.is_some() && key == self.git_cache.git_poll_cache {
             return false;
         }
         // mtime moved — invalidate the raw-status cache before going
