@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 pub mod blame_render;
 pub mod diff_render;
 pub mod help;
+pub mod hex;
 pub mod json;
 #[allow(
     dead_code,

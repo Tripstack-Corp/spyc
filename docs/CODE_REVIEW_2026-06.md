@@ -1004,7 +1004,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | confirmed · ✅ #356 |
 | `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
 | `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | confirmed · ✅ #360 |
-| `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | unverified |
+| `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | confirmed · ✅ #395 |
 | `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
 | `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | confirmed · ✅ #365 |
 | `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |

@@ -754,7 +754,7 @@ fn snapshot_pager_hex() {
     let path = dir.path().join("bin");
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(b"\x7fELF\x02\x01\x01\x00hello, spyc!").unwrap();
-    let lines = crate::fs::ops::hex_dump_lines(&path, &Theme::default()).unwrap();
+    let lines = crate::ui::hex::hex_dump_lines(&path, &Theme::default()).unwrap();
     let mut view = PagerView::new_styled("bin", lines);
     view.full_width = true;
     let out = render_pager_to_string(&view, 80, 6);
