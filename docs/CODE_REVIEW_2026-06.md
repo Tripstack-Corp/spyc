@@ -989,7 +989,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
 | `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed |
 | `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | confirmed · ✅ #354 |
-| `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | unverified |
+| `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | confirmed · ✅ #387 (added bindable `searchprev`/`searchnext`; `previous`=cursor-up + `enter`=open-or-edit are documented-intentional, kept for back-compat) |
 | `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | unverified |
 | `src/config/mod.rs:353` | merge_file hand-lists all 23 color fields — adding a color requires a parallel edit or it silently never merges | maintainability | unverified |
 | `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | unverified |
