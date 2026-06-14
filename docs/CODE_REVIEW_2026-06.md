@@ -992,7 +992,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | confirmed · ✅ #387 (added bindable `searchprev`/`searchnext`; `previous`=cursor-up + `enter`=open-or-edit are documented-intentional, kept for back-compat) |
 | `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | unverified |
 | `src/config/mod.rs:353` | merge_file hand-lists all 23 color fields — adding a color requires a parallel edit or it silently never merges | maintainability | unverified |
-| `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | unverified |
+| `src/config/mod.rs:431` | Bad `[[scan.patterns]]` regex is dropped with a warning only visible under --debug | correctness | confirmed · ✅ #390 |
 | `src/debug_log.rs:37` | Debug log created world-readable at a predictable /tmp path | security | confirmed · ✅ #373 |
 | `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed · ✅ #373 |
 | `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | confirmed · ✅ #355 |

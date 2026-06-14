@@ -56,6 +56,14 @@ pub struct Config {
 
     /// File paths we actually loaded from (for the watcher to track).
     pub sources: Vec<PathBuf>,
+
+    /// Non-fatal config problems collected during load — e.g. a
+    /// `[[scan.patterns]]` entry with an un-compilable regex. These
+    /// don't fail the load (one typo shouldn't lock the user out of
+    /// starting spyc), but they're surfaced via a startup / reload
+    /// flash so the user knows part of their config didn't apply —
+    /// not buried behind `--debug`.
+    pub warnings: Vec<String>,
 }
 
 /// Where the status bar lives. Defaults to `Top` (matches stock spyc).
@@ -465,6 +473,10 @@ impl Config {
                         source.display(),
                         p.name
                     );
+                    // Also surface it to the user (flash), not only under
+                    // --debug: a silently-dropped pattern just looks broken.
+                    self.warnings
+                        .push(format!("scan pattern {:?}: bad regex — {e}", p.name));
                 }
             }
         }
@@ -674,6 +686,45 @@ exec = "#112233"
         assert_eq!(cfg.colors.dir.as_deref(), Some("#aabbcc"));
         assert_eq!(cfg.colors.exec.as_deref(), Some("#112233"));
         assert_eq!(cfg.bindings.len(), 2);
+    }
+
+    #[test]
+    fn bad_scan_pattern_regex_is_dropped_but_collected_as_warning() {
+        // A `[[scan.patterns]]` with an un-compilable regex must NOT
+        // fail the whole load (one typo shouldn't lock the user out),
+        // but it must surface as a non-fatal warning — not vanish into
+        // a --debug-only log. The valid pattern alongside it loads fine.
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("spycrc.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"
+[[scan.patterns]]
+name = "good"
+regex = "TICKET-[0-9]+"
+
+[[scan.patterns]]
+name = "broken"
+regex = "TICKET-[0-9"
+"#
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        // The good pattern still loaded; the broken one was dropped.
+        assert_eq!(
+            cfg.scan_patterns.len(),
+            1,
+            "only the compilable pattern should be kept"
+        );
+        // ...and the drop is visible as a warning naming the culprit.
+        assert_eq!(cfg.warnings.len(), 1, "got: {:?}", cfg.warnings);
+        assert!(
+            cfg.warnings[0].contains("broken"),
+            "warning should name the offending pattern: {:?}",
+            cfg.warnings
+        );
     }
 
     /// A project-local (untrusted) rc may set cosmetic options and rebind to
