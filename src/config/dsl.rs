@@ -27,8 +27,9 @@
 //! - home, climb
 //! - enter / edit (open-or-edit), display (open-or-display)
 //! - pick, unpick, take, drop, inventory, empty
-//! - search, next  (note: `previous` above is an alias for cursor-up, *not*
-//!   search-previous; there is no search-prev verb)
+//! - search; next / searchnext (repeat search forward); searchprev (repeat
+//!   search backward). NB: `previous` above is a legacy alias for *cursor-up*,
+//!   not search-previous — use `searchprev` to rebind backward search.
 //! - startshell; unix CMD (verbatim template); unix_cmd (prompted, captured
 //!   into the pager); foreground_cmd (prompted, run in the foreground like `;`)
 //! - longlist, file, copy, move, remove, makedirs
@@ -157,7 +158,11 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
         "empty" => Ok(BoundAction::Plain(Action::EmptyInventory)),
 
         "search" => Ok(BoundAction::Plain(Action::SearchPrompt)),
-        "next" => Ok(BoundAction::Plain(Action::SearchNext)),
+        "next" | "searchnext" => Ok(BoundAction::Plain(Action::SearchNext)),
+        // Backward search repeat (the default `N`). Previously unbindable —
+        // `next` had no symmetric verb, and `previous` is cursor-up, not
+        // search-prev.
+        "searchprev" => Ok(BoundAction::Plain(Action::SearchPrev)),
 
         "startshell" => Ok(BoundAction::Plain(Action::StartShell)),
         // `unix_cmd` in spy was a prompted shell command. In spyc, `!`
@@ -249,6 +254,25 @@ mod tests {
         let b = parse("map <F1> help").unwrap().unwrap();
         assert_eq!(b.chord, KeyChord::Named(NamedKey::Fn(1)));
         assert!(matches!(b.action, BoundAction::Plain(Action::Help)));
+    }
+
+    #[test]
+    fn binds_search_repeat_verbs() {
+        // `searchprev` was previously unbindable — only `next` → SearchNext
+        // existed, with no symmetric verb for backward search.
+        assert!(matches!(
+            parse("map p searchprev").unwrap().unwrap().action,
+            BoundAction::Plain(Action::SearchPrev)
+        ));
+        assert!(matches!(
+            parse("map n searchnext").unwrap().unwrap().action,
+            BoundAction::Plain(Action::SearchNext)
+        ));
+        // `next` stays an alias for SearchNext (back-compat).
+        assert!(matches!(
+            parse("map n next").unwrap().unwrap().action,
+            BoundAction::Plain(Action::SearchNext)
+        ));
     }
 
     #[test]
