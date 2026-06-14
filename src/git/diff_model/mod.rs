@@ -286,6 +286,52 @@ mod tests {
             .collect()
     }
 
+    /// The `paths` filter restricts the working-tree diff to the selected
+    /// file/subtree (what `gd` on a cursor file/folder relies on): a subtree
+    /// filter keeps only files under it, a single-file filter keeps only that
+    /// file, and an empty filter is "everything". (Guards against a regression
+    /// in the scoping itself; the `gd`-shows-stale-diff bug was actually in the
+    /// pager close path, not here — see `pager_stream` tests.)
+    #[test]
+    fn paths_filter_scopes_working_diff_to_selection() {
+        let (_t, root) = repo_with_commit();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/inner.txt"), "x\n").unwrap();
+        std::fs::write(root.join("top.txt"), "y\n").unwrap();
+        std::fs::write(root.join("f.txt"), "a\nb\nC\nd\ne\n").unwrap();
+
+        let names = |m: &crate::git::model::DiffModel| {
+            let mut v: Vec<String> = m
+                .files
+                .iter()
+                .map(|f| {
+                    f.new_path
+                        .clone()
+                        .or_else(|| f.old_path.clone())
+                        .unwrap_or_default()
+                })
+                .collect();
+            v.sort();
+            v
+        };
+
+        let all = diff_head_to_worktree(&root, &[]).expect("all");
+        assert_eq!(
+            names(&all),
+            vec![
+                "f.txt".to_string(),
+                "sub/inner.txt".to_string(),
+                "top.txt".to_string()
+            ]
+        );
+
+        let scoped_sub = diff_head_to_worktree(&root, &["sub".to_string()]).expect("sub");
+        assert_eq!(names(&scoped_sub), vec!["sub/inner.txt".to_string()]);
+
+        let scoped_f = diff_head_to_worktree(&root, &["f.txt".to_string()]).expect("f");
+        assert_eq!(names(&scoped_f), vec!["f.txt".to_string()]);
+    }
+
     #[test]
     fn working_added_modified_deleted_structure() {
         let (_t, root) = repo_with_commit();
