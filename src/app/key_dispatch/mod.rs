@@ -511,8 +511,13 @@ impl App {
         match bound {
             BoundAction::Plain(action) => return self.apply(action),
             BoundAction::UnixCmd(template) => {
-                let cmd = shell::expand_percent(template, &self.state.selection_paths());
-                return Ok(sh_c(&cmd, true));
+                return match shell::expand_percent(template, &self.state.selection_paths()) {
+                    Ok(cmd) => Ok(sh_c(&cmd, true)),
+                    Err(e) => {
+                        self.state.flash_error(e.to_string());
+                        Ok(Vec::new())
+                    }
+                };
             }
             BoundAction::PatternPick(pattern) => {
                 if let Ok(pat) = glob::Pattern::new(pattern) {

@@ -56,9 +56,10 @@ impl App {
         if input == "!!" || input == "!" {
             match self.state.last_captured_cmd.clone() {
                 Some(cmd) => {
-                    let expanded =
-                        crate::shell::expand_percent(&cmd, &self.state.selection_paths());
-                    self.start_capture(&expanded, &cmd, &cmd);
+                    match crate::shell::expand_percent(&cmd, &self.state.selection_paths()) {
+                        Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
+                        Err(e) => self.state.flash_error(e.to_string()),
+                    }
                 }
                 None => self.state.flash_error("no previous ! command"),
             }
@@ -73,8 +74,10 @@ impl App {
                 return Vec::new();
             }
             self.state.last_captured_cmd = Some(cmd.to_string());
-            let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
-            self.start_capture(&expanded, cmd, cmd);
+            match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+                Ok(expanded) => self.start_capture(&expanded, cmd, cmd),
+                Err(e) => self.state.flash_error(e.to_string()),
+            }
             return Vec::new();
         }
 
@@ -85,7 +88,13 @@ impl App {
                 self.state.flash_error("empty command");
                 return Vec::new();
             }
-            let expanded = crate::shell::expand_percent(cmd, &self.state.selection_paths());
+            let expanded = match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+                Ok(s) => s,
+                Err(e) => {
+                    self.state.flash_error(e.to_string());
+                    return Vec::new();
+                }
+            };
             let (rows, cols) =
                 Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
             let cwd = self.state.listing.dir.clone();
