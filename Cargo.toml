@@ -77,6 +77,7 @@ rustix = { version = "1.1.4", features = ["process", "termios", "fs"] }
 # disk/network/component/user backends). Aliased because spyc has an
 # internal `crate::sysinfo` module.
 sysinfo_crate = { package = "sysinfo", version = "0.33", default-features = false, features = ["system"] }
+infer = { version = "0.19.0", default-features = false }
 
 # macOS thread count: sysinfo's `tasks()` is Linux-only, so on macOS we read
 # it from `proc_pidinfo(PROC_PIDTASKINFO).pti_threadnum` via the small,
