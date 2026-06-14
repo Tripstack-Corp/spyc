@@ -1015,7 +1015,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | confirmed · ✅ #354 |
 | `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | confirmed · ✅ #359 |
 | `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | confirmed · ✅ #355 |
-| `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
+| `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | ✅ #403 — shared `decide_takeover` + `live_owner_pid`; each ensure_/detect_ keeps only its format-specific parse (JSON ptr vs TOML lookup) |
 | `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | confirmed · ✅ #384 |
 | `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | confirmed · ✅ #393 |
 | `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
