@@ -1,7 +1,9 @@
 //! File-system operations, pure Rust: both the *mutating* ops
 //! (`copy_tree`/`move_tree`/`remove_tree`/`*_selection_to`/`chmod_add_bits`)
 //! and the read-side *viewer* helpers the file-display path needs
-//! (`read_truncated`, `format_size`, `file_type_label`, `hex_dump_lines`).
+//! (`read_truncated`, `format_size`, `file_type_label`, `read_hex_window`).
+//! The *styling* of the hex window into pager lines lives in the UI layer
+//! ([`crate::ui::hex`]) — `fs` reads bytes, `ui` paints them.
 //!
 //! The mutating ops replace the `sh -c "cp -r ..."`-style shell-outs we used
 //! originally. Benefits:
@@ -400,14 +402,17 @@ fn magic_label(head: &[u8]) -> Option<&'static str> {
 /// Max bytes we'll read for the hex view. 64 KiB is plenty to inspect
 /// headers, magic bytes, and initial structure without loading a giant
 /// binary into memory.
-const HEX_CAP: usize = 64 * 1024;
+pub const HEX_CAP: usize = 64 * 1024;
 
 /// Read up to `cap` bytes from `path` for the hex view. The second tuple
 /// element is whether the file has *more* content beyond `cap` (so the caller
 /// can flag the dump as truncated). Uses `read_to_end` over a `take(cap)` so a
 /// short `read()` doesn't under-fill the buffer, then probes one extra byte: a
 /// file that ends exactly at `cap` is complete, not truncated.
-fn read_hex_window(path: &Path, cap: usize) -> io::Result<(Vec<u8>, bool)> {
+///
+/// The byte read lives here in the `fs` layer; styling the bytes into pager
+/// lines is [`crate::ui::hex::hex_dump_lines`].
+pub fn read_hex_window(path: &Path, cap: usize) -> io::Result<(Vec<u8>, bool)> {
     use std::io::Read as _;
     let mut f = fs::File::open(path)?;
     let mut buf = Vec::new();
@@ -415,75 +420,6 @@ fn read_hex_window(path: &Path, cap: usize) -> io::Result<(Vec<u8>, bool)> {
     let mut probe = [0u8; 1];
     let truncated = matches!(f.read(&mut probe), Ok(n) if n > 0);
     Ok((buf, truncated))
-}
-
-/// Read up to `HEX_CAP` bytes from `path` and format as a hex dump.
-/// Returns styled lines ready for the pager: each line split into
-/// offset (dim), hex bytes (default), and ASCII sidebar (warm).
-pub fn hex_dump_lines(
-    path: &Path,
-    theme: &crate::ui::theme::Theme,
-) -> io::Result<Vec<ratatui::text::Line<'static>>> {
-    use pretty_hex::{HexConfig, config_hex};
-    use ratatui::{
-        style::{Modifier, Style},
-        text::{Line, Span},
-    };
-
-    let (buf, truncated) = read_hex_window(path, HEX_CAP)?;
-
-    let hex_str = config_hex(
-        &buf,
-        HexConfig {
-            title: false,
-            width: 16,
-            group: 0,
-            ..HexConfig::default()
-        },
-    );
-
-    let offset_style = Style::default()
-        .fg(theme.status_suffix)
-        .add_modifier(Modifier::DIM);
-    let hex_style = Style::default().fg(theme.file);
-    let ascii_style = Style::default().fg(theme.pick).add_modifier(Modifier::DIM);
-    let sep_style = Style::default().fg(theme.status_suffix);
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for text_line in hex_str.lines() {
-        // pretty-hex lines look like:
-        //   00000000: 7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00  .ELF............
-        // Split into offset (before ':'), hex (middle), ascii (after '  ').
-        if let Some(colon) = text_line.find(':') {
-            let offset_part = &text_line[..colon];
-            let rest = &text_line[colon + 1..];
-            // The ASCII sidebar is the last segment after "  " (double space).
-            let (hex_part, ascii_part) = if let Some(sep) = rest.rfind("  ") {
-                (&rest[..sep], rest[sep + 2..].trim())
-            } else {
-                (rest, "")
-            };
-            lines.push(Line::from(vec![
-                Span::styled(offset_part.to_string(), offset_style),
-                Span::styled(":", sep_style),
-                Span::styled(hex_part.to_string(), hex_style),
-                Span::styled("  ", sep_style),
-                Span::styled(ascii_part.to_string(), ascii_style),
-            ]));
-        } else {
-            // Fallback: unstyled.
-            lines.push(Line::from(text_line.to_string()));
-        }
-    }
-
-    if truncated {
-        lines.push(Line::from(Span::styled(
-            format!("... truncated at {HEX_CAP} bytes"),
-            offset_style,
-        )));
-    }
-
-    Ok(lines)
 }
 
 #[cfg(test)]

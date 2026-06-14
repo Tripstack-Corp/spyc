@@ -13,7 +13,6 @@ use std::path::Path;
 
 use crossterm::event::KeyEvent;
 
-use crate::fs;
 use crate::pane::Pane;
 use crate::shell;
 use crate::ui::pager;
@@ -463,8 +462,8 @@ impl App {
             }
             Some(view)
         } else {
-            // Binary file: hex dump via pretty-hex.
-            match fs::ops::hex_dump_lines(path, &self.view.theme) {
+            // Binary file: hex dump via pretty-hex (styled in the ui layer).
+            match crate::ui::hex::hex_dump_lines(path, &self.view.theme) {
                 Ok(lines) => {
                     let mut view = PagerView::new_plain(format!("{name} [hex]"), Vec::new());
                     view.lines = lines;
