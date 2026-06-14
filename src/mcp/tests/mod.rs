@@ -13,7 +13,7 @@ use crate::mcp_cmd::McpCommand;
 
 use super::protocol::{dispatch, read_lsp_message, send_message};
 use super::server::{
-    collect_project_pids, discover_live_socket, handle_socket_connection, pid_from_sock_path,
+    collect_project_pids_in, discover_live_socket, handle_socket_connection, pid_from_sock_path,
     read_context_pids_in_dir,
 };
 use super::*;
@@ -433,6 +433,19 @@ fn touch_context(dir: &Path, pid: u32) {
     std::fs::write(dir.join(format!(".spyc-context-{pid}.json")), b"{}").unwrap();
 }
 
+/// Write the trusted-root sidecar attesting `pid` is rooted at `root`,
+/// mirroring what a live spyc writes next to its socket. Without this a
+/// marker is untrusted, so the genuine-discovery tests must lay one down.
+fn touch_root_marker(state_dir: &Path, pid: u32, root: &Path) {
+    std::fs::create_dir_all(state_dir).unwrap();
+    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    std::fs::write(
+        state_dir.join(format!("mcp-{pid}.root")),
+        canon.to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+}
+
 #[test]
 fn read_context_pids_finds_markers() {
     let tmp = tempfile::tempdir().unwrap();
@@ -456,19 +469,23 @@ fn read_context_pids_empty_dir() {
 #[test]
 fn collect_pids_finds_marker_in_caller_dir() {
     let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
     touch_context(tmp.path(), 42);
-    assert_eq!(collect_project_pids(tmp.path()), vec![42]);
+    touch_root_marker(state.path(), 42, tmp.path());
+    assert_eq!(collect_project_pids_in(tmp.path(), state.path()), vec![42]);
 }
 
 #[test]
 fn collect_pids_walks_up_to_ancestor_marker() {
     // spyc started at /tmp/.../proj; claude in /tmp/.../proj/src/sub.
     let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("proj");
     let sub = proj.join("src").join("sub");
     std::fs::create_dir_all(&sub).unwrap();
     touch_context(&proj, 7);
-    assert_eq!(collect_project_pids(&sub), vec![7]);
+    touch_root_marker(state.path(), 7, &proj);
+    assert_eq!(collect_project_pids_in(&sub, state.path()), vec![7]);
 }
 
 #[test]
@@ -477,21 +494,27 @@ fn collect_pids_first_ancestor_with_match_wins() {
     // /proj/inner should NOT see /proj's spyc — locality
     // beats inheritance.
     let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("proj");
     let inner = proj.join("inner");
     std::fs::create_dir_all(&inner).unwrap();
     touch_context(&proj, 1);
+    touch_root_marker(state.path(), 1, &proj);
     touch_context(&inner, 2);
-    assert_eq!(collect_project_pids(&inner), vec![2]);
+    touch_root_marker(state.path(), 2, &inner);
+    assert_eq!(collect_project_pids_in(&inner, state.path()), vec![2]);
 }
 
 #[test]
 fn collect_pids_returns_all_pids_at_same_dir() {
     // Two spyc instances rooted at the same dir → both candidates.
     let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
     touch_context(tmp.path(), 100);
+    touch_root_marker(state.path(), 100, tmp.path());
     touch_context(tmp.path(), 200);
-    let mut pids = collect_project_pids(tmp.path());
+    touch_root_marker(state.path(), 200, tmp.path());
+    let mut pids = collect_project_pids_in(tmp.path(), state.path());
     pids.sort_unstable();
     assert_eq!(pids, vec![100, 200]);
 }
@@ -501,20 +524,53 @@ fn collect_pids_no_match_returns_empty() {
     // Cross-project case: caller's tree has no .spyc-context-*.json.
     // Sibling dir does, but that's deliberately invisible.
     let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
     let project_a = tmp.path().join("a");
     let project_b = tmp.path().join("b");
     std::fs::create_dir_all(&project_a).unwrap();
     std::fs::create_dir_all(&project_b).unwrap();
     touch_context(&project_b, 99);
+    touch_root_marker(state.path(), 99, &project_b);
     // Walking up from project_a hits tmp.path() (no marker), then
     // ancestors of the temp dir which we can't predict — but the
     // test passes as long as none of THOSE happen to have a
     // spyc-context file. In CI / typical dev machines they won't.
     // To make the test deterministic we anchor at project_a only.
-    let pids = collect_project_pids(&project_a);
+    let pids = collect_project_pids_in(&project_a, state.path());
     assert!(
         !pids.contains(&99),
         "must not pick up sibling project's spyc"
+    );
+}
+
+#[test]
+fn collect_pids_rejects_planted_marker_rooted_elsewhere() {
+    // The attack: a malicious repo ships a `.spyc-context-<pid>.json`
+    // whose pid is really a victim spyc rooted in a DIFFERENT project.
+    // The trusted sidecar (which the attacker can't write — it lives in
+    // the victim's private state dir) records that other root, so the
+    // planted marker is refused. No cross-project attachment.
+    let clone = tempfile::tempdir().unwrap(); // the cloned hostile repo
+    let real = tempfile::tempdir().unwrap(); // victim's real project
+    let state = tempfile::tempdir().unwrap();
+    touch_context(clone.path(), 4242); // planted marker in the clone
+    touch_root_marker(state.path(), 4242, real.path()); // genuine root ≠ clone
+    assert!(
+        collect_project_pids_in(clone.path(), state.path()).is_empty(),
+        "a marker rooted elsewhere must be refused"
+    );
+}
+
+#[test]
+fn collect_pids_requires_a_trusted_root_sidecar() {
+    // A marker with no sidecar at all (a stray or planted file with no
+    // matching live spyc) is untrusted — fail safe, don't attach.
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    touch_context(tmp.path(), 55);
+    assert!(
+        collect_project_pids_in(tmp.path(), state.path()).is_empty(),
+        "a marker without a trusted-root sidecar must be refused"
     );
 }
 
