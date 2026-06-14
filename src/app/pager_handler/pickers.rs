@@ -304,9 +304,10 @@ impl App {
                     // Execute the (possibly edited) command directly.
                     self.state.last_captured_cmd = Some(cmd.clone());
                     self.state.history.push(cmd.trim());
-                    let expanded =
-                        crate::shell::expand_percent(&cmd, &self.state.selection_paths());
-                    self.start_capture(&expanded, &cmd, &cmd);
+                    match crate::shell::expand_percent(&cmd, &self.state.selection_paths()) {
+                        Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
+                        Err(e) => self.state.flash_error(e.to_string()),
+                    }
                 }
                 EditResult::Cancel => {
                     // Esc in Insert → Normal (handled by editor, returns Continue).

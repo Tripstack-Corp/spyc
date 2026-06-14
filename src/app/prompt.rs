@@ -488,7 +488,14 @@ impl App {
         // --- Terminal-touching arms ---
         match prompt.kind {
             PromptKind::ShellCmd => {
-                let expanded = shell::expand_percent(&prompt.buffer, &self.state.selection_paths());
+                let expanded =
+                    match shell::expand_percent(&prompt.buffer, &self.state.selection_paths()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.state.flash_error(e.to_string());
+                            return Vec::new();
+                        }
+                    };
                 let (rows, cols) = Self::top_overlay_size(
                     self.effective_pane_pct(),
                     self.runtime.pane_tabs.is_some(),
@@ -516,8 +523,10 @@ impl App {
                     prompt.buffer.clone()
                 };
                 self.state.last_captured_cmd = Some(cmd.clone());
-                let expanded = shell::expand_percent(&cmd, &self.state.selection_paths());
-                self.start_capture(&expanded, &cmd, &prompt.buffer);
+                match shell::expand_percent(&cmd, &self.state.selection_paths()) {
+                    Ok(expanded) => self.start_capture(&expanded, &cmd, &prompt.buffer),
+                    Err(e) => self.state.flash_error(e.to_string()),
+                }
                 Vec::new()
             }
             PromptKind::CopyTo => {
