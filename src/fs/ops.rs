@@ -343,7 +343,15 @@ pub fn file_type_label(path: &Path) -> String {
 
     // Peek at up to 512 bytes of the head for magic-byte sniffing.
     let head = read_head(path, 512).unwrap_or_default();
-    if let Some(label) = magic_label(&head) {
+    // Binary signatures via the `infer` crate's maintained matcher set
+    // (replaces a handrolled magic-byte table). Reports the detected MIME
+    // type, e.g. `image/png` / `application/zip`.
+    if let Some(kind) = infer::get(&head) {
+        return format!("{}, {}", kind.mime_type(), format_size(md.len()));
+    }
+    // Text formats whose "magic" is just their opening bytes — infer
+    // doesn't claim these (notably JSON), so keep a tiny heuristic.
+    if let Some(label) = text_format_label(&head) {
         return format!("{label}, {}", format_size(md.len()));
     }
     // Fall back: binary (contains NUL) vs text (ASCII/UTF-8-friendly).
@@ -361,34 +369,12 @@ fn read_head(path: &Path, cap: usize) -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Detect a handful of common file magics. Intentionally narrow — this
-/// isn't libmagic; we only claim the signatures we are confident about.
-fn magic_label(head: &[u8]) -> Option<&'static str> {
-    let cases: &[(&[u8], &str)] = &[
-        (b"\x7fELF", "ELF executable"),
-        (b"\xfe\xed\xfa\xce", "Mach-O 32-bit executable"),
-        (b"\xce\xfa\xed\xfe", "Mach-O 32-bit executable (reverse)"),
-        (b"\xfe\xed\xfa\xcf", "Mach-O 64-bit executable"),
-        (b"\xcf\xfa\xed\xfe", "Mach-O 64-bit executable (reverse)"),
-        (b"\xca\xfe\xba\xbe", "Mach-O universal binary"),
-        (b"\x89PNG\r\n\x1a\n", "PNG image"),
-        (b"GIF87a", "GIF image"),
-        (b"GIF89a", "GIF image"),
-        (b"\xff\xd8\xff", "JPEG image"),
-        (b"%PDF-", "PDF document"),
-        (b"PK\x03\x04", "ZIP archive"),
-        (b"PK\x05\x06", "ZIP archive (empty)"),
-        (b"\x1f\x8b", "gzip compressed"),
-        (b"BZh", "bzip2 compressed"),
-        (b"\xfd7zXZ\x00", "xz compressed"),
-        (b"7z\xbc\xaf\x27\x1c", "7-Zip archive"),
-        (b"#!", "script (shebang)"),
-        (b"<?xml", "XML document"),
-        (b"{\n", "JSON document"),
-        (b"[\n", "JSON array"),
-        (b"<!DOCTYPE html", "HTML document"),
-        (b"<html", "HTML document"),
-    ];
+/// JSON heuristic — the one common format `infer` doesn't claim (JSON has
+/// no registered byte signature). `infer` already handles shebang scripts
+/// (`text/x-shellscript`), XML, and HTML, so those aren't repeated here.
+/// Deliberately tiny — `infer` owns everything with a real signature.
+fn text_format_label(head: &[u8]) -> Option<&'static str> {
+    let cases: &[(&[u8], &str)] = &[(b"{\n", "JSON document"), (b"[\n", "JSON array")];
     for (sig, label) in cases {
         if head.starts_with(sig) {
             return Some(label);
@@ -500,6 +486,55 @@ mod tests {
         let (_, lines, truncated) = read_truncated(&path, 5).unwrap();
         assert_eq!(lines, 5);
         assert!(!truncated, "file ending at the cap should not be flagged");
+    }
+
+    fn label_for(bytes: &[u8]) -> String {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("probe.bin");
+        File::create(&path).unwrap().write_all(bytes).unwrap();
+        file_type_label(&path)
+    }
+
+    #[test]
+    fn file_type_label_detects_binary_via_infer_and_text_heuristics() {
+        // Binary magics now come from `infer` (MIME type in the label).
+        // infer's ELF matcher wants a full-ish header, so pad past it.
+        let mut elf = b"\x7fELF\x02\x01\x01\x00".to_vec();
+        elf.resize(64, 0);
+        assert!(
+            label_for(&elf).starts_with("application/"),
+            "ELF: {}",
+            label_for(&elf)
+        );
+        assert!(
+            label_for(b"\x89PNG\r\n\x1a\n").starts_with("image/png"),
+            "PNG: {}",
+            label_for(b"\x89PNG\r\n\x1a\n")
+        );
+        assert!(
+            label_for(b"PK\x03\x04").starts_with("application/zip"),
+            "ZIP: {}",
+            label_for(b"PK\x03\x04")
+        );
+        // A shebang script is classified (by infer) — not left as the
+        // generic fallback. We don't pin infer's exact MIME string.
+        let shebang = label_for(b"#!/bin/sh\nexit 0\n");
+        assert!(
+            !shebang.starts_with("text file") && !shebang.starts_with("binary data"),
+            "shebang should be recognized, got: {shebang}"
+        );
+        // JSON has no magic signature; our heuristic labels it.
+        assert!(
+            label_for(b"{\n  \"k\": 1\n}").starts_with("JSON document"),
+            "json: {}",
+            label_for(b"{\n  \"k\": 1\n}")
+        );
+        // Plain text and empty fall through to the text/binary classifier.
+        assert!(
+            label_for(b"hello world\n").starts_with("text file"),
+            "text: {}",
+            label_for(b"hello world\n")
+        );
     }
 
     #[test]
@@ -702,7 +737,7 @@ mod tests {
             .write_all(&[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0])
             .unwrap();
         let label = file_type_label(&p);
-        assert!(label.starts_with("PNG image"), "got: {label}");
+        assert!(label.starts_with("image/png"), "got: {label}");
     }
 
     #[test]

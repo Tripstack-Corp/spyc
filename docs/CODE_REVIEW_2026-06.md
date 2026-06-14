@@ -1002,7 +1002,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | confirmed · ✅ #361 |
 | `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | confirmed · ✅ #357 |
 | `src/fs/ops.rs:70` | Hardcoded EXDEV errno is obsolete — io::ErrorKind::CrossesDevices is stable under the crate's MSRV | maintainability | confirmed · ✅ #356 |
-| `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | unverified |
+| `src/fs/ops.rs:274` | Handrolled magic-byte table where the zero-dependency `infer` crate fits the owner's crate-over-handroll preference | maintainability | confirmed · ✅ #397 |
 | `src/fs/ops.rs:330` | hex_dump_lines relies on a single read() filling the buffer and flags exactly-64KiB files as truncated | correctness | confirmed · ✅ #360 |
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | confirmed · ✅ #395 |
 | `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
