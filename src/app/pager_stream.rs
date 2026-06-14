@@ -40,13 +40,11 @@ pub enum DrainOutcome {
     /// iff [`PagerStream::retain_after_finish`] (git-view retains its model for
     /// the `|` toggle; streaming grep / one-shot transcript do not).
     Finished,
-    /// Terminal: close the stream's pager (pop back to the prior view) and
-    /// flash this as an info message (git-view "no changes"; a transcript that
-    /// resolved to nothing).
+    /// Terminal: close the stream's pager (revealing the listing underneath, not
+    /// a prior overlay) and flash this as an info message (a transcript that
+    /// resolved to nothing). git-view reports "no changes" before mounting (see
+    /// `drain_pending_git_view`), so it never reaches here.
     CloseInfo(String),
-    /// Terminal: close the stream's pager and flash this as an error (git-view
-    /// bad rev / a dead worker).
-    CloseError(String),
 }
 
 /// Render inputs handed to [`PagerStream::drain`]. **Owned** (not borrowed) so
@@ -161,7 +159,7 @@ impl App {
 
     /// Mount the initial empty pager for a freshly-spawned stream, tagged with
     /// `id` so [`App::drain_pager_stream`] id-gates the worker's output.
-    fn mount_stream_pager(&mut self, mount: PagerStreamMount, id: u32) {
+    pub(crate) fn mount_stream_pager(&mut self, mount: PagerStreamMount, id: u32) {
         match mount {
             PagerStreamMount::Overlay {
                 title,
@@ -273,12 +271,6 @@ impl App {
             DrainOutcome::CloseInfo(msg) => {
                 self.close_stream_pager(in_scroll);
                 self.state.flash_info(msg);
-                self.runtime.pager_stream = None;
-                true
-            }
-            DrainOutcome::CloseError(msg) => {
-                self.close_stream_pager(in_scroll);
-                self.state.flash_error(msg);
                 self.runtime.pager_stream = None;
                 true
             }

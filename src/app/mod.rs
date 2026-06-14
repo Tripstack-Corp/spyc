@@ -446,6 +446,11 @@ struct Runtime {
     /// `app` type and the dependency runs `app → pane` only. Re-installed into
     /// `pager_stream` by `restore_active_tab_scrollback_pager`.
     stashed_pager_streams: std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
+    /// An in-flight git-view whose model is being built off-thread, before any
+    /// pager is mounted. `drain_pending_git_view` mounts the overlay only when a
+    /// non-empty model arrives (an empty result just flashes "no changes"), so
+    /// `gd` over a clean path doesn't pop an overlay up and tear it back down.
+    pending_git_view: Option<git_view_session::PendingGitView>,
     /// Off-render-thread agent-status resolve: the landing slot + in-flight
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,

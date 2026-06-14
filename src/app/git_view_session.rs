@@ -152,33 +152,43 @@ fn git_view_body_width(full_width: bool) -> usize {
     w as usize
 }
 
-/// A [`PagerStream`] for an active git-view. The worker builds one bounded model
-/// off-thread and reports once; the first drain renders it into the pager and
-/// the stream is RETAINED (`retain_after_finish`) so the `|` layout toggle
-/// (`on_pager_command`) re-renders from the retained `model` without re-touching
-/// gix. An empty/error/dead-worker result closes the pager (info/error flash).
-pub struct GitViewStream {
+/// In-flight git-view: the worker is building the model off-thread, but NO
+/// pager is mounted yet. [`App::drain_pending_git_view`] mounts the overlay
+/// only when a non-empty model arrives; an empty result just flashes "no
+/// changes" (so `gd` over a clean path doesn't pop an overlay up and instantly
+/// tear it back down). Held in `Runtime` until the worker reports.
+pub struct PendingGitView {
     id: u32,
     rx: std::sync::mpsc::Receiver<GitViewPayload>,
+    /// The pager title once mounted.
+    title: String,
+    /// Initial layout for diff/show (ignored for blame).
+    layout: DiffLayout,
+}
+
+/// A [`PagerStream`] for a *mounted* git-view. The model is built off-thread and
+/// the overlay is mounted (by `drain_pending_git_view`) only once it arrives, so
+/// this stream always holds a ready model — `drain` is a no-op. The stream is
+/// RETAINED (`retain_after_finish`) purely so the `|` layout toggle
+/// (`on_pager_command`) can re-render from the held `model` without re-touching
+/// gix.
+pub struct GitViewStream {
+    id: u32,
     /// Current layout for diff/show (ignored for blame).
     layout: DiffLayout,
-    /// The retained model, set once received. Backs the `|` toggle; doubling as
-    /// the "already rendered" flag (drain no-ops once `Some`).
-    model: Option<GitViewModel>,
-    /// The final pager title (without the " — computing…" suffix).
+    /// The built model, rendered at mount and re-rendered on `|`.
+    model: GitViewModel,
+    /// The pager title.
     title: String,
 }
 
 impl GitViewStream {
-    /// Render the retained model into `view` at the pager's true body width.
+    /// Render the held model into `view` at the pager's true body width.
     /// Width must match the render path (depends on `full_width`), else the
     /// fixed-width side-by-side rows wrap into stray tinted bars.
     fn render_into(&self, view: &mut PagerView, ctx: &RenderCtx) {
-        let Some(model) = self.model.as_ref() else {
-            return;
-        };
         let width = git_view_body_width(ctx.full_width);
-        let rendered = render_model(model, &ctx.theme, self.layout, width);
+        let rendered = render_model(&self.model, &ctx.theme, self.layout, width);
         view.lines = rendered.lines;
         view.show_line_numbers = rendered.line_numbers;
         view.wrap = rendered.wrap;
@@ -200,34 +210,10 @@ impl PagerStream for GitViewStream {
         true
     }
 
-    fn drain(&mut self, view: &mut PagerView, ctx: &RenderCtx) -> DrainOutcome {
-        // Already rendered — the stream lives only to back the `|` toggle.
-        if self.model.is_some() {
-            return DrainOutcome::Idle;
-        }
-        match self.rx.try_recv() {
-            Ok(GitViewPayload::Empty) => DrainOutcome::CloseInfo("no changes".into()),
-            Ok(GitViewPayload::Error(msg)) => DrainOutcome::CloseError(msg),
-            Ok(GitViewPayload::Diff(m)) => {
-                self.model = Some(GitViewModel::Diff(m));
-                self.render_into(view, ctx);
-                DrainOutcome::Finished
-            }
-            Ok(GitViewPayload::Show(b)) => {
-                self.model = Some(GitViewModel::Show(b));
-                self.render_into(view, ctx);
-                DrainOutcome::Finished
-            }
-            Ok(GitViewPayload::Blame(m)) => {
-                self.model = Some(GitViewModel::Blame(m));
-                self.render_into(view, ctx);
-                DrainOutcome::Finished
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => DrainOutcome::Idle,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                DrainOutcome::CloseError("git: worker failed".into())
-            }
-        }
+    fn drain(&mut self, _view: &mut PagerView, _ctx: &RenderCtx) -> DrainOutcome {
+        // The model was rendered at mount time; the stream lives only to back
+        // the `|` toggle. Nothing to drain.
+        DrainOutcome::Idle
     }
 
     fn on_pager_command(
@@ -239,10 +225,7 @@ impl PagerStream for GitViewStream {
         match cmd {
             PagerStreamCmd::ToggleLayout => {
                 // Only meaningful for diff/show (blame has no layout).
-                if !matches!(
-                    self.model,
-                    Some(GitViewModel::Diff(_) | GitViewModel::Show(_))
-                ) {
+                if !matches!(self.model, GitViewModel::Diff(_) | GitViewModel::Show(_)) {
                     return false;
                 }
                 self.layout = match self.layout {
@@ -257,29 +240,105 @@ impl PagerStream for GitViewStream {
 }
 
 impl App {
-    /// Spawn a git-view worker, mount a "computing…" overlay pager, and install
-    /// the retained streaming session. A later tick (`drain_pager_stream` →
-    /// `GitViewStream::drain`) renders the built model into that pager.
+    /// Spawn a git-view worker off-thread, but DON'T mount an overlay yet — the
+    /// pager is mounted by [`Self::drain_pending_git_view`] only when a non-empty
+    /// model arrives. An empty result (`gd` over a path with no changes) just
+    /// flashes "no changes", so the overlay never pops up and tears itself back
+    /// down. (Deferring keeps the build off the input thread — large repos don't
+    /// freeze it — while giving git-like "no changes" feedback for clean paths.)
     pub fn open_git_view(&mut self, kind: GitViewKind, title: String) {
-        self.spawn_pager_stream(
+        let id = self.runtime.next_stream_id;
+        self.runtime.next_stream_id = self.runtime.next_stream_id.wrapping_add(1);
+        let (tx, rx) = std::sync::mpsc::channel::<GitViewPayload>();
+        // Wake the loop on the worker's send and once more after it returns —
+        // the final wake drives the drain that observes the rx (mirrors
+        // `spawn_pager_stream`).
+        let wake = self.make_pager_stream_wake();
+        let final_wake = std::sync::Arc::clone(&wake);
+        let tx = crate::fs::WakingSender::new(tx, wake);
+        std::thread::spawn(move || {
+            let _ = tx.send(build_payload(kind));
+            final_wake();
+        });
+        self.runtime.pending_git_view = Some(PendingGitView {
+            id,
+            rx,
+            title,
+            // SideBySide is the product default for diff/show.
+            layout: DiffLayout::SideBySide,
+        });
+    }
+
+    /// Poll the in-flight git-view (if any). On a non-empty model, mount the
+    /// overlay now and render it; on an empty result, flash "no changes" (no
+    /// overlay); on error / dead worker, flash the error. Called every tick from
+    /// the run loop alongside `drain_pager_stream`. Returns true when something
+    /// changed so the caller can redraw.
+    pub(crate) fn drain_pending_git_view(&mut self) -> bool {
+        // Peek the worker's result without holding the borrow across the mutate.
+        let result = {
+            let Some(pending) = self.runtime.pending_git_view.as_ref() else {
+                return false;
+            };
+            pending.rx.try_recv()
+        };
+        let payload = match result {
+            Ok(GitViewPayload::Empty) => {
+                self.state.flash_info("no changes");
+                self.runtime.pending_git_view = None;
+                return true;
+            }
+            Ok(GitViewPayload::Error(msg)) => {
+                self.state.flash_error(msg);
+                self.runtime.pending_git_view = None;
+                return true;
+            }
+            Ok(payload) => payload,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.state.flash_error("git: worker failed");
+                self.runtime.pending_git_view = None;
+                return true;
+            }
+        };
+        // Non-empty content → mount the overlay now and render it.
+        let pending = self
+            .runtime
+            .pending_git_view
+            .take()
+            .expect("pending git-view present (checked above)");
+        let model = match payload {
+            GitViewPayload::Diff(m) => GitViewModel::Diff(m),
+            GitViewPayload::Show(b) => GitViewModel::Show(b),
+            GitViewPayload::Blame(m) => GitViewModel::Blame(m),
+            GitViewPayload::Empty | GitViewPayload::Error(_) => {
+                unreachable!("empty/error handled above")
+            }
+        };
+        self.mount_stream_pager(
             PagerStreamMount::Overlay {
-                title: format!("{title} — computing…"),
+                title: pending.title.clone(),
                 line_count_hint: None,
             },
-            move |tx| {
-                let _ = tx.send(build_payload(kind));
-            },
-            move |id, rx| {
-                Box::new(GitViewStream {
-                    id,
-                    rx,
-                    // SideBySide is the product default for diff/show.
-                    layout: DiffLayout::SideBySide,
-                    model: None,
-                    title,
-                })
-            },
+            pending.id,
         );
+        let stream = GitViewStream {
+            id: pending.id,
+            layout: pending.layout,
+            model,
+            title: pending.title,
+        };
+        let full_width = self.view.pager.as_ref().is_some_and(|p| p.full_width);
+        let ctx = RenderCtx {
+            theme: self.view.theme.clone(),
+            full_width,
+        };
+        if let Some(view) = self.view.pager.as_mut() {
+            stream.render_into(view, &ctx);
+        }
+        self.runtime.pager_stream = Some(Box::new(stream));
+        self.view.needs_full_repaint = true;
+        true
     }
 }
 
@@ -332,6 +391,75 @@ mod tests {
         assert!(split_too_narrow(10));
         // A roomy terminal is fine.
         assert!(!split_too_narrow(120));
+    }
+
+    fn with_app(f: impl FnOnce(&mut App)) {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            f(&mut app);
+        });
+    }
+
+    /// `gd` over a path with no changes: the worker reports `Empty`, and that
+    /// must just flash "no changes" — NEVER mount an overlay that pops up and
+    /// instantly tears itself back down.
+    #[test]
+    fn pending_git_view_empty_flashes_without_mounting() {
+        with_app(|app| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(GitViewPayload::Empty).unwrap();
+            app.runtime.pending_git_view = Some(PendingGitView {
+                id: 1,
+                rx,
+                title: "git diff HEAD".into(),
+                layout: DiffLayout::SideBySide,
+            });
+            assert!(app.drain_pending_git_view());
+            assert!(
+                app.view.pager.is_none(),
+                "an empty result must not mount an overlay"
+            );
+            assert!(app.runtime.pager_stream.is_none());
+            assert!(app.runtime.pending_git_view.is_none());
+            assert_eq!(app.flash_text(), Some("no changes"));
+        });
+    }
+
+    /// A non-empty result mounts the overlay (tagged with the pending id) and
+    /// installs the retained stream that backs the `|` toggle.
+    #[test]
+    fn pending_git_view_content_mounts_overlay() {
+        with_app(|app| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(GitViewPayload::Diff(DiffModel {
+                files: Vec::new(),
+                truncated: false,
+            }))
+            .unwrap();
+            app.runtime.pending_git_view = Some(PendingGitView {
+                id: 7,
+                rx,
+                title: "git diff HEAD".into(),
+                layout: DiffLayout::SideBySide,
+            });
+            assert!(app.drain_pending_git_view());
+            let pager = app.view.pager.as_ref().expect("content mounts the overlay");
+            assert_eq!(pager.stream_id, Some(7));
+            assert!(
+                app.runtime.pager_stream.is_some(),
+                "retained stream installed for the `|` toggle"
+            );
+            assert!(app.runtime.pending_git_view.is_none());
+        });
+    }
+
+    /// No in-flight git-view → a no-op (doesn't touch the pager).
+    #[test]
+    fn pending_git_view_noop_when_none() {
+        with_app(|app| {
+            assert!(!app.drain_pending_git_view());
+        });
     }
 
     #[test]
