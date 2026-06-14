@@ -194,6 +194,14 @@ impl LineEditor {
     // ---- Normal mode --------------------------------------------------------
 
     fn feed_normal(&mut self, key: KeyEvent) -> EditResult {
+        // Ctrl-modified keys aren't vi Normal-mode commands; `feed`'s global
+        // handler already consumed the meaningful ones (^C, history chords).
+        // Ignore the rest instead of letting them fall through to the bare-char
+        // arms — otherwise ^A would `a` (enter Insert) and ^D would arm the
+        // delete operator. (Insert mode keeps its own ^A/^E/^U/^W handling.)
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return EditResult::Continue;
+        }
         // If an operator (d/c) is pending, the next key is a motion.
         if let Some(op) = self.pending_op.take() {
             match key.code {
@@ -739,5 +747,25 @@ mod tests {
         let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
         e.feed(ctrl_w);
         assert_eq!(e.text(), "foo-");
+    }
+
+    #[test]
+    fn normal_mode_ignores_ctrl_modifier() {
+        let ctrl = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        let mut e = LineEditor::new();
+        for c in "hello".chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.feed(k(KeyCode::Esc)); // → Normal
+        assert_eq!(e.mode, Mode::Normal);
+
+        // ^A must NOT be treated as bare `a` (which appends → Insert mode).
+        e.feed(ctrl('a'));
+        assert_eq!(e.mode, Mode::Normal, "^A must not enter Insert mode");
+
+        // ^D must NOT arm the delete operator: a following motion can't delete.
+        e.feed(ctrl('d'));
+        e.feed(k(KeyCode::Char('w'))); // would complete `dw` if ^D had armed it
+        assert_eq!(e.text(), "hello", "^D must not arm the delete operator");
     }
 }
