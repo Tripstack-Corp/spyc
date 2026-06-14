@@ -1022,7 +1022,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | confirmed · ✅ #367 |
 | `src/pane/input.rs:68` | encode_key drops Ctrl/Alt/Shift modifiers on arrows, Home/End, Delete — modified-arrow keys silently degrade in pane apps | correctness | confirmed · ✅ #380 |
 | `src/pane/mod.rs:174` | If the parser worker thread ever panics, take_host loses the byte receiver: demoted task hangs silently, and a later Pane::adopt panics on expect | correctness | confirmed · ✅ #366 |
-| `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | unverified |
+| `src/pane/mod.rs:498` | Pane::save_to_file is blocking file IO called inline from three handlers, each duplicating the flash handling | maintainability | ✅ #402 — the two identical Pane handlers now share `AppState::flash_saved_file`; the 3rd (PagerView) uses a different sink/wording so it's left alone. Blocking IO kept inline (one-shot keypress, not a hot path) |
 | `src/pane/mod.rs:579` | SPYC_PTY_DEBUG byte-dump block copy-pasted between parser_worker and PtyHost::drain | maintainability | confirmed · ✅ #396 (also closed a /tmp site #337 missed) |
 | `src/pane/pathref.rs:73` | gcc/clang-style diagnostics with trailing colon ('file.c:3:7: error: ...') defeat split_path_line — gf misses the path | correctness | confirmed · ✅ #369 |
 | `src/pane/tabs.rs:264` | Blanket #[allow(dead_code)] on impl PaneTabs hides genuinely dead remove_closed() | maintainability | confirmed · ✅ #355 |

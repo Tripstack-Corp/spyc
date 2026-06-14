@@ -319,14 +319,13 @@ impl App {
                 self.open_pane_scroll_pager();
             }
             Action::PaneScrollSave => {
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                    match tabs.active_mut().save_to_file() {
-                        Ok(path) => {
-                            let name = path.file_name().unwrap_or_default().to_string_lossy();
-                            self.state.flash_info(format!("saved: {name}"));
-                        }
-                        Err(e) => self.state.flash_info(format!("save error: {e}")),
-                    }
+                let result = self
+                    .runtime
+                    .pane_tabs
+                    .as_mut()
+                    .map(|tabs| tabs.active_mut().save_to_file());
+                if let Some(result) = result {
+                    self.state.flash_saved_file(result);
                 }
             }
 

@@ -571,6 +571,22 @@ impl AppState {
         });
     }
 
+    /// Flash the outcome of a "save pane contents to file" action: the
+    /// saved file's basename on success, the error text on failure. Shared
+    /// by the two pane-scrollback save handlers (the `PaneScrollSave` action
+    /// and the `s` key in pane-scroll mode), which were byte-for-byte
+    /// identical. Errors stay `flash_info` (not `flash_error`) to preserve
+    /// the pre-existing presentation.
+    pub fn flash_saved_file(&mut self, result: std::io::Result<std::path::PathBuf>) {
+        match result {
+            Ok(path) => {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                self.flash_info(format!("saved: {name}"));
+            }
+            Err(e) => self.flash_info(format!("save error: {e}")),
+        }
+    }
+
     /// Human-readable session name for status bar / overlays; falls back to
     /// `"(unnamed)"` when no name is set (e.g. restored from an old session
     /// file that predates the name field).
