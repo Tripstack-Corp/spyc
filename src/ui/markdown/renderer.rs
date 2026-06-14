@@ -12,8 +12,8 @@ use ratatui::text::{Line, Span};
 
 use super::wrap::{slice_spans, spans_visual_width, word_wrap_ranges, wrap_spans_to_width};
 use super::{
-    CONTENT_WIDTH, CodeBlockState, PROSE_WRAP_MIN, Renderer, TABLE_MAX_COL_WIDTH_CEILING,
-    TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder, heading_depth,
+    CONTENT_WIDTH, CodeBlockState, PROSE_WRAP_MIN, Renderer, StyleMods,
+    TABLE_MAX_COL_WIDTH_CEILING, TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder, heading_depth,
 };
 use crate::ui::theme::Theme;
 
@@ -30,7 +30,7 @@ impl<'t> Renderer<'t> {
             theme,
             lines: Vec::new(),
             current: Vec::new(),
-            style_mods: Modifier::empty(),
+            style_mods: StyleMods::default(),
             list_indent: 0,
             in_blockquote: false,
             code_block: None,
@@ -127,7 +127,7 @@ impl<'t> Renderer<'t> {
             }
             first = false;
             if !chunk.is_empty() {
-                let style = base_style.add_modifier(self.style_mods);
+                let style = base_style.add_modifier(self.style_mods.current());
                 self.current.push(Span::styled(chunk.to_string(), style));
             }
         }
@@ -235,7 +235,7 @@ impl<'t> Renderer<'t> {
                     .add_modifier(Modifier::BOLD);
                 self.current.push(Span::styled(format!("{prefix} "), style));
                 // Subsequent text in the heading inherits BOLD via style_mods.
-                self.style_mods |= Modifier::BOLD;
+                self.style_mods.push(Modifier::BOLD);
             }
             Tag::BlockQuote(_) => {
                 self.in_blockquote = true;
@@ -276,17 +276,17 @@ impl<'t> Renderer<'t> {
                 self.just_started_item = true;
             }
             Tag::Emphasis => {
-                self.style_mods |= Modifier::ITALIC;
+                self.style_mods.push(Modifier::ITALIC);
             }
             Tag::Strong => {
-                self.style_mods |= Modifier::BOLD;
+                self.style_mods.push(Modifier::BOLD);
             }
             Tag::Strikethrough => {
-                self.style_mods |= Modifier::CROSSED_OUT;
+                self.style_mods.push(Modifier::CROSSED_OUT);
             }
             Tag::Link { dest_url, .. } => {
                 self.pending_link_url = Some(dest_url.into_string());
-                self.style_mods |= Modifier::UNDERLINED;
+                self.style_mods.push(Modifier::UNDERLINED);
             }
             Tag::Image { dest_url, .. } => {
                 // Render as `[image: url]` placeholder. Alt text
@@ -354,7 +354,7 @@ impl<'t> Renderer<'t> {
                 self.lines.push(Line::from(Vec::<Span<'static>>::new()));
             }
             TagEnd::Heading(_) => {
-                self.style_mods.remove(Modifier::BOLD);
+                self.style_mods.pop(Modifier::BOLD);
                 if !self.current.is_empty() {
                     self.flush_line();
                 }
@@ -378,11 +378,11 @@ impl<'t> Renderer<'t> {
                     self.flush_line();
                 }
             }
-            TagEnd::Emphasis => self.style_mods.remove(Modifier::ITALIC),
-            TagEnd::Strong => self.style_mods.remove(Modifier::BOLD),
-            TagEnd::Strikethrough => self.style_mods.remove(Modifier::CROSSED_OUT),
+            TagEnd::Emphasis => self.style_mods.pop(Modifier::ITALIC),
+            TagEnd::Strong => self.style_mods.pop(Modifier::BOLD),
+            TagEnd::Strikethrough => self.style_mods.pop(Modifier::CROSSED_OUT),
             TagEnd::Link => {
-                self.style_mods.remove(Modifier::UNDERLINED);
+                self.style_mods.pop(Modifier::UNDERLINED);
                 if let Some(url) = self.pending_link_url.take() {
                     let dim = Style::default()
                         .fg(self.theme.status_suffix)
