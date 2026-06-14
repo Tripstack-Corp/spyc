@@ -235,6 +235,12 @@ impl PagerStream for GitViewStream {
                 self.render_into(view, ctx);
                 true
             }
+            PagerStreamCmd::Rerender => {
+                // `f` toggled the body width; re-bake the fixed-width rows at
+                // the new width (`ctx.full_width` already reflects the toggle).
+                self.render_into(view, ctx);
+                true
+            }
         }
     }
 }
@@ -459,6 +465,77 @@ mod tests {
     fn pending_git_view_noop_when_none() {
         with_app(|app| {
             assert!(!app.drain_pending_git_view());
+        });
+    }
+
+    /// `f` (full-width toggle) on a git-view diff must re-bake the fixed-width
+    /// side-by-side rows at the new (wider) body width — not leave them sized
+    /// for the old, narrower centered overlay.
+    #[test]
+    fn full_width_toggle_rerenders_git_view_diff() {
+        use crate::git::model::{
+            DiffKind, DiffLine, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin,
+        };
+        let content = DiffModel {
+            files: vec![FileDiff {
+                old_path: Some("f.txt".into()),
+                new_path: Some("f.txt".into()),
+                status: FileStatus::Modified,
+                lang_hint: "txt".into(),
+                kind: DiffKind::Text(vec![Hunk {
+                    old_start: 1,
+                    old_lines: 1,
+                    new_start: 1,
+                    new_lines: 1,
+                    lines: vec![
+                        DiffLine {
+                            origin: LineOrigin::Remove,
+                            text: "old".into(),
+                        },
+                        DiffLine {
+                            origin: LineOrigin::Add,
+                            text: "new".into(),
+                        },
+                    ],
+                }]),
+            }],
+            truncated: false,
+        };
+        with_app(|app| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(GitViewPayload::Diff(content)).unwrap();
+            app.runtime.pending_git_view = Some(PendingGitView {
+                id: 9,
+                rx,
+                title: "git diff HEAD".into(),
+                layout: DiffLayout::SideBySide,
+            });
+            assert!(app.drain_pending_git_view());
+            let widest = |app: &App| {
+                app.view
+                    .pager
+                    .as_ref()
+                    .unwrap()
+                    .lines
+                    .iter()
+                    .map(|l| {
+                        l.spans
+                            .iter()
+                            .map(|s| crate::ui::display_width(s.content.as_ref()))
+                            .sum::<usize>()
+                    })
+                    .max()
+                    .unwrap_or(0)
+            };
+            let before = widest(app);
+            // Exactly what the `f` key arm does: toggle full-width, re-render.
+            app.view.pager.as_mut().unwrap().toggle_full_width();
+            assert!(app.dispatch_pager_command(PagerStreamCmd::Rerender));
+            let after = widest(app);
+            assert!(
+                after > before,
+                "full-width re-render must widen the diff rows: {before} → {after}"
+            );
         });
     }
 

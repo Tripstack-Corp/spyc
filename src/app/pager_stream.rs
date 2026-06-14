@@ -62,10 +62,16 @@ pub struct RenderCtx {
 }
 
 /// An in-pager command routed to a retained stream (via
-/// [`App::dispatch_pager_command`]). git-view's `|` flips its diff layout.
+/// [`App::dispatch_pager_command`]). git-view's `|` flips its diff layout;
+/// `f` (full-width toggle) re-renders at the new width.
 pub enum PagerStreamCmd {
     /// Flip diff/show unified ⇄ side-by-side (git-view `|`).
     ToggleLayout,
+    /// Re-render the retained model at the current width/layout — for `f`
+    /// (full-width toggle), whose new body width changes the fixed-width
+    /// side-by-side diff columns (plain-text pagers wrap at render time and
+    /// don't need this).
+    Rerender,
 }
 
 /// A background producer streaming styled content into a [`PagerView`].

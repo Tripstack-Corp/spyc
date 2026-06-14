@@ -155,7 +155,15 @@ impl App {
             KeyCode::Char('m') if !view.toggle_markdown() => {
                 view.flash = Some("not a markdown file".into());
             }
-            KeyCode::Char('f') => view.toggle_full_width(),
+            KeyCode::Char('f') => {
+                view.toggle_full_width();
+                // git-view diffs bake fixed-width side-by-side rows at the
+                // body width; the toggle changes that width, so re-render the
+                // retained model. No-op for plain-text pagers (no stream;
+                // wrapping handles width at render). Re-borrows `self` after
+                // the `view` use above ends.
+                self.dispatch_pager_command(crate::app::pager_stream::PagerStreamCmd::Rerender);
+            }
             KeyCode::Char('y') => {
                 let include_title = self.state.config.yank.include_pager_title;
                 match view.yank_to_clipboard(include_title) {
