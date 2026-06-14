@@ -148,6 +148,27 @@ fn flash_error_sets_message() {
     assert!(matches!(flash.kind, FlashKind::Error));
 }
 
+#[test]
+fn flash_saved_file_reports_basename_on_success() {
+    let mut s = test_state();
+    s.flash_saved_file(Ok(std::path::PathBuf::from("/tmp/foo/spyc_pane_x.txt")));
+    let flash = s.flash.as_ref().unwrap();
+    assert_eq!(flash.text, "saved: spyc_pane_x.txt");
+    assert!(matches!(flash.kind, FlashKind::Info));
+}
+
+#[test]
+fn flash_saved_file_reports_error_text_on_failure() {
+    let mut s = test_state();
+    s.flash_saved_file(Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "denied",
+    )));
+    let flash = s.flash.as_ref().unwrap();
+    assert_eq!(flash.text, "save error: denied");
+    assert!(matches!(flash.kind, FlashKind::Info));
+}
+
 // ── selection_paths ───────────────────────────────────────────
 
 #[test]

@@ -369,13 +369,10 @@ impl App {
                 self.view.scroll_pending_g = true;
             }
             KeyCode::Char('G') => pane.scroll_to_bottom(),
-            KeyCode::Char('s') => match pane.save_to_file() {
-                Ok(path) => {
-                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    self.state.flash_info(format!("saved: {name}"));
-                }
-                Err(e) => self.state.flash_info(format!("save error: {e}")),
-            },
+            KeyCode::Char('s') => {
+                let result = pane.save_to_file();
+                self.state.flash_saved_file(result);
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 pane.exit_scroll_mode();
                 self.state.flash_info("scroll: off");
