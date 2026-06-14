@@ -234,32 +234,38 @@ struct FileMarkdown {
     open_as_rendered: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ColorOverrides {
-    pub dir: Option<String>,
-    pub exec: Option<String>,
-    pub symlink: Option<String>,
-    pub file: Option<String>,
-    pub other: Option<String>,
-    pub cursor_bg: Option<String>,
-    pub cursor_fg: Option<String>,
-    pub pick: Option<String>,
-    pub take: Option<String>,
-    pub status_user: Option<String>,
-    pub status_path: Option<String>,
-    pub status_suffix: Option<String>,
-    pub prompt_prefix: Option<String>,
-    pub delete_warning: Option<String>,
-    pub diff_add_fg: Option<String>,
-    pub diff_del_fg: Option<String>,
-    pub diff_add_bg: Option<String>,
-    pub diff_del_bg: Option<String>,
-    pub diff_add_word_bg: Option<String>,
-    pub diff_del_word_bg: Option<String>,
-    pub diff_hunk_fg: Option<String>,
-    pub diff_file_fg: Option<String>,
-    pub diff_meta_fg: Option<String>,
+/// Define `ColorOverrides` and its `merge` from a single field list, so a
+/// new color can't be added to the struct but forgotten in the merge (which
+/// silently dropped `delete_warning` before — the field existed but was never
+/// merged, so setting it in a config did nothing). One list = one edit.
+macro_rules! color_overrides {
+    ($($field:ident),+ $(,)?) => {
+        /// Per-element color overrides parsed from `[colors]`. Each is an
+        /// optional hex/named color; `None` means "use the theme default".
+        #[derive(Debug, Clone, Default, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        pub struct ColorOverrides {
+            $(pub $field: Option<String>,)+
+        }
+
+        impl ColorOverrides {
+            /// Merge `other` into `self`: any `Some` in `other` wins (later
+            /// config file overrides earlier). Generated from the same field
+            /// list as the struct, so the two can never drift.
+            fn merge(&mut self, other: ColorOverrides) {
+                $(merge_color(&mut self.$field, other.$field);)+
+            }
+        }
+    };
+}
+
+color_overrides! {
+    dir, exec, symlink, file, other,
+    cursor_bg, cursor_fg, pick, take,
+    status_user, status_path, status_suffix, prompt_prefix, delete_warning,
+    diff_add_fg, diff_del_fg, diff_add_bg, diff_del_bg,
+    diff_add_word_bg, diff_del_word_bg,
+    diff_hunk_fg, diff_file_fg, diff_meta_fg,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -278,10 +284,6 @@ pub struct IgnoreMask {
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
-    #[serde(default)]
-    relax_search: bool,
-    #[serde(default)]
-    relax_prompt: bool,
     #[serde(default)]
     keymap: Vec<String>,
     #[serde(default)]
@@ -384,40 +386,10 @@ impl Config {
     fn merge_file(&mut self, file: FileConfig, source: &Path, trust: Trust) -> anyhow::Result<()> {
         self.sources.push(source.to_path_buf());
 
-        // Settings: later wins. (Currently just bools — no-op placeholders
-        // until we wire them in.)
-        let _ = file.relax_search;
-        let _ = file.relax_prompt;
-
-        // Colors: any Some() overrides the accumulated value.
-        merge_color(&mut self.colors.dir, file.colors.dir);
-        merge_color(&mut self.colors.exec, file.colors.exec);
-        merge_color(&mut self.colors.symlink, file.colors.symlink);
-        merge_color(&mut self.colors.file, file.colors.file);
-        merge_color(&mut self.colors.other, file.colors.other);
-        merge_color(&mut self.colors.cursor_bg, file.colors.cursor_bg);
-        merge_color(&mut self.colors.cursor_fg, file.colors.cursor_fg);
-        merge_color(&mut self.colors.pick, file.colors.pick);
-        merge_color(&mut self.colors.take, file.colors.take);
-        merge_color(&mut self.colors.status_user, file.colors.status_user);
-        merge_color(&mut self.colors.status_path, file.colors.status_path);
-        merge_color(&mut self.colors.status_suffix, file.colors.status_suffix);
-        merge_color(&mut self.colors.prompt_prefix, file.colors.prompt_prefix);
-        merge_color(&mut self.colors.diff_add_fg, file.colors.diff_add_fg);
-        merge_color(&mut self.colors.diff_del_fg, file.colors.diff_del_fg);
-        merge_color(&mut self.colors.diff_add_bg, file.colors.diff_add_bg);
-        merge_color(&mut self.colors.diff_del_bg, file.colors.diff_del_bg);
-        merge_color(
-            &mut self.colors.diff_add_word_bg,
-            file.colors.diff_add_word_bg,
-        );
-        merge_color(
-            &mut self.colors.diff_del_word_bg,
-            file.colors.diff_del_word_bg,
-        );
-        merge_color(&mut self.colors.diff_hunk_fg, file.colors.diff_hunk_fg);
-        merge_color(&mut self.colors.diff_file_fg, file.colors.diff_file_fg);
-        merge_color(&mut self.colors.diff_meta_fg, file.colors.diff_meta_fg);
+        // Colors: any Some() in this file overrides the accumulated value.
+        // Field list lives once in the `color_overrides!` macro, so a new
+        // color can't be merged-by-omission (which dropped delete_warning).
+        self.colors.merge(file.colors);
 
         // Layout: per-field merge — only overwrite when the file
         // explicitly set the value (Some). Otherwise a project file
@@ -686,6 +658,50 @@ exec = "#112233"
         assert_eq!(cfg.colors.dir.as_deref(), Some("#aabbcc"));
         assert_eq!(cfg.colors.exec.as_deref(), Some("#112233"));
         assert_eq!(cfg.bindings.len(), 2);
+    }
+
+    #[test]
+    fn every_color_field_merges_including_delete_warning() {
+        // Regression: the hand-written merge list omitted `delete_warning`,
+        // so setting it in a config silently did nothing. The macro now
+        // drives struct + merge from one field list. Set a representative
+        // spread — notably delete_warning — and confirm each lands.
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("spycrc.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r##"
+[colors]
+dir = "#111111"
+delete_warning = "#ff0000"
+diff_meta_fg = "#222222"
+"##
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.colors.dir.as_deref(), Some("#111111"));
+        assert_eq!(
+            cfg.colors.delete_warning.as_deref(),
+            Some("#ff0000"),
+            "delete_warning must merge (was silently dropped)"
+        );
+        assert_eq!(cfg.colors.diff_meta_fg.as_deref(), Some("#222222"));
+    }
+
+    #[test]
+    fn later_config_color_overrides_earlier() {
+        // The macro-generated merge keeps "later file wins" semantics.
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("a.toml");
+        let b = tmp.path().join("b.toml");
+        std::fs::write(&a, "[colors]\ndir = \"#aaaaaa\"\ntake = \"#bbbbbb\"\n").unwrap();
+        std::fs::write(&b, "[colors]\ndir = \"#cccccc\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&a), Some(&b)]).unwrap();
+        // b overrode dir; take only set in a, so it survives.
+        assert_eq!(cfg.colors.dir.as_deref(), Some("#cccccc"));
+        assert_eq!(cfg.colors.take.as_deref(), Some("#bbbbbb"));
     }
 
     #[test]
