@@ -1009,7 +1009,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | confirmed · ✅ #365 |
 | `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |
 | `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | unverified |
-| `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | unverified |
+| `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | confirmed · ✅ #399 |
 | `src/git/status.rs:121` | map_to_listing rebuilds the loop-invariant prefix string for every status entry | maintainability | confirmed · ✅ #357 |
 | `src/keymap/action.rs:115` | ResumePane comment says F11; the actual binding is F9 | maintainability | confirmed · ✅ #354 |
 | `src/keymap/mod.rs:3` | Module doc promises features as future work that shipped long ago | maintainability | confirmed · ✅ #354 |
