@@ -1016,7 +1016,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/keymap/resolver/mod.rs:364` | Count-prefix accumulation overflows u32 — panic in debug builds, silent wrap in release | correctness | confirmed · ✅ #359 |
 | `src/keymap/user.rs:117` | BoundAction::Copy / BoundAction::Move are unconstructable — dead variants with live-looking dispatch arms | maintainability | confirmed · ✅ #355 |
 | `src/mcp/config.rs:152` | Takeover/detection logic duplicated between the .mcp.json and codex config.toml paths | maintainability | unverified |
-| `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | unverified |
+| `src/mcp/config.rs:207` | .mcp.json written non-atomically while MCP clients may be reading it | correctness | confirmed · ✅ #384 |
 | `src/mcp/server.rs:112` | Planted .spyc-context-<pid>.json markers in a cloned repo defeat the documented cross-project attachment refusal | security | unverified |
 | `src/mcp/server.rs:158` | run_direct round-trips through Content-Length framing it immediately strips by string search | maintainability | unverified |
 | `src/mcp/server.rs:309` | Accept loop hot-spins on persistent accept errors (e.g. EMFILE) | correctness | confirmed · ✅ #367 |
@@ -1034,7 +1034,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/state/cursor.rs:1` | Cursor doc comment describes a grid-width field that no longer exists | maintainability | confirmed · ✅ #354 |
 | `src/state/inventory.rs:34` | Inventory items doc comment says "ordered by original path" but the BTreeMap is keyed by UUIDv7 id (time order) | maintainability | confirmed · ✅ #354 |
 | `src/state/marks.rs:57` | save() comment claims "atomically-ish" but the write is a plain fs::write; same non-atomic pattern across all state saves | maintainability | confirmed · ✅ #354 |
-| `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | unverified |
+| `src/state/marks.rs:67` | State files are written non-atomically; a torn write silently erases all marks on next load | correctness | confirmed · ✅ #384 |
 | `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | confirmed · ✅ #360 |
 | `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | confirmed · ✅ #356 |
 | `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | confirmed · ✅ #376 (codex/agy share `extract_token_after`; claude stays separate — anchored `strip_prefix` + accepts a session name) |
