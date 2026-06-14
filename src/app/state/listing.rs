@@ -83,6 +83,15 @@ impl AppState {
         self.cursor.clamp(self.rows.len());
     }
 
+    /// Re-sort the listing with the current `sort_order` / `sort_reversed` and
+    /// rebuild the visible rows. Shared by the `:sort`, `:sort reverse`, and
+    /// `:set sort=` command arms, which only differ in how they mutate the
+    /// sort state and what they flash.
+    pub fn apply_sort(&mut self) {
+        self.listing.sort(self.sort_order, self.sort_reversed);
+        self.rebuild_rows();
+    }
+
     pub fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
         let Some(ref pattern) = self.temp_filter else {
             return rows;

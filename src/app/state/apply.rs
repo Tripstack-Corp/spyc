@@ -8,7 +8,7 @@ use crate::keymap::Action;
 
 use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
 
-use super::{AppState, ApplyResult, PagerLines, PagerRequest};
+use super::{AppState, ApplyResult, PagerRequest, TakeOutcome};
 
 use super::count_files_in_dir_capped;
 
@@ -103,9 +103,9 @@ impl AppState {
 
             // -- Inventory --
             Action::Take => match self.take() {
-                Some(msg) if msg.starts_with("yanked") => self.flash_info(msg),
-                Some(err) => self.flash_error(err),
-                None => {}
+                TakeOutcome::Yanked(msg) => self.flash_info(msg),
+                TakeOutcome::Failed(err) => self.flash_error(err),
+                TakeOutcome::Noop => {}
             },
             Action::Untake => {
                 if self.view != View::Dir {
@@ -343,7 +343,7 @@ impl AppState {
                 self.cursor.clamp(self.rows.len());
                 return ApplyResult::OpenPager(PagerRequest {
                     title,
-                    lines: PagerLines::Plain(lines),
+                    lines,
                     columns: 1,
                     fit_to_content: true,
                 });
@@ -377,7 +377,7 @@ impl AppState {
                     self.cursor.clamp(self.rows.len());
                     return ApplyResult::OpenPager(PagerRequest {
                         title: "file types".to_string(),
-                        lines: PagerLines::Plain(lines),
+                        lines,
                         columns: 1,
                         fit_to_content: false,
                     });

@@ -62,9 +62,10 @@ impl AppState {
 
     /// Yank files into the inventory cache. Takes picks if any, else
     /// cursor item. Only regular files are accepted.
-    pub fn take(&mut self) -> Option<String> {
+    pub fn take(&mut self) -> super::TakeOutcome {
+        use super::TakeOutcome;
         if self.view != View::Dir {
-            return None;
+            return TakeOutcome::Noop;
         }
         let to_take: Vec<PathBuf> = if !self.picks.is_empty() {
             self.picks.iter().cloned().collect()
@@ -83,9 +84,12 @@ impl AppState {
             } else {
                 format!("yanked {count} file(s) to inventory")
             };
-            return Some(msg);
+            return TakeOutcome::Yanked(msg);
         }
-        err
+        match err {
+            Some(e) => TakeOutcome::Failed(e),
+            None => TakeOutcome::Noop,
+        }
     }
 
     /// Remove the cursor item from inventory (move to graveyard).

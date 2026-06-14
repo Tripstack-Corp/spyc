@@ -157,18 +157,13 @@ impl App {
                 return Ok(post);
             }
             state::Update::OpenPager(req) => {
-                let view = match req.lines {
-                    state::PagerLines::Plain(lines) => {
-                        let mut v = PagerView::new_plain(req.title, lines);
-                        v.columns = req.columns;
-                        if req.fit_to_content {
-                            v.fit_to_content = true;
-                            // Line-number gutter is noise for short summaries.
-                            v.show_line_numbers = false;
-                        }
-                        v
-                    }
-                };
+                let mut view = PagerView::new_plain(req.title, req.lines);
+                view.columns = req.columns;
+                if req.fit_to_content {
+                    view.fit_to_content = true;
+                    // Line-number gutter is noise for short summaries.
+                    view.show_line_numbers = false;
+                }
                 self.set_pager(view);
                 return Ok(Vec::new());
             }
