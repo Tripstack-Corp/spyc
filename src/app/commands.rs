@@ -23,7 +23,7 @@ impl App {
     /// Pure-domain arms are handled by `AppState::dispatch_command`;
     /// terminal-touching arms (shell, pager, overlay) stay here.
     pub fn dispatch_command(&mut self, input: &str) -> Vec<Effect> {
-        use super::state::{PagerLines, Update};
+        use super::state::Update;
 
         // Try the pure-domain handler first, normalized to the unified
         // `Update` (MVU Stage 3C). `Handled`/`Post` collapse into
@@ -36,8 +36,7 @@ impl App {
                 // `set_pager` / `remember_pager_position`), rebuilt from the
                 // normalized request (columns 1, no fit = `new_plain`
                 // defaults, so byte-identical to the old call).
-                let PagerLines::Plain(lines) = req.lines;
-                self.view.pager = Some(PagerView::new_plain(req.title, lines));
+                self.view.pager = Some(PagerView::new_plain(req.title, req.lines));
                 return Vec::new();
             }
             Update::Quit => {

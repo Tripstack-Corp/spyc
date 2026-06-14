@@ -115,7 +115,7 @@ impl From<CommandResult> for Update {
             // = 1, no fit-to-content — `new_plain` defaults).
             CommandResult::OpenPager { title, lines } => Self::OpenPager(PagerRequest {
                 title,
-                lines: PagerLines::Plain(lines),
+                lines,
                 columns: 1,
                 fit_to_content: false,
             }),
@@ -135,23 +135,30 @@ impl From<PromptResult> for Update {
     }
 }
 
+/// Outcome of [`AppState::take`] (yanking files into the inventory). A typed
+/// result so the caller dispatches on the variant instead of string-prefixing
+/// the flash message to tell success from error.
+#[derive(Debug)]
+pub enum TakeOutcome {
+    /// Files were yanked; carries the success flash message.
+    Yanked(String),
+    /// Nothing yanked; carries the error flash message.
+    Failed(String),
+    /// Nothing to do — wrong view, or an empty selection with no error.
+    Noop,
+}
+
 /// Description of a pager to open, without importing UI types.
 #[derive(Debug)]
 pub struct PagerRequest {
     pub title: String,
-    pub lines: PagerLines,
+    pub lines: Vec<String>,
     pub columns: u8,
     /// When true, the pager height auto-shrinks to fit content (top edge
     /// stays anchored to the standard centered position; the box just
     /// grows shorter from the bottom). Line-number gutter is suppressed
     /// since it's noise for short summaries.
     pub fit_to_content: bool,
-}
-
-/// Content for a pager — either plain strings or pre-styled lines.
-#[derive(Debug)]
-pub enum PagerLines {
-    Plain(Vec<String>),
 }
 
 /// Off-main-thread git-status work item. The chdir hot path sends

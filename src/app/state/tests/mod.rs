@@ -75,7 +75,7 @@ fn apply_result_into_update() {
     // OpenPager passes the request through verbatim.
     let req = PagerRequest {
         title: "T".into(),
-        lines: PagerLines::Plain(vec!["a".into()]),
+        lines: vec!["a".into()],
         columns: 2,
         fit_to_content: true,
     };
@@ -113,8 +113,7 @@ fn command_result_into_update() {
                 "command-path pager keeps new_plain's 1-column default"
             );
             assert!(!r.fit_to_content);
-            let PagerLines::Plain(lines) = r.lines;
-            assert_eq!(lines, vec!["m1".to_string(), "m2".to_string()]);
+            assert_eq!(r.lines, vec!["m1".to_string(), "m2".to_string()]);
         }
         _ => panic!("expected OpenPager"),
     }

@@ -97,8 +97,7 @@ impl AppState {
             // `:sort reverse` / `:sort -` toggles direction.
             if rest == "reverse" || rest == "-" {
                 self.sort_reversed = !self.sort_reversed;
-                self.listing.sort(self.sort_order, self.sort_reversed);
-                self.rebuild_rows();
+                self.apply_sort();
                 self.flash_info(format!(
                     "sort: {}{}",
                     self.sort_order,
@@ -113,8 +112,7 @@ impl AppState {
             match crate::fs::listing::SortMode::parse(rest) {
                 Some(mode) => {
                     self.sort_order = mode;
-                    self.listing.sort(mode, self.sort_reversed);
-                    self.rebuild_rows();
+                    self.apply_sort();
                     self.flash_info(format!(
                         "sort: {mode}{}",
                         if self.sort_reversed {
@@ -238,8 +236,7 @@ impl AppState {
                     "sort" => match crate::fs::listing::SortMode::parse(value) {
                         Some(mode) => {
                             self.sort_order = mode;
-                            self.listing.sort(mode, self.sort_reversed);
-                            self.rebuild_rows();
+                            self.apply_sort();
                             self.flash_info(format!("sort={mode}"));
                         }
                         None => self.flash_error(format!("invalid sort mode: {value}")),
