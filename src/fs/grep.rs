@@ -242,11 +242,13 @@ const MAX_LINE_DISPLAY: usize = 400;
 
 /// Convert a matched line's raw bytes into a single-line string
 /// safe to render in the pager. Drops trailing CR/LF, replaces
-/// control bytes (NUL, ESC, BEL, etc.) with `·` so they can't
-/// move the cursor or set colors, expands tabs to spaces (ratatui
-/// counts `\t` as zero-width but terminals expand it to 8 columns,
-/// which scrambles tab-separated content like TSV postcode tables),
-/// and truncates absurdly long lines with an ellipsis.
+/// control characters (NUL, ESC, BEL, etc. — including the C1 range
+/// U+0080..=U+009F, where U+009B is a CSI that many terminals honor
+/// exactly like `ESC [`) with `·` so they can't move the cursor or
+/// set colors, expands tabs to spaces (ratatui counts `\t` as
+/// zero-width but terminals expand it to 8 columns, which scrambles
+/// tab-separated content like TSV postcode tables), and truncates
+/// absurdly long lines with an ellipsis.
 fn sanitize_line(bytes: &[u8]) -> String {
     // Strip any trailing CR/LF (handles \n, \r, \r\n alike).
     let mut end = bytes.len();
@@ -272,7 +274,13 @@ fn sanitize_line(bytes: &[u8]) -> String {
                 out.push(' ');
                 written += 1;
             }
-        } else if (ch as u32) < 0x20 || ch == '\u{7f}' {
+        } else if ch.is_control() {
+            // `char::is_control` is exactly the Unicode Cc category:
+            // C0 (U+0000..=U+001F), DEL (U+007F), and C1
+            // (U+0080..=U+009F). The old `< 0x20 || == 0x7f` test let
+            // the C1 range through — and a UTF-8-encoded U+009B (CSI)
+            // in a matched line would reach the terminal as a live
+            // control sequence introducer. (Tab is handled above.)
             out.push('·');
             written += 1;
         } else {
@@ -601,6 +609,21 @@ mod tests {
         let trimmed = sanitize_line(&long);
         assert_eq!(trimmed.chars().count(), super::MAX_LINE_DISPLAY + 1);
         assert!(trimmed.ends_with('…'));
+    }
+
+    #[test]
+    fn sanitize_neutralizes_c1_control_chars() {
+        // C1 controls (U+0080..=U+009F) are encoded in UTF-8 as two
+        // bytes (0xC2 0x8x/0x9x). U+009B is the CSI — a terminal honors
+        // it like `ESC [`, so a matched line carrying one must not pass
+        // through. "a"(·)"b" → the CSI between them becomes `·`.
+        let s = sanitize_line("a\u{009b}31mb".as_bytes());
+        assert_eq!(s, "a·31mb");
+        // The whole C1 range is neutralized, not just CSI.
+        assert_eq!(sanitize_line("\u{0080}\u{009f}".as_bytes()), "··");
+        // A printable high-Latin-1 char (U+00E9 = é) is NOT a control
+        // and must survive untouched.
+        assert_eq!(sanitize_line("caf\u{00e9}".as_bytes()), "café");
     }
 
     #[test]

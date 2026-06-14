@@ -997,7 +997,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/debug_log.rs:56` | spyc_debug! formats its message and locks a global Mutex even when debug logging is disabled, on per-wake/per-fs-event hot paths | perf | confirmed · ✅ #373 |
 | `src/fs/entry.rs:57` | Dead code hidden behind #[allow(dead_code)]: Entry::is_dir, Listing::is_empty, Listing::len | maintainability | confirmed · ✅ #355 |
 | `src/fs/finder.rs:72` | Nested-repo pass 2 is skipped in git worktrees (.git is a file, not a dir) | correctness | confirmed · ✅ #364 |
-| `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | unverified |
+| `src/fs/grep.rs:272` | sanitize_line passes C1 control characters (incl. U+009B CSI) despite claiming to neutralize control bytes | security | confirmed · ✅ #391 |
 | `src/fs/long_listing.rs:274` | is_exec and the dir-slash/exec-star display logic duplicate fs/entry.rs | maintainability | unverified |
 | `src/fs/long_listing.rs:308` | kind_char renders FIFOs, sockets, and device nodes as regular files | correctness | confirmed · ✅ #361 |
 | `src/fs/ops.rs:1` | ops.rs module doc no longer describes the file — half of it is read-side viewer helpers | maintainability | confirmed · ✅ #357 |
