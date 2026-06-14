@@ -134,6 +134,8 @@ impl App {
                     self.runtime.pane_tabs = None;
                 }
             }
+            // Reclaim the dismissed tab's parked scrollback stream (if any).
+            self.prune_orphaned_pager_streams();
             self.state.flash_info("claude crash dismissed; tab closed");
             self.view.needs_full_repaint = true;
             return Vec::new();
@@ -158,6 +160,9 @@ impl App {
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.replace_at(tab_idx, entry);
                 }
+                // The replaced tab's old entry (and any stashed scrollback pager)
+                // was dropped; reclaim its parked stream so it doesn't leak.
+                self.prune_orphaned_pager_streams();
                 self.state
                     .flash_info("started fresh claude — type /resume to recover");
             }

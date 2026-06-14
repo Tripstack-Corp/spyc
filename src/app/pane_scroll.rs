@@ -115,6 +115,45 @@ impl App {
         self.view.scroll_pager = Some(view);
     }
 
+    /// Stream ids still owned by a living tab's stashed scrollback pager — the
+    /// ids `prune_orphaned_pager_streams` must keep.
+    fn live_stashed_stream_ids(&self) -> std::collections::HashSet<u32> {
+        self.runtime
+            .pane_tabs
+            .as_ref()
+            .map(|tabs| {
+                tabs.tabs()
+                    .iter()
+                    .filter_map(|e| {
+                        e.stashed_scrollback_pager
+                            .as_ref()
+                            .and_then(|v| v.stream_id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Drop parked pager streams whose owning tab no longer exists. A scrollback
+    /// pager's backing stream is parked in `runtime.stashed_pager_streams` (keyed
+    /// by id) while its tab is off-screen — see
+    /// [`stash_scrollback_pager_to_active_tab`](Self::stash_scrollback_pager_to_active_tab) —
+    /// and [`restore_active_tab_scrollback_pager`](Self::restore_active_tab_scrollback_pager)
+    /// is the *only* other drain. So a tab dropped while stashed — closed
+    /// (`^W x`), restarted (`^a R`), demoted (`:pane-to-task`), or replaced
+    /// (claude crash-recover) — would leak its stream forever. The `pane` layer
+    /// can't reach `runtime` (the one-way `app → pane` rule), so the owning side
+    /// reclaims here, *after* the tab is gone. Idempotent and path-independent: a
+    /// call from any removal site sweeps every now-orphaned stream, so a future
+    /// removal path is covered as long as it (or a later call) reaches here.
+    pub fn prune_orphaned_pager_streams(&mut self) {
+        if self.runtime.stashed_pager_streams.is_empty() {
+            return; // common case: nothing parked — skip the tab walk
+        }
+        let live = self.live_stashed_stream_ids();
+        retain_live_streams(&mut self.runtime.stashed_pager_streams, &live);
+    }
+
     pub fn open_pane_scroll_pager(&mut self) {
         let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return;
@@ -347,6 +386,17 @@ impl App {
     }
 }
 
+/// Evict parked streams whose id isn't in `live` (their owning tab is gone).
+/// Split from the `pane_tabs` walk in
+/// [`App::prune_orphaned_pager_streams`] so the keep/drop policy is unit-testable
+/// without spawning a pane.
+fn retain_live_streams(
+    parked: &mut std::collections::HashMap<u32, Box<dyn PagerStream>>,
+    live: &std::collections::HashSet<u32>,
+) {
+    parked.retain(|id, _| live.contains(id));
+}
+
 /// A [`PagerStream`] backing an agent-transcript scrollback view. The worker
 /// resolves + reads + renders the on-disk transcript off-thread and sends the
 /// rendered lines once; this drain installs them (or, on an empty / not-found
@@ -388,7 +438,59 @@ impl PagerStream for TranscriptStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{ScrollSnapshot, ScrollSource, decide_scroll_source};
+    use std::collections::{HashMap, HashSet};
+
+    use super::{
+        App, DrainOutcome, PagerStream, PagerView, RenderCtx, ScrollSnapshot, ScrollSource,
+        decide_scroll_source, retain_live_streams,
+    };
+
+    /// Inert [`PagerStream`] for the leak tests — only its id matters; it's
+    /// never actually drained here.
+    struct FakeStream(u32);
+    impl PagerStream for FakeStream {
+        fn id(&self) -> u32 {
+            self.0
+        }
+        fn drain(&mut self, _view: &mut PagerView, _ctx: &RenderCtx) -> DrainOutcome {
+            DrainOutcome::Idle
+        }
+    }
+
+    fn parked(ids: &[u32]) -> HashMap<u32, Box<dyn PagerStream>> {
+        ids.iter()
+            .map(|&id| (id, Box::new(FakeStream(id)) as Box<dyn PagerStream>))
+            .collect()
+    }
+
+    /// The keep/drop policy: only streams whose id a living tab still references
+    /// survive; an id with no living tab (closed / demoted / replaced) is evicted.
+    #[test]
+    fn retain_live_streams_drops_only_unreferenced() {
+        let mut map = parked(&[7, 8]);
+        let live: HashSet<u32> = std::iter::once(8).collect();
+        retain_live_streams(&mut map, &live);
+        assert!(!map.contains_key(&7), "orphaned stream 7 should be dropped");
+        assert!(map.contains_key(&8), "referenced stream 8 must survive");
+        assert_eq!(map.len(), 1);
+    }
+
+    /// With no tabs left (last tab closed / only tab demoted), every parked
+    /// stream is orphaned — the integration that closes the leak.
+    #[test]
+    fn prune_empties_parked_streams_when_no_tabs() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.runtime.stashed_pager_streams = parked(&[1, 2]);
+            assert!(app.runtime.pane_tabs.is_none());
+            app.prune_orphaned_pager_streams();
+            assert!(
+                app.runtime.stashed_pager_streams.is_empty(),
+                "no tabs ⇒ all parked streams orphaned"
+            );
+        });
+    }
 
     fn snap(has_transcript: bool, transcript_enabled: bool, is_alt_screen: bool) -> ScrollSnapshot {
         ScrollSnapshot {

@@ -249,6 +249,9 @@ impl App {
             self.view.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
         }
+        // The closed tab may have had a stashed scrollback pager whose stream is
+        // parked by id; reclaim it now that the tab is gone.
+        self.prune_orphaned_pager_streams();
     }
 
     /// ^a R — restart the active tab's command. Closes the tab and spawns
@@ -266,6 +269,9 @@ impl App {
             self.runtime.pane_tabs = None;
             self.state.focus = state::Focus::FileList;
         }
+        // The old tab is gone; reclaim its parked scrollback stream (if any)
+        // before spawning the replacement (which starts with no stash).
+        self.prune_orphaned_pager_streams();
         // Spawn a replacement with the same command and cwd. Only claim
         // "restarted" if it actually spawned — otherwise leave
         // open_pane_tab_in's "pane spawn failed" flash in place rather than
