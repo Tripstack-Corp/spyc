@@ -42,10 +42,11 @@ pub enum DiffLayout {
 /// Column separator for the side-by-side layout, and its display width.
 const SEP: &str = " │ ";
 const SEP_W: usize = 3;
-/// Width of the per-cell line-number field in the side-by-side layout.
+/// Minimum width of the per-cell line-number field in the side-by-side
+/// layout. Files whose largest line number needs more digits widen the
+/// field to fit (see [`lnum_width`]) so the marker / separator / right
+/// column stay aligned; smaller files keep this stable narrow gutter.
 const LNUM_W: usize = 4;
-/// Per-cell prefix before content: line-number field + space + 1-char marker.
-const CELL_PREFIX_W: usize = LNUM_W + 2;
 
 /// Render a whole diff to styled lines in the chosen `layout`. `width` is the
 /// total viewport width in columns (used only by [`DiffLayout::SideBySide`] to
@@ -129,36 +130,13 @@ fn commit_header(meta: &CommitMeta, theme: &Theme) -> Vec<Line<'static>> {
 // ── unified layout ──────────────────────────────────────────────────────
 
 fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'static>>) {
-    out.push(file_header(file, theme));
-    let hunks = match &file.kind {
-        DiffKind::Text(hunks) => hunks,
-        DiffKind::Binary => {
-            out.push(Line::styled(
-                "Binary file differs.",
-                theme.diff_meta_style(),
-            ));
-            return;
-        }
-        DiffKind::Submodule { old, new } => {
-            out.push(submodule_line(old, new, theme));
-            return;
-        }
-        DiffKind::Error(msg) => {
-            out.push(Line::styled(
-                format!("diff unavailable: {msg}"),
-                theme.diff_error_style(),
-            ));
-            return;
-        }
+    let Some(prep) = prepare_file(file, theme, out) else {
+        return;
     };
-
-    let (new_text, old_text) = side_texts(hunks);
-    let new_hl = highlight_side(file_name(file), &new_text);
-    let old_hl = highlight_side(file_name(file), &old_text);
-    let (new_ref, old_ref) = (new_hl.as_deref(), old_hl.as_deref());
+    let (new_ref, old_ref) = (prep.new_hl.as_deref(), prep.old_hl.as_deref());
 
     let (mut oi, mut ni) = (0usize, 0usize);
-    for h in hunks {
+    for h in prep.hunks {
         out.push(hunk_header_line(h, theme));
         let intra = compute_intra(&h.lines);
         for (j, line) in h.lines.iter().enumerate() {
@@ -226,37 +204,17 @@ fn unified_row(
 // ── side-by-side layout ───────────────────────────────────────────────────
 
 fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec<Line<'static>>) {
-    out.push(file_header(file, theme));
-    let hunks = match &file.kind {
-        DiffKind::Text(hunks) => hunks,
-        DiffKind::Binary => {
-            out.push(Line::styled(
-                "Binary file differs.",
-                theme.diff_meta_style(),
-            ));
-            return;
-        }
-        DiffKind::Submodule { old, new } => {
-            out.push(submodule_line(old, new, theme));
-            return;
-        }
-        DiffKind::Error(msg) => {
-            out.push(Line::styled(
-                format!("diff unavailable: {msg}"),
-                theme.diff_error_style(),
-            ));
-            return;
-        }
+    let Some(prep) = prepare_file(file, theme, out) else {
+        return;
     };
-
-    let (new_text, old_text) = side_texts(hunks);
-    let new_hl = highlight_side(file_name(file), &new_text);
-    let old_hl = highlight_side(file_name(file), &old_text);
-    let (new_ref, old_ref) = (new_hl.as_deref(), old_hl.as_deref());
+    let (new_ref, old_ref) = (prep.new_hl.as_deref(), prep.old_hl.as_deref());
     let col_w = width.saturating_sub(SEP_W) / 2;
+    // Size the line-number field to the file's largest number so 5-digit+
+    // files don't overflow the gutter and break column alignment.
+    let lnum_w = lnum_width(prep.hunks);
 
     let (mut oi, mut ni) = (0usize, 0usize);
-    for h in hunks {
+    for h in prep.hunks {
         out.push(hunk_header_line(h, theme));
         let intra = compute_intra(&h.lines);
         let mut old_no = h.old_start;
@@ -271,6 +229,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     LineOrigin::Context,
                     styled_content(pick(old_ref, oi, &lines[i].text, theme, None), None, None),
                     col_w,
+                    lnum_w,
                 );
                 let right = split_cell(
                     theme,
@@ -278,6 +237,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     LineOrigin::Context,
                     styled_content(pick(new_ref, ni, &lines[i].text, theme, None), None, None),
                     col_w,
+                    lnum_w,
                 );
                 out.push(split_row(left, right, theme));
                 old_no += 1;
@@ -310,7 +270,14 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                         theme.diff_row_bg(false),
                         word,
                     );
-                    let cell = split_cell(theme, Some(old_no), LineOrigin::Remove, content, col_w);
+                    let cell = split_cell(
+                        theme,
+                        Some(old_no),
+                        LineOrigin::Remove,
+                        content,
+                        col_w,
+                        lnum_w,
+                    );
                     old_no += 1;
                     oi += 1;
                     cell
@@ -324,7 +291,8 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                         theme.diff_row_bg(true),
                         word,
                     );
-                    let cell = split_cell(theme, Some(new_no), LineOrigin::Add, content, col_w);
+                    let cell =
+                        split_cell(theme, Some(new_no), LineOrigin::Add, content, col_w, lnum_w);
                     new_no += 1;
                     ni += 1;
                     cell
@@ -338,14 +306,17 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
 }
 
 /// One side-by-side cell: `[lnum][space][marker][content…]`, padded/truncated
-/// to exactly `col_w` columns. `content` is already styled (wash + word
-/// highlight via [`styled_content`]); the prefix + padding carry `row_bg`.
+/// to exactly `col_w` columns. `lnum_w` is the file's line-number field width
+/// (see [`lnum_width`]) — the prefix is `lnum_w + 2` columns. `content` is
+/// already styled (wash + word highlight via [`styled_content`]); the prefix
+/// + padding carry `row_bg`.
 fn split_cell(
     theme: &Theme,
     lnum: Option<u32>,
     origin: LineOrigin,
     content: Vec<Span<'static>>,
     col_w: usize,
+    lnum_w: usize,
 ) -> Vec<Span<'static>> {
     let (marker, row_bg, gutter_style) = match origin {
         LineOrigin::Context => (' ', None, Style::default()),
@@ -356,8 +327,8 @@ fn split_cell(
             theme.diff_gutter_style(false),
         ),
     };
-    let lnum_str = lnum.map_or_else(|| " ".repeat(LNUM_W), |n| format!("{n:>LNUM_W$}"));
-    let content_w = col_w.saturating_sub(CELL_PREFIX_W);
+    let lnum_str = lnum.map_or_else(|| " ".repeat(lnum_w), |n| format!("{n:>lnum_w$}"));
+    let content_w = col_w.saturating_sub(lnum_w + 2);
 
     let mut spans = Vec::with_capacity(content.len() + 3);
     spans.push(Span::styled(
@@ -386,6 +357,93 @@ fn split_row(left: Vec<Span<'static>>, right: Vec<Span<'static>>, theme: &Theme)
 }
 
 // ── shared helpers ────────────────────────────────────────────────────────
+
+/// A text file's hunks plus each side highlighted once, ready for layout.
+struct PreparedFile<'a> {
+    hunks: &'a [Hunk],
+    /// New-side syntax highlight (context + adds), `None` if syntect didn't
+    /// recognize the language — callers fall back to flat `+`/`-` text.
+    new_hl: Option<Vec<Line<'static>>>,
+    /// Old-side syntax highlight (context + removes).
+    old_hl: Option<Vec<Line<'static>>>,
+}
+
+/// Shared prologue for both layouts: push the file header, then resolve the
+/// hunks. The non-text kinds (binary / submodule / error) push their
+/// one-line explanation and return `None`, signaling the caller to stop. On
+/// a text diff, each side is syntax-highlighted once (syntect is stateful
+/// across lines, so per-line calls would break multi-line constructs).
+fn prepare_file<'a>(
+    file: &'a FileDiff,
+    theme: &Theme,
+    out: &mut Vec<Line<'static>>,
+) -> Option<PreparedFile<'a>> {
+    out.push(file_header(file, theme));
+    let hunks = match &file.kind {
+        DiffKind::Text(hunks) => hunks,
+        DiffKind::Binary => {
+            out.push(Line::styled(
+                "Binary file differs.",
+                theme.diff_meta_style(),
+            ));
+            return None;
+        }
+        DiffKind::Submodule { old, new } => {
+            out.push(submodule_line(old, new, theme));
+            return None;
+        }
+        DiffKind::Error(msg) => {
+            out.push(Line::styled(
+                format!("diff unavailable: {msg}"),
+                theme.diff_error_style(),
+            ));
+            return None;
+        }
+    };
+    let (new_text, old_text) = side_texts(hunks);
+    let new_hl = highlight_side(file_name(file), &new_text);
+    let old_hl = highlight_side(file_name(file), &old_text);
+    Some(PreparedFile {
+        hunks,
+        new_hl,
+        old_hl,
+    })
+}
+
+/// Width of the line-number field for a file's side-by-side cells: the digit
+/// count of the largest line number actually rendered, floored at [`LNUM_W`].
+/// Without this, a number wider than the fixed field (≥ 10000 with `LNUM_W`
+/// = 4) widened only that cell, shoving the marker, separator, and entire
+/// right column out of alignment for the rest of the file.
+fn lnum_width(hunks: &[Hunk]) -> usize {
+    let mut max_no = 0u32;
+    for h in hunks {
+        let (mut old, mut new) = (h.old_start, h.new_start);
+        for line in &h.lines {
+            match line.origin {
+                LineOrigin::Context => {
+                    max_no = max_no.max(old).max(new);
+                    old += 1;
+                    new += 1;
+                }
+                LineOrigin::Remove => {
+                    max_no = max_no.max(old);
+                    old += 1;
+                }
+                LineOrigin::Add => {
+                    max_no = max_no.max(new);
+                    new += 1;
+                }
+            }
+        }
+    }
+    let digits = if max_no == 0 {
+        1
+    } else {
+        (max_no.ilog10() + 1) as usize
+    };
+    digits.max(LNUM_W)
+}
 
 /// Collect the new-side (context + adds) and old-side (context + removes)
 /// line texts across all hunks, in order — the inputs we highlight once each.

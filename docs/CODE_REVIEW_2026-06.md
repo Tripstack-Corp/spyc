@@ -1038,8 +1038,8 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/state/mod.rs:89` | read_tail_lossy drops a whole valid line when the seek lands exactly on a line boundary | correctness | confirmed · ✅ #360 |
 | `src/state/sessions/mod.rs:273` | find_claude_session_name_public is a pointless pub passthrough wrapper | maintainability | confirmed · ✅ #356 |
 | `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | unverified |
-| `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | unverified |
-| `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | unverified |
+| `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | confirmed · ✅ #374 |
+| `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | confirmed · ✅ #374 |
 | `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | unverified |
 | `src/ui/line_edit.rs:63` | Stale pending_op survives history navigation and set_content — next motion key silently deletes text | correctness | unverified |
 | `src/ui/line_edit.rs:253` | Normal mode ignores the CONTROL modifier — ^A enters Insert mode, ^D arms the delete operator | correctness | unverified |

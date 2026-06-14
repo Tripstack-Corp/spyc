@@ -68,6 +68,23 @@ fn added_model() -> DiffModel {
     }
 }
 
+/// A one-file modify diff whose hunk sits at 5-digit line numbers
+/// (`12340…`), to exercise the dynamic side-by-side line-number field.
+fn big_lnum_model() -> DiffModel {
+    single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 12_340,
+            old_lines: 4,
+            new_start: 12_340,
+            new_lines: 4,
+            lines: vec![ctx("a"), ctx("b"), rem("c"), add("C"), ctx("d")],
+        }]),
+        Some("f.txt"),
+        Some("f.txt"),
+    )
+}
+
 fn single_file(
     status: FileStatus,
     kind: DiffKind,
@@ -321,6 +338,58 @@ fn side_by_side_rows_never_exceed_width() {
             assert!(w <= width, "row width {w} exceeds {width}: {line:?}");
         }
     }
+}
+
+#[test]
+fn side_by_side_five_digit_line_numbers_stay_aligned() {
+    // A file with 5-digit line numbers must not overflow the gutter and
+    // shove the separator / right column out of alignment. (The bug: the
+    // fixed 4-wide LNUM_W field made a 5-digit number's cell one column too
+    // wide, so the row exceeded `width` and wrapped — exactly what the
+    // ≤-width assertion below catches.)
+    let theme = Theme::default();
+    for width in [40usize, 60, 80, 100] {
+        let out = render_diff(&big_lnum_model(), &theme, DiffLayout::SideBySide, width);
+        for line in &out {
+            let w: usize = line
+                .spans
+                .iter()
+                .map(|s| crate::ui::display_width(s.content.as_ref()))
+                .sum();
+            assert!(
+                w <= width,
+                "5-digit row width {w} exceeds {width}: {line:?}"
+            );
+        }
+        // The full 5-digit numbers must survive — not be truncated to fit a
+        // 4-wide field.
+        let body = text(&out);
+        assert!(
+            body.contains("12340") && body.contains("12343"),
+            "5-digit line numbers missing/truncated at width {width}:\n{body}"
+        );
+    }
+}
+
+#[test]
+fn lnum_width_floors_at_four_and_grows_with_digits() {
+    use crate::git::model::{DiffLine, Hunk, LineOrigin};
+    let hunk = |start: u32| Hunk {
+        old_start: start,
+        old_lines: 1,
+        new_start: start,
+        new_lines: 1,
+        lines: vec![DiffLine {
+            origin: LineOrigin::Context,
+            text: "x".into(),
+        }],
+    };
+    // Small numbers keep the stable 4-wide gutter…
+    assert_eq!(super::lnum_width(&[hunk(1)]), 4);
+    assert_eq!(super::lnum_width(&[hunk(9999)]), 4);
+    // …5- and 6-digit numbers widen to fit.
+    assert_eq!(super::lnum_width(&[hunk(10_000)]), 5);
+    assert_eq!(super::lnum_width(&[hunk(123_456)]), 6);
 }
 
 #[test]
