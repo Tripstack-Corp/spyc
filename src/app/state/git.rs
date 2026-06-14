@@ -225,7 +225,11 @@ impl AppState {
             if let Some(&cached) = self.git_cache.huge_tree_decisions.get(&new_anchor) {
                 cached
             } else {
-                let huge = crate::app::count_subdirs_capped(
+                // gitignore-aware: count only what `git status` walks, so a
+                // checkout's `target/` / `.claude/` / `node_modules/` (all
+                // gitignored, thousands of dirs) don't mis-flag an otherwise
+                // small repo as huge and throttle its git polling to 10 s.
+                let huge = crate::app::count_unignored_subdirs_capped(
                     &new_anchor,
                     crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
                 ) > crate::app::HUGE_TREE_SUBDIR_THRESHOLD;
