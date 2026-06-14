@@ -475,45 +475,14 @@ mod map_tests {
 #[cfg(test)]
 mod parity_tests {
     use super::{StatusEntry, decode_porcelain, map_to_listing, repo_status};
+    use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
 
-    /// Run `git` in `dir` with a hermetic config (no user/system gitconfig) so
-    /// tests are reproducible. Mirrors `discovery::tests::run_git`. `git` is a
-    /// test-only fixture dependency — production status is pure gix
-    /// (`repo_status`); the parity tests cross-check it against the test-only
-    /// `porcelain` helper.
-    fn run_git(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .expect("spawn git");
-        assert!(
-            out.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
-    /// Hermetic `git status --porcelain -unormal` stdout for `dir`. Uses the
-    /// same env as `run_git` so config (e.g. rename detection) is identical to
-    /// the setup commands.
+    /// Hermetic `git status --porcelain -unormal` stdout for `dir`, via the
+    /// shared `run_git` fixture (so config — e.g. rename detection — matches
+    /// the setup commands exactly).
     fn porcelain(dir: &Path) -> String {
-        let out = std::process::Command::new("git")
-            .args(["status", "--porcelain", "-unormal"])
-            .current_dir(dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .expect("spawn git status");
-        assert!(out.status.success(), "git status failed");
-        String::from_utf8(out.stdout).expect("utf8 porcelain")
+        run_git(dir, &["status", "--porcelain", "-unormal"])
     }
 
     /// Fresh empty repo on `main`, canonicalized path (macOS /var→/private/var

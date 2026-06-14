@@ -207,38 +207,8 @@ mod tests {
     //! *construct* the repos and cross-check ids.
     use super::{diff_cached, diff_head_to_worktree, show_model};
     use crate::git::model::{DiffKind, FileStatus, LineOrigin};
-    use std::path::{Path, PathBuf};
-
-    /// Hermetic `git` (no user/system config), run from a STABLE cwd via
-    /// `git -C <dir>` so the parallel suite's global-CWD thrash can't strand
-    /// it. Mirrors `worktree::tests::run_git`. Panics with stderr on failure.
-    fn run_git(dir: &Path, args: &[&str]) -> String {
-        let dir_str = dir.to_str().expect("utf8 dir");
-        let mut last_err = String::new();
-        for attempt in 0..3u32 {
-            let out = std::process::Command::new("git")
-                .arg("-C")
-                .arg(dir_str)
-                .args(args)
-                .current_dir(std::env::temp_dir())
-                .env("GIT_AUTHOR_NAME", "Ada")
-                .env("GIT_AUTHOR_EMAIL", "ada@example.com")
-                .env("GIT_COMMITTER_NAME", "Ada")
-                .env("GIT_COMMITTER_EMAIL", "ada@example.com")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                .output()
-                .expect("spawn git");
-            if out.status.success() {
-                return String::from_utf8(out.stdout).expect("utf8 stdout");
-            }
-            last_err = String::from_utf8_lossy(&out.stderr).into_owned();
-            std::thread::sleep(std::time::Duration::from_millis(
-                50 * u64::from(attempt + 1),
-            ));
-        }
-        panic!("git {args:?} failed after 3 attempts: {last_err}");
-    }
+    use crate::git::test_support::run_git;
+    use std::path::PathBuf;
 
     /// Fresh repo on `main`, canonicalized (macOS /var→/private/var so gix's
     /// absolute paths line up). No commits — callers add their own.
