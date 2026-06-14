@@ -50,7 +50,7 @@ struct Cli {
     #[arg(short, long)]
     resume: bool,
 
-    /// Write debug log to /tmp/spyc-debug-<ts>.log
+    /// Write debug log to an owner-only spyc-debug-<ts>.log in the state dir
     #[arg(short, long)]
     debug: bool,
 

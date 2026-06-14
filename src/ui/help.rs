@@ -345,7 +345,7 @@ const SECTIONS: &[Section] = &[
         title: "CLI Flags",
         rows: &[
             ("-r --resume", "open pane with claude --resume"),
-            ("-d --debug", "write debug log to /tmp/spyc-debug-<ts>.log"),
+            ("-d --debug", "write owner-only debug log in the state dir"),
             ("-h --help", "show usage"),
             ("-v --version", "show version"),
         ],
