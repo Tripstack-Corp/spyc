@@ -450,6 +450,27 @@ fn placement_uppercase_v_commits_to_line_at_cursor_row() {
 }
 
 #[test]
+fn picker_move_autoscrolls_via_shared_keep_visible() {
+    let mut view = block_view_with(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    view.picker_cursor = Some(0);
+    view.scroll = 0;
+    // Jump to line 7 with a 5-row viewport: bottom-align so 7 is visible
+    // (scroll = 7 + 1 - 5 = 3).
+    view.picker_move(7, 5);
+    assert_eq!(view.picker_cursor, Some(7));
+    assert_eq!(view.scroll, 3);
+    // Back up to line 1: top-align (scroll = 1).
+    view.picker_move(-6, 5);
+    assert_eq!(view.picker_cursor, Some(1));
+    assert_eq!(view.scroll, 1);
+    // Degenerate zero-height viewport: cursor still moves, scroll is left
+    // alone (the shared keep-visible guard the inline version lacked).
+    view.picker_move(1, 0);
+    assert_eq!(view.picker_cursor, Some(2));
+    assert_eq!(view.scroll, 1);
+}
+
+#[test]
 fn placement_esc_clears_without_starting_visual() {
     let mut view = block_view_with(&["a", "b"]);
     view.enter_placement();
