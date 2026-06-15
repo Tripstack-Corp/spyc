@@ -298,6 +298,17 @@ pub struct GitCache {
     /// `None` until the first successful poll, or when `.git/index`
     /// can't be stat'd.
     pub git_poll_cache: Option<(std::time::SystemTime, std::time::SystemTime)>,
+    /// Memoized branch-display string keyed by `(repo_root, HEAD mtime)`.
+    /// `compute_git_info_fast` re-derives the branch via `gix::open` only
+    /// when `HEAD`'s mtime moves (checkout / branch-switch / detached-HEAD
+    /// commit) — otherwise an active filesystem trips `refresh_listing`
+    /// every few seconds and each call would re-open the repo just to read
+    /// an unchanged branch name. The dirty `*` flag is NOT cached here: it's
+    /// recombined fresh each call from `git_status_cache`, which moves on
+    /// working-tree edits that `HEAD`'s mtime can't see. Shares the coarse-
+    /// FS-mtime caveat of [`Self::git_poll_cache`] (same key, same 1 Hz poll
+    /// gate). `None` until the first resolve, or outside a repo.
+    pub head_branch_cache: Option<(std::path::PathBuf, std::time::SystemTime, String)>,
     /// Set at `chdir` when the new project root has more than
     /// `HUGE_TREE_SUBDIR_THRESHOLD` subdirs (measured with the
     /// bounded-DFS `count_subdirs_capped`). Drives two adaptive
