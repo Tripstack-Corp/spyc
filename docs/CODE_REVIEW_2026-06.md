@@ -1007,7 +1007,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/fs/ops.rs:359` | hex_dump_lines re-parses pretty_hex's string output and pulls ui::theme/ratatui into the fs layer | maintainability | confirmed · ✅ #395 |
 | `src/git/diff_model/blob.rs:57` | format_git_time_pub is a redundant visibility wrapper with a duplicated doc comment | maintainability | confirmed · ✅ #355 |
 | `src/git/diff_model/blob.rs:101` | Diff resource errors render as an empty (clean-looking) file diff | correctness | confirmed · ✅ #365 |
-| `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | unverified |
+| `src/git/diff_model/mod.rs:85` | diff_head_to_worktree does a root-down tree lookup per changed path — O(N x depth) tree decodes | perf | confirmed · ✅ #420 (gix object cache; off-thread, low-sev) |
 | `src/git/discovery.rs:34` | head_branch gix::open runs on every fs-event refresh and chdir, not only at repo change as the hot-path doc claims | perf | confirmed · ✅ #417 (memoized branch by HEAD mtime) |
 | `src/git/discovery.rs:51` | Five near-identical run_git test fixtures; the two older copies lack the CWD-thrash hardening the newer copies were written to fix | maintainability | confirmed · ✅ #399 |
 | `src/git/status.rs:121` | map_to_listing rebuilds the loop-invariant prefix string for every status entry | maintainability | confirmed · ✅ #357 |
