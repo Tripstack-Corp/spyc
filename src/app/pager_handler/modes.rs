@@ -109,59 +109,61 @@ impl App {
     }
 
     /// Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
+    ///
+    /// The buffer is the active `PagerView`'s own `jump_buf` (single source of
+    /// truth, like `search`/`visual`); the footer indicator renders straight
+    /// from it, so there is no separate copy to keep in sync. Jump mode is
+    /// modal — this handler runs early (see `handle_pager_key`) and swallows
+    /// every key while active, so no pager swap / focus change can interleave.
     pub(super) fn handle_pager_jump_buf(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         let view = active_pager_mut!(self)?;
-        // Inline `:N` jump — accumulate digits, Enter commits, Esc cancels.
-        if let Some(ref mut buf) = self.view.pager_jump_buf {
-            match key.code {
-                KeyCode::Char(c @ '0'..='9') => {
+        // Not in jump mode → fall through to the other pager handlers.
+        view.jump_buf.as_ref()?;
+        match key.code {
+            KeyCode::Char(c @ '0'..='9') => {
+                if let Some(buf) = view.jump_buf.as_mut() {
                     buf.push(c);
-                    view.jump_buf = Some(buf.clone());
                 }
-                KeyCode::Backspace => {
-                    if buf.pop().is_none() {
-                        self.view.pager_jump_buf = None;
-                        view.jump_buf = None;
-                    } else {
-                        view.jump_buf = Some(buf.clone());
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Ok(n) = buf.parse::<usize>()
-                        && n > 0
-                    {
-                        let target = n.saturating_sub(1);
-                        if self.view.pending_history_pick.is_some() {
-                            // History editor: jump to entry N.
-                            let max = view.lines.len().saturating_sub(1);
-                            let clamped = target.min(max);
-                            view.picker_cursor = Some(clamped);
-                            view.scroll =
-                                u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
-                        } else {
-                            // Regular pager: jump to line N, clamped to the
-                            // last line — a jump past EOF would otherwise leave
-                            // `scroll` past the end and blank the viewport.
-                            view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
-                            view.clamp_scroll_auto();
-                        }
-                    }
-                    view.jump_buf = None;
-                    self.view.pager_jump_buf = None;
-                    if self.view.pending_history_pick.is_some() {
-                        self.sync_history_editor_to_cursor();
-                    }
-                }
-                _ => {
-                    // Esc or non-digit cancels.
-                    self.view.pager_jump_buf = None;
+            }
+            KeyCode::Backspace => {
+                // Pop a digit; backspacing past the first digit exits jump mode.
+                if view.jump_buf.as_mut().is_some_and(|b| b.pop().is_none()) {
                     view.jump_buf = None;
                 }
             }
-            return Some(Vec::new());
+            KeyCode::Enter => {
+                let n = view
+                    .jump_buf
+                    .as_ref()
+                    .and_then(|b| b.parse::<usize>().ok())
+                    .filter(|&n| n > 0);
+                view.jump_buf = None;
+                if let Some(n) = n {
+                    let target = n.saturating_sub(1);
+                    if self.view.pending_history_pick.is_some() {
+                        // History editor: jump to entry N.
+                        let max = view.lines.len().saturating_sub(1);
+                        let clamped = target.min(max);
+                        view.picker_cursor = Some(clamped);
+                        view.scroll = u16::try_from(clamped.saturating_sub(2)).unwrap_or(u16::MAX);
+                    } else {
+                        // Regular pager: jump to line N, clamped to the
+                        // last line — a jump past EOF would otherwise leave
+                        // `scroll` past the end and blank the viewport.
+                        view.scroll = u16::try_from(target).unwrap_or(u16::MAX);
+                        view.clamp_scroll_auto();
+                    }
+                }
+                if self.view.pending_history_pick.is_some() {
+                    self.sync_history_editor_to_cursor();
+                }
+            }
+            _ => {
+                // Esc or non-digit cancels.
+                view.jump_buf = None;
+            }
         }
-
-        None
+        Some(Vec::new())
     }
 
     /// `[b` (`forward = false`) / `]b` (`forward = true`): step the top pager's
@@ -440,5 +442,87 @@ impl App {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::App;
+    use crate::ui::pager::PagerView;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn ch(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+    fn code(c: KeyCode) -> KeyEvent {
+        KeyEvent::new(c, KeyModifiers::NONE)
+    }
+
+    /// App with a 50-line pager and a pinned viewport so the jump's clamped
+    /// scroll is deterministic regardless of the headless terminal size.
+    fn jump_pager_app() -> App {
+        let mut app = App::test_app(std::env::temp_dir());
+        let lines: Vec<String> = (0..50).map(|i| format!("line {i}")).collect();
+        let view = PagerView::new_plain("t", lines);
+        view.last_viewport_h.set(20);
+        app.view.pager = Some(view);
+        app
+    }
+
+    fn pager(app: &App) -> &PagerView {
+        app.view.pager.as_ref().expect("pager")
+    }
+
+    #[test]
+    fn jump_buf_accumulates_on_the_pager_and_feeds_the_footer() {
+        let mut app = jump_pager_app();
+        app.handle_pager_key(ch(':'));
+        app.handle_pager_key(ch('1'));
+        app.handle_pager_key(ch('2'));
+        // The buffer is the pager's own field — the single source of truth the
+        // footer indicator (`status_text`) renders straight from, no mirror.
+        assert_eq!(pager(&app).jump_buf.as_deref(), Some("12"));
+    }
+
+    #[test]
+    fn jump_buf_enter_jumps_to_line_and_clears() {
+        let mut app = jump_pager_app();
+        for k in [ch(':'), ch('1'), ch('0'), code(KeyCode::Enter)] {
+            app.handle_pager_key(k);
+        }
+        // `:10` → line 10 (0-indexed scroll 9); buffer cleared on commit.
+        assert_eq!(pager(&app).scroll, 9);
+        assert_eq!(pager(&app).jump_buf, None);
+    }
+
+    #[test]
+    fn jump_buf_esc_cancels_without_jumping() {
+        let mut app = jump_pager_app();
+        for k in [ch(':'), ch('5')] {
+            app.handle_pager_key(k);
+        }
+        let before = pager(&app).scroll;
+        app.handle_pager_key(code(KeyCode::Esc));
+        assert_eq!(pager(&app).jump_buf, None, "Esc exits jump mode");
+        assert_eq!(pager(&app).scroll, before, "cancel does not jump");
+    }
+
+    #[test]
+    fn jump_buf_backspace_past_first_digit_exits() {
+        let mut app = jump_pager_app();
+        for k in [ch(':'), ch('7'), code(KeyCode::Backspace)] {
+            app.handle_pager_key(k);
+        }
+        assert_eq!(
+            pager(&app).jump_buf.as_deref(),
+            Some(""),
+            "one digit removed → empty buffer, still in jump mode"
+        );
+        app.handle_pager_key(code(KeyCode::Backspace));
+        assert_eq!(
+            pager(&app).jump_buf,
+            None,
+            "backspacing past the first digit exits jump mode"
+        );
     }
 }

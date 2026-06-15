@@ -487,7 +487,6 @@ pub struct ViewState {
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
-    pub pager_jump_buf: Option<String>,
     /// Stash for the pager that was active when `?` opened the
     /// pager-help overlay. Restored verbatim on Esc/q dismissal so
     /// the user lands back in the same view. Separate from
@@ -608,7 +607,6 @@ impl ViewState {
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,
-            pager_jump_buf: None,
             pager_help_stash: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
             theme,

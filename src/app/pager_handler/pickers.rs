@@ -268,7 +268,6 @@ impl App {
                     }
                     KeyCode::Char(':') => {
                         self.view.history_pending_g = false;
-                        self.view.pager_jump_buf = Some(String::new());
                         view.jump_buf = Some(String::new());
                         true
                     }

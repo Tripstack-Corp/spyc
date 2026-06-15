@@ -22,8 +22,8 @@ use super::{App, Effect, EntryKind, PagerView, state};
 /// `&mut` selector for the focused-region pager — the macro companion to
 /// [`App::active_pager_ref`]. Inlined (not a method) so the borrow stays
 /// field-level: a method returning `&mut PagerView` would borrow all of `*self`
-/// and collide with handlers that touch sibling fields (history pick, jump buf,
-/// config) while holding the pager. Yields `Option<&mut PagerView>` — use with
+/// and collide with handlers that touch sibling fields (history pick, config)
+/// while holding the pager. Yields `Option<&mut PagerView>` — use with
 /// `?` or `let Some(view) = active_pager_mut!(self) else { … }`.
 macro_rules! active_pager_mut {
     ($self:ident) => {
@@ -187,7 +187,7 @@ impl App {
     /// The `&mut` companion is the [`active_pager_mut!`] macro, not a method:
     /// a `fn(&mut self) -> &mut PagerView` borrows all of `*self` for the
     /// return's lifetime, which collides with handlers that also touch sibling
-    /// fields (`pending_history_pick`, `pager_jump_buf`, `state.config`) while
+    /// fields (`pending_history_pick`, `state.config`) while
     /// holding the pager. The macro inlines the slot pick so the borrow stays
     /// field-level (`view.pager` / `view.scroll_pager` only).
     pub(super) const fn active_pager_ref(&self) -> Option<&PagerView> {

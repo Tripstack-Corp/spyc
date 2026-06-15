@@ -44,7 +44,6 @@ impl App {
                     .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
                 {
                     self.view.pager = self.view.pager_help_stash.take();
-                    self.view.pager_jump_buf = None;
                     self.view.pager_pending_bracket = None;
                     self.view.needs_full_repaint = true;
                     return Vec::new();
@@ -108,7 +107,6 @@ impl App {
                 self.state.pending_sessions = None;
                 self.view.pending_history_pick = None;
                 self.view.pending_jump_history = None;
-                self.view.pager_jump_buf = None;
                 self.view.pager_pending_bracket = None;
                 self.view.needs_full_repaint = true;
             }
@@ -116,7 +114,6 @@ impl App {
             KeyCode::Char('n') => view.search_next(viewport),
             KeyCode::Char('N') => view.search_prev(viewport),
             KeyCode::Char(':') => {
-                self.view.pager_jump_buf = Some(String::new());
                 view.jump_buf = Some(String::new());
             }
             KeyCode::Char('[' | ']') => {
