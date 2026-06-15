@@ -447,18 +447,22 @@ impl PaneTabs {
     /// SIGTERM the process group, 250ms grace, then SIGKILL. Without
     /// this an `^a x` on a tab running `npm run dev` (or anything
     /// with subprocesses) would orphan the whole tree because
-    /// `portable_pty::Child`'s default Drop is a no-op. The Pane's
-    /// own `Drop` is a hard SIGKILL safety net, but going through
-    /// `shutdown` here gives well-behaved children a chance to
-    /// flush their own state first.
+    /// `portable_pty::Child`'s default Drop is a no-op.
+    ///
+    /// The shutdown runs on a **detached thread** (`shutdown_detached`) so the
+    /// input thread doesn't freeze 20-250 ms while a child winds down — the
+    /// tab disappears from the UI immediately and the reap finishes in the
+    /// background. `PtyHost::Drop`'s hard SIGKILL remains the backstop. (App
+    /// *exit* keeps a synchronous shutdown — see `run_teardown` — to avoid
+    /// orphaning children when the process is about to die.)
     pub fn remove_at(&mut self, idx: usize) -> bool {
         if idx >= self.tabs.len() {
             return !self.tabs.is_empty();
         }
-        self.tabs[idx]
+        let entry = self.tabs.remove(idx);
+        entry
             .pane
-            .shutdown(std::time::Duration::from_millis(250));
-        self.tabs.remove(idx);
+            .shutdown_detached(std::time::Duration::from_millis(250));
         self.fixup_last_active_after_remove(idx);
         if self.tabs.is_empty() {
             return false;

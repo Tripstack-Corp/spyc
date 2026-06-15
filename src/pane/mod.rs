@@ -359,6 +359,26 @@ impl Pane {
         self.host.shutdown(grace);
     }
 
+    /// Off-thread variant of [`shutdown`] for the **interactive** tab close.
+    /// The SIGTERM→grace→SIGKILL→reap can block up to `grace` (~20-250 ms) on
+    /// a child that doesn't exit promptly on SIGTERM (a `npm run dev` tree,
+    /// say); running it on the input thread froze the UI for that long on
+    /// every close. The whole `Pane` moves to a detached thread, so the
+    /// parser-worker stop/join leaves the input thread too. `PtyHost::Drop`
+    /// (hard SIGKILL) is the backstop.
+    ///
+    /// NOT for app exit: `run_teardown` keeps a *synchronous* shutdown,
+    /// because spawned children live in their own process groups (`setsid`)
+    /// and a detached reaper would die with the process before killing them,
+    /// orphaning the tree. Interactive close has no such race — the run loop
+    /// keeps going — so off-threading is safe there.
+    pub fn shutdown_detached(self, grace: std::time::Duration) {
+        std::thread::spawn(move || {
+            let mut host = self.take_host();
+            host.shutdown(grace);
+        });
+    }
+
     /// Write arbitrary bytes to the child (e.g. paste, or send-selection).
     pub fn send_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         if crate::key_trace::is_enabled() {
