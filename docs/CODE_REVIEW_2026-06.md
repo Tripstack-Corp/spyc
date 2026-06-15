@@ -987,7 +987,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed |
 | `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed · ✅ #353 |
 | `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
-| `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed |
+| `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed · ✅ #409 |
 | `src/config/dsl.rs:27` | DSL header doc contradicts the parser: enter/display swapped, 'previous' is cursor-up not search-prev, and newer verbs are missing | maintainability | confirmed · ✅ #354 |
 | `src/config/dsl.rs:138` | DSL action names contradict the documented grammar: `previous` means cursor-up, `enter` opens the editor, and SearchPrev is unbindable | correctness | confirmed · ✅ #387 (added bindable `searchprev`/`searchnext`; `previous`=cursor-up + `enter`=open-or-edit are documented-intentional, kept for back-compat) |
 | `src/config/mod.rs:274` | relax_search / relax_prompt are parsed, explicitly discarded, and referenced nowhere else | maintainability | confirmed · ✅ #394 |
