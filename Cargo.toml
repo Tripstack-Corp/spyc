@@ -70,7 +70,7 @@ trash = "5"
 # graveyard's cascade-to-trash and legacy-migration paths stage
 # files into a TempDir before handing them to the system trash.
 tempfile = "3"
-rustix = { version = "1.1.4", features = ["process", "termios", "fs"] }
+rustix = { version = "1.1.4", features = ["process", "termios", "fs", "system"] }
 # Portable process stats (RSS / thread count) for the activity HUD — OS
 # APIs via a safe wrapper instead of shelling out to `ps` (whose `thcount`
 # keyword isn't portable). Trimmed to the `system` feature only (no

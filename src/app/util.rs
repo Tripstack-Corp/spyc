@@ -226,15 +226,33 @@ fn hostname_best_effort() -> String {
     {
         return h;
     }
-    if let Ok(out) = std::process::Command::new("hostname").output()
-        && out.status.success()
+    if let Some(node) = system_nodename()
+        && !node.is_empty()
     {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return s;
-        }
+        return node;
     }
     "localhost".to_string()
+}
+
+/// `uname(2)`'s `nodename` is the kernel's `gethostname` value — read it
+/// with a syscall instead of fork-execing the `hostname` binary.
+#[cfg(unix)]
+fn system_nodename() -> Option<String> {
+    rustix::system::uname()
+        .nodename()
+        .to_str()
+        .ok()
+        .map(str::to_owned)
+}
+
+/// Non-unix fallback: spyc ships only unix builds, but keep the binary
+/// shell-out so any non-unix compile retains its hostname behavior.
+#[cfg(not(unix))]
+fn system_nodename() -> Option<String> {
+    let out = std::process::Command::new("hostname").output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Strip ANSI escape sequences from a string and drop remaining
@@ -285,5 +303,15 @@ mod tests {
         }
         let n = count_unignored_subdirs_capped(tmp.path(), 3);
         assert!(n > 3 && n <= 11, "expected just past cap, got {n}");
+    }
+
+    /// `user_host_string` always yields `user@host` with both halves
+    /// non-empty — host falls back to `localhost`, user to `user`.
+    #[test]
+    fn user_host_string_has_nonempty_user_and_host() {
+        let s = user_host_string();
+        let (user, host) = s.split_once('@').expect("user@host shape");
+        assert!(!user.is_empty(), "user half empty: {s}");
+        assert!(!host.is_empty(), "host half empty: {s}");
     }
 }
