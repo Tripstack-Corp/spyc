@@ -227,24 +227,12 @@ impl App {
                 (format!("{word_base}{common}"), Some(msg))
             } else {
                 // No text progress — show matches and set up cycle state.
-                let display: Vec<&str> = matches.iter().map(std::string::String::as_str).collect();
-                let shown = if display.len() > 12 {
-                    format!(
-                        "{}  (+{} more)",
-                        display[..12].join("  "),
-                        display.len() - 12
-                    )
-                } else {
-                    display.join("  ")
-                };
                 if dir == self.state.listing.dir {
                     // Local dir — also filter the listing.
                     self.state.temp_filter = Some(format!("{file_prefix}*"));
                     self.state.rebuild_rows();
-                    self.state.flash_info(format!("{shown}  — Tab to cycle"));
-                } else {
-                    self.state.flash_info(format!("{shown}  — Tab to cycle"));
                 }
+                self.state.flash_info(cycle_hint(&matches));
                 let Mode::Prompting(ref prompt) = self.state.mode else {
                     return;
                 };
@@ -317,17 +305,7 @@ impl App {
         if common.len() > prefix.len() {
             // Filled some chars but more matches remain — stage cycle
             // state so a follow-up Tab on the same buffer can rotate.
-            let display: Vec<&str> = matches.iter().map(String::as_str).collect();
-            let shown = if display.len() > 12 {
-                format!(
-                    "{}  (+{} more)",
-                    display[..12].join("  "),
-                    display.len() - 12
-                )
-            } else {
-                display.join("  ")
-            };
-            self.state.flash_info(format!("{shown}  — Tab to cycle"));
+            self.state.flash_info(cycle_hint(&matches));
             let Mode::Prompting(ref mut prompt) = self.state.mode else {
                 return;
             };
@@ -349,17 +327,7 @@ impl App {
         // matches, and stage cycle state. The cycle path on the next
         // Tab will compare `original_buf == buffer` (true since we
         // didn't change the buffer) and rotate.
-        let display: Vec<&str> = matches.iter().map(String::as_str).collect();
-        let shown = if display.len() > 12 {
-            format!(
-                "{}  (+{} more)",
-                display[..12].join("  "),
-                display.len() - 12
-            )
-        } else {
-            display.join("  ")
-        };
-        self.state.flash_info(format!("{shown}  — Tab to cycle"));
+        self.state.flash_info(cycle_hint(&matches));
         self.view.tab_state = Some(TabState {
             original_buf: prefix.to_string(),
             buf_prefix: String::new(),
@@ -697,6 +665,32 @@ impl App {
 }
 
 /// Longest common prefix of a slice of strings (byte-safe for UTF-8).
+/// Build the multi-match Tab-completion flash: candidates joined by two
+/// spaces, truncated to the first 12 with a `(+N more)` tail, suffixed
+/// with the cycle hint. Shared by the file / command / frecency completion
+/// paths, which each reach the "no further shared prefix" branch identically.
+fn cycle_hint(matches: &[String]) -> String {
+    const MAX_SHOWN: usize = 12;
+    let shown = if matches.len() > MAX_SHOWN {
+        format!(
+            "{}  (+{} more)",
+            matches[..MAX_SHOWN]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join("  "),
+            matches.len() - MAX_SHOWN
+        )
+    } else {
+        matches
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    format!("{shown}  — Tab to cycle")
+}
+
 fn common_prefix(strings: &[String]) -> String {
     let Some(first) = strings.first() else {
         return String::new();
@@ -712,4 +706,40 @@ fn common_prefix(strings: &[String]) -> String {
         }
     }
     first[..byte_len].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cycle_hint;
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn joins_with_two_spaces_and_cycle_suffix() {
+        assert_eq!(cycle_hint(&v(&["a", "b"])), "a  b  — Tab to cycle");
+    }
+
+    #[test]
+    fn shows_all_at_the_twelve_match_boundary() {
+        let m = v(&[
+            "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11", "m12",
+        ]);
+        let hint = cycle_hint(&m);
+        assert!(
+            !hint.contains("more"),
+            "12 matches must not truncate: {hint}"
+        );
+        assert!(hint.ends_with("  — Tab to cycle"));
+    }
+
+    #[test]
+    fn truncates_past_twelve_with_more_count() {
+        let m: Vec<String> = (0..15).map(|i| format!("m{i}")).collect();
+        let hint = cycle_hint(&m);
+        assert!(hint.contains("(+3 more)"), "expected +3 more: {hint}");
+        assert!(hint.starts_with("m0  m1  "));
+        assert!(!hint.contains("m12"), "13th+ match must be hidden: {hint}");
+    }
 }
