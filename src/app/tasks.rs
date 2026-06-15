@@ -14,7 +14,7 @@ use crate::pane::pty_host::PtyHost;
 use crate::pane::{Pane, PaneTabs, TabEntry, TabInfo};
 use crate::ui::pager::PagerView;
 
-use super::{App, Effect, PendingCapture, SigOk, eof_marker_line, kill_pg, state, strip_crlf};
+use super::{App, Effect, PendingCapture, SigOk, buffer_to_lines, eof_marker_line, kill_pg, state};
 
 /// Lifecycle state of a backgrounded shell capture.
 #[derive(Debug)]
@@ -25,6 +25,18 @@ pub enum TaskStatus {
     Exited(i32),
     /// `child.wait()` returned an error -- inner is the message.
     Crashed(String),
+}
+
+/// The status glyph for a background task's pager title: ✓ on a clean exit,
+/// ✗ on a non-zero exit or a crash, ⏳ while still running. Shared by the
+/// `:fg`/static exited pager and the `:task N` viewer so the mapping stays
+/// in one place (only the surrounding status *text* differs between them).
+const fn status_glyph(status: &TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Running => "\u{23f3}",                            // ⏳
+        TaskStatus::Exited(0) => "\u{2713}",                          // ✓
+        TaskStatus::Exited(_) | TaskStatus::Crashed(_) => "\u{2717}", // ✗
+    }
 }
 
 /// A capture that has been moved off the foreground pager into the
@@ -532,15 +544,12 @@ impl App {
                 // to row 0 with the live tail off-screen) until the
                 // streaming-tick rebuilds. Mirrors what
                 // `build_task_viewer_for` does for `:task N`.
-                use ansi_to_tui::IntoText;
-                let normalized = strip_crlf(&task.buffer);
-                let text = normalized.as_slice().into_text().unwrap_or_default();
                 let secs = task.started.elapsed().as_secs();
                 let mut view = PagerView::new_plain(
                     format!("\u{23f3} {} — running... ({secs}s)", task.title),
                     Vec::new(),
                 );
-                view.lines = text.lines;
+                view.lines = buffer_to_lines(&task.buffer);
                 view.streaming = true;
                 view.scroll_to_bottom_auto();
                 self.set_pager(view);
@@ -559,9 +568,6 @@ impl App {
             status => {
                 // Exited / Crashed -- open a static pager with
                 // the buffered output and a final-state title.
-                use ansi_to_tui::IntoText;
-                let normalized = strip_crlf(&task.buffer);
-                let text = normalized.as_slice().into_text().unwrap_or_default();
                 let elapsed_secs = task
                     .finished_at
                     .map_or_else(|| task.started.elapsed(), |f| f - task.started)
@@ -572,14 +578,13 @@ impl App {
                     TaskStatus::Crashed(msg) => format!("error: {msg}"),
                     TaskStatus::Running => unreachable!(),
                 };
-                let glyph = if matches!(&status, TaskStatus::Exited(0)) {
-                    "\u{2713}" // ✓
-                } else {
-                    "\u{2717}" // ✗
-                };
-                let title = format!("{glyph} {} — {status_text} ({elapsed_secs}s)", task.title);
+                let title = format!(
+                    "{} {} — {status_text} ({elapsed_secs}s)",
+                    status_glyph(&status),
+                    task.title
+                );
                 let mut view = PagerView::new_plain(title, Vec::new());
-                view.lines = text.lines;
+                view.lines = buffer_to_lines(&task.buffer);
                 view.saveable = true;
                 view.scroll_to_bottom_auto();
                 self.set_pager(view);
@@ -603,22 +608,23 @@ impl App {
     }
 
     pub fn build_task_viewer_for(id: u32, task: &BackgroundTask) -> PagerView {
-        use ansi_to_tui::IntoText;
         let elapsed = task
             .finished_at
             .map_or_else(|| task.started.elapsed(), |f| f - task.started)
             .as_secs();
-        let (glyph, status_text) = match &task.status {
-            TaskStatus::Running => ("\u{23f3}", format!("running ({elapsed}s)")), // ⏳
-            TaskStatus::Exited(0) => ("\u{2713}", format!("exit 0 ({elapsed}s)")), // ✓
-            TaskStatus::Exited(code) => ("\u{2717}", format!("exit {code} ({elapsed}s)")), // ✗
-            TaskStatus::Crashed(msg) => ("\u{2717}", format!("error: {msg} ({elapsed}s)")),
+        let status_text = match &task.status {
+            TaskStatus::Running => format!("running ({elapsed}s)"),
+            TaskStatus::Exited(0) => format!("exit 0 ({elapsed}s)"),
+            TaskStatus::Exited(code) => format!("exit {code} ({elapsed}s)"),
+            TaskStatus::Crashed(msg) => format!("error: {msg} ({elapsed}s)"),
         };
-        let title = format!("{glyph} [task #{id}] {} — {status_text}", task.cmd_display);
-        let normalized = strip_crlf(&task.buffer);
-        let text = normalized.as_slice().into_text().unwrap_or_default();
+        let title = format!(
+            "{} [task #{id}] {} — {status_text}",
+            status_glyph(&task.status),
+            task.cmd_display
+        );
         let mut view = PagerView::new_plain(title, Vec::new());
-        view.lines = text.lines;
+        view.lines = buffer_to_lines(&task.buffer);
         view.task_id = Some(id);
         // Task viewer is a peek -- don't push it to buffer history on
         // close UNLESS the task has exited (handled separately on
@@ -752,7 +758,18 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_ho
 
 #[cfg(test)]
 mod tests {
-    use super::BackgroundTasks;
+    use super::{BackgroundTasks, TaskStatus, status_glyph};
+
+    #[test]
+    fn status_glyph_maps_each_state() {
+        assert_eq!(status_glyph(&TaskStatus::Running), "\u{23f3}"); // ⏳
+        assert_eq!(status_glyph(&TaskStatus::Exited(0)), "\u{2713}"); // ✓
+        assert_eq!(status_glyph(&TaskStatus::Exited(1)), "\u{2717}"); // ✗
+        assert_eq!(
+            status_glyph(&TaskStatus::Crashed("boom".into())),
+            "\u{2717}" // ✗
+        );
+    }
 
     #[test]
     fn allocate_id_starts_at_one_and_monotonic() {

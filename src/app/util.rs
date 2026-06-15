@@ -203,6 +203,21 @@ pub fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Turn an accumulated pty buffer into pager lines: normalize CRLF / bare CR
+/// via [`strip_crlf`], then ANSI-parse, falling back to empty on a parse
+/// error. Shared by the background-task pagers (`:fg` re-attach, the static
+/// exited-task view, the live task viewer) and the streaming-capture rebuild,
+/// which all built `strip_crlf(buf) → into_text().unwrap_or_default().lines`
+/// by hand.
+pub fn buffer_to_lines(buffer: &[u8]) -> Vec<ratatui::text::Line<'static>> {
+    use ansi_to_tui::IntoText;
+    strip_crlf(buffer)
+        .as_slice()
+        .into_text()
+        .unwrap_or_default()
+        .lines
+}
+
 /// `kill(-pid, sig)` — signal the process group leadered by `pid`.
 /// portable-pty calls `setsid` on spawn, so the child IS the group
 /// leader; negative-pid targets reach grandchildren too. Returns the
@@ -329,5 +344,17 @@ mod tests {
         let (user, host) = s.split_once('@').expect("user@host shape");
         assert!(!user.is_empty(), "user half empty: {s}");
         assert!(!host.is_empty(), "host half empty: {s}");
+    }
+
+    /// `buffer_to_lines` normalizes CRLF and bare-CR progress overwrites the
+    /// same way `strip_crlf` does, then yields one pager line per `\n`.
+    #[test]
+    fn buffer_to_lines_normalizes_and_splits() {
+        let lines = buffer_to_lines(b"a\r\nb\nc");
+        let plain: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert_eq!(plain, vec!["a", "b", "c"]);
     }
 }

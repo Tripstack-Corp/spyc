@@ -9,7 +9,7 @@
 //! calls (the clear-before-read half of the lost-wakeup protocol — a no-op
 //! until a capture/task installs its wake slot in this phase).
 
-use super::{App, TASK_BUFFER_CAP, TaskStatus, eof_marker_line, strip_crlf};
+use super::{App, TASK_BUFFER_CAP, TaskStatus, buffer_to_lines, eof_marker_line};
 use crate::pane::pty_host::ExitOutcome;
 
 /// MVU Phase 5 PR8: a child-exit event, finalized by [`App::apply_exit_event`].
@@ -76,12 +76,10 @@ impl App {
                 let glyph = if ok { "\u{2713}" } else { "\u{2717}" }; // ✓ / ✗
                 let title = format!("{glyph} {} — {exit_info}", capture.title);
                 // Final rebuild with stderr included.
-                use ansi_to_tui::IntoText;
-                let normalized = strip_crlf(&capture.buffer);
-                let text = normalized.as_slice().into_text().unwrap_or_default();
+                let lines = buffer_to_lines(&capture.buffer);
                 if let Some(view) = self.view.pager.as_mut() {
                     view.title = title;
-                    view.lines = text.lines;
+                    view.lines = lines;
                     // Anchor an EOF marker to the bottom of content so it's
                     // visible even when output exceeds viewport_h.
                     view.lines.push(eof_marker_line(&exit_info));
@@ -175,9 +173,7 @@ impl App {
             }
             if got_data || capture.finished {
                 // Rebuild pager content from the accumulated buffer.
-                use ansi_to_tui::IntoText;
-                let normalized = strip_crlf(&capture.buffer);
-                let text = normalized.as_slice().into_text().unwrap_or_default();
+                let lines = buffer_to_lines(&capture.buffer);
                 // "At bottom" detection uses the actual rendered viewport
                 // height -- before this we hardcoded 40, which under-shoots
                 // on tall terminals and made the streaming-capture auto-tail
@@ -192,7 +188,7 @@ impl App {
                     v.scroll >= total.saturating_sub(page)
                 });
                 if let Some(view) = self.view.pager.as_mut() {
-                    view.lines = text.lines;
+                    view.lines = lines;
                     if at_bottom {
                         view.scroll_to_bottom_auto();
                     }
