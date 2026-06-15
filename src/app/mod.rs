@@ -265,8 +265,8 @@ use util::kill_pg;
 #[cfg(any(target_os = "linux", test))]
 use util::count_subdirs_capped;
 use util::{
-    count_unignored_subdirs_capped, eof_marker_line, format_elapsed_hms, format_uptime,
-    path_basename_display, strip_ansi_escapes, strip_crlf, user_host_string,
+    buffer_to_lines, count_unignored_subdirs_capped, eof_marker_line, format_elapsed_hms,
+    format_uptime, path_basename_display, strip_ansi_escapes, user_host_string,
 };
 
 /// Which collection the user is looking at.

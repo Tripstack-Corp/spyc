@@ -442,7 +442,7 @@ mod eof_marker_tests {
 
 #[cfg(test)]
 mod strip_crlf_tests {
-    use super::super::strip_crlf;
+    use super::super::util::strip_crlf;
 
     #[test]
     fn crlf_collapses_to_lf() {
