@@ -1,195 +1,181 @@
-# spyc test improvement plan
+# spyc testing campaign — coverage + anti-"test theater"
 
-**Status:** plan, not yet implemented. Based on the May 2026 unit-test
-assessment: `cargo test --locked --all-targets` passes with 732 tests
-under normal permissions, while sandboxed runs can fail the Unix-socket
-MCP tests with `Operation not permitted`.
+**Status:** active campaign (the one after the 2026-06 deep-review
+remediation, `archive/CODE_REVIEW_2026-06.md`). **Phase 1 — the `App`
+workflow harness — shipped** (`App::test_app`, `src/app/test_harness.rs`).
+This charter folds the original May workflow-coverage plan together with
+the "Beyond Test Theater" quality RFC into one running plan.
 
-**Goal:** reduce regressions in the dog-fooding paths where most real
-bugs appear: full `App` orchestration, pane/pty behavior, Quick Select,
-background tasks, session restore, and MCP socket lifecycle.
+**Goal:** raise the *value* of the suite, not just the count. Two distinct
+risks, addressed in parallel:
 
-## Thesis
+1. **Workflow-composition gaps** — most real bugs appear where a key routes
+   through `App`, focus changes, pane/pty state mutates, a task changes
+   ownership, or a session restore picks an agent-specific resume path.
+   Those flows need harness-level tests between tiny unit tests and full
+   terminal automation.
+2. **"Test theater"** — tests that confirm the code does what it already
+   does (tautologies) or pin internal struct layout byte-for-byte, creating
+   false confidence and refactoring paralysis instead of catching real
+   regressions. (See the appendix.)
 
-The existing suite is strong at isolated logic. It has broad coverage
-for keymap resolution, pure state transitions, pager wrapping, path
-extraction, grep/finder behavior, config parsing, and session metadata.
+## Where we are
 
-The remaining risk is not raw algorithm correctness. It is workflow
-composition: a key routes through `App`, focus changes, pane state
-mutates, a pager opens, a task changes ownership, or a session restore
-chooses an agent-specific resume path. Those flows need harness-level
-tests that sit between tiny unit tests and full interactive terminal
-automation.
+~1,100 tests (up from the 732 in the May assessment — the MVU migration and
+the deep-review campaign added the rest). `cargo test --locked --all-targets`
+passes under normal permissions; sandboxed runs can fail the Unix-socket MCP
+tests with `Operation not permitted`.
 
-## What exists today
+**Genuine strengths (already not theater):**
 
-Current coverage is roughly:
+- **Pure domain tests** — `src/app/state/tests/{navigation,apply}.rs` exercise
+  state transitions with no mocked terminal, avoiding the brittle UI tests
+  that plague TUIs.
+- **Contract tests** — `tests/pane_roundtrip.rs` validates the real
+  `portable-pty` ↔ `vt100` contract rather than mocking it (the gold standard).
+- **Targeted edge cases** — `find_match` covers glob-anchor vs substring,
+  case-insensitivity, etc.
+- **Enforced invariants as tests** — the render-purity source scan
+  (`app::render::purity_guard`), the `mod.rs` line ceiling, and the
+  compile-checked `COMMAND_TABLE`. These are tests that catch *architecture*
+  drift, not behavior tautologies.
+- Property tests exist (shell quoting, ignore masks, keymap counts); 15+
+  `insta` snapshots cover pager/status/prompt/list rendering.
 
-- 732 tests total.
-- Major groups: `app` 153, `ui` 139, `state` 117, `keymap` 100,
-  `pane` 61, `fs` 46, `mcp` 28.
-- 15 `insta` snapshots cover pager, status, prompt, and list rendering.
-- Property tests exist for shell quoting, ignore masks, and keymap count
-  behavior.
-- Integration tests under `tests/` are intentionally small:
-  filesystem basics, keymap/config round-trips, and one pane round-trip.
+**Symptoms to fix:**
 
-This is a good base. The improvement should add carefully chosen
-workflow tests rather than duplicating every unit case at another layer.
+- **Example-based tautologies** — `state_with_rows(&["a","b","c"])` encodes one
+  developer's assumption about a 3-item list; misses empty lists, 10k-item
+  lists, mid-action resizes.
+- **Implementation coupling** — `apply.rs` pins emitted effects byte-for-byte
+  (`apply_jump_start_dir_emits_change_dir` matches the whole `Effect::ChangeDir`
+  struct). Add a field to `ChangeDir` and every such test breaks — the exact
+  refactoring paralysis to avoid.
 
-## Phase 1 — App workflow harness
+## Workstreams
 
-Add a test-only harness for realistic `App` flows.
+Run like the deep-review campaign: **one PR per cluster, verify the gap first
+(write the missing/failing test), then close it, gate green, merge as we go.**
+The workstreams are independent — interleave by value, not strict order.
 
-Recommended shape:
+### A. Move off "test theater" (quality)
 
-- Keep it under `#[cfg(test)]`, either in `src/app/mod.rs` or a small
-  app test-support module.
-- Create isolated temp dirs and deterministic file listings.
-- Provide helpers to seed files, picks, inventory, project home,
-  sessions, pane tabs, task buffers, and pager state.
-- Drive either `Action`s or `KeyEvent`s, depending on what each scenario
-  is trying to prove.
-- Expose compact assertions for mode, focus, cursor, flash message,
-  pane presence, active tab, pager mount, quick-select state, task
-  state, and session metadata.
-- Avoid real terminal setup. Use existing state/layout/render helpers
-  where possible, and keep full terminal automation out of scope.
+- **Property-based testing (`proptest`).** spyc's pure MVU state is the ideal
+  candidate.
+  - *Navigation & grid math:* for *any* list size, *any* grid dims, *any*
+    start cursor, `Down(N)` then `Up(N)` stays in bounds and behaves
+    predictably — instead of one fixed 3-item case.
+  - *Fuzzy find (`find_match`):* random strings + queries prove it never
+    panics, and that a literal substring present in the list always yields
+    `Some(index)`.
+- **Decouple assertions from struct layout.** Replace byte-for-byte effect
+  matches with intent-level helpers:
+  - *Instead of* `assert_eq!(fx, [Effect::ChangeDir { path, focus, on_ok: None, err_prefix: "chdir" }])`
+  - *Use* `assert!(fx.contains_chdir_to("/tmp/test"))` — validates the
+    requirement (a directory change was requested) without pinning the error
+    prefix or whether `on_ok` is currently populated.
+- **Spec-first / BDD.** Tests as executable spec: requirement-based names
+  (`returns_none_when_search_query_is_empty`), tests mapped to `FEATURES.md` /
+  `AGENTS.md`, and **negative tests** that prove what the system must *not* do
+  (e.g. "the cursor index must never exceed the listing length").
 
-Acceptance tests for the harness itself:
+### B. AI-assisted-testing rules (process)
 
-- Fresh harness starts with a deterministic cwd, listing, cursor, focus,
-  and no pane.
-- Harness can apply an `Action` and observe the expected `PostAction`.
-- Harness can seed multiple files and assert cursor movement, filtering,
-  and selection behavior.
-- Harness can install fake pane/task/session data without spawning real
-  agent CLIs.
+Adopt these so we expand coverage without manufacturing theater:
 
-## Phase 2 — High-risk workflow regressions
+1. **Never prompt "write tests for this function."** That just re-asserts
+   current behavior.
+2. **Prompt with the requirement.** e.g. *"property test: no sequence of
+   `Up`/`Down` may leave the cursor index ≥ `inventory.len()`."*
+3. **Use AI for edge-case data**, not assertions — circular symlinks,
+   unreadable dirs, weird-unicode filenames fed into the existing
+   `filesystem.rs` integration tests.
 
-### Routing and focus
+### C. High-risk workflow coverage (the original Phase 2)
 
-Add tests that prove the user-visible routing rules rather than only
-the pure `app::route` classifier:
+Prove the user-visible rules at the harness level, not just the pure classifier:
 
-- Prompt input wins over focused pane input.
-- Overlay pager consumes normal keys but allows configured meta chords.
-- Lower-pane pager routes keys based on focus.
-- Exited pane flashes on normal typing but still accepts pane-management
-  chords.
-- Pane scroll mode and pager mode do not both consume the same key.
+- **Routing & focus:** prompt input wins over a focused pane; overlay pager
+  consumes normal keys but allows configured meta chords; lower-pane pager
+  routes by focus; an exited pane flashes on typing yet still takes
+  pane-management chords; pane-scroll and pager modes don't both eat the same key.
+- **Pane / pty:** `^a z` zoom/unzoom preserves `pane_height_pct` and restores
+  prior focus; `^a v` scrollback shows scrollback-before-live; empty scrollback
+  flashes rather than an empty pager; new tabs default to `PROJECT_HOME`;
+  switch/close/restart/exited-tab routing preserves active-tab state. (Keep real
+  pty spawning to a few smoke tests; use fake buffers / test constructors.)
+- **Quick Select:** scans exactly the visible viewport; off-viewport text
+  ignored; lowercase yanks, uppercase dispatches open-intent (URL/path/SHA/custom);
+  query strings preserved, trailing punctuation trimmed; existing paths jump,
+  missing paths flash; SHA → git-show pager; Esc closes with no side effects.
+- **Background tasks:** `^Z` from a capture pager backgrounds + keeps an entry;
+  post-background output is visible on resume; `:fg` / `:fg N`; `gB` / `:task N`
+  / `[t` / `]t` view without taking ownership; closing an exited viewed task
+  promotes its output into buffer history; divider distinguishes
+  running/new/success/failure.
+- **Session restore:** multiple tabs restore in order with distinct session IDs;
+  cwd/labels/commands/project-home/session-name survive save→restore; Codex
+  spawns `codex resume <UUID>`; Claude types `/resume <id>` after settle; Gemini
+  uses the configured/listed target; legacy fields still deserialize; malformed
+  agent IDs fall back to a fresh command without panicking.
 
-### Pane and pty behavior
+### D. MCP & environment ergonomics (the original Phase 3)
 
-Add workflow tests around pane state transitions:
+Keep the real-socket tests; make failures interpretable:
 
-- `^a z` zooms and unzooms while preserving `pane_height_pct`.
-- Zoom forces focus into the pane and restores prior focus on unzoom.
-- `^a v` opens a scrollback pager with scrollback rows before live rows.
-- Empty or unavailable scrollback produces the expected flash instead
-  of an empty/confusing pager.
-- New pane tabs default to `PROJECT_HOME` when set.
-- Tab switching, close, restart, and exited-tab routing preserve the
-  expected active-tab state.
+- Socket server responds to initialize + tool calls; disconnect routes through
+  the command channel; path traversal stays blocked for file-content reads;
+  tool searches use the expected project root + ignore behavior.
+- Unix-socket permission failures in restricted sandboxes produce a clear
+  diagnostic pointing to "rerun under normal permissions."
+- Do **not** weaken the authoritative check: `cargo test --locked
+  --all-targets` under normal local permissions still runs all MCP socket tests.
 
-Keep real pty spawning limited to a few smoke tests. Most of these can
-use fake pane buffers or test-only constructors.
+### E. Rust / TUI best practices (cross-cutting)
 
-### Quick Select
-
-Add tests for the end-to-end picker behavior, not just the scanner:
-
-- Opening Quick Select scans exactly the visible pane viewport.
-- Text outside the visible viewport is ignored.
-- Lowercase label yanks the selected match.
-- Uppercase label dispatches the open intent for URLs, paths, SHAs, and
-  custom patterns.
-- URL query strings are preserved and trailing sentence punctuation is
-  trimmed.
-- Existing paths jump the cursor; missing paths flash clearly.
-- SHA open intent creates the git-show pager path.
-- Escape closes the picker without side effects.
-
-### Background tasks
-
-Add tests around ownership and output flow:
-
-- `^Z` from a capture pager backgrounds the running task and keeps a
-  task entry.
-- Output appended after backgrounding is visible when resumed.
-- `:fg` resumes the most recent task; `:fg N` resumes a specific task.
-- `gB`, `:task N`, `[t`, and `]t` open viewers without taking ownership.
-- Closing an exited viewed task promotes rendered output into pager
-  buffer history.
-- Divider state distinguishes running, new output, success, and failure.
-
-### Session restore
-
-Add focused restore tests for agent behavior:
-
-- Multiple saved tabs restore in order with distinct session IDs.
-- Cwd, tab labels, commands, project home, and session name survive
-  save/restore.
-- Codex sessions spawn `codex resume <UUID>` directly.
-- Claude sessions type `/resume <id>` after settle.
-- Gemini records use the configured/listed resume target.
-- Legacy session fields still deserialize and infer the correct agent
-  kind.
-- Missing or malformed agent IDs fall back to fresh command behavior
-  without panicking.
-
-## Phase 3 — MCP and environment ergonomics
-
-The existing MCP tests are valuable because they exercise real socket
-behavior. Keep them, but make failures easier to interpret.
-
-Add or adjust tests so:
-
-- Socket server responds to initialize and tool calls.
-- Disconnect notification routes through the command channel.
-- Path traversal remains blocked for file-content reads.
-- Tool searches use the expected project root and ignore behavior.
-- Unix-socket permission failures in restricted sandboxes produce a
-  clear diagnostic that points to rerunning under normal permissions.
-
-Do not weaken the authoritative check: `cargo test --locked
---all-targets` under normal local permissions should still run all MCP
-socket tests.
+- **Snapshots (`insta` + `TestBackend`):** extend coverage of the terminal
+  output buffer to catch visual regressions without per-cell asserts.
+- **Fuzzing (`cargo-fuzz`):** brute-force mutated input for the critical
+  parsers/mutators — the keymap DSL parser and the fuzzy matcher — to expose
+  crashes `proptest` might miss.
+- **Organization & hygiene:** keep unit tests (`#[cfg(test)]` in-file) separate
+  from integration tests (`tests/`); single-responsibility, descriptive names;
+  use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behavior
+  under test (don't assert on intermediate setup steps).
 
 ## Acceptance criteria
 
 - `cargo test --locked --all-targets` passes locally with all new tests.
-- Existing snapshots remain stable unless the implementation
-  intentionally changes UI output.
-- New tests do not depend on the developer's real home directory, shell
-  history, clipboard, running spyc instance, or installed agent CLIs.
-- Tests use temp dirs and deterministic fake data.
-- Real pty/socket tests are isolated and either pass under normal
-  permissions or fail with clear environment-specific messaging.
-- The harness is test-only and does not change user-visible behavior.
+- Snapshots stay stable unless the implementation intentionally changes UI.
+- New tests don't depend on the developer's real home dir, shell history,
+  clipboard, a running spyc, or installed agent CLIs — temp dirs + deterministic
+  fake data only.
+- Real pty/socket tests are isolated and either pass under normal permissions
+  or fail with a clear environment-specific message.
+- The harness stays test-only; no user-visible behavior changes.
 
 ## Out of scope
 
-- Full interactive terminal automation.
-- Performance benchmarking.
-- Coverage-percentage gates.
-- Product behavior changes, except clearer test diagnostics for
-  environment-specific socket failures.
-- Documentation, changelog, or version updates unless implementation
-  later changes user-visible behavior.
+- Full interactive terminal automation; performance benchmarking;
+  coverage-percentage gates.
+- Product behavior changes, except clearer diagnostics for environment-specific
+  socket failures.
+- Docs/changelog/version churn unless an implementation change makes it
+  user-visible.
 
-## Recommended order
+## Appendix — "The Rise of Test Theater" (Ben Houston, 2025)
 
-1. Build the `App` workflow harness and add two or three smoke tests.
-2. Add routing/focus workflow regressions, because they are fast and
-   validate the harness.
-3. Add pane zoom and scrollback tests.
-4. Add Quick Select workflow tests.
-5. Add background task workflow tests.
-6. Add session restore tests.
-7. Improve MCP socket diagnostics.
+The source article (*"The Rise of Test Theater": When AI Coders Write Tests
+That Mean Nothing*) frames the quality risk this campaign targets:
 
-Each phase should land with its own small set of tests so failures are
-easy to localize.
+- **The circularity problem:** "write tests for this function" yields
+  tautologies that confirm the code does what it's written to do, not whether
+  it does the *right* thing.
+- **Theater vs. real testing:** generated suites create false confidence; real
+  tests validate requirements, protect against regression, document intent, and
+  challenge assumptions.
+- **The cost:** false confidence, maintenance burden, refactoring paralysis
+  (brittle tests breaking on any implementation change), missed bugs.
+- **The fix:** start from specifications; write critical logic tests manually
+  (TDD); use AI mainly to expand coverage, find edge cases, and implement
+  property-based tests.
