@@ -30,6 +30,12 @@ pub use blob::format_git_time;
 use crate::git::model::DiffModel;
 use std::path::Path;
 
+/// Decoded-object LRU budget for the `gd` per-path HEAD-tree lookups. Tree
+/// objects are small (sub-KB), so a few MB caches every directory a realistic
+/// diff touches — shared parent trees get decoded once instead of once per
+/// changed file. Bounded LRU, lives only for the off-thread model build.
+const OBJECT_CACHE_BYTES: usize = 8 * 1024 * 1024;
+
 use blob::{MAX_DIFF_LINES, account_file, commit_meta, path_selected, tree_blob_at};
 use build::{
     OwnedIndexChange, WorkItem, build_index_change_file, build_tree_change_file,
@@ -45,7 +51,16 @@ use build::{
 /// `paths` (repo-relative, forward-slash) optionally restricts the result to
 /// matching files/subtrees; empty means "everything".
 pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
-    let repo = gix::open(repo_root).ok()?;
+    let mut repo = gix::open(repo_root).ok()?;
+    // Cache decoded objects so the per-changed-path HEAD-tree lookups below
+    // (`tree_blob_at` → root-down `lookup_entry_by_path`, and the same call in
+    // `build_worktree_rename`) reuse shared parent trees instead of re-decoding
+    // them from the pack for every path. Without it a large diff over a deep
+    // tree pays O(N·depth) tree decodes, re-walking the same directories once
+    // per changed file. Adaptive LRU (only caches trees actually touched);
+    // `_if_unset` respects a user-configured `core.deltaBaseCacheLimit`-style
+    // size if one is already set.
+    repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
     let workdir = repo.workdir()?.to_path_buf();
     let head_tree = repo.head_tree().ok();
 
