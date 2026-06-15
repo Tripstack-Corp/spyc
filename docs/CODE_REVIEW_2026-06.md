@@ -952,7 +952,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/graveyard.rs:48` | Graveyard `dd` arming is not cleared by j/k, contradicting the documented contract and enabling a surprise purge | correctness | confirmed · ✅ #370 |
 | `src/app/key_dispatch/prompts.rs:71` | Dead `_kind` discriminant computed in the simple-prompt Tab path | maintainability | confirmed · ✅ #356 |
 | `src/app/key_dispatch/prompts.rs:283` | History-popup escape paths bypass cancel_prompt, leaking Tab-applied filter and stale tab_state | correctness | confirmed · ✅ #371 |
-| `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed |
+| `src/app/loop_steps.rs:131` | Activity monitor: ~27 flat activity_* fields on ViewState with four hand-maintained parallel lists | maintainability | confirmed · ✅ #422 (grouped into ActivityMonitor) |
 | `src/app/mcp.rs:96` | write_context serializes the full context twice per call (dedup compare + actual write) | perf | confirmed · ✅ #414 (dedup on the struct, not its JSON) |
 | `src/app/mod.rs:118` | Message::AgentStatusReady doc contradicts where the agent-status apply actually happens | maintainability | confirmed · ✅ #352 |
 | `src/app/mod.rs:491` | Dead ViewState field: pending_overlay_close is never set true | maintainability | confirmed · ✅ #353 |

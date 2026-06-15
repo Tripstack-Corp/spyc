@@ -58,15 +58,15 @@ impl App {
         }
     }
 
-    /// Refresh `activity_proc_rss_kb` / `activity_proc_threads`. Called once
+    /// Refresh `activity.proc_rss_kb` / `activity.proc_threads`. Called once
     /// per A-monitor 1 s tick. `proc_rss_threads` reads the OS directly
     /// (sysinfo for rss + libproc for the macOS thread count) — a fast
     /// syscall, not a `ps` fork-exec, so it runs inline (the off-thread
     /// machinery #227 added for the slow `ps` spawn is no longer needed).
     pub fn refresh_process_stats(&mut self) {
         if let Some((rss, threads)) = crate::sysinfo::proc_rss_threads() {
-            self.view.activity_proc_rss_kb = rss;
-            self.view.activity_proc_threads = threads;
+            self.view.activity.proc_rss_kb = rss;
+            self.view.activity.proc_threads = threads;
         }
     }
 

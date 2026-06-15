@@ -183,7 +183,7 @@ impl App {
     /// pre-recv `rx.try_recv()` drain so the recv-arm buffering and this
     /// drain can never diverge. Stamps against the caller's `now_pre` (the
     /// per-iteration clock), matching the old per-event read position;
-    /// bumps `activity_watcher_events` once per event (not per path).
+    /// bumps `activity.live.watcher_events` once per event (not per path).
     pub fn ingest_fs_event(
         &mut self,
         ev: &notify::Event,
@@ -192,7 +192,8 @@ impl App {
         last_event_at: &mut Option<std::time::Instant>,
         first_event_after_refresh: &mut Option<std::time::Instant>,
     ) {
-        self.view.activity_watcher_events = self.view.activity_watcher_events.saturating_add(1);
+        self.view.activity.live.watcher_events =
+            self.view.activity.live.watcher_events.saturating_add(1);
         for p in &ev.paths {
             let listing = self.is_listing_path(p);
             let config = self.is_config_path(p);
@@ -311,7 +312,7 @@ impl App {
 
     /// MVU Phase 3a: apply one buffered git-worker result — the SOLE
     /// apply/count/take site (the recv arm + coalesce only buffer). Bumps
-    /// `activity_git_results` per delivered result (before the generation
+    /// `activity.live.git_results` per delivered result (before the generation
     /// gate), records the request roundtrip on the first result after a
     /// request, then applies it (generation-/repo-gated inside
     /// `apply_git_worker_result`). Returns `true` when the apply changed
@@ -319,11 +320,11 @@ impl App {
     /// Extracted verbatim from the old pre-recv `git_result_rx.try_recv()`
     /// drain.
     pub fn ingest_git_result(&mut self, result: state::GitWorkerResult) -> bool {
-        self.view.activity_git_results = self.view.activity_git_results.saturating_add(1);
+        self.view.activity.live.git_results = self.view.activity.live.git_results.saturating_add(1);
         // Roundtrip duration: when the request was sent (set by
         // `git_file_statuses_cached`) vs. now.
         if let Some(sent) = self.state.git_cache.last_git_request_at.take() {
-            self.view.activity_git_last_ms =
+            self.view.activity.git_last_ms =
                 u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
         }
         self.apply_git_worker_result(result)
@@ -538,7 +539,7 @@ mod tests {
 
             // Counted once per event (not per path), stamped at `now_pre`,
             // and the max-defer anchor fixed at the FIRST event.
-            assert_eq!(app.view.activity_watcher_events, 3);
+            assert_eq!(app.view.activity.live.watcher_events, 3);
             assert_eq!(last_event_at, Some(base));
             assert_eq!(first, Some(base));
             assert!(!needs_reload); // not a config path
@@ -580,7 +581,7 @@ mod tests {
             // counted per delivery (activity is "results seen", not "applied").
             assert!(!app.ingest_git_result(git_result(99)));
             assert!(!app.ingest_git_result(git_result(99)));
-            assert_eq!(app.view.activity_git_results, 2);
+            assert_eq!(app.view.activity.live.git_results, 2);
         });
     }
 

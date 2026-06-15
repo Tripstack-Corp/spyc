@@ -97,7 +97,7 @@ impl App {
     pub(crate) fn drain_mcp_pending(&mut self, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
         for req in std::mem::take(&mut ctx.mcp_pending) {
-            self.view.activity_mcp_reqs = self.view.activity_mcp_reqs.saturating_add(1);
+            self.view.activity.live.mcp_reqs = self.view.activity.live.mcp_reqs.saturating_add(1);
             let resp = self.execute_mcp_command(req.command);
             let _ = req.reply.send(resp);
             needs_draw = true;
@@ -129,64 +129,21 @@ impl App {
     /// already dirty, so the overlay refresh draws without being counted in the
     /// stats (which would oscillate). The caller folds it into `needs_draw`.
     pub(crate) fn roll_activity_window(&mut self, now_post: Instant, needs_draw: bool) -> bool {
-        let mut activity_only_draw = false;
-        if self.view.show_activity
-            && now_post.duration_since(self.view.activity_last_tick) >= Duration::from_secs(1)
+        if !self.view.show_activity
+            || now_post.duration_since(self.view.activity.last_tick) < Duration::from_secs(1)
         {
-            let new_dps = self.view.activity_draws;
-            let new_bps = self.view.activity_bytes;
-            let new_sp = self.view.activity_reason_pane;
-            let new_se = self.view.activity_reason_event;
-            let new_so = self.view.activity_reason_other;
-            let new_we = self.view.activity_watcher_events;
-            let new_mr = self.view.activity_mcp_reqs;
-            let new_gr = self.view.activity_git_results;
-            // Only force a redraw if something changed.
-            if (new_dps != self.view.activity_dps
-                || new_bps != self.view.activity_bps
-                || new_sp != self.view.activity_snap_pane
-                || new_se != self.view.activity_snap_event
-                || new_so != self.view.activity_snap_other
-                || new_we != self.view.activity_watcher_events_snap
-                || new_mr != self.view.activity_mcp_reqs_snap
-                || new_gr != self.view.activity_git_results_snap)
-                && !needs_draw
-            {
-                // This draw exists only to refresh the overlay —
-                // don't count it in the stats or it oscillates.
-                activity_only_draw = true;
-            }
-            self.view.activity_dps = new_dps;
-            self.view.activity_bps = new_bps;
-            self.view.activity_snap_pane = new_sp;
-            self.view.activity_snap_event = new_se;
-            self.view.activity_snap_other = new_so;
-            self.view.activity_watcher_events_snap = new_we;
-            self.view.activity_mcp_reqs_snap = new_mr;
-            self.view.activity_git_results_snap = new_gr;
-            // Snapshot + reset the peak frame time. Not part of the
-            // force-redraw predicate above (it's a passive stat — a
-            // changing peak shouldn't itself drive an overlay redraw).
-            self.view.activity_frame_peak_snap = self.view.activity_frame_peak_us;
-            self.view.activity_frame_peak_us = 0;
-            self.view.activity_render_peak_snap = self.view.activity_render_peak_us;
-            self.view.activity_render_peak_us = 0;
-            self.view.activity_echo_snap = self.view.activity_echo_peak_us;
-            self.view.activity_echo_peak_us = 0;
-            self.view.activity_draws = 0;
-            self.view.activity_bytes = 0;
-            self.view.activity_reason_pane = 0;
-            self.view.activity_reason_event = 0;
-            self.view.activity_reason_other = 0;
-            self.view.activity_watcher_events = 0;
-            self.view.activity_mcp_reqs = 0;
-            self.view.activity_git_results = 0;
-            self.view.activity_last_tick = now_post;
-            // Refresh process stats (RSS / thread count) on the same 1 s
-            // cadence. Hidden inside the A-monitor tick so callers without it
-            // open pay zero cost.
-            self.refresh_process_stats();
+            return false;
         }
+        // Snapshot the live counters/peaks and reset the accumulators. `roll`
+        // reports whether any *counter* changed; if so and the frame wasn't
+        // already dirty, draw once to refresh the overlay — but don't count
+        // that draw in the stats (it would oscillate).
+        let changed = self.view.activity.roll(now_post);
+        let activity_only_draw = changed && !needs_draw;
+        // Refresh process stats (RSS / thread count) on the same 1 s cadence.
+        // Hidden inside the A-monitor tick so callers without it open pay zero
+        // cost.
+        self.refresh_process_stats();
         activity_only_draw
     }
 
@@ -199,7 +156,7 @@ impl App {
         if self.view.show_activity {
             ctx.scheduler.arm(
                 Deadline::ActivityRollover,
-                self.view.activity_last_tick + Duration::from_secs(1),
+                self.view.activity.last_tick + Duration::from_secs(1),
             );
         } else {
             ctx.scheduler.disarm(Deadline::ActivityRollover);
@@ -287,13 +244,13 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.view.show_activity = false;
-            app.view.activity_draws = 7;
-            app.view.activity_last_tick =
+            app.view.activity.live.draws = 7;
+            app.view.activity.last_tick =
                 Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
             let only = app.roll_activity_window(Instant::now(), false);
             assert!(!only);
             assert_eq!(
-                app.view.activity_draws, 7,
+                app.view.activity.live.draws, 7,
                 "monitor off → counters untouched"
             );
         });
@@ -307,17 +264,17 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.view.show_activity = true;
-            app.view.activity_draws = 5; // differs from activity_dps (0) → changed
-            app.view.activity_last_tick =
+            app.view.activity.live.draws = 5; // differs from snap (0) → changed
+            app.view.activity.last_tick =
                 Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
             let only = app.roll_activity_window(Instant::now(), false);
             assert!(
                 only,
                 "changed counter + not already dirty → overlay-only draw"
             );
-            assert_eq!(app.view.activity_draws, 0, "accumulators reset");
+            assert_eq!(app.view.activity.live.draws, 0, "accumulators reset");
             assert_eq!(
-                app.view.activity_dps, 5,
+                app.view.activity.snap.draws, 5,
                 "snapshot captured the window value"
             );
         });
@@ -331,13 +288,13 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.view.show_activity = true;
-            app.view.activity_draws = 5;
-            app.view.activity_last_tick =
+            app.view.activity.live.draws = 5;
+            app.view.activity.last_tick =
                 Instant::now().checked_sub(Duration::from_secs(2)).unwrap();
             let only = app.roll_activity_window(Instant::now(), true);
             assert!(!only);
             assert_eq!(
-                app.view.activity_draws, 0,
+                app.view.activity.live.draws, 0,
                 "rollover resets even when already dirty"
             );
         });

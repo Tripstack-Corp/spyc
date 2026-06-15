@@ -199,6 +199,7 @@ pub enum PostAction {
 }
 
 mod actions;
+mod activity;
 mod agent_status;
 mod bootstrap;
 mod capture;
@@ -544,37 +545,15 @@ pub struct ViewState {
     /// When a focus-switch chord just completed: (when, completing key) —
     /// the next dispatch drops a Press/Repeat of that key within ~60 ms.
     pub focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
-    /// Activity monitor (`A`): draws/sec, bytes/sec overlay toggle + counters.
+    /// Activity monitor (`A`): the overlay visibility toggle. The counters
+    /// themselves live in [`activity::ActivityMonitor`] (`self.view.activity`).
     pub show_activity: bool,
-    pub activity_draws: u32,
-    pub activity_bytes: u64,
-    pub activity_last_tick: std::time::Instant,
-    pub activity_dps: u32,
-    pub activity_bps: u64,
-    pub activity_reason_pane: u32,
-    pub activity_reason_event: u32,
-    pub activity_reason_other: u32,
-    pub activity_snap_pane: u32,
-    pub activity_snap_event: u32,
-    pub activity_snap_other: u32,
-    /// Peak frame/render time (µs) over the window + snapshots.
-    pub activity_frame_peak_us: u64,
-    pub activity_frame_peak_snap: u64,
-    pub activity_render_peak_us: u64,
-    pub activity_render_peak_snap: u64,
-    /// Peak keystroke→echo latency (µs) + snapshot; `pane_send_at` is the
-    /// forward timestamp measured against the next active-pane output.
-    pub activity_echo_peak_us: u64,
-    pub activity_echo_snap: u64,
+    /// Activity-monitor counters: live/snapshot double-buffer + peaks + proc
+    /// stats. See [`activity::ActivityMonitor`].
+    pub activity: activity::ActivityMonitor,
+    /// Forward timestamp for the keystroke→echo latency peak, measured against
+    /// the next active-pane output.
     pub pane_send_at: Option<std::time::Instant>,
-    pub activity_watcher_events: u32,
-    pub activity_watcher_events_snap: u32,
-    pub activity_mcp_reqs: u32,
-    pub activity_mcp_reqs_snap: u32,
-    pub activity_git_results: u32,
-    pub activity_git_results_snap: u32,
-    /// Roundtrip (ms) of the most recent git worker request.
-    pub activity_git_last_ms: u32,
     /// `App::run` process start (activity-monitor uptime).
     pub started_at: std::time::Instant,
     /// Process-lifetime constants for the activity HUD, snapshotted ONCE at
@@ -585,9 +564,6 @@ pub struct ViewState {
     pub hud_pid: u32,
     pub hud_term: String,
     pub hud_truecolor: bool,
-    /// Cached proc stats refreshed once per 1 s A-monitor tick.
-    pub activity_proc_rss_kb: u64,
-    pub activity_proc_threads: u32,
     /// Tab-completion / cycle state.
     // Module-private (type `TabState` is module-private).
     tab_state: Option<TabState>,
@@ -632,38 +608,13 @@ impl ViewState {
             mcp_running,
             focus_chord_completed: None,
             show_activity: false,
-            activity_draws: 0,
-            activity_bytes: 0,
-            activity_last_tick: std::time::Instant::now(),
-            activity_dps: 0,
-            activity_bps: 0,
-            activity_reason_pane: 0,
-            activity_reason_event: 0,
-            activity_reason_other: 0,
-            activity_snap_pane: 0,
-            activity_snap_event: 0,
-            activity_snap_other: 0,
-            activity_frame_peak_us: 0,
-            activity_frame_peak_snap: 0,
-            activity_render_peak_us: 0,
-            activity_render_peak_snap: 0,
-            activity_echo_peak_us: 0,
-            activity_echo_snap: 0,
+            activity: activity::ActivityMonitor::new(std::time::Instant::now()),
             pane_send_at: None,
-            activity_watcher_events: 0,
-            activity_watcher_events_snap: 0,
-            activity_mcp_reqs: 0,
-            activity_mcp_reqs_snap: 0,
-            activity_git_results: 0,
-            activity_git_results_snap: 0,
-            activity_git_last_ms: 0,
             started_at: std::time::Instant::now(),
             hud_pid: std::process::id(),
             hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
             hud_truecolor: std::env::var("COLORTERM")
                 .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
-            activity_proc_rss_kb: 0,
-            activity_proc_threads: 0,
             tab_state: None,
             scroll_last: None,
         }

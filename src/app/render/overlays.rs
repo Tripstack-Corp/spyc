@@ -149,19 +149,19 @@ impl App {
         // headline is the at-a-glance idle indicator and reads better
         // de-emphasized, while the `[p e o]` reason breakdown and the timings
         // stay sharp. Only the head carries `Modifier::DIM` (see the render loop).
-        let l1_head = format!(" {} dps", self.view.activity_dps);
+        let l1_head = format!(" {} dps", self.view.activity.snap.draws);
         let l1_tail = format!(
             " [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
-            self.view.activity_snap_pane,
-            self.view.activity_snap_event,
-            self.view.activity_snap_other,
-            self.view.activity_bps,
-            self.view.activity_frame_peak_snap as f64 / 1000.0,
-            self.view.activity_render_peak_snap as f64 / 1000.0,
+            self.view.activity.snap.reason_pane,
+            self.view.activity.snap.reason_event,
+            self.view.activity.snap.reason_other,
+            self.view.activity.snap.bytes,
+            self.view.activity.peaks_snap.frame_us as f64 / 1000.0,
+            self.view.activity.peaks_snap.render_us as f64 / 1000.0,
             // Peak keystroke→echo round-trip (forward → agent echo → render).
             // `echo - r` ≈ the agent/pty round-trip (Claude re-rendering its
             // input box) we don't control; a small `echo` ⇒ spyc isn't the lag.
-            self.view.activity_echo_snap as f64 / 1000.0,
+            self.view.activity.peaks_snap.echo_us as f64 / 1000.0,
         );
         let l1 = format!("{l1_head}{l1_tail}");
 
@@ -183,10 +183,10 @@ impl App {
                 crate::ui::pager::Mount::LowerPane => "lower",
             },
         };
-        let git_last = if self.view.activity_git_last_ms == 0 {
+        let git_last = if self.view.activity.git_last_ms == 0 {
             "—".to_string()
         } else {
-            format!("{}ms", self.view.activity_git_last_ms)
+            format!("{}ms", self.view.activity.git_last_ms)
         };
         let l2 = format!(
             " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
@@ -195,10 +195,10 @@ impl App {
             } else {
                 String::new()
             },
-            self.view.activity_git_results_snap,
+            self.view.activity.snap.git_results,
             git_last,
-            self.view.activity_watcher_events_snap,
-            self.view.activity_mcp_reqs_snap,
+            self.view.activity.snap.watcher_events,
+            self.view.activity.snap.mcp_reqs,
             self.state.listing.entries.len(),
             pager_state,
         );
@@ -212,10 +212,10 @@ impl App {
             .pane_tabs
             .as_ref()
             .map_or(0, |t| t.tabs().len());
-        let rss_mb = self.view.activity_proc_rss_kb / 1024;
+        let rss_mb = self.view.activity.proc_rss_kb / 1024;
         let l3 = format!(
             " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
-            self.view.activity_proc_threads,
+            self.view.activity.proc_threads,
         );
 
         // Line 4 — build identity + terminal capabilities. `$TERM` + truecolor
