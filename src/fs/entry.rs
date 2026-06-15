@@ -29,19 +29,7 @@ impl Entry {
     }
 
     fn from_parts(path: PathBuf, name: String, md: &Metadata) -> Self {
-        let kind = if md.is_dir() {
-            EntryKind::Dir
-        } else if md.file_type().is_symlink() {
-            EntryKind::Symlink
-        } else if md.is_file() {
-            if is_executable(md) {
-                EntryKind::Executable
-            } else {
-                EntryKind::File
-            }
-        } else {
-            EntryKind::Other
-        };
+        let kind = classify(md);
         let size = md.len();
         let mtime = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         Self {
@@ -56,11 +44,39 @@ impl Entry {
     /// Display name with a trailing `/` for directories or `*` for
     /// executables (both are classic spy / `ls -F` conventions).
     pub fn display_name(&self) -> String {
-        match self.kind {
-            EntryKind::Dir => format!("{}/", self.name),
-            EntryKind::Executable => format!("{}*", self.name),
-            _ => self.name.clone(),
+        format!("{}{}", self.name, kind_suffix(self.kind))
+    }
+}
+
+/// Classify a path's metadata into an [`EntryKind`]. Directories win over
+/// symlinks (a followed symlink-to-dir reads as `Dir`); a symlink that isn't
+/// followed reads as `Symlink`; regular files split on the executable bit.
+/// The single source of truth for both the directory listing and the
+/// long-listing (`L`) table.
+pub fn classify(md: &Metadata) -> EntryKind {
+    if md.is_dir() {
+        EntryKind::Dir
+    } else if md.file_type().is_symlink() {
+        EntryKind::Symlink
+    } else if md.is_file() {
+        if is_executable(md) {
+            EntryKind::Executable
+        } else {
+            EntryKind::File
         }
+    } else {
+        EntryKind::Other
+    }
+}
+
+/// The classic `ls -F` name suffix for a kind: `/` for directories, `*` for
+/// executables, nothing otherwise. Shared by `Entry::display_name` and the
+/// long-listing name column.
+pub const fn kind_suffix(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Dir => "/",
+        EntryKind::Executable => "*",
+        _ => "",
     }
 }
 
@@ -81,6 +97,35 @@ fn is_executable(md: &Metadata) -> bool {
 #[cfg(not(unix))]
 fn is_executable(_md: &Metadata) -> bool {
     false
+}
+
+#[cfg(test)]
+mod kind_suffix_tests {
+    use super::*;
+
+    #[test]
+    fn kind_suffix_matches_ls_f_convention() {
+        assert_eq!(kind_suffix(EntryKind::Dir), "/");
+        assert_eq!(kind_suffix(EntryKind::Executable), "*");
+        assert_eq!(kind_suffix(EntryKind::File), "");
+        assert_eq!(kind_suffix(EntryKind::Symlink), "");
+        assert_eq!(kind_suffix(EntryKind::Other), "");
+    }
+
+    #[test]
+    fn display_name_decorates_via_shared_suffix() {
+        let mk = |name: &str, kind| Entry {
+            path: PathBuf::from(name),
+            name: name.to_string(),
+            kind,
+            size: 0,
+            mtime: SystemTime::UNIX_EPOCH,
+        };
+        assert_eq!(mk("d", EntryKind::Dir).display_name(), "d/");
+        assert_eq!(mk("x", EntryKind::Executable).display_name(), "x*");
+        assert_eq!(mk("f", EntryKind::File).display_name(), "f");
+        assert_eq!(mk("l", EntryKind::Symlink).display_name(), "l");
+    }
 }
 
 #[cfg(test)]
