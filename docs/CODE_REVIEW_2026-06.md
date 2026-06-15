@@ -1040,7 +1040,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/state/sessions/mod.rs:617` | Three near-duplicate resume-token extractors (claude/codex/agy) copy the same reverse-scan/find/next-token/validate block four times | maintainability | confirmed · ✅ #376 (codex/agy share `extract_token_after`; claude stays separate — anchored `strip_prefix` + accepts a session name) |
 | `src/ui/diff_render/mod.rs:221` | render_file_unified and render_file_split duplicate their entire prologue | maintainability | confirmed · ✅ #374 |
 | `src/ui/diff_render/mod.rs:345` | Side-by-side line-number field overflows at 5+ digit line numbers, breaking column alignment | correctness | confirmed · ✅ #374 |
-| `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | unverified |
+| `src/ui/help.rs:449` | wrap_description reimplements the word-wrap already in markdown/wrap.rs | maintainability | ✅ #404 — extracted the shared routine to a neutral `ui::wrap`; both markdown + help delegate; wrap_description is now a thin adapter (4 existing tests unchanged) |
 | `src/ui/line_edit.rs:63` | Stale pending_op survives history navigation and set_content — next motion key silently deletes text | correctness | confirmed · ✅ #383 |
 | `src/ui/line_edit.rs:253` | Normal mode ignores the CONTROL modifier — ^A enters Insert mode, ^D arms the delete operator | correctness | confirmed · ✅ #386 |
 | `src/ui/markdown/mod.rs:141` | TableBuilder.alignments is parsed but never used (dead field) | maintainability | confirmed · ✅ #355 |
