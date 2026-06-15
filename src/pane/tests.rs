@@ -202,7 +202,11 @@ mod wake_tests {
     fn deliberate_stop_suppresses_final_wake() {
         let stop = Arc::new(AtomicBool::new(true));
         let (tx, _gen, _pending, count, handle) = spawn_worker(&stop);
-        tx.send(PtyEvent::Closed).unwrap();
+        // `stop` is preset, so the worker returns at its loop-top check —
+        // possibly before this send, dropping `rx`. That's the behavior under
+        // test (no wake fires either way), so the send is best-effort: a
+        // `SendError` from the already-exited worker is not a failure.
+        let _ = tx.send(PtyEvent::Closed);
         let _ = handle.join();
         assert_eq!(
             count.load(Ordering::Acquire),
