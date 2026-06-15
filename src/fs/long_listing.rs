@@ -233,15 +233,12 @@ fn display_name(path: &Path, md: &fs::Metadata) -> String {
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
-    if md.is_dir() {
-        format!("{base}/")
-    } else if md.file_type().is_symlink() {
-        base
-    } else if is_exec(md) {
-        format!("{base}*")
-    } else {
-        base
-    }
+    // Same `ls -F` decoration the directory listing uses (dir `/`, exec `*`),
+    // via the shared classifier rather than a second hand-rolled copy.
+    format!(
+        "{base}{}",
+        crate::fs::entry::kind_suffix(crate::fs::entry::classify(md))
+    )
 }
 
 #[cfg(unix)]
@@ -269,17 +266,6 @@ fn format_local_time_from_unix(secs: i64, _nsec: i64) -> String {
     ts.to_zoned(jiff::tz::TimeZone::system())
         .strftime("%Y-%m-%d %H:%M:%S")
         .to_string()
-}
-
-#[cfg(unix)]
-fn is_exec(md: &fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    md.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn is_exec(_md: &fs::Metadata) -> bool {
-    false
 }
 
 /// Format as `drwxr-xr-x` style. On non-Unix we only have kind info so we
