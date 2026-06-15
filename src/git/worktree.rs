@@ -61,22 +61,36 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
     let repo = gix::open(dir).ok()?;
     let mut worktrees = Vec::new();
 
-    // The main worktree is NOT in `repo.worktrees()` (linked only), and
-    // `git worktree list` lists it first — emit it from `repo` itself.
-    if let Some(workdir) = repo.workdir() {
-        worktrees.push(Worktree {
-            path: workdir.to_path_buf(),
-            head: head_short(&repo),
-            branch: head_branch_label(&repo),
-        });
-    } else {
+    // The main worktree is NOT in `repo.worktrees()` (which enumerates the
+    // LINKED worktrees only), and `git worktree list` shows it first. Resolve
+    // it from the shared COMMON dir, *not* from `repo.workdir()`: when the
+    // user has switched INTO a linked worktree, `gix::open(dir)` opened that
+    // linked worktree, whose `workdir()` is the linked dir — emitting it here
+    // listed the *current* linked worktree as the `[1]` "main" entry and
+    // dropped the real main, so the user could no longer switch back to it
+    // (Spencer's "[1] shows where I currently am, can't get back to my git
+    // home"). The common dir (`<main>/.git`) is identical for every worktree;
+    // opening it yields the main worktree's repo view regardless of `dir`.
+    // Canonicalize first — gix can hand back a CWD-relative `common_dir`
+    // (see `add`), and the second open must not depend on the process CWD.
+    let common_dir = std::fs::canonicalize(repo.common_dir())
+        .unwrap_or_else(|_| repo.common_dir().to_path_buf());
+    match gix::open(&common_dir)
+        .ok()
+        .and_then(|main| main.workdir().map(|w| (main.clone(), w.to_path_buf())))
+    {
+        Some((main, workdir)) => worktrees.push(Worktree {
+            path: workdir,
+            head: head_short(&main),
+            branch: head_branch_label(&main),
+        }),
         // Bare repo: no main working tree, but git still lists the bare
         // entry first. Keep the "(bare)" label the callers expect.
-        worktrees.push(Worktree {
-            path: repo.git_dir().to_path_buf(),
+        None => worktrees.push(Worktree {
+            path: common_dir,
             head: head_short(&repo),
             branch: "(bare)".to_string(),
-        });
+        }),
     }
 
     for proxy in repo.worktrees().ok()? {
@@ -558,6 +572,41 @@ mod tests {
             .collect();
         assert_eq!(worktrees[0].head, git_heads[0]);
         assert_eq!(worktrees[1].head, git_heads[1]);
+    }
+
+    #[test]
+    fn list_from_linked_worktree_still_shows_main_first() {
+        let (_tmp, main) = init_repo();
+        let target = add(&main, "feature").expect("add");
+
+        // Listing from INSIDE the linked worktree must still enumerate the
+        // main worktree + the linked one, main first — NOT list the current
+        // linked worktree as `[1]` and drop main. The old code emitted
+        // `repo.workdir()`, which for a repo opened from a linked worktree is
+        // the linked dir, so the user couldn't switch back to main (Spencer:
+        // "[1] shows where I currently am, can't switch back to my git home").
+        let from_linked = list(&target).expect("list from linked worktree");
+        let paths: Vec<_> = from_linked.iter().map(|w| w.path.clone()).collect();
+        assert!(
+            paths.contains(&main),
+            "main worktree missing when listing from a linked worktree: {paths:?}"
+        );
+        assert_eq!(
+            from_linked[0].path, main,
+            "main worktree must be listed first regardless of which worktree we list from: {paths:?}"
+        );
+        assert_eq!(
+            from_linked.len(),
+            2,
+            "expected exactly main + one linked worktree (no duplicate of the current one): {paths:?}"
+        );
+        // And the order/labels match listing from main itself.
+        let from_main = list(&main).expect("list from main");
+        let main_paths: Vec<_> = from_main.iter().map(|w| w.path.clone()).collect();
+        assert_eq!(
+            paths, main_paths,
+            "listing must be identical whether opened from main or a linked worktree"
+        );
     }
 
     #[test]
