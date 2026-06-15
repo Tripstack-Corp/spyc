@@ -99,6 +99,22 @@ pub fn format_uptime(secs: u64) -> String {
     }
 }
 
+/// Like [`format_uptime`] but always carries seconds, for the live
+/// "running…" timer on streaming captures where the user watches the count
+/// tick. Deliberately diverges past one hour: `format_uptime` coarsens to
+/// `Nh NNm` (then `Nd Nh`) for a static uptime field, whereas this keeps
+/// `Nh Nm Ns` so the seconds stay visible on a long-running command.
+/// Forms: `Ns` / `Nm Ns` / `Nh Nm Ns`.
+pub fn format_elapsed_hms(secs: u64) -> String {
+    if secs >= 3600 {
+        format!("{}h {}m {}s", secs / 3600, (secs % 3600) / 60, secs % 60)
+    } else if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 /// Build the EOF marker line appended to captures / finished tasks
 /// so the "command finished" indicator stays visible at the bottom
 /// of the pager even when content fills the viewport. `tail` is

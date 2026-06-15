@@ -390,6 +390,29 @@ mod format_uptime_tests {
 }
 
 #[cfg(test)]
+mod format_elapsed_hms_tests {
+    use super::super::format_elapsed_hms;
+
+    #[test]
+    fn seconds_then_minutes() {
+        assert_eq!(format_elapsed_hms(0), "0s");
+        assert_eq!(format_elapsed_hms(59), "59s");
+        assert_eq!(format_elapsed_hms(60), "1m 0s");
+        assert_eq!(format_elapsed_hms(125), "2m 5s");
+    }
+
+    /// The deliberate divergence from `format_uptime`: past one hour the
+    /// live timer keeps seconds (and never coarsens to days), so a long
+    /// `!make` keeps ticking second-by-second.
+    #[test]
+    fn hours_keep_seconds_and_never_roll_to_days() {
+        assert_eq!(format_elapsed_hms(3600), "1h 0m 0s");
+        assert_eq!(format_elapsed_hms(3725), "1h 2m 5s");
+        assert_eq!(format_elapsed_hms(90_000), "25h 0m 0s");
+    }
+}
+
+#[cfg(test)]
 mod eof_marker_tests {
     use super::super::eof_marker_line;
 

@@ -164,18 +164,7 @@ impl App {
             // when the displayed seconds string actually changes.
             if !capture.finished {
                 let elapsed = capture.started.elapsed().as_secs();
-                let human_time = if elapsed >= 3600 {
-                    format!(
-                        "{}h {}m {}s",
-                        elapsed / 3600,
-                        (elapsed % 3600) / 60,
-                        elapsed % 60
-                    )
-                } else if elapsed >= 60 {
-                    format!("{}m {}s", elapsed / 60, elapsed % 60)
-                } else {
-                    format!("{elapsed}s")
-                };
+                let human_time = super::format_elapsed_hms(elapsed);
                 let timer_title = format!("\u{23f3} {} — running... ({human_time})", capture.title);
                 if let Some(view) = self.view.pager.as_mut() {
                     if view.title != timer_title {
