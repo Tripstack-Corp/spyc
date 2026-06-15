@@ -41,6 +41,29 @@ fn scroll_max_accounts_for_wrapped_visual_rows() {
     );
 }
 
+/// The render pass computes the multi-column partition once and feeds it to
+/// the position indicator via `position_indicator_multi`. That shared-partition
+/// path must produce the same label as the original `position_indicator`
+/// (which re-partitions internally) for the same view + viewport — the
+/// invariant the dedup relies on.
+#[test]
+fn position_indicator_multi_matches_recomputing_path() {
+    // Two columns with a blank line, so the partition isn't a trivial even cut.
+    let mut lines: Vec<String> = (0..40).map(|i| format!("line {i}")).collect();
+    lines[18] = String::new(); // section break shifts the chunk boundary
+    let mut view = PagerView::new_plain("t", lines);
+    view.columns = 2;
+    let chunks = super::layout::partition_lines_static(&view.lines, 2);
+    for (scroll, vh) in [(0u16, 6u16), (3, 6), (8, 6), (100, 6)] {
+        view.scroll = scroll;
+        assert_eq!(
+            view.position_indicator_multi(&chunks, vh),
+            view.position_indicator(vh),
+            "shared-partition indicator diverged at scroll={scroll} vh={vh}"
+        );
+    }
+}
+
 /// Regression test for the "stuck at bottom" search bug in the
 /// help pager (which is multi-column). With `ncols >= 2`, `scroll`
 /// is interpreted per-column (each column applies the same offset
