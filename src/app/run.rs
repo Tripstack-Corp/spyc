@@ -316,7 +316,8 @@ impl App {
                 self.render(frame);
                 if self.view.show_activity {
                     let us = u64::try_from(render_start.elapsed().as_micros()).unwrap_or(u64::MAX);
-                    self.view.activity_render_peak_us = self.view.activity_render_peak_us.max(us);
+                    self.view.activity.peaks_live.render_us =
+                        self.view.activity.peaks_live.render_us.max(us);
                 }
             })?
             .area;
@@ -324,16 +325,17 @@ impl App {
         // main-thread render stall. `frame - render` ≈ diff + emission.
         if self.view.show_activity {
             let us = u64::try_from(draw_start.elapsed().as_micros()).unwrap_or(u64::MAX);
-            self.view.activity_frame_peak_us = self.view.activity_frame_peak_us.max(us);
+            self.view.activity.peaks_live.frame_us = self.view.activity.peaks_live.frame_us.max(us);
         }
         let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
         if self.view.show_activity && !activity_only {
-            self.view.activity_draws += 1;
-            self.view.activity_bytes += u64::from(frame_area.width) * u64::from(frame_area.height);
+            self.view.activity.live.draws += 1;
+            self.view.activity.live.bytes +=
+                u64::from(frame_area.width) * u64::from(frame_area.height);
             match ctx.draw.reason {
-                1 => self.view.activity_reason_pane += 1,
-                2 => self.view.activity_reason_event += 1,
-                _ => self.view.activity_reason_other += 1,
+                1 => self.view.activity.live.reason_pane += 1,
+                2 => self.view.activity.live.reason_event += 1,
+                _ => self.view.activity.live.reason_other += 1,
             }
         }
         ctx.draw.reason = 0;

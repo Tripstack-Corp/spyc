@@ -345,7 +345,8 @@ impl App {
                 && let Some(sent) = self.view.pane_send_at.take()
             {
                 let us = u64::try_from(sent.elapsed().as_micros()).unwrap_or(u64::MAX);
-                self.view.activity_echo_peak_us = self.view.activity_echo_peak_us.max(us);
+                self.view.activity.peaks_live.echo_us =
+                    self.view.activity.peaks_live.echo_us.max(us);
             }
         }
         // Mark exited tabs AFTER drain so the Closed event has been processed
