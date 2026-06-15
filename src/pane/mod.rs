@@ -352,14 +352,16 @@ impl Pane {
     /// the child's PID is also its process-group leader — sending to
     /// `-pid` reaches the whole tree. Already-exited children
     /// short-circuit (the reader thread set `closed`).
-    pub fn shutdown(&mut self, grace: std::time::Duration) {
-        // Delegated to the host — same SIGTERM-then-SIGKILL escalation
-        // as the pre-v1.5 inline implementation, just owned by the
-        // shared kernel now.
-        self.host.shutdown(grace);
+    /// Synchronous child shutdown (SIGTERM → grace → SIGKILL) that names a
+    /// slow child: `on_linger` fires once if the process is still alive a beat
+    /// after SIGTERM. Used by `run_teardown` so a hang at exit tells the user
+    /// which pane is holding things up. The interactive close uses
+    /// [`Self::shutdown_detached`] instead (off-thread, no narration).
+    pub fn shutdown_reporting(&mut self, grace: std::time::Duration, on_linger: impl FnOnce()) {
+        self.host.shutdown_reporting(grace, on_linger);
     }
 
-    /// Off-thread variant of [`shutdown`] for the **interactive** tab close.
+    /// Off-thread child shutdown for the **interactive** tab close.
     /// The SIGTERM→grace→SIGKILL→reap can block up to `grace` (~20-250 ms) on
     /// a child that doesn't exit promptly on SIGTERM (a `npm run dev` tree,
     /// say); running it on the input thread froze the UI for that long on
