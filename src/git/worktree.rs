@@ -55,17 +55,21 @@ fn head_branch_label(repo: &gix::Repository) -> String {
 
 /// List the repo's worktrees, MAIN first then linked ones (matching
 /// `git worktree list --porcelain` ordering so the "← current" marker in
-/// `git_state.rs` lines up). `None` if `dir` isn't a repository gix can
-/// open — same failure shape as the prior `git worktree list` → `None`.
+/// `git_state.rs` lines up). `None` if `dir` isn't inside a repository.
+///
+/// Uses `gix::discover` (walks up to the enclosing repo) rather than
+/// `gix::open` (strict — repo must be *at* `dir`): callers pass the user's
+/// listing dir, so browsing `repo/src/` must still resolve the repo, matching
+/// the upward discovery the prior `git worktree list` subprocess inherited.
 pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
-    let repo = gix::open(dir).ok()?;
+    let repo = gix::discover(dir).ok()?;
     let mut worktrees = Vec::new();
 
     // The main worktree is NOT in `repo.worktrees()` (which enumerates the
     // LINKED worktrees only), and `git worktree list` shows it first. Resolve
     // it from the shared COMMON dir, *not* from `repo.workdir()`: when the
-    // user has switched INTO a linked worktree, `gix::open(dir)` opened that
-    // linked worktree, whose `workdir()` is the linked dir — emitting it here
+    // user has switched INTO a linked worktree, discovery opened that linked
+    // worktree, whose `workdir()` is the linked dir — emitting it here
     // listed the *current* linked worktree as the `[1]` "main" entry and
     // dropped the real main, so the user could no longer switch back to it
     // (Spencer's "[1] shows where I currently am, can't get back to my git
@@ -119,7 +123,10 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
 /// EXISTING branch `<branch>` if present, else create it at the current HEAD.
 /// Returns the new worktree's path.
 pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
-    let repo = gix::open(dir).map_err(|e| std::io::Error::other(format!("open repo: {e}")))?;
+    // `gix::discover` (not `gix::open`) so adding from a repo subdirectory
+    // resolves the enclosing repo and anchors the new worktree on its root,
+    // matching `git worktree add` from anywhere in the tree.
+    let repo = gix::discover(dir).map_err(|e| std::io::Error::other(format!("open repo: {e}")))?;
 
     // Resolve the working-tree root and common git dir to ABSOLUTE,
     // fs-canonical paths up front. gix derives these relative to the
@@ -661,6 +668,54 @@ mod tests {
         let err = remove(&target).expect_err("untracked content should refuse removal");
         assert!(err.to_string().contains("modified or untracked"));
         assert!(target.is_dir());
+    }
+
+    #[test]
+    fn list_works_from_a_repo_subdirectory() {
+        let (_tmp, main) = init_repo();
+        // `init_repo` creates `<main>/sub/` with a committed file.
+        let sub = main.join("sub");
+        assert!(sub.is_dir(), "fixture should have a subdir");
+
+        // `W l` passes the user's listing dir; browsing `repo/sub/` must still
+        // find the repo (upward discovery), not fail "not a git repository"
+        // the way the strict `gix::open(dir)` did.
+        let from_sub = list(&sub).expect("list from a repo subdirectory");
+        assert_eq!(
+            from_sub[0].path,
+            main,
+            "subdir list should resolve the enclosing repo, main first: {:?}",
+            from_sub.iter().map(|w| &w.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn add_works_from_a_repo_subdirectory() {
+        let (_tmp, main) = init_repo();
+        let sub = main.join("sub");
+
+        // Adding from a subdir must anchor the worktree on the REPO root
+        // (`<repo>.worktrees/<branch>`), not on the subdir.
+        let target = add(&sub, "feature").expect("add from a repo subdirectory");
+        assert_eq!(
+            target
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str()),
+            Some("repo.worktrees"),
+            "worktree should be grouped under the repo's <repo>.worktrees/, got {target:?}"
+        );
+        assert!(
+            target.is_dir(),
+            "worktree dir missing: {}",
+            target.display()
+        );
+        // Real git accepts it against the MAIN repo.
+        let porcelain = run_git(&main, &["worktree", "list", "--porcelain"]);
+        assert!(
+            porcelain.contains("branch refs/heads/feature"),
+            "porcelain missing the new worktree:\n{porcelain}"
+        );
     }
 
     #[test]
