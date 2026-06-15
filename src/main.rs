@@ -145,10 +145,16 @@ fn main() -> Result<()> {
     let mut app = App::new(cli.resume, mcp_takeover_allowed);
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
-    restore_terminal(&mut terminal)?;
+    // Restore the terminal BEFORE teardown so `run_teardown`'s "waiting for …"
+    // lines land on the normal screen instead of behind the alt-screen. A
+    // restore error is deferred so teardown still runs unconditionally (the
+    // PR8b guarantee that pane children are always SIGTERM-graced on exit).
+    let restore = restore_terminal(&mut terminal);
+    app.run_teardown();
     if let Some(summary) = &app.exit_summary {
         println!("\u{1f336}\u{fe0f} {summary}");
     }
+    restore?;
     result
 }
 

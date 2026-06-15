@@ -426,6 +426,15 @@ impl PtyHost {
     /// (portable_pty calls `setsid`, so child PID == process-group
     /// leader on Unix).
     pub fn shutdown(&mut self, grace: std::time::Duration) {
+        self.shutdown_reporting(grace, || {});
+    }
+
+    /// Like [`shutdown`], but invokes `on_linger` **once** if the child is
+    /// still alive a short beat after SIGTERM — i.e. it's about to hold the
+    /// caller for up to `grace`. `run_teardown` uses this to name which child
+    /// is stalling the exit. `on_linger` never fires on a fast path
+    /// (already-closed, no PID, or a child that exits promptly on SIGTERM).
+    pub fn shutdown_reporting(&mut self, grace: std::time::Duration, on_linger: impl FnOnce()) {
         if self.closed {
             // Reader thread already saw EOF; harvest exit_status if
             // we haven't yet. Non-blocking.
@@ -446,7 +455,9 @@ impl PtyHost {
 
         #[cfg(unix)]
         kill_group(pid, rustix::process::Signal::TERM);
-        let deadline = std::time::Instant::now() + grace;
+        let start = std::time::Instant::now();
+        let deadline = start + grace;
+        let mut on_linger = Some(on_linger);
         while std::time::Instant::now() < deadline {
             match self.child.try_wait() {
                 Ok(Some(status)) => {
@@ -454,7 +465,16 @@ impl PtyHost {
                     self.closed = true;
                     return;
                 }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                Ok(None) => {
+                    // Still alive past the linger threshold → tell the caller
+                    // once, so a slow child is named before the grace wait.
+                    if start.elapsed() >= LINGER_NARRATE_AFTER
+                        && let Some(notify) = on_linger.take()
+                    {
+                        notify();
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
                 Err(_) => break,
             }
         }
@@ -466,6 +486,13 @@ impl PtyHost {
         self.closed = true;
     }
 }
+
+/// How long a child may linger after SIGTERM before
+/// [`PtyHost::shutdown_reporting`] fires its `on_linger` hook. Above the
+/// common case (well-behaved children exit within a few ms of SIGTERM) so a
+/// clean exit narrates nothing, but well under the 250 ms grace so a genuine
+/// staller is named with time to read it.
+const LINGER_NARRATE_AFTER: std::time::Duration = std::time::Duration::from_millis(50);
 
 impl Drop for PtyHost {
     fn drop(&mut self) {

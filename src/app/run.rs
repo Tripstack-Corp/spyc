@@ -340,17 +340,35 @@ impl App {
         Ok(())
     }
 
-    /// Loop teardown (extracted verbatim from the tail of `run()`): remove the
-    /// MCP context file, then SIGTERM-grace every pane child tree before `App`
-    /// is dropped (the per-Pane `Drop` is a SIGKILL safety net; going through
-    /// `shutdown` first gives well-behaved children — `vite`, `npm run dev`,
-    /// anything that catches SIGTERM — 250ms to flush before we escalate, so
-    /// quitting with a dev server in a pane doesn't orphan its process tree).
-    fn run_teardown(&mut self) {
+    /// Exit teardown: remove the MCP context file, then SIGTERM-grace every
+    /// pane child tree before `App` is dropped (the per-Pane `Drop` is a
+    /// SIGKILL safety net; going through `shutdown` first gives well-behaved
+    /// children — `vite`, `npm run dev`, anything that catches SIGTERM —
+    /// 250ms to flush before we escalate, so quitting with a dev server in a
+    /// pane doesn't orphan its process tree).
+    ///
+    /// Stays **synchronous** (unlike the interactive `^a x` close, which
+    /// off-threads via `Pane::shutdown_detached`): the process is about to
+    /// exit, and a detached reaper would die with it before killing children
+    /// in their own `setsid` process groups — orphaning the tree.
+    ///
+    /// Called from `main` *after* `restore_terminal`, so it runs on the normal
+    /// screen: a child that doesn't exit promptly gets a `spyc: waiting for …`
+    /// line naming it, instead of a silent freeze behind the alt-screen. Must
+    /// run on every exit path (the PR8b guarantee) — `main` calls it
+    /// unconditionally regardless of the run loop's result.
+    pub fn run_teardown(&mut self) {
         crate::context::remove_context_file(&self.view.context_path);
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             for entry in tabs.tabs_mut() {
-                entry.pane.shutdown(Duration::from_millis(250));
+                let label = entry.info.label.clone();
+                let pid = entry.pane.process_id();
+                entry
+                    .pane
+                    .shutdown_reporting(Duration::from_millis(250), || match pid {
+                        Some(p) => eprintln!("spyc: waiting for {label} (pid {p}) to exit…"),
+                        None => eprintln!("spyc: waiting for {label} to exit…"),
+                    });
             }
         }
     }
@@ -689,7 +707,9 @@ impl App {
             // `maybe_write_context`).
             self.maybe_write_context(now_post, &mut ctx);
         };
-        self.run_teardown();
+        // `run_teardown` is intentionally NOT called here — `main` runs it
+        // after `restore_terminal`, so its "waiting for …" lines land on the
+        // normal screen instead of behind the alt-screen.
         exit_result
     }
 
