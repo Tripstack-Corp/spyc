@@ -24,6 +24,66 @@ pub enum McpConfigStatus {
     ManagedByEnterprise,
 }
 
+/// Given the `SPYC_MCP_SOCK` value parsed out of an existing client config,
+/// return the live owner's PID — or `None` if it points at our own socket,
+/// isn't reachable (stale registration), or has no parseable PID. The shared
+/// tail of both `detect_existing_spyc*` functions; only the per-format
+/// parsing of `old_sock_str` differs between them.
+fn live_owner_pid(old_sock_str: &str, our_sock: &Path) -> Option<u32> {
+    let old_sock = PathBuf::from(old_sock_str);
+    if old_sock == *our_sock {
+        return None;
+    }
+    UnixStream::connect(&old_sock).ok()?;
+    pid_from_sock_path(old_sock_str)
+}
+
+/// Outcome of the takeover check shared by `ensure_mcp_json` and
+/// `ensure_codex_config_toml`.
+enum TakeoverDecision {
+    /// No live conflicting instance (it's us, stale, or unreachable) —
+    /// write our entry normally.
+    Proceed,
+    /// A live instance was found and we took it over (already notified).
+    TookOver(u32),
+    /// A live instance was found but takeover wasn't allowed — caller bails,
+    /// leaving the old registration in place.
+    Skipped(u32),
+}
+
+/// Decide whether to take over from the instance an existing config points
+/// at. `old_sock_str` is the `SPYC_MCP_SOCK` already parsed out of the config
+/// (JSON or TOML — the parsing differs per format, this decision does not).
+/// On a live takeover this sends the disconnect notification as a side effect;
+/// `log_prefix` (`""` / `"codex: "`) distinguishes the two in the debug log.
+fn decide_takeover(
+    old_sock_str: &str,
+    our_sock: &Path,
+    our_pid: u32,
+    takeover_allowed: bool,
+    log_prefix: &str,
+) -> TakeoverDecision {
+    let old_sock = PathBuf::from(old_sock_str);
+    if old_sock == *our_sock || UnixStream::connect(&old_sock).is_err() {
+        // Our own socket, or a dead one (stale registration) — no conflict.
+        return TakeoverDecision::Proceed;
+    }
+    let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
+    if !takeover_allowed {
+        mcp_log(&format!(
+            "{log_prefix}skipped takeover from PID {old_pid} ({})",
+            old_sock.display()
+        ));
+        return TakeoverDecision::Skipped(old_pid);
+    }
+    notify_disconnect(&old_sock, our_pid);
+    mcp_log(&format!(
+        "{log_prefix}taking over from PID {old_pid} ({})",
+        old_sock.display()
+    ));
+    TakeoverDecision::TookOver(old_pid)
+}
+
 /// Detect a live spyc instance currently owning MCP for `dir` without
 /// modifying `.mcp.json`. Returns the old instance's PID if its socket
 /// is reachable, else None. Used by the startup takeover prompt so we
@@ -36,12 +96,7 @@ pub fn detect_existing_spyc(dir: &Path) -> Option<u32> {
     let old_sock_str = parsed
         .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
         .and_then(|v| v.as_str())?;
-    let old_sock = PathBuf::from(old_sock_str);
-    if old_sock == our_sock {
-        return None;
-    }
-    UnixStream::connect(&old_sock).ok()?;
-    pid_from_sock_path(old_sock_str)
+    live_owner_pid(old_sock_str, &our_sock)
 }
 
 /// Well-known paths for Claude Code enterprise managed settings.
@@ -146,24 +201,11 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
             .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
             .and_then(|v| v.as_str())
     {
-        let old_sock = PathBuf::from(old_sock_str);
-        if old_sock != our_sock {
-            // Another instance — check if it's still alive.
-            if UnixStream::connect(&old_sock).is_ok() {
-                let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
-                if !takeover_allowed {
-                    mcp_log(&format!(
-                        "skipped takeover from PID {old_pid} ({})",
-                        old_sock.display()
-                    ));
-                    return Ok(McpConfigStatus::SkippedTakeover { old_pid });
-                }
-                notify_disconnect(&old_sock, our_pid);
-                took_over = Some(old_pid);
-                mcp_log(&format!(
-                    "taking over from PID {old_pid} ({})",
-                    old_sock.display()
-                ));
+        match decide_takeover(old_sock_str, &our_sock, our_pid, takeover_allowed, "") {
+            TakeoverDecision::Proceed => {}
+            TakeoverDecision::TookOver(old_pid) => took_over = Some(old_pid),
+            TakeoverDecision::Skipped(old_pid) => {
+                return Ok(McpConfigStatus::SkippedTakeover { old_pid });
             }
         }
     }
@@ -263,22 +305,18 @@ pub fn ensure_codex_config_toml(
             .and_then(|e| e.get("SPYC_MCP_SOCK"))
             .and_then(toml::Value::as_str)
     {
-        let old_sock = PathBuf::from(old_sock_str);
-        if old_sock != our_sock && UnixStream::connect(&old_sock).is_ok() {
-            let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
-            if !takeover_allowed {
-                mcp_log(&format!(
-                    "codex: skipped takeover from PID {old_pid} ({})",
-                    old_sock.display()
-                ));
+        match decide_takeover(
+            old_sock_str,
+            &our_sock,
+            our_pid,
+            takeover_allowed,
+            "codex: ",
+        ) {
+            TakeoverDecision::Proceed => {}
+            TakeoverDecision::TookOver(old_pid) => took_over = Some(old_pid),
+            TakeoverDecision::Skipped(old_pid) => {
                 return Ok(McpConfigStatus::SkippedTakeover { old_pid });
             }
-            notify_disconnect(&old_sock, our_pid);
-            took_over = Some(old_pid);
-            mcp_log(&format!(
-                "codex: taking over from PID {old_pid} ({})",
-                old_sock.display()
-            ));
         }
     }
 
@@ -367,12 +405,7 @@ pub fn detect_existing_spyc_codex(dir: &Path) -> Option<u32> {
         .get("env")?
         .get("SPYC_MCP_SOCK")?
         .as_str()?;
-    let old_sock = PathBuf::from(old_sock_str);
-    if old_sock == our_sock {
-        return None;
-    }
-    UnixStream::connect(&old_sock).ok()?;
-    pid_from_sock_path(old_sock_str)
+    live_owner_pid(old_sock_str, &our_sock)
 }
 
 /// Remove just the "spyc" entry from `<dir>/.mcp.json` if present,
@@ -413,5 +446,46 @@ fn clean_local_mcp_entry(dir: &Path) {
             "cleaned spyc entry from .mcp.json (preserved other servers, {})",
             path.display()
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TakeoverDecision, decide_takeover, live_owner_pid};
+    use std::path::Path;
+
+    // The takeover/detection helpers' deterministic branches (no live
+    // socket): an entry pointing at our own socket, or at a dead one, must
+    // never trigger a takeover. The live-socket TookOver/Skipped branches
+    // share the same `UnixStream::connect` call and are exercised by the
+    // end-to-end takeover behavior.
+
+    #[test]
+    fn decide_takeover_proceeds_on_own_socket() {
+        let sock = Path::new("/run/spyc/mcp-1.sock");
+        // old == our socket → no conflict, even with takeover disallowed.
+        assert!(matches!(
+            decide_takeover(&sock.to_string_lossy(), sock, 1, false, ""),
+            TakeoverDecision::Proceed
+        ));
+    }
+
+    #[test]
+    fn decide_takeover_proceeds_on_dead_socket() {
+        // A path that can't be connected to (no listener) is a stale
+        // registration → proceed, don't try to take it over.
+        let dead = "/nonexistent/spyc-mcp-does-not-exist.sock";
+        let our = Path::new("/run/spyc/mcp-2.sock");
+        assert!(matches!(
+            decide_takeover(dead, our, 2, true, ""),
+            TakeoverDecision::Proceed
+        ));
+    }
+
+    #[test]
+    fn live_owner_pid_none_for_own_or_dead_socket() {
+        let our = Path::new("/run/spyc/mcp-3.sock");
+        assert_eq!(live_owner_pid(&our.to_string_lossy(), our), None);
+        assert_eq!(live_owner_pid("/nonexistent/spyc-mcp-nope.sock", our), None);
     }
 }
