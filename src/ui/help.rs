@@ -445,55 +445,15 @@ fn emit_row(
 }
 
 /// Split `text` into chunks no wider than `max`. Breaks at word boundaries
-/// when possible; a single word longer than `max` is hard-split.
+/// when possible; a single word longer than `max` is hard-split. A thin
+/// adapter over the shared [`crate::ui::wrap::word_wrap_ranges`] — same greedy
+/// word-wrap the markdown renderer uses — materializing each byte range as an
+/// owned `String` for the help table's description column.
 fn wrap_description(text: &str, max: usize) -> Vec<String> {
-    if crate::ui::display_width(text) <= max {
-        return vec![text.to_string()];
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_w = 0usize;
-    for word in text.split_whitespace() {
-        let w = crate::ui::display_width(word);
-        let need = if current.is_empty() { w } else { w + 1 };
-        if current_w + need > max && !current.is_empty() {
-            out.push(std::mem::take(&mut current));
-            current_w = 0;
-        }
-        if w > max {
-            // Word alone exceeds the budget — hard-split by chars.
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                current_w = 0;
-            }
-            let mut buf = String::new();
-            let mut buf_w = 0usize;
-            for ch in word.chars() {
-                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                if buf_w + cw > max && !buf.is_empty() {
-                    out.push(std::mem::take(&mut buf));
-                    buf_w = 0;
-                }
-                buf.push(ch);
-                buf_w += cw;
-            }
-            if !buf.is_empty() {
-                current = buf;
-                current_w = buf_w;
-            }
-            continue;
-        }
-        if !current.is_empty() {
-            current.push(' ');
-            current_w += 1;
-        }
-        current.push_str(word);
-        current_w += w;
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    out
+    crate::ui::wrap::word_wrap_ranges(text, max)
+        .into_iter()
+        .map(|(s, e)| text[s..e].to_string())
+        .collect()
 }
 
 #[cfg(test)]

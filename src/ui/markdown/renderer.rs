@@ -10,12 +10,13 @@ use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::wrap::{slice_spans, spans_visual_width, word_wrap_ranges, wrap_spans_to_width};
+use super::wrap::{slice_spans, spans_visual_width, wrap_spans_to_width};
 use super::{
     CONTENT_WIDTH, CodeBlockState, PROSE_WRAP_MIN, Renderer, StyleMods,
     TABLE_MAX_COL_WIDTH_CEILING, TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder, heading_depth,
 };
 use crate::ui::theme::Theme;
+use crate::ui::wrap::word_wrap_ranges;
 
 impl<'t> Renderer<'t> {
     pub(super) fn new(theme: &'t Theme, table_width_hint: Option<usize>) -> Self {

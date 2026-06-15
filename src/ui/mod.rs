@@ -26,6 +26,7 @@ pub mod scrollback;
 pub mod status;
 pub mod syntax;
 pub mod theme;
+pub mod wrap;
 
 /// Display width of a string in terminal columns. CJK characters and
 /// some emoji count as 2 columns; most Latin/symbol characters as 1.
