@@ -6,12 +6,16 @@
 //! more robustly.
 //!
 //! HOT-PATH NOTE: opening a gix `Repository` parses config and sets up the
-//! object/ref stores, so it is heavier than a single file read. These are
-//! called only at chdir-into-a-*new*-repo (`set_repo_root` early-returns
-//! when the repo is unchanged) and on HEAD/index change (branch refresh) —
-//! never on the 1 Hz idle mtime poll, which stats the cached
-//! `current_gitdir` directly. The cheap ancestor-walk that finds the repo
-//! *root* (`find_repo_root`) stays pure-fs and runs every chdir.
+//! object/ref stores, so it is heavier than a single file read. Callers keep
+//! the open off the per-event path: `gitdir` runs only at chdir-into-a-*new*-
+//! repo (`set_repo_root` early-returns when the repo is unchanged), and
+//! `head_branch`'s caller (`AppState::compute_git_info_fast`, via
+//! `cached_head_branch`) memoizes the result by `HEAD`'s mtime — so although
+//! `refresh_listing` *calls* it on every fs-event, the gix open only fires
+//! when `HEAD` is actually rewritten (checkout / branch-switch). Neither runs
+//! on the 1 Hz idle mtime poll, which stats the cached `current_gitdir`
+//! directly. The cheap ancestor-walk that finds the repo *root*
+//! (`find_repo_root`) stays pure-fs and runs every chdir.
 
 use std::path::{Path, PathBuf};
 

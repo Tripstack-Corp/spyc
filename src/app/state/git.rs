@@ -147,9 +147,9 @@ impl AppState {
     ///
     /// Returns `None` if the listing dir isn't in a repo, mirroring
     /// the old `sysinfo::git_status` contract.
-    pub fn compute_git_info_fast(&self) -> Option<String> {
-        let repo_root = self.git_cache.current_repo_root.as_ref()?;
-        let branch = crate::git::discovery::head_branch(repo_root)?;
+    pub fn compute_git_info_fast(&mut self) -> Option<String> {
+        let repo_root = self.git_cache.current_repo_root.clone()?;
+        let branch = self.cached_head_branch(&repo_root)?;
         // Only trust the raw cache for the dirty marker if it was
         // captured for *this* repo. Without the `c.repo_root` filter,
         // a worktree switch left the top-bar showing the previous
@@ -160,9 +160,39 @@ impl AppState {
             .git_cache
             .git_status_cache
             .as_ref()
-            .filter(|c| &c.repo_root == repo_root)
+            .filter(|c| c.repo_root == repo_root)
             .is_some_and(|c| !c.entries.is_empty());
         Some(if dirty { format!("{branch}*") } else { branch })
+    }
+
+    /// Branch-display string for `repo_root`, memoized by `HEAD`'s mtime in
+    /// [`GitCache::head_branch_cache`] so the `gix::open` only fires when
+    /// `HEAD` is rewritten (checkout / branch-switch / detached-HEAD commit).
+    /// On an active filesystem `refresh_listing` trips every few seconds and
+    /// the unmemoized read re-opened the repo each time just to recover an
+    /// unchanged branch name. When `HEAD` can't be stat'd we can't validate
+    /// freshness, so we skip the cache and re-resolve (the prior behavior).
+    fn cached_head_branch(&mut self, repo_root: &Path) -> Option<String> {
+        let head_mtime = self
+            .git_cache
+            .current_gitdir
+            .as_ref()
+            .and_then(|d| std::fs::metadata(d.join("HEAD")).ok())
+            .and_then(|m| m.modified().ok());
+        if let Some(mtime) = head_mtime
+            && let Some((cached_root, cached_mtime, branch)) =
+                self.git_cache.head_branch_cache.as_ref()
+            && cached_root == repo_root
+            && *cached_mtime == mtime
+        {
+            return Some(branch.clone());
+        }
+        let branch = crate::git::discovery::head_branch(repo_root)?;
+        if let Some(mtime) = head_mtime {
+            self.git_cache.head_branch_cache =
+                Some((repo_root.to_path_buf(), mtime, branch.clone()));
+        }
+        Some(branch)
     }
 
     /// Stat `index` and `HEAD` in the cached gitdir — the hot-path

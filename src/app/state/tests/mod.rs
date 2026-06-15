@@ -534,6 +534,76 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     );
 }
 
+/// `compute_git_info_fast` memoizes the branch string by `HEAD`'s mtime:
+/// a matching `(repo_root, mtime)` key reuses the cached value WITHOUT
+/// re-opening gix, and a differing key re-resolves. Proven without relying
+/// on filesystem mtime granularity by poisoning the cache directly.
+#[test]
+fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+    let run_git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run_git(&["init", "-q", "--initial-branch=main"]);
+    std::fs::write(root.join("file.txt"), "v1\n").unwrap();
+    run_git(&["add", "file.txt"]);
+    run_git(&["commit", "-q", "-m", "v1"]);
+
+    let mut s = test_state();
+    s.listing.dir = root.clone();
+    s.start_dir = root.clone();
+    s.update_huge_tree(&root); // sets current_repo_root + current_gitdir
+
+    // First resolve opens gix and seeds the cache.
+    assert_eq!(s.compute_git_info_fast().as_deref(), Some("main"));
+    let (cached_root, cached_mtime, _) = s
+        .git_cache
+        .head_branch_cache
+        .clone()
+        .expect("first resolve seeds the branch cache");
+    assert_eq!(cached_root, root);
+
+    // Cache HIT: poison the stored string but keep the (root, mtime) key.
+    // A matching key must reuse the poisoned value — proving no gix re-open.
+    s.git_cache.head_branch_cache =
+        Some((cached_root.clone(), cached_mtime, "POISONED".to_string()));
+    assert_eq!(
+        s.compute_git_info_fast().as_deref(),
+        Some("POISONED"),
+        "matching HEAD mtime must reuse the cached branch without re-resolving"
+    );
+
+    // Cache MISS: force the stored mtime stale. A differing key must
+    // re-resolve via gix, recover the real branch, and re-cache.
+    s.git_cache.head_branch_cache =
+        Some((cached_root, std::time::UNIX_EPOCH, "POISONED".to_string()));
+    assert_eq!(
+        s.compute_git_info_fast().as_deref(),
+        Some("main"),
+        "stale HEAD mtime must re-resolve the branch"
+    );
+    assert_eq!(
+        s.git_cache
+            .head_branch_cache
+            .as_ref()
+            .map(|(_, _, b)| b.as_str()),
+        Some("main"),
+        "re-resolve refreshes the cache entry"
+    );
+}
+
 // ── count_files_in_dir_capped (R blast-radius walk, bounded) ──────
 #[test]
 fn count_files_capped_counts_under_cap_and_stops_at_cap() {
