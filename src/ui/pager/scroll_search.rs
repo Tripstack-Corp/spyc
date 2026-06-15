@@ -4,7 +4,7 @@
 
 use super::{PagerView, Search, VisualKind};
 
-use super::layout::{line_plain_text, partition_lines_static, visual_rows};
+use super::layout::{partition_lines_static, visual_rows};
 
 impl PagerView {
     pub const fn toggle_whitespace(&mut self) {
@@ -229,11 +229,24 @@ impl PagerView {
             return true;
         }
         let needle = query.to_lowercase();
+        // Reuse one plain-text scratch buffer across the whole buffer rather
+        // than allocating a fresh `line_plain_text` String per line. (The
+        // lowercase still allocates once per line — `to_lowercase` is kept
+        // for its exact, full-string casing semantics — so this is 1 alloc
+        // per line instead of 2, which matters on a large file pager where a
+        // single search commit scans every line.)
+        let mut plain = String::new();
         let matches: Vec<usize> = self
             .lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| line_plain_text(line).to_lowercase().contains(&needle))
+            .filter(|(_, line)| {
+                plain.clear();
+                for span in &line.spans {
+                    plain.push_str(&span.content);
+                }
+                plain.to_lowercase().contains(&needle)
+            })
             .map(|(i, _)| i)
             .collect();
         if matches.is_empty() {
