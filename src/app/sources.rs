@@ -73,6 +73,24 @@ pub fn coalesce_pending(
     None
 }
 
+/// Shared tail of every [`coalesce_recv`] arm: drain the rest of the burst
+/// into the pending Vecs, then surface a coalesced keystroke as `Input` or
+/// synthesize `Timeout` so the loop re-enters its pre-recv drains.
+fn coalesce_tail(
+    rx: &std::sync::mpsc::Receiver<Message>,
+    ctx: &mut RunCtx,
+) -> Result<Message, std::sync::mpsc::RecvTimeoutError> {
+    coalesce_pending(
+        rx,
+        &mut ctx.fs_pending,
+        &mut ctx.git_pending,
+        &mut ctx.mcp_pending,
+    )
+    .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
+        Ok(Message::Input(ev))
+    })
+}
+
 /// MVU Phase 3a: having received, *coalesce* — buffer every
 /// immediately-available FsEvent/GitResult/Mcp into the pending Vecs
 /// (drained at the top of the next iteration) and surface only an
@@ -94,42 +112,18 @@ pub fn coalesce_recv(
     match recvd {
         Ok(Message::FsEvent(ev)) => {
             ctx.fs_pending.push(ev);
-            coalesce_pending(
-                rx,
-                &mut ctx.fs_pending,
-                &mut ctx.git_pending,
-                &mut ctx.mcp_pending,
-            )
-            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                Ok(Message::Input(ev))
-            })
+            coalesce_tail(rx, ctx)
         }
         Ok(Message::GitResult(r)) => {
             ctx.git_pending.push(r);
-            coalesce_pending(
-                rx,
-                &mut ctx.fs_pending,
-                &mut ctx.git_pending,
-                &mut ctx.mcp_pending,
-            )
-            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                Ok(Message::Input(ev))
-            })
+            coalesce_tail(rx, ctx)
         }
         // MVU Phase 3d: buffer the MCP request (carries its reply
         // Sender), collapse companions, synthesize Timeout so the
         // pre-recv MCP drain executes it + replies.
         Ok(Message::Mcp(req)) => {
             ctx.mcp_pending.push(req);
-            coalesce_pending(
-                rx,
-                &mut ctx.fs_pending,
-                &mut ctx.git_pending,
-                &mut ctx.mcp_pending,
-            )
-            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                Ok(Message::Input(ev))
-            })
+            coalesce_tail(rx, ctx)
         }
         // MVU Phase 3b: a pane wake carries no payload to buffer —
         // collapse any companion wakes/fs/git, then synthesize a
@@ -144,15 +138,7 @@ pub fn coalesce_recv(
             // synthesize Timeout so control re-enters the pre-recv
             // drains (pane scan + capture/task drains).
             spyc_debug!("sink wake: {tab:?}");
-            coalesce_pending(
-                rx,
-                &mut ctx.fs_pending,
-                &mut ctx.git_pending,
-                &mut ctx.mcp_pending,
-            )
-            .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-                Ok(Message::Input(ev))
-            })
+            coalesce_tail(rx, ctx)
         }
         // MVU Phase 3d / Phase 6: a grep/finder wake, a reader
         // death-wake, or an agent-status-resolved wake — all
@@ -171,15 +157,7 @@ pub fn coalesce_recv(
             // Tier 5: graveyard-op-done — payloadless, drained by the pre-recv
             // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
             | Message::GraveyardDone,
-        ) => coalesce_pending(
-            rx,
-            &mut ctx.fs_pending,
-            &mut ctx.git_pending,
-            &mut ctx.mcp_pending,
-        )
-        .map_or(Err(std::sync::mpsc::RecvTimeoutError::Timeout), |ev| {
-            Ok(Message::Input(ev))
-        }),
+        ) => coalesce_tail(rx, ctx),
         other => other,
     }
 }
