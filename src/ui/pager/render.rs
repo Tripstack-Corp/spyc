@@ -22,28 +22,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
 
     frame.render_widget(Clear, inner_area);
 
-    let pos = view.position_indicator(inner_area.height.saturating_sub(2));
-    let title_style = Style::default()
-        .fg(theme.prompt_prefix)
-        .add_modifier(Modifier::BOLD);
-    // Flash is teal + BOLD against the amber title so help notices
-    // (e.g. "truncated at 5000 lines · press p for full file in
-    // $PAGER") stand out clearly as a separate piece of info, not as
-    // an extension of the filename.
-    let flash_style = Style::default().fg(theme.take).add_modifier(Modifier::BOLD);
-    let title_line: Line<'static> = if let Some(ref msg) = view.flash {
-        Line::from(vec![
-            Span::styled(format!("  {}  ", view.title), title_style),
-            Span::styled(format!(" {msg} "), flash_style),
-            Span::styled("  ", title_style),
-        ])
-    } else {
-        Line::from(Span::styled(
-            format!("  {}   ({} lines)  ", view.title, view.lines.len()),
-            title_style,
-        ))
-    };
-    let title_right = format!("  {pos}  ");
     // Borderless when:
     //   - `full_width` (current behavior — terminal text selection
     //     is clean without the box drawing).
@@ -51,10 +29,36 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     //     slot, which the pty renders into without a border. Drawing
     //     a border eats two rows of usable content and visually
     //     disrupts the layout the user just had on-screen.
+    // The title bar and position indicator only exist on the bordered
+    // block, so build them inside that branch — borderless mode discarded
+    // them before (and fed `position_indicator` an `inner-2` viewport that
+    // doesn't match a border-free body anyway).
     let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
     let block = if borderless {
         Block::default()
     } else {
+        let pos = view.position_indicator(inner_area.height.saturating_sub(2));
+        let title_style = Style::default()
+            .fg(theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        // Flash is teal + BOLD against the amber title so help notices
+        // (e.g. "truncated at 5000 lines · press p for full file in
+        // $PAGER") stand out clearly as a separate piece of info, not as
+        // an extension of the filename.
+        let flash_style = Style::default().fg(theme.take).add_modifier(Modifier::BOLD);
+        let title_line: Line<'static> = if let Some(ref msg) = view.flash {
+            Line::from(vec![
+                Span::styled(format!("  {}  ", view.title), title_style),
+                Span::styled(format!(" {msg} "), flash_style),
+                Span::styled("  ", title_style),
+            ])
+        } else {
+            Line::from(Span::styled(
+                format!("  {}   ({} lines)  ", view.title, view.lines.len()),
+                title_style,
+            ))
+        };
+        let title_right = format!("  {pos}  ");
         Block::default()
             .borders(Borders::ALL)
             .title(title_line)
