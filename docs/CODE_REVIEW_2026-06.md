@@ -984,7 +984,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/state/dispatch.rs:236` | Sort-apply logic triplicated across :sort reverse, :sort <mode>, and :set sort= | maintainability | confirmed · ✅ #382 |
 | `src/app/state/dispatch.rs:280` | Invalid glob in the pick-pattern prompt is silently swallowed | correctness | confirmed · ✅ #363 |
 | `src/app/state/mod.rs:153` | PagerLines is a single-variant enum that every consumer irrefutably destructures | maintainability | confirmed · ✅ #382 |
-| `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed |
+| `src/app/streaming.rs:146` | drain_pending_capture hand-rolls a human-duration formatter that duplicates util::format_uptime | maintainability | confirmed · ✅ #411 (sibling `format_elapsed_hms`; divergence intentional — live timer keeps seconds) |
 | `src/app/tasks.rs:27` | TaskStatus::Killed is a dead variant for a feature that never landed; the dead_code allow on Crashed is stale | maintainability | confirmed · ✅ #353 |
 | `src/app/tasks.rs:560` | Task exit-status glyph/text formatting and the strip_crlf+into_text rebuild are triplicated | maintainability | confirmed |
 | `src/app/util.rs:193` | hostname resolved by fork-execing the hostname binary instead of a syscall/crate | maintainability | confirmed · ✅ #409 |
