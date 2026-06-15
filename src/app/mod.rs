@@ -534,8 +534,9 @@ pub struct ViewState {
     pending_pager_return: Option<PagerReturn>,
     /// Path to the `.spyc-context.json` file (written each loop for MCP).
     pub context_path: PathBuf,
-    /// Last serialized context JSON — skip the disk write when unchanged.
-    pub last_context_json: String,
+    /// Last context snapshot written to disk — skip the write when the new
+    /// snapshot compares equal (avoids serializing just to diff).
+    pub last_context: Option<crate::context::SpycContext>,
     /// `.spyc-context.json` is stale and should be rewritten (debounced +
     /// typing-burst-guarded).
     pub context_dirty: bool,
@@ -628,7 +629,7 @@ impl ViewState {
             scroll_pending_g: false,
             pending_pager_return: None,
             context_path,
-            last_context_json: String::new(),
+            last_context: None,
             context_dirty,
             mcp_running,
             focus_chord_completed: None,
