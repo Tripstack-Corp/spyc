@@ -552,7 +552,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/PANE_RECOVERY_PLAN.md` | Pending design (Phase 0 is road-to-2.0). |
 | `docs/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
 | `docs/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
-| `docs/TEST_IMPROVEMENT_PLAN.md` | Phase 1 shipped; remainder is road-to-2.0. |
+| `docs/TEST_IMPROVEMENT_PLAN.md` | Testing campaign charter (coverage + anti-"test theater"). Phase 1 (App harness) shipped; remainder is road-to-2.0. |
 | `docs/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
 | `docs/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
 | `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (2026-05-28); refresh on Yazi's next major. |
