@@ -93,17 +93,22 @@ impl App {
     /// Skips the disk write when the serialized JSON is unchanged.
     pub fn write_context(&mut self) {
         let ctx = self.snapshot_context();
-        let json = serde_json::to_string_pretty(&ctx).unwrap_or_default();
-        if json == self.view.last_context_json {
+        // Skip the disk write when state is unchanged. Compare the snapshot
+        // struct directly rather than its serialized JSON: equal structs
+        // serialize to equal JSON (the snapshot has no nondeterministic
+        // fields), so this is the same dedup decision without serializing a
+        // second time purely to compare — `write_context_file` does the one
+        // and only serialization, on the write path.
+        if self.view.last_context.as_ref() == Some(&ctx) {
             return;
         }
         // MVU Phase 3d: only advance the dedup cache when the write actually
-        // landed. If `write_context_file` fails, `last_context_json` stays
-        // behind disk, so a later identical-state mutation still writes
-        // instead of dedup-skipping into a stale file. (The 500ms cap used to
-        // mask this by re-running the debounced writer; it's gone now.)
+        // landed. If the write fails, `last_context` stays behind disk, so a
+        // later identical-state mutation still writes instead of dedup-skipping
+        // into a stale file. (The 500ms cap used to mask this by re-running the
+        // debounced writer; it's gone now.)
         if crate::context::write_context_file(&self.view.context_path, &ctx).is_ok() {
-            self.view.last_context_json = json;
+            self.view.last_context = Some(ctx);
         }
     }
 

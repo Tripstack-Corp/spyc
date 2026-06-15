@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 /// Snapshot of spyc's user-visible state, serialized to JSON.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpycContext {
     /// Current working directory shown in the file list.
     pub cwd: PathBuf,
@@ -120,5 +120,35 @@ mod tests {
         let path = context_path(tmp.path());
         // Removing a file that doesn't exist should not panic.
         remove_context_file(&path);
+    }
+
+    /// `App::write_context` dedups by comparing the snapshot struct instead
+    /// of its serialized JSON. That's only valid if equal structs serialize
+    /// identically and unequal ones differ — lock that invariant here.
+    #[test]
+    fn struct_equality_tracks_serialized_json() {
+        let base = SpycContext {
+            cwd: PathBuf::from("/p"),
+            cursor_file: Some("a.rs".into()),
+            picks: vec![PathBuf::from("src/lib.rs")],
+            inventory: vec![],
+            filter: None,
+            git_branch: Some("main".into()),
+            project_home: None,
+            session_name: "SAFFRON_CUMIN".into(),
+        };
+        let same = base.clone();
+        let mut different = base.clone();
+        different.cursor_file = Some("b.rs".into());
+
+        let j = |c: &SpycContext| serde_json::to_string_pretty(c).unwrap();
+        assert_eq!(base, same);
+        assert_eq!(j(&base), j(&same), "equal structs must serialize equally");
+        assert_ne!(base, different);
+        assert_ne!(
+            j(&base),
+            j(&different),
+            "changed struct must serialize differently"
+        );
     }
 }
