@@ -33,11 +33,25 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // block, so build them inside that branch — borderless mode discarded
     // them before (and fed `position_indicator` an `inner-2` viewport that
     // doesn't match a border-free body anyway).
+    // Multi-column partition is viewport-independent, so compute it ONCE here
+    // and share it with the position indicator and the body layout below.
+    // Previously each of `position_indicator`, `render_multi_column` (and
+    // `clamp_scroll` on input) re-ran `partition_lines_static` — up to 3
+    // O(lines) scans per keystroke in multi-col mode. This collapses the two
+    // render-pass scans into one.
+    let ncols = view.columns.max(1) as usize;
+    let multi_col_chunks = (ncols > 1).then(|| partition_lines_static(&view.lines, ncols));
+
     let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
     let block = if borderless {
         Block::default()
     } else {
-        let pos = view.position_indicator(inner_area.height.saturating_sub(2));
+        let pos = match &multi_col_chunks {
+            Some(chunks) => {
+                view.position_indicator_multi(chunks, inner_area.height.saturating_sub(2))
+            }
+            None => view.position_indicator(inner_area.height.saturating_sub(2)),
+        };
         let title_style = Style::default()
             .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
@@ -79,7 +93,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // views (help) the row is always reserved so the viewport height stays
     // constant when search is activated — otherwise the column layout
     // would reflow. In single-column views it's only shown when active.
-    let ncols = view.columns.max(1) as usize;
     let show_search_row = view.status_text().is_some() || ncols > 1;
     let (content_area, search_area) = if show_search_row {
         (
@@ -108,8 +121,8 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // and the rest with `~` until the user manually scrolled).
     view.last_viewport_h.set(content_area.height);
 
-    if ncols > 1 {
-        render_multi_column(frame, content_area, view, theme, ncols);
+    if let Some(chunks) = multi_col_chunks {
+        render_multi_column(frame, content_area, view, theme, ncols, &chunks);
     } else {
         render_single_column(frame, content_area, view, theme);
     }
@@ -235,6 +248,7 @@ fn render_multi_column(
     view: &PagerView,
     theme: &Theme,
     ncols: usize,
+    chunks: &[(usize, usize)],
 ) {
     let viewport_h = content_area.height as usize;
     let scroll = view.scroll as usize;
@@ -249,10 +263,9 @@ fn render_multi_column(
 
     // Static partition: content-to-column mapping is fixed (doesn't shift
     // as the user scrolls). Each column then applies the scroll offset
-    // independently within its own chunk.
-    let chunks = partition_lines_static(&view.lines, ncols);
-
-    for (col, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
+    // independently within its own chunk. The partition is computed once in
+    // `render` and shared with the position indicator (passed in as `chunks`).
+    for (col, &(chunk_start, chunk_end)) in chunks.iter().enumerate() {
         let chunk_len = chunk_end - chunk_start;
         let local_scroll = scroll.min(chunk_len);
         let col_start = chunk_start + local_scroll;

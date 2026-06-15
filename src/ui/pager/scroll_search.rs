@@ -83,16 +83,13 @@ impl PagerView {
     pub fn scroll_max(&self, viewport_height: u16) -> u16 {
         let ncols = self.columns.max(1) as usize;
         if ncols > 1 {
-            // Multi-col: keep the prior partition-based bound. Wrap
-            // is irrelevant here because multi-col is only used for
-            // pickers (find finder, task viewer) where wrap is off.
-            let longest = partition_lines_static(&self.lines, ncols)
-                .into_iter()
-                .map(|(s, e)| e - s)
-                .max()
-                .unwrap_or(0);
-            return u16::try_from(longest.saturating_sub(viewport_height.into()))
-                .unwrap_or(u16::MAX);
+            // Multi-col: bound by the longest column chunk. Wrap is irrelevant
+            // here because multi-col is only used for pickers (find finder,
+            // task viewer) where wrap is off.
+            return Self::multi_col_max_scroll(
+                &partition_lines_static(&self.lines, ncols),
+                viewport_height,
+            );
         }
         let logical_max = u16::try_from(self.lines.len().saturating_sub(viewport_height.into()))
             .unwrap_or(u16::MAX);
@@ -167,23 +164,52 @@ impl PagerView {
         self.clamp_scroll(h);
     }
 
+    /// Greatest scroll offset for a multi-column layout: the longest column
+    /// chunk (each column scrolls independently within its chunk) minus the
+    /// viewport. Split out so the render pass can pass a partition it already
+    /// computed instead of re-partitioning (see [`Self::position_indicator_multi`]).
+    fn multi_col_max_scroll(chunks: &[(usize, usize)], viewport_height: u16) -> u16 {
+        let longest = chunks.iter().map(|(s, e)| e - s).max().unwrap_or(0);
+        u16::try_from(longest.saturating_sub(viewport_height.into())).unwrap_or(u16::MAX)
+    }
+
+    /// The "Top" / "Bot" / "All" / "NN%" label from a scroll position and its
+    /// max. Shared by the single- and multi-column indicator paths.
+    fn indicator_string(scroll: u16, max_scroll: u16) -> String {
+        if max_scroll == 0 {
+            return "All".to_string();
+        }
+        if scroll == 0 {
+            return "Top".to_string();
+        }
+        if scroll >= max_scroll {
+            return "Bot".to_string();
+        }
+        let pct = (u32::from(scroll) * 100) / u32::from(max_scroll);
+        format!("{pct}%")
+    }
+
     /// Position indicator: "Top", "Bot", "All", or "NN%".
     /// Percentage is based on scroll progress through the "effective"
     /// document length — in multi-col that's the longest chunk, not the
     /// total line count, since each column's chunk scrolls independently.
     pub fn position_indicator(&self, viewport_height: u16) -> String {
-        let max_scroll = self.scroll_max(viewport_height);
-        if max_scroll == 0 {
-            return "All".to_string();
-        }
-        if self.scroll == 0 {
-            return "Top".to_string();
-        }
-        if self.scroll >= max_scroll {
-            return "Bot".to_string();
-        }
-        let pct = (u32::from(self.scroll) * 100) / u32::from(max_scroll);
-        format!("{pct}%")
+        Self::indicator_string(self.scroll, self.scroll_max(viewport_height))
+    }
+
+    /// Like [`Self::position_indicator`] but for a multi-column layout whose
+    /// partition the caller already holds — avoids re-partitioning. The render
+    /// pass computes the partition once and shares it across the body layout
+    /// and this indicator (previously each re-ran `partition_lines_static`).
+    pub(super) fn position_indicator_multi(
+        &self,
+        chunks: &[(usize, usize)],
+        viewport_height: u16,
+    ) -> String {
+        Self::indicator_string(
+            self.scroll,
+            Self::multi_col_max_scroll(chunks, viewport_height),
+        )
     }
 
     // ---- Search ----------------------------------------------------------
