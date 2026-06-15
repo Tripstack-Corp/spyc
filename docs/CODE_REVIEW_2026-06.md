@@ -959,7 +959,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/mod.rs:849` | Matcher::matches allocates a lowercased String per candidate name — O(n) allocation churn per filter/search pass | perf | confirmed · ✅ fixed in #344 (allocation-free ASCII case-insensitive substring fast path; glob skips the lowercasing alloc for already-lowercase ASCII names; non-ASCII keeps `to_lowercase` fallback) |
 | `src/app/pager_handler/mod.rs:154` | close_pane_scroll_pager doc claims callers that don't exist | maintainability | confirmed · ✅ #352 |
 | `src/app/pager_handler/mod.rs:331` | Stale comment: rename "queued for the folding work in v1.50.73" never happened | maintainability | confirmed · ✅ #352 |
-| `src/app/pager_handler/modes.rs:119` | Jump buffer state mirrored in ViewState and PagerView, hand-synced at eight sites | maintainability | confirmed |
+| `src/app/pager_handler/modes.rs:119` | Jump buffer state mirrored in ViewState and PagerView, hand-synced at eight sites | maintainability | confirmed · ✅ #421 (single-sourced on PagerView) |
 | `src/app/pager_handler/modes.rs:143` | `:N` jump past end-of-file blanks the entire pager viewport | correctness | confirmed · ✅ #368 |
 | `src/app/pager_handler/modes.rs:178` | handle_pager_bracket: '[' and ']' arms are 15-line mirror copies | maintainability | confirmed · ✅ #381 |
 | `src/app/pager_handler/motion.rs:158` | `f` (toggle full-width) on a git-view pager does not re-render the fixed-width rows at the new width | correctness | confirmed · ✅ #378 |
