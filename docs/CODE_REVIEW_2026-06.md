@@ -969,7 +969,7 @@ PromptLine::render builds one Line from mode_tag + prefix + the FULL buffer and 
 | `src/app/pane_tabs.rs:346` | :dump-scrollback writes pane contents to a fixed, predictable, symlink-followed path in /tmp | security | confirmed ✅ #337 |
 | `src/app/pane_wake.rs:44` | Wake-builder doc comments assert a safety net (poll floor / MAX_IDLE_CAP) that no longer exists | maintainability | confirmed · ✅ #352 |
 | `src/app/prompt.rs:29` | Stale #[allow(dead_code)] on Prompt::editor and stale RemoveConfirm doc | maintainability | confirmed · ✅ #353 |
-| `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed |
+| `src/app/prompt.rs:231` | "matches + Tab to cycle" flash formatting copy-pasted three times in one file | maintainability | confirmed · ✅ #410 |
 | `src/app/render/chrome.rs:76` | Stale comment: 're-borrow mut to fetch the live cwd' in a &self render method | maintainability | confirmed · ✅ #352 |
 | `src/app/render/inner.rs:214` | Dead bottom_pane_rect binding kept alive by a comment that no longer holds | maintainability | confirmed · ✅ #353 |
 | `src/app/render/overlays.rs:215` | Activity HUD reads env vars and process id every frame inside the render pass | maintainability | confirmed · ✅ fixed in #348 (pid + `$TERM` + truecolor are process-lifetime constants — snapshotted once into ViewState at construction; render reads the cache, no per-frame OS/env access) |
