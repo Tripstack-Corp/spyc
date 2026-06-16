@@ -232,6 +232,21 @@ impl App {
     ) -> bool {
         let mut needs_draw = false;
         let mut needs_reload = false;
+        // Drop FSEvents under gitignored build/cache dirs (`target/`,
+        // `fuzz/target`, `node_modules/`, `.claude/`, …) before ingesting: the
+        // recursive watch can't skip those subtrees (one FSEvents stream for
+        // the whole tree), and their churn — a cargo build, a fuzz run — would
+        // otherwise flood the loop and starve the git poll, leaving the dirty
+        // markers stale. Built once per batch; fails open (no repo / no
+        // matcher → keep everything).
+        if let Some(root) = self.state.git_cache.current_repo_root.clone() {
+            crate::git::excludes::with_checker(&root, |is_excluded| {
+                ctx.fs_pending.retain_mut(|ev| {
+                    ev.paths.retain(|p| !is_excluded(p));
+                    !ev.paths.is_empty()
+                });
+            });
+        }
         for ev in std::mem::take(&mut ctx.fs_pending) {
             self.ingest_fs_event(
                 &ev,

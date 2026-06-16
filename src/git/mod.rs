@@ -16,6 +16,7 @@
 pub mod blame;
 pub mod diff_model;
 pub mod discovery;
+pub mod excludes;
 pub mod model;
 pub mod status;
 pub mod worktree;
