@@ -508,3 +508,125 @@ fn cycle_task_viewer_wraps_across_tasks() {
         assert_eq!(app.runtime.background_tasks.tasks.len(), 2);
     });
 }
+
+// ── quick-select dispatch + path-jump (testing campaign, cluster 6) ──
+// The scanner is unit-tested in src/pane/quick_select.rs and the kind ×
+// intent action matrix in src/app/quick_select.rs; these cover the overlay
+// state machine + the path leaf's *not-found* branch. The successful jump
+// executes `chdir` → `std::env::set_current_dir` (a process-global mutation
+// that races the parallel test runner — the codebase keeps unit tests
+// chdir-free), and the yank / URL-open / git-show leaves are impure
+// (clipboard / OS opener / git), so those are covered at the pure-matrix
+// level rather than executed here.
+
+/// A path jump to a nonexistent path flashes and does NOT chdir.
+#[test]
+fn jump_to_pane_path_missing_flashes_not_found() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let start = tmp.path().join("start");
+        std::fs::create_dir(&start).unwrap();
+        let mut app = App::test_app(start);
+        let before = app.state.listing.dir.clone();
+        app.jump_to_pane_path("/no/such/path/xyz123");
+        assert_eq!(app.state.listing.dir, before, "missing path must not chdir");
+        assert!(
+            app.flash_text()
+                .unwrap_or_default()
+                .contains("path not found"),
+            "missing path flashes not-found"
+        );
+    });
+}
+
+fn qs_path_overlay(target: &str) -> crate::pane::quick_select::QuickSelect {
+    crate::pane::quick_select::QuickSelect {
+        matches: vec![crate::pane::quick_select::Match {
+            text: target.to_string(),
+            kind: crate::pane::quick_select::MatchKind::Path,
+            label: "a".to_string(),
+            row: 0,
+            col: 0,
+        }],
+        pending_first: None,
+        all_two_letter: false,
+        open_intent: false,
+    }
+}
+
+/// Esc closes the Quick Select overlay with no dispatch (no chdir).
+#[test]
+fn quick_select_esc_closes_without_dispatch() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let start = tmp.path().join("start");
+        let target = tmp.path().join("target");
+        std::fs::create_dir(&start).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        let mut app = App::test_app(start);
+        let before = app.state.listing.dir.clone();
+        app.view.quick_select = Some(qs_path_overlay(target.to_str().unwrap()));
+        app.handle_key(esc()).unwrap();
+        assert!(app.view.quick_select.is_none(), "Esc closes the overlay");
+        assert_eq!(app.state.listing.dir, before, "Esc dispatches nothing");
+    });
+}
+
+/// An uppercase (open-intent) label on a Path match dispatches the *open*
+/// (jump), not a yank — proving the lowercase-yank / uppercase-open split
+/// end to end through the full key path. Targets a *missing* path so the
+/// jump flashes and returns before `chdir` (a successful jump would
+/// `set_current_dir` and race the parallel runner); a yank would not flash
+/// "path not found".
+#[test]
+fn quick_select_uppercase_path_label_dispatches_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.view.quick_select = Some(qs_path_overlay("/no/such/qs/path/zzz"));
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::empty()))
+            .unwrap();
+        assert!(
+            app.view.quick_select.is_none(),
+            "label commit closes the overlay"
+        );
+        assert!(
+            app.flash_text()
+                .unwrap_or_default()
+                .contains("path not found"),
+            "uppercase Path label dispatched the open (jump) → not-found flash"
+        );
+    });
+}
+
+/// In the 2-letter-label case, an uppercase first keystroke arms the sticky
+/// open-intent bit and narrows (the overlay stays open for the 2nd key).
+#[test]
+fn quick_select_two_letter_uppercase_first_arms_open_intent() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        let mk = |label: &str| crate::pane::quick_select::Match {
+            text: "x".to_string(),
+            kind: crate::pane::quick_select::MatchKind::Path,
+            label: label.to_string(),
+            row: 0,
+            col: 0,
+        };
+        app.view.quick_select = Some(crate::pane::quick_select::QuickSelect {
+            matches: vec![mk("aa"), mk("ab")],
+            pending_first: None,
+            all_two_letter: true,
+            open_intent: false,
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::empty()))
+            .unwrap();
+        let qs = app
+            .view
+            .quick_select
+            .as_ref()
+            .expect("overlay stays open after the first of two keys");
+        assert_eq!(qs.pending_first, Some('a'));
+        assert!(qs.open_intent, "uppercase first keystroke arms open intent");
+    });
+}
