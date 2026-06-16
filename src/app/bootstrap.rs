@@ -250,14 +250,11 @@ impl App {
             },
         };
         app.state.rebuild_rows();
-        // Evaluate huge-tree status at startup so the first 1 Hz poll
-        // / first event-driven refresh uses the right cadence and
-        // `git status` flag. Without this, spyc launched directly
-        // in a 110k-file project root would run small-tree cadence
-        // until the user navigated somewhere.
+        // Resolve + cache the repo root at startup so the first git read
+        // (and the FSEvent exclude filter) have it before the user navigates.
         let initial_cwd = app.state.listing.dir.clone();
-        app.state.update_huge_tree(&initial_cwd);
-        // Now that the worker is wired and we know is_huge_tree,
+        app.state.update_repo_root(&initial_cwd);
+        // Now that the worker is wired and the repo root is cached,
         // kick off the first git read in the background. The branch
         // string is computed sync via gix (compute_git_info_fast ->
         // discovery::head_branch) so it's available on the first paint;

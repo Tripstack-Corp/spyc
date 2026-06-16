@@ -17,8 +17,8 @@ use crate::pane::PaneTabs;
 /// captured `now`, so an armed deadline never blindly fires work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Deadline {
-    /// 1 Hz git safety-net poll (1 s normal / 10 s huge-tree). Armed only
-    /// while `git_info.is_some()`. PRE-recv timer.
+    /// 1 Hz git safety-net poll (1 s). Armed only while
+    /// `git_info.is_some()`. PRE-recv timer.
     GitPoll,
     /// 1 s activity-monitor rollover. Armed only while `show_activity`.
     /// POST-recv timer.

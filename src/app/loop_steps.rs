@@ -57,18 +57,14 @@ impl App {
         self.recompute_focus();
     }
 
-    /// 1 Hz safety-net git poll (10 s for huge trees) — converges within a
-    /// second when FSEvents misses an atomic-rename `.git/index` replace.
-    /// Diff-aware (`refresh_git_state` only repaints on a real change, so idle
-    /// dps stays 0). Also arms/disarms the advisory `GitPoll` deadline.
-    /// Returns whether a redraw is needed.
+    /// 1 Hz safety-net git poll — converges within a second when FSEvents
+    /// misses an atomic-rename `.git/index` replace. Diff-aware
+    /// (`refresh_git_state` only repaints on a real change, so idle dps stays
+    /// 0). Also arms/disarms the advisory `GitPoll` deadline. Returns whether a
+    /// redraw is needed.
     pub(crate) fn poll_git_cadence(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
-        let git_poll_interval = if self.state.git_cache.is_huge_tree {
-            Duration::from_secs(10)
-        } else {
-            Duration::from_secs(1)
-        };
+        let git_poll_interval = Duration::from_secs(1);
         if self.state.git.info.is_some()
             && now_pre.duration_since(ctx.last_git_poll) >= git_poll_interval
         {

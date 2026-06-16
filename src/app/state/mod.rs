@@ -274,9 +274,9 @@ pub struct PaneSnapshot {
 }
 
 /// Git status/worker plumbing cached on the Model: the 1 Hz mtime
-/// short-circuit pair, the huge-tree decision + its per-anchor cache,
-/// the resolved repo-root/gitdir, the structured-status cache, and the
-/// off-thread worker outbox/generation/timing. Grouped out of `AppState`
+/// short-circuit pair, the resolved repo-root/gitdir, the
+/// structured-status cache, and the off-thread worker
+/// outbox/generation/timing. Grouped out of `AppState`
 /// (the loose git-cache fields) so the Model field block stays legible;
 /// the display pair lives separately in [`GitState`].
 #[derive(Default)]
@@ -309,51 +309,13 @@ pub struct GitCache {
     /// FS-mtime caveat of [`Self::git_poll_cache`] (same key, same 1 Hz poll
     /// gate). `None` until the first resolve, or outside a repo.
     pub head_branch_cache: Option<(std::path::PathBuf, std::time::SystemTime, String)>,
-    /// Set at `chdir` when the new project root has more than
-    /// `HUGE_TREE_SUBDIR_THRESHOLD` subdirs (measured with the
-    /// bounded-DFS `count_subdirs_capped`). Drives two adaptive
-    /// behaviors in the event loop:
-    ///
-    /// - Slower poll cadence: `REFRESH_QUIET` 500 ms → 3 s,
-    ///   `GIT_POLL_INTERVAL` 1 s → 10 s.
-    /// - Initial flash on first detection so the user sees the
-    ///   trade.
-    ///
-    /// Decision is cached by [`Self::huge_tree_anchor`]: drilling
-    /// down or popping up within the same project reuses the
-    /// previous decision without re-walking. Re-evaluated only
-    /// when the chdir crosses into a different project root (or
-    /// out of any repo). Without the cache, drilling into a
-    /// deeply-nested Java package layout (`src/main/java/com/...`)
-    /// took hundreds of ms per chdir as each step re-ran
-    /// `count_subdirs_capped` against an increasingly large
-    /// subtree.
-    pub is_huge_tree: bool,
-    /// Path that `is_huge_tree` is cached against — the repo root
-    /// of the active project, or the canonical listing dir when
-    /// not in a repo. `chdir` recomputes `is_huge_tree` only when
-    /// the new dir resolves to a different anchor. Without this,
-    /// every navigation step on a deeply-nested tree (typical
-    /// Java package layout: `src/main/java/com/...`) would re-run
-    /// `count_subdirs_capped` — observed as multi-hundred-ms
-    /// drill-in latency on a ~110k-file project.
-    pub huge_tree_anchor: Option<std::path::PathBuf>,
-    /// Multi-slot cache of huge-tree decisions per anchor path,
-    /// keyed on the same value that `huge_tree_anchor` would hold.
-    /// `huge_tree_anchor` is a single-slot "current" pointer — it
-    /// tells us whether the *active* project is huge — but the
-    /// decision behind it is project-wide and stable. Caching every
-    /// previously-computed decision means re-entering a project we
-    /// already classified (after a brief excursion to its parent dir
-    /// or to a sibling repo) skips `count_subdirs_capped` entirely.
-    pub huge_tree_decisions: std::collections::HashMap<std::path::PathBuf, bool>,
     /// Repo root of the active project (the directory containing
     /// `.git`), or `None` when the listing dir isn't inside any
-    /// repo. Updated alongside `huge_tree_anchor` in
-    /// `update_huge_tree`. Used to compute the
-    /// `git status --porcelain` prefix without spawning
-    /// `git rev-parse --show-toplevel`, and as the cache key for
-    /// `git_status_cache`.
+    /// repo. Resolved + cached on chdir by `update_repo_root`. Used to
+    /// compute the `git status --porcelain` prefix without spawning
+    /// `git rev-parse --show-toplevel`, as the cache key for
+    /// `git_status_cache`, and as the root for the gitignore-aware
+    /// FSEvent filter (`git::excludes`).
     pub current_repo_root: Option<std::path::PathBuf>,
     /// The active repo's *resolved* gitdir — `<root>/.git` for a normal
     /// repo, or `<main>/.git/worktrees/<name>/` for a linked worktree
@@ -686,10 +648,10 @@ pub(super) fn count_files_in_dir_capped(dir: &Path, cap: u64) -> u64 {
 /// Walk up from `start` looking for an enclosing `.git` (dir or
 /// gitfile). Returns the directory containing the `.git/`, or
 /// `None` if we hit the filesystem root without finding one.
-/// Used as the cache key for `AppState::update_huge_tree` — the
-/// huge-tree decision is project-wide, so anchoring on the repo
-/// root lets every chdir within that project reuse the same
-/// determination without re-walking the subtree.
+/// Used by `AppState::update_repo_root` to cache the current repo
+/// root, so every chdir within a project reuses the same root
+/// without re-walking, and the git-status cache is invalidated only
+/// when the root actually changes.
 ///
 /// Filesystem-only (no `git rev-parse` subprocess) — a few `lstat`
 /// calls per ancestor.

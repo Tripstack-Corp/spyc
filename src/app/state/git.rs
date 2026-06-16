@@ -1,6 +1,6 @@
 //! `AppState` git display/cache state: status refresh, the cached-status
-//! lookup, fast info/mtime probes, repo-root resolution, and the huge-tree
-//! decision. Split from `state` verbatim.
+//! lookup, fast info/mtime probes, and repo-root resolution. Split from
+//! `state` verbatim.
 
 use std::path::Path;
 
@@ -69,9 +69,8 @@ impl AppState {
     /// chdir within the same repo. On the ~110k-file Java monorepo,
     /// this drops per-chdir cost from 200-500 ms to sub-millisecond.
     ///
-    /// Caller must have already called [`Self::update_huge_tree`] for
-    /// `canonical` so `current_repo_root` and `is_huge_tree` reflect
-    /// the new dir.
+    /// Caller must have already called [`Self::update_repo_root`] for
+    /// `canonical` so `current_repo_root` reflects the new dir.
     pub fn git_file_statuses_cached(
         &mut self,
         canonical: &Path,
@@ -229,63 +228,18 @@ impl AppState {
         self.git_cache.current_repo_root = repo_root;
     }
 
-    /// Recompute `is_huge_tree` / `huge_tree_anchor` for the given
-    /// canonical dir. The cached anchor (the active project's repo
-    /// root, or the dir itself when not in a repo) short-circuits
-    /// re-walking on every chdir within the same project — drilling
-    /// into a deeply-nested Java package layout was observed taking
-    /// hundreds of ms per step because each chdir re-ran the
-    /// bounded-DFS walk over the package subtree.
+    /// Resolve + cache the active repo root (and gitdir) for the given
+    /// canonical dir, called on every chdir. `find_repo_root` walks up to the
+    /// enclosing `.git`; cheap, so there's no per-project memoization.
     ///
-    /// On a real anchor change (different repo / different non-repo
-    /// dir), runs `count_subdirs_capped` and flashes if newly huge.
-    /// Returns true if `is_huge_tree` is now set, mostly for tests.
-    pub fn update_huge_tree(&mut self, canonical: &Path) -> bool {
+    /// Also wipes the raw-status cache when crossing into a *different* repo
+    /// (worktree switch): `git_file_statuses_cached` does its own key check on
+    /// the marker path, but `compute_git_info_fast` didn't, and Spencer
+    /// reported brief "stale dirty marker" flashes on worktree switches.
+    /// Going from a repo to a non-repo dir doesn't satisfy `repo_root.is_some()`
+    /// here, so the cache lives on for re-entry.
+    pub fn update_repo_root(&mut self, canonical: &Path) {
         let repo_root = find_repo_root(canonical);
-        let new_anchor = repo_root.clone().unwrap_or_else(|| canonical.to_path_buf());
-        if self.git_cache.huge_tree_anchor.as_ref() == Some(&new_anchor) {
-            // Same project — keep the cached decision and skip the
-            // walk. No flash either (we've already flashed this
-            // project's first entry if it was huge).
-            self.set_repo_root(repo_root);
-            return self.git_cache.is_huge_tree;
-        }
-        let was_huge = self.git_cache.is_huge_tree;
-        // Look up a previously-cached decision for this anchor before
-        // walking. Multi-slot cache survives leave-and-return cycles
-        // (drill into the huge project → up to its parent → back in)
-        // that the single-slot `huge_tree_anchor` thrashed on,
-        // forcing a fresh `count_subdirs_capped` walk every time.
-        self.git_cache.is_huge_tree =
-            if let Some(&cached) = self.git_cache.huge_tree_decisions.get(&new_anchor) {
-                cached
-            } else {
-                // gitignore-aware: count only what `git status` walks, so a
-                // checkout's `target/` / `.claude/` / `node_modules/` (all
-                // gitignored, thousands of dirs) don't mis-flag an otherwise
-                // small repo as huge and throttle its git polling to 10 s.
-                let huge = crate::app::count_unignored_subdirs_capped(
-                    &new_anchor,
-                    crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
-                ) > crate::app::HUGE_TREE_SUBDIR_THRESHOLD;
-                self.git_cache
-                    .huge_tree_decisions
-                    .insert(new_anchor.clone(), huge);
-                huge
-            };
-        self.git_cache.huge_tree_anchor = Some(new_anchor);
-        // Worktree-switch belt-and-suspenders: if we're crossing
-        // into a *different* repo than the raw cache holds, wipe
-        // the cache. `git_file_statuses_cached` does its own key
-        // check that catches this on the marker path, but
-        // `compute_git_info_fast` previously didn't, and Spencer
-        // reported brief "stale dirty marker" flashes on worktree
-        // switches. Clearing here is precautionary and explicit;
-        // the cache check in `git_file_statuses_cached` still
-        // covers the cache-survives-leave-and-return optimization
-        // because going from a repo to a non-repo dir doesn't
-        // satisfy `repo_root.is_some()` here, so the cache lives
-        // on for re-entry.
         if let Some(new_root) = repo_root.as_ref()
             && let Some(c) = self.git_cache.git_status_cache.as_ref()
             && &c.repo_root != new_root
@@ -293,12 +247,5 @@ impl AppState {
             self.git_cache.git_status_cache = None;
         }
         self.set_repo_root(repo_root);
-        if self.git_cache.is_huge_tree && !was_huge {
-            self.flash_info(format!(
-                "large tree ({}+ subdirs) — git poll throttled, untracked markers off",
-                crate::app::HUGE_TREE_SUBDIR_THRESHOLD,
-            ));
-        }
-        self.git_cache.is_huge_tree
     }
 }
