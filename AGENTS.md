@@ -151,10 +151,22 @@ cargo build --release  # release build
 make release           # release build via Makefile
 make install           # build release + copy to ~/.local/bin
 make check             # fmt + clippy + test + deny (CI gate)
+make fuzz              # coverage-guided fuzz (nightly + cargo-fuzz; on-demand, NOT in check)
 make changelog         # preview the pending (unreleased) CHANGELOG section
 make release-tag VERSION=x.y.z   # bump + prepend changelog + commit + tag
 make                   # see Makefile for all targets
 ```
+
+**Crate shape: lib + bin.** `src/lib.rs` is the library root — it owns every
+module and the `run()` entry point; `src/main.rs` is a thin shim
+(`fn main() { spyc::run() }`). The split exists so the crate also builds as a
+library, which the `cargo-fuzz` targets under `fuzz/` link against (libFuzzer
+targets are separate binaries). `fuzz/` is a **standalone workspace** (its own
+`[workspace]`), so `cargo build` / `make check` / cargo-deny never touch it —
+fuzzing needs nightly and runs on demand (`make fuzz`, or `cargo +nightly fuzz
+run dsl_parse`). New fuzz entry points go through the `pub mod fuzz` facade in
+`lib.rs` (raw-input wrappers that leak no internal types), not by widening
+module visibility.
 
 ## Roadmap
 

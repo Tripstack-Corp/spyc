@@ -1,0 +1,34 @@
+# cargo-fuzz crate for spyc. Standalone (own `[workspace]`) so the main
+# `cargo build` / `make check` / cargo-deny never touch it — fuzzing needs a
+# nightly toolchain + libFuzzer and runs on demand, NOT in the CI gate:
+#
+#   cargo install cargo-fuzz          # once
+#   cargo +nightly fuzz run dsl_parse # hammer the keymap DSL parser
+#
+# `find_match` (the other candidate from the testing charter) is covered by
+# proptest instead (src/app/state/tests/navigation.rs) — it's a method on a
+# constructed AppState, awkward to reach from a free-standing libFuzzer target.
+[package]
+name = "spyc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.spyc]
+path = ".."
+
+[[bin]]
+name = "dsl_parse"
+path = "fuzz_targets/dsl_parse.rs"
+test = false
+doc = false
+bench = false
+
+# Own workspace so the parent crate's build/gate ignores this entirely.
+[workspace]

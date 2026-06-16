@@ -147,10 +147,14 @@ Keep the real-socket tests; make failures interpretable:
   misses. Decision history: cargo-fuzz was chosen first, but it needs a `[lib]`
   target and spyc is **bin-only** (modules are `mod` in `main.rs`) — a
   crate-wide lib+bin split wasn't worth it for one cluster, so we used
-  **`proptest` in-crate** instead (no nightly, runs in `make check`). Both
-  targets are now proptest-fuzzed for panic-freedom (`find_match` in #427, the
-  DSL parser in #435). A real coverage-guided `cargo-fuzz` pass stays a
-  road-to-2.0 option if a lib split lands for other reasons.
+  **`proptest` in-crate** first (no nightly, runs in `make check`): both targets
+  are proptest-fuzzed for panic-freedom (`find_match` in #427, the DSL parser in
+  #435). **Then the real cargo-fuzz pass landed** (#436): the crate was split
+  lib+bin so a standalone `fuzz/` crate can link it; `cargo +nightly fuzz run
+  dsl_parse` exercises the DSL parser under libFuzzer (kept out of `make check`,
+  run on demand). First run: ~690k coverage-guided execs, no crash. `find_match`
+  stays on proptest (it's a method on a constructed `AppState`, awkward to reach
+  from a free-standing libFuzzer target).
 - **Organization & hygiene:** keep unit tests (`#[cfg(test)]` in-file) separate
   from integration tests (`tests/`); single-responsibility, descriptive names;
   use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behavior
@@ -172,7 +176,7 @@ unblocks the rest. Tick `✅ #NNN` as each lands.
 | 5 | **Background tasks** | C | `BackgroundTask` owns a live `PtyHost` (can't build without forking), so real-`cat`-capture smoke tests: `^Z` backgrounds + keeps the entry (Running) + closes the pager → `:fg` re-attaches it + removes it from the list; `gB`/`:task` views without taking ownership (marks viewed, clears the unread divider, pager tracks the id); `[t`/`]t` cycle with wraparound, view-only. Pure helpers (id alloc, status glyph, counts) already unit-tested in `tasks.rs`. | ✅ #432 |
 | 6 | **Quick-select dispatch** | C | Scanner already covered (11 tests); the gap was the dispatch. Extracted the kind×intent **action matrix** into a pure `quick_select_action` (behaviour-preserving) → unit-tested every cell (lowercase→yank; uppercase URL→open, path→jump, SHA→git-show, custom+template→filled URL, IPv4/template-less→yank-with-hint). Overlay state machine: Esc closes with no dispatch; 2-letter uppercase-first arms open-intent + narrows; uppercase Path label dispatches the open (proved via a missing path → not-found flash, CWD-safe). The successful-jump `chdir` (`set_current_dir`) + yank/URL/git leaves stay impure (covered at the matrix level). **Deferred:** the two routing edges (exited-pane flash-yet-takes-chords; pane-scroll vs pager key overlap) → fold into a later edge-cases pass. | ✅ #433 |
 | 7 | **MCP / env diagnostics** | D | Socket bind permission failures were opaque (server `bind_result?` → bare "Operation not permitted"; tests `.unwrap()` → opaque panic). Added a pure `socket_bind_error` classifier (EACCES/EPERM → "rerun under normal permissions" + path; else plain context), applied at the server bind site + unit-tested both branches; a `bind_test_socket` helper makes the two socket tests fail with a clear sandbox hint. Full-perms run unchanged (still binds + exercises the real socket). Diagnostic-only, patch bump 1.58.3. | ✅ #434 |
-| 8 | **Parser fuzzing (proptest)** | E | cargo-fuzz needs a `[lib]` target, but spyc is **bin-only** (every module is `mod` in `main.rs`) — a crate-wide lib+bin split wasn't worth the blast radius for the last cluster. Pivoted to **proptest in-crate** (no nightly, runs in `make check`): the keymap DSL parser (`config/dsl.rs::parse`) gets panic-freedom over arbitrary + map-biased input, and "well-formed `map ^<k> <verb>` always binds". `find_match` was already proptest-fuzzed in #2. No bugs (parser panic-safe by construction). | ✅ #435 |
+| 8 | **Parser fuzzing (proptest → real cargo-fuzz)** | E | First shipped **proptest in-crate** (no nightly, runs in `make check`): the keymap DSL parser (`config/dsl.rs::parse`) gets panic-freedom over arbitrary + map-biased input, "well-formed `map ^<k> <verb>` always binds"; `find_match` was already proptest-fuzzed in #2. **Then did the real thing** (#436): split the crate **lib+bin** (`src/lib.rs` owns the modules + `run()`, `main.rs` is a shim) so a `fuzz/` cargo-fuzz crate can link it, with a libFuzzer `dsl_parse` target via the `spyc::fuzz` facade. Standalone `[workspace]` keeps it out of `make check` (nightly + on-demand). **Ran it: 689,852 coverage-guided execs, no crash.** | ✅ #435, #436 |
 
 ## Bugs found by the campaign
 
