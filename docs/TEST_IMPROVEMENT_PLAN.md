@@ -156,13 +156,24 @@ unblocks the rest. Tick `✅ #NNN` as each lands.
 | # | Cluster | Workstream | Verify-first gap → deliverable | Status |
 |---|---------|-----------|--------------------------------|--------|
 | 1 | **Effect-intent matchers** (enabling) | A.2, B | The ~6 byte-for-byte `Effect` destructures in `state/tests/apply.rs` (`apply_jump_start_dir_emits_change_dir`, `apply_jump_mark_*`, `apply_climb_*`) break on any field add → matcher layer over `&[Effect]` (`effect.rs::matchers`: `change_dir()`, `read_pane_text()`), retrofit those tests onto it, codify the AI-testing rules into AGENTS.md. | ✅ #426 |
-| 2 | **Pure-state property tests** | A.1, A.3 | Nav/grid covered by one fixed 3-item case → proptest: any list × grid × cursor, `Down(N)∘Up(N)` in-bounds + the negative invariant "cursor index never ≥ `len`"; `find_match` never panics, literal substring ⇒ `Some`, empty-query pinned. | ☐ |
+| 2 | **Pure-state property tests** | A.1, A.3 | Nav/grid covered by one fixed 3-item case → proptest: any list × grid × cursor, the negative invariant "cursor index never ≥ `len`" under any move sequence; `find_match` sound + never panics, literal substring ⇒ `Some`, matcher fast-path ≡ Unicode reference. | ✅ #427 |
 | 3 | **Harness extensions + session restore** | C | Session restore is 100% untested → extend `test_harness.rs` (fake pane-tabs, non-spawning session load), then multi-tab order + distinct IDs, full field roundtrip, the three agent resume command-builders (Codex/Claude/Gemini), legacy deser, malformed-ID → fresh command no-panic. | ☐ |
 | 4 | **Pane/pty workflow** | C | No `^a z`/`^a v`/new-tab/switch-close tests → `^a z` preserves `pane_height_pct`+focus; `^a v` scrollback-before-live; empty-scrollback flash; new-tab `PROJECT_HOME`; switch/close/restart routing. Fake buffers + a few real-pty smoke tests in `tests/`. | ☐ |
 | 5 | **Background tasks** | C | No `^Z`/`:fg`/`gB`/divider tests → `^Z` backgrounds+keeps entry; resume shows post-bg output; `:fg`/`:fg N`; `gB`/`:task N`/`[t`/`]t` view-without-own; closing an exited viewed task promotes output; divider running/new/success/failure. | ☐ |
 | 6 | **Quick-select e2e + routing edges** | C | Scanner well-covered (11 tests) but no dispatch flow → yank vs open-intent; path jump vs flash; SHA→git-show pager; Esc no-side-effects; + exited-pane flash-yet-takes-chords; pane-scroll vs pager key overlap. | ☐ |
 | 7 | **MCP / env diagnostics** | D | `mcp/tests/mod.rs` (30 tests) has no sandbox-skip logic → socket EPERM/EACCES → clear "rerun under normal permissions" diagnostic, without weakening the full-perms run. | ☐ |
 | 8 | **Fuzzing + snapshot expansion** | E | No fuzz targets, thin snapshot areas → `cargo-fuzz` targets for `find_match` + `config/dsl.rs::parse` (nightly, on-demand `fuzz/` crate); fill thin `insta` coverage. | ☐ |
+
+## Bugs found by the campaign
+
+The headline win: real bugs a *newly-added test* caught — not behaviour-
+preserving refactors (which find nothing by design). A fix is a behaviour
+change, so it ships as its own `fix:` PR (release-build + owner test), separate
+from the test-only cluster PR that exposed it.
+
+| Found by | Bug | Fixed in |
+|----------|-----|----------|
+| _(none yet)_ | Clusters 1–2 surfaced none — expected. #1 was a behaviour-preserving retrofit; #2's four invariants (cursor-never-escapes-the-listing, finder soundness + panic-freedom, substring completeness, matcher ASCII-fast-path ≡ Unicode reference) all held under 256 random cases each. Bugs are likeliest in the untested workflow clusters (3–6). | — |
 
 ## Acceptance criteria
 
