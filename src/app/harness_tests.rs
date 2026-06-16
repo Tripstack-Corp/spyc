@@ -352,3 +352,48 @@ fn empty_scrollback_agent_pane_points_to_transcript() {
         );
     });
 }
+
+/// `^a n` / `^a p` cycle tabs on *every* chord, including back-to-back with
+/// no loop iteration between — a routing-level guard for the "rapid `^a-n`
+/// eats the command" class. Exercises the full `handle_key` path with the
+/// pane focused; a regression that routed the chord's second key to the pane
+/// child instead of completing the chord would fail here. (The reported
+/// real-world flake is in live event delivery, which a unit test can't
+/// reproduce; this at least locks the synchronous routing.)
+#[test]
+fn rapid_pane_next_prev_chords_each_switch_tabs() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        app.open_pane_tab("cat");
+        app.open_pane_tab("cat"); // 3 tabs; pane focused
+        // Ctrl held through the second key — the real fast-typing case
+        // (`^a ^n` / `^a ^p`), which used to be eaten by the generic Ctrl
+        // block. End-to-end guard through the full handle_key path.
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
+        let p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        let idx = |app: &App| app.runtime.pane_tabs.as_ref().unwrap().active_index();
+
+        let mut prev = idx(&app);
+        for i in 1..=4 {
+            app.handle_key(ctrl_a).unwrap();
+            app.handle_key(n).unwrap();
+            assert_eq!(idx(&app), (prev + 1) % 3, "^a n #{i} must advance one tab");
+            prev = idx(&app);
+        }
+        for i in 1..=4 {
+            app.handle_key(ctrl_a).unwrap();
+            app.handle_key(p).unwrap();
+            assert_eq!(
+                idx(&app),
+                (prev + 2) % 3,
+                "^a p #{i} must step back one tab"
+            );
+            prev = idx(&app);
+        }
+    });
+}

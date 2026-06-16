@@ -136,6 +136,53 @@ impl Resolver {
             return ResolverOutcome::Action(Action::PaneLastTab);
         }
 
+        // Mid-sequence: Ctrl-A / Ctrl-W prefix waiting for a pane command.
+        // Combines screen(1)-style (^a n=next, ^a p=prev, ^a c=new, ^a k=kill)
+        // with vim-style (j/k focus, +/- resize).
+        //
+        // Runs BEFORE the generic Ctrl block below and matches on the key
+        // *code* regardless of the Ctrl modifier. Holding Ctrl through the
+        // second key (`^a ^n`, `^a ^p`, …) is the natural way to fire the
+        // chord fast, and screen treats it the same as `^a n`. With the old
+        // order, the Ctrl block ate `^a ^n` / `^a ^p` as an unknown control
+        // code and reset the chord — the "rapid `^a-n` eats the command"
+        // regression. (`^a ^a` is already intercepted just above as
+        // PaneLastTab, so it never reaches the `'a' | 'A'` focus arm here.)
+        if self.pending == PendingSeq::W {
+            let out = match ev.code {
+                // Focus switching — vim-style j/J, plus plain `^a a`/`^a A`.
+                // Grouped to shut up clippy::match_same_arms.
+                KeyCode::Char('j' | 'J' | 'a' | 'A') => {
+                    ResolverOutcome::Action(Action::PaneFocusDown)
+                }
+                KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
+                // Tab navigation (screen-style + vim bracket style).
+                KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
+                KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
+                KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
+                KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
+                KeyCode::Char(c @ '1'..='9') => {
+                    ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
+                }
+                KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
+                KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
+                // Pane toggle / resize / scroll.
+                KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
+                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
+                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+                KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
+                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
+                // Send / pipe content to pane.
+                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
+                KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
+                KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
+                KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
@@ -214,46 +261,6 @@ impl Resolver {
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
                 KeyCode::Char('y') => ResolverOutcome::Action(Action::OpenGraveyardView),
-                _ => ResolverOutcome::Ignored,
-            };
-            self.reset();
-            return out;
-        }
-
-        // Mid-sequence: Ctrl-A / Ctrl-W prefix waiting for a pane command.
-        // Combines screen(1)-style (^a n=next, ^a p=prev, ^a c=new, ^a k=kill)
-        // with vim-style (j/k focus, +/- resize).
-        if self.pending == PendingSeq::W {
-            let out = match ev.code {
-                // Focus switching — vim-style j/J, plus plain `^a a`/`^a A`.
-                // (Note `^a ^a` with ctrl on the second key is intercepted
-                // above as PaneLastTab; this arm only sees the no-ctrl
-                // letters. Grouped to shut up clippy::match_same_arms.)
-                KeyCode::Char('j' | 'J' | 'a' | 'A') => {
-                    ResolverOutcome::Action(Action::PaneFocusDown)
-                }
-                KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
-                // Tab navigation (screen-style + vim bracket style).
-                KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
-                KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
-                KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
-                KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
-                KeyCode::Char(c @ '1'..='9') => {
-                    ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
-                }
-                KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
-                KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
-                // Pane toggle / resize / scroll.
-                KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
-                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
-                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
-                KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
-                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
-                // Send / pipe content to pane.
-                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
-                KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
-                KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
-                KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
