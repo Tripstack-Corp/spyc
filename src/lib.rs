@@ -72,6 +72,26 @@ pub mod fuzz {
             let _ = &text[start..end]; // must not panic
         }
     }
+
+    /// Expand `~` / `$VAR` / `${VAR}` in an arbitrary path string and discard
+    /// the result — asserts the path expander never panics on adversarial
+    /// variable syntax.
+    pub fn expand_path(input: &str) {
+        let _ = crate::paths::expand(input);
+    }
+
+    /// Expand a `%`-template (the `unix CMD` substitution) against a couple of
+    /// fixed target paths and discard the result — asserts the template parser
+    /// never panics on arbitrary `%`/escape syntax.
+    pub fn expand_percent(template: &str) {
+        let _ = crate::shell::expand_percent(
+            template,
+            &[
+                std::path::Path::new("/tmp/a.rs"),
+                std::path::Path::new("/tmp/b c.txt"),
+            ],
+        );
+    }
 }
 
 use std::io;

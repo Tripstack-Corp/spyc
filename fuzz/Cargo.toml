@@ -51,5 +51,19 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "expand_path"
+path = "fuzz_targets/expand_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "expand_percent"
+path = "fuzz_targets/expand_percent.rs"
+test = false
+doc = false
+bench = false
+
 # Own workspace so the parent crate's build/gate ignores this entirely.
 [workspace]
