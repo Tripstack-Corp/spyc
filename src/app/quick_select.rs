@@ -123,28 +123,18 @@ impl App {
     /// Route a picked match to the right action, given user
     /// intent. See action matrix in `FEATURES.md` ("Quick Select").
     fn dispatch_quick_select(&mut self, m: &crate::pane::quick_select::Match, open_intent: bool) {
-        use crate::pane::quick_select::MatchKind;
         let kind_label = m.kind.label().to_string();
-        let text = m.text.clone();
-        if !open_intent {
-            self.yank_quick_select(&text, &kind_label);
-            return;
-        }
-        match &m.kind {
-            MatchKind::Url => self.open_url_or_flash(&text),
-            MatchKind::Path => self.jump_to_pane_path(&text),
-            MatchKind::GitSha => self.open_git_show_pager(&text),
-            MatchKind::Custom { url_template, .. } if url_template.is_some() => {
-                let url = url_template
-                    .as_ref()
-                    .expect("guarded by is_some in match arm")
-                    .replace("{}", &text);
-                self.open_url_or_flash(&url);
-            }
-            // IPv4 and template-less Custom: fall back to yank with a
-            // hint that explains why nothing else happened.
-            MatchKind::Ipv4 | MatchKind::Custom { .. } => {
-                self.yank_quick_select(&text, &kind_label);
+        // The kind × intent decision is the pure `quick_select_action`; this
+        // method only executes the chosen (impure) action.
+        match quick_select_action(m, open_intent) {
+            QsAction::Yank => self.yank_quick_select(&m.text, &kind_label),
+            QsAction::OpenUrl(url) => self.open_url_or_flash(&url),
+            QsAction::JumpPath(path) => self.jump_to_pane_path(&path),
+            QsAction::GitShow(sha) => self.open_git_show_pager(&sha),
+            // IPv4 and template-less Custom: fall back to yank with a hint
+            // that explains why nothing else happened.
+            QsAction::YankNoHandler => {
+                self.yank_quick_select(&m.text, &kind_label);
                 self.state
                     .flash_info(format!("yanked {kind_label} (no open handler)"));
             }
@@ -248,5 +238,116 @@ impl App {
                 label_rect,
             );
         }
+    }
+}
+
+/// What a picked Quick Select match should do, given the user's intent
+/// (lowercase = yank, uppercase = open). Split out of `dispatch_quick_select`
+/// as a pure decision so the whole action matrix is unit-testable without
+/// touching the clipboard / OS opener / git.
+#[derive(Debug, PartialEq, Eq)]
+enum QsAction {
+    /// Copy the match text to the clipboard.
+    Yank,
+    /// Hand a URL to the system opener.
+    OpenUrl(String),
+    /// Navigate spyc to a filesystem path.
+    JumpPath(String),
+    /// Open `git show <sha>` in the pager.
+    GitShow(String),
+    /// No opener for this kind (IPv4, template-less custom) — yank + hint.
+    YankNoHandler,
+}
+
+/// The Quick Select action matrix. Lowercase intent always yanks; uppercase
+/// opens per kind — URL → opener, path → navigate, SHA → git show, custom
+/// with a `url_template` → the filled URL — and kinds with no opener fall
+/// back to a yank-with-hint.
+fn quick_select_action(m: &crate::pane::quick_select::Match, open_intent: bool) -> QsAction {
+    use crate::pane::quick_select::MatchKind;
+    if !open_intent {
+        return QsAction::Yank;
+    }
+    match &m.kind {
+        MatchKind::Url => QsAction::OpenUrl(m.text.clone()),
+        MatchKind::Path => QsAction::JumpPath(m.text.clone()),
+        MatchKind::GitSha => QsAction::GitShow(m.text.clone()),
+        MatchKind::Custom {
+            url_template: Some(t),
+            ..
+        } => QsAction::OpenUrl(t.replace("{}", &m.text)),
+        MatchKind::Ipv4 | MatchKind::Custom { .. } => QsAction::YankNoHandler,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{QsAction, quick_select_action};
+    use crate::pane::quick_select::{Match, MatchKind};
+
+    fn m(kind: MatchKind, text: &str) -> Match {
+        Match {
+            text: text.to_string(),
+            kind,
+            label: "a".to_string(),
+            row: 0,
+            col: 0,
+        }
+    }
+
+    #[test]
+    fn lowercase_intent_always_yanks() {
+        for kind in [
+            MatchKind::Url,
+            MatchKind::Path,
+            MatchKind::GitSha,
+            MatchKind::Ipv4,
+        ] {
+            assert_eq!(quick_select_action(&m(kind, "x"), false), QsAction::Yank);
+        }
+    }
+
+    #[test]
+    fn uppercase_opens_per_kind() {
+        assert_eq!(
+            quick_select_action(&m(MatchKind::Url, "https://e.com"), true),
+            QsAction::OpenUrl("https://e.com".to_string())
+        );
+        assert_eq!(
+            quick_select_action(&m(MatchKind::Path, "/tmp/x"), true),
+            QsAction::JumpPath("/tmp/x".to_string())
+        );
+        assert_eq!(
+            quick_select_action(&m(MatchKind::GitSha, "abc123"), true),
+            QsAction::GitShow("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn uppercase_custom_with_template_fills_the_url() {
+        let kind = MatchKind::Custom {
+            name: "JIRA".to_string(),
+            url_template: Some("https://j/browse/{}".to_string()),
+        };
+        assert_eq!(
+            quick_select_action(&m(kind, "PROJ-42"), true),
+            QsAction::OpenUrl("https://j/browse/PROJ-42".to_string())
+        );
+    }
+
+    #[test]
+    fn uppercase_kinds_without_an_opener_yank_with_hint() {
+        assert_eq!(
+            quick_select_action(&m(MatchKind::Ipv4, "1.2.3.4"), true),
+            QsAction::YankNoHandler
+        );
+        let kind = MatchKind::Custom {
+            name: "X".to_string(),
+            url_template: None,
+        };
+        assert_eq!(
+            quick_select_action(&m(kind, "v"), true),
+            QsAction::YankNoHandler
+        );
     }
 }
