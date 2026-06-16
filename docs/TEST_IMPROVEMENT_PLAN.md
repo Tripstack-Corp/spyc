@@ -164,6 +164,17 @@ unblocks the rest. Tick `✅ #NNN` as each lands.
 | 7 | **MCP / env diagnostics** | D | `mcp/tests/mod.rs` (30 tests) has no sandbox-skip logic → socket EPERM/EACCES → clear "rerun under normal permissions" diagnostic, without weakening the full-perms run. | ☐ |
 | 8 | **Fuzzing + snapshot expansion** | E | No fuzz targets, thin snapshot areas → `cargo-fuzz` targets for `find_match` + `config/dsl.rs::parse` (nightly, on-demand `fuzz/` crate); fill thin `insta` coverage. | ☐ |
 
+## Bugs found by the campaign
+
+The headline win: real bugs a *newly-added test* caught — not behaviour-
+preserving refactors (which find nothing by design). A fix is a behaviour
+change, so it ships as its own `fix:` PR (release-build + owner test), separate
+from the test-only cluster PR that exposed it.
+
+| Found by | Bug | Fixed in |
+|----------|-----|----------|
+| _(none yet)_ | Clusters 1–2 surfaced none — expected. #1 was a behaviour-preserving retrofit; #2's four invariants (cursor-never-escapes-the-listing, finder soundness + panic-freedom, substring completeness, matcher ASCII-fast-path ≡ Unicode reference) all held under 256 random cases each. Bugs are likeliest in the untested workflow clusters (3–6). | — |
+
 ## Acceptance criteria
 
 - `cargo test --locked --all-targets` passes locally with all new tests.
