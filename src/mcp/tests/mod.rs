@@ -340,7 +340,7 @@ fn socket_server_responds() {
 
     // Use a temp socket path to avoid interfering with a running instance.
     let sock_path = tmp.path().join("test-mcp.sock");
-    let listener = UnixListener::bind(&sock_path).unwrap();
+    let listener = bind_test_socket(&sock_path);
 
     let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
     let ctx_for_thread = ctx_path;
@@ -380,7 +380,7 @@ fn disconnect_notification_routes_through_channel() {
     context::write_context_file(&ctx_path, &ctx).unwrap();
 
     let sock_path = tmp.path().join("test-disconnect.sock");
-    let listener = UnixListener::bind(&sock_path).unwrap();
+    let listener = bind_test_socket(&sock_path);
 
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
     let ctx_for_thread = ctx_path;
@@ -735,4 +735,46 @@ fn codex_config_rewrites_completely_invalid_toml() {
     let written = std::fs::read_to_string(&path).unwrap();
     let parsed: toml::Value = toml::from_str(&written).unwrap();
     assert!(parsed["mcp_servers"]["spyc"].is_table());
+}
+
+// ── socket-bind diagnostics (testing campaign, cluster 7) ──
+// Make a sandboxed bind failure interpretable instead of an opaque
+// "Operation not permitted" panic — without weakening the full-perms run
+// (under normal permissions these still bind and exercise the real socket).
+
+/// Bind a Unix socket for a roundtrip test, panicking with a clear message
+/// (not a bare OS error) if a restricted sandbox refuses the bind.
+fn bind_test_socket(path: &std::path::Path) -> UnixListener {
+    UnixListener::bind(path).unwrap_or_else(|e| {
+        panic!(
+            "MCP socket test needs a real Unix socket; bind at {} failed ({e}). \
+             If this is a restricted sandbox, rerun under normal permissions.",
+            path.display()
+        )
+    })
+}
+
+/// A permission-denied bind is reported as a sandbox hint pointing at
+/// rerunning under normal permissions, carrying the socket path.
+#[test]
+fn socket_bind_error_permission_denied_points_to_rerun() {
+    let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    let msg =
+        super::server::socket_bind_error(err, std::path::Path::new("/run/spyc-x.sock")).to_string();
+    assert!(msg.contains("rerun under normal permissions"), "got: {msg}");
+    assert!(msg.contains("/run/spyc-x.sock"), "got: {msg}");
+}
+
+/// A non-permission bind error keeps a plain path context (no misleading
+/// sandbox hint).
+#[test]
+fn socket_bind_error_other_is_plain_context() {
+    let err = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+    let msg =
+        super::server::socket_bind_error(err, std::path::Path::new("/run/spyc-x.sock")).to_string();
+    assert!(msg.contains("binding MCP socket"), "got: {msg}");
+    assert!(
+        !msg.contains("rerun under normal permissions"),
+        "must not mislabel a non-permission error as a sandbox: {msg}"
+    );
 }
