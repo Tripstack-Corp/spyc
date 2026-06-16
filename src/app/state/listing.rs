@@ -142,21 +142,14 @@ impl AppState {
                 // have — and we need fresh content for ` M`
                 // markers).
                 //
-                // But: on huge trees, `git status` is 200-500 ms per
-                // spawn, and an active filesystem (claude writing
-                // findings, build outputs, even some IDE auto-saves)
-                // can trip `refresh_listing` every 3 s — burning the
-                // worker thread nonstop. Throttle the invalidation
-                // (huge: 10 s, small: 1 s). The 1 Hz / 10 Hz safety
-                // poll in `refresh_git_state` still catches
-                // `.git/index` changes immediately; the only
-                // trade-off is a small lag in working-tree ` M`
-                // markers for edits within the throttle window.
-                let throttle = if self.git_cache.is_huge_tree {
-                    std::time::Duration::from_secs(10)
-                } else {
-                    std::time::Duration::from_secs(1)
-                };
+                // But: an active filesystem (claude writing findings, build
+                // outputs, IDE auto-saves) can trip `refresh_listing`
+                // repeatedly. Throttle the raw-cache invalidation to 1 s so a
+                // burst doesn't re-walk `git status` on every event. The 1 Hz
+                // safety poll in `refresh_git_state` still catches `.git/index`
+                // changes immediately; the only trade-off is up to ~1 s lag in
+                // working-tree ` M` markers for edits within the window.
+                let throttle = std::time::Duration::from_secs(1);
                 let should_invalidate = self
                     .git_cache
                     .last_git_invalidation
@@ -221,13 +214,9 @@ impl AppState {
         }
         self.listing = new_listing;
         self.listing.sort(self.sort_order, self.sort_reversed);
-        // Maybe re-evaluate "is this a huge tree?" — only runs the
-        // bounded-DFS walk when the chdir crosses into a different
-        // project (different repo root, or out of any repo). Drilling
-        // around inside the same project inherits the cached value.
-        // Must happen *before* the git calls below so they see the
-        // right `huge` value on the first run after chdir.
-        self.update_huge_tree(&canonical);
+        // Resolve + cache the repo root for the new dir *before* the git
+        // calls below so they see the right root on the first run after chdir.
+        self.update_repo_root(&canonical);
         // Refill the raw-status cache (if needed) before computing
         // branch/dirty — `compute_git_info_fast` reads `dirty` off
         // the cached raw output, so it must be current.

@@ -398,9 +398,8 @@ mod map_tests {
 
     #[test]
     fn untracked_surfaces_in_subdirectory_listing() {
-        // Regression for the `-uno` huge-tree suppression: viewing
-        // `docs/` with untracked files in it must surface them as
-        // basename-keyed untracked entries.
+        // Viewing `docs/` with untracked files in it must surface them
+        // as basename-keyed untracked entries.
         let porcelain = "?? docs/PATH_HANDOFF_PLAN.md\n?? docs/TEST_IMPROVEMENT_PLAN.md\n";
         let map = parse(porcelain, "docs");
         let a = map.get("PATH_HANDOFF_PLAN.md").unwrap();

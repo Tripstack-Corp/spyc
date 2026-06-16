@@ -260,13 +260,8 @@ impl App {
             self.reload_config();
             needs_draw = true;
         }
-        // Adaptive cadence: small trees get tight latency (500 ms debounce);
-        // huge trees back off (3 s) so `git status` doesn't dominate idle CPU.
-        let refresh_quiet = if self.state.git_cache.is_huge_tree {
-            std::time::Duration::from_secs(3)
-        } else {
-            std::time::Duration::from_millis(500)
-        };
+        // 500 ms trailing debounce on the watcher-driven listing refresh.
+        let refresh_quiet = std::time::Duration::from_millis(500);
         // Fire when the watcher quiets down OR the max-defer cap bites (see
         // `should_fire_refresh`) — continuous fs activity can't starve the
         // trailing debounce forever.

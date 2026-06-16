@@ -261,13 +261,12 @@ use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 #[cfg(unix)]
 use util::kill_pg;
-// Raw subdir count: only the Linux recursive-watch gate (and its tests) use
-// it now that the huge-tree git decision counts gitignore-aware dirs instead.
+// Raw subdir count: only the Linux recursive-watch gate (and its tests) use it.
 #[cfg(any(target_os = "linux", test))]
 use util::count_subdirs_capped;
 use util::{
-    buffer_to_lines, count_unignored_subdirs_capped, eof_marker_line, format_elapsed_hms,
-    format_uptime, path_basename_display, strip_ansi_escapes, user_host_string,
+    buffer_to_lines, eof_marker_line, format_elapsed_hms, format_uptime, path_basename_display,
+    strip_ansi_escapes, user_host_string,
 };
 
 /// Which collection the user is looking at.
@@ -1029,18 +1028,6 @@ const fn is_spyc_meta_when_pane_focused(
 /// trees bail at the budget in ~50 ms.
 #[cfg(target_os = "linux")]
 const MAX_RECURSIVE_WATCH_DIRS: usize = 256;
-
-/// Subdir count threshold for "this is a huge working tree" — drives
-/// adaptive backoff of the git poll cadence and the `git status`
-/// untracked-enumeration mode (see `AppState::is_huge_tree`,
-/// `AppState::chdir`). Chosen to match `MAX_RECURSIVE_WATCH_DIRS`:
-/// a tree that already trips Linux's recursive-watch downgrade is
-/// almost certainly the same tree where the 1 Hz `git status` poll
-/// hurts. Single constant on all platforms because the huge-tree
-/// signal is needed everywhere — the recursive-watch gating
-/// constant stays Linux-only because only Linux's `notify` backend
-/// pays the per-subdir walk cost.
-pub const HUGE_TREE_SUBDIR_THRESHOLD: usize = 256;
 
 /// Build a `ForegroundExec` effect that runs `cmd` through `sh -c` so shell features
 /// (pipes, redirection, `$VAR`) work.

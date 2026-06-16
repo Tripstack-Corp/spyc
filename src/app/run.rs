@@ -596,8 +596,8 @@ impl App {
             // (`SinkOutput`), MCP, finder, grep (3d), and reader-death. The
             // loop blocks on `recv()` when no deadline is armed; an armed
             // deadline only SHORTENS the wait (it never lengthens it, and
-            // there's no ceiling clamp — a 1s GitPoll drives a 1s wait, a 10s
-            // huge-tree poll a 10s wait). Fresh clock JUST before recv so a
+            // there's no ceiling clamp — the 1s GitPoll drives a 1s wait, a
+            // farther-out deadline a longer wait). Fresh clock JUST before recv so a
             // deadline-driven sleep lands on the deadline, not deadline +
             // body-cost.
             let wait_now = std::time::Instant::now();

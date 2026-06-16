@@ -342,7 +342,7 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     let mut s = test_state();
     s.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_huge_tree(&root);
+    s.update_repo_root(&root);
     s.git.info = s.compute_git_info_fast();
 
     // Clean repo: refresh sees no modifications.
@@ -410,7 +410,7 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     let mut s = test_state();
     s.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_huge_tree(&root);
+    s.update_repo_root(&root);
     s.git.info = s.compute_git_info_fast();
 
     // Walk once (clean) to seed git_poll_cache with the current index/HEAD
@@ -493,7 +493,7 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     let mut s = test_state();
     s.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_huge_tree(&root); // sets current_repo_root
+    s.update_repo_root(&root); // sets current_repo_root
 
     // Wire the "worker" and force a clean cache-miss baseline so the
     // asserted call takes the enqueue branch deterministically.
@@ -564,7 +564,7 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     let mut s = test_state();
     s.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_huge_tree(&root); // sets current_repo_root + current_gitdir
+    s.update_repo_root(&root); // sets current_repo_root + current_gitdir
 
     // First resolve opens gix and seeds the cache.
     assert_eq!(s.compute_git_info_fast().as_deref(), Some("main"));
