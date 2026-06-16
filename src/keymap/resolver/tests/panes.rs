@@ -194,6 +194,68 @@ fn ctrl_w_unknown_is_ignored() {
     assert_eq!(feed(&mut r, key('q')), ResolverOutcome::Ignored);
 }
 
+// ── Ctrl held through the second key (rapid chord) ────────────
+// Regression (key-trace confirmed): firing `^a n` fast leaves Ctrl down,
+// so the second key arrives as `^n` (Char('n') + CONTROL), not bare `n`.
+// The pane chord must still resolve — the generic Ctrl block used to eat
+// these as an unknown control code and reset the pending `^a-` chord, so
+// the tab switch was silently lost. screen treats `^a ^n` == `^a n`.
+
+#[test]
+fn ctrl_a_then_ctrl_n_still_next_tab() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, ctrl('n')),
+        ResolverOutcome::Action(Action::PaneNextTab)
+    );
+}
+
+#[test]
+fn ctrl_a_then_ctrl_p_still_prev_tab() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, ctrl('p')),
+        ResolverOutcome::Action(Action::PanePrevTab)
+    );
+}
+
+#[test]
+fn ctrl_w_then_ctrl_n_still_next_tab() {
+    // The `^w` alias prefix behaves the same.
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('w'));
+    assert_eq!(
+        feed(&mut r, ctrl('n')),
+        ResolverOutcome::Action(Action::PaneNextTab)
+    );
+}
+
+#[test]
+fn ctrl_a_then_ctrl_c_still_new_tab() {
+    // `^a ^c` == `^a c` (screen-style new window), Ctrl held or not.
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, ctrl('c')),
+        ResolverOutcome::Action(Action::PaneNewTab)
+    );
+}
+
+#[test]
+fn ctrl_a_then_ctrl_a_is_last_tab_not_focus_down() {
+    // `^a ^a` must stay PaneLastTab (intercepted before the pane block),
+    // NOT fall into the `'a'` focus-down arm now that the block matches
+    // code-only and runs ahead of the generic Ctrl block.
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, ctrl('a')),
+        ResolverOutcome::Action(Action::PaneLastTab)
+    );
+}
+
 // ── W (worktree) prefix ───────────────────────────────────────
 
 #[test]
