@@ -320,4 +320,42 @@ mod tests {
         assert_eq!(b.chord, KeyChord::Ctrl('p'));
         assert!(matches!(b.action, BoundAction::Plain(Action::TogglePane)));
     }
+
+    // ── parser fuzzing via proptest (testing campaign, cluster 8) ──
+    // cargo-fuzz would need a lib target (spyc is bin-only); proptest gets the
+    // same panic-freedom property in-crate — no nightly, runs in `make check`.
+    proptest::proptest! {
+        /// The DSL parser must never panic on *any* input — it returns
+        /// Ok(binding) / Ok(None) / Err for everything, never an unwrap or an
+        /// index/slice panic.
+        #[test]
+        fn parse_never_panics_on_arbitrary_input(line in ".{0,64}") {
+            let _ = parse(&line);
+        }
+
+        /// Biased toward the `map` grammar so the key / action sub-parsers
+        /// (`^X` control, plain char, `=value` args) are exercised — not just
+        /// the unknown-directive early-out.
+        #[test]
+        fn parse_never_panics_on_map_like_input(
+            key in "\\^?.{0,4}",
+            action in "[a-z_]{0,16}",
+            arg in "(=.{0,12})?",
+        ) {
+            let _ = parse(&format!("map {key} {action} {arg}"));
+        }
+
+        /// A well-formed `map ^<letter> <known-verb>` always parses to a
+        /// binding — the happy path holds for any letter × known verb.
+        #[test]
+        fn parse_well_formed_ctrl_map_binds(c in "[a-z]") {
+            for verb in ["quit", "redraw", "help", "up", "down", "pageup"] {
+                let line = format!("map ^{c} {verb}");
+                proptest::prop_assert!(
+                    matches!(parse(&line), Ok(Some(_))),
+                    "well-formed map should bind: {line:?}"
+                );
+            }
+        }
+    }
 }
