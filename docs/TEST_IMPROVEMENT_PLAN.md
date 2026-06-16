@@ -1,8 +1,14 @@
 # spyc testing campaign — coverage + anti-"test theater"
 
-**Status:** active campaign (the one after the 2026-06 deep-review
-remediation, `archive/CODE_REVIEW_2026-06.md`). **Phase 1 — the `App`
-workflow harness — shipped** (`App::test_app`, `src/app/test_harness.rs`).
+**Status:** all 8 clusters shipped (#426–#435); ~50 new tests, the
+anti-"test theater" effect-intent seam in place, and **2 real bugs found +
+fixed** (#430, #431 — both in the live pane/pty workflow, cluster 4). Two
+small follow-ons remain (the deferred routing edges from cluster 6; a real
+coverage-guided cargo-fuzz pass if a lib split ever lands) — see the Order of
+attack table. The harness (`App::test_app`, `src/app/test_harness.rs`) +
+effect-intent matchers (`app/effect.rs`) are the durable foundation for
+future workflow tests.
+
 This charter folds the original May workflow-coverage plan together with
 the "Beyond Test Theater" quality RFC into one running plan.
 
@@ -135,12 +141,16 @@ Keep the real-socket tests; make failures interpretable:
 
 - **Snapshots (`insta` + `TestBackend`):** extend coverage of the terminal
   output buffer to catch visual regressions without per-cell asserts.
-- **Fuzzing (`cargo-fuzz`):** brute-force mutated input for the critical
-  parsers/mutators — the keymap DSL parser (`config/dsl.rs::parse`) and the
-  fuzzy matcher (`state/navigation.rs::find_match`) — to expose crashes
-  `proptest` might miss. Decision: use real coverage-guided `cargo-fuzz`
-  (nightly toolchain, a `fuzz/` crate); fuzz targets run **on demand**, not in
-  the default `make check` gate, so the stable gate stays nightly-free.
+- **Fuzzing:** brute-force mutated input for the critical parsers/mutators —
+  the keymap DSL parser (`config/dsl.rs::parse`) and the fuzzy matcher
+  (`state/navigation.rs::find_match`) — to expose crashes a single example
+  misses. Decision history: cargo-fuzz was chosen first, but it needs a `[lib]`
+  target and spyc is **bin-only** (modules are `mod` in `main.rs`) — a
+  crate-wide lib+bin split wasn't worth it for one cluster, so we used
+  **`proptest` in-crate** instead (no nightly, runs in `make check`). Both
+  targets are now proptest-fuzzed for panic-freedom (`find_match` in #427, the
+  DSL parser in #435). A real coverage-guided `cargo-fuzz` pass stays a
+  road-to-2.0 option if a lib split lands for other reasons.
 - **Organization & hygiene:** keep unit tests (`#[cfg(test)]` in-file) separate
   from integration tests (`tests/`); single-responsibility, descriptive names;
   use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behavior
@@ -162,7 +172,7 @@ unblocks the rest. Tick `✅ #NNN` as each lands.
 | 5 | **Background tasks** | C | `BackgroundTask` owns a live `PtyHost` (can't build without forking), so real-`cat`-capture smoke tests: `^Z` backgrounds + keeps the entry (Running) + closes the pager → `:fg` re-attaches it + removes it from the list; `gB`/`:task` views without taking ownership (marks viewed, clears the unread divider, pager tracks the id); `[t`/`]t` cycle with wraparound, view-only. Pure helpers (id alloc, status glyph, counts) already unit-tested in `tasks.rs`. | ✅ #432 |
 | 6 | **Quick-select dispatch** | C | Scanner already covered (11 tests); the gap was the dispatch. Extracted the kind×intent **action matrix** into a pure `quick_select_action` (behaviour-preserving) → unit-tested every cell (lowercase→yank; uppercase URL→open, path→jump, SHA→git-show, custom+template→filled URL, IPv4/template-less→yank-with-hint). Overlay state machine: Esc closes with no dispatch; 2-letter uppercase-first arms open-intent + narrows; uppercase Path label dispatches the open (proved via a missing path → not-found flash, CWD-safe). The successful-jump `chdir` (`set_current_dir`) + yank/URL/git leaves stay impure (covered at the matrix level). **Deferred:** the two routing edges (exited-pane flash-yet-takes-chords; pane-scroll vs pager key overlap) → fold into a later edge-cases pass. | ✅ #433 |
 | 7 | **MCP / env diagnostics** | D | Socket bind permission failures were opaque (server `bind_result?` → bare "Operation not permitted"; tests `.unwrap()` → opaque panic). Added a pure `socket_bind_error` classifier (EACCES/EPERM → "rerun under normal permissions" + path; else plain context), applied at the server bind site + unit-tested both branches; a `bind_test_socket` helper makes the two socket tests fail with a clear sandbox hint. Full-perms run unchanged (still binds + exercises the real socket). Diagnostic-only, patch bump 1.58.3. | ✅ #434 |
-| 8 | **Fuzzing + snapshot expansion** | E | No fuzz targets, thin snapshot areas → `cargo-fuzz` targets for `find_match` + `config/dsl.rs::parse` (nightly, on-demand `fuzz/` crate); fill thin `insta` coverage. | ☐ |
+| 8 | **Parser fuzzing (proptest)** | E | cargo-fuzz needs a `[lib]` target, but spyc is **bin-only** (every module is `mod` in `main.rs`) — a crate-wide lib+bin split wasn't worth the blast radius for the last cluster. Pivoted to **proptest in-crate** (no nightly, runs in `make check`): the keymap DSL parser (`config/dsl.rs::parse`) gets panic-freedom over arbitrary + map-biased input, and "well-formed `map ^<k> <verb>` always binds". `find_match` was already proptest-fuzzed in #2. No bugs (parser panic-safe by construction). | ✅ #435 |
 
 ## Bugs found by the campaign
 
@@ -176,11 +186,16 @@ from the test-only cluster PR that exposed it.
 | Cluster 4 — `^a v` empty-scrollback (smoke test + owner manual test) | Three issues in one branch: (1) **dead effect** — `open_pane_scroll_pager` flashed the hint then called `mount_scroll_pager`, which flashes `"scroll: on …"` in the same call (`flash_info` overwrites), so the hint never reached the user. (2) **inaccurate wording** — `"this app keeps its own history"` is false for a fresh shell and backwards for an agent (spyc *does* parse claude/agy logs via the transcript hook). (3) **dead-end mode** — it entered scroll mode even with nothing above the visible screen, trapping the user in a one-screen pager (caught on a fresh zsh during manual test). Fix: when scrollback is empty, flash an **agent-aware** hint and **stay live** (don't mount the pager); the visible screen is still on screen and `yp` yanks it. | #430 |
 | Owner manual test + key-trace (during the pane/pty cluster) | **Rapid `^a n` / `^a p` eaten.** Firing the chord fast leaves Ctrl held, so the second key arrives as `^n`/`^p` (Char + CONTROL), not bare. The resolver's generic Ctrl block ran *before* the `PendingSeq::W` pane-chord block and matched `^n`/`^p` to nothing → `_ => Ignored`, resetting the pending `^a-` chord, so the tab switch was silently lost. (The harness test used *bare* keys, which always worked — only the live keystroke carries Ctrl; the key-trace showed `code=Char('n') mods=CONTROL … resolver -> Ignored`.) Fix: run the `PendingSeq::W` block before the Ctrl block, matching the completion key code-only — screen treats `^a ^n` == `^a n`. Regression tests: resolver `ctrl_a_then_ctrl_{n,p,c}_*` + the `^a ^a`→PaneLastTab guard + harness `rapid_pane_next_prev_chords_each_switch_tabs` (now Ctrl-held). | #431 |
 
-Clusters 1–3 + 5 surfaced none — expected: #1 was a behaviour-preserving
+Clusters 1–3 + 5–8 surfaced none — expected: #1 was a behaviour-preserving
 retrofit; #2's four invariants held under 256 random cases each; #3 found the
 session dispatch + serde back-compat correct (the disk roundtrip / per-agent
-resume already had tests); #5's `^Z`/`:fg`/`gB`/cycle round-trips all behaved.
-Both bugs came from #4 (pane/pty) — where untested *live* workflow lived.
+resume already had tests); #5's `^Z`/`:fg`/`gB`/cycle round-trips all behaved;
+#6's quick-select dispatch matrix + state machine held; #7 + #8 were diagnostic
+/ parser-fuzzing (parser panic-safe by construction). **Both bugs came from #4
+(pane/pty) — where untested *live* workflow lived.** The pure / decision layers
+(effects, nav, finder, session dispatch, serde, task bookkeeping, the
+quick-select matrix, the DSL parser) all held up — a useful signal for where
+the risk actually concentrates.
 
 ## Acceptance criteria
 
