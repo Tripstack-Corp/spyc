@@ -173,7 +173,12 @@ from the test-only cluster PR that exposed it.
 
 | Found by | Bug | Fixed in |
 |----------|-----|----------|
-| _(none yet)_ | Clusters 1–3 surfaced none — expected so far. #1 was a behaviour-preserving retrofit; #2's four invariants held under 256 random cases each; #3 found the session dispatch + serde back-compat correct (and the disk roundtrip / per-agent resume already had tests). Bugs are likeliest in the still-untested live-workflow clusters (4–6: pane/pty, background tasks, quick-select). | — |
+| Cluster 4 — `^a v` empty-scrollback (smoke test + owner manual test) | Three issues in one branch: (1) **dead effect** — `open_pane_scroll_pager` flashed the hint then called `mount_scroll_pager`, which flashes `"scroll: on …"` in the same call (`flash_info` overwrites), so the hint never reached the user. (2) **inaccurate wording** — `"this app keeps its own history"` is false for a fresh shell and backwards for an agent (spyc *does* parse claude/agy logs via the transcript hook). (3) **dead-end mode** — it entered scroll mode even with nothing above the visible screen, trapping the user in a one-screen pager (caught on a fresh zsh during manual test). Fix: when scrollback is empty, flash an **agent-aware** hint and **stay live** (don't mount the pager); the visible screen is still on screen and `yp` yanks it. | #430 |
+
+Clusters 1–3 surfaced none — expected: #1 was a behaviour-preserving retrofit;
+#2's four invariants held under 256 random cases each; #3 found the session
+dispatch + serde back-compat correct (the disk roundtrip / per-agent resume
+already had tests).
 
 ## Acceptance criteria
 
