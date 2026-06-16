@@ -568,3 +568,73 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
         assert_eq!(s.tabs[1].cwd, PathBuf::from("/tmp/proj/sub"));
     });
 }
+
+// ── back-compat & wire-format pins (testing campaign, cluster 3) ──
+
+/// A pre-name / pre-project_home session (both fields added later, both
+/// `#[serde(default)]`) carrying legacy tabs (`claude_session_id`, no
+/// `agent_kind`) must still deserialize: `name` defaults empty,
+/// `project_home` None, and the tab's effective kind infers Claude. This
+/// pins the *session*-level back-compat (the tab-level alias path is
+/// covered by `effective_kind_infers_claude_for_legacy_saves`).
+#[test]
+fn legacy_session_json_without_name_or_project_home_loads() {
+    let json = serde_json::json!({
+        "id": 7u64,
+        "saved_at": "2025-01-01T00:00:00Z",
+        "epoch_secs": 1_600_000_000u64,
+        "cwd": "/tmp/old",
+        "tabs": [{
+            "command": "claude",
+            "label": "claude",
+            "cwd": "/tmp/old",
+            "claude_session_id": "22222222-2222-2222-2222-222222222222"
+        }],
+        "active_tab": 0,
+        "pane_height_pct": 50,
+        "pane_focused": false
+        // no "name", no "project_home" — an old save predating both
+    });
+    let s: Session = serde_json::from_value(json).unwrap();
+    assert_eq!(s.name, "");
+    assert_eq!(s.project_home, None);
+    assert_eq!(s.tabs.len(), 1);
+    assert_eq!(s.tabs[0].agent_kind, AgentKind::Other);
+    assert_eq!(s.tabs[0].effective_kind(), AgentKind::Claude);
+    assert_eq!(
+        s.tabs[0].agent_session_id.as_deref(),
+        Some("22222222-2222-2222-2222-222222222222")
+    );
+}
+
+/// Wire-format guarantee: a tab with no session id omits the
+/// `agent_session_id` / `agent_session_name` keys entirely
+/// (`skip_serializing_if`), so saved JSON stays clean and older spyc
+/// builds keep parsing it. A tab *with* an id includes the key.
+#[test]
+fn tab_omits_absent_session_id_in_json() {
+    let bare = SavedTab {
+        command: "bash".into(),
+        label: "bash".into(),
+        cwd: "/tmp".into(),
+        agent_kind: AgentKind::Other,
+        agent_session_id: None,
+        agent_session_name: None,
+    };
+    let json = serde_json::to_value(&bare).unwrap();
+    assert!(
+        json.get("agent_session_id").is_none(),
+        "an absent session id must be skipped, not serialized as null"
+    );
+    assert!(json.get("agent_session_name").is_none());
+
+    let with_id = SavedTab {
+        agent_session_id: Some("sid".into()),
+        ..bare
+    };
+    let json = serde_json::to_value(&with_id).unwrap();
+    assert_eq!(
+        json.get("agent_session_id").and_then(|v| v.as_str()),
+        Some("sid")
+    );
+}
