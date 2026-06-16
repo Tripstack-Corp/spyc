@@ -350,6 +350,23 @@ pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
 /// background thread and reads context from `ctx_path`. `cmd_tx` is the
 /// write end of the command channel — writable actions go through it to
 /// the main event loop.
+/// Turn a failed MCP socket bind into a helpful error. A permission-denied
+/// bind (EACCES / EPERM) almost always means a restricted sandbox refused the
+/// bind — not a real misconfiguration — so point the user at rerunning under
+/// normal permissions instead of leaving them with a bare "Operation not
+/// permitted". Other errors get plain path context.
+pub(super) fn socket_bind_error(err: std::io::Error, sock: &Path) -> anyhow::Error {
+    if err.kind() == std::io::ErrorKind::PermissionDenied {
+        anyhow::anyhow!(
+            "MCP socket bind denied at {} ({err}) — this usually means a restricted \
+             sandbox; rerun under normal permissions",
+            sock.display()
+        )
+    } else {
+        anyhow::Error::new(err).context(format!("binding MCP socket at {}", sock.display()))
+    }
+}
+
 pub fn start_socket_server(
     ctx_path: PathBuf,
     cmd_tx: std::sync::mpsc::Sender<McpRequest>,
@@ -369,7 +386,7 @@ pub fn start_socket_server(
     let old_umask = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o077));
     let bind_result = UnixListener::bind(&sock);
     rustix::process::umask(old_umask);
-    let listener = bind_result?;
+    let listener = bind_result.map_err(|e| socket_bind_error(e, &sock))?;
 
     // Record the directory this spyc is rooted at, next to the socket, so
     // stdio discovery can verify a `.spyc-context-<pid>.json` marker
