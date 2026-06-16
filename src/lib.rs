@@ -39,6 +39,39 @@ pub mod fuzz {
     pub fn parse_keymap_line(line: &str) {
         let _ = crate::config::dsl::parse(line);
     }
+
+    /// Render arbitrary markdown to styled lines and discard the result — the
+    /// fuzz target asserts the renderer never panics on adversarial markdown
+    /// (it ingests untrusted file content via the pager).
+    pub fn render_markdown(source: &str) {
+        let _ = crate::ui::markdown::render(source, &crate::ui::theme::Theme::default(), Some(80));
+    }
+
+    /// Syntax-highlight arbitrary content (as if it were a Rust file) and
+    /// discard the result — asserts the highlighter never panics.
+    pub fn highlight(content: &str) {
+        let _ = crate::ui::syntax::highlight_to_lines("fuzz.rs", content);
+    }
+
+    /// Word-wrap arbitrary text at `width`, asserting the wrap invariant.
+    ///
+    /// Every returned byte range must land on char boundaries and be
+    /// sliceable — a mid-codepoint range would panic the pager's actual
+    /// slicing, which is the bug class this catches.
+    pub fn word_wrap(text: &str, width: usize) {
+        for (start, end) in crate::ui::wrap::word_wrap_ranges(text, width) {
+            assert!(
+                start <= end && end <= text.len(),
+                "wrap range out of bounds: ({start},{end}) len {}",
+                text.len()
+            );
+            assert!(
+                text.is_char_boundary(start) && text.is_char_boundary(end),
+                "wrap range splits a codepoint: ({start},{end}) in {text:?}"
+            );
+            let _ = &text[start..end]; // must not panic
+        }
+    }
 }
 
 use std::io;

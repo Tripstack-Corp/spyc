@@ -30,5 +30,26 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "render_markdown"
+path = "fuzz_targets/render_markdown.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "highlight"
+path = "fuzz_targets/highlight.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "word_wrap"
+path = "fuzz_targets/word_wrap.rs"
+test = false
+doc = false
+bench = false
+
 # Own workspace so the parent crate's build/gate ignores this entirely.
 [workspace]

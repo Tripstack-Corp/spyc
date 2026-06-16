@@ -84,7 +84,7 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 	cargo deny --all-features check
 
 .PHONY: fuzz
-fuzz: ## Coverage-guided fuzz of the keymap DSL parser (needs nightly + cargo-fuzz; on-demand, NOT in `check`). Override time with FUZZ_SECS=N.
+fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=dsl_parse|render_markdown|highlight|word_wrap, FUZZ_SECS=N.
 	@command -v cargo-fuzz >/dev/null 2>&1 || { \
 		echo "cargo-fuzz not found — install with: cargo install cargo-fuzz"; \
 		exit 1; \
@@ -93,7 +93,7 @@ fuzz: ## Coverage-guided fuzz of the keymap DSL parser (needs nightly + cargo-fu
 		echo "nightly toolchain not found — install with: rustup toolchain install nightly"; \
 		exit 1; \
 	}
-	cargo +nightly fuzz run dsl_parse -- -max_total_time=$(or $(FUZZ_SECS),30)
+	cargo +nightly fuzz run $(or $(TARGET),dsl_parse) -- -max_total_time=$(or $(FUZZ_SECS),30)
 
 # Advisory AI-slop / code-quality scan. Deliberately NOT part of `check`: its
 # format/lint/security engines duplicate clippy+rustfmt (already in `check`),
