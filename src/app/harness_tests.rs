@@ -292,3 +292,63 @@ fn zoom_toggles_and_restores_prior_focus() {
         );
     });
 }
+
+/// Regression (fix:): opening `^a v` on a *plain* pane with empty
+/// scrollback must (a) flash the accurate hint — not the old
+/// "this app keeps its own history", false for a fresh shell, and not
+/// the "scroll: on" flash that used to clobber it — and (b) stay live
+/// rather than trap the user in an empty, un-scrollable pager.
+#[test]
+fn empty_scrollback_flashes_hint_and_stays_live() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat"); // fresh cat: no output → empty scrollback
+        app.open_pane_scroll_pager();
+        assert_eq!(
+            app.flash_text(),
+            Some("no terminal scrollback captured"),
+            "empty scrollback should flash the accurate hint"
+        );
+        assert!(
+            app.view.scroll_pager.is_none(),
+            "empty scrollback must not enter scroll mode (no dead-end pager)"
+        );
+    });
+}
+
+/// An inline agent pane (claude/agy) whose transcript scrollback is toggled
+/// off reaches the same empty-scrollback path — but its history *is*
+/// recoverable via the transcript hook, so the hint must point there, not
+/// claim the history is lost. The tab's command detects as `claude` (→ a
+/// transcript spec, default-off) while actually running `cat` so it spawns
+/// in a test.
+#[test]
+fn empty_scrollback_agent_pane_points_to_transcript() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn cat");
+        let entry =
+            crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
+        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        app.open_pane_scroll_pager();
+        assert_eq!(
+            app.flash_text(),
+            Some(
+                "no terminal scrollback — claude keeps its history in a transcript (toggle it on)"
+            ),
+            "an inline agent with transcript off should point at its transcript"
+        );
+        assert!(
+            app.view.scroll_pager.is_none(),
+            "empty scrollback must not enter scroll mode, agent or not"
+        );
+    });
+}

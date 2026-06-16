@@ -257,16 +257,31 @@ impl App {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         active.drain_output();
-        // Empty scrollback ⇒ a fresh process, or an app that keeps
-        // its own history (scroll region / virtual scroll). Flash a
-        // hint; still open the pager so search/yank of the visible
-        // screen works.
+        // Empty scrollback ⇒ a fresh/short process, or an inline agent whose
+        // structured transcript is toggled off (an agent with its transcript
+        // engaged or on the alt screen took the Transcript branch above).
+        // There's nothing above the visible screen to scroll to, so DON'T enter
+        // scroll mode — mounting a one-screen pager just traps the user in a
+        // view they have to Esc out of (reported on a fresh zsh). Flash the
+        // reason and stay live: the visible screen is already on screen, and
+        // `yp` yanks it without scroll mode. For an agent we point at its
+        // transcript (spyc parses its log); for a plain process we state the
+        // fact — never the old "this app keeps its own history", which was false
+        // for a shell and backwards for an agent.
         let scrollback_rows = active.with_screen_mut(crate::ui::scrollback::scrollback_len);
-        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         if scrollback_rows == 0 {
-            self.state
-                .flash_info("no scrollback captured — this app keeps its own history");
+            let hint = if spec.is_some() {
+                format!(
+                    "no terminal scrollback — {} keeps its history in a transcript (toggle it on)",
+                    profile.name()
+                )
+            } else {
+                "no terminal scrollback captured".to_string()
+            };
+            self.state.flash_info(hint);
+            return;
         }
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
         self.mount_scroll_pager(format!(" {label} (history)"), lines);
     }
 
