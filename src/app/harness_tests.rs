@@ -397,3 +397,114 @@ fn rapid_pane_next_prev_chords_each_switch_tabs() {
         }
     });
 }
+
+// ── background-task workflow smoke tests (testing campaign, cluster 5) ──
+// `BackgroundTask` owns a live PtyHost (can't be built without forking), so
+// these drive the real `! `-capture path with `cat` (blocks on stdin, stays
+// Running). The pure helpers (id alloc, glyph, counts) are unit-tested in
+// src/app/tasks.rs.
+
+/// `^Z` from a streaming capture backgrounds it (keeps a task entry, closes
+/// the pager); `:fg` re-attaches it as the live capture and removes it from
+/// the list.
+#[test]
+fn capture_backgrounds_with_ctrl_z_then_foregrounds_with_fg() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat"); // real running capture
+        assert!(app.runtime.pending_capture.is_some(), "capture is live");
+        assert!(app.view.pager.is_some(), "streaming pager is open");
+
+        app.background_capture(); // ^Z
+        assert!(
+            app.runtime.pending_capture.is_none(),
+            "no live capture after ^Z"
+        );
+        assert!(app.view.pager.is_none(), "pager closed on background");
+        assert_eq!(
+            app.runtime.background_tasks.tasks.len(),
+            1,
+            "the task entry is kept"
+        );
+        assert!(matches!(
+            app.runtime.background_tasks.tasks[0].status,
+            TaskStatus::Running
+        ));
+        assert_eq!(
+            app.flash_text(),
+            Some("task #1 backgrounded — :fg to resume")
+        );
+
+        app.foreground_task(None); // :fg
+        assert!(
+            app.runtime.pending_capture.is_some(),
+            ":fg re-attaches the capture"
+        );
+        assert!(
+            app.runtime.background_tasks.tasks.is_empty(),
+            ":fg removes it from the task list"
+        );
+        assert!(app.view.pager.is_some(), ":fg reopens the streaming pager");
+    });
+}
+
+/// `gB` / `:task` views a backgrounded task WITHOUT taking ownership: the
+/// task stays in the list, gets marked viewed (clearing its unread divider),
+/// and the pager tracks its id.
+#[test]
+fn open_task_viewer_views_without_taking_ownership() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat");
+        app.background_capture();
+        // Mark unread so we can prove the view clears it.
+        app.runtime.background_tasks.tasks[0].has_unread_output = true;
+
+        app.open_task_viewer(None); // gB / :task
+        assert_eq!(
+            app.runtime.background_tasks.tasks.len(),
+            1,
+            "viewing must NOT take ownership"
+        );
+        let t = &app.runtime.background_tasks.tasks[0];
+        assert!(t.viewed_in_task_viewer, "task is marked viewed");
+        assert!(!t.has_unread_output, "viewing clears the unread divider");
+        let pager = app.view.pager.as_ref().expect("task viewer pager opened");
+        assert_eq!(pager.task_id, Some(1), "pager tracks the viewed task id");
+    });
+}
+
+/// `[t` / `]t` cycle the task viewer across tasks with wraparound, viewing
+/// each without taking ownership.
+#[test]
+fn cycle_task_viewer_wraps_across_tasks() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat");
+        app.background_capture(); // task #1
+        app.start_capture("cat", "cat", "cat");
+        app.background_capture(); // task #2
+        assert_eq!(app.runtime.background_tasks.tasks.len(), 2);
+
+        let viewed = |app: &App| app.view.pager.as_ref().and_then(|v| v.task_id);
+        app.open_task_viewer(None); // most-recent → #2
+        assert_eq!(viewed(&app), Some(2));
+        app.cycle_task_viewer(1); // forward wraps → #1
+        assert_eq!(viewed(&app), Some(1));
+        app.cycle_task_viewer(1); // → #2
+        assert_eq!(viewed(&app), Some(2));
+        app.cycle_task_viewer(-1); // back → #1
+        assert_eq!(viewed(&app), Some(1));
+        // Cycling is view-only — both tasks remain.
+        assert_eq!(app.runtime.background_tasks.tasks.len(), 2);
+    });
+}
