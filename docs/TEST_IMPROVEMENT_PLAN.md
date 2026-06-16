@@ -136,12 +136,33 @@ Keep the real-socket tests; make failures interpretable:
 - **Snapshots (`insta` + `TestBackend`):** extend coverage of the terminal
   output buffer to catch visual regressions without per-cell asserts.
 - **Fuzzing (`cargo-fuzz`):** brute-force mutated input for the critical
-  parsers/mutators — the keymap DSL parser and the fuzzy matcher — to expose
-  crashes `proptest` might miss.
+  parsers/mutators — the keymap DSL parser (`config/dsl.rs::parse`) and the
+  fuzzy matcher (`state/navigation.rs::find_match`) — to expose crashes
+  `proptest` might miss. Decision: use real coverage-guided `cargo-fuzz`
+  (nightly toolchain, a `fuzz/` crate); fuzz targets run **on demand**, not in
+  the default `make check` gate, so the stable gate stays nightly-free.
 - **Organization & hygiene:** keep unit tests (`#[cfg(test)]` in-file) separate
   from integration tests (`tests/`); single-responsibility, descriptive names;
   use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behavior
   under test (don't assert on intermediate setup steps).
+
+## Order of attack
+
+Sequenced **one PR per cluster**, deep-review cadence: verify the gap first
+(write the missing/failing test), close it, gate green (`make check`), merge as
+we go (`--close-source=false`), tick the box. Front-loaded so enabling work
+unblocks the rest. Tick `✅ #NNN` as each lands.
+
+| # | Cluster | Workstream | Verify-first gap → deliverable | Status |
+|---|---------|-----------|--------------------------------|--------|
+| 1 | **Effect-intent matchers** (enabling) | A.2, B | The ~6 byte-for-byte `Effect` destructures in `state/tests/apply.rs` (`apply_jump_start_dir_emits_change_dir`, `apply_jump_mark_*`, `apply_climb_*`) break on any field add → matcher layer over `&[Effect]` (`contains_chdir_to`, `requested_read_pane_text`, `flashed`), retrofit those tests onto it, codify the AI-testing rules into AGENTS.md. | ☐ |
+| 2 | **Pure-state property tests** | A.1, A.3 | Nav/grid covered by one fixed 3-item case → proptest: any list × grid × cursor, `Down(N)∘Up(N)` in-bounds + the negative invariant "cursor index never ≥ `len`"; `find_match` never panics, literal substring ⇒ `Some`, empty-query pinned. | ☐ |
+| 3 | **Harness extensions + session restore** | C | Session restore is 100% untested → extend `test_harness.rs` (fake pane-tabs, non-spawning session load), then multi-tab order + distinct IDs, full field roundtrip, the three agent resume command-builders (Codex/Claude/Gemini), legacy deser, malformed-ID → fresh command no-panic. | ☐ |
+| 4 | **Pane/pty workflow** | C | No `^a z`/`^a v`/new-tab/switch-close tests → `^a z` preserves `pane_height_pct`+focus; `^a v` scrollback-before-live; empty-scrollback flash; new-tab `PROJECT_HOME`; switch/close/restart routing. Fake buffers + a few real-pty smoke tests in `tests/`. | ☐ |
+| 5 | **Background tasks** | C | No `^Z`/`:fg`/`gB`/divider tests → `^Z` backgrounds+keeps entry; resume shows post-bg output; `:fg`/`:fg N`; `gB`/`:task N`/`[t`/`]t` view-without-own; closing an exited viewed task promotes output; divider running/new/success/failure. | ☐ |
+| 6 | **Quick-select e2e + routing edges** | C | Scanner well-covered (11 tests) but no dispatch flow → yank vs open-intent; path jump vs flash; SHA→git-show pager; Esc no-side-effects; + exited-pane flash-yet-takes-chords; pane-scroll vs pager key overlap. | ☐ |
+| 7 | **MCP / env diagnostics** | D | `mcp/tests/mod.rs` (30 tests) has no sandbox-skip logic → socket EPERM/EACCES → clear "rerun under normal permissions" diagnostic, without weakening the full-perms run. | ☐ |
+| 8 | **Fuzzing + snapshot expansion** | E | No fuzz targets, thin snapshot areas → `cargo-fuzz` targets for `find_match` + `config/dsl.rs::parse` (nightly, on-demand `fuzz/` crate); fill thin `insta` coverage. | ☐ |
 
 ## Acceptance criteria
 

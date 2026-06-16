@@ -597,6 +597,98 @@ impl App {
     }
 }
 
+/// Test-only **intent matchers** over a slice of [`Effect`]s.
+///
+/// The pure `apply()` transitions return `Vec<Effect>`; a test wants to assert
+/// *what was requested* — a chdir to `/tmp`, a pane read — without pinning the
+/// effect's struct layout. Destructuring `Effect::ChangeDir { path, focus,
+/// on_ok, err_prefix }` inline in every test means a new field breaks them all:
+/// the refactoring paralysis the testing campaign targets. These matchers are
+/// the **single** place that destructures (with `..`, so new fields are
+/// transparent); tests read the fields they care about through the view.
+///
+/// Grow this as the campaign reaches each cluster — a boolean `requests_*` for
+/// "an intent was emitted" checks, a `*View` when a test asserts fields. Add
+/// the matcher the test needs, not a speculative shelf of unused helpers.
+#[cfg(test)]
+pub mod matchers {
+    use std::path::Path;
+
+    use super::{Effect, PaneTextKind, PaneTextSink};
+
+    /// Intent assertions over `&[Effect]`. Works on a `Vec<Effect>`,
+    /// `fx.as_slice()`, or a borrowed slice (the impl is on `[Effect]`).
+    pub trait EffectSliceExt {
+        /// The sole emitted effect as a [`ChangeDirView`], iff the slice is
+        /// *exactly* one `ChangeDir`. `None` otherwise — so a stray extra
+        /// effect is still caught, matching the old `[Effect::ChangeDir { .. }]`
+        /// single-element patterns.
+        fn change_dir(&self) -> Option<ChangeDirView<'_>>;
+
+        /// The sole `ReadPaneText`'s `(kind, sink)`, iff the slice is exactly
+        /// one `ReadPaneText`.
+        fn read_pane_text(&self) -> Option<(&PaneTextKind, &PaneTextSink)>;
+    }
+
+    impl EffectSliceExt for [Effect] {
+        fn change_dir(&self) -> Option<ChangeDirView<'_>> {
+            match self {
+                [
+                    Effect::ChangeDir {
+                        path,
+                        focus,
+                        on_ok,
+                        err_prefix,
+                        ..
+                    },
+                ] => Some(ChangeDirView {
+                    path,
+                    focus: focus.as_deref(),
+                    on_ok: on_ok.as_deref(),
+                    err_prefix,
+                }),
+                _ => None,
+            }
+        }
+
+        fn read_pane_text(&self) -> Option<(&PaneTextKind, &PaneTextSink)> {
+            match self {
+                [Effect::ReadPaneText { kind, then, .. }] => Some((kind, then)),
+                _ => None,
+            }
+        }
+    }
+
+    /// Borrowed view over an `Effect::ChangeDir`'s fields, decoupling tests
+    /// from the struct's layout: only the one destructure in `change_dir`
+    /// sees the fields (via `..`), so a new field never breaks a caller.
+    pub struct ChangeDirView<'a> {
+        path: &'a Path,
+        focus: Option<&'a Path>,
+        on_ok: Option<&'a str>,
+        err_prefix: &'a str,
+    }
+
+    impl ChangeDirView<'_> {
+        /// The destination directory.
+        pub fn path(&self) -> &Path {
+            self.path
+        }
+        /// The row to focus after the chdir, if any.
+        pub fn focus(&self) -> Option<&Path> {
+            self.focus
+        }
+        /// The success flash, if any.
+        pub fn on_ok(&self) -> Option<&str> {
+            self.on_ok
+        }
+        /// The error-flash prefix.
+        pub fn err_prefix(&self) -> &str {
+            self.err_prefix
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ClipMsg, Effect, PostAction};

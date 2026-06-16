@@ -2,6 +2,7 @@
 //! mod.rs (800-LoC campaign).
 
 use super::*;
+use crate::app::effect::matchers::EffectSliceExt;
 use crate::keymap::Action;
 use crossterm::event::KeyModifiers;
 
@@ -54,27 +55,31 @@ fn goto_file_actions_emit_read_pane_text_pickable() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
-        match app.apply(&Action::GotoFile).unwrap().as_slice() {
-            [
-                Effect::ReadPaneText {
-                    kind: PaneTextKind::Pickable(200),
-                    then:
-                        PaneTextSink::GotoFile {
-                            open_at_line: false,
-                        },
-                },
-            ] => {}
-            other => panic!("gf: expected ReadPaneText Pickable(200)+GotoFile, got {other:?}"),
-        }
-        match app.apply(&Action::GotoFileLine).unwrap().as_slice() {
-            [
-                Effect::ReadPaneText {
-                    kind: PaneTextKind::Pickable(200),
-                    then: PaneTextSink::GotoFile { open_at_line: true },
-                },
-            ] => {}
-            other => panic!("gF: expected open_at_line=true, got {other:?}"),
-        }
+        let fx = app.apply(&Action::GotoFile).unwrap();
+        let (kind, then) = fx.read_pane_text().expect("gf emits one ReadPaneText");
+        assert!(
+            matches!(kind, PaneTextKind::Pickable(200)),
+            "gf reads pickable(200)"
+        );
+        assert!(
+            matches!(
+                then,
+                PaneTextSink::GotoFile {
+                    open_at_line: false
+                }
+            ),
+            "gf navigates without opening at a line"
+        );
+        let fx = app.apply(&Action::GotoFileLine).unwrap();
+        let (kind, then) = fx.read_pane_text().expect("gF emits one ReadPaneText");
+        assert!(
+            matches!(kind, PaneTextKind::Pickable(200)),
+            "gF reads pickable(200)"
+        );
+        assert!(
+            matches!(then, PaneTextSink::GotoFile { open_at_line: true }),
+            "gF opens the target at its line"
+        );
     });
 }
 

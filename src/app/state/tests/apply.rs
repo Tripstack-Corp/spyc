@@ -1,5 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 use super::*;
+use crate::app::effect::matchers::EffectSliceExt;
 
 #[test]
 fn apply_down_moves_cursor() {
@@ -293,65 +294,38 @@ fn apply_jump_prev_dir() {
 #[test]
 fn apply_jump_start_dir_emits_change_dir() {
     let mut s = test_state(); // start_dir = /tmp/test
-    match s.apply(&Action::JumpStartDir) {
-        ApplyResult::Post(fx) => match fx.as_slice() {
-            [
-                Effect::ChangeDir {
-                    path,
-                    focus,
-                    on_ok,
-                    err_prefix,
-                },
-            ] => {
-                assert_eq!(path, &PathBuf::from("/tmp/test"));
-                assert!(focus.is_none());
-                assert!(on_ok.is_none());
-                assert_eq!(*err_prefix, "jump to start failed");
-            }
-            other => panic!("expected one ChangeDir, got {other:?}"),
-        },
-        other => panic!("expected Post, got {other:?}"),
-    }
+    let ApplyResult::Post(fx) = s.apply(&Action::JumpStartDir) else {
+        panic!("expected Post");
+    };
+    let cd = fx.change_dir().expect("one ChangeDir effect");
+    assert_eq!(cd.path(), Path::new("/tmp/test"));
+    assert!(cd.focus().is_none());
+    assert!(cd.on_ok().is_none());
+    assert_eq!(cd.err_prefix(), "jump to start failed");
 }
 
 #[test]
 fn apply_jump_prev_dir_emits_change_dir_when_set() {
     let mut s = test_state();
     s.prev_dir = Some(PathBuf::from("/tmp/prev"));
-    match s.apply(&Action::JumpPrevDir) {
-        ApplyResult::Post(fx) => match fx.as_slice() {
-            [
-                Effect::ChangeDir {
-                    path, err_prefix, ..
-                },
-            ] => {
-                assert_eq!(path, &PathBuf::from("/tmp/prev"));
-                assert_eq!(*err_prefix, "jump back failed");
-            }
-            other => panic!("expected one ChangeDir, got {other:?}"),
-        },
-        other => panic!("expected Post, got {other:?}"),
-    }
+    let ApplyResult::Post(fx) = s.apply(&Action::JumpPrevDir) else {
+        panic!("expected Post");
+    };
+    let cd = fx.change_dir().expect("one ChangeDir effect");
+    assert_eq!(cd.path(), Path::new("/tmp/prev"));
+    assert_eq!(cd.err_prefix(), "jump back failed");
 }
 
 #[test]
 fn apply_jump_project_home_emits_change_dir_when_set() {
     let mut s = test_state();
     s.project_home = Some(PathBuf::from("/tmp/proj"));
-    match s.apply(&Action::JumpProjectHome) {
-        ApplyResult::Post(fx) => match fx.as_slice() {
-            [
-                Effect::ChangeDir {
-                    path, err_prefix, ..
-                },
-            ] => {
-                assert_eq!(path, &PathBuf::from("/tmp/proj"));
-                assert_eq!(*err_prefix, "jump to project home failed");
-            }
-            other => panic!("expected one ChangeDir, got {other:?}"),
-        },
-        other => panic!("expected Post, got {other:?}"),
-    }
+    let ApplyResult::Post(fx) = s.apply(&Action::JumpProjectHome) else {
+        panic!("expected Post");
+    };
+    let cd = fx.change_dir().expect("one ChangeDir effect");
+    assert_eq!(cd.path(), Path::new("/tmp/proj"));
+    assert_eq!(cd.err_prefix(), "jump to project home failed");
 }
 
 #[test]
@@ -374,25 +348,14 @@ fn apply_jump_mark_emits_change_dir_with_focus_and_flash() {
             focus: Some(PathBuf::from("/tmp/marked/file.rs")),
         },
     );
-    match s.apply(&Action::JumpMark('a')) {
-        ApplyResult::Post(fx) => match fx.as_slice() {
-            [
-                Effect::ChangeDir {
-                    path,
-                    focus,
-                    on_ok,
-                    err_prefix,
-                },
-            ] => {
-                assert_eq!(path, &PathBuf::from("/tmp/marked"));
-                assert_eq!(focus.as_deref(), Some(Path::new("/tmp/marked/file.rs")));
-                assert_eq!(on_ok.as_deref(), Some("jumped to mark 'a'"));
-                assert_eq!(*err_prefix, "jump failed");
-            }
-            other => panic!("expected one ChangeDir, got {other:?}"),
-        },
-        other => panic!("expected Post, got {other:?}"),
-    }
+    let ApplyResult::Post(fx) = s.apply(&Action::JumpMark('a')) else {
+        panic!("expected Post");
+    };
+    let cd = fx.change_dir().expect("one ChangeDir effect");
+    assert_eq!(cd.path(), Path::new("/tmp/marked"));
+    assert_eq!(cd.focus(), Some(Path::new("/tmp/marked/file.rs")));
+    assert_eq!(cd.on_ok(), Some("jumped to mark 'a'"));
+    assert_eq!(cd.err_prefix(), "jump failed");
 }
 
 #[test]
@@ -408,28 +371,17 @@ fn apply_jump_mark_unset_flashes_no_effect() {
 #[test]
 fn apply_climb_emits_change_dir_to_parent_focusing_old_dir() {
     let mut s = test_state(); // listing.dir = /tmp/test
-    match s.apply(&Action::Climb) {
-        ApplyResult::Post(fx) => match fx.as_slice() {
-            [
-                Effect::ChangeDir {
-                    path,
-                    focus,
-                    on_ok,
-                    err_prefix,
-                },
-            ] => {
-                assert_eq!(path, &PathBuf::from("/tmp"));
-                // Focus by the just-left dir's path — the parent's row for
-                // that child has `r.path == /tmp/test`, so this lands on
-                // the same row the former by-display-name match did.
-                assert_eq!(focus.as_deref(), Some(Path::new("/tmp/test")));
-                assert!(on_ok.is_none());
-                assert_eq!(*err_prefix, "chdir");
-            }
-            other => panic!("expected one ChangeDir, got {other:?}"),
-        },
-        other => panic!("expected Post, got {other:?}"),
-    }
+    let ApplyResult::Post(fx) = s.apply(&Action::Climb) else {
+        panic!("expected Post");
+    };
+    let cd = fx.change_dir().expect("one ChangeDir effect");
+    assert_eq!(cd.path(), Path::new("/tmp"));
+    // Focus by the just-left dir's path — the parent's row for that child
+    // has `r.path == /tmp/test`, so this lands on the same row the former
+    // by-display-name match did.
+    assert_eq!(cd.focus(), Some(Path::new("/tmp/test")));
+    assert!(cd.on_ok().is_none());
+    assert_eq!(cd.err_prefix(), "chdir");
 }
 
 #[test]
@@ -439,24 +391,13 @@ fn apply_home_emits_change_dir() {
     // `Home` reads $HOME at dispatch; guard so the test is deterministic
     // regardless of the runner's environment (CI always has it set).
     if std::env::var_os("HOME").is_some() {
-        match result {
-            ApplyResult::Post(fx) => match fx.as_slice() {
-                [
-                    Effect::ChangeDir {
-                        focus,
-                        on_ok,
-                        err_prefix,
-                        ..
-                    },
-                ] => {
-                    assert!(focus.is_none());
-                    assert!(on_ok.is_none());
-                    assert_eq!(*err_prefix, "chdir");
-                }
-                other => panic!("expected one ChangeDir, got {other:?}"),
-            },
-            other => panic!("expected Post, got {other:?}"),
-        }
+        let ApplyResult::Post(fx) = result else {
+            panic!("expected Post");
+        };
+        let cd = fx.change_dir().expect("one ChangeDir effect");
+        assert!(cd.focus().is_none());
+        assert!(cd.on_ok().is_none());
+        assert_eq!(cd.err_prefix(), "chdir");
     } else {
         assert!(matches!(result, ApplyResult::Handled));
     }
