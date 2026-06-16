@@ -600,4 +600,98 @@ mod tests {
         assert_eq!(plan.command, "bash -lc 'make'");
         assert!(matches!(plan.resume, ResumeAction::None));
     }
+
+    // ── kind → profile dispatch (restore-time) ────────────────────────
+    // `detect` (command → profile) is covered above; these pin the OTHER
+    // direction, `profile_for` (persisted AgentKind → behavior), which the
+    // restore loop uses to choose each tab's resume strategy.
+
+    /// Every registered agent's kind round-trips through `profile_for`:
+    /// the persisted tag resolves back to the profile that owns it.
+    /// Catches a REGISTRY entry whose `kind()` is wrong, or a missing one.
+    #[test]
+    fn profile_for_round_trips_every_registered_kind() {
+        for &p in REGISTRY {
+            let back = profile_for(p.kind());
+            assert_eq!(back.kind(), p.kind());
+            assert_eq!(
+                back.binary(),
+                p.binary(),
+                "kind {:?} routed to the wrong profile",
+                p.kind()
+            );
+        }
+    }
+
+    /// All five real kinds resolve to a matching profile, and the
+    /// un-registered `Other` falls back to the no-op profile (identity
+    /// restore, no panic).
+    #[test]
+    fn profile_for_resolves_all_kinds_including_other() {
+        for k in [
+            AgentKind::Claude,
+            AgentKind::Codex,
+            AgentKind::Gemini,
+            AgentKind::Agy,
+            AgentKind::Zot,
+        ] {
+            assert_eq!(profile_for(k).kind(), k);
+        }
+        assert_eq!(profile_for(AgentKind::Other).kind(), AgentKind::Other);
+        let plan =
+            profile_for(AgentKind::Other).reconstruct_restore("vim", Some("x"), Path::new("/tmp"));
+        assert_eq!(plan.command, "vim");
+        assert!(matches!(plan.resume, ResumeAction::None));
+    }
+
+    /// Back-compat end-to-end (no PTY): a pre-1.41.6 Claude tab — saved
+    /// with `claude_session_id` and no `agent_kind` (so `agent_kind ==
+    /// Other`) — must still route to the Claude resume path. This is the
+    /// `effective_kind → profile_for → reconstruct_restore` chain the
+    /// restore loop runs for each tab.
+    #[test]
+    fn legacy_claude_tab_resumes_via_effective_kind() {
+        let tab = crate::state::sessions::SavedTab {
+            command: "claude".into(),
+            label: "claude".into(),
+            cwd: "/tmp".into(),
+            agent_kind: AgentKind::Other, // legacy save: field absent → Other
+            agent_session_id: Some("sid-legacy".into()),
+            agent_session_name: Some("OLD".into()),
+        };
+        // `effective_kind` upgrades the legacy Other → Claude.
+        assert_eq!(tab.effective_kind(), AgentKind::Claude);
+        let plan = profile_for(tab.effective_kind()).reconstruct_restore(
+            &tab.command,
+            tab.agent_session_id.as_deref(),
+            Path::new("/tmp"),
+        );
+        assert_eq!(plan.command, "claude");
+        assert!(matches!(
+            plan.resume,
+            ResumeAction::ClaudeStdin { session_id } if session_id == "sid-legacy"
+        ));
+    }
+
+    /// A legacy tab with no session id stays a fresh, verbatim spawn
+    /// (`effective_kind == Other` → no resume) — never a panic.
+    #[test]
+    fn legacy_tab_without_sid_is_a_fresh_spawn() {
+        let tab = crate::state::sessions::SavedTab {
+            command: "claude".into(),
+            label: "claude".into(),
+            cwd: "/tmp".into(),
+            agent_kind: AgentKind::Other,
+            agent_session_id: None,
+            agent_session_name: None,
+        };
+        assert_eq!(tab.effective_kind(), AgentKind::Other);
+        let plan = profile_for(tab.effective_kind()).reconstruct_restore(
+            &tab.command,
+            None,
+            Path::new("/tmp"),
+        );
+        assert_eq!(plan.command, "claude");
+        assert!(matches!(plan.resume, ResumeAction::None));
+    }
 }
