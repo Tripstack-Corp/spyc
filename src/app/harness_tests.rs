@@ -225,3 +225,70 @@ fn esc_closes_overlay_pager() {
         assert!(app.view.pager.is_none(), "Esc should close the pager");
     });
 }
+
+// ── pane/pty workflow smoke tests (testing campaign, cluster 4) ──
+// These spawn a real `cat` pane (the established pattern — cat blocks on
+// stdin, keeping the pty alive for the test) and drive the App-level pane
+// handlers. A handful of smoke tests per the charter; the pure decision
+// logic (decide_scroll_source, PaneTabs index math) is unit-tested in
+// src/pane.
+
+/// Opening a bare pane tab spawns it in the *current listing dir*
+/// (deliberately not PROJECT_HOME — see `open_pane_tab` docs) and moves
+/// focus into the pane.
+#[test]
+fn open_pane_tab_spawns_in_listing_dir_and_focuses_pane() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        assert!(app.runtime.pane_tabs.is_none());
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        assert_eq!(tabs.active_info().cwd, app.state.listing.dir);
+        assert_eq!(tabs.active_info().cwd, dir);
+        assert_eq!(
+            app.state.focus,
+            state::Focus::Pane,
+            "opening a pane focuses it"
+        );
+    });
+}
+
+/// `^a z` forces focus into the pane and sets the zoom flag; toggling
+/// again restores the *prior* focus (FileList here) and clears the flag.
+/// `pane_height_pct` is preserved across the round-trip.
+#[test]
+fn zoom_toggles_and_restores_prior_focus() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        // The user moves focus back to the list before zooming.
+        app.state.focus = state::Focus::FileList;
+        let pct_before = app.state.pane.pane_height_pct;
+
+        app.toggle_pane_zoom();
+        assert!(app.state.pane.pane_zoomed, "first toggle zooms on");
+        assert_eq!(
+            app.state.focus,
+            state::Focus::Pane,
+            "zoom-on forces pane focus"
+        );
+
+        app.toggle_pane_zoom();
+        assert!(!app.state.pane.pane_zoomed, "second toggle zooms off");
+        assert_eq!(
+            app.state.focus,
+            state::Focus::FileList,
+            "unzoom restores the prior focus"
+        );
+        assert_eq!(
+            app.state.pane.pane_height_pct, pct_before,
+            "zoom must not disturb pane_height_pct"
+        );
+    });
+}
