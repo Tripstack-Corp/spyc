@@ -22,6 +22,27 @@ use ratatui::text::{Line, Span};
 
 use crate::ui::theme::Theme;
 
+/// A ` ```mermaid ` fenced block discovered while rendering markdown.
+///
+/// `line_range` is the half-open range of *rendered* `lines` the block's
+/// placeholder occupies — so the pager can tell when the cursor is on it (the
+/// `o`-to-open hook, and later the inline image). `source` is the raw diagram
+/// text handed to the off-thread renderer. See `docs/MERMAID_PAGER_PLAN.md`.
+#[derive(Debug, Clone)]
+pub struct MermaidBlock {
+    pub line_range: std::ops::Range<usize>,
+    pub source: String,
+}
+
+/// Output of [`render_doc`]: the styled lines plus the mermaid blocks found in
+/// them. [`render`] returns just the lines (back-compat); callers that need the
+/// blocks (the pager) use [`render_doc`].
+#[derive(Debug, Default)]
+pub struct MarkdownDoc {
+    pub lines: Vec<Line<'static>>,
+    pub mermaid_blocks: Vec<MermaidBlock>,
+}
+
 /// Per-column upper bound when the caller didn't supply a width hint
 /// (tests, programmatic use). Real renders pass an actual pager body
 /// width and the per-column cap is computed from it. See [`render`].
@@ -53,6 +74,13 @@ const PROSE_WRAP_MIN: usize = 40;
 /// Naming kept as `table_width_hint` for back-compat with v1.50.48
 /// callers, but the hint now also drives prose wrap.
 pub fn render(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> Vec<Line<'static>> {
+    render_doc(source, theme, table_width_hint).lines
+}
+
+/// Like [`render`] but also returns the ` ```mermaid ` blocks discovered (with
+/// the rendered-line range each occupies). The pager uses this so it can map a
+/// cursor position to a diagram (the `o`-to-open hook + the inline image).
+pub fn render_doc(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> MarkdownDoc {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
@@ -64,7 +92,7 @@ pub fn render(source: &str, theme: &Theme, table_width_hint: Option<usize>) -> V
     for event in parser {
         r.handle(event);
     }
-    r.finish()
+    r.finish_doc()
 }
 
 /// Reference-counted text modifiers. Markdown spans nest — e.g. `**bold**`
@@ -176,6 +204,9 @@ struct Renderer<'t> {
     /// Clamped to [`PROSE_WRAP_MIN`] so a tiny terminal doesn't
     /// produce 30-char rows of mangled prose.
     prose_width: usize,
+    /// ` ```mermaid ` blocks found so far, with the rendered-line range each
+    /// occupies. Collected in `end_code_block`; surfaced via `finish_doc`.
+    mermaid_blocks: Vec<MermaidBlock>,
 }
 
 /// Source-level preprocessor: insert markdown's two-space hard-break

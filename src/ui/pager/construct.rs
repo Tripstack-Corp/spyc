@@ -50,6 +50,7 @@ impl PagerView {
             mount: Mount::Overlay,
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
+            mermaid_blocks: Vec::new(),
         }
     }
 
@@ -89,7 +90,25 @@ impl PagerView {
             mount: Mount::Overlay,
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
+            mermaid_blocks: Vec::new(),
         }
+    }
+
+    /// The first ` ```mermaid ` block whose rendered-line range overlaps the
+    /// current viewport (`[scroll, scroll + last_viewport_h)`), for the
+    /// `o`-to-open hook. `None` when no diagram is on screen (or this isn't a
+    /// markdown view). Uses the viewport height cached by the last render.
+    pub fn visible_mermaid_block(&self) -> Option<&crate::ui::markdown::MermaidBlock> {
+        // The ranges index the *rendered* markdown lines; ignore them while the
+        // source view is showing (the `m` toggle), where line numbers differ.
+        if !self.markdown_rendered {
+            return None;
+        }
+        let top = self.scroll as usize;
+        let bottom = top + (self.last_viewport_h.get() as usize).max(1);
+        self.mermaid_blocks
+            .iter()
+            .find(|b| b.line_range.start < bottom && b.line_range.end > top)
     }
 
     /// Plain text of the *source* view. For Markdown buffers this

@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.58.8"
+version = "1.58.9"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -13,6 +13,19 @@ path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.30"
+# Mermaid-in-pager (docs/MERMAID_PAGER_PLAN.md): render ```mermaid blocks as
+# terminal-graphics images. All pure-Rust, zero C deps — `default-features =
+# false` on ratatui-image drops the `chafa-dyn` default (a C lib via
+# pkg-config); Sixel still works via pure-Rust `icy_sixel`, and Kitty/iTerm2/
+# halfblocks are built in. ratatui-image tracks ratatui 0.30; mermaid-rs-renderer
+# emits PNG via resvg (no Node/Chromium); `image` (png only) decodes it.
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
+mermaid-rs-renderer = { version = "0.2", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Rasterize the mermaid SVG → PNG (pure-Rust; same version mermaid-rs-renderer
+# pulls in, so no duplicate in the tree). We drive it directly to control the
+# white background + system-font loading.
+resvg = { version = "0.46", default-features = false, features = ["text", "system-fonts"] }
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
