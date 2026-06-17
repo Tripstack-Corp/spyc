@@ -45,15 +45,10 @@ impl App {
     /// context to a sub-handler (returning `Some` when it consumes the key,
     /// `None` to fall through); the final motion handler always consumes.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        // The full-screen mermaid image overlay sits on top of the pager and is
-        // modal: intercept before any pager handler. q/Esc/i/o dismiss it; every
-        // other key is swallowed so nothing scrolls underneath it.
-        if self.view.mermaid_image.is_some() {
-            if matches!(key.code, KeyCode::Esc | KeyCode::Char('q' | 'i' | 'o')) {
-                self.view.mermaid_image = None;
-                self.view.needs_full_repaint = true;
-            }
-            return Vec::new();
+        // The full-screen image overlay sits on top of the pager and is modal:
+        // intercept before any pager handler and route to its own verbs.
+        if self.view.image_view.is_some() {
+            return self.handle_image_view_key(key);
         }
         let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
@@ -95,6 +90,58 @@ impl App {
             return r;
         }
         self.handle_pager_motion(key, viewport)
+    }
+
+    /// Verbs for the full-screen image overlay (modal): `s` save the PNG, `o`
+    /// open it in the external viewer, q/Esc/i dismiss. Other keys are swallowed
+    /// so nothing scrolls underneath. (`Y`/`y`/`b`/`c` land in a follow-on.)
+    fn handle_image_view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'i') => {
+                self.view.image_view = None;
+                self.view.needs_full_repaint = true;
+            }
+            KeyCode::Char('s') => self.save_image_view(),
+            KeyCode::Char('o') => {
+                // Open the current diagram externally — re-render via the worker
+                // (mermaid views always carry their source).
+                if let Some(source) = self
+                    .view
+                    .image_view
+                    .as_ref()
+                    .and_then(|iv| iv.source.clone())
+                {
+                    return vec![Effect::RenderMermaid(
+                        crate::app::mermaid_ops::MermaidRenderOp {
+                            source,
+                            mode: crate::app::mermaid_ops::MermaidMode::Open,
+                        },
+                    )];
+                }
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// `s` in the image overlay: write the rendered PNG to the cwd, reporting
+    /// the path (or error) in the overlay footer. Small write, done inline like
+    /// the pager's text `save_to_file`.
+    fn save_image_view(&mut self) {
+        let Some(iv) = self.view.image_view.as_mut() else {
+            return;
+        };
+        let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
+        let stamp = now.trim_end_matches("_UTC");
+        let result = std::env::current_dir().and_then(|d| {
+            let p = d.join(format!("spyc_mermaid_{stamp}.png"));
+            std::fs::write(&p, &iv.png).map(|()| p)
+        });
+        iv.flash = Some(match result {
+            Ok(p) => format!("saved: {}", p.display()),
+            Err(e) => format!("save failed: {e}"),
+        });
+        self.view.needs_full_repaint = true;
     }
 
     /// The pager's content viewport height (body rows). Prefers the

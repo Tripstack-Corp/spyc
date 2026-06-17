@@ -44,8 +44,13 @@ pub enum MermaidOutcome {
     Opened,
     /// Open path failed; short reason for the status line.
     Failed(String),
-    /// View path: protocol ready for the full-screen overlay.
-    Viewed(Box<Protocol>),
+    /// View path: protocol ready for the full-screen overlay, plus the PNG
+    /// bytes (for `s`/`y`/`b`) and the mermaid source (for `Y`).
+    Viewed {
+        protocol: Box<Protocol>,
+        png: Vec<u8>,
+        source: String,
+    },
     /// View path failed (incl. "no image protocol"); short reason.
     ViewFailed(String),
 }
@@ -54,9 +59,10 @@ pub enum MermaidOutcome {
 /// the (blocking) protocol encode are off the loop. `picker` is `Some` only
 /// when the terminal supports a graphics protocol (needed by `View`).
 pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> MermaidOutcome {
-    match op.mode {
-        MermaidMode::Open => match render_to_png(&op.source, None) {
-            Ok(bytes) => open_png(&op.source, &bytes),
+    let MermaidRenderOp { source, mode } = op;
+    match mode {
+        MermaidMode::Open => match render_to_png(&source, None) {
+            Ok(bytes) => open_png(&source, &bytes),
             Err(e) => MermaidOutcome::Failed(e),
         },
         MermaidMode::View { cols, rows } => {
@@ -65,8 +71,12 @@ pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> Mermaid
                     "terminal has no image protocol (use `o` to open externally)".to_string(),
                 );
             };
-            match render_to_protocol(&op.source, &picker, cols, rows) {
-                Ok(p) => MermaidOutcome::Viewed(Box::new(p)),
+            match render_to_protocol(&source, &picker, cols, rows) {
+                Ok((protocol, png)) => MermaidOutcome::Viewed {
+                    protocol: Box::new(protocol),
+                    png,
+                    source,
+                },
                 Err(e) => MermaidOutcome::ViewFailed(e),
             }
         }
@@ -98,7 +108,7 @@ fn render_to_protocol(
     picker: &Picker,
     cols: u16,
     rows: u16,
-) -> Result<Protocol, String> {
+) -> Result<(Protocol, Vec<u8>), String> {
     let font = picker.font_size();
     let box_px = (
         u32::from(cols) * u32::from(font.width.max(1)),
@@ -106,13 +116,15 @@ fn render_to_protocol(
     );
     let bytes = render_to_png(source, Some(box_px))?;
     let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
-    picker
+    let protocol = picker
         .new_protocol(
             img,
             ratatui::layout::Size::new(cols, rows),
             ratatui_image::Resize::Fit(None),
         )
-        .map_err(|e| format!("protocol: {e}"))
+        .map_err(|e| format!("protocol: {e}"))?;
+    // Return the PNG too — the overlay keeps it for `s`/`y`/`b` without re-render.
+    Ok((protocol, bytes))
 }
 
 /// mermaid source → PNG bytes, pure-Rust: mermaid-rs-renderer for the SVG, resvg
@@ -168,10 +180,18 @@ impl super::App {
         for outcome in outcomes {
             redraw = true;
             match outcome {
-                MermaidOutcome::Viewed(protocol) => {
+                MermaidOutcome::Viewed {
+                    protocol,
+                    png,
+                    source,
+                } => {
                     // Install the full-screen overlay; the draw blits it.
-                    self.view.mermaid_image = Some(*protocol);
-                    self.flash_pager("diagram \u{2014} q/Esc to dismiss");
+                    self.view.image_view = Some(super::ImageView {
+                        protocol: *protocol,
+                        png,
+                        source: Some(source),
+                        flash: None,
+                    });
                 }
                 MermaidOutcome::Opened => self.flash_pager("opened diagram in external viewer"),
                 MermaidOutcome::Failed(reason) | MermaidOutcome::ViewFailed(reason) => {

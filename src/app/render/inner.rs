@@ -298,9 +298,10 @@ impl App {
     /// `Protocol` was built off-thread at terminal size by `mermaid_ops`; this
     /// is a pure blit (graphics terminals only). Pure `&self`.
     pub(super) fn render_mermaid_overlay(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let Some(protocol) = self.view.mermaid_image.as_ref() else {
+        let Some(iv) = self.view.image_view.as_ref() else {
             return;
         };
+        let protocol = &iv.protocol;
         use ratatui::layout::Rect;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
@@ -335,11 +336,14 @@ impl App {
         let style = Style::default()
             .fg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
+        // Footer: transient verb feedback if set, else the key hints. `Y`
+        // (copy source) only when this is a mermaid diagram.
+        let footer = iv.flash.clone().unwrap_or_else(|| {
+            let yank = if iv.source.is_some() { " \u{00b7} Y copy source" } else { "" };
+            format!(" mermaid diagram \u{2014} s save \u{00b7} o open externally{yank} \u{00b7} q/Esc dismiss")
+        });
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                " mermaid diagram \u{2014} q/Esc to dismiss",
-                style,
-            ))),
+            Paragraph::new(Line::from(Span::styled(footer, style))),
             hint_area,
         );
     }

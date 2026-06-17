@@ -290,7 +290,7 @@ impl App {
         // paints. The overlay is a single static frame, so skipping the sync
         // wrap there costs nothing.
         use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
-        let sync_update = self.view.mermaid_image.is_none();
+        let sync_update = self.view.image_view.is_none();
         if sync_update {
             let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         }
