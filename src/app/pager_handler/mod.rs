@@ -146,7 +146,11 @@ impl App {
             Ok(p) => format!("saved: {}", p.display()),
             Err(e) => format!("save failed: {e}"),
         });
-        self.view.needs_full_repaint = true;
+        // Footer-only change: do NOT force a full repaint. The input arm already
+        // marks a (diff) draw, which repaints the changed footer cells while
+        // leaving the image cells untouched — so the inline image is not
+        // re-emitted. A full repaint clears the screen and re-blits the image,
+        // a visible flash on every verb keypress.
     }
 
     /// `Y` in the image overlay: copy the mermaid source to the clipboard
@@ -162,7 +166,8 @@ impl App {
             },
             None => "no source to copy (not a mermaid diagram)".to_string(),
         });
-        self.view.needs_full_repaint = true;
+        // Footer-only — no full repaint (see `save_image_view`: avoids flashing
+        // the inline image).
     }
 
     /// `y` in the image overlay: copy the rendered PNG to the system clipboard
@@ -175,7 +180,8 @@ impl App {
             Ok(()) => "image copied to clipboard".to_string(),
             Err(e) => format!("copy failed: {e}"),
         });
-        self.view.needs_full_repaint = true;
+        // Footer-only — no full repaint (see `save_image_view`: avoids flashing
+        // the inline image).
     }
 
     /// `c` in the image overlay: toggle light/dark and re-render off-thread
