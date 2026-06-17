@@ -27,6 +27,7 @@ vt100 = "0.16"
 ansi-to-tui = "8"
 pretty-hex = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
 libc = "0.2"
 ignore = "0.4"

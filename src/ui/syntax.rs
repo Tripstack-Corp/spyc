@@ -1,23 +1,26 @@
-//! Syntax highlighting for the pager via `syntect`.
+//! Syntax highlighting for the pager via `syntect` + `two-face`.
 //!
-//! Lazy-loads the default syntax and theme sets once, then converts
-//! syntect's highlighting output into ratatui `Line`s with RGB colors.
+//! Lazy-loads the syntax and theme sets once, then converts syntect's
+//! highlighting output into ratatui `Line`s with RGB colors.
+//!
+//! The base syntax set comes from `two_face::syntax::extra_newlines()`:
+//! `bat`'s curated grammar collection (TypeScript, TOML, Dockerfile,
+//! Kotlin, and ~100 more) in syntect's own dump format (~0.6 MiB binary
+//! increase). It is a *differently-curated* set, not a strict superset of
+//! syntect's bundled defaults — bat trims a few promiscuous extension
+//! claims, so e.g. `.tmpl`/`.tpl` no longer force-map to HTML and `.s` no
+//! longer maps to R. Net of TypeScript + ~100 languages, a clear win.
 //!
 //! ## User-supplied grammars
 //!
-//! syntect's `default-fancy` bundle covers ~90 languages but has
-//! notable gaps (TypeScript, Zig, …). Instead of shipping every
-//! grammar we ever might want, spyc merges `.sublime-syntax` files
-//! the user drops into one of these directories (first hit wins for
-//! a given scope):
+//! Additional `.sublime-syntax` files can be layered on top by dropping
+//! them into one of these directories (first hit wins for a given scope):
 //!
 //! - `$XDG_CONFIG_HOME/spyc/syntaxes/` (XDG default)
 //! - `~/.config/spyc/syntaxes/` (fallback when `XDG_CONFIG_HOME` is unset)
 //!
 //! Files are best-effort; a malformed grammar is logged via
 //! `spyc_debug!` and the rest of the directory is still loaded.
-//! Permissively-licensed grammars are widely available — Sublime's
-//! TypeScript package, `bat`'s assets, the `syntect/syntaxes` repo.
 
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -36,10 +39,10 @@ use syntect::{
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(build_syntax_set);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
-/// Load syntect's bundled defaults, then layer any user-supplied
+/// Load the two-face extended syntax set, then layer any user-supplied
 /// `.sublime-syntax` files on top.
 fn build_syntax_set() -> SyntaxSet {
-    let defaults = SyntaxSet::load_defaults_newlines();
+    let defaults = two_face::syntax::extra_newlines();
     let Some(dir) = user_syntaxes_dir() else {
         return defaults;
     };
@@ -156,5 +159,20 @@ mod tests {
     fn unknown_filename_returns_none() {
         let lines = highlight_to_lines("nofile-xyz-zzz", "plain bytes\n");
         assert!(lines.is_none());
+    }
+
+    #[test]
+    fn highlights_typescript() {
+        let lines = highlight_to_lines("component.ts", "const x: number = 42;\n");
+        assert!(lines.is_some(), ".ts should resolve TypeScript syntax");
+    }
+
+    #[test]
+    fn highlights_tsx() {
+        let lines = highlight_to_lines("app.tsx", "const el = <div />;\n");
+        assert!(
+            lines.is_some(),
+            ".tsx should resolve TypescriptReact syntax"
+        );
     }
 }
