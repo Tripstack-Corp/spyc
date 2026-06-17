@@ -247,7 +247,9 @@ impl App {
                 });
             });
         }
+        let mut git_event = false;
         for ev in std::mem::take(&mut ctx.fs_pending) {
+            git_event |= ev.paths.iter().any(|p| self.is_gitdir_status_path(p));
             self.ingest_fs_event(
                 &ev,
                 now_pre,
@@ -258,6 +260,15 @@ impl App {
         }
         if needs_reload {
             self.reload_config();
+            needs_draw = true;
+        }
+        // A discrete git operation (commit / stage / checkout / branch switch)
+        // changed `.git/index` or `HEAD` — not the bursty working-tree churn the
+        // trailing debounce exists to coalesce. Refresh git markers NOW so the
+        // view tracks real git state near-instantly instead of waiting out the
+        // debounce / max-defer window (the 1 Hz poll was the only sub-debounce
+        // backstop, so markers lagged ~0.5–1 s after a commit/checkout).
+        if git_event && self.state.refresh_git_state() {
             needs_draw = true;
         }
         // 500 ms trailing debounce on the watcher-driven listing refresh.
