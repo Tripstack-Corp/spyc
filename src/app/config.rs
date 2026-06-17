@@ -119,4 +119,62 @@ impl App {
         // refresh/status work.
         path.starts_with(dir)
     }
+
+    /// True for a watched-gitdir change that signals a discrete git
+    /// operation — `index` (stage/commit/checkout) or `HEAD` (branch
+    /// switch / commit), or the gitdir itself (macOS FSEvents sometimes
+    /// coalesces intra-dir changes onto the dir path). Unlike a
+    /// working-tree edit, these aren't bursty churn the trailing debounce
+    /// exists to coalesce — they're one-shot events whose markers should
+    /// refresh immediately. Subset of `is_listing_path`'s gitdir arm; kept
+    /// separate so the caller can give git-state events a no-debounce path.
+    pub fn is_gitdir_status_path(&self, path: &Path) -> bool {
+        let Some(git_dir) = self.state.git_cache.current_gitdir.as_deref() else {
+            return false;
+        };
+        if path == git_dir {
+            return true;
+        }
+        path.parent() == Some(git_dir)
+            && path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| matches!(name, "index" | "HEAD"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `is_gitdir_status_path` accepts exactly the discrete git-state
+    /// signals (`index`/`HEAD`, or the gitdir itself) and rejects gitdir
+    /// housekeeping + working-tree paths — so the caller can give those a
+    /// no-debounce refresh without firing on every `.git/objects` write.
+    #[test]
+    fn gitdir_status_path_matches_index_head_and_dir_only() {
+        let mut app = App::test_app(PathBuf::from("/repo"));
+        app.state.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
+
+        // The discrete-operation signals.
+        assert!(app.is_gitdir_status_path(Path::new("/repo/.git/index")));
+        assert!(app.is_gitdir_status_path(Path::new("/repo/.git/HEAD")));
+        // macOS FSEvents sometimes coalesces onto the dir path itself.
+        assert!(app.is_gitdir_status_path(Path::new("/repo/.git")));
+
+        // Housekeeping under the gitdir — must NOT trigger an immediate refresh.
+        assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/objects/ab/cd")));
+        assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/refs/heads/main")));
+        assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/index.lock")));
+        // Working-tree paths go through the normal debounced listing refresh.
+        assert!(!app.is_gitdir_status_path(Path::new("/repo/src/main.rs")));
+    }
+
+    /// Outside a repo (no cached gitdir) nothing is a git-status path.
+    #[test]
+    fn gitdir_status_path_false_without_gitdir() {
+        let app = App::test_app(PathBuf::from("/repo"));
+        assert!(app.state.git_cache.current_gitdir.is_none());
+        assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/index")));
+    }
 }
