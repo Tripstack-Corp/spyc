@@ -135,7 +135,13 @@ fn render_to_protocol(
 /// short reason for the status line.
 fn render_to_png(source: &str, fit_px: Option<(u32, u32)>) -> Result<Vec<u8>, String> {
     use resvg::tiny_skia::{Color, Pixmap, Transform};
-    let svg = mermaid_rs_renderer::render(source).map_err(|e| e.to_string())?;
+    // Slightly roomier than the crate's 50/50 default — eases the label/box
+    // overlaps seen on dense flowcharts. (The `[mermaid]` config + `c` theme
+    // toggle will make this tunable in a follow-on.)
+    let opts = mermaid_rs_renderer::RenderOptions::default()
+        .with_node_spacing(60.0)
+        .with_rank_spacing(70.0);
+    let svg = mermaid_rs_renderer::render_with_options(source, opts).map_err(|e| e.to_string())?;
     let mut opt = resvg::usvg::Options::default();
     opt.fontdb_mut().load_system_fonts();
     let tree = resvg::usvg::Tree::from_str(&svg, &opt).map_err(|e| format!("svg parse: {e}"))?;

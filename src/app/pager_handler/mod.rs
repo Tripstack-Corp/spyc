@@ -102,6 +102,8 @@ impl App {
                 self.view.needs_full_repaint = true;
             }
             KeyCode::Char('s') => self.save_image_view(),
+            KeyCode::Char('Y') => self.yank_image_source(),
+            KeyCode::Char('b') => self.image_to_base64_pager(),
             KeyCode::Char('o') => {
                 // Open the current diagram externally — re-render via the worker
                 // (mermaid views always carry their source).
@@ -141,6 +143,47 @@ impl App {
             Ok(p) => format!("saved: {}", p.display()),
             Err(e) => format!("save failed: {e}"),
         });
+        self.view.needs_full_repaint = true;
+    }
+
+    /// `Y` in the image overlay: copy the mermaid source to the clipboard
+    /// (mermaid diagrams only — no-op with a footer note otherwise).
+    fn yank_image_source(&mut self) {
+        let Some(iv) = self.view.image_view.as_mut() else {
+            return;
+        };
+        iv.flash = Some(match iv.source.clone() {
+            Some(src) => match crate::clipboard::copy(&src) {
+                Ok(()) => "mermaid source copied to clipboard".to_string(),
+                Err(e) => format!("copy failed: {e}"),
+            },
+            None => "no source to copy (not a mermaid diagram)".to_string(),
+        });
+        self.view.needs_full_repaint = true;
+    }
+
+    /// `b` in the image overlay: flip to a text pager holding the PNG's base64
+    /// (yank it there with the pager's own `y`). The image view is dismissed and
+    /// the markdown pager pushed to history, so `q` from the base64 buffer
+    /// returns to the diagram's doc.
+    fn image_to_base64_pager(&mut self) {
+        use base64::Engine;
+        let Some(iv) = self.view.image_view.take() else {
+            return;
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&iv.png);
+        let lines: Vec<String> = b64
+            .as_bytes()
+            .chunks(120)
+            .map(|c| String::from_utf8_lossy(c).into_owned())
+            .collect();
+        if let Some(prev) = self.view.pager.take() {
+            self.view.pager_history.push(prev);
+        }
+        self.view.pager = Some(crate::ui::pager::PagerView::new_plain(
+            "mermaid diagram \u{2014} PNG base64",
+            lines,
+        ));
         self.view.needs_full_repaint = true;
     }
 

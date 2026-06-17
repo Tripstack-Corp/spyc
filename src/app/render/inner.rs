@@ -340,7 +340,7 @@ impl App {
         // (copy source) only when this is a mermaid diagram.
         let footer = iv.flash.clone().unwrap_or_else(|| {
             let yank = if iv.source.is_some() { " \u{00b7} Y copy source" } else { "" };
-            format!(" mermaid diagram \u{2014} s save \u{00b7} o open externally{yank} \u{00b7} q/Esc dismiss")
+            format!(" mermaid diagram \u{2014} s save \u{00b7} o open \u{00b7} b base64{yank} \u{00b7} q/Esc dismiss")
         });
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, style))),

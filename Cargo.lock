@@ -3820,6 +3820,7 @@ version = "1.58.11"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
+ "base64",
  "clap",
  "crossterm",
  "gix",
