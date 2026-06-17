@@ -127,6 +127,11 @@ enum Message {
     /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
     /// message surviving. Same shape as `AgentStatusReady`.
     GraveyardDone,
+    /// An off-thread mermaid render+open (`Effect::RenderMermaid`) finished and
+    /// pushed its outcome onto `runtime.mermaid_results`. Payloadless wake —
+    /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
+    /// as `GraveyardDone`.
+    MermaidDone,
 }
 
 /// How long to wait after spawning a restored Claude pane before
@@ -221,6 +226,7 @@ mod harpoon;
 mod key_dispatch;
 mod loop_steps;
 mod mcp;
+mod mermaid_ops;
 #[cfg(test)]
 mod mod_tests;
 mod modal;
@@ -463,6 +469,12 @@ struct Runtime {
     /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
     /// concurrent ops never clobber each other — no in-flight guard needed).
     graveyard_results: std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
+    /// Landing slot for off-thread mermaid render+open ops (`Effect::RenderMermaid`).
+    /// The worker pushes a `MermaidOutcome` here and wakes with
+    /// `Message::MermaidDone`; `apply_mermaid_outcomes` drains it each pre-recv
+    /// scan and surfaces the result in the pager status line. Same shape as
+    /// `graveyard_results`.
+    mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
 }
 
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived

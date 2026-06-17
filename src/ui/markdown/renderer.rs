@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 
 use super::wrap::{slice_spans, spans_visual_width, wrap_spans_to_width};
 use super::{
-    CONTENT_WIDTH, CodeBlockState, PROSE_WRAP_MIN, Renderer, StyleMods,
+    CONTENT_WIDTH, CodeBlockState, MarkdownDoc, MermaidBlock, PROSE_WRAP_MIN, Renderer, StyleMods,
     TABLE_MAX_COL_WIDTH_CEILING, TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder, heading_depth,
 };
 use crate::ui::theme::Theme;
@@ -40,14 +40,18 @@ impl<'t> Renderer<'t> {
             just_started_item: false,
             table_width,
             prose_width,
+            mermaid_blocks: Vec::new(),
         }
     }
 
-    pub(super) fn finish(mut self) -> Vec<Line<'static>> {
+    pub(super) fn finish_doc(mut self) -> MarkdownDoc {
         if !self.current.is_empty() {
             self.flush_line();
         }
-        self.lines
+        MarkdownDoc {
+            lines: self.lines,
+            mermaid_blocks: self.mermaid_blocks,
+        }
     }
 
     fn flush_line(&mut self) {
@@ -596,6 +600,13 @@ impl<'t> Renderer<'t> {
             return;
         };
         let body = state.body.trim_end_matches('\n');
+        // A ```mermaid block is a diagram, not code: record it (source + the
+        // rendered-line range) so the pager can open/inline it, and emit a
+        // discoverable placeholder rather than syntax-highlighting the source.
+        if state.lang == "mermaid" {
+            self.emit_mermaid_block(body);
+            return;
+        }
         // Try syntect highlighting if a language is given; fall
         // back to plain dim text otherwise. We synthesize a fake
         // filename for highlight_to_lines's extension-based lookup
@@ -626,5 +637,38 @@ impl<'t> Renderer<'t> {
         self.lines
             .push(Line::from(Span::styled("\u{2500}".repeat(40), dim)));
         self.lines.push(Line::from(Vec::<Span<'static>>::new()));
+    }
+
+    /// Emit a ` ```mermaid ` block's placeholder and record it in
+    /// `mermaid_blocks`. For now we show the source under a discoverable
+    /// header (so nothing is hidden before the off-thread image render lands);
+    /// the inline image later replaces the source rows in this same range.
+    fn emit_mermaid_block(&mut self, body: &str) {
+        let start = self.lines.len();
+        let header = Style::default()
+            .fg(self.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        let dim = Style::default()
+            .fg(self.theme.status_suffix)
+            .add_modifier(Modifier::DIM);
+        self.lines.push(Line::from(Span::styled(
+            "\u{25a3} mermaid diagram — press o to open".to_string(),
+            header,
+        )));
+        self.lines
+            .push(Line::from(Span::styled("\u{2500}".repeat(40), dim)));
+        for raw in body.lines() {
+            self.lines.push(Line::from(Span::styled(
+                raw.to_string(),
+                Style::default().fg(self.theme.other),
+            )));
+        }
+        self.lines
+            .push(Line::from(Span::styled("\u{2500}".repeat(40), dim)));
+        self.lines.push(Line::from(Vec::<Span<'static>>::new()));
+        self.mermaid_blocks.push(MermaidBlock {
+            line_range: start..self.lines.len(),
+            source: body.to_string(),
+        });
     }
 }

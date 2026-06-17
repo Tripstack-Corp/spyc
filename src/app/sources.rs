@@ -65,6 +65,9 @@ pub fn coalesce_pending(
             // the outcome rides `runtime.graveyard_results`, drained
             // unconditionally by `apply_graveyard_outcomes` in the pre-recv scan.
             | Message::GraveyardDone
+            // Mermaid render+open done — same payloadless wake; drained by
+            // `apply_mermaid_outcomes` in the pre-recv scan.
+            | Message::MermaidDone
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
@@ -155,7 +158,9 @@ pub fn coalesce_recv(
             | Message::AgentStatusReady
             // Tier 5: graveyard-op-done — payloadless, drained by the pre-recv
             // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
-            | Message::GraveyardDone,
+            | Message::GraveyardDone
+            // Mermaid render+open done — same payloadless-wake shape.
+            | Message::MermaidDone,
         ) => coalesce_tail(rx, ctx),
         other => other,
     }

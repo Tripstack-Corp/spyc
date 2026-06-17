@@ -246,7 +246,8 @@ impl App {
                 | Message::FindOutput
                 | Message::ReaderExited
                 | Message::AgentStatusReady
-                | Message::GraveyardDone,
+                | Message::GraveyardDone
+                | Message::MermaidDone,
             ) => {
                 unreachable!(
                     "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -486,6 +487,12 @@ impl App {
             // Always drained here — the slot holds the outcome regardless of
             // which wake survived coalescing; the apply does the flash + refresh.
             if self.apply_graveyard_outcomes() {
+                ctx.draw.mark(3);
+            }
+
+            // Mermaid render+open results (woke us via `Message::MermaidDone`) —
+            // surface success/failure in the pager status line.
+            if self.apply_mermaid_outcomes() {
                 ctx.draw.mark(3);
             }
 

@@ -283,6 +283,11 @@ pub struct PagerView {
     /// (interior mutability via `Cell`). Subsequent frames don't
     /// re-snap, so user scrolling is preserved.
     pub pending_scroll_to_bottom: std::cell::Cell<bool>,
+    /// ` ```mermaid ` blocks in this view (rendered-line range + source),
+    /// collected by `markdown::render_doc`. Empty for non-markdown views.
+    /// Drives the `o`-to-open hook (and later the inline image). See
+    /// `docs/MERMAID_PAGER_PLAN.md`.
+    pub mermaid_blocks: Vec<crate::ui::markdown::MermaidBlock>,
 }
 
 /// Sentinel title used to identify the pager-help overlay so the

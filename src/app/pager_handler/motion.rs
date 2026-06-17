@@ -352,6 +352,26 @@ impl App {
                 // `view.scroll_pager`. (`view`'s borrow ends at the guard.)
                 self.open_pane_scroll_pager();
             }
+            // Open the on-screen mermaid diagram full-res in the OS image viewer
+            // (Preview.app / xdg-open). Rendering runs off-thread via
+            // `Effect::RenderMermaid`; the result is flashed in the pager status
+            // line by `apply_mermaid_outcomes`. See docs/MERMAID_PAGER_PLAN.md.
+            KeyCode::Char('o') => {
+                // `.map(...)` ends the immutable borrow before we mutate `flash`.
+                match view.visible_mermaid_block().map(|b| b.source.clone()) {
+                    Some(source) => {
+                        view.flash = Some("rendering mermaid diagram\u{2026}".to_string());
+                        return vec![Effect::RenderMermaid(
+                            crate::app::mermaid_ops::MermaidRenderOp { source },
+                        )];
+                    }
+                    None => {
+                        view.flash = Some(
+                            "no mermaid diagram in view (toggle rendered with `m`)".to_string(),
+                        );
+                    }
+                }
+            }
             _ => {}
         }
         Vec::new()

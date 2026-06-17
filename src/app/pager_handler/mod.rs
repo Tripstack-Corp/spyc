@@ -398,20 +398,28 @@ impl App {
                 let source_line_count = content.lines().count().max(1);
                 let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
                 let pager_w = body_w.saturating_sub(2 + gutter_w);
-                let rendered =
-                    crate::ui::markdown::render(&content, &self.view.theme, Some(pager_w));
+                let doc =
+                    crate::ui::markdown::render_doc(&content, &self.view.theme, Some(pager_w));
+                let crate::ui::markdown::MarkdownDoc {
+                    lines: rendered,
+                    mermaid_blocks,
+                } = doc;
                 if self.state.config.markdown.open_as_rendered {
                     let mut v = PagerView::new_styled(name, rendered);
                     v.alt_lines = Some(source_lines);
                     v.markdown_rendered = true;
+                    v.mermaid_blocks = mermaid_blocks;
                     v
                 } else {
                     // Source first: `lines` holds source, `alt_lines`
                     // holds the rendered view, `markdown_rendered`
-                    // is false. `m` swap is symmetric.
+                    // is false. `m` swap is symmetric. The mermaid block
+                    // ranges index the rendered view, so `visible_mermaid_block`
+                    // ignores them until the user toggles to rendered.
                     let mut v = PagerView::new_styled(name, source_lines);
                     v.alt_lines = Some(rendered);
                     v.markdown_rendered = false;
+                    v.mermaid_blocks = mermaid_blocks;
                     v
                 }
             } else {

@@ -3816,7 +3816,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spyc"
-version = "1.58.8"
+version = "1.58.9"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -3845,6 +3845,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "regex",
+ "resvg",
  "rustix 1.1.4",
  "serde",
  "serde_json",

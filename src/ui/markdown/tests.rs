@@ -275,3 +275,62 @@ fn nested_bold_in_heading_keeps_rest_bold() {
         tail.style
     );
 }
+
+// --- mermaid block detection (docs/MERMAID_PAGER_PLAN.md, Phase 1) ---
+
+fn doc(src: &str) -> MarkdownDoc {
+    render_doc(src, &Theme::default(), None)
+}
+
+#[test]
+fn mermaid_block_recorded_with_source_and_line_range() {
+    let d = doc("intro\n\n```mermaid\nflowchart LR\n  A-->B\n```\n\nafter\n");
+    assert_eq!(d.mermaid_blocks.len(), 1, "exactly one mermaid block");
+    let b = &d.mermaid_blocks[0];
+    assert_eq!(b.source, "flowchart LR\n  A-->B");
+    // The recorded range must point at real placeholder rows, and the header
+    // row must be the first line of that range.
+    assert!(b.line_range.start < b.line_range.end);
+    assert!(b.line_range.end <= d.lines.len());
+    let header: String = d.lines[b.line_range.start]
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        header.contains("mermaid diagram"),
+        "first line of the block range is the header, got {header:?}"
+    );
+    // The source is shown within the block range (open-MVP keeps it visible).
+    let block_text: String = d.lines[b.line_range.clone()]
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect();
+    assert!(block_text.contains("flowchart LR"));
+}
+
+#[test]
+fn multiple_mermaid_blocks_are_each_recorded_and_disjoint() {
+    let d =
+        doc("```mermaid\nflowchart LR\n  A-->B\n```\n\n```mermaid\nflowchart TD\n  X-->Y\n```\n");
+    assert_eq!(d.mermaid_blocks.len(), 2);
+    assert_eq!(d.mermaid_blocks[0].source, "flowchart LR\n  A-->B");
+    assert_eq!(d.mermaid_blocks[1].source, "flowchart TD\n  X-->Y");
+    // Ranges don't overlap and are in document order.
+    assert!(d.mermaid_blocks[0].line_range.end <= d.mermaid_blocks[1].line_range.start);
+}
+
+#[test]
+fn non_mermaid_code_block_records_nothing() {
+    let d = doc("```rust\nfn main() {}\n```\n");
+    assert!(
+        d.mermaid_blocks.is_empty(),
+        "a ```rust block is code, not a diagram"
+    );
+}
+
+#[test]
+fn no_code_block_records_nothing() {
+    let d = doc("# just prose\n\nno diagrams here\n");
+    assert!(d.mermaid_blocks.is_empty());
+}

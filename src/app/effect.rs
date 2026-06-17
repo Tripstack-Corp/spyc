@@ -26,7 +26,7 @@ use crate::Tui;
 use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
-use super::{App, ForegroundExec, Message, PagerReturn, PostAction, graveyard_ops};
+use super::{App, ForegroundExec, Message, PagerReturn, PostAction, graveyard_ops, mermaid_ops};
 
 /// A side effect for the run loop to execute. Producers (handlers) return
 /// a `Vec<Effect>` describing *what* should happen; `run_effects` is the
@@ -134,6 +134,14 @@ pub enum Effect {
     /// scan) does the flash + listing/graveyard refresh. The cheap prep (which
     /// paths, which entry, the in-memory entry list) is done by the producer.
     Graveyard(graveyard_ops::GraveyardOp),
+
+    /// Render a ` ```mermaid ` block to a PNG on a detached worker and open it in
+    /// the OS image viewer — parse/layout/raster/font-load is far too heavy for
+    /// the loop. The worker pushes a `MermaidOutcome` onto
+    /// `runtime.mermaid_results` and wakes with `Message::MermaidDone`;
+    /// `apply_mermaid_outcomes` (pre-recv scan) surfaces it in the pager status
+    /// line. See `docs/MERMAID_PAGER_PLAN.md`.
+    RenderMermaid(mermaid_ops::MermaidRenderOp),
 }
 
 /// Which slice of the active pane's text to materialize (MVU Phase 5).
@@ -589,6 +597,20 @@ impl App {
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
                             let _ = tx.send(Message::GraveyardDone);
+                        }
+                    });
+                }
+                // Render the mermaid diagram + open it externally on a detached
+                // worker (same shape as Graveyard); the outcome lands in
+                // `mermaid_results` and `apply_mermaid_outcomes` flashes it.
+                Effect::RenderMermaid(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.mermaid_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = mermaid_ops::render_mermaid_op(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::MermaidDone);
                         }
                     });
                 }

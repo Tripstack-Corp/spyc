@@ -44,6 +44,7 @@ impl App {
                     false,
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                mermaid_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             },
         };
         app.state.rebuild_rows();
