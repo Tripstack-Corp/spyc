@@ -217,6 +217,11 @@ pub fn run() -> Result<()> {
     let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
     let mut app = App::new(cli.resume, mcp_takeover_allowed);
+    // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
+    // font cell size) for inline diagram rendering — ONCE, here, before the
+    // input reader spawns, because `from_query_stdio` reads stdin/cursor
+    // responses (the #444 no-live-cursor-read rule). Best-effort.
+    app.set_picker(detect_image_picker());
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
     // Restore the terminal BEFORE teardown so `run_teardown`'s "waiting for …"
@@ -400,6 +405,29 @@ fn install_signal_handlers() {
         libc::signal(libc::SIGQUIT, h);
         libc::signal(libc::SIGTTOU, libc::SIG_IGN);
     }
+}
+
+/// Detect the terminal graphics protocol + font cell size for inline mermaid
+/// rendering. `from_query_stdio` probes via Kitty/Sixel capability *queries*;
+/// iTerm2 answers none of them and so falls back to `Halfblocks` (which renders
+/// nothing useful for a diagram). iTerm2 has its own inline-image protocol, so
+/// when the env identifies iTerm2 we force it. Returns `None` only if the query
+/// errored outright (→ mermaid `i` reports "no image protocol").
+fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
+    use ratatui_image::picker::{Picker, ProtocolType};
+    let mut picker = Picker::from_query_stdio().ok()?;
+    // iTerm2 (3.5+) also implements the Kitty graphics protocol, so the probe
+    // detects Kitty — but iTerm2's Kitty emulation doesn't paint reliably here,
+    // while its native inline-image protocol (OSC 1337) does. And without a
+    // graphics response it falls back to Halfblocks. Either way, prefer the
+    // native iTerm2 protocol whenever the env identifies iTerm2 (the detected
+    // font size from the successful query is kept).
+    let is_iterm = std::env::var("TERM_PROGRAM").is_ok_and(|t| t.contains("iTerm"))
+        || std::env::var("LC_TERMINAL").is_ok_and(|t| t.contains("iTerm"));
+    if is_iterm && picker.protocol_type() != ProtocolType::Iterm2 {
+        picker.set_protocol_type(ProtocolType::Iterm2);
+    }
+    Some(picker)
 }
 
 fn setup_terminal() -> Result<Tui> {

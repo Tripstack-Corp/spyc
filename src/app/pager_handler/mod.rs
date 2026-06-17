@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::pane::Pane;
 use crate::shell;
@@ -45,6 +45,16 @@ impl App {
     /// context to a sub-handler (returning `Some` when it consumes the key,
     /// `None` to fall through); the final motion handler always consumes.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        // The full-screen mermaid image overlay sits on top of the pager and is
+        // modal: intercept before any pager handler. q/Esc/i/o dismiss it; every
+        // other key is swallowed so nothing scrolls underneath it.
+        if self.view.mermaid_image.is_some() {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('q' | 'i' | 'o')) {
+                self.view.mermaid_image = None;
+                self.view.needs_full_repaint = true;
+            }
+            return Vec::new();
+        }
         let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
         };

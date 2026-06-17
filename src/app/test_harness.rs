@@ -45,6 +45,7 @@ impl App {
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 mermaid_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                picker: None,
             },
         };
         app.state.rebuild_rows();

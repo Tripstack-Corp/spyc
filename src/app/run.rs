@@ -284,9 +284,16 @@ impl App {
         self.run_effects(title_fx, terminal, foreground_exec);
         // Wrap in DEC 2026 synchronized update so the terminal emulator
         // (iTerm2, etc.) buffers the entire frame and paints it atomically —
-        // eliminates tearing and reduces terminal-side CPU.
+        // eliminates tearing and reduces terminal-side CPU. EXCEPT while the
+        // mermaid image overlay is up: iTerm2 drops inline-image (OSC 1337)
+        // escapes emitted inside a synchronized update, so the diagram never
+        // paints. The overlay is a single static frame, so skipping the sync
+        // wrap there costs nothing.
         use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
-        let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
+        let sync_update = self.view.mermaid_image.is_none();
+        if sync_update {
+            let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
+        }
         if pending_clear {
             // NOT `terminal.clear()`: ratatui 0.30's clear() does a
             // `get_cursor_position()` (`ESC[6n`) round-trip that hangs/errs
@@ -313,7 +320,9 @@ impl App {
             let us = u64::try_from(draw_start.elapsed().as_micros()).unwrap_or(u64::MAX);
             self.view.activity.peaks_live.frame_us = self.view.activity.peaks_live.frame_us.max(us);
         }
-        let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+        if sync_update {
+            let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
+        }
         if self.view.show_activity && !activity_only {
             self.view.activity.live.draws += 1;
             self.view.activity.live.bytes +=

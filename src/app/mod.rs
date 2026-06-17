@@ -475,6 +475,12 @@ struct Runtime {
     /// scan and surfaces the result in the pager status line. Same shape as
     /// `graveyard_results`.
     mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Terminal graphics-protocol capability (Kitty/iTerm2/Sixel/halfblocks +
+    /// font cell size), detected ONCE at startup in `setup_terminal` before the
+    /// input reader spawns (the `from_query_stdio` reads stdin — the #444 rule).
+    /// `None` ⇒ detection failed / no graphics; the mermaid `View` mode then
+    /// reports "no image protocol". Cloned into the render worker by `run_effects`.
+    picker: Option<ratatui_image::picker::Picker>,
 }
 
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
@@ -494,6 +500,11 @@ pub struct ViewState {
     /// and must not evict each other. The focused-region pager is selected by
     /// [`App::active_pager_mut`]; render draws both independently.
     pub scroll_pager: Option<PagerView>,
+    /// Full-screen mermaid diagram overlay (the pager `i` key): a rendered
+    /// `Protocol` blitted over everything until dismissed (q/Esc). `None` when
+    /// no diagram is being viewed. Set by `apply_mermaid_outcomes`. Graphics
+    /// terminals only. See `docs/MERMAID_PAGER_PLAN.md`.
+    pub mermaid_image: Option<ratatui_image::protocol::Protocol>,
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
@@ -589,6 +600,7 @@ impl ViewState {
         Self {
             pager: None,
             scroll_pager: None,
+            mermaid_image: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,

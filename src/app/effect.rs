@@ -606,8 +606,12 @@ impl App {
                 Effect::RenderMermaid(op) => {
                     let results = std::sync::Arc::clone(&self.runtime.mermaid_results);
                     let wake = self.runtime.pane_wake_tx.clone();
+                    // The picker (graphics-protocol capability, detected once at
+                    // startup) lives in Runtime; inject it so the View mode can
+                    // build a Protocol off-thread. `None` ⇒ no graphics protocol.
+                    let picker = self.runtime.picker.clone();
                     std::thread::spawn(move || {
-                        let outcome = mermaid_ops::render_mermaid_op(op);
+                        let outcome = mermaid_ops::render_mermaid_op(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
                             let _ = tx.send(Message::MermaidDone);
