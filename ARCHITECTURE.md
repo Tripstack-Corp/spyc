@@ -234,12 +234,25 @@ the same dispatch:
 - **In-process socket listener** — the running spyc accepts
   connections from the stdio proxy.
 
-`.mcp.json` carries `SPYC_MCP_SOCK` in the `env` block so the
-proxy connects to the right instance. On startup, if another live
-spyc owns the entry, spyc prompts on stderr before taking over
-(`PID N already owns MCP here. Take over? [Y/n]`); decline keeps
-the old instance in charge. Non-tty stdin auto-takes-over so CI
-isn't blocked.
+`.mcp.json` (claude) and `.codex/config.toml` (codex) carry
+`SPYC_MCP_SOCK` in the `env` block so the proxy connects to the
+right instance. spyc writes the client config **when an agent pane
+launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at
+startup — so a directory where no agent is ever run doesn't get a
+stray `.mcp.json` / `.codex/` written into it. On startup, if another
+live spyc already owns the entry, spyc prompts on stderr (`PID N
+already owns MCP here. Take over? [Y/n]`); decline keeps the old
+instance as MCP owner and the launch-time write leaves its entry in
+place. Non-tty stdin auto-takes-over so CI isn't blocked.
+
+On exit, teardown (`cleanup_written_mcp_configs`, run from
+`run_teardown` after the terminal is restored) removes the entries
+*we* wrote — our socket is about to die, so a lingering registration
+would point at nothing. It only touches an entry whose `SPYC_MCP_SOCK`
+is still ours (a successor that took over is left alone), deletes a
+file/`.codex/` dir left empty, preserves any other servers/config the
+user has, and refuses to modify a **git-tracked** config (warning on
+stderr instead) — we never dirty something the user committed.
 
 Enterprise managed-settings.json policies
 (`deniedMcpServers`/`allowedMcpServers`) are honored.

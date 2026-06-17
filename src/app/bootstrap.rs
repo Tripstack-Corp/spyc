@@ -240,6 +240,7 @@ impl App {
                 mcp_cmd_rx: Some(mcp_cmd_rx),
                 pane_wake_tx: None,
                 next_sink_id: 0,
+                mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
                 pending_capture: None,
@@ -251,6 +252,10 @@ impl App {
                 pending_git_view: None,
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
+                codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -311,11 +316,13 @@ impl App {
         if resume {
             app.show_session_picker();
         }
-        // Write .mcp.json so Claude Code spawns `spyc --mcp` (stdio),
-        // which proxies to our Unix socket.
-        if app.view.mcp_running {
-            app.ensure_mcp_config(mcp_takeover_allowed);
-        }
+        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is no
+        // longer written here; it's written lazily when an agent pane launches
+        // (`open_pane_tab_in` → `ensure_agent_mcp_config`), so we don't create a
+        // config dir in directories where no agent is ever run. Stash the
+        // takeover decision for that later write. (Restored agent panes go
+        // through the same launch path, so they pick up their config too.)
+        app.view.mcp_takeover_allowed = mcp_takeover_allowed;
         app
     }
 }

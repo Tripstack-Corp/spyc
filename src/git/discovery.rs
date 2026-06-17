@@ -45,6 +45,32 @@ pub fn head_branch(repo_root: &Path) -> Option<String> {
     }
 }
 
+/// True if `path` is tracked by git — present in the repository index (so it's
+/// committed or staged). Used by teardown cleanup to refuse to delete a config
+/// file the user has checked in. Returns `false` when there's no enclosing
+/// repo, the path lies outside its worktree, or it simply isn't in the index.
+/// Uses `gix::discover` so a path in a repo subdirectory still resolves.
+pub fn is_tracked(path: &Path) -> bool {
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    let Ok(repo) = gix::discover(dir) else {
+        return false;
+    };
+    let Some(workdir) = repo.workdir() else {
+        return false;
+    };
+    let Ok(rela) = path.strip_prefix(workdir) else {
+        return false;
+    };
+    let Ok(index) = repo.index() else {
+        return false;
+    };
+    // The index keys on forward-slash repo-relative paths.
+    let rela = rela.to_string_lossy().replace('\\', "/");
+    index.entry_by_path(gix::bstr::BStr::new(&rela)).is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +112,29 @@ mod tests {
         let b = head_branch(&root).expect("detached head still resolves");
         assert_eq!(b.len(), 7, "expected 7-char short hash, got {b:?}");
         assert!(b.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {b:?}");
+    }
+
+    #[test]
+    fn is_tracked_distinguishes_committed_untracked_and_no_repo() {
+        let (_tmp, root) = init_repo();
+        // `f.txt` was committed by the fixture → tracked.
+        assert!(is_tracked(&root.join("f.txt")));
+        // A new, unadded file in the repo → not tracked.
+        std::fs::write(root.join("untracked.txt"), "x\n").unwrap();
+        assert!(!is_tracked(&root.join("untracked.txt")));
+        // A path with no enclosing repo → not tracked.
+        let outside = tempfile::tempdir().unwrap();
+        assert!(!is_tracked(&outside.path().join("anything.txt")));
+    }
+
+    #[test]
+    fn is_tracked_sees_a_staged_but_uncommitted_file() {
+        let (_tmp, root) = init_repo();
+        std::fs::write(root.join("staged.txt"), "y\n").unwrap();
+        run_git(&root, &["add", "staged.txt"]);
+        // Staged (in the index) counts as tracked — the teardown guard must not
+        // delete a config the user has `git add`ed even before committing.
+        assert!(is_tracked(&root.join("staged.txt")));
     }
 
     // Linked-worktree gitdir resolution (gix following a worktree's `.git`

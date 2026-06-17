@@ -40,16 +40,18 @@ use ratatui::{
 
 use crate::ui::theme::Theme;
 
-/// Resolve the conversation JSONL for the Claude session running in
-/// `cwd`, spawned around `spawn_epoch_secs`. Picks the session whose
-/// start time is closest to the pane's spawn time (handles multiple
-/// Claude tabs sharing a cwd), then maps it to its on-disk path.
-pub fn resolve_active_jsonl(cwd: &Path, spawn_epoch_secs: u64) -> Option<PathBuf> {
-    let sessions = crate::state::sessions::find_claude_sessions(cwd);
+/// Resolve the conversation JSONL for the Claude session running in the pane.
+/// Picks the session whose start time is closest to the pane's spawn time
+/// (handles multiple Claude tabs sharing a cwd), then maps it to its on-disk
+/// path. Claude rewrites its session index live, so the closest-start heuristic
+/// holds here (unlike codex — see [`crate::state::codex_transcript`]); the
+/// `command` field of the query is unused.
+pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
+    let sessions = crate::state::sessions::find_claude_sessions(q.cwd);
     let best = sessions
         .into_iter()
-        .min_by_key(|s| s.started_at_secs.abs_diff(spawn_epoch_secs))?;
-    crate::state::sessions::claude_jsonl_path(cwd, &best.session_id)
+        .min_by_key(|s| s.started_at_secs.abs_diff(q.spawn_epoch_secs))?;
+    crate::state::sessions::claude_jsonl_path(q.cwd, &best.session_id)
 }
 
 /// Parse a Claude conversation JSONL into styled pager lines, in

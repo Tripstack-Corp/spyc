@@ -68,6 +68,10 @@ pub fn coalesce_pending(
             // Mermaid render+open done — same payloadless wake; drained by
             // `apply_mermaid_outcomes` in the pre-recv scan.
             | Message::MermaidDone
+            // Option B: codex-session-scan-done — same payloadless-wake shape;
+            // the snapshot rides `runtime.codex_pin_pending`, drained by
+            // `apply_codex_session_pins` in the pre-recv scan.
+            | Message::CodexSessionReady
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
