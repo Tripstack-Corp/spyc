@@ -615,9 +615,9 @@ pub(super) fn format_age(epoch: u64) -> String {
 /// the event loop for the whole tree when the cursor sat on a `node_modules`
 /// / `target/` (~100k+ files) — exactly the blocking-IO-on-input scaling
 /// pitfall the project has been bitten by. Iterative bounded-DFS (no recursion
-/// → no stack blow-up on a deep tree either), same early-termination shape as
-/// [`crate::app::util::count_subdirs_capped`]. Returns a value `<= cap`; a
-/// return of exactly `cap` means "at least `cap`" (the caller shows `N+`).
+/// → no stack blow-up on a deep tree either), with early termination once the
+/// running count reaches `cap`. Returns a value `<= cap`; a return of exactly
+/// `cap` means "at least `cap`" (the caller shows `N+`).
 pub(super) fn count_files_in_dir_capped(dir: &Path, cap: u64) -> u64 {
     let mut n = 0u64;
     let mut stack = vec![dir.to_path_buf()];
