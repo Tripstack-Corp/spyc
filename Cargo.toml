@@ -29,6 +29,11 @@ resvg = { version = "0.46", default-features = false, features = ["text", "syste
 # base64 for the image-pager `b` verb (PNG → base64 text buffer). Already in the
 # tree transitively; making it direct.
 base64 = "0.22"
+# Image clipboard for the image-pager `y` verb — no portable shell helper for
+# images (text clipboard stays shell-based in src/clipboard.rs). macOS works
+# cleanly; Linux is best-effort (X11/Wayland clipboards don't persist after exit
+# without a manager).
+arboard = "3"
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

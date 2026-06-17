@@ -492,6 +492,8 @@ pub struct ImageView {
     pub protocol: ratatui_image::protocol::Protocol,
     pub png: Vec<u8>,
     pub source: Option<String>,
+    /// Whether the current render uses the dark theme — tracked so `c` toggles it.
+    pub dark: bool,
     /// Transient verb feedback (e.g. "saved: …"), shown in the overlay footer —
     /// the normal flash area is hidden behind the full-screen image.
     pub flash: Option<String>,

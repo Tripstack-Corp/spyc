@@ -339,8 +339,13 @@ impl App {
         // Footer: transient verb feedback if set, else the key hints. `Y`
         // (copy source) only when this is a mermaid diagram.
         let footer = iv.flash.clone().unwrap_or_else(|| {
-            let yank = if iv.source.is_some() { " \u{00b7} Y copy source" } else { "" };
-            format!(" mermaid diagram \u{2014} s save \u{00b7} o open \u{00b7} b base64{yank} \u{00b7} q/Esc dismiss")
+            // `Y` (source) and `c` (theme) are mermaid-only.
+            let mermaid = if iv.source.is_some() {
+                " \u{00b7} Y copy source \u{00b7} c theme"
+            } else {
+                ""
+            };
+            format!(" mermaid diagram \u{2014} s save \u{00b7} y copy image{mermaid} \u{00b7} b base64 \u{00b7} o open \u{00b7} q/Esc dismiss")
         });
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, style))),

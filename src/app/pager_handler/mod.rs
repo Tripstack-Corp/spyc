@@ -92,9 +92,10 @@ impl App {
         self.handle_pager_motion(key, viewport)
     }
 
-    /// Verbs for the full-screen image overlay (modal): `s` save the PNG, `o`
-    /// open it in the external viewer, q/Esc/i dismiss. Other keys are swallowed
-    /// so nothing scrolls underneath. (`Y`/`y`/`b`/`c` land in a follow-on.)
+    /// Verbs for the full-screen image overlay (modal — other keys are
+    /// swallowed so nothing scrolls underneath): `s` save the PNG, `y` copy the
+    /// image, `Y` copy the mermaid source, `c` toggle light/dark, `b` flip to a
+    /// base64 text buffer, `o` open externally, q/Esc/i dismiss.
     fn handle_image_view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'i') => {
@@ -103,6 +104,8 @@ impl App {
             }
             KeyCode::Char('s') => self.save_image_view(),
             KeyCode::Char('Y') => self.yank_image_source(),
+            KeyCode::Char('y') => self.yank_image_to_clipboard(),
+            KeyCode::Char('c') => return self.toggle_image_theme(),
             KeyCode::Char('b') => self.image_to_base64_pager(),
             KeyCode::Char('o') => {
                 // Open the current diagram externally — re-render via the worker
@@ -160,6 +163,51 @@ impl App {
             None => "no source to copy (not a mermaid diagram)".to_string(),
         });
         self.view.needs_full_repaint = true;
+    }
+
+    /// `y` in the image overlay: copy the rendered PNG to the system clipboard
+    /// (image data, via `arboard`).
+    fn yank_image_to_clipboard(&mut self) {
+        let Some(iv) = self.view.image_view.as_mut() else {
+            return;
+        };
+        iv.flash = Some(match crate::clipboard::copy_image(&iv.png) {
+            Ok(()) => "image copied to clipboard".to_string(),
+            Err(e) => format!("copy failed: {e}"),
+        });
+        self.view.needs_full_repaint = true;
+    }
+
+    /// `c` in the image overlay: toggle light/dark and re-render off-thread
+    /// (mermaid-only — we re-run the source through the worker with the other
+    /// theme). Returns the render Effect; `apply_mermaid_outcomes` swaps in the
+    /// new protocol when it lands.
+    fn toggle_image_theme(&mut self) -> Vec<Effect> {
+        let Some(iv) = self.view.image_view.as_mut() else {
+            return Vec::new();
+        };
+        let Some(source) = iv.source.clone() else {
+            iv.flash = Some("theme toggle is mermaid-only".to_string());
+            self.view.needs_full_repaint = true;
+            return Vec::new();
+        };
+        let dark = !iv.dark;
+        iv.flash = Some(format!(
+            "rendering {} theme\u{2026}",
+            if dark { "dark" } else { "light" }
+        ));
+        self.view.needs_full_repaint = true;
+        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        vec![Effect::RenderMermaid(
+            crate::app::mermaid_ops::MermaidRenderOp {
+                source,
+                mode: crate::app::mermaid_ops::MermaidMode::View {
+                    cols,
+                    rows: rows.saturating_sub(1),
+                    dark,
+                },
+            },
+        )]
     }
 
     /// `b` in the image overlay: flip to a text pager holding the PNG's base64

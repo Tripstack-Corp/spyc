@@ -371,6 +371,7 @@ impl App {
                             MermaidMode::View {
                                 cols,
                                 rows: rows.saturating_sub(1),
+                                dark: false,
                             }
                         } else {
                             MermaidMode::Open

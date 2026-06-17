@@ -41,6 +41,27 @@ pub fn with_clipboard_override<R>(bin: &std::path::Path, body: impl FnOnce() -> 
     body()
 }
 
+/// Copy a PNG image to the system clipboard (the image-pager `y` verb).
+///
+/// Text (below) stays shell-based, but there's no portable shell helper for
+/// image clipboard, so this uses `arboard`. macOS works cleanly; on Linux the
+/// image is only held while spyc runs (X11/Wayland clipboards don't persist
+/// after the owning process exits without a clipboard manager).
+pub fn copy_image(png: &[u8]) -> Result<(), String> {
+    let img = image::load_from_memory(png)
+        .map_err(|e| format!("decode: {e}"))?
+        .to_rgba8();
+    let (width, height) = (img.width() as usize, img.height() as usize);
+    let data = arboard::ImageData {
+        width,
+        height,
+        bytes: std::borrow::Cow::Owned(img.into_raw()),
+    };
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_image(data))
+        .map_err(|e| format!("clipboard: {e}"))
+}
+
 /// Write `text` to the system clipboard.
 pub fn copy(text: &str) -> io::Result<()> {
     #[cfg(test)]
