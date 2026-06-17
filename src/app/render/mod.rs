@@ -222,6 +222,9 @@ impl App {
         self.render_inner(frame, layout);
         let frame_area = frame.area();
         self.render_activity_hud(frame, frame_area);
+        // Full-screen mermaid image overlay (the `i` key) — drawn last so it
+        // sits on top of everything, including the HUD.
+        self.render_mermaid_overlay(frame, frame_area);
     }
 
     /// Pre-draw pass: compute the frame layout and settle the derived list

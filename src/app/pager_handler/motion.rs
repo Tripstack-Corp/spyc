@@ -352,18 +352,30 @@ impl App {
                 // `view.scroll_pager`. (`view`'s borrow ends at the guard.)
                 self.open_pane_scroll_pager();
             }
-            // Open the on-screen mermaid diagram full-res in the OS image viewer
-            // (Preview.app / xdg-open). Rendering runs off-thread via
-            // `Effect::RenderMermaid`; the result is flashed in the pager status
-            // line by `apply_mermaid_outcomes`. See docs/MERMAID_PAGER_PLAN.md.
-            KeyCode::Char('o') => {
-                // `.map(...)` ends the immutable borrow before we mutate `flash`.
+            // Mermaid diagram on screen: `o` opens it full-res in the OS viewer
+            // (Preview.app / xdg-open); `i` renders it as a full-screen image
+            // overlay inside spyc (graphics terminals). Both render off-thread
+            // via `Effect::RenderMermaid`; `apply_mermaid_outcomes` installs the
+            // result + flashes status. `.map(...)` ends the immutable borrow
+            // before we mutate `flash`. See docs/MERMAID_PAGER_PLAN.md.
+            KeyCode::Char('o' | 'i') => {
+                use crate::app::mermaid_ops::{MermaidMode, MermaidRenderOp};
                 match view.visible_mermaid_block().map(|b| b.source.clone()) {
                     Some(source) => {
                         view.flash = Some("rendering mermaid diagram\u{2026}".to_string());
-                        return vec![Effect::RenderMermaid(
-                            crate::app::mermaid_ops::MermaidRenderOp { source },
-                        )];
+                        let mode = if key.code == KeyCode::Char('i') {
+                            let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                            // Reserve the bottom row for the dismiss hint, so the
+                            // protocol is sized to the *actual* draw area — else
+                            // ratatui-image's Image refuses to render (size > area).
+                            MermaidMode::View {
+                                cols,
+                                rows: rows.saturating_sub(1),
+                            }
+                        } else {
+                            MermaidMode::Open
+                        };
+                        return vec![Effect::RenderMermaid(MermaidRenderOp { source, mode })];
                     }
                     None => {
                         view.flash = Some(

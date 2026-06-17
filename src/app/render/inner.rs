@@ -292,4 +292,55 @@ impl App {
             });
         }
     }
+
+    /// Draw the full-screen mermaid image overlay (the pager `i` key) on top of
+    /// everything, with a dismiss-hint footer. No-op when no diagram is up. The
+    /// `Protocol` was built off-thread at terminal size by `mermaid_ops`; this
+    /// is a pure blit (graphics terminals only). Pure `&self`.
+    pub(super) fn render_mermaid_overlay(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        let Some(protocol) = self.view.mermaid_image.as_ref() else {
+            return;
+        };
+        use ratatui::layout::Rect;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Clear, Paragraph};
+        frame.render_widget(Clear, area);
+        // Center the diagram in the region above the one-row dismiss hint.
+        // ratatui-image anchors at the rect's top-left, so we place a rect of
+        // the protocol's own cell size at the centered offset. `allow_clipping`
+        // guards an off-by-one from Fit's cell rounding.
+        let avail = Rect {
+            height: area.height.saturating_sub(1),
+            ..area
+        };
+        let psize = protocol.size();
+        let iw = psize.width.min(avail.width);
+        let ih = psize.height.min(avail.height);
+        let img_area = Rect {
+            x: avail.x + avail.width.saturating_sub(iw) / 2,
+            y: avail.y + avail.height.saturating_sub(ih) / 2,
+            width: iw,
+            height: ih,
+        };
+        frame.render_widget(
+            ratatui_image::Image::new(protocol).allow_clipping(true),
+            img_area,
+        );
+        let hint_area = Rect {
+            y: area.y + area.height.saturating_sub(1),
+            height: 1,
+            ..area
+        };
+        let style = Style::default()
+            .fg(self.view.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " mermaid diagram \u{2014} q/Esc to dismiss",
+                style,
+            ))),
+            hint_area,
+        );
+    }
 }

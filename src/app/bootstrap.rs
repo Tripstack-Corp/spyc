@@ -17,6 +17,13 @@ use super::{
 };
 
 impl App {
+    /// Install the terminal graphics-protocol `Picker` detected in
+    /// `setup_terminal` (real binary only). Called once before `run()`; tests
+    /// leave it `None`. See `Runtime::picker`.
+    pub fn set_picker(&mut self, picker: Option<ratatui_image::picker::Picker>) {
+        self.runtime.picker = picker;
+    }
+
     pub fn new(resume: bool, mcp_takeover_allowed: bool) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
@@ -248,6 +255,9 @@ impl App {
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 mermaid_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                // Set by `App::set_picker` from `setup_terminal` (real binary
+                // only); tests never detect a terminal graphics protocol.
+                picker: None,
             },
         };
         app.state.rebuild_rows();

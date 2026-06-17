@@ -652,7 +652,8 @@ impl<'t> Renderer<'t> {
             .fg(self.theme.status_suffix)
             .add_modifier(Modifier::DIM);
         self.lines.push(Line::from(Span::styled(
-            "\u{25a3} mermaid diagram — press o to open".to_string(),
+            "\u{25a3} mermaid diagram \u{2014} i: view in terminal \u{00b7} o: open in image viewer"
+                .to_string(),
             header,
         )));
         self.lines
