@@ -195,19 +195,24 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 
 # --- Linux (static, musl) ---
 
+# `ulimit -n 8192`: zig's linker opens an fd per object file (250+ for spyc),
+# so the final link dies with `ProcessFdQuotaExceeded` under macOS's 256-fd
+# default soft limit — which bites when `make deploy-fika` is invoked from a
+# context that didn't raise it (e.g. spyc's own `!` shell). Raise it on the
+# same shell line as the build so it applies to that subshell.
 .PHONY: release-linux-x86
 release-linux-x86: ## Linux x86_64 (static, musl)
 	@# Touch the main source so zigbuild always recompiles spyc itself
 	@# (zigbuild cache is separate from cargo build and can go stale).
 	@touch src/main.rs
-	cargo zigbuild $(RELEASE_FLAGS) --target x86_64-unknown-linux-musl
+	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target x86_64-unknown-linux-musl
 	@echo "→ target/x86_64-unknown-linux-musl/release/$(BINARY)"
 	@ls -lh target/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: release-linux-arm
 release-linux-arm: ## Linux aarch64 (static, musl)
 	@touch src/main.rs
-	cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
+	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
 	@echo "→ target/aarch64-unknown-linux-musl/release/$(BINARY)"
 	@ls -lh target/aarch64-unknown-linux-musl/release/$(BINARY)
 
