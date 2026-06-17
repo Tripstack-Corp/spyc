@@ -501,6 +501,22 @@ struct Runtime {
     picker: Option<ratatui_image::picker::Picker>,
 }
 
+/// A rendered image shown full-screen (the pager `i` view). Holds the
+/// ready-to-blit protocol plus the PNG bytes and — for a mermaid diagram — its
+/// source, so the image-pager verbs (`s` save, `Y` yank source, later
+/// `y`/`b`/`c`) work without re-rendering. Generalizes to image-file preview
+/// (where `source` is `None`). See `docs/MERMAID_PAGER_PLAN.md`.
+pub struct ImageView {
+    pub protocol: ratatui_image::protocol::Protocol,
+    pub png: Vec<u8>,
+    pub source: Option<String>,
+    /// Whether the current render uses the dark theme — tracked so `c` toggles it.
+    pub dark: bool,
+    /// Transient verb feedback (e.g. "saved: …"), shown in the overlay footer —
+    /// the normal flash area is hidden behind the full-screen image.
+    pub flash: Option<String>,
+}
+
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
 /// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
 /// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
@@ -518,11 +534,12 @@ pub struct ViewState {
     /// and must not evict each other. The focused-region pager is selected by
     /// [`App::active_pager_mut`]; render draws both independently.
     pub scroll_pager: Option<PagerView>,
-    /// Full-screen mermaid diagram overlay (the pager `i` key): a rendered
-    /// `Protocol` blitted over everything until dismissed (q/Esc). `None` when
-    /// no diagram is being viewed. Set by `apply_mermaid_outcomes`. Graphics
-    /// terminals only. See `docs/MERMAID_PAGER_PLAN.md`.
-    pub mermaid_image: Option<ratatui_image::protocol::Protocol>,
+    /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
+    /// blitted over everything until dismissed (q/Esc), with its own verbs
+    /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
+    /// `apply_mermaid_outcomes`. Graphics terminals only. See
+    /// `docs/MERMAID_PAGER_PLAN.md`.
+    pub image_view: Option<ImageView>,
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
@@ -623,7 +640,7 @@ impl ViewState {
         Self {
             pager: None,
             scroll_pager: None,
-            mermaid_image: None,
+            image_view: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,

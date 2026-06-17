@@ -371,6 +371,8 @@ impl App {
                             MermaidMode::View {
                                 cols,
                                 rows: rows.saturating_sub(1),
+                                // Dark by default — reads best in a terminal.
+                                dark: true,
                             }
                         } else {
                             MermaidMode::Open
