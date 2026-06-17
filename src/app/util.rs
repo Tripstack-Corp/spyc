@@ -1,50 +1,8 @@
 //! Leaf helper functions with no `App`/`Runtime` dependency: time/byte/text
-//! formatting, path + user/host display, a capped subdir walk, a process-group
-//! kill, and an untracked-file diff. Relocated from `app/mod.rs` (800-LoC
-//! campaign); the app-domain glue (`sh_c` → `Effect`, `row_from_entry` →
-//! `RowData`) stays in mod.rs.
-
-// `Path` is only referenced by the Linux-only `count_subdirs_capped` below.
-#[cfg(any(target_os = "linux", test))]
-use std::path::Path;
-
-/// Count *every* subdir under `root` (no gitignore awareness), terminating
-/// as soon as the running count exceeds `cap`. Sole caller is the **Linux**
-/// `pick_recursive_mode` recursive-watch gate (see `MAX_RECURSIVE_WATCH_DIRS`):
-/// `notify` registers an inotify watch per directory regardless of
-/// `.gitignore`, so that decision must count what's actually on disk.
-///
-/// Iterative DFS over a stack rather than a recursive call or an
-/// internal BFS. For an "is the count over `cap`" decision the order
-/// doesn't matter; the DFS form keeps stack memory bounded by `cap`
-/// (we stop pushing immediately on overflow).
-///
-/// Does not follow symlinks: `DirEntry::file_type()` is `lstat`-based
-/// on Unix, so a symlink-to-dir reports as a symlink (not a dir) and
-/// is not pushed onto the walk stack. This matches `notify`'s default
-/// behavior — its recursive walker does not chase symlinks either, so
-/// the count we produce here tracks what `notify` would have walked.
-#[cfg(any(target_os = "linux", test))]
-pub fn count_subdirs_capped(root: &Path, cap: usize) -> usize {
-    let mut count = 0usize;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in rd.filter_map(Result::ok) {
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_dir() {
-                count += 1;
-                if count > cap {
-                    return count;
-                }
-                stack.push(entry.path());
-            }
-        }
-    }
-    count
-}
+//! formatting, path + user/host display, a process-group kill, and an
+//! untracked-file diff. Relocated from `app/mod.rs` (800-LoC campaign); the
+//! app-domain glue (`sh_c` → `Effect`, `row_from_entry` → `RowData`) stays in
+//! mod.rs.
 
 /// Format a `Duration` in seconds as a compact human string for
 /// the activity-monitor uptime field. Forms:

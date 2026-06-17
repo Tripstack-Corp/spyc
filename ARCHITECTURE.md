@@ -26,7 +26,11 @@ Why:
   stale messages instead of cancelling workers.
 
 Where threads exist today:
-- File watcher (`notify`) — pushes change events into the main loop.
+- File watcher (`notify`) — pushes change events into the main loop. A
+  dedicated watch-control worker (`app/watch.rs`) owns the
+  `RecommendedWatcher` and applies (un)watch commands off the loop, because
+  notify's recursive `watch()` does a blocking per-subdir `inotify_add_watch`
+  walk on Linux.
 - Per-pane PTY reader threads — push bytes from the master into a
   per-pane channel.
 - MCP socket listener — accepts stdio-proxy connections.

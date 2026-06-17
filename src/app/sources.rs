@@ -14,11 +14,10 @@
 //!   the descendant-module rule (no field is made `pub`).
 //! - [`take_reader_result`] — the shared reader-death exit decision used by
 //!   both the Timeout (reader_done) and Disconnected arms.
-//! - [`sync_listing_watch`] / `pick_recursive_mode` — fs-watch topology
-//!   (which dirs to watch on chdir). Unchanged by Phase 3a; the delivery
-//!   mechanism (closure vs Sender) is orthogonal to the watch topology.
+//!
+//! The fs-watch *topology* (which dirs to watch on chdir) lives off-thread in
+//! the [`super::watch`] worker; this module only handles event *delivery*.
 
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::Result;
@@ -352,98 +351,11 @@ impl App {
     }
 }
 
-/// Linux gates `Recursive` behind the `MAX_RECURSIVE_WATCH_DIRS` cap
-/// to avoid blocking the main thread on `inotify_add_watch` walks
-/// through `$HOME`-shaped trees. On other platforms (macOS FSEvents,
-/// Windows ReadDirectoryChangesW), recursive watches are OS-level
-/// and cheap, so `Recursive` is returned unconditionally.
-#[cfg(target_os = "linux")]
-fn pick_recursive_mode(new_dir: &Path) -> notify::RecursiveMode {
-    use super::{MAX_RECURSIVE_WATCH_DIRS, count_subdirs_capped};
-    use notify::RecursiveMode;
-    if count_subdirs_capped(new_dir, MAX_RECURSIVE_WATCH_DIRS) > MAX_RECURSIVE_WATCH_DIRS {
-        crate::spyc_debug!(
-            "watcher: {} has > {} subdirs, using non-recursive watch (parent-row dirty refresh falls back to 1 Hz git poll)",
-            new_dir.display(),
-            MAX_RECURSIVE_WATCH_DIRS,
-        );
-        RecursiveMode::NonRecursive
-    } else {
-        RecursiveMode::Recursive
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-const fn pick_recursive_mode(_new_dir: &Path) -> notify::RecursiveMode {
-    notify::RecursiveMode::Recursive
-}
-
-pub fn sync_listing_watch(
-    fs_watcher: Option<&mut notify::RecommendedWatcher>,
-    active: &mut Option<PathBuf>,
-    active_git: &mut Option<PathBuf>,
-    new_dir: &Path,
-    gitdir: Option<&Path>,
-) {
-    use notify::{RecursiveMode, Watcher};
-    let Some(w) = fs_watcher else {
-        return;
-    };
-    if active.as_deref() != Some(new_dir) {
-        if let Some(old) = active.as_ref() {
-            let _ = w.unwatch(old);
-        }
-        // Recursive (when feasible): catches changes anywhere below
-        // the listing dir so git status markers update on the parent
-        // directory row when a file is added/modified in a
-        // subdirectory (e.g. touching `docs/foo.md` while sitting at
-        // the repo root). Events under `.git/` are filtered to
-        // specific files (`index`, `HEAD`) by `is_listing_path` to
-        // avoid `.git/objects` / pack / lockfile churn cascading into
-        // needless `git status` calls.
-        //
-        // On Linux, `pick_recursive_mode` downgrades to non-recursive
-        // when the subtree exceeds `MAX_RECURSIVE_WATCH_DIRS` —
-        // otherwise `notify`'s synchronous per-subdir
-        // `inotify_add_watch` walk blocks the main thread (the
-        // `$HOME`-with-anaconda3 case). The 1 Hz git poll declared
-        // at the top of `App::run` covers parent-row dirty-flag
-        // refresh in that case with at most one second of lag.
-        // macOS FSEvents is OS-level and unaffected.
-        if w.watch(new_dir, pick_recursive_mode(new_dir)).is_ok() {
-            *active = Some(new_dir.to_path_buf());
-        } else {
-            *active = None;
-        }
-    }
-    // Watch the repo's *resolved* gitdir non-recursively. For a normal
-    // repo that's `<root>/.git`; for a linked worktree it's
-    // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*),
-    // which lives OUTSIDE the working tree — without watching it, a
-    // worktree's index/HEAD changes (stage, commit, checkout, branch
-    // switch) never fire the watcher and markers only refresh on the
-    // slower periodic poll. We can't watch the `index` *file* directly:
-    // git commits via atomic rename (write `index.lock`, rename to
-    // `index`), which replaces the inode — a file-level watch follows
-    // the *old* inode and goes deaf. A directory watch sees the rename
-    // land. NonRecursive bounds the noise even with huge `.git/objects`
-    // trees. `gitdir` is resolved + cached on chdir (`current_gitdir`).
-    if active_git.as_deref() != gitdir {
-        if let Some(old) = active_git.take() {
-            let _ = w.unwatch(&old);
-        }
-        if let Some(gd) = gitdir
-            && w.watch(gd, RecursiveMode::NonRecursive).is_ok()
-        {
-            *active_git = Some(gd.to_path_buf());
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::scheduler::Deadline;
     use super::*;
+    use std::path::{Path, PathBuf};
     use std::sync::mpsc;
 
     fn fs_event(path: &Path) -> notify::Event {

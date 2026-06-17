@@ -5,7 +5,8 @@
 //! `term_title_effect` helper. `App::new` (the constructor) lives in
 //! `bootstrap.rs`.
 
-use super::sources::{coalesce_recv, sync_listing_watch, take_reader_result};
+use super::sources::{coalesce_recv, take_reader_result};
+use super::watch::{WatchCommand, spawn_watch_worker};
 use super::{
     App, DispatchFlow, Draw, Duration, Effect, Event, ForegroundExec, KeyCode, KeyEventKind,
     Message, PathBuf, Result, RunCtx, Scheduler, Tui, spawn_input_reader,
@@ -21,51 +22,33 @@ impl App {
     /// to the input reader afterward. Does NOT spawn the reader or build
     /// `foreground_exec` — those stay bare `run()` locals for Drop ordering.
     fn run_setup(&mut self, msg_tx: &std::sync::mpsc::Sender<Message>) -> RunCtx {
-        use notify::{RecursiveMode, Watcher};
-
-        // File watcher: notify posts events onto the unified channel via a
-        // closure `EventHandler` that wraps each `Ok(Event)` as
-        // `Message::FsEvent`, dropping `Err` at the boundary (preserving
-        // the prior Ok-only drain contract). Two kinds of watch:
-        //
-        // 1. Config files — we watch their *parent* directories, not the
-        //    files, because editors that replace-on-save (vim, VS Code,
-        //    nvim) remove the old inode before creating the new one.
-        //
-        // 2. The current listing directory (non-recursive) — so external
-        //    changes (a build artifact dropping in, `git pull`, etc.) are
-        //    reflected without a manual refresh.
-        let watcher_tx = msg_tx.clone();
-        let mut fs_watcher: Option<notify::RecommendedWatcher> =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(ev) = res {
-                    let _ = watcher_tx.send(Message::FsEvent(ev));
-                }
-            })
-            .ok();
-        let mut already_watched: std::collections::HashSet<PathBuf> =
-            std::collections::HashSet::new();
-        if let Some(w) = fs_watcher.as_mut() {
-            for path in self.candidate_config_paths() {
-                if let Some(parent) = path.parent()
-                    && parent.is_dir()
-                    && already_watched.insert(parent.to_path_buf())
-                {
-                    let _ = w.watch(parent, RecursiveMode::NonRecursive);
-                }
-            }
-        }
-        // Which listing dir is currently watched. On chdir we'll unwatch
-        // this one and re-watch the new dir.
-        let mut watched_listing: Option<PathBuf> = None;
-        let mut watched_git: Option<PathBuf> = None;
-        sync_listing_watch(
-            fs_watcher.as_mut(),
-            &mut watched_listing,
-            &mut watched_git,
-            &self.state.listing.dir,
-            self.state.git_cache.current_gitdir.as_deref(),
-        );
+        // Filesystem watching runs on a dedicated worker thread
+        // (`watch::spawn_watch_worker`). notify's recursive `watch()` does a
+        // synchronous per-subdir `inotify_add_watch` walk on Linux, so the
+        // watcher — and that potentially-blocking walk — must stay off the
+        // event-loop/input thread. The worker owns the `RecommendedWatcher`,
+        // posts events back as `Message::FsEvent`, and self-terminates when
+        // `watch_tx` drops at teardown. We pass it the config-file *parent*
+        // dirs (editors replace-on-save, removing the file inode) and then
+        // send an initial `SyncListing` to watch the listing dir recursively.
+        let config_parents: Vec<PathBuf> = self
+            .candidate_config_paths()
+            .into_iter()
+            .filter_map(|p| p.parent().map(std::path::Path::to_path_buf))
+            .collect();
+        let watch_tx = spawn_watch_worker(msg_tx, config_parents);
+        // Last listing dir we've asked the worker to watch (send-dedup key);
+        // seed it by sending the initial watch command.
+        let watched_listing = if let Some(tx) = watch_tx.as_ref() {
+            let dir = self.state.listing.dir.clone();
+            let _ = tx.send(WatchCommand::SyncListing {
+                gitdir: self.state.git_cache.current_gitdir.clone(),
+                dir: dir.clone(),
+            });
+            Some(dir)
+        } else {
+            None
+        };
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
         // sending onto its own channel; this forwarder bridges its results
@@ -116,9 +99,8 @@ impl App {
         self.runtime.pane_wake_tx = Some(msg_tx.clone());
 
         RunCtx {
-            fs_watcher,
+            watch_tx,
             watched_listing,
-            watched_git,
             // MVU Phase 2: advisory deadline scheduler — computes the
             // recv_timeout wait from armed timers; the loop still fires each
             // timer via its own predicate against the threaded `now`.
@@ -385,12 +367,14 @@ impl App {
         // reader takes ownership of the original.
         let (msg_tx, msg_rx) = mpsc::channel::<Message>();
 
-        // All run()-scoped scratch (watcher + topology, scheduler, coalesce
-        // buffers, debounce timers, last-keypress instant, the Draw
-        // accumulator) lives in `ctx`. `run_setup` also spawns the git/MCP
-        // forwarder threads and installs `pane_wake_tx` (all needing a
-        // `msg_tx` clone). Declared BEFORE `reader_handle` so the watcher
-        // (owned by `ctx`) drops AFTER the reader thread is joined (H8).
+        // All run()-scoped scratch (the fs-watch worker's command sender + its
+        // topology dedup key, scheduler, coalesce buffers, debounce timers,
+        // last-keypress instant, the Draw accumulator) lives in `ctx`.
+        // `run_setup` also spawns the fs-watch worker + the git/MCP forwarder
+        // threads and installs `pane_wake_tx` (all needing a `msg_tx` clone).
+        // Declared BEFORE `reader_handle` so `ctx` — and thus `watch_tx` —
+        // drops AFTER the reader thread is joined; dropping `watch_tx` signals
+        // the watch worker to exit and drop its `RecommendedWatcher` (H8).
         let mut ctx = self.run_setup(&msg_tx);
 
         // MVU Phase 1: the parkable input reader runs on its own thread
@@ -693,15 +677,18 @@ impl App {
                 break Err(e);
             }
 
-            // Only re-sync the filesystem watcher when the cwd actually changed.
-            if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path()) {
-                sync_listing_watch(
-                    ctx.fs_watcher.as_mut(),
-                    &mut ctx.watched_listing,
-                    &mut ctx.watched_git,
-                    &self.state.listing.dir,
-                    self.state.git_cache.current_gitdir.as_deref(),
-                );
+            // Only re-point the watcher when the cwd actually changed. The
+            // (un)watch syscalls run on the worker thread; we just send the
+            // new topology and record it as the send-dedup key.
+            if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path())
+                && let Some(tx) = ctx.watch_tx.as_ref()
+            {
+                let dir = self.state.listing.dir.clone();
+                let _ = tx.send(WatchCommand::SyncListing {
+                    gitdir: self.state.git_cache.current_gitdir.clone(),
+                    dir: dir.clone(),
+                });
+                ctx.watched_listing = Some(dir);
             }
 
             // Event-driven MCP context-file write — debounced + typing-burst

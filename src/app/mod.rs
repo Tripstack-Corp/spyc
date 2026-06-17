@@ -247,6 +247,7 @@ mod tasks;
 mod test_harness;
 mod update;
 mod util;
+mod watch;
 
 use capture::PendingCapture;
 #[cfg(unix)]
@@ -261,9 +262,6 @@ use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 #[cfg(unix)]
 use util::kill_pg;
-// Raw subdir count: only the Linux recursive-watch gate (and its tests) use it.
-#[cfg(any(target_os = "linux", test))]
-use util::count_subdirs_capped;
 use util::{
     buffer_to_lines, eof_marker_line, format_elapsed_hms, format_uptime, path_basename_display,
     strip_ansi_escapes, user_host_string,
@@ -720,10 +718,13 @@ enum DispatchFlow {
 /// module-private (the `app` module itself is private, so this is
 /// crate-internal in practice — matching `ViewState`/`App`).
 pub struct RunCtx {
-    fs_watcher: Option<notify::RecommendedWatcher>,
-    /// Listing dir currently watched; on chdir we unwatch it and watch the new one.
+    /// Command sender to the off-thread watch worker (`watch::spawn_watch_worker`).
+    /// `None` if the watcher couldn't be created (degrades to poll-only).
+    watch_tx: Option<std::sync::mpsc::Sender<watch::WatchCommand>>,
+    /// Last listing dir we sent a watch command for; on chdir we send a new
+    /// `SyncListing` so the worker re-points its watches. Purely a send-dedup
+    /// key — the worker owns the actual watch topology.
     watched_listing: Option<PathBuf>,
-    watched_git: Option<PathBuf>,
     scheduler: Scheduler,
     /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
     fs_pending: Vec<notify::Event>,
@@ -748,9 +749,8 @@ impl RunCtx {
     /// take `&mut RunCtx`, can be driven from tests.
     fn for_test() -> Self {
         Self {
-            fs_watcher: None,
+            watch_tx: None,
             watched_listing: None,
-            watched_git: None,
             scheduler: Scheduler::new(),
             fs_pending: Vec::new(),
             git_pending: Vec::new(),
@@ -988,46 +988,6 @@ const fn is_spyc_meta_when_pane_focused(
     key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
 }
-
-/// Hard cap on subdirs we will walk when deciding whether to use
-/// `RecursiveMode::Recursive` for the listing watcher.
-///
-/// On Linux, `notify`'s recursive mode is not OS-native — it walks
-/// the subtree and calls `inotify_add_watch` per directory,
-/// synchronously, on the calling thread. In a tree like `$HOME`
-/// with `anaconda3/` and similar deep package directories, that walk
-/// runs for many seconds while the main event loop is blocked,
-/// hanging the TUI. Same shape as the `MAX_ENTRIES` cap added in
-/// PR #28 for `Listing::read`.
-///
-/// When the listing dir's subtree exceeds this cap (counted with
-/// early termination, see `count_subdirs_capped`), we fall back to a
-/// non-recursive watch. The 1 Hz git poll declared at the top of
-/// `App::run` covers parent-row dirty-flag refresh independently of
-/// the watcher, so the only feature regression is up to one second
-/// of lag on "child modified → parent row dirties" — visible only
-/// on the largest trees, where instant updates aren't reliable in
-/// practice anyway.
-///
-/// macOS FSEvents is OS-level (no per-subdir walk) and is unaffected
-/// by this cap: `pick_recursive_mode` returns `Recursive`
-/// unconditionally on non-Linux platforms.
-///
-/// The chosen value is empirical, not derived: 256 is comfortably
-/// above the subdir count of typical project repos (the spyc tree
-/// itself, ratatui, cargo, …) and below `$HOME`-shaped trees with
-/// package managers in residence (`anaconda3/`, multiple
-/// `node_modules/`, `.cache/`, etc.). If real-world reports show a
-/// project that ends up over the cap or a giant tree that ends up
-/// under it, this is the constant to revisit.
-///
-/// Trades the old worst case of "blocks the event loop forever on
-/// `inotify_add_watch`" for a new worst case of "walks at most
-/// `MAX_RECURSIVE_WATCH_DIRS + 1` `read_dir` calls per chdir" —
-/// hot-cache typical chdirs are sub-millisecond; cold-cache giant
-/// trees bail at the budget in ~50 ms.
-#[cfg(target_os = "linux")]
-const MAX_RECURSIVE_WATCH_DIRS: usize = 256;
 
 /// Build a `ForegroundExec` effect that runs `cmd` through `sh -c` so shell features
 /// (pipes, redirection, `$VAR`) work.
