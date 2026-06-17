@@ -44,6 +44,30 @@ protocols. The MVP sidesteps this (draw the image only when its full row-range
 is within the viewport; show a placeholder otherwise); Phase 2 leans on Kitty's
 clipping for smooth scroll.
 
+### Inline is a *preview*; "open" is how you read it
+
+The DEPLOY.md spike rendered at **2147×1445 px**. Scaled to fit ~70 terminal
+cells wide, that's a legible *overview* but the label text is too small to read
+— inherent to terminal-cell resolution, not a rendering bug. So the design is
+explicitly two-tier:
+
+- **Inline**: an at-a-glance preview/thumbnail (readable for small diagrams; an
+  overview map for dense ones), only on graphics-capable terminals.
+- **"Open" escape hatch (first-class, not an afterthought)**: a keybinding that
+  writes the rendered PNG to a temp file and hands it to the OS viewer via
+  `open::that_detached(path)` — the **existing** spyc pattern
+  (`src/app/quick_select.rs:162`), detached so it never tears the TUI. On macOS
+  that's Preview.app (full zoom/scroll/pan); Linux-local → `xdg-open` → default
+  viewer. This is the same PNG bytes the inline path already produced — one
+  render, two sinks — and it works **even on terminals with no graphics
+  protocol** (you don't need inline support to render-to-temp-and-open). For a
+  dense diagram, this is the primary way to actually read it.
+  - **Caveat — needs a local display**: over SSH (the fika-vm) `open`/`xdg-open`
+    targets the *remote* machine, which has no GUI → it should no-op with a flash
+    ("no display — open locally"). So "open" is a local-machine convenience;
+    over SSH the inline preview (if the local terminal + passthrough support
+    Kitty/iTerm2) is the only in-place option.
+
 ---
 
 ## 2. Architecture (fits the MVU invariants)
@@ -137,25 +161,43 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 ### Phase 2 — off-thread render worker (`Effect::RenderMermaid`)
 - Add the `Effect` variant + `MermaidResult`/`Message::MermaidReady` +
   Runtime outbox slot + pre-recv drain (graveyard template end-to-end).
-- Worker: `mermaid_rs_renderer::render_with_options(src, …)` → PNG →
-  `image::load_from_memory` → `picker.new_protocol(img, target_size, Resize::Fit)`
-  → push `Protocol`. On render error, push the error (→ fall back to source for
-  that block).
+- Worker (render once at high res, **keep both outputs**):
+  `mermaid_rs_renderer::render(src)` → SVG → resvg(+`load_system_fonts`) → **PNG
+  bytes**, then `image::load_from_memory` → `picker.new_protocol(img,
+  target_size, Resize::Fit)` → **`Protocol`**. The PNG bytes feed the "open"
+  sink (Phase 3); the downscaled `Protocol` feeds the inline sink (Phase 4) —
+  one render, two consumers. On error, push the error (→ source fallback +
+  status note, Phase 5).
 - On pager open (markdown), emit one `RenderMermaid` per detected block.
-- Cache by `id` in ViewState; the placeholder updates to the image when ready.
+- Cache by `id` in ViewState; the placeholder updates when ready.
 
-### Phase 3 — draw the image inline (the visible-only MVP)
+### Phase 3 — "open" externally (simple, universal, the read-it path)
+- Action (e.g. `o` while the pager is open and the cursor is on a mermaid
+  block): write the block's cached PNG bytes to a temp file
+  (`$TMPDIR/spyc-mermaid-<id>.png`) and `open::that_detached(path)` — the
+  existing pattern (`quick_select.rs:162`), detached so the TUI isn't torn.
+  macOS → Preview.app (zoom/scroll/pan); Linux-local → `xdg-open`.
+- Works on **any** terminal locally (no graphics protocol needed). If the PNG
+  isn't rendered yet, kick the render and open on completion (or flash "still
+  rendering").
+- **SSH/no-display**: detect (no `$DISPLAY`/`$WAYLAND_DISPLAY` on Linux, or a
+  failed `open`) → flash "no display — open locally"; don't pretend it worked.
+- Smallest end-to-end slice that delivers real value and sidesteps the entire
+  inline scroll-clip problem.
+
+### Phase 4 — draw the image inline (the visible-only MVP)
 - In `pager/render.rs`, after the `Paragraph` body paints: for each block whose
   **full** visual row-range ∈ `[scroll, scroll + viewport_h)` AND whose
   `Protocol` is ready AND graphics are supported, compute its `Rect` and
   `frame.render_widget(Image::new(protocol), rect)` (layers on top of the
-  placeholder cells).
+  placeholder cells). This is the at-a-glance *preview*; "open" (Phase 3) is how
+  you actually read a dense one.
 - Partially-scrolled / not-ready / no-graphics → leave the placeholder text
   (Phase 1) showing. Robust on every protocol.
 - Scroll math: block visual-row-start derived from its source line range +
   wrap expansion (the pager already computes wrapped offsets for the gutter).
 
-### Phase 4 — fallbacks + ergonomics
+### Phase 5 — fallbacks + failure status
 - **Render failure (syntax error, unsupported shapes, panic) → fall back to the
   rendered markdown/source for that block AND surface *why* in the pager status
   line.** The pager already has a status row: `PagerView::status_text()`
@@ -168,19 +210,17 @@ image = { version = "0.25", default-features = false, features = ["png"] }
   first non-search consumer of the status row beyond visual/block mode — keep the
   precedence explicit and unit-test it.)
 - No graphics protocol at all: show the **raw mermaid source** (today's
-  behavior); optionally a one-time status note "terminal has no image protocol —
-  showing source."
-- Add an action (e.g. `m` while the pager is open on a mermaid block, or a
-  toggle) to open the diagram in a **dedicated full-screen image pager** —
-  sidesteps the scroll-clip problem for "I just want to see it big," and works
-  acceptably even on Sixel.
+  behavior) inline, with the "open" hook (Phase 3) still available locally;
+  optionally a one-time status note "terminal has no image protocol — showing
+  source (press `o` to open)."
 
-### Phase 5 — caching, resize, tests, docs
+### Phase 6 — caching, resize, tests, docs
 - Invalidate + re-render on terminal resize (cell size / target px change) and
   on file reload; key the cache on `(block_id, content_width)`.
 - Tests: pure layers only (block detection, range math, fallback selection,
-  effect emission). `TestBackend` snapshots can't capture graphics — the image
-  path is **manual-verify** on Kitty/iTerm2 + the fika-vm (Sixel/SSH).
+  effect emission, `open`-no-display gating). `TestBackend` snapshots can't
+  capture graphics — the image path is **manual-verify** on Kitty/iTerm2 + the
+  fika-vm (Sixel/SSH).
 - Docs in the same commits: AGENTS.md module map (markdown/pager/new worker),
   ARCHITECTURE.md thread list (the render worker), and a note in the pager docs.
 
@@ -189,12 +229,16 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 ## 5. Risks & open questions
 
 1. **Fidelity**: `mermaid-rs-renderer` is pre-1.0; complex diagrams may look
-   off. Phase 4's source-fallback bounds the downside. Re-evaluate `mmdc` only
-   if fidelity proves unacceptable (and accept the Chromium cost then).
-2. **Scroll-clip across protocols**: MVP renders only when fully visible. Smooth
-   partial-scroll (Phase 2+) is Kitty-only realistically.
-3. **Dependency weight**: resvg + image codecs + ratatui-image is a non-trivial
-   tree. Measure and justify in the Phase 0 PR.
+   off. The source-fallback (Phase 5) bounds the downside, and the "open"
+   full-res path (Phase 3) means even an imperfect-but-correct render is useful.
+   Spike on the real DEPLOY.md flowchart was faithful. Re-evaluate `mmdc` only if
+   fidelity proves unacceptable (and accept the Chromium cost then).
+2. **Scroll-clip across protocols**: inline MVP renders only when fully visible.
+   Smooth partial-scroll is Kitty-only realistically — but "open" (Phase 3)
+   makes this low-stakes, since reading happens in the OS viewer.
+3. **Dependency weight**: ✅ resolved in Phase 0 — pure-Rust tree (resvg/usvg/
+   tiny-skia/fontdb/rustybuzz/icy_sixel/image/mermaid-rs-renderer), cargo-deny
+   green, **zero C deps** (dropped `chafa-dyn`). Builds against ratatui 0.30.
 4. **Pager reflow**: the pager wraps text to width; the image block reserves a
    fixed cell height. Width changes must recompute both the placeholder size and
    the target render size.
@@ -205,10 +249,13 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 ## 6. Effort
 
-~5 PRs (one per phase). Phase 0–1 are small and low-risk; Phase 2–3 are the
-meat (worker + draw integration); Phase 4–5 are polish. Each behavior PR builds
-a release and is dogfooded on a graphics-capable terminal (Kitty/iTerm2/WezTerm)
-**and** the fika-vm before merge, per the standing rule.
+~6 PRs (one per phase). Phase 0 (deps) ✅ done; Phase 1 (detect) is small and
+pure; Phase 2 (worker) + Phase 3 ("open") are the first user-visible value and
+relatively self-contained; Phase 4 (inline blit) is the trickiest; Phase 5–6
+are fallbacks/polish. Each behavior PR builds a release and is dogfooded on a
+graphics-capable terminal (Kitty/iTerm2/WezTerm) **and** the fika-vm before
+merge, per the standing rule. Note Phase 3 ("open") delivers a usable feature
+without any of Phase 4's inline-graphics complexity — a natural early ship.
 
 ## 7. Future embedded-image possibilities (the infra unlocks these)
 
