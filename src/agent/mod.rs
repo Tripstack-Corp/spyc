@@ -50,10 +50,28 @@ pub enum ExitSummaryMode {
     Count,
 }
 
+/// Everything a resolver needs to find the transcript file belonging to a
+/// *specific* live pane. Passed to [`TranscriptSpec::resolve`]. `command` lets
+/// a resolver use an explicit session id baked into the spawn command (codex's
+/// `resume <uuid>`) for an exact match; resolvers that don't need it ignore it.
+#[derive(Clone, Copy)]
+pub struct TranscriptQuery<'a> {
+    /// The pane's working directory.
+    pub cwd: &'a Path,
+    /// When the pane's subprocess was spawned (epoch seconds).
+    pub spawn_epoch_secs: u64,
+    /// The command the pane was spawned with (e.g. `codex resume <uuid>`).
+    pub command: &'a str,
+    /// The session id pinned to this pane at spawn (codex — Option B), if
+    /// resolved. The strongest signal: an exact match on the session's rollout.
+    /// `None` until pinned (or for agents that don't pin).
+    pub session_id: Option<&'a str>,
+}
+
 /// Describes an agent's on-disk transcript view for `^a v`.
 pub struct TranscriptSpec {
-    /// Locate the transcript file for the pane's (cwd, spawn time).
-    pub resolve: fn(&Path, u64) -> Option<PathBuf>,
+    /// Locate the transcript file for the pane (see [`TranscriptQuery`]).
+    pub resolve: fn(TranscriptQuery) -> Option<PathBuf>,
     /// Render that file into pager lines. `width` is the pager body-width
     /// hint (cells) so agent prose reflows to the scrollback pane width
     /// when rendered as Markdown; `None` falls back to the default.

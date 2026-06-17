@@ -247,7 +247,8 @@ impl App {
                 | Message::ReaderExited
                 | Message::AgentStatusReady
                 | Message::GraveyardDone
-                | Message::MermaidDone,
+                | Message::MermaidDone
+                | Message::CodexSessionReady,
             ) => {
                 unreachable!(
                     "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -356,6 +357,9 @@ impl App {
     /// unconditionally regardless of the run loop's result.
     pub fn run_teardown(&mut self) {
         crate::context::remove_context_file(&self.view.context_path);
+        // Remove the MCP client configs we wrote on agent launch — our socket
+        // is about to die, so a lingering entry would point at nothing.
+        self.cleanup_written_mcp_configs();
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             for entry in tabs.tabs_mut() {
                 let label = entry.info.label.clone();
@@ -490,6 +494,13 @@ impl App {
             // contract). No-ops fast when the cache is fresh or a walk is
             // already in flight.
             self.kick_agent_status_refresh();
+
+            // Option B: drain a landed codex-session scan and pin uuids to
+            // unpinned codex tabs, then re-arm a scan if any tab still needs one
+            // (within its pin window). Pins don't change the frame, so neither
+            // marks a redraw — same off-thread shape as agent-status above.
+            self.apply_codex_session_pins();
+            self.kick_codex_session_scan();
 
             // Tier 5: drain any off-thread graveyard op (archive / restore /
             // purge-all) that landed (it woke us via `Message::GraveyardDone`).

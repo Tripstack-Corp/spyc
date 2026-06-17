@@ -132,6 +132,11 @@ enum Message {
     /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
     /// as `GraveyardDone`.
     MermaidDone,
+    /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
+    /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
+    /// rides the slot, drained by `apply_codex_session_pins` in the pre-recv
+    /// scan. Collapses to a Timeout like the other re-scan wakes.
+    CodexSessionReady,
 }
 
 /// How long to wait after spawning a restored Claude pane before
@@ -209,6 +214,7 @@ mod agent_status;
 mod bootstrap;
 mod capture;
 mod clipboard;
+mod codex_pin;
 pub mod command_table;
 mod commands;
 mod config;
@@ -430,6 +436,11 @@ struct Runtime {
     pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// Monotonic `SinkId` allocator (never reused).
     next_sink_id: u64,
+    /// Directories where we wrote an MCP client config we own (`.mcp.json` /
+    /// `.codex/config.toml`) when launching an agent pane. Recorded by
+    /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our
+    /// entry from each on teardown so a dead socket isn't left referenced.
+    mcp_config_dirs: Vec<PathBuf>,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pane_tabs: Option<PaneTabs>,
     /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`.
@@ -463,6 +474,13 @@ struct Runtime {
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
     agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Option B (`codex_pin`): off-thread `~/.codex/sessions` scan landing slot
+    /// (with an in-flight flag). A worker dumps a rollout snapshot here and wakes
+    /// the loop with `Message::CodexSessionReady`; `apply_codex_session_pins`
+    /// assigns session uuids to unpinned codex tabs.
+    codex_pin_pending:
+        std::sync::Arc<std::sync::Mutex<Option<Vec<crate::state::codex_transcript::RolloutMeta>>>>,
+    codex_scan_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Tier 5: landing slot for off-thread graveyard ops (archive / restore /
     /// purge-all). Each `Effect::Graveyard` worker pushes its
     /// `GraveyardOutcome` here and wakes the loop with `Message::GraveyardDone`;
@@ -562,6 +580,11 @@ pub struct ViewState {
     pub context_dirty: bool,
     /// Whether the MCP socket server is running.
     pub mcp_running: bool,
+    /// Whether this instance may take over the MCP socket from another spyc
+    /// when it writes a client config. Captured once at startup (the
+    /// `App::new` arg) and read at agent-launch time, when we actually write
+    /// `.mcp.json` / `.codex/config.toml`.
+    pub mcp_takeover_allowed: bool,
     /// When a focus-switch chord just completed: (when, completing key) —
     /// the next dispatch drops a Press/Repeat of that key within ~60 ms.
     pub focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
@@ -627,6 +650,9 @@ impl ViewState {
             last_context: None,
             context_dirty,
             mcp_running,
+            // Set from the `App::new` arg in bootstrap; the test harness never
+            // writes client configs, so the default is fine there.
+            mcp_takeover_allowed: false,
             focus_chord_completed: None,
             show_activity: false,
             activity: activity::ActivityMonitor::new(std::time::Instant::now()),

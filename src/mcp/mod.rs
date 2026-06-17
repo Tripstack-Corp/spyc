@@ -92,8 +92,8 @@ mod readers;
 mod server;
 
 pub use config::{
-    McpConfigStatus, detect_existing_spyc, detect_existing_spyc_codex, ensure_codex_config_toml,
-    ensure_mcp_json, enterprise_defines_spyc,
+    ConfigCleanup, McpConfigStatus, cleanup_codex_config, cleanup_mcp_json, detect_existing_spyc,
+    detect_existing_spyc_codex, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
 };
 pub use server::{cleanup_socket, start_socket_server};
 

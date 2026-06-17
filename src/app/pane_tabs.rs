@@ -94,12 +94,25 @@ impl App {
             self.state.config.layout.status_position,
         );
         let wake = self.make_pane_wake();
+        // Write the agent's MCP client config (`.mcp.json` / `.codex/config.toml`)
+        // into the launch dir *before* the pty spawns, so claude/codex discover
+        // spyc's socket on startup. Gated on the agent here, so directories where
+        // no agent is ever launched don't get a stray config dir. No-op otherwise.
+        self.ensure_agent_mcp_config(cmd, cwd);
         match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.view.context_path, &[], wake) {
             Ok(p) => {
                 self.state.focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
-                let entry = TabEntry::new(p, TabInfo::new(cmd, cwd));
+                let mut info = TabInfo::new(cmd, cwd);
+                // Option B: a `codex resume <uuid>` pane knows its session id up
+                // front — pin it now so `^a v` is exact from the first keypress
+                // (the spawn-time scan handles fresh codex panes instead).
+                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+                    info.codex_session_id =
+                        crate::state::codex_transcript::resume_uuid_from_command(cmd);
+                }
+                let entry = TabEntry::new(p, info);
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.push(entry);
                 } else {

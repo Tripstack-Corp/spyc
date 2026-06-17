@@ -163,6 +163,9 @@ impl App {
         let command = active_info.command.clone();
         let cwd = active_info.cwd.clone();
         let spawn = active_info.spawn_epoch_secs;
+        // Option B: the session uuid pinned to this codex pane (if resolved) —
+        // the resolver's strongest signal for an exact rollout match.
+        let session_id = active_info.codex_session_id.clone();
         let is_alt_screen = tabs.active().is_alternate_screen();
 
         // Agent-aware scrollback. An agent's `AgentProfile` may carry a
@@ -218,7 +221,13 @@ impl App {
                 self.spawn_pager_stream(
                     PagerStreamMount::LowerPane { title },
                     move |tx| {
-                        let lines = match resolve(&cwd, spawn) {
+                        let query = crate::agent::TranscriptQuery {
+                            cwd: &cwd,
+                            spawn_epoch_secs: spawn,
+                            command: &command,
+                            session_id: session_id.as_deref(),
+                        };
+                        let lines = match resolve(query) {
                             Some(path) => render(&path, &theme, width),
                             None => Vec::new(),
                         };

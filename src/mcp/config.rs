@@ -408,27 +408,66 @@ pub fn detect_existing_spyc_codex(dir: &Path) -> Option<u32> {
     live_owner_pid(old_sock_str, &our_sock)
 }
 
-/// Remove just the "spyc" entry from `<dir>/.mcp.json` if present,
-/// preserving any other servers the user (or another tool) may have
-/// added. If after removal `mcpServers` is empty *and* no other
-/// top-level keys remain, delete the file. All errors are best-effort
-/// — this is cleanup, not load-bearing.
+/// Remove just the "spyc" entry from `<dir>/.mcp.json`. Enterprise path:
+/// removes *any* spyc entry unconditionally (org config owns the name),
+/// ignoring ownership and git-tracking.
 fn clean_local_mcp_entry(dir: &Path) {
+    let _ = remove_spyc_from_mcp_json(
+        dir, /* only_if_ours */ false, /* guard_tracked */ false,
+    );
+}
+
+/// Outcome of a teardown cleanup attempt for one client-config file.
+pub enum ConfigCleanup {
+    /// Our entry was removed (and the file/dir deleted if left empty).
+    Cleaned,
+    /// Nothing of ours to clean — no file, or the entry isn't ours.
+    NothingToDo,
+    /// The file is ours but tracked in git, so it was left untouched; the
+    /// caller should warn the user rather than dirty a committed file.
+    SkippedTracked,
+}
+
+/// True when `sock_str` is *our* PID-scoped MCP socket — i.e. this entry was
+/// written by this running spyc, not a different (possibly successor) instance.
+/// Our socket path embeds our pid, so this is a sound "did we write it" proxy.
+fn sock_is_ours(sock_str: &str) -> bool {
+    socket_path().to_string_lossy() == sock_str
+}
+
+/// Shared core for `.mcp.json` spyc-entry removal. `only_if_ours` restricts the
+/// removal to an entry pointing at our own socket (teardown — never disturb a
+/// successor's entry); `guard_tracked` refuses to touch a git-tracked file
+/// (teardown — never dirty/delete something the user committed). On removal, if
+/// `mcpServers` is empty *and* no other top-level keys remain, the file is
+/// deleted. All errors are best-effort: this is cleanup, not load-bearing.
+fn remove_spyc_from_mcp_json(dir: &Path, only_if_ours: bool, guard_tracked: bool) -> ConfigCleanup {
     let path = dir.join(".mcp.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return;
+        return ConfigCleanup::NothingToDo;
     };
     let Ok(mut parsed) = serde_json::from_str::<Value>(&text) else {
-        return;
+        return ConfigCleanup::NothingToDo;
     };
+    if only_if_ours
+        && !parsed
+            .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
+            .and_then(Value::as_str)
+            .is_some_and(sock_is_ours)
+    {
+        return ConfigCleanup::NothingToDo;
+    }
+    if guard_tracked && crate::git::discovery::is_tracked(&path) {
+        return ConfigCleanup::SkippedTracked;
+    }
     let Some(root) = parsed.as_object_mut() else {
-        return;
+        return ConfigCleanup::NothingToDo;
     };
     let Some(servers) = root.get_mut("mcpServers").and_then(Value::as_object_mut) else {
-        return;
+        return ConfigCleanup::NothingToDo;
     };
     if servers.remove("spyc").is_none() {
-        return;
+        return ConfigCleanup::NothingToDo;
     }
     let servers_empty = servers.is_empty();
     let only_servers = root.len() == 1; // i.e. just `mcpServers`
@@ -438,7 +477,7 @@ fn clean_local_mcp_entry(dir: &Path) {
             "removed empty .mcp.json after cleaning spyc entry ({})",
             path.display()
         ));
-        return;
+        return ConfigCleanup::Cleaned;
     }
     if let Ok(out) = serde_json::to_string_pretty(&parsed) {
         let _ = crate::fs::write_atomic(&path, (out + "\n").as_bytes());
@@ -447,6 +486,77 @@ fn clean_local_mcp_entry(dir: &Path) {
             path.display()
         ));
     }
+    ConfigCleanup::Cleaned
+}
+
+/// Teardown counterpart to [`ensure_mcp_json`]: remove the spyc entry *we*
+/// wrote from `<dir>/.mcp.json`, deleting the file if it's left empty. Leaves a
+/// successor instance's entry and any git-tracked file untouched.
+pub fn cleanup_mcp_json(dir: &Path) -> ConfigCleanup {
+    remove_spyc_from_mcp_json(
+        dir, /* only_if_ours */ true, /* guard_tracked */ true,
+    )
+}
+
+/// Teardown counterpart to [`ensure_codex_config_toml`]: remove the spyc entry
+/// *we* wrote from `<dir>/.codex/config.toml`, preserving any other codex
+/// config the user has. If that empties the file, delete it and then the
+/// `.codex/` directory too (only when it's now empty — `remove_dir` is a no-op
+/// otherwise, so a `.codex/` holding other files is left alone). Leaves a
+/// successor's entry and any git-tracked file untouched.
+pub fn cleanup_codex_config(dir: &Path) -> ConfigCleanup {
+    let codex_dir = dir.join(".codex");
+    let path = codex_dir.join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let Ok(mut parsed) = toml::from_str::<toml::Value>(&text) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let is_ours = parsed
+        .get("mcp_servers")
+        .and_then(|m| m.get("spyc"))
+        .and_then(|s| s.get("env"))
+        .and_then(|e| e.get("SPYC_MCP_SOCK"))
+        .and_then(toml::Value::as_str)
+        .is_some_and(sock_is_ours);
+    if !is_ours {
+        return ConfigCleanup::NothingToDo;
+    }
+    if crate::git::discovery::is_tracked(&path) {
+        return ConfigCleanup::SkippedTracked;
+    }
+    let Some(root) = parsed.as_table_mut() else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let mut removed = false;
+    if let Some(servers) = root
+        .get_mut("mcp_servers")
+        .and_then(toml::Value::as_table_mut)
+    {
+        removed = servers.remove("spyc").is_some();
+        if servers.is_empty() {
+            root.remove("mcp_servers");
+        }
+    }
+    if !removed {
+        return ConfigCleanup::NothingToDo;
+    }
+    if root.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&codex_dir);
+        mcp_log(&format!(
+            "removed empty .codex/config.toml after cleaning spyc entry ({})",
+            path.display()
+        ));
+    } else if let Ok(out) = toml::to_string_pretty(&parsed) {
+        let _ = crate::fs::write_atomic(&path, out.as_bytes());
+        mcp_log(&format!(
+            "cleaned spyc entry from .codex/config.toml (preserved other config, {})",
+            path.display()
+        ));
+    }
+    ConfigCleanup::Cleaned
 }
 
 #[cfg(test)]
@@ -487,5 +597,146 @@ mod tests {
         let our = Path::new("/run/spyc/mcp-3.sock");
         assert_eq!(live_owner_pid(&our.to_string_lossy(), our), None);
         assert_eq!(live_owner_pid("/nonexistent/spyc-mcp-nope.sock", our), None);
+    }
+
+    // --- teardown cleanup ---
+    use super::{ConfigCleanup, cleanup_codex_config, cleanup_mcp_json};
+
+    fn our_sock() -> String {
+        crate::mcp::socket_path().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn cleanup_codex_removes_our_entry_and_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let codex = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex).unwrap();
+        let cfg = codex.join("config.toml");
+        std::fs::write(
+            &cfg,
+            format!(
+                "[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                our_sock()
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_codex_config(tmp.path()),
+            ConfigCleanup::Cleaned
+        ));
+        assert!(!cfg.exists(), "config.toml should be deleted");
+        assert!(!codex.exists(), "empty .codex dir should be removed");
+    }
+
+    #[test]
+    fn cleanup_codex_preserves_a_foreign_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let codex = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex).unwrap();
+        let cfg = codex.join("config.toml");
+        // Points at a *different* socket → not ours, leave it alone.
+        std::fs::write(
+            &cfg,
+            "[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"/run/other/mcp-999.sock\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_codex_config(tmp.path()),
+            ConfigCleanup::NothingToDo
+        ));
+        assert!(cfg.exists(), "a foreign entry must be left untouched");
+    }
+
+    #[test]
+    fn cleanup_codex_preserves_other_config_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let codex = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex).unwrap();
+        let cfg = codex.join("config.toml");
+        std::fs::write(
+            &cfg,
+            format!(
+                "model = \"gpt-5\"\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                our_sock()
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_codex_config(tmp.path()),
+            ConfigCleanup::Cleaned
+        ));
+        let after = std::fs::read_to_string(&cfg).expect("file kept (other config present)");
+        assert!(after.contains("model"), "user's other config preserved");
+        assert!(!after.contains("spyc"), "our entry removed");
+        assert!(codex.exists(), ".codex dir kept (config.toml still there)");
+    }
+
+    #[test]
+    fn cleanup_mcp_json_removes_our_entry_when_sole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".mcp.json");
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+                our_sock()
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_mcp_json(tmp.path()),
+            ConfigCleanup::Cleaned
+        ));
+        assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
+    }
+
+    #[test]
+    fn cleanup_mcp_json_preserves_other_servers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".mcp.json");
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}},\"other\":{{\"command\":\"x\"}}}}}}",
+                our_sock()
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_mcp_json(tmp.path()),
+            ConfigCleanup::Cleaned
+        ));
+        let after = std::fs::read_to_string(&path).expect("file kept (other server present)");
+        assert!(after.contains("other"), "other server preserved");
+        assert!(!after.contains("spyc"), "our entry removed");
+    }
+
+    #[test]
+    fn cleanup_mcp_json_leaves_foreign_socket() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".mcp.json");
+        std::fs::write(
+            &path,
+            "{\"mcpServers\":{\"spyc\":{\"env\":{\"SPYC_MCP_SOCK\":\"/run/other/mcp-1.sock\"}}}}",
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_mcp_json(tmp.path()),
+            ConfigCleanup::NothingToDo
+        ));
+        assert!(path.exists(), "a successor's entry must be left in place");
+    }
+
+    #[test]
+    fn cleanup_is_noop_when_no_config_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            cleanup_mcp_json(tmp.path()),
+            ConfigCleanup::NothingToDo
+        ));
+        assert!(matches!(
+            cleanup_codex_config(tmp.path()),
+            ConfigCleanup::NothingToDo
+        ));
     }
 }

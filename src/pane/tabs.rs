@@ -98,6 +98,12 @@ pub struct TabInfo {
     /// this value. `Instant::now()` (above) is monotonic and can't
     /// be compared against wall-clock data, so we record both.
     pub spawn_epoch_secs: u64,
+    /// Codex session uuid pinned to this tab (Option B — `app::codex_pin`).
+    /// Set at launch for a `codex resume <uuid>` pane, else filled by the
+    /// spawn-time scan once codex writes its rollout. `^a v` resolves to this
+    /// exact rollout when present (the strongest signal). `None` for non-codex
+    /// tabs and codex tabs not yet pinned.
+    pub codex_session_id: Option<String>,
 }
 
 impl TabInfo {
@@ -118,6 +124,7 @@ impl TabInfo {
             pending_resume_send: None,
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
+            codex_session_id: None,
         }
     }
 }

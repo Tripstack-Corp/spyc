@@ -1,60 +1,127 @@
-//! MCP / context integration: write the `.mcp.json` (+ codex) config on
-//! startup, snapshot the current state into the on-disk context file MCP
-//! clients read, and execute writable MCP commands on the main thread.
-//! Extracted verbatim from `app/mod.rs` (the impl-extraction sweep), same
-//! child-module `impl App` pattern. `ensure_mcp_config` / `refresh_process_stats`
-//! / `write_context` / `execute_mcp_command` are `pub` (called from `new` /
-//! `loop_steps`); `snapshot_context` is internal to this module.
+//! MCP / context integration: write the `.mcp.json` / `.codex/config.toml`
+//! client config when an agent pane launches (and remove it again on exit),
+//! snapshot the current state into the on-disk context file MCP clients read,
+//! and execute writable MCP commands on the main thread. Originally extracted
+//! verbatim from `app/mod.rs` (the impl-extraction sweep), same child-module
+//! `impl App` pattern. `ensure_agent_mcp_config` / `cleanup_written_mcp_configs`
+//! / `refresh_process_stats` / `write_context` / `execute_mcp_command` are
+//! `pub` (called from the pane-launch path / `run_teardown` / `loop_steps`);
+//! `snapshot_context` is internal to this module.
 
 use super::App;
 
 impl App {
-    /// Write `.mcp.json` with stdio transport on startup.
-    /// If enterprise policy blocks spyc, flash an error instead.
-    pub fn ensure_mcp_config(&mut self, takeover_allowed: bool) {
-        match crate::mcp::ensure_mcp_json(&self.state.listing.dir, takeover_allowed) {
-            Ok(crate::mcp::McpConfigStatus::Configured) => {}
-            Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                self.state
-                    .flash_info(format!("MCP: took over from PID {old_pid}"));
+    /// Write the MCP client config a *launching* agent needs to discover spyc's
+    /// socket — `.mcp.json` for claude, `.codex/config.toml` for codex — into
+    /// `cwd` (the pane's launch dir). Called from the pane-launch path
+    /// ([`open_pane_tab_in`](Self::open_pane_tab_in)) right before the pty
+    /// spawns, NOT at startup: we only create these files in directories where
+    /// the user actually runs the agent, instead of writing them into every
+    /// directory spyc is ever opened in. A no-op when the MCP socket isn't
+    /// running or the command isn't a config-needing agent.
+    pub fn ensure_agent_mcp_config(&mut self, cmd: &str, cwd: &std::path::Path) {
+        if !self.view.mcp_running {
+            return;
+        }
+        let takeover = self.view.mcp_takeover_allowed;
+        // True only when *we* wrote our own entry (Configured / TookOver) — then
+        // we record the dir so teardown removes our (now-dead-socket) entry. A
+        // skipped takeover, enterprise block, or managed env leaves nothing of
+        // ours to clean, so those don't record.
+        let wrote_ours = match crate::agent::detect(cmd).kind() {
+            crate::state::sessions::AgentKind::Claude => {
+                match crate::mcp::ensure_mcp_json(cwd, takeover) {
+                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
+                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
+                        self.state
+                            .flash_info(format!("MCP: took over from PID {old_pid}"));
+                        true
+                    }
+                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
+                        self.state.flash_info(format!(
+                            "MCP: kept PID {old_pid} as owner (Claude here will talk to it)"
+                        ));
+                        false
+                    }
+                    Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
+                        self.state.flash_error(
+                            "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
+                        );
+                        false
+                    }
+                    Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
+                        self.state
+                            .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
+                        false
+                    }
+                    Err(e) => {
+                        self.state.flash_error(format!(".mcp.json: {e}"));
+                        false
+                    }
+                }
             }
-            Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                self.state.flash_info(format!(
-                    "MCP: kept PID {old_pid} as owner (Claude here will talk to it)"
-                ));
+            // Codex equivalent: both agents share the same socket; the writer
+            // just registers a stdio entry that re-execs `spyc --mcp` to proxy.
+            // Enterprise-flavored statuses are claude-specific; codex shouldn't
+            // return them, but if it ever does we treat them as a no-op.
+            crate::state::sessions::AgentKind::Codex => {
+                match crate::mcp::ensure_codex_config_toml(cwd, takeover) {
+                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
+                        self.state
+                            .flash_info(format!("codex MCP: took over from PID {old_pid}"));
+                        true
+                    }
+                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
+                        self.state.flash_info(format!(
+                            "codex MCP: kept PID {old_pid} as owner (codex here will talk to it)"
+                        ));
+                        false
+                    }
+                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
+                    Ok(_) => false,
+                    Err(e) => {
+                        self.state.flash_error(format!(".codex/config.toml: {e}"));
+                        false
+                    }
+                }
             }
-            Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
-                self.state.flash_error(
-                    "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
+            _ => false,
+        };
+        if wrote_ours && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
+            self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+        }
+    }
+
+    /// Teardown: remove the MCP client config entries *we* wrote (a `.mcp.json`
+    /// / `.codex/config.toml` pointing at our now-dead socket) from every dir we
+    /// launched an agent in, deleting a file/`.codex` dir left empty. A
+    /// git-tracked config is left in place with a stderr warning — we never
+    /// dirty or delete something the user committed. Best-effort; called from
+    /// `run_teardown` after the terminal is restored, so warnings are visible.
+    pub fn cleanup_written_mcp_configs(&mut self) {
+        for dir in std::mem::take(&mut self.runtime.mcp_config_dirs) {
+            // Try both shapes per dir; each is a no-op unless it finds an entry
+            // pointing at *our* socket, so attempting the wrong one is harmless.
+            for tracked_path in [
+                matches!(
+                    crate::mcp::cleanup_mcp_json(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".mcp.json")),
+                matches!(
+                    crate::mcp::cleanup_codex_config(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".codex").join("config.toml")),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                eprintln!(
+                    "spyc: left git-tracked MCP config in place: {} (remove the spyc entry by hand if unwanted)",
+                    tracked_path.display()
                 );
             }
-            Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
-                self.state
-                    .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
-            }
-            Err(e) => self.state.flash_error(format!(".mcp.json: {e}")),
-        }
-
-        // Codex equivalent: write `.codex/config.toml` so the codex CLI
-        // discovers spyc's MCP server the same way claude does. Both
-        // agents share the same socket; the writer just registers a
-        // stdio entry that re-execs `spyc --mcp` to proxy. Failures
-        // here flash but don't gate startup — codex isn't required.
-        // Enterprise-flavored statuses are claude-specific; codex
-        // shouldn't return them, but if it ever does we treat them as
-        // a no-op.
-        match crate::mcp::ensure_codex_config_toml(&self.state.listing.dir, takeover_allowed) {
-            Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                self.state
-                    .flash_info(format!("codex MCP: took over from PID {old_pid}"));
-            }
-            Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                self.state.flash_info(format!(
-                    "codex MCP: kept PID {old_pid} as owner (codex here will talk to it)"
-                ));
-            }
-            Ok(_) => {}
-            Err(e) => self.state.flash_error(format!(".codex/config.toml: {e}")),
         }
     }
 

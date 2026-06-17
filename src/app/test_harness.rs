@@ -30,6 +30,7 @@ impl App {
                 mcp_cmd_rx: None,
                 pane_wake_tx: None,
                 next_sink_id: 0,
+                mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
                 pending_capture: None,
@@ -41,6 +42,10 @@ impl App {
                 pending_git_view: None,
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
+                codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
