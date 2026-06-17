@@ -13,6 +13,15 @@ path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.30"
+# Mermaid-in-pager (docs/MERMAID_PAGER_PLAN.md): render ```mermaid blocks as
+# terminal-graphics images. All pure-Rust, zero C deps — `default-features =
+# false` on ratatui-image drops the `chafa-dyn` default (a C lib via
+# pkg-config); Sixel still works via pure-Rust `icy_sixel`, and Kitty/iTerm2/
+# halfblocks are built in. ratatui-image tracks ratatui 0.30; mermaid-rs-renderer
+# emits PNG via resvg (no Node/Chromium); `image` (png only) decodes it.
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
+mermaid-rs-renderer = { version = "0.2", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

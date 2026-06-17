@@ -93,19 +93,25 @@ the draw thread). We do **not** use `StatefulImage` (it encodes at render time).
 
 ## 3. Crate additions
 
-`Cargo.toml`:
+`Cargo.toml` (validated — builds against ratatui 0.30, cargo-deny green, **zero C deps**):
 
 ```toml
-ratatui-image = "11"                 # tracks ratatui 0.30.1; Kitty/iTerm2/Sixel/halfblock
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 mermaid-rs-renderer = { version = "0.2", default-features = false, features = ["png"] }
-# `image` is already transitively present via ratatui-image; add explicit dep if needed.
+image = { version = "0.25", default-features = false, features = ["png"] }
 ```
 
-- Disable `mermaid-rs-renderer`'s `cli` default feature (we only want the lib +
-  `png`). `resvg` comes in transitively.
-- Run `make` (cargo-deny gate) — verify license/advisory acceptance for the new
-  tree (resvg, image codecs). This is a **dependency-weight** decision; flag the
-  added tree size in the PR per the "lightweight" rule.
+- **`ratatui-image` defaults pull `chafa-dyn` → a C library via `pkg-config`.**
+  `default-features = false` + `crossterm` drops it. Sixel still works (pure-Rust
+  `icy_sixel`); Kitty/iTerm2/halfblocks are built in. We lose only chafa's fancier
+  symbol fallback — irrelevant, since our no-graphics fallback is source text.
+- `mermaid-rs-renderer` minus its `cli` default; `png` keeps the resvg PNG path.
+- Added tree (all pure-Rust, MIT/Apache/MPL, deny-clean): resvg/usvg/tiny-skia/
+  fontdb/rustybuzz/ttf-parser/kurbo (SVG+font render), icy_sixel, image+png.
+- **Font loading**: resvg renders the mermaid labels as `<text>` → the render
+  worker must `fontdb.load_system_fonts()` once (tens of ms) and reuse the
+  `fontdb`/`Picker`; an empty fontdb renders boxes with no text. (The fika-vm has
+  system fonts.)
 
 ---
 
