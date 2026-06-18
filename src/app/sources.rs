@@ -185,6 +185,16 @@ pub fn take_reader_result(read_err: &Mutex<Option<std::io::Error>>) -> Result<()
     }
 }
 
+/// True when `path` is at the listing level — the dir itself (macOS FSEvents
+/// coalesces intra-dir changes onto it) or a direct child. Such paths bypass
+/// the gitignore-excludes drop so the cwd the user is viewing stays an
+/// always-current class even for gitignored entries (e.g. spyc's own
+/// `.spyc-context-*` files); only gitignored *subtree* churn the user isn't
+/// looking at is dropped.
+fn is_cwd_level(path: &std::path::Path, listing_dir: &std::path::Path) -> bool {
+    path == listing_dir || path.parent() == Some(listing_dir)
+}
+
 impl App {
     /// MVU Phase 3a: fold one buffered watcher event into the
     /// listing-refresh debounce state. Extracted verbatim from the old
@@ -247,10 +257,21 @@ impl App {
         // otherwise flood the loop and starve the git poll, leaving the dirty
         // markers stale. Built once per batch; fails open (no repo / no
         // matcher → keep everything).
+        //
+        // EXCEPT entries at the listing level (the cwd the user is viewing): a
+        // file created/removed *there* changes a visible row and must refresh
+        // the listing even when gitignored — e.g. spyc's own `.spyc-context-*`
+        // files, or another instance's startup sweep deleting stale ones. We
+        // only suppress churn from gitignored *subtrees* the user isn't looking
+        // at, so the cwd stays an always-current class.
         if let Some(root) = self.state.git_cache.current_repo_root.clone() {
+            let listing_dir = self.state.listing.dir.clone();
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 ctx.fs_pending.retain_mut(|ev| {
-                    ev.paths.retain(|p| !is_excluded(p));
+                    // Keep cwd-level paths unconditionally (short-circuits the
+                    // gitignore check); drop deeper gitignored-subtree churn.
+                    ev.paths
+                        .retain(|p| is_cwd_level(p, &listing_dir) || !is_excluded(p));
                     !ev.paths.is_empty()
                 });
             });
@@ -369,6 +390,28 @@ mod tests {
 
     fn fs_event(path: &Path) -> notify::Event {
         notify::Event::new(notify::EventKind::Any).add_path(path.to_path_buf())
+    }
+
+    /// The gitignore-excludes pre-filter keeps cwd-level paths (the dir itself
+    /// or a direct child) so a gitignored file created/removed there still
+    /// refreshes the listing; only deeper subtree paths fall to the exclude
+    /// check.
+    #[test]
+    fn cwd_level_paths_bypass_the_excludes_drop() {
+        let dir = Path::new("/repo");
+        assert!(is_cwd_level(dir, dir), "the dir itself (macOS coalesce)");
+        assert!(
+            is_cwd_level(Path::new("/repo/.spyc-context-1.json"), dir),
+            "direct child — kept even if gitignored"
+        );
+        assert!(
+            !is_cwd_level(Path::new("/repo/target/debug/foo.o"), dir),
+            "deep subtree path — subject to the exclude check"
+        );
+        assert!(
+            !is_cwd_level(Path::new("/other/foo"), dir),
+            "outside the listing dir"
+        );
     }
 
     fn git_result(generation: u64) -> state::GitWorkerResult {

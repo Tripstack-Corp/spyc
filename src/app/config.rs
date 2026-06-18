@@ -78,13 +78,20 @@ impl App {
     /// `.git/` carved out for tighter filtering since rebase/gc/pack
     /// activity inside there would otherwise spam refresh.
     pub fn is_listing_path(&self, path: &Path) -> bool {
-        // Ignore our own context file writes -- they land in the
-        // listing directory and would otherwise trigger a self-
-        // perpetuating refresh_listing → git-status → redraw cycle.
-        if let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with(".spyc-context-")
-        {
-            return false;
+        // Ignore OUR OWN context-file writes -- the ~150ms snapshot churn lands
+        // in the listing dir and would otherwise spin refresh_listing →
+        // git-status → redraw. Only *our* pid's file (and its write-temp
+        // sibling) is filtered: other instances' context files appearing /
+        // vanishing (e.g. another spyc's startup orphan sweep) are real listing
+        // changes the user must see, so they pass through (the refresh debounce
+        // bounds any residual churn from a second active instance).
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            let pid = std::process::id();
+            if name == format!(".spyc-context-{pid}.json")
+                || name == format!(".spyc-context-{pid}.tmp")
+            {
+                return false;
+            }
         }
         let dir = self.state.listing.dir.as_path();
 
@@ -176,5 +183,35 @@ mod tests {
         let app = App::test_app(PathBuf::from("/repo"));
         assert!(app.state.git_cache.current_gitdir.is_none());
         assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/index")));
+    }
+
+    /// Only OUR OWN context file (and its write-temp) is filtered from the
+    /// listing refresh — another instance's context file appearing/vanishing
+    /// in the cwd is a real change the user must see, and an ordinary file is
+    /// always relevant. (The cwd is an always-current class.)
+    #[test]
+    fn listing_path_filters_only_our_own_context_file() {
+        let app = App::test_app(PathBuf::from("/repo"));
+        let our = std::process::id();
+        let ours_json = format!("/repo/.spyc-context-{our}.json");
+        let ours_tmp = format!("/repo/.spyc-context-{our}.tmp");
+        let other = format!("/repo/.spyc-context-{}.json", our.wrapping_add(1));
+
+        assert!(
+            !app.is_listing_path(Path::new(&ours_json)),
+            "our own write churn → suppressed"
+        );
+        assert!(
+            !app.is_listing_path(Path::new(&ours_tmp)),
+            "our write-temp → suppressed"
+        );
+        assert!(
+            app.is_listing_path(Path::new(&other)),
+            "another instance's file → visible"
+        );
+        assert!(
+            app.is_listing_path(Path::new("/repo/notes.txt")),
+            "ordinary cwd file → relevant"
+        );
     }
 }
