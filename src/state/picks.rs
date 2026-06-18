@@ -27,11 +27,6 @@ impl Picks {
         self.set.insert(path.to_path_buf());
     }
 
-    #[allow(dead_code)]
-    pub fn remove(&mut self, path: &Path) {
-        self.set.remove(path);
-    }
-
     pub fn contains(&self, path: &Path) -> bool {
         self.set.contains(path)
     }
@@ -80,13 +75,6 @@ mod tests {
         p.insert(path);
         p.insert(path);
         assert_eq!(p.len(), 1);
-    }
-
-    #[test]
-    fn remove_nonexistent_is_noop() {
-        let mut p = Picks::new();
-        p.remove(Path::new("/nope"));
-        assert!(p.is_empty());
     }
 
     #[test]
