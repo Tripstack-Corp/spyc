@@ -216,6 +216,13 @@ run off-thread via the `pager_stream` seam.
 `current_gitdir` — no gix repo open on the poll. gix opens only on
 chdir into a new repo and on HEAD change.
 
+> Before reworking this refresh/cache machinery, read
+> `docs/VSCODE_GIT_STUDY.md` — a comparative study of VSCode's git
+> extension (no freshness cache, purely event-driven, re-walk-and-replace
+> + a changed-file cap). It's left as a *consideration* that strengthens
+> the deferred git-status-owner-thread consolidation, not a committed
+> plan.
+
 ## State persistence (XDG)
 
 All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
