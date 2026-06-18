@@ -270,7 +270,6 @@ color_overrides! {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)] // wired in the next task
 pub struct IgnoreMask {
     pub group: u8,
     #[serde(default)]

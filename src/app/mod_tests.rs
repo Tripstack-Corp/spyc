@@ -13,13 +13,17 @@ mod guard_tests {
     ///
     /// If you hit this: extract a module, don't bump the ceiling. The
     /// ceiling sits well below the old monolith and comfortably above
-    /// what legitimately stays in `mod.rs` (the `App` struct, `run`
-    /// event loop, and small glue), so tripping it means something that
-    /// should be its own module landed here instead. See AGENTS.md →
-    /// "Keep `src/app/` modularized".
+    /// what legitimately stays in `mod.rs` (the `App`/`Runtime`/
+    /// `ViewState`/`Message` type defs + small glue — `run` lives in
+    /// run.rs, `App::new` in bootstrap.rs), so tripping it means
+    /// something that should be its own module landed here instead.
+    /// See AGENTS.md → "Keep `src/app/` modularized".
+    ///
+    /// Ratcheted 4000 → 1500 after the impl-extraction sweep left mod.rs
+    /// at ~1076 lines (a guard that allows tripling isn't guarding).
     #[test]
     fn mod_rs_stays_decomposed() {
-        const CEILING: usize = 4_000;
+        const CEILING: usize = 1_500;
         let src = include_str!("mod.rs");
         let lines = src.lines().count();
         assert!(

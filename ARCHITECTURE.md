@@ -132,6 +132,45 @@ Goal: 0 draws-per-second at idle. Implementation:
 The activity overlay (`A` toggle) reports dps and bytes/sec for
 ongoing tuning.
 
+## Mermaid / image rendering
+
+The pager renders ` ```mermaid ` blocks as real images, all pure-Rust
+(no Node/Chromium/C deps): `mermaid-rs-renderer` (mermaid → SVG) →
+`resvg` (SVG → raster) → `ratatui-image` (terminal graphics:
+Kitty/iTerm2/Sixel/halfblocks). The render is far too heavy for the
+loop (parse → layout → SVG → raster → font load), so it runs on a
+detached worker like the graveyard ops (`src/app/mermaid_ops.rs`):
+`Effect::RenderMermaid` → worker → `runtime.mermaid_results` →
+`Message::MermaidDone` → `apply_mermaid_outcomes` (pre-recv drain)
+installs a `ViewState.image_view: Option<ImageView>` overlay or opens
+the PNG in the OS viewer. Two modes: `Open` (`o`, temp PNG +
+`open::that_detached` — any local terminal) and `View` (`i`, a
+terminal-sized `Protocol` for a full-screen in-spyc overlay — graphics
+terminals only; the `Picker` is detected once at startup and `None`
+disables the in-terminal path). The overlay is modal with its own
+verbs (save / copy-image / copy-source / light-dark / base64); image
+copy uses `arboard` (spyc's text clipboard stays shell-based).
+
+Graphics gotchas, each of which cost real debugging time:
+
+- **iTerm2 (3.5+) answers the Kitty graphics probe**, so
+  `Picker::from_query_stdio` detects it as Kitty — but only iTerm2's
+  *native* OSC 1337 actually paints. `detect_image_picker` forces the
+  Iterm2 protocol when `TERM_PROGRAM`/`LC_TERMINAL` says iTerm. Detect
+  once at startup, before the input reader spawns (the cursor-read SSH
+  rule).
+- **DEC 2026 synchronized update swallows inline-image escapes** —
+  iTerm2 drops OSC 1337 emitted inside `\x1b[?2026h…l`. The per-frame
+  sync wrap (above) is therefore skipped while `image_view.is_some()`.
+- **`ratatui-image` renders nothing if the protocol is larger than the
+  draw area** (silent), and **`Resize::Fit` only downscales** — so the
+  vector SVG is rasterized at the terminal's pixel size and centered,
+  rather than fitting a small natural raster into a large area.
+- **Footer-only overlay verbs must not `needs_full_repaint`** — a full
+  repaint clears the screen and re-blits the image (a visible flash);
+  the input-arm diff draw updates just the footer cells and leaves the
+  image untouched. Only verbs that change/remove the image repaint.
+
 ## Process & TTY ownership
 
 - The TUI runs in raw mode + alt screen. `setup_terminal`

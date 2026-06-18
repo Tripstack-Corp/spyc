@@ -291,12 +291,6 @@ impl Inventory {
         self.items.values()
     }
 
-    /// Get item by index.
-    #[allow(dead_code)]
-    pub fn get_at(&self, index: usize) -> Option<&CachedItem> {
-        self.items.values().nth(index)
-    }
-
     /// Get IDs of picked items (or all if no picks).
     pub fn selected_ids(&self) -> Vec<String> {
         if self.picks.is_empty() {

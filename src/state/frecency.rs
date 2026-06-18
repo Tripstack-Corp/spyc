@@ -88,12 +88,6 @@ impl Frecency {
         hits.into_iter().map(|(p, _)| p).collect()
     }
 
-    /// Number of tracked directories.
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
     // ── Persistence ─────────────────────────────────────────────
 
     fn disk_path() -> Option<PathBuf> {
