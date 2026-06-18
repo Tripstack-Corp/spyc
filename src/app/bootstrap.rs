@@ -198,25 +198,16 @@ impl App {
         let (git_res_tx, git_res_rx) = std::sync::mpsc::channel::<state::GitWorkerResult>();
         std::thread::spawn(move || {
             while let Ok(req) = git_req_rx.recv() {
-                // Stat the cache-key mtimes BEFORE reading status. An
-                // index write racing this read then lands in the *next*
-                // poll's diff: an older key paired with newer status is
-                // safe (forces one redundant refresh), whereas the
-                // reverse order — newer key, older status — would make
-                // the 1 Hz poll short-circuit on a stale snapshot
-                // forever, hiding staged/working changes until an
-                // unrelated later write moved the mtime.
-                let (index_mtime, head_mtime) = crate::git::discovery::gitdir(&req.repo_root)
-                    .map_or((None, None), |gd| {
-                        let i = std::fs::metadata(gd.join("index"))
-                            .and_then(|m| m.modified())
-                            .ok();
-                        let h = std::fs::metadata(gd.join("HEAD"))
-                            .and_then(|m| m.modified())
-                            .ok();
-                        (i, h)
-                    });
-                let entries = crate::git::status::repo_status(&req.repo_root);
+                // Walk status with the stat-before-AND-after consistency guard
+                // (`repo_status_stable`): the cache-key mtimes are re-checked
+                // across the walk so the entries are never paired with a mtime
+                // they don't correspond to. The "newer key, older status"
+                // combination — a stale snapshot stamped with the current index
+                // mtime — would make the 1 Hz poll short-circuit forever, hiding
+                // committed/staged changes until an unrelated later write moved
+                // the mtime (the stale-marker bug this guards against).
+                let (entries, index_mtime, head_mtime) =
+                    crate::git::status::repo_status_stable(&req.repo_root);
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
