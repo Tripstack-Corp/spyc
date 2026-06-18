@@ -20,6 +20,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::ui::list_view::{GitChange, GitFileStatus};
 
@@ -327,6 +328,153 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
     Some(by_path.into_values().collect())
 }
 
+/// [`repo_status`] guarded against the racy-snapshot pitfall, returning the
+/// entries alongside the `.git/index` + `HEAD` mtimes they're consistent with
+/// (the `GitWorkerResult` shape the off-thread git worker sends).
+///
+/// The status walk takes hundreds of ms on a large tree. If `.git/index` or
+/// `HEAD` is rewritten *during* it (a `commit` / `checkout` / `git add` landing
+/// concurrently — e.g. a rapid `git add … && git commit …`), the entries can be
+/// paired with a mtime that coincides with the now-current index. That single
+/// combination — stale entries stamped with the current mtime — is the one the
+/// mtime-keyed status caches (`AppState::refresh_git_state`'s short-circuit and
+/// `git_file_statuses_cached`'s reuse check) can never recover from: they treat
+/// it as fresh forever and never re-walk, so committed files keep showing as
+/// modified until an unrelated write moves the mtime.
+///
+/// Guard it: stat the mtimes before AND after the walk, and only trust the
+/// result when they're unchanged across it — then the entries provably belong
+/// to the stamped mtime. If they moved, the walk raced a write; retry for a
+/// stable window. On persistent churn fall back to the last walk stamped with
+/// its *before* mtimes: `before` is older than the now-moved on-disk mtime, so
+/// the 1 Hz poll still diffs and re-walks (the safe "older key, newer status"
+/// direction). We never stamp a stale snapshot as current.
+pub fn repo_status_stable(
+    repo_root: &Path,
+) -> (
+    Option<Vec<StatusEntry>>,
+    Option<SystemTime>,
+    Option<SystemTime>,
+) {
+    let gitdir = crate::git::discovery::gitdir(repo_root);
+    let stat = || {
+        gitdir.as_ref().map_or((None, None), |gd| {
+            let index = std::fs::metadata(gd.join("index"))
+                .and_then(|m| m.modified())
+                .ok();
+            let head = std::fs::metadata(gd.join("HEAD"))
+                .and_then(|m| m.modified())
+                .ok();
+            (index, head)
+        })
+    };
+    let (entries, (index_mtime, head_mtime)) = stable_walk(stat, || repo_status(repo_root), 3);
+    (entries, index_mtime, head_mtime)
+}
+
+/// Generic stat-walk-stat consistency guard (see [`repo_status_stable`]).
+/// Extracted from the IO so the race handling is unit-testable with injected
+/// `stat`/`walk` closures. Returns the walk result paired with the `stat` key
+/// it is consistent with: the `before` key of a walk the key didn't move
+/// across, or — on persistent churn after `max_tries` — the last walk stamped
+/// with its (older) `before` key, which still forces a re-walk on the next poll.
+fn stable_walk<K, E>(
+    mut stat: impl FnMut() -> K,
+    mut walk: impl FnMut() -> E,
+    max_tries: u32,
+) -> (E, K)
+where
+    K: PartialEq,
+{
+    let mut fallback: Option<(E, K)> = None;
+    for _ in 0..max_tries.max(1) {
+        let before = stat();
+        let result = walk();
+        let after = stat();
+        if before == after {
+            // Key stable across the walk → `result` corresponds to it.
+            return (result, before);
+        }
+        // A write raced the walk; the pair may be inconsistent. Keep it stamped
+        // with the older `before` key as a fallback (the on-disk key has since
+        // moved, so a re-walk is still forced) and retry for a stable window.
+        fallback = Some((result, before));
+    }
+    fallback.expect("loop runs at least once and sets fallback whenever it doesn't return early")
+}
+
+#[cfg(test)]
+mod stable_walk_tests {
+    use super::stable_walk;
+    use std::cell::Cell;
+
+    /// Key stable across the walk → the first walk is trusted (one walk only).
+    #[test]
+    fn trusts_first_walk_when_key_stable() {
+        let walks = Cell::new(0u32);
+        let (res, key) = stable_walk(
+            || 7u32,
+            || {
+                walks.set(walks.get() + 1);
+                "entries"
+            },
+            3,
+        );
+        assert_eq!(res, "entries");
+        assert_eq!(key, 7);
+        assert_eq!(walks.get(), 1, "stable on the first try → exactly one walk");
+    }
+
+    /// Key moves across the first walk, then settles → the racy first result is
+    /// discarded and the second (stable) walk is returned, stamped with its key.
+    #[test]
+    fn retries_until_key_is_stable() {
+        let n = Cell::new(0u32);
+        // stat sequence: before1=1, after1=2 (differ) → retry; before2=9,
+        // after2=9 (same) → trust the second walk.
+        let key = || {
+            let i = n.get();
+            n.set(i + 1);
+            match i {
+                0 => 1,
+                1 => 2,
+                _ => 9,
+            }
+        };
+        let walks = Cell::new(0u32);
+        let (_res, k) = stable_walk(
+            key,
+            || {
+                walks.set(walks.get() + 1);
+                walks.get()
+            },
+            3,
+        );
+        assert_eq!(k, 9, "stamped with the stable key");
+        assert_eq!(walks.get(), 2, "one retry after the racy first walk");
+    }
+
+    /// Persistent churn (key changes across every walk) terminates after
+    /// `max_tries` and falls back to the last walk's *before* key — never the
+    /// post-walk key, so a stale snapshot can't be stamped as current.
+    #[test]
+    fn persistent_churn_falls_back_to_before_key() {
+        let n = Cell::new(0u32);
+        let key = || {
+            let i = n.get();
+            n.set(i + 1);
+            i // strictly increasing → before != after on every iteration
+        };
+        let (res, k) = stable_walk(key, || "e", 3);
+        assert_eq!(res, "e");
+        // 3 iterations consume keys 0..6; befores are 0, 2, 4 → last before = 4.
+        assert_eq!(
+            k, 4,
+            "fallback stamps the last walk's BEFORE key, not its after"
+        );
+    }
+}
+
 #[cfg(test)]
 mod map_tests {
     //! Path-mapping rules: `decode_porcelain` → `map_to_listing`. Relocated
@@ -473,7 +621,7 @@ mod map_tests {
 
 #[cfg(test)]
 mod parity_tests {
-    use super::{StatusEntry, decode_porcelain, map_to_listing, repo_status};
+    use super::{StatusEntry, decode_porcelain, map_to_listing, repo_status, repo_status_stable};
     use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
 
@@ -671,5 +819,25 @@ mod parity_tests {
             "detached clean tree has no entries: {gix:?}"
         );
         assert_parity(&root, "sub");
+    }
+
+    /// `repo_status_stable` on a quiescent repo agrees with a direct
+    /// `repo_status` and stamps the live cache-key mtimes (the happy path; the
+    /// racy-snapshot handling that fixes the stale-marker bug is unit-tested in
+    /// `stable_walk_tests`).
+    #[test]
+    fn repo_status_stable_agrees_with_repo_status() {
+        let (_t, root) = repo_with_commit();
+        std::fs::write(root.join("base.txt"), "base\nmod\n").unwrap();
+        let (entries, index_mtime, head_mtime) = repo_status_stable(&root);
+        assert_eq!(
+            as_set(entries.expect("stable walk yields entries")),
+            as_set(repo_status(&root).expect("opens")),
+            "stable walk agrees with a direct walk on a quiescent repo"
+        );
+        assert!(
+            index_mtime.is_some() && head_mtime.is_some(),
+            "quiescent repo → both cache-key mtimes stamped"
+        );
     }
 }
