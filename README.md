@@ -225,7 +225,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a 1`..`9` | Switch to tab N |
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
-| `^a z` | Zoom pane (fullscreen toggle) |
+| `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |

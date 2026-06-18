@@ -46,8 +46,7 @@ impl App {
                 // re-show doesn't try to render zoomed onto a
                 // newly-resized area.
                 self.state.focus = state::Focus::FileList;
-                self.state.pane.pane_zoomed = false;
-                self.state.pane.pane_focus_before_zoom = None;
+                self.state.pane.zoom = state::ZoomTarget::None;
                 self.state.flash_info("pane hidden — F10/^a-\\ to show");
             } else {
                 // Re-show: focus the pane so the next keystroke
@@ -89,6 +88,14 @@ impl App {
     /// injection) MUST gate on this, or they act on the wrong tab when the
     /// spawn fails. On failure this flashes the error and returns `false`.
     pub fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) -> bool {
+        // A new pane is meant to be used — if the file list is zoomed (the
+        // pane is collapsed to its tab bar), reveal the split so the pane
+        // isn't created behind a fullscreen list and silently lost. The
+        // pane-zoom case already shows the pane, so leave it. (Cleared before
+        // `pane_spawn_size` so the pty spawns at the real split size, not 0.)
+        if self.state.pane.zoom == state::ZoomTarget::TopList {
+            self.state.pane.zoom = state::ZoomTarget::None;
+        }
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
@@ -299,6 +306,14 @@ impl App {
         if self.runtime.pane_tabs.is_none() {
             return;
         }
+        // While zoomed, focus is pinned to the zoomed region: the other
+        // region is collapsed (list → 0 rows) or off-screen (pane hidden),
+        // so moving focus there is exactly the confusing case. Refuse with a
+        // hint — you're zoomed, and that's that (mirrors `resize_pane`).
+        if self.state.pane.zoom != state::ZoomTarget::None {
+            self.state.flash_info("pane is zoomed (^a z to exit)");
+            return;
+        }
         if self.state.pane_focused() == want_pane {
             return; // already there — no-op
         }
@@ -411,7 +426,7 @@ impl App {
         if self.runtime.pane_tabs.is_none() {
             return;
         }
-        if self.state.pane.pane_zoomed {
+        if self.state.pane.zoom != state::ZoomTarget::None {
             self.state.flash_info("pane is zoomed (^a z to exit)");
             return;
         }
@@ -420,52 +435,64 @@ impl App {
         self.state.pane.pane_height_pct = new as u16;
     }
 
-    /// The pane percentage to use for layout/sizing computations.
-    /// Returns 100 when zoomed (list collapses to 0 rows) so that the
-    /// stored `pane_height_pct` — the user's preferred split — stays
-    /// untouched and is restored on un-zoom.
+    /// The pane percentage to use for layout/sizing computations. Zoom drives
+    /// it to a sentinel the stored `pane_height_pct` can never reach (it's
+    /// clamped to `[10, 90]`): `BottomPane` → 100 (list collapses to 0 rows),
+    /// `TopList` → 0 (the pane collapses to a single bottom tab-bar row and
+    /// the list fills the rest — `compute_layout` drops the pane rect to
+    /// `None` at 0). The stored split is left untouched, so un-zoom restores
+    /// it exactly.
     pub const fn effective_pane_pct(&self) -> u16 {
-        if self.state.pane.pane_zoomed {
-            100
-        } else {
-            self.state.pane.pane_height_pct
+        match self.state.pane.zoom {
+            state::ZoomTarget::BottomPane => 100,
+            state::ZoomTarget::TopList => 0,
+            state::ZoomTarget::None => self.state.pane.pane_height_pct,
         }
     }
 
-    /// ^a z / ^w z — toggle "zoom" on the bottom pane. When zoomed,
-    /// the file list collapses to 0 rows and the pane fills the
-    /// middle region (status + prompt rows still render). Focus is
-    /// forced into the pane on zoom-on; the prior focus is restored
-    /// on zoom-off. No-op (with a flash) when the pane is closed.
+    /// ^a z / ^w z — toggle "zoom" on the *active* region. Zoom-on
+    /// enlarges whichever region currently has focus: the bottom pane
+    /// (`BottomPane` — list collapses to 0 rows) or the file list
+    /// (`TopList` — the pane collapses off-screen, the list fills the
+    /// frame). Toggling again restores the prior split. Focus is left
+    /// where it is — it already names the zoomed region, so no save/restore
+    /// is needed (this is the fix for the old "zoom always grabbed the
+    /// bottom pane" bug). The stored `pane_height_pct` is preserved across
+    /// the round-trip. No-op (with a flash) when the pane is closed.
     pub fn toggle_pane_zoom(&mut self) {
         if self.runtime.pane_tabs.is_none() {
             self.state.flash_info("no pane open");
             return;
         }
-        if self.state.pane.pane_zoomed {
-            self.state.pane.pane_zoomed = false;
-            if let Some(prev) = self.state.pane.pane_focus_before_zoom.take() {
-                self.state.focus = if prev {
-                    state::Focus::Pane
-                } else {
-                    state::Focus::FileList
-                };
-            }
+        if self.state.pane.zoom != state::ZoomTarget::None {
+            self.state.pane.zoom = state::ZoomTarget::None;
             self.state.flash_info("zoom: off");
+        } else if self.state.pane_focused() {
+            self.state.pane.zoom = state::ZoomTarget::BottomPane;
+            self.state.flash_info("zoom: pane (^a z to exit)");
         } else {
-            self.state.pane.pane_focus_before_zoom = Some(self.state.pane_focused());
-            self.state.pane.pane_zoomed = true;
-            self.state.focus = state::Focus::Pane;
-            self.state.flash_info("zoom: on (^a z to exit)");
+            self.state.pane.zoom = state::ZoomTarget::TopList;
+            self.state.flash_info("zoom: list (^a z to exit)");
         }
-        // Resize all pty children to the new pane rect so their
-        // child shells re-render at the right dimensions; otherwise
-        // Claude's UI is the wrong size until the next terminal resize.
+        // Resize every pane pty to the new layout so child shells re-render at
+        // the right dimensions; otherwise Claude's UI is the wrong size until
+        // the next terminal resize.
+        self.resize_panes_to_layout();
+        self.view.needs_full_repaint = true;
+    }
+
+    /// Resize every pane pty to the current layout's pane rect, so child
+    /// shells re-render at the right size after a zoom / fullscreen change.
+    /// No-op when the layout has no pane rect — `TopList` zoom collapses the
+    /// pane to a tab bar (`compute_layout` yields `pane: None` at pct 0), so
+    /// the pty keeps its prior size, ready the instant the pane is revealed.
+    pub(super) fn resize_panes_to_layout(&mut self) {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
+        let pane_open = self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden;
         let layout = Self::compute_layout(
             area,
-            true,
+            pane_open,
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
@@ -474,7 +501,6 @@ impl App {
                 let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
             }
         }
-        self.view.needs_full_repaint = true;
     }
 
     /// Compute the (rows, cols) the bottom pane will occupy.

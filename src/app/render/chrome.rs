@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use crate::ui::list_view::Row;
 
-use crate::app::{App, TaskStatus, View};
+use crate::app::{App, TaskStatus, View, state};
 
 impl App {
     /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
@@ -165,7 +165,10 @@ impl App {
         let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
         let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
         let mut bg_width = 0usize;
-        let zoom_tag = if self.state.pane.pane_zoomed {
+        // Only `BottomPane` zoom keeps a divider (this line) to tag; `TopList`
+        // zoom has no divider — its cue rides the status-bar suffix instead
+        // (see `header_parts`).
+        let zoom_tag = if self.state.pane.zoom == state::ZoomTarget::BottomPane {
             " [ZOOM]"
         } else {
             ""
@@ -217,7 +220,7 @@ impl App {
             ));
         }
 
-        if self.state.pane.pane_zoomed {
+        if self.state.pane.zoom == state::ZoomTarget::BottomPane {
             spans.push(Span::styled(
                 zoom_tag,
                 Style::default()
@@ -282,7 +285,7 @@ impl App {
                             ""
                         },
                     );
-                    format!(
+                    let suffix = format!(
                         "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}]",
                         self.state.picks.len(),
                         self.state.inventory.len(),
@@ -292,7 +295,16 @@ impl App {
                         hidden_tag,
                         sort_tag,
                         bg_tag,
-                    )
+                    );
+                    // `TopList` zoom collapses the pane (no divider), so its
+                    // zoom cue can't ride the pane divider like `BottomPane`'s
+                    // does — surface it here, the same fallback the bg-task
+                    // tag uses when there's no divider.
+                    if self.state.pane.zoom == state::ZoomTarget::TopList {
+                        format!("{suffix} [ZOOM]")
+                    } else {
+                        suffix
+                    }
                 }
             }),
             View::Inventory => (

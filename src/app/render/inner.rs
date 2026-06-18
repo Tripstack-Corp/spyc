@@ -15,6 +15,7 @@ use crate::ui::status::StatusBar;
 
 use crate::app::{
     App, FlashKind, FrameLayout, Mode, View, path_basename_display, place_pty_cursor_from_screen,
+    state,
 };
 
 impl App {
@@ -147,23 +148,35 @@ impl App {
             return;
         }
 
-        let (path, suffix) = self.header_parts();
-        let project_label = self
-            .state
-            .project_home
-            .as_deref()
-            .map(path_basename_display);
-        let agent_info = self.active_agent_status();
-        StatusBar {
-            project_home: project_label.as_deref(),
-            session_name: self.state.session_name.as_deref(),
-            path: &path,
-            suffix: &suffix,
-            git_info: self.state.git.info.as_deref(),
-            agent_info: agent_info.as_deref(),
-            theme: &self.view.theme,
+        // While the bottom pane is zoomed, the status bar and the
+        // prompt/flash/arming line share the single top row (see
+        // `compute_layout`'s `pane_pct >= 100` branch). Yield that row to the
+        // prompt/flash/arming when one is active, so a zoomed session still
+        // shows arming + messages; otherwise the status bar owns it.
+        let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
+            || self.state.flash.is_some()
+            || self.state.resolver.pending_display().is_some();
+        let yield_top_row_to_prompt =
+            self.state.pane.zoom == state::ZoomTarget::BottomPane && prompt_row_occupied;
+        if !yield_top_row_to_prompt {
+            let (path, suffix) = self.header_parts();
+            let project_label = self
+                .state
+                .project_home
+                .as_deref()
+                .map(path_basename_display);
+            let agent_info = self.active_agent_status();
+            StatusBar {
+                project_home: project_label.as_deref(),
+                session_name: self.state.session_name.as_deref(),
+                path: &path,
+                suffix: &suffix,
+                git_info: self.state.git.info.as_deref(),
+                agent_info: agent_info.as_deref(),
+                theme: &self.view.theme,
+            }
+            .render(frame, layout.status);
         }
-        .render(frame, layout.status);
 
         // The rows cache + view_top↔grid stabilization were settled in
         // `prepare_frame` (MVU Stage 2); read the results for the draw.

@@ -385,6 +385,23 @@ pub struct GitCache {
 /// Bottom-pane layout + prompt-echo state: the split percentage, zoom
 /// (with the focus captured at zoom-on), the hide toggle, the once-per-loop
 /// routing snapshot, and the `^a c` prompt-echo buffers. Grouped out of
+/// Which region `^a z` has zoomed. Zoom enlarges the *focused* region:
+/// `BottomPane` collapses the file list (the historical behavior),
+/// `TopList` collapses the pane (the list fills the frame). `None` is the
+/// normal split. The target is derived from focus at zoom-on, so focus is
+/// unchanged across the toggle and needs no separate save/restore.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ZoomTarget {
+    /// Normal split — neither region is zoomed.
+    #[default]
+    None,
+    /// The bottom pty pane fills the middle; the file list collapses to 0 rows.
+    BottomPane,
+    /// The file list fills the frame; the pane collapses off-screen (like
+    /// `pane_hidden`, but the pty stays alive and the prior split is kept).
+    TopList,
+}
+
 /// `AppState`'s loose pane fields.
 #[derive(Default)]
 pub struct PaneLayout {
@@ -395,14 +412,13 @@ pub struct PaneLayout {
     /// Model, not the live pane host.
     pub pane_snapshot: PaneSnapshot,
     pub pane_height_pct: u16,
-    /// Tmux-style "zoom": when true, the bottom pane fills the middle
-    /// region (list collapses to 0 rows). The user's preferred
-    /// `pane_height_pct` is preserved untouched so un-zoom restores
-    /// exactly the prior split.
-    pub pane_zoomed: bool,
-    /// Focus state captured at zoom-on, restored at zoom-off. `None`
-    /// when not zoomed.
-    pub pane_focus_before_zoom: Option<bool>,
+    /// Tmux-style "zoom" of the *active* region (see [`ZoomTarget`]).
+    /// `BottomPane` fills the middle (list → 0 rows); `TopList` fills the
+    /// frame (pane collapses off-screen). The user's preferred
+    /// `pane_height_pct` is preserved untouched so un-zoom restores exactly
+    /// the prior split. Zoom always targets whichever region had focus at
+    /// zoom-on, so focus is unchanged across the toggle.
+    pub zoom: ZoomTarget,
     /// `F10` / `^a-\` (TogglePane) toggles this. When true, the pane
     /// row is hidden — render skips the pane area, layout treats it
     /// as if no pane existed — but `pane_tabs` and every child pty

@@ -315,6 +315,43 @@ mod layout_tests {
             );
         }
     }
+
+    /// BottomPane zoom (`pane_pct >= 100`, top status): the pane fills the
+    /// frame below a single status row. status + prompt share that top row,
+    /// the divider sits just below it, and there's no file list — so a zoomed
+    /// session still surfaces spyc's flash / chord-arming / prompt.
+    #[test]
+    fn bottom_pane_zoom_keeps_one_top_status_row() {
+        let l = App::compute_layout(area(80, 24), true, 100, StatusPosition::Top);
+        assert_eq!(l.status.y, 0);
+        assert_eq!(l.status.height, 1);
+        // The flash / arming / prompt line shares the single top row.
+        assert_eq!(l.prompt, l.status);
+        let div = l.divider.unwrap();
+        let pane = l.pane.unwrap();
+        assert_eq!(div.y, 1, "divider sits just below the status row");
+        assert_eq!(pane.y, 2, "pane starts below status + divider");
+        assert_eq!(pane.y + pane.height, 24, "pane runs to the frame bottom");
+        assert_eq!(l.list.height, 0, "no file list while the pane is zoomed");
+    }
+
+    /// TopList zoom (`pane_pct == 0`, top status): the list fills the body
+    /// above a single pane **tab bar** at the very bottom (so the hidden
+    /// pane's tabs stay visible and `^a <n>` can fullscreen one). There is no
+    /// pane rect — the pty runs off-screen until un-zoom.
+    #[test]
+    fn list_zoom_keeps_bottom_tab_bar_and_no_pane() {
+        let l = App::compute_layout(area(80, 24), true, 0, StatusPosition::Top);
+        assert_eq!(l.status.y, 0, "status bar stays at the top");
+        assert!(l.list.height > 0, "the list fills the body");
+        let div = l.divider.unwrap();
+        assert_eq!(div.y, 23, "tab bar at the very bottom row");
+        assert_eq!(l.prompt.y, 22, "prompt sits just above the tab bar");
+        assert!(
+            l.pane.is_none(),
+            "no pane rect — the pty runs off-screen while the list is zoomed"
+        );
+    }
 }
 
 #[cfg(test)]

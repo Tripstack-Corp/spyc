@@ -332,6 +332,11 @@ impl App {
             Action::PaneNewTab => self.start_new_tab_prompt(),
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
+                // From a fullscreen list (`TopList` zoom), `^a <n>` fullscreens
+                // the chosen pane instead of dropping back to the split — the
+                // bottom tab bar makes the panes visible, and this navigates
+                // between fullscreen views. Otherwise it's a plain tab switch.
+                let from_list_zoom = self.state.pane.zoom == state::ZoomTarget::TopList;
                 self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
@@ -342,6 +347,10 @@ impl App {
                     // behavior of `^a c` (new tab) which already
                     // does this in `open_pane_tab_in`.
                     self.state.focus = state::Focus::Pane;
+                }
+                if from_list_zoom {
+                    self.state.pane.zoom = state::ZoomTarget::BottomPane;
+                    self.resize_panes_to_layout();
                 }
                 self.restore_active_tab_scrollback_pager();
                 self.view.needs_full_repaint = true;

@@ -216,7 +216,7 @@ const SECTIONS: &[Section] = &[
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
             ("^a +  ^a -", "grow / shrink the pane"),
-            ("^a z", "zoom pane (fullscreen toggle)"),
+            ("^a z", "zoom the active region — list or bottom pane"),
             (
                 "^a v",
                 "scroll pane history in the in-app pager (/, n/N, :N, V, ^v, y)",
@@ -315,7 +315,7 @@ const SECTIONS: &[Section] = &[
             ("[N✓]", "task #N exited cleanly (status 0)"),
             ("[N✗]", "task #N exited with error / signal"),
             ("[SCROLL]", "lower pane is in scrollback view (^a v)"),
-            ("[ZOOM]", "the bottom pane is zoomed (^a z)"),
+            ("[ZOOM]", "the active region is zoomed (^a z)"),
         ],
     },
     Section {

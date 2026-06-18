@@ -256,40 +256,147 @@ fn open_pane_tab_spawns_in_listing_dir_and_focuses_pane() {
     });
 }
 
-/// `^a z` forces focus into the pane and sets the zoom flag; toggling
-/// again restores the *prior* focus (FileList here) and clears the flag.
-/// `pane_height_pct` is preserved across the round-trip.
+/// `^a z` zooms the *active* region: with the list focused it zooms the
+/// list (`TopList`), with the pane focused it zooms the pane (`BottomPane`).
+/// Focus is left unchanged across the toggle (it already names the zoomed
+/// region — this is the fix for the old "zoom always grabbed the bottom
+/// pane" bug), and `pane_height_pct` is preserved across the round-trip.
 #[test]
-fn zoom_toggles_and_restores_prior_focus() {
+fn zoom_targets_the_active_region() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat");
-        // The user moves focus back to the list before zooming.
-        app.state.focus = state::Focus::FileList;
         let pct_before = app.state.pane.pane_height_pct;
 
+        // List focused → zoom the list; focus stays on the list.
+        app.state.focus = state::Focus::FileList;
         app.toggle_pane_zoom();
-        assert!(app.state.pane.pane_zoomed, "first toggle zooms on");
         assert_eq!(
-            app.state.focus,
-            state::Focus::Pane,
-            "zoom-on forces pane focus"
+            app.state.pane.zoom,
+            state::ZoomTarget::TopList,
+            "list focused → zoom the list"
         );
-
-        app.toggle_pane_zoom();
-        assert!(!app.state.pane.pane_zoomed, "second toggle zooms off");
         assert_eq!(
             app.state.focus,
             state::Focus::FileList,
-            "unzoom restores the prior focus"
+            "list-zoom leaves focus on the list"
         );
+        app.toggle_pane_zoom();
+        assert_eq!(
+            app.state.pane.zoom,
+            state::ZoomTarget::None,
+            "second toggle clears the zoom"
+        );
+
+        // Pane focused → zoom the pane; focus stays on the pane.
+        app.state.focus = state::Focus::Pane;
+        app.toggle_pane_zoom();
+        assert_eq!(
+            app.state.pane.zoom,
+            state::ZoomTarget::BottomPane,
+            "pane focused → zoom the pane"
+        );
+        assert_eq!(
+            app.state.focus,
+            state::Focus::Pane,
+            "pane-zoom leaves focus on the pane"
+        );
+        app.toggle_pane_zoom();
+        assert_eq!(app.state.pane.zoom, state::ZoomTarget::None);
+
         assert_eq!(
             app.state.pane.pane_height_pct, pct_before,
             "zoom must not disturb pane_height_pct"
         );
+    });
+}
+
+/// While zoomed, `^a j` / `^a k` (`set_pane_focus`) are inert — you can't
+/// focus the collapsed/off-screen region; only `^a z` exits the zoom.
+#[test]
+fn focus_switch_is_inert_while_zoomed() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+
+        // Zoom the pane (pane focused → BottomPane).
+        app.state.focus = state::Focus::Pane;
+        app.toggle_pane_zoom();
+        assert_eq!(app.state.pane.zoom, state::ZoomTarget::BottomPane);
+
+        // `^a k` would normally move focus to the list — inert while zoomed.
+        app.set_pane_focus(false);
+        assert_eq!(
+            app.state.focus,
+            state::Focus::Pane,
+            "focus must not move while zoomed"
+        );
+
+        // Un-zoom, then the same call moves focus as usual.
+        app.toggle_pane_zoom();
+        app.set_pane_focus(false);
+        assert_eq!(
+            app.state.focus,
+            state::Focus::FileList,
+            "focus moves again once un-zoomed"
+        );
+    });
+}
+
+/// Creating a pane while the list is zoomed reveals the split — otherwise the
+/// new pane would be created off-screen behind a fullscreen list.
+#[test]
+fn new_pane_reveals_a_list_zoomed_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        // List focused → zoom the list (pane collapses to its tab bar).
+        app.state.focus = state::Focus::FileList;
+        app.toggle_pane_zoom();
+        assert_eq!(app.state.pane.zoom, state::ZoomTarget::TopList);
+
+        // Creating another pane clears the list-zoom so the pane is visible.
+        app.open_pane_tab("cat");
+        assert_eq!(
+            app.state.pane.zoom,
+            state::ZoomTarget::None,
+            "a new pane reveals the split"
+        );
+    });
+}
+
+/// `^a <n>` from a fullscreen list (`TopList` zoom) fullscreens the chosen
+/// pane (switch + flip to `BottomPane` zoom), navigating between fullscreen
+/// views via the bottom tab bar.
+#[test]
+fn pane_index_fullscreens_from_list_zoom() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        app.open_pane_tab("cat"); // two tabs
+        app.state.focus = state::Focus::FileList;
+        app.toggle_pane_zoom();
+        assert_eq!(app.state.pane.zoom, state::ZoomTarget::TopList);
+
+        app.apply(&Action::PaneTabByIndex(1)).unwrap();
+        assert_eq!(
+            app.state.pane.zoom,
+            state::ZoomTarget::BottomPane,
+            "^a <n> fullscreens the chosen pane from a zoomed list"
+        );
+        assert_eq!(app.state.focus, state::Focus::Pane);
     });
 }
 

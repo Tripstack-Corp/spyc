@@ -123,12 +123,14 @@ impl App {
                 width: w,
                 height: 1,
             };
-            let pane = Rect {
+            // No pane rect when it has no height — `TopList` zoom (pct 0)
+            // leaves only the tab-bar divider; the pty runs off-screen.
+            let pane = (pane_h_b > 0).then_some(Rect {
                 x: area.x,
                 y: divider.y + 1,
                 width: w,
                 height: pane_h_b,
-            };
+            });
             let prompt = Rect {
                 x: area.x,
                 y: area.y + h.saturating_sub(2),
@@ -145,7 +147,7 @@ impl App {
                 status,
                 list,
                 divider: Some(divider),
-                pane: Some(pane),
+                pane,
                 prompt,
                 // Bottom status + pane: only the list sits above the divider;
                 // prompt and status are below the pane. A top overlay occupies
@@ -156,6 +158,51 @@ impl App {
                     width: w,
                     height: list_h,
                 },
+            };
+        }
+
+        // BottomPane zoom (`pane_pct >= 100` — the only value `effective_pane_pct`
+        // ever returns ≥ 100, and `pane_height_pct` is clamped to ≤ 90): the
+        // pane fills everything below a single spyc status line. That one row
+        // carries the status bar normally and flips to flash / chord-arming /
+        // prompt when active (they share the row — `render_inner` draws one or
+        // the other), so a zoomed session still surfaces arming + messages
+        // while leaving the pane's own input line uncluttered at the bottom.
+        // (The bottom-status path reserves its chrome even at pct 100, so only
+        // this top-status path collapsed it — hence the targeted branch.)
+        if pane_pct >= 100 {
+            let status = Rect {
+                x: area.x,
+                y: area.y,
+                width: w,
+                height: 1.min(h),
+            };
+            let divider = Rect {
+                x: area.x,
+                y: area.y + status.height,
+                width: w,
+                height: 1.min(h.saturating_sub(status.height)),
+            };
+            let pane = Rect {
+                x: area.x,
+                y: divider.y + divider.height,
+                width: w,
+                height: h.saturating_sub(status.height + divider.height),
+            };
+            return FrameLayout {
+                status,
+                // No file list while the pane is zoomed.
+                list: Rect {
+                    x: area.x,
+                    y: pane.y,
+                    width: w,
+                    height: 0,
+                },
+                divider: Some(divider),
+                pane: Some(pane),
+                // The flash / arming / prompt line shares the single top row.
+                prompt: status,
+                top_unit: status,
             };
         }
 
@@ -186,18 +233,20 @@ impl App {
             width: w,
             height: 1,
         };
-        let pane = Rect {
+        // No pane rect when it has no height — `TopList` zoom (pct 0) leaves
+        // only the bottom tab-bar divider visible; the pty runs off-screen.
+        let pane = (pane_h > 0).then_some(Rect {
             x: area.x,
             y: divider.y + 1,
             width: w,
             height: pane_h,
-        };
+        });
 
         FrameLayout {
             status,
             list,
             divider: Some(divider),
-            pane: Some(pane),
+            pane,
             prompt,
             // Top status + pane: status+list+prompt are contiguous above the
             // divider (== top_h rows starting at area.y).

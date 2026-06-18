@@ -150,10 +150,15 @@ spyc's workflow: browse files above, talk to Claude below.
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
 - **^a + / ^a -** grow or shrink the pane
-- **^a z** zoom the pane (toggle fullscreen) — list collapses to 0
-  rows so the pane fills the middle region; the prior split is
-  restored on un-zoom. Status + prompt rows stay visible (tmux-style).
-  A `[ZOOM]` tag appears in the divider while active.
+- **^a z** zoom the **active** region (toggle fullscreen). Pane focused →
+  the pane fills the screen (list collapses to 0 rows, `[ZOOM]` on the
+  divider) and a single spyc status line stays at the top (status, or
+  flash / chord-arming / prompt when active). List focused → the list fills
+  the screen with the pane **tab bar kept at the bottom** (`[ZOOM]` in the
+  top status bar); from there `^a <n>` fullscreens that tab, and creating a
+  new pane reveals the split. Focus stays where it is, `^a j` / `^a k` are
+  inert while zoomed (only `^a z` exits), and the prior split is restored on
+  un-zoom.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager** (v1.5). All pager keys work: `/`
   search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual
