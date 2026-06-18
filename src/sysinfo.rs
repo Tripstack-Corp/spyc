@@ -13,6 +13,30 @@ pub fn epoch_secs() -> u64 {
     jiff::Timestamp::now().as_second().max(0) as u64
 }
 
+/// Whether `pid` names a live process, via a signal-0 existence test
+/// (`rustix::process::test_kill_process` — no `unsafe`, no `/proc` dependency,
+/// works on macOS + Linux). Used by the startup orphan sweeps to decide whether
+/// a `.spyc-context-<pid>.json` / dead-socket MCP entry belongs to a still-
+/// running spyc.
+///
+/// Treats a process as alive UNLESS the kernel says *no such process*
+/// (`ESRCH`): a `Pid::from_raw` that fails (pid 0 / negative) or any other
+/// errno (e.g. `EPERM` — exists but not ours to signal) counts as alive, so the
+/// sweep only ever reaps an entry whose owner is *definitely* gone. PID reuse
+/// therefore can't cause a wrongful delete (a reused-and-live PID reads alive).
+pub fn pid_alive(pid: u32) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return true;
+    };
+    let Some(rpid) = rustix::process::Pid::from_raw(raw) else {
+        return true;
+    };
+    !matches!(
+        rustix::process::test_kill_process(rpid),
+        Err(rustix::io::Errno::SRCH)
+    )
+}
+
 /// Nanoseconds since the Unix epoch. Same shape as `epoch_secs` but
 /// for hot-path id generators that want sub-second resolution.
 pub fn epoch_nanos() -> u128 {

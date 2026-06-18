@@ -173,6 +173,19 @@ impl App {
             list_generation: 0,
         };
         let context_path = crate::context::context_path(&app_state.start_dir);
+        // Reap orphaned artifacts left by instances that exited WITHOUT running
+        // teardown (SIGKILL / crash / `kill -9`): stale `.spyc-context-<pid>.json`
+        // files and dead-PID `spyc` MCP entries in `.mcp.json` / `.codex/config.toml`.
+        // Both reap only entries whose owning PID is *definitely* dead (never a
+        // live owner's, never a git-tracked config, preserving any non-spyc
+        // config), so this is safe to run before we write our own. Clean exits
+        // still self-clean via `run_teardown`; this just stops orphans piling up.
+        let our_pid = std::process::id();
+        let swept = crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid)
+            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid);
+        if swept > 0 {
+            spyc_debug!("startup: reaped {swept} orphaned spyc artifact(s)");
+        }
         // Command channel for writable MCP actions (Claude → main loop).
         let (mcp_cmd_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
         // Start the MCP Unix socket server so `spyc --mcp` (spawned by

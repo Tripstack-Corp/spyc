@@ -59,6 +59,41 @@ pub fn remove_context_file(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+/// Reap orphaned `.spyc-context-<pid>.json` files in `dir` whose owning process
+/// is dead. Each spyc removes its own context file on a clean exit
+/// ([`remove_context_file`]), but a SIGKILL / panic / `kill -9` leaves it
+/// behind, so they accumulate in the project root over time. Called once at
+/// startup (in the launch dir, where every instance's context file lands).
+///
+/// Conservative: only removes a file whose embedded PID is **definitely** dead
+/// ([`crate::sysinfo::pid_alive`] — ESRCH only) and isn't `our_pid` (we write
+/// ours moments later). A live or reused PID is left alone. Returns the count
+/// removed. Best-effort — an unreadable dir or unparsable name is skipped.
+pub fn sweep_orphan_context_files(dir: &Path, our_pid: u32) -> usize {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix(".spyc-context-"))
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == our_pid || crate::sysinfo::pid_alive(pid) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +155,31 @@ mod tests {
         let path = context_path(tmp.path());
         // Removing a file that doesn't exist should not panic.
         remove_context_file(&path);
+    }
+
+    /// The orphan sweep reaps a dead-PID context file but spares our own and a
+    /// live PID — and leaves unrelated files (and a malformed name) untouched.
+    #[test]
+    fn sweep_reaps_dead_pid_context_files_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let our_pid = std::process::id();
+        // PID 999999999 is (effectively) never live → an orphan. Our own PID
+        // is alive, covering the "spare the live owner" case.
+        let dead = dir.join(".spyc-context-999999999.json");
+        let ours = dir.join(format!(".spyc-context-{our_pid}.json"));
+        let unrelated = dir.join("README.md");
+        let malformed = dir.join(".spyc-context-notapid.json");
+        for f in [&dead, &ours, &unrelated, &malformed] {
+            std::fs::write(f, b"{}").unwrap();
+        }
+
+        let removed = sweep_orphan_context_files(dir, our_pid);
+        assert_eq!(removed, 1, "only the dead-PID file is reaped");
+        assert!(!dead.exists(), "dead-PID orphan removed");
+        assert!(ours.exists(), "our own context file is spared");
+        assert!(unrelated.exists(), "unrelated files untouched");
+        assert!(malformed.exists(), "unparsable name skipped");
     }
 
     /// `App::write_context` dedups by comparing the snapshot struct instead
