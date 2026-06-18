@@ -164,7 +164,10 @@ pub fn coalesce_recv(
             // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
             | Message::GraveyardDone
             // Mermaid render+open done — same payloadless-wake shape.
-            | Message::MermaidDone,
+            | Message::MermaidDone
+            // Option B: codex-session-scan-done — payloadless, drained by
+            // `apply_codex_session_pins` in the pre-recv scan.
+            | Message::CodexSessionReady,
         ) => coalesce_tail(rx, ctx),
         other => other,
     }
