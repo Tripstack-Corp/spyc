@@ -402,6 +402,47 @@ pub enum ZoomTarget {
     TopList,
 }
 
+// NOTE: `Side` / `VsplitMode` / `VSplit` are dormant scaffolding in this PR —
+// the `carve_vsplit` geometry + their tests exercise them, but nothing
+// *constructs* a split at runtime until the vsplit keybindings land (PR4).
+// `#[allow(dead_code)]` keeps the no-runtime-constructor case green under
+// `-D warnings`; the allows come off when PR4 wires the keys.
+
+/// Which of the two vertical regions a left/right split addresses. Labelled
+/// `a` (left) / `b` (right) in the UI — numbers stay for PTY tabs, letters
+/// for file panes.
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+/// How a vertical split is laid out. `TopOnly` splits just the file-list
+/// region (the PTY/agent pane stays full-width below both columns);
+/// `FullHeight` runs the divider the whole frame height (the PTY pane shrinks
+/// to the left column's width).
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VsplitMode {
+    TopOnly,
+    FullHeight,
+}
+
+/// The vertical (left/right) split. Pure domain state: the right column's
+/// width share, the layout mode, and which column owns input. Held as
+/// `Option<VSplit>` on the Model — `None` is the single-column default. The
+/// pager *content* for the right region lives in `ViewState`, not here.
+#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct VSplit {
+    /// The right column's share of the split, percent. Clamped to `[20, 80]`.
+    pub width_pct: u16,
+    pub mode: VsplitMode,
+    /// Which column currently owns the keyboard.
+    pub focus: Side,
+}
+
 /// `AppState`'s loose pane fields.
 #[derive(Default)]
 pub struct PaneLayout {
@@ -531,6 +572,10 @@ pub struct AppState {
     pub git_cache: GitCache,
     /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
     pub pane: PaneLayout,
+    /// The vertical (left/right) split, when open (see [`VSplit`]). `None`
+    /// is the single-column default. Stage 1: the right region hosts a
+    /// live-reloading preview pager; a second file-commander is deferred.
+    pub vsplit: Option<VSplit>,
 }
 
 impl AppState {
@@ -736,6 +781,7 @@ impl AppState {
                 pane_height_pct: 30,
                 ..Default::default()
             },
+            vsplit: None,
             rows: Vec::new(),
             grid_dims: GridDims {
                 cols: 1,

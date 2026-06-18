@@ -195,6 +195,18 @@ impl App {
             layout.list,
         );
 
+        // Right column of a vertical split (the live-reloading preview): its
+        // own slot (`view.right_pager`) painted into `layout.right`, coexisting
+        // with the top/bottom region pagers, plus the 1-column vertical
+        // divider. Both are `None` until a split is open (PR4) — single-column
+        // is a no-op here, so this stays byte-identical today.
+        if let (Some(rect), Some(view)) = (layout.right, self.view.right_pager.as_ref()) {
+            crate::ui::pager::render(frame, rect, view, &self.view.theme);
+        }
+        if let Some(vd) = layout.vdivider {
+            self.render_vsplit_divider(frame, vd);
+        }
+
         // v1.5 Phase 3: the bottom region is the `^a v` scrollback pager
         // (`view.scroll_pager`, a `LowerPane` snapshot) when one is open — it
         // replaces the pty widget while the pty runs off-screen — else the live
@@ -303,6 +315,21 @@ impl App {
                     place_pty_cursor_from_screen(frame, screen, rect);
                 }
             });
+        }
+    }
+
+    /// Paint the 1-column vertical separator between the left and right columns
+    /// of a vertical split — `│` down the column, muted like the horizontal
+    /// pane divider's unfocused rule (`theme.status_suffix`). Cell-level paint
+    /// (the rect is 1 col wide) via the same `cell_mut` API the pane widget
+    /// uses. (PR4 can make it focus-aware.)
+    fn render_vsplit_divider(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        let style = ratatui::style::Style::default().fg(self.view.theme.status_suffix);
+        let buf = frame.buffer_mut();
+        for y in rect.y..rect.y.saturating_add(rect.height) {
+            if let Some(cell) = buf.cell_mut((rect.x, y)) {
+                cell.set_char('│').set_style(style);
+            }
         }
     }
 

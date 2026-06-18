@@ -230,6 +230,7 @@ mod post_chord_bounce_tests {
 
 #[cfg(test)]
 mod layout_tests {
+    use super::super::state::{Side, VSplit, VsplitMode};
     use super::super::{App, StatusPosition};
     use ratatui::layout::Rect;
 
@@ -351,6 +352,85 @@ mod layout_tests {
             l.pane.is_none(),
             "no pane rect — the pty runs off-screen while the list is zoomed"
         );
+    }
+
+    /// `carve_vsplit` TopOnly: splits only the list region into
+    /// left | divider(1) | right; status/divider/pane stay full-width. At 80
+    /// cols, pct 45 → right 36, divider at 43, left 43.
+    #[test]
+    fn carve_vsplit_top_only_splits_just_the_list() {
+        let base = App::compute_layout(area(80, 24), true, 50, StatusPosition::Top);
+        let l = App::carve_vsplit(
+            base,
+            VSplit {
+                width_pct: 45,
+                mode: VsplitMode::TopOnly,
+                focus: Side::Right,
+            },
+            area(80, 24),
+        );
+        // List shrinks to the left column.
+        assert_eq!(l.list.x, 0);
+        assert_eq!(l.list.width, 43);
+        // 1-column divider, then the right column to the frame edge.
+        let vd = l.vdivider.unwrap();
+        assert_eq!((vd.x, vd.width), (43, 1));
+        let right = l.right.unwrap();
+        assert_eq!((right.x, right.width), (44, 36));
+        assert_eq!(right.x + right.width, 80, "right column reaches the edge");
+        // Same vertical band as the list (TopOnly).
+        assert_eq!((right.y, right.height), (l.list.y, l.list.height));
+        // Everything else stays full-width.
+        assert_eq!(l.status.width, 80);
+        assert_eq!(l.pane.unwrap().width, 80);
+    }
+
+    /// `carve_vsplit` FullHeight: the divider runs the whole frame height, the
+    /// left-column chrome (incl. the PTY pane) is clamped to the left width,
+    /// and the right column spans the full frame height.
+    #[test]
+    fn carve_vsplit_full_height_clamps_left_chrome() {
+        let base = App::compute_layout(area(80, 24), true, 50, StatusPosition::Top);
+        let l = App::carve_vsplit(
+            base,
+            VSplit {
+                width_pct: 45,
+                mode: VsplitMode::FullHeight,
+                focus: Side::Right,
+            },
+            area(80, 24),
+        );
+        assert_eq!(l.status.width, 43, "status clamped to left column");
+        assert_eq!(l.list.width, 43);
+        assert_eq!(l.prompt.width, 43);
+        assert_eq!(
+            l.pane.unwrap().width,
+            43,
+            "PTY pane confined under left col"
+        );
+        let right = l.right.unwrap();
+        assert_eq!((right.x, right.width), (44, 36));
+        assert_eq!((right.y, right.height), (0, 24), "right spans full height");
+        assert_eq!(l.vdivider.unwrap().height, 24, "divider runs full height");
+    }
+
+    /// `carve_vsplit` refuses (single-column passthrough) when the frame is too
+    /// narrow to host two usable columns — never builds a 0/1-col rect.
+    #[test]
+    fn carve_vsplit_too_narrow_stays_single_column() {
+        let base = App::compute_layout(area(30, 24), true, 50, StatusPosition::Top);
+        let l = App::carve_vsplit(
+            base,
+            VSplit {
+                width_pct: 50,
+                mode: VsplitMode::TopOnly,
+                focus: Side::Left,
+            },
+            area(30, 24),
+        );
+        assert!(l.right.is_none(), "no right column when too narrow");
+        assert!(l.vdivider.is_none());
+        assert_eq!(l.list.width, 30, "list keeps the full width");
     }
 }
 

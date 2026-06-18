@@ -189,6 +189,13 @@ pub struct FrameLayout {
     /// with `status_position = "bottom"` the status row is the *last* row,
     /// so that construction anchors the overlay off-screen and panics.
     top_unit: ratatui::layout::Rect,
+    /// The right column's content rect when a vertical split is open (the
+    /// live-reloading preview), else `None`. Filled by `carve_vsplit`;
+    /// `compute_layout`'s single-column branches leave it `None`.
+    right: Option<ratatui::layout::Rect>,
+    /// The 1-column vertical separator between the left and right columns
+    /// when a vertical split is open, else `None`.
+    vdivider: Option<ratatui::layout::Rect>,
 }
 
 /// Follow-up side effect a key handler asks the main loop to perform.
@@ -534,6 +541,12 @@ pub struct ViewState {
     /// and must not evict each other. The focused-region pager is selected by
     /// [`App::active_pager_mut`]; render draws both independently.
     pub scroll_pager: Option<PagerView>,
+    /// The right-column pager of a vertical split (the live-reloading
+    /// preview). Its **own** slot, like [`Self::scroll_pager`], so it coexists
+    /// with the top and bottom region pagers — render draws it into
+    /// `layout.right`. `None` until the vsplit keys (PR4) open a split; it is
+    /// re-read + re-rendered off-thread when its `source_path` changes (PR5).
+    pub right_pager: Option<PagerView>,
     /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
@@ -640,6 +653,7 @@ impl ViewState {
         Self {
             pager: None,
             scroll_pager: None,
+            right_pager: None,
             image_view: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,

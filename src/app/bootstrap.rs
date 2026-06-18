@@ -129,6 +129,7 @@ impl App {
                 pane_height_pct: 70,
                 ..Default::default()
             },
+            vsplit: None,
             harpoon_filter_set: harpoon
                 .as_ref()
                 .map(|h| h.ancestor_set().clone())

@@ -23,7 +23,7 @@ use crate::config::StatusPosition;
 use crate::spyc_debug;
 use crate::ui::list_view::ListView;
 
-use super::{App, FrameLayout, View};
+use super::{App, FrameLayout, View, state};
 
 mod chrome;
 mod inner;
@@ -92,6 +92,8 @@ impl App {
                     width: w,
                     height: h,
                 },
+                right: None,
+                vdivider: None,
             };
         }
 
@@ -158,6 +160,8 @@ impl App {
                     width: w,
                     height: list_h,
                 },
+                right: None,
+                vdivider: None,
             };
         }
 
@@ -203,6 +207,8 @@ impl App {
                 // The flash / arming / prompt line shares the single top row.
                 prompt: status,
                 top_unit: status,
+                right: None,
+                vdivider: None,
             };
         }
 
@@ -256,7 +262,91 @@ impl App {
                 width: w,
                 height: top_h,
             },
+            right: None,
+            vdivider: None,
         }
+    }
+
+    /// Carve a single-column [`FrameLayout`] into a left/right vertical split.
+    /// Pure geometry (no `self`, no IO) — unit-tested without a TUI, the
+    /// `route.rs`/`focus.rs` template. Returns the layout **unchanged** when
+    /// the frame is too narrow to host two usable columns (single-column
+    /// fallback for that frame — never builds a 0/1-col rect). `TopOnly`
+    /// splits only the list region (the PTY pane stays full-width below);
+    /// `FullHeight` runs the divider the full frame height and clamps the
+    /// left-column chrome — including the PTY pane — to the left width.
+    pub fn carve_vsplit(
+        layout: FrameLayout,
+        vsplit: state::VSplit,
+        area: ratatui::layout::Rect,
+    ) -> FrameLayout {
+        use ratatui::layout::Rect;
+        // Each column floors at MIN_COL; below `2*MIN_COL + 1` (the divider)
+        // there's no room, so stay single-column this frame.
+        const MIN_COL: u16 = 20;
+        let w = area.width;
+        if w < MIN_COL * 2 + 1 {
+            return layout;
+        }
+        let pct = vsplit.width_pct.clamp(20, 80);
+        let right_w = ((u32::from(w) * u32::from(pct)) / 100) as u16;
+        let right_w = right_w.clamp(MIN_COL, w - MIN_COL - 1);
+        let left_w = w - right_w - 1; // 1 column for the vertical divider
+        let vdiv_x = area.x + left_w;
+        let right_x = vdiv_x + 1;
+        let mut out = layout;
+        match vsplit.mode {
+            state::VsplitMode::TopOnly => {
+                // Split only the list region; status/divider/pane/prompt stay
+                // full-width.
+                let list = out.list;
+                out.list = Rect {
+                    width: left_w,
+                    ..list
+                };
+                out.vdivider = Some(Rect {
+                    x: vdiv_x,
+                    y: list.y,
+                    width: 1,
+                    height: list.height,
+                });
+                out.right = Some(Rect {
+                    x: right_x,
+                    y: list.y,
+                    width: right_w,
+                    height: list.height,
+                });
+            }
+            state::VsplitMode::FullHeight => {
+                // Divider runs the full frame height; clamp every left-column
+                // rect (they all start at `area.x`) to `left_w`, including the
+                // PTY pane — that's what confines the pane under the left
+                // column. The right column spans the whole frame height.
+                out.status.width = out.status.width.min(left_w);
+                out.list.width = out.list.width.min(left_w);
+                out.prompt.width = out.prompt.width.min(left_w);
+                out.top_unit.width = out.top_unit.width.min(left_w);
+                if let Some(p) = out.pane.as_mut() {
+                    p.width = p.width.min(left_w);
+                }
+                if let Some(d) = out.divider.as_mut() {
+                    d.width = d.width.min(left_w);
+                }
+                out.vdivider = Some(Rect {
+                    x: vdiv_x,
+                    y: area.y,
+                    width: 1,
+                    height: area.height,
+                });
+                out.right = Some(Rect {
+                    x: right_x,
+                    y: area.y,
+                    width: right_w,
+                    height: area.height,
+                });
+            }
+        }
+        out
     }
 
     /// Draw a full frame. Thin wrapper so the activity (`A`) monitor renders
@@ -297,6 +387,13 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
+        // Carve the single-column layout into a left/right split when one is
+        // open. `None` (today's only runtime state until the vsplit keys land)
+        // returns the layout untouched — byte-identical single-column.
+        let layout = match self.state.vsplit {
+            Some(vsplit) => Self::carve_vsplit(layout, vsplit, area),
+            None => layout,
+        };
         if self.runtime.top_overlay.is_none() {
             self.settle_list_grid(&layout);
         }
