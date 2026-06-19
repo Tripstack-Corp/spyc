@@ -507,112 +507,132 @@ impl App {
             self.view.cached_rows = self.build_rows();
             self.view.cached_rows_gen = self.state.left.list_generation;
         }
-        let rows = &self.view.cached_rows;
-        let list_focused = !self.state.pane_focused();
-        // Stabilize view_top ↔ grid.  Skip the expensive multi-round
-        // loop when inputs haven't changed since the last frame.
-        let grid_key = (
-            self.state.left.list_generation,
-            self.state.left.cursor.view_top,
-            self.state.left.cursor.index,
-            layout.list.width,
-            layout.list.height,
+        let focused = !self.state.pane_focused();
+        // Disjoint field borrows: cached_rows/theme (read) + cached_grid_key
+        // (write) on `view`, and `state.left` (write) — all distinct fields, so
+        // this passes the borrow checker without an accessor that locks all of
+        // `self`. PR C settles the right column the same way against its own
+        // commander + caches.
+        stabilize_grid(
+            &self.view.cached_rows,
+            &mut self.state.left,
+            layout.list,
+            focused,
+            &self.view.theme,
+            &mut self.view.cached_grid_key,
         );
-        if grid_key != self.view.cached_grid_key {
-            self.view.cached_grid_key = grid_key;
-            // The grid depends on view_top (different entries have different
-            // name lengths → different column count → different items_per_page),
-            // and view_top depends on the grid.
-            //
-            // This can produce a 2-cycle: vt=A gives grid that wants vt=B, and
-            // vt=B gives grid that wants vt=A.  When we detect that, always pick
-            // the lower of the two (shows more context, deterministic across
-            // frames) and recompute the grid for that choice.
-            {
-                let mut prev_vt: Option<usize> = None; // for 2-cycle detection
-                let mut settled = false;
-                for round in 0..4 {
-                    let probe = ListView {
-                        rows,
-                        cursor: self.state.left.cursor.index,
-                        view_top: self.state.left.cursor.view_top,
-                        empty_marker: self.state.left.view == View::Dir,
-                        focused: list_focused,
-                        theme: &self.view.theme,
-                    };
-                    self.state.left.grid_dims = probe.grid(layout.list).dims();
-                    let old_vt = self.state.left.cursor.view_top;
-                    let pp = self.state.left.grid_dims.items_per_page();
-                    self.state.ensure_cursor_visible();
-                    if self.state.left.cursor.view_top == old_vt {
-                        spyc_debug!(
-                            "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
-                            round + 1,
-                            old_vt,
-                            self.state.left.cursor.index,
-                            self.state.left.grid_dims.cols,
-                            self.state.left.grid_dims.rows_per_col,
-                            pp,
-                        );
-                        settled = true;
-                        break;
-                    }
-                    spyc_debug!(
-                        "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
-                        round + 1,
-                        old_vt,
-                        self.state.left.cursor.view_top,
-                        self.state.left.cursor.index,
-                        self.state.left.grid_dims.cols,
-                        self.state.left.grid_dims.rows_per_col,
-                        pp,
-                    );
-                    // 2-cycle: new vt equals the vt from two rounds ago.
-                    if Some(self.state.left.cursor.view_top) == prev_vt {
-                        // Always pick the lower vt — deterministic across frames.
-                        let forced = old_vt.min(self.state.left.cursor.view_top);
-                        self.state.left.cursor.view_top = forced;
-                        // Recompute grid for the forced view_top.
-                        let probe = ListView {
-                            rows,
-                            cursor: self.state.left.cursor.index,
-                            view_top: self.state.left.cursor.view_top,
-                            empty_marker: self.state.left.view == View::Dir,
-                            focused: list_focused,
-                            theme: &self.view.theme,
-                        };
-                        self.state.left.grid_dims = probe.grid(layout.list).dims();
-                        spyc_debug!(
-                            "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
-                            forced,
-                            self.state.left.cursor.index,
-                            self.state.left.grid_dims.cols,
-                            self.state.left.grid_dims.rows_per_col,
-                            self.state.left.grid_dims.items_per_page(),
-                        );
-                        settled = true;
-                        break;
-                    }
-                    prev_vt = Some(old_vt);
-                }
-                if !settled {
-                    spyc_debug!(
-                        "grid did NOT settle after 4 rounds: vt={} cursor={}",
-                        self.state.left.cursor.view_top,
-                        self.state.left.cursor.index,
-                    );
-                }
-            }
-            // Update cache key in case the stabilization loop changed view_top.
-            self.view.cached_grid_key = (
-                self.state.left.list_generation,
-                self.state.left.cursor.view_top,
-                self.state.left.cursor.index,
-                layout.list.width,
-                layout.list.height,
-            );
-        } // end grid cache guard
     }
+}
+
+/// The `view_top` ↔ grid stabilization for one commander column. The grid
+/// depends on `view_top` (entry name lengths → column count → items-per-page)
+/// and `view_top` depends on the grid, so this iterates to a fixpoint (≤4
+/// rounds), breaking a 2-cycle by picking the lower `view_top` (more context,
+/// deterministic across frames). Skips the loop when nothing changed since the
+/// last frame (the `cached_grid_key` guard). Pure derived state — mutates only
+/// the commander's `grid_dims`/`cursor.view_top` and the caller's cache key, no
+/// drawing or IO. Free fn (not an `App` method) so the borrows on the caller's
+/// `view`/`state` fields stay disjoint; called once per visible column.
+fn stabilize_grid(
+    rows: &[crate::ui::list_view::Row],
+    commander: &mut state::Commander,
+    rect: ratatui::layout::Rect,
+    focused: bool,
+    theme: &crate::ui::theme::Theme,
+    cached_grid_key: &mut (u64, usize, usize, u16, u16),
+) {
+    let grid_key = (
+        commander.list_generation,
+        commander.cursor.view_top,
+        commander.cursor.index,
+        rect.width,
+        rect.height,
+    );
+    if grid_key == *cached_grid_key {
+        return;
+    }
+    *cached_grid_key = grid_key;
+    let mut prev_vt: Option<usize> = None; // for 2-cycle detection
+    let mut settled = false;
+    for round in 0..4 {
+        let probe = ListView {
+            rows,
+            cursor: commander.cursor.index,
+            view_top: commander.cursor.view_top,
+            empty_marker: commander.view == View::Dir,
+            focused,
+            theme,
+        };
+        commander.grid_dims = probe.grid(rect).dims();
+        let old_vt = commander.cursor.view_top;
+        let pp = commander.grid_dims.items_per_page();
+        commander.ensure_cursor_visible();
+        if commander.cursor.view_top == old_vt {
+            spyc_debug!(
+                "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
+                round + 1,
+                old_vt,
+                commander.cursor.index,
+                commander.grid_dims.cols,
+                commander.grid_dims.rows_per_col,
+                pp,
+            );
+            settled = true;
+            break;
+        }
+        spyc_debug!(
+            "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
+            round + 1,
+            old_vt,
+            commander.cursor.view_top,
+            commander.cursor.index,
+            commander.grid_dims.cols,
+            commander.grid_dims.rows_per_col,
+            pp,
+        );
+        // 2-cycle: new vt equals the vt from two rounds ago.
+        if Some(commander.cursor.view_top) == prev_vt {
+            // Always pick the lower vt — deterministic across frames.
+            let forced = old_vt.min(commander.cursor.view_top);
+            commander.cursor.view_top = forced;
+            // Recompute grid for the forced view_top.
+            let probe = ListView {
+                rows,
+                cursor: commander.cursor.index,
+                view_top: commander.cursor.view_top,
+                empty_marker: commander.view == View::Dir,
+                focused,
+                theme,
+            };
+            commander.grid_dims = probe.grid(rect).dims();
+            spyc_debug!(
+                "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
+                forced,
+                commander.cursor.index,
+                commander.grid_dims.cols,
+                commander.grid_dims.rows_per_col,
+                commander.grid_dims.items_per_page(),
+            );
+            settled = true;
+            break;
+        }
+        prev_vt = Some(old_vt);
+    }
+    if !settled {
+        spyc_debug!(
+            "grid did NOT settle after 4 rounds: vt={} cursor={}",
+            commander.cursor.view_top,
+            commander.cursor.index,
+        );
+    }
+    // Update cache key in case the stabilization loop changed view_top.
+    *cached_grid_key = (
+        commander.list_generation,
+        commander.cursor.view_top,
+        commander.cursor.index,
+        rect.width,
+        rect.height,
+    );
 }
 
 #[cfg(test)]

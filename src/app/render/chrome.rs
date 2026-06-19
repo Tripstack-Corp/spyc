@@ -333,11 +333,20 @@ impl App {
     }
 
     pub(super) fn build_rows(&self) -> Vec<Row> {
+        self.build_rows_for(&self.state.left)
+    }
+
+    /// Build the styled display rows for one commander column `c` (its
+    /// `rows`/`view`/`picks`), folding in the app-wide overlays (git status,
+    /// inventory `taken`, pending-delete highlight). Per-column so the right
+    /// split list can be built the same way; `build_rows` is the left default.
+    /// (Git status is the single app-wide map for now — correct for the left
+    /// column; a right column in a different repo gets per-column git with the
+    /// dual-git-worker PR.)
+    pub(super) fn build_rows_for(&self, c: &state::Commander) -> Vec<Row> {
         use crate::ui::list_view::GitFileStatus;
         let delete_preview: Option<&Vec<PathBuf>> = self.state.pending_delete_preview.as_ref();
-        self.state
-            .left
-            .rows
+        c.rows
             .iter()
             .map(|rd| {
                 let git_status = self
@@ -352,8 +361,7 @@ impl App {
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,
-                    picked: self.state.left.view == View::Dir
-                        && self.state.left.picks.contains(&rd.path),
+                    picked: c.view == View::Dir && c.picks.contains(&rd.path),
                     taken: self.state.inventory.contains(&rd.path),
                     git_status,
                     pending_delete,

@@ -6,7 +6,23 @@ use anyhow::Result;
 
 use crate::app::{Effect, Matcher};
 
-use super::AppState;
+use super::{AppState, Commander};
+
+impl Commander {
+    /// Snap `view_top` to the page containing the cursor, given the last
+    /// rendered grid geometry. Per-browser (cursor/grid/rows all live here), so
+    /// each split column settles independently. Was an `AppState` method back
+    /// when there was one browser.
+    pub const fn ensure_cursor_visible(&mut self) {
+        let per_page = self.grid_dims.items_per_page();
+        if per_page == 0 || self.rows.is_empty() {
+            self.cursor.view_top = 0;
+            return;
+        }
+        let page = self.cursor.index / per_page;
+        self.cursor.view_top = page * per_page;
+    }
+}
 
 impl AppState {
     /// j/k — move within the current column only. Wraps at column
@@ -152,16 +168,6 @@ impl AppState {
             self.left.cursor.index = target_idx;
         }
         true
-    }
-
-    pub const fn ensure_cursor_visible(&mut self) {
-        let per_page = self.left.grid_dims.items_per_page();
-        if per_page == 0 || self.left.rows.is_empty() {
-            self.left.cursor.view_top = 0;
-            return;
-        }
-        let page = self.left.cursor.index / per_page;
-        self.left.cursor.view_top = page * per_page;
     }
 
     pub fn find_match(&self, query: &str, from: usize, backward: bool) -> Option<usize> {

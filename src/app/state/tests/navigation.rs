@@ -130,7 +130,7 @@ fn ensure_visible_snaps_view_top() {
         rows_per_col: 3,
     }; // 3 items per page
     s.left.cursor.index = 5; // page 1 (items 3-5)
-    s.ensure_cursor_visible();
+    s.left.ensure_cursor_visible();
     assert_eq!(s.left.cursor.view_top, 3);
 }
 
@@ -142,7 +142,7 @@ fn ensure_visible_first_page() {
         rows_per_col: 3,
     };
     s.left.cursor.index = 1;
-    s.ensure_cursor_visible();
+    s.left.ensure_cursor_visible();
     assert_eq!(s.left.cursor.view_top, 0);
 }
 
