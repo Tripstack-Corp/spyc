@@ -32,12 +32,19 @@ use super::Message;
 /// Watch-topology change requested by the event loop. The worker owns the
 /// actual watch state; the main loop just describes the target topology.
 pub enum WatchCommand {
-    /// Re-point the recursive listing watch onto `dir` and the non-recursive
-    /// gitdir watch onto `gitdir` (unwatching the previous targets). Sent
-    /// whenever the listing cwd changes.
+    /// Re-point the recursive listing watch onto `dir`, the non-recursive
+    /// gitdir watch onto `gitdir`, and the non-recursive preview-parent watch
+    /// onto `preview`'s parent dir (unwatching the previous targets). Sent
+    /// whenever the listing cwd OR the open vertical-split preview changes.
     SyncListing {
         dir: PathBuf,
         gitdir: Option<PathBuf>,
+        /// The vertical-split preview's source file (`None` when no split is
+        /// open). Its *parent* dir is watched non-recursively so a
+        /// replace-on-save survives (file-level watches go deaf on the rename)
+        /// — but only when that parent lies OUTSIDE the recursive listing watch,
+        /// which already delivers events for files beneath it.
+        preview: Option<PathBuf>,
     },
 }
 
@@ -82,14 +89,21 @@ pub fn spawn_watch_worker(
         // sending redundant commands.
         let mut active_listing: Option<PathBuf> = None;
         let mut active_git: Option<PathBuf> = None;
+        let mut active_preview: Option<PathBuf> = None;
         while let Ok(cmd) = cmd_rx.recv() {
             match cmd {
-                WatchCommand::SyncListing { dir, gitdir } => sync_listing(
+                WatchCommand::SyncListing {
+                    dir,
+                    gitdir,
+                    preview,
+                } => sync_listing(
                     &mut watcher,
                     &mut active_listing,
                     &mut active_git,
+                    &mut active_preview,
                     &dir,
                     gitdir.as_deref(),
+                    preview.as_deref(),
                 ),
             }
         }
@@ -106,8 +120,10 @@ fn sync_listing(
     watcher: &mut notify::RecommendedWatcher,
     active: &mut Option<PathBuf>,
     active_git: &mut Option<PathBuf>,
+    active_preview: &mut Option<PathBuf>,
     new_dir: &Path,
     gitdir: Option<&Path>,
+    preview: Option<&Path>,
 ) {
     if active.as_deref() != Some(new_dir) {
         if let Some(old) = active.as_ref() {
@@ -148,5 +164,69 @@ fn sync_listing(
         {
             *active_git = Some(gd.to_path_buf());
         }
+    }
+    // Watch the vertical-split preview's *parent* dir non-recursively (same
+    // replace-on-save rationale as the config + gitdir watches: a file-level
+    // watch follows the old inode through an editor's atomic rename and goes
+    // deaf).
+    let want_preview = preview_parent_to_watch(preview, new_dir);
+    if active_preview.as_deref() != want_preview.as_deref() {
+        if let Some(old) = active_preview.take() {
+            let _ = watcher.unwatch(&old);
+        }
+        if let Some(pp) = want_preview
+            && watcher.watch(&pp, RecursiveMode::NonRecursive).is_ok()
+        {
+            *active_preview = Some(pp);
+        }
+    }
+}
+
+/// The parent dir to watch for a vertical-split `preview` file, or `None` when
+/// no separate watch is needed. Returns the preview's parent — but only when it
+/// lies OUTSIDE the recursive listing watch (`new_dir`): a parent at or under
+/// the listing dir already gets the file's events from that recursive watch, and
+/// double-watching the same dir then unwatching one of them can interfere on
+/// inotify. So this covers only a preview whose file lives outside the cwd (e.g.
+/// after browsing away with the split still open).
+fn preview_parent_to_watch(preview: Option<&Path>, new_dir: &Path) -> Option<PathBuf> {
+    preview
+        .and_then(Path::parent)
+        .filter(|pp| !pp.starts_with(new_dir))
+        .map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preview_parent_to_watch;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn no_preview_means_no_watch() {
+        assert_eq!(preview_parent_to_watch(None, Path::new("/repo")), None);
+    }
+
+    #[test]
+    fn preview_under_listing_dir_is_covered_by_recursive_watch() {
+        // File directly in the cwd, or in a subdir of it → the recursive
+        // listing watch already delivers its events, so no separate watch.
+        assert_eq!(
+            preview_parent_to_watch(Some(Path::new("/repo/doc.md")), Path::new("/repo")),
+            None
+        );
+        assert_eq!(
+            preview_parent_to_watch(Some(Path::new("/repo/docs/sub/doc.md")), Path::new("/repo")),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_outside_listing_dir_watches_its_parent() {
+        // Browsed away with the split still open: the file's dir is no longer
+        // under the listing watch, so watch its parent non-recursively.
+        assert_eq!(
+            preview_parent_to_watch(Some(Path::new("/other/place/doc.md")), Path::new("/repo")),
+            Some(PathBuf::from("/other/place"))
+        );
     }
 }

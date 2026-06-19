@@ -486,208 +486,244 @@ impl App {
     /// inline body of `ActivateIntent::Display` so both `Enter` /
     /// `d` (overlay) and `D` (top pane) share the same loading
     /// path.
+    ///
+    /// The heavy load+render is the pure free fn [`build_pager_view`] (no
+    /// `&mut self`), so the live-reload worker (`preview_ops`) can run it
+    /// off-thread; this method adds the `&mut self` glue — flash on error,
+    /// and the per-file scroll-position restore — that only makes sense on
+    /// the main thread.
     pub fn build_pager_view_for_file(
         &mut self,
         path: &Path,
         wrap_width: Option<u16>,
     ) -> Option<PagerView> {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        if shell::looks_like_text(path) {
-            let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
-            // Big files used to OOM us: read_to_string + syntect every
-            // token = file size × ~50 in pager state. Cap at
-            // MAX_PAGER_BYTES; past that, load just MAX_PAGER_LINES of
-            // plain text and tell the user how to hand off to $PAGER
-            // for the full thing.
-            let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
-                crate::fs::ops::read_truncated(path, crate::fs::ops::MAX_PAGER_LINES)
-            } else {
-                std::fs::read_to_string(path).map(|c| {
-                    let n = c.lines().count();
-                    (c, n, false)
-                })
-            };
-            let (content, _line_count, truncated) = match load_result {
-                Ok(t) => t,
-                Err(e) => {
-                    self.state.flash_error(format!("read: {e}"));
-                    return None;
+        match build_pager_view(
+            path,
+            &self.view.theme,
+            self.state.config.markdown.open_as_rendered,
+            wrap_width,
+        ) {
+            Ok(mut view) => {
+                // Restore the scroll position from the previous visit (if
+                // any). Clamp to `lines.len() - 1` so a saved row that's now
+                // past the end (file shrank) lands at the new last line rather
+                // than blanking the viewport.
+                if let Some(saved) = self.view.pager_positions.get(path) {
+                    let last = view.lines.len().saturating_sub(1);
+                    view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
                 }
-            };
-            let content = expand_tabs(&content);
-            let is_md = crate::ui::markdown::is_markdown_path(path);
-            // JSON pretty-print: try parse + canonical re-emit. On a
-            // successful parse with output differing from the raw
-            // bytes, `lines` holds the pretty version and `alt_lines`
-            // holds the raw (`m` toggles). Re-uses the alt-view
-            // machinery currently named for markdown (`alt_lines`,
-            // `markdown_rendered`) — the name stays markdown-specific even
-            // though JSON pretty-print also rides it.
-            let json_pretty: Option<String> = if !truncated && crate::ui::json::is_json_path(path) {
-                crate::ui::json::pretty_print(&content)
-            } else {
+                Some(view)
+            }
+            Err(e) => {
+                self.state.flash_error(e);
                 None
-            };
-            // Source-side lines: syntect-highlighted if available AND
-            // we loaded the whole file (highlighting a partial file
-            // would still mostly work but blows memory, and the
-            // savings is the whole point of truncation).
-            let source_lines: Vec<ratatui::text::Line<'static>> = if truncated {
+            }
+        }
+    }
+}
+
+/// Pure load+render half of [`App::build_pager_view_for_file`]: read `path`
+/// off disk and build a `PagerView` (markdown render / syntax highlight /
+/// big-file truncation banner / binary hex-dump), wrapping markdown to
+/// `wrap_width` (or the centered-overlay body width when `None`). No
+/// `&mut self` — `theme` and `open_as_rendered` are passed in — so the
+/// live-reload worker can call it on a detached thread. Returns the error
+/// string (instead of flashing) on a read/decode failure; the caller decides
+/// where it surfaces. Does NOT restore the per-file scroll position (the
+/// `&mut self` wrapper does that, and the reload path preserves its own).
+pub(super) fn build_pager_view(
+    path: &Path,
+    theme: &crate::ui::theme::Theme,
+    open_as_rendered: bool,
+    wrap_width: Option<u16>,
+) -> Result<PagerView, String> {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    if shell::looks_like_text(path) {
+        let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
+        // Big files used to OOM us: read_to_string + syntect every
+        // token = file size × ~50 in pager state. Cap at
+        // MAX_PAGER_BYTES; past that, load just MAX_PAGER_LINES of
+        // plain text and tell the user how to hand off to $PAGER
+        // for the full thing.
+        let load_result = if file_size > crate::fs::ops::MAX_PAGER_BYTES {
+            crate::fs::ops::read_truncated(path, crate::fs::ops::MAX_PAGER_LINES)
+        } else {
+            std::fs::read_to_string(path).map(|c| {
+                let n = c.lines().count();
+                (c, n, false)
+            })
+        };
+        let (content, _line_count, truncated) = match load_result {
+            Ok(t) => t,
+            Err(e) => {
+                return Err(format!("read: {e}"));
+            }
+        };
+        let content = expand_tabs(&content);
+        let is_md = crate::ui::markdown::is_markdown_path(path);
+        // JSON pretty-print: try parse + canonical re-emit. On a
+        // successful parse with output differing from the raw
+        // bytes, `lines` holds the pretty version and `alt_lines`
+        // holds the raw (`m` toggles). Re-uses the alt-view
+        // machinery currently named for markdown (`alt_lines`,
+        // `markdown_rendered`) — the name stays markdown-specific even
+        // though JSON pretty-print also rides it.
+        let json_pretty: Option<String> = if !truncated && crate::ui::json::is_json_path(path) {
+            crate::ui::json::pretty_print(&content)
+        } else {
+            None
+        };
+        // Source-side lines: syntect-highlighted if available AND
+        // we loaded the whole file (highlighting a partial file
+        // would still mostly work but blows memory, and the
+        // savings is the whole point of truncation).
+        let source_lines: Vec<ratatui::text::Line<'static>> = if truncated {
+            content
+                .lines()
+                .map(|l| ratatui::text::Line::from(l.to_string()))
+                .collect()
+        } else {
+            crate::ui::syntax::highlight_to_lines(&name, &content).unwrap_or_else(|| {
                 content
                     .lines()
                     .map(|l| ratatui::text::Line::from(l.to_string()))
                     .collect()
-            } else {
-                crate::ui::syntax::highlight_to_lines(&name, &content).unwrap_or_else(|| {
-                    content
+            })
+        };
+        let mut view = if let Some(pretty) = json_pretty {
+            // Pretty differs from raw: build a styled view of the
+            // pretty bytes, stash the (already-highlighted) raw
+            // lines as alt for the `m` toggle.
+            let pretty_lines: Vec<ratatui::text::Line<'static>> =
+                crate::ui::syntax::highlight_to_lines(&name, &pretty).unwrap_or_else(|| {
+                    pretty
                         .lines()
                         .map(|l| ratatui::text::Line::from(l.to_string()))
                         .collect()
-                })
-            };
-            let mut view = if let Some(pretty) = json_pretty {
-                // Pretty differs from raw: build a styled view of the
-                // pretty bytes, stash the (already-highlighted) raw
-                // lines as alt for the `m` toggle.
-                let pretty_lines: Vec<ratatui::text::Line<'static>> =
-                    crate::ui::syntax::highlight_to_lines(&name, &pretty).unwrap_or_else(|| {
-                        pretty
-                            .lines()
-                            .map(|l| ratatui::text::Line::from(l.to_string()))
-                            .collect()
-                    });
-                let mut v = PagerView::new_styled(name.clone(), pretty_lines);
-                if pretty != content {
-                    v.alt_lines = Some(source_lines);
-                    // `markdown_rendered = true` semantically means
-                    // "the processed/alt-form is in `lines`". Same
-                    // interpretation for JSON: pretty is "rendered".
-                    v.markdown_rendered = true;
-                }
-                v
-            } else if is_md && !truncated {
-                // Pre-compute both views; `m` toggles. Yank/save
-                // always hit the source via `source_text()`. Which
-                // view shows first is configurable via
-                // `[markdown] open_as_rendered`. Skipped for
-                // truncated files since markdown rendering of half a
-                // doc looks weird (broken refs, half-closed code
-                // fences).
-                // Hint the markdown renderer at the actual pager body
-                // width so wide tables expand instead of wrapping into
-                // the 80-col prose budget. Centered overlay pager
-                // claims 90% of the terminal minus block borders;
-                // matches the `pager_inner_area` math.
-                //
-                // Subtract the projected line-number gutter so a wide
-                // table doesn't overflow the right edge of the
-                // viewport. The gutter is `ilog10(lines) + 2` cells
-                // wide (see `pager::render`); we don't yet know the
-                // RENDERED line count (it can exceed the source's
-                // because of soft-break-as-hard-break + table
-                // expansion), so use 4× the source count as a
-                // conservative estimate, which buys ~1 digit of
-                // safety on the gutter.
+                });
+            let mut v = PagerView::new_styled(name.clone(), pretty_lines);
+            if pretty != content {
+                v.alt_lines = Some(source_lines);
+                // `markdown_rendered = true` semantically means
+                // "the processed/alt-form is in `lines`". Same
+                // interpretation for JSON: pretty is "rendered".
+                v.markdown_rendered = true;
+            }
+            v
+        } else if is_md && !truncated {
+            // Pre-compute both views; `m` toggles. Yank/save
+            // always hit the source via `source_text()`. Which
+            // view shows first is configurable via
+            // `[markdown] open_as_rendered`. Skipped for
+            // truncated files since markdown rendering of half a
+            // doc looks weird (broken refs, half-closed code
+            // fences).
+            // Hint the markdown renderer at the actual pager body
+            // width so wide tables expand instead of wrapping into
+            // the 80-col prose budget. Centered overlay pager
+            // claims 90% of the terminal minus block borders;
+            // matches the `pager_inner_area` math.
+            //
+            // Subtract the projected line-number gutter so a wide
+            // table doesn't overflow the right edge of the
+            // viewport. The gutter is `ilog10(lines) + 2` cells
+            // wide (see `pager::render`); we don't yet know the
+            // RENDERED line count (it can exceed the source's
+            // because of soft-break-as-hard-break + table
+            // expansion), so use 4× the source count as a
+            // conservative estimate, which buys ~1 digit of
+            // safety on the gutter.
+            // A caller-supplied `wrap_width` (the right-split column) wins;
+            // otherwise wrap to the centered overlay body width. The
+            // terminal-size query is lazy so the off-thread reload path
+            // (which always supplies a width) never touches the tty.
+            let body_w = wrap_width.unwrap_or_else(|| {
                 let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                // A caller-supplied `wrap_width` (the right-split column) wins;
-                // otherwise wrap to the centered overlay body width.
-                let body_w = wrap_width
-                    .unwrap_or_else(|| crate::ui::pager::centered_body_width(term_w))
-                    as usize;
-                let source_line_count = content.lines().count().max(1);
-                let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
-                let pager_w = body_w.saturating_sub(2 + gutter_w);
-                let doc =
-                    crate::ui::markdown::render_doc(&content, &self.view.theme, Some(pager_w));
-                let crate::ui::markdown::MarkdownDoc {
-                    lines: rendered,
-                    mermaid_blocks,
-                } = doc;
-                if self.state.config.markdown.open_as_rendered {
-                    let mut v = PagerView::new_styled(name, rendered);
-                    v.alt_lines = Some(source_lines);
-                    v.markdown_rendered = true;
-                    v.mermaid_blocks = mermaid_blocks;
-                    v
-                } else {
-                    // Source first: `lines` holds source, `alt_lines`
-                    // holds the rendered view, `markdown_rendered`
-                    // is false. `m` swap is symmetric. The mermaid block
-                    // ranges index the rendered view, so `visible_mermaid_block`
-                    // ignores them until the user toggles to rendered.
-                    let mut v = PagerView::new_styled(name, source_lines);
-                    v.alt_lines = Some(rendered);
-                    v.markdown_rendered = false;
-                    v.mermaid_blocks = mermaid_blocks;
-                    v
-                }
-            } else {
-                let display_name = if truncated {
-                    format!(
-                        "{name} \u{26a0} truncated · {} MB",
-                        file_size / (1024 * 1024)
-                    )
-                } else {
-                    name
-                };
-                let mut v = PagerView::new_styled(display_name, source_lines);
-                if truncated {
-                    // Append a banner row pointing at the escape
-                    // hatch so the user knows the cap fired and what
-                    // to do.
-                    let warn_style = ratatui::style::Style::default()
-                        .fg(self.view.theme.pick)
-                        .add_modifier(ratatui::style::Modifier::BOLD);
-                    v.lines.push(ratatui::text::Line::from(""));
-                    v.lines
-                        .push(ratatui::text::Line::from(ratatui::text::Span::styled(
-                            format!(
-                                "[truncated at {} lines · {} MB total · press p to open in $PAGER]",
-                                crate::fs::ops::MAX_PAGER_LINES,
-                                file_size / (1024 * 1024)
-                            ),
-                            warn_style,
-                        )));
-                    // Also flash an immediate hint — the banner is at
-                    // the bottom and the user might not scroll there
-                    // before wondering what happened to their file.
-                    v.flash = Some(format!(
-                        "truncated at {} lines · press p for full file in $PAGER",
-                        crate::fs::ops::MAX_PAGER_LINES
-                    ));
-                }
+                crate::ui::pager::centered_body_width(term_w)
+            }) as usize;
+            let source_line_count = content.lines().count().max(1);
+            let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
+            let pager_w = body_w.saturating_sub(2 + gutter_w);
+            let doc = crate::ui::markdown::render_doc(&content, theme, Some(pager_w));
+            let crate::ui::markdown::MarkdownDoc {
+                lines: rendered,
+                mermaid_blocks,
+            } = doc;
+            if open_as_rendered {
+                let mut v = PagerView::new_styled(name, rendered);
+                v.alt_lines = Some(source_lines);
+                v.markdown_rendered = true;
+                v.mermaid_blocks = mermaid_blocks;
                 v
-            };
-            view.source_path = Some(path.to_path_buf());
-            // Restore the scroll position from the previous visit (if
-            // any). Clamp to `lines.len() - 1` so a saved row that's
-            // now past the end (file shrank) lands at the new last
-            // line rather than blanking the viewport.
-            if let Some(saved) = self.view.pager_positions.get(path) {
-                let last = view.lines.len().saturating_sub(1);
-                view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
+            } else {
+                // Source first: `lines` holds source, `alt_lines`
+                // holds the rendered view, `markdown_rendered`
+                // is false. `m` swap is symmetric. The mermaid block
+                // ranges index the rendered view, so `visible_mermaid_block`
+                // ignores them until the user toggles to rendered.
+                let mut v = PagerView::new_styled(name, source_lines);
+                v.alt_lines = Some(rendered);
+                v.markdown_rendered = false;
+                v.mermaid_blocks = mermaid_blocks;
+                v
             }
-            Some(view)
         } else {
-            // Binary file: hex dump via pretty-hex (styled in the ui layer).
-            match crate::ui::hex::hex_dump_lines(path, &self.view.theme) {
-                Ok(lines) => {
-                    let mut view = PagerView::new_plain(format!("{name} [hex]"), Vec::new());
-                    view.lines = lines;
-                    Some(view)
-                }
-                Err(e) => {
-                    self.state.flash_error(format!("hex: {e}"));
-                    None
-                }
+            let display_name = if truncated {
+                format!(
+                    "{name} \u{26a0} truncated · {} MB",
+                    file_size / (1024 * 1024)
+                )
+            } else {
+                name
+            };
+            let mut v = PagerView::new_styled(display_name, source_lines);
+            if truncated {
+                // Append a banner row pointing at the escape
+                // hatch so the user knows the cap fired and what
+                // to do.
+                let warn_style = ratatui::style::Style::default()
+                    .fg(theme.pick)
+                    .add_modifier(ratatui::style::Modifier::BOLD);
+                v.lines.push(ratatui::text::Line::from(""));
+                v.lines
+                    .push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                        format!(
+                            "[truncated at {} lines · {} MB total · press p to open in $PAGER]",
+                            crate::fs::ops::MAX_PAGER_LINES,
+                            file_size / (1024 * 1024)
+                        ),
+                        warn_style,
+                    )));
+                // Also flash an immediate hint — the banner is at
+                // the bottom and the user might not scroll there
+                // before wondering what happened to their file.
+                v.flash = Some(format!(
+                    "truncated at {} lines · press p for full file in $PAGER",
+                    crate::fs::ops::MAX_PAGER_LINES
+                ));
             }
+            v
+        };
+        view.source_path = Some(path.to_path_buf());
+        Ok(view)
+    } else {
+        // Binary file: hex dump via pretty-hex (styled in the ui layer).
+        match crate::ui::hex::hex_dump_lines(path, theme) {
+            Ok(lines) => {
+                let mut view = PagerView::new_plain(format!("{name} [hex]"), Vec::new());
+                view.lines = lines;
+                Ok(view)
+            }
+            Err(e) => Err(format!("hex: {e}")),
         }
     }
+}
 
+impl App {
     /// Pre-v1.5 `D` behavior: spawn `\$PAGER` as a top overlay pty.
     /// Now used only as the huge-file fallback path from
     /// `display_in_pane` — files past `MAX_PAGER_BYTES` benefit from

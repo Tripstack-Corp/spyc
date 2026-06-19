@@ -68,6 +68,10 @@ pub fn coalesce_pending(
             // Mermaid render+open done — same payloadless wake; drained by
             // `apply_mermaid_outcomes` in the pre-recv scan.
             | Message::MermaidDone
+            // Vsplit preview reload done — same payloadless wake; the rebuilt
+            // view rides `runtime.preview_results`, drained by
+            // `apply_preview_reloads` in the pre-recv scan.
+            | Message::PreviewReloadDone
             // Option B: codex-session-scan-done — same payloadless-wake shape;
             // the snapshot rides `runtime.codex_pin_pending`, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
@@ -165,6 +169,9 @@ pub fn coalesce_recv(
             | Message::GraveyardDone
             // Mermaid render+open done — same payloadless-wake shape.
             | Message::MermaidDone
+            // Vsplit preview reload done — payloadless, drained by
+            // `apply_preview_reloads` in the pre-recv scan.
+            | Message::PreviewReloadDone
             // Option B: codex-session-scan-done — payloadless, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
             | Message::CodexSessionReady,
@@ -267,21 +274,36 @@ impl App {
         // files, or another instance's startup sweep deleting stale ones. We
         // only suppress churn from gitignored *subtrees* the user isn't looking
         // at, so the cwd stays an always-current class.
+        // The previewed file (vertical split) must survive the gitignore drop
+        // even if it lives in a gitignored subtree — otherwise its save event is
+        // filtered out and the live reload never fires. Precomputed so the
+        // retain closure (which borrows `ctx`) needn't reach back into `self`.
+        let preview_path = self
+            .view
+            .right_pager
+            .as_ref()
+            .and_then(|v| v.source_path.clone());
         if let Some(root) = self.state.git_cache.current_repo_root.clone() {
             let listing_dir = self.state.listing.dir.clone();
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 ctx.fs_pending.retain_mut(|ev| {
-                    // Keep cwd-level paths unconditionally (short-circuits the
-                    // gitignore check); drop deeper gitignored-subtree churn.
-                    ev.paths
-                        .retain(|p| is_cwd_level(p, &listing_dir) || !is_excluded(p));
+                    // Keep cwd-level paths and the previewed file unconditionally
+                    // (short-circuits the gitignore check); drop deeper
+                    // gitignored-subtree churn.
+                    ev.paths.retain(|p| {
+                        is_cwd_level(p, &listing_dir)
+                            || preview_path.as_deref() == Some(p.as_path())
+                            || !is_excluded(p)
+                    });
                     !ev.paths.is_empty()
                 });
             });
         }
         let mut git_event = false;
+        let mut preview_event = false;
         for ev in std::mem::take(&mut ctx.fs_pending) {
             git_event |= ev.paths.iter().any(|p| self.is_gitdir_status_path(p));
+            preview_event |= ev.paths.iter().any(|p| self.is_preview_path(p));
             self.ingest_fs_event(
                 &ev,
                 now_pre,
@@ -302,6 +324,12 @@ impl App {
         // backstop, so markers lagged ~0.5–1 s after a commit/checkout).
         if git_event && self.state.refresh_git_state() {
             needs_draw = true;
+        }
+        // The previewed file changed on disk — kick an off-thread re-render of
+        // the right split column (the rebuilt view lands via
+        // `apply_preview_reloads`, so no `needs_draw` here; the wake drives it).
+        if preview_event {
+            self.kick_preview_reload();
         }
         // 500 ms trailing debounce on the watcher-driven listing refresh.
         let refresh_quiet = std::time::Duration::from_millis(500);

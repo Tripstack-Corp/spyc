@@ -502,6 +502,11 @@ impl App {
         if self.help_is_open() {
             self.open_help();
         }
+        // The split preview's markdown was wrapped to the old column width;
+        // re-render it off-thread at the new width (no-op when no preview is
+        // open). The in-flight guard collapses a resize-drag's event burst to a
+        // single trailing re-render.
+        self.kick_preview_reload();
     }
 
     /// Dispatch a user-defined binding. Inline-data actions (unix command,

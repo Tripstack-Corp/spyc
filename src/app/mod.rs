@@ -132,6 +132,11 @@ enum Message {
     /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
     /// as `GraveyardDone`.
     MermaidDone,
+    /// An off-thread vertical-split preview reload (`kick_preview_reload`)
+    /// finished and pushed its outcome onto `runtime.preview_results`.
+    /// Payloadless wake — `apply_preview_reloads` drains the slot in the
+    /// pre-recv scan. Same shape as `MermaidDone`.
+    PreviewReloadDone,
     /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
     /// rides the slot, drained by `apply_codex_session_pins` in the pre-recv
@@ -250,6 +255,7 @@ mod pager_stream;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
+mod preview_ops;
 mod proc;
 mod prompt;
 mod quick_select;
@@ -501,6 +507,14 @@ struct Runtime {
     /// scan and surfaces the result in the pager status line. Same shape as
     /// `graveyard_results`.
     mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Landing slot for the off-thread vertical-split preview reload
+    /// (`kick_preview_reload`). The worker stores its `PreviewOutcome` here
+    /// (last-wins `Option` — one preview, so no `Vec` is needed) and wakes the
+    /// loop with `Message::PreviewReloadDone`; `apply_preview_reloads` drains it
+    /// each pre-recv scan. `preview_reloading` is the in-flight guard that
+    /// collapses a burst of saves to one trailing re-render (see `preview_ops`).
+    preview_results: std::sync::Arc<std::sync::Mutex<Option<preview_ops::PreviewOutcome>>>,
+    preview_reloading: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Terminal graphics-protocol capability (Kitty/iTerm2/Sixel/halfblocks +
     /// font cell size), detected ONCE at startup in `setup_terminal` before the
     /// input reader spawns (the `from_query_stdio` reads stdin — the #444 rule).
@@ -551,6 +565,11 @@ pub struct ViewState {
     /// Whether to fade the inactive split column / list (the focus dim). On by
     /// default; toggled by `^a d` for users who prefer both columns bright.
     pub dim_inactive: bool,
+    /// Set when a preview-file change arrived while an off-thread reload was
+    /// already in flight (`kick_preview_reload`); the reload's drain re-kicks
+    /// once so the FINAL save is the one rendered. Main-thread-only — set in the
+    /// fs ingest, read+cleared in `apply_preview_reloads` — so a plain `bool`.
+    pub preview_dirty: bool,
     /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
@@ -659,6 +678,7 @@ impl ViewState {
             scroll_pager: None,
             right_pager: None,
             dim_inactive: true,
+            preview_dirty: false,
             image_view: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
@@ -811,6 +831,10 @@ pub struct RunCtx {
     /// `SyncListing` so the worker re-points its watches. Purely a send-dedup
     /// key — the worker owns the actual watch topology.
     watched_listing: Option<PathBuf>,
+    /// Last vertical-split preview file we sent a watch command for. The watch
+    /// topology is re-sent when this OR `watched_listing` changes, so opening /
+    /// swapping / closing the preview re-points the preview-parent watch.
+    watched_preview: Option<PathBuf>,
     scheduler: Scheduler,
     /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
     fs_pending: Vec<notify::Event>,
@@ -837,6 +861,7 @@ impl RunCtx {
         Self {
             watch_tx: None,
             watched_listing: None,
+            watched_preview: None,
             scheduler: Scheduler::new(),
             fs_pending: Vec::new(),
             git_pending: Vec::new(),

@@ -168,8 +168,10 @@ spyc's workflow: browse files above, talk to Claude below.
   directory isn't previewable (it warns). `^a a` / `^a h` focus the left pane
   (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
   a column is focused. Opinionated: exactly two file panes, labelled a/b
-  (numbers stay for PTY tabs). *(Auto-reload of the preview when the file
-  changes on disk is coming next.)*
+  (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
+  (in spyc's editor, an agent pane, or any external editor) and the rendered
+  markdown updates on save — the re-render runs off-thread, preserving your
+  scroll position, and re-wraps when you resize the column.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager** (v1.5). All pager keys work: `/`
   search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual

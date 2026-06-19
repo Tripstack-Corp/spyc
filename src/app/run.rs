@@ -44,6 +44,8 @@ impl App {
             let _ = tx.send(WatchCommand::SyncListing {
                 gitdir: self.state.git_cache.current_gitdir.clone(),
                 dir: dir.clone(),
+                // No vertical-split preview can be open at startup.
+                preview: None,
             });
             Some(dir)
         } else {
@@ -101,6 +103,7 @@ impl App {
         RunCtx {
             watch_tx,
             watched_listing,
+            watched_preview: None,
             // MVU Phase 2: advisory deadline scheduler — computes the
             // recv_timeout wait from armed timers; the loop still fires each
             // timer via its own predicate against the threaded `now`.
@@ -248,6 +251,7 @@ impl App {
                 | Message::AgentStatusReady
                 | Message::GraveyardDone
                 | Message::MermaidDone
+                | Message::PreviewReloadDone
                 | Message::CodexSessionReady,
             ) => {
                 unreachable!(
@@ -516,6 +520,13 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // Vsplit preview reloads (woke us via `Message::PreviewReloadDone`) —
+            // install the rebuilt right-column view, preserving scroll. Always
+            // drained here; the apply re-kicks if a save landed mid-render.
+            if self.apply_preview_reloads() {
+                ctx.draw.mark(3);
+            }
+
             // F-finder: drain any candidate batches the walker
             // worker has pushed since the last tick. Re-rank +
             // re-render only when something changed (or the walk
@@ -707,18 +718,28 @@ impl App {
                 break Err(e);
             }
 
-            // Only re-point the watcher when the cwd actually changed. The
-            // (un)watch syscalls run on the worker thread; we just send the
-            // new topology and record it as the send-dedup key.
-            if ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path())
+            // Re-point the watcher when the cwd OR the open vertical-split
+            // preview changed. The (un)watch syscalls run on the worker thread;
+            // we just send the new topology and record the send-dedup keys.
+            let preview = self
+                .view
+                .right_pager
+                .as_ref()
+                .and_then(|v| v.source_path.clone());
+            let listing_changed =
+                ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path());
+            let preview_changed = ctx.watched_preview != preview;
+            if (listing_changed || preview_changed)
                 && let Some(tx) = ctx.watch_tx.as_ref()
             {
                 let dir = self.state.listing.dir.clone();
                 let _ = tx.send(WatchCommand::SyncListing {
                     gitdir: self.state.git_cache.current_gitdir.clone(),
                     dir: dir.clone(),
+                    preview: preview.clone(),
                 });
                 ctx.watched_listing = Some(dir);
+                ctx.watched_preview = preview;
             }
 
             // Event-driven MCP context-file write — debounced + typing-burst

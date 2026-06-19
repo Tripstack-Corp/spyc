@@ -127,6 +127,19 @@ impl App {
         path.starts_with(dir)
     }
 
+    /// True iff `path` is the file currently shown in the vertical-split
+    /// preview (`view.right_pager.source_path`). Drives the live reload: a
+    /// watcher event on this exact path re-renders the right column. Exact
+    /// match — the preview tracks one file, and the watched parent dir delivers
+    /// events for all its siblings, so anything looser would over-trigger.
+    pub fn is_preview_path(&self, path: &Path) -> bool {
+        self.view
+            .right_pager
+            .as_ref()
+            .and_then(|v| v.source_path.as_deref())
+            .is_some_and(|src| src == path)
+    }
+
     /// True for a watched-gitdir change that signals a discrete git
     /// operation — `index` (stage/commit/checkout) or `HEAD` (branch
     /// switch / commit), or the gitdir itself (macOS FSEvents sometimes
@@ -212,6 +225,24 @@ mod tests {
         assert!(
             app.is_listing_path(Path::new("/repo/notes.txt")),
             "ordinary cwd file → relevant"
+        );
+    }
+
+    /// `is_preview_path` matches exactly the open vertical-split preview's
+    /// source file — nothing when no preview is open, and not a sibling.
+    #[test]
+    fn preview_path_matches_only_the_open_preview_source() {
+        let mut app = App::test_app(PathBuf::from("/repo"));
+        // No split open → nothing is a preview path.
+        assert!(!app.is_preview_path(Path::new("/repo/doc.md")));
+
+        let mut view = crate::ui::pager::PagerView::new_plain("doc.md".to_string(), Vec::new());
+        view.source_path = Some(PathBuf::from("/repo/doc.md"));
+        app.view.right_pager = Some(view);
+        assert!(app.is_preview_path(Path::new("/repo/doc.md")));
+        assert!(
+            !app.is_preview_path(Path::new("/repo/other.md")),
+            "a sibling in the same (watched) dir is not the preview"
         );
     }
 }
