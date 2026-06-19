@@ -171,6 +171,54 @@ Graphics gotchas, each of which cost real debugging time:
   the input-arm diff draw updates just the footer cells and leaves the
   image untouched. Only verbs that change/remove the image repaint.
 
+## Vertical (left/right) split
+
+`^a |` opens a second column on the right hosting a **live-reloading
+preview** of the cursor file. The split's *shape* is pure Model
+(`AppState.vsplit: Option<VSplit { width_pct, mode: TopOnly | FullHeight,
+focus: Side }>`); the preview's *content* is a `ViewState.right_pager:
+Option<PagerView>` slot (`Mount::RightPane`), parallel to the top/scrollback
+pagers; the reload's *worker* lives in `Runtime`. The three-disjoint-state
+split holds — nothing about the split leaks an OS handle into the Model.
+
+**Geometry is a pure post-pass.** `compute_layout` builds the single-column
+frame unchanged; when a split is open, `carve_vsplit` (unit-tested, no TUI)
+splits it into `left | vdivider | right`. *TopOnly* carves only the file-list
+region (the PTY pane stays full-width below both columns); *FullHeight* runs the
+divider the whole height and clamps the left chrome — including the pane — to the
+left width, so the pane sits under the left column only. Both modes narrow
+`top_unit` to the left column, which scopes the `V`/`;cmd` editor overlay to its
+column for free. Zoom takes precedence: the carve is skipped while
+`pane.zoom != None`. `vsplit_column_widths` (clamped to `[20,80]`, floored at a
+20-col minimum, `None` when too narrow) is the single source of truth for both
+the carve geometry and the markdown wrap width, so they can't drift.
+
+**Focus is two axes, no `Focus` explosion.** `Focus::FileList` still means "the
+commander region owns input"; the left/right axis rides `VSplit.focus: Side`.
+`route_input` gains one bit — `right_column_focused` — that sends non-meta keys
+to `right_pager` while meta chords (`^a …`) still escape to the resolver. The two
+columns are addressed `a` (left) / `b` (right): **letters for file panes, numbers
+for PTY tabs.**
+
+**Live reload is off-thread** (`app/preview_ops.rs`), the graveyard/mermaid
+pattern. The fs-event ingest matches the previewed file (`config::is_preview_path`,
+exempt from the gitignore drop) and `kick_preview_reload` spawns a detached worker
+that re-runs the pure `pager_handler::build_pager_view` (markdown render + syntect
+— far too heavy for the loop) → `runtime.preview_results` → `Message::PreviewReloadDone`
+→ `apply_preview_reloads` (pre-recv drain) installs the rebuilt view, preserving
+scroll. The watch worker (`watch.rs`) adds the preview's *parent* dir
+non-recursively — a file-level watch follows the old inode through an editor's
+atomic rename and goes deaf — skipped when that parent already lies under the
+recursive listing watch. A terminal resize re-kicks to re-wrap at the new width;
+an in-flight guard plus a `preview_dirty` flag collapse a save/resize burst to a
+single trailing re-render. A deleted preview file flashes in the footer and keeps
+the last-good render.
+
+Stage 1 ships the preview-on-the-right; a second *full file-commander* on the
+right (second cwd, git cache, dual-cwd watch, per-pane MCP) is the deferred
+Stage 2 — see ROADMAP.md. The `Side` / `Mount::RightPane` scaffolding is
+forward-compatible with it.
+
 ## Process & TTY ownership
 
 - The TUI runs in raw mode + alt screen. `setup_terminal`

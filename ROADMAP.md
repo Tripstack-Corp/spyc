@@ -256,6 +256,18 @@ once we've daily-driven our own builds for a few days.
   (`[notify] on_task_complete = "bell"`, off by default), exited
   pane-tabs as post-mortem task records, and a `get_running_tasks`
   MCP tool so Claude can ask "what's running?" and tail output.
+- **Vertical (left/right) split.** **Stage 1 shipped (v1.59.0):** `^a |`
+  cycles a right-hand column off → top-only → full-height, hosting a
+  **live-reloading** preview of the cursor file (markdown rendered); `^a a`/`^a h`
+  and `^a b`/`^a l` focus the a/b columns, `^a +`/`^a -` resize the width, `^a z`
+  zooms the active column, `^a d` toggles the focus-dim. The preview re-renders
+  off-thread on save (parent-dir watch survives replace-on-save) and re-wraps on
+  resize. **Stage 2 deferred** — a second *full file-commander* on the right:
+  second process cwd + listing, second git cache + status map, dual-cwd recursive
+  watch, per-pane MCP context (`navigate_to`/`set_filter`/`pick_files` gain a pane
+  selector), and two-cwd session save/restore. The `Side` / `Mount::RightPane`
+  scaffolding from Stage 1 is forward-compatible; build it when a concrete
+  two-commander workflow asks for it.
 - **Context enrichment.** `get_spyc_context` returns paths and
   metadata; could add pick snippets, recent `cargo check` errors,
   unstaged diffs. Makes Claude's context richer without explicit

@@ -226,9 +226,10 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
-| `^a \|` | Vertical split — cycle off / top-only / full-height (preview of the cursor file) |
+| `^a \|` | Vertical split — cycle off / top-only / full-height (live-reloading preview of the cursor file) |
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
+| `^a d` | Toggle dimming of the inactive split column / list |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
