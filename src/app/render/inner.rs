@@ -205,9 +205,9 @@ impl App {
             frame.render_widget(
                 ListView {
                     rows,
-                    cursor: self.state.cursor.index,
-                    view_top: self.state.cursor.view_top,
-                    empty_marker: self.state.view == View::Dir,
+                    cursor: self.state.left.cursor.index,
+                    view_top: self.state.left.cursor.view_top,
+                    empty_marker: self.state.left.view == View::Dir,
                     focused: list_focused,
                     theme: &self.view.theme,
                 },

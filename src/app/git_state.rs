@@ -67,7 +67,7 @@ impl App {
         // Re-filter against the current listing dir's prefix and refresh
         // the display string. `compute_git_info_fast` reads the cache
         // we just stored for its dirty flag.
-        let listing_dir = self.state.listing.dir.clone();
+        let listing_dir = self.state.left.listing.dir.clone();
         let new_files = {
             let cache = self
                 .state
@@ -153,7 +153,7 @@ impl App {
     /// (blame on multiple files / a directory is meaningless). PR 8b:
     /// builds the blame model off-thread (gix) and renders it in-house.
     pub fn open_git_blame(&mut self) {
-        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             self.state.flash_error("git blame: no cursor file");
             return;
         };
@@ -183,7 +183,7 @@ impl App {
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
     pub fn worktree_list(&mut self) {
-        match crate::git::worktree::list(&self.state.listing.dir) {
+        match crate::git::worktree::list(&self.state.left.listing.dir) {
             Some(worktrees) => {
                 self.state.pending_worktrees =
                     Some(worktrees.iter().map(|w| w.path.clone()).collect());
@@ -191,7 +191,7 @@ impl App {
                     .iter()
                     .enumerate()
                     .map(|(i, wt)| {
-                        let current = if wt.path == self.state.listing.dir {
+                        let current = if wt.path == self.state.left.listing.dir {
                             " ← current"
                         } else {
                             ""

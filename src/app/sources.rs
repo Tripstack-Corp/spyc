@@ -284,7 +284,7 @@ impl App {
             .as_ref()
             .and_then(|v| v.source_path.clone());
         if let Some(root) = self.state.git_cache.current_repo_root.clone() {
-            let listing_dir = self.state.listing.dir.clone();
+            let listing_dir = self.state.left.listing.dir.clone();
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 ctx.fs_pending.retain_mut(|ev| {
                     // Keep cwd-level paths and the previewed file unconditionally

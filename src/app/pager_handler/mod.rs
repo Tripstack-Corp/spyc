@@ -357,7 +357,7 @@ impl App {
     }
 
     pub fn edit_in_pane(&mut self) {
-        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             return;
         };
         let path = row.path.clone();
@@ -379,7 +379,7 @@ impl App {
         );
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.listing.dir.clone();
+        let cwd = self.state.left.listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
@@ -409,7 +409,7 @@ impl App {
     /// truncated) buffer into memory. Streaming wins for multi-GB
     /// logs.
     pub fn display_in_pane(&mut self) {
-        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             return;
         };
         let path = row.path.clone();
@@ -457,7 +457,7 @@ impl App {
     /// readable file, **not** a directory (huge files page truncated). `None`
     /// for a directory (or no row); the caller flashes the warning.
     pub(super) fn previewable_cursor_path(&self) -> Option<std::path::PathBuf> {
-        let row = self.state.rows.get(self.state.cursor.index)?;
+        let row = self.state.left.rows.get(self.state.left.cursor.index)?;
         let path = row.path.clone();
         let is_dir = row.kind == EntryKind::Dir
             || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path));
@@ -741,7 +741,7 @@ impl App {
         );
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.listing.dir.clone();
+        let cwd = self.state.left.listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {

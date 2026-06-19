@@ -78,7 +78,7 @@ impl App {
     /// Users who want a specific anchor should use `^a-c` and edit
     /// the prompt, or invoke `:project` to move PROJECT_HOME.
     pub fn open_pane_tab(&mut self, cmd: &str) {
-        let cwd = self.state.listing.dir.clone();
+        let cwd = self.state.left.listing.dir.clone();
         self.open_pane_tab_in(cmd, &cwd);
     }
 

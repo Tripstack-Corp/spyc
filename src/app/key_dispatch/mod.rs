@@ -227,7 +227,7 @@ impl App {
         // (common half-page-scroll chords) hit the `Char('x'|'d')` arm and
         // destructively drop the cursor item. A modified key falls through to
         // the resolver instead.
-        if self.state.view == View::Inventory {
+        if self.state.left.view == View::Inventory {
             let bare = !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
@@ -241,11 +241,14 @@ impl App {
                     return Ok(Vec::new());
                 }
                 KeyCode::Char(' ' | 't') if bare => {
-                    self.state.inventory.toggle_pick(self.state.cursor.index);
-                    self.state.list_generation = self.state.list_generation.wrapping_add(1);
-                    let rpc = self.state.grid_dims.rows_per_col as usize;
                     self.state
-                        .cursor_move_vertical(1, rpc, self.state.rows.len());
+                        .inventory
+                        .toggle_pick(self.state.left.cursor.index);
+                    self.state.left.list_generation =
+                        self.state.left.list_generation.wrapping_add(1);
+                    let rpc = self.state.left.grid_dims.rows_per_col as usize;
+                    self.state
+                        .cursor_move_vertical(1, rpc, self.state.left.rows.len());
                     return Ok(Vec::new());
                 }
                 KeyCode::Char('p') if bare => {
@@ -258,7 +261,7 @@ impl App {
         // inventory; verbs are restore/purge instead of put/tag.
         // `dd` (vim-style two-key delete) is implemented via the
         // pager's `d` already being free here — second `d` confirms.
-        if self.state.view == View::Graveyard {
+        if self.state.left.view == View::Graveyard {
             return Ok(self.handle_graveyard_view_key(key));
         }
         let outcome = self.state.resolver.feed(key, &self.state.user_keymap);
@@ -526,12 +529,13 @@ impl App {
             }
             BoundAction::PatternPick(pattern) => {
                 if let Ok(pat) = glob::Pattern::new(pattern) {
-                    for e in &self.state.listing.entries {
+                    for e in &self.state.left.listing.entries {
                         if pat.matches(&e.name) {
-                            self.state.picks.insert(&e.path);
+                            self.state.left.picks.insert(&e.path);
                         }
                     }
-                    self.state.list_generation = self.state.list_generation.wrapping_add(1);
+                    self.state.left.list_generation =
+                        self.state.left.list_generation.wrapping_add(1);
                 }
             }
             BoundAction::Jump(path) => {
@@ -539,14 +543,14 @@ impl App {
             }
             BoundAction::ToggleMaskFixed(n) => {
                 if *n == 1 {
-                    self.state.masks.toggle_mask1();
+                    self.state.left.masks.toggle_mask1();
                 } else if *n == 2 {
-                    self.state.masks.toggle_mask2();
+                    self.state.left.masks.toggle_mask2();
                 }
                 self.state.rebuild_rows();
             }
         }
-        self.state.cursor.clamp(self.state.rows.len());
+        self.state.left.cursor.clamp(self.state.left.rows.len());
         Ok(Vec::new())
     }
 }

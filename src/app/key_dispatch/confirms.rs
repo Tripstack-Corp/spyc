@@ -44,7 +44,7 @@ impl App {
         // The picks are the items being removed — clear them now (they're
         // gone from the user's intent); the listing still shows the files
         // until the worker unlinks them and the refresh lands.
-        self.state.picks.clear();
+        self.state.left.picks.clear();
         self.state
             .flash_info(format!("removing {} item(s)…", paths.len()));
         vec![Effect::Graveyard(GraveyardOp::Archive { paths })]

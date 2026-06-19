@@ -53,11 +53,11 @@ fn cmd_quit_long_defers_to_app() {
 fn cmd_limit_set_and_clear() {
     let mut s = state_with_rows(&["foo.rs", "bar.txt", "baz.rs"]);
     s.dispatch_command("limit *.rs");
-    assert_eq!(s.temp_filter.as_deref(), Some("*.rs"));
+    assert_eq!(s.left.temp_filter.as_deref(), Some("*.rs"));
     assert!(s.flash.as_ref().unwrap().text.contains("limit:"));
 
     s.dispatch_command("limit");
-    assert!(s.temp_filter.is_none());
+    assert!(s.left.temp_filter.is_none());
     assert!(s.flash.as_ref().unwrap().text.contains("cleared"));
 }
 
@@ -65,7 +65,7 @@ fn cmd_limit_set_and_clear() {
 fn cmd_limit_picks_only() {
     let mut s = test_state();
     s.dispatch_command("limit !");
-    assert_eq!(s.temp_filter.as_deref(), Some("!"));
+    assert_eq!(s.left.temp_filter.as_deref(), Some("!"));
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn cmd_sort_query() {
 fn cmd_sort_set() {
     let mut s = test_state();
     s.dispatch_command("sort size");
-    assert_eq!(s.sort_order, SortMode::Size);
+    assert_eq!(s.left.sort_order, SortMode::Size);
     assert!(s.flash.as_ref().unwrap().text.contains("size"));
 }
 
@@ -123,7 +123,7 @@ fn cmd_marks_with_entries() {
 fn cmd_set_sort() {
     let mut s = test_state();
     s.dispatch_command("set sort=mtime");
-    assert_eq!(s.sort_order, SortMode::Mtime);
+    assert_eq!(s.left.sort_order, SortMode::Mtime);
 }
 
 #[test]
@@ -185,15 +185,15 @@ fn prompt_search_empty_does_not_save() {
 fn prompt_limit_sets_filter() {
     let mut s = test_state();
     s.dispatch_prompt(&PromptKind::Limit, "*.rs");
-    assert_eq!(s.temp_filter.as_deref(), Some("*.rs"));
+    assert_eq!(s.left.temp_filter.as_deref(), Some("*.rs"));
 }
 
 #[test]
 fn prompt_limit_empty_clears() {
     let mut s = test_state();
-    s.temp_filter = Some("old".to_string());
+    s.left.temp_filter = Some("old".to_string());
     s.dispatch_prompt(&PromptKind::Limit, "");
-    assert!(s.temp_filter.is_none());
+    assert!(s.left.temp_filter.is_none());
 }
 
 #[test]
@@ -220,9 +220,9 @@ fn prompt_set_env_bad_format() {
 fn prompt_pattern_pick() {
     let mut s = test_state();
     // Add some listing entries for the pattern to match against
-    s.listing = Listing::empty(PathBuf::from("/tmp/test"));
+    s.left.listing = Listing::empty(PathBuf::from("/tmp/test"));
     use crate::fs::entry::{Entry, EntryKind};
-    s.listing.entries = vec![
+    s.left.listing.entries = vec![
         Entry {
             path: PathBuf::from("/tmp/test/foo.rs"),
             name: "foo.rs".to_string(),
@@ -239,8 +239,8 @@ fn prompt_pattern_pick() {
         },
     ];
     s.dispatch_prompt(&PromptKind::PatternPick, "*.rs");
-    assert!(s.picks.contains(Path::new("/tmp/test/foo.rs")));
-    assert!(!s.picks.contains(Path::new("/tmp/test/bar.txt")));
+    assert!(s.left.picks.contains(Path::new("/tmp/test/foo.rs")));
+    assert!(!s.left.picks.contains(Path::new("/tmp/test/bar.txt")));
 }
 
 #[test]

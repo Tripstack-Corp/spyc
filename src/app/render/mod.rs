@@ -503,18 +503,18 @@ impl App {
     /// extracted from the draw path (MVU Stage 2) so `render` stays
     /// mutation-free.
     fn settle_list_grid(&mut self, layout: &FrameLayout) {
-        if self.view.cached_rows_gen != self.state.list_generation {
+        if self.view.cached_rows_gen != self.state.left.list_generation {
             self.view.cached_rows = self.build_rows();
-            self.view.cached_rows_gen = self.state.list_generation;
+            self.view.cached_rows_gen = self.state.left.list_generation;
         }
         let rows = &self.view.cached_rows;
         let list_focused = !self.state.pane_focused();
         // Stabilize view_top ↔ grid.  Skip the expensive multi-round
         // loop when inputs haven't changed since the last frame.
         let grid_key = (
-            self.state.list_generation,
-            self.state.cursor.view_top,
-            self.state.cursor.index,
+            self.state.left.list_generation,
+            self.state.left.cursor.view_top,
+            self.state.left.cursor.index,
             layout.list.width,
             layout.list.height,
         );
@@ -534,24 +534,24 @@ impl App {
                 for round in 0..4 {
                     let probe = ListView {
                         rows,
-                        cursor: self.state.cursor.index,
-                        view_top: self.state.cursor.view_top,
-                        empty_marker: self.state.view == View::Dir,
+                        cursor: self.state.left.cursor.index,
+                        view_top: self.state.left.cursor.view_top,
+                        empty_marker: self.state.left.view == View::Dir,
                         focused: list_focused,
                         theme: &self.view.theme,
                     };
-                    self.state.grid_dims = probe.grid(layout.list).dims();
-                    let old_vt = self.state.cursor.view_top;
-                    let pp = self.state.grid_dims.items_per_page();
+                    self.state.left.grid_dims = probe.grid(layout.list).dims();
+                    let old_vt = self.state.left.cursor.view_top;
+                    let pp = self.state.left.grid_dims.items_per_page();
                     self.state.ensure_cursor_visible();
-                    if self.state.cursor.view_top == old_vt {
+                    if self.state.left.cursor.view_top == old_vt {
                         spyc_debug!(
                             "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
                             round + 1,
                             old_vt,
-                            self.state.cursor.index,
-                            self.state.grid_dims.cols,
-                            self.state.grid_dims.rows_per_col,
+                            self.state.left.cursor.index,
+                            self.state.left.grid_dims.cols,
+                            self.state.left.grid_dims.rows_per_col,
                             pp,
                         );
                         settled = true;
@@ -561,34 +561,34 @@ impl App {
                         "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
                         round + 1,
                         old_vt,
-                        self.state.cursor.view_top,
-                        self.state.cursor.index,
-                        self.state.grid_dims.cols,
-                        self.state.grid_dims.rows_per_col,
+                        self.state.left.cursor.view_top,
+                        self.state.left.cursor.index,
+                        self.state.left.grid_dims.cols,
+                        self.state.left.grid_dims.rows_per_col,
                         pp,
                     );
                     // 2-cycle: new vt equals the vt from two rounds ago.
-                    if Some(self.state.cursor.view_top) == prev_vt {
+                    if Some(self.state.left.cursor.view_top) == prev_vt {
                         // Always pick the lower vt — deterministic across frames.
-                        let forced = old_vt.min(self.state.cursor.view_top);
-                        self.state.cursor.view_top = forced;
+                        let forced = old_vt.min(self.state.left.cursor.view_top);
+                        self.state.left.cursor.view_top = forced;
                         // Recompute grid for the forced view_top.
                         let probe = ListView {
                             rows,
-                            cursor: self.state.cursor.index,
-                            view_top: self.state.cursor.view_top,
-                            empty_marker: self.state.view == View::Dir,
+                            cursor: self.state.left.cursor.index,
+                            view_top: self.state.left.cursor.view_top,
+                            empty_marker: self.state.left.view == View::Dir,
                             focused: list_focused,
                             theme: &self.view.theme,
                         };
-                        self.state.grid_dims = probe.grid(layout.list).dims();
+                        self.state.left.grid_dims = probe.grid(layout.list).dims();
                         spyc_debug!(
                             "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
                             forced,
-                            self.state.cursor.index,
-                            self.state.grid_dims.cols,
-                            self.state.grid_dims.rows_per_col,
-                            self.state.grid_dims.items_per_page(),
+                            self.state.left.cursor.index,
+                            self.state.left.grid_dims.cols,
+                            self.state.left.grid_dims.rows_per_col,
+                            self.state.left.grid_dims.items_per_page(),
                         );
                         settled = true;
                         break;
@@ -598,16 +598,16 @@ impl App {
                 if !settled {
                     spyc_debug!(
                         "grid did NOT settle after 4 rounds: vt={} cursor={}",
-                        self.state.cursor.view_top,
-                        self.state.cursor.index,
+                        self.state.left.cursor.view_top,
+                        self.state.left.cursor.index,
                     );
                 }
             }
             // Update cache key in case the stabilization loop changed view_top.
             self.view.cached_grid_key = (
-                self.state.list_generation,
-                self.state.cursor.view_top,
-                self.state.cursor.index,
+                self.state.left.list_generation,
+                self.state.left.cursor.view_top,
+                self.state.left.cursor.index,
                 layout.list.width,
                 layout.list.height,
             );
@@ -641,9 +641,9 @@ mod render_tests {
     /// without bumping `list_generation`, which the cache is keyed on).
     fn demo_app(names: &[&str]) -> App {
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.listing.dir = PathBuf::from("/projects/demo");
+        app.state.left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(names);
-        app.view.cached_rows_gen = app.state.list_generation.wrapping_sub(1);
+        app.view.cached_rows_gen = app.state.left.list_generation.wrapping_sub(1);
         app
     }
 
@@ -688,7 +688,7 @@ mod render_tests {
         let names: Vec<String> = (0..200).map(|i| format!("file-{i:03}.txt")).collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let mut app = demo_app(&refs);
-        app.state.cursor.index = 180;
+        app.state.left.cursor.index = 180;
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 

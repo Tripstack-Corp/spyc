@@ -37,7 +37,7 @@ impl App {
             let candidate = tab_cwd.as_ref().map(|c| c.join(&path));
             match candidate {
                 Some(p) if p.exists() => p,
-                _ => self.state.listing.dir.join(&path),
+                _ => self.state.left.listing.dir.join(&path),
             }
         };
         if !resolved.exists() {
@@ -84,7 +84,7 @@ impl App {
         // Also try resolving against the spyc cwd (project root), not just
         // the pane tab's cwd — Claude often prints paths relative to the
         // project root regardless of the shell's cwd.
-        let spyc_cwd = self.state.listing.dir.clone();
+        let spyc_cwd = self.state.left.listing.dir.clone();
 
         // Debug: dump visible lines to the debug log so we can see what
         // the vt100 screen actually contains.
@@ -141,7 +141,7 @@ impl App {
         }
 
         if let Some(parent) = path.parent() {
-            if parent != self.state.listing.dir
+            if parent != self.state.left.listing.dir
                 && let Err(e) = self.state.chdir(parent)
             {
                 self.state.flash_error(format!("gf: {e}"));
@@ -186,7 +186,7 @@ impl App {
     }
 
     pub(super) fn activate(&mut self, intent: ActivateIntent) -> Vec<Effect> {
-        let Some(row) = self.state.rows.get(self.state.cursor.index) else {
+        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             return Vec::new();
         };
         let path = row.path.clone();
@@ -194,7 +194,7 @@ impl App {
 
         // Inventory view: enter drills down to the containing directory and
         // focuses on the item, then continues with the intent on that item.
-        if self.state.view == View::Inventory {
+        if self.state.left.view == View::Inventory {
             let target_dir = if kind == EntryKind::Dir {
                 path.clone()
             } else {
@@ -205,7 +205,7 @@ impl App {
                 self.state.flash_error(format!("chdir: {e}"));
                 return Vec::new();
             }
-            self.state.view = View::Dir;
+            self.state.left.view = View::Dir;
             self.state.focus_on_path(&path);
             self.state.rebuild_rows();
             if kind == EntryKind::Dir {

@@ -247,16 +247,16 @@ impl App {
     /// Status-bar header: the left (path / view name) and right
     /// (status tags) halves of the top line, per current view.
     pub(super) fn header_parts(&self) -> (String, String) {
-        match self.state.view {
-            View::Dir => (crate::paths::display_tilde(&self.state.listing.dir), {
-                let filter_tag = match &self.state.temp_filter {
+        match self.state.left.view {
+            View::Dir => (crate::paths::display_tilde(&self.state.left.listing.dir), {
+                let filter_tag = match &self.state.left.temp_filter {
                     Some(f) if f == "!" => " limit:picks".to_string(),
                     Some(f) => format!(" limit:{f}"),
                     None => String::new(),
                 };
                 {
-                    let total = self.state.listing.entries.len();
-                    let shown = self.state.rows.len();
+                    let total = self.state.left.listing.entries.len();
+                    let shown = self.state.left.rows.len();
                     let hidden = total.saturating_sub(shown);
                     let hidden_tag = format!(" hidden:{hidden}");
                     // Bg tasks normally render in the divider line above
@@ -278,8 +278,8 @@ impl App {
                     };
                     let sort_tag = format!(
                         " sort:{}{}",
-                        self.state.sort_order,
-                        if self.state.sort_reversed {
+                        self.state.left.sort_order,
+                        if self.state.left.sort_reversed {
                             "\u{2191}"
                         } else {
                             ""
@@ -287,10 +287,10 @@ impl App {
                     );
                     let suffix = format!(
                         "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}]",
-                        self.state.picks.len(),
+                        self.state.left.picks.len(),
                         self.state.inventory.len(),
-                        on_off(self.state.masks.mask1.enabled),
-                        on_off(self.state.masks.mask2.enabled),
+                        on_off(self.state.left.masks.mask1.enabled),
+                        on_off(self.state.left.masks.mask2.enabled),
                         filter_tag,
                         hidden_tag,
                         sort_tag,
@@ -336,6 +336,7 @@ impl App {
         use crate::ui::list_view::GitFileStatus;
         let delete_preview: Option<&Vec<PathBuf>> = self.state.pending_delete_preview.as_ref();
         self.state
+            .left
             .rows
             .iter()
             .map(|rd| {
@@ -351,7 +352,8 @@ impl App {
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,
-                    picked: self.state.view == View::Dir && self.state.picks.contains(&rd.path),
+                    picked: self.state.left.view == View::Dir
+                        && self.state.left.picks.contains(&rd.path),
                     taken: self.state.inventory.contains(&rd.path),
                     git_status,
                     pending_delete,

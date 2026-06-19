@@ -161,17 +161,17 @@ impl App {
         let input_str = input.to_string_lossy().to_string();
         let (dir, file_prefix) = if input_str.ends_with('/') || input_str.is_empty() {
             let dir = if input_str.is_empty() {
-                self.state.listing.dir.clone()
+                self.state.left.listing.dir.clone()
             } else {
                 input
             };
             (dir, String::new())
         } else {
             let dir = input.parent().map_or_else(
-                || self.state.listing.dir.clone(),
+                || self.state.left.listing.dir.clone(),
                 |p| {
                     if p.as_os_str().is_empty() {
-                        self.state.listing.dir.clone()
+                        self.state.left.listing.dir.clone()
                     } else {
                         p.to_path_buf()
                     }
@@ -227,9 +227,9 @@ impl App {
                 (format!("{word_base}{common}"), Some(msg))
             } else {
                 // No text progress — show matches and set up cycle state.
-                if dir == self.state.listing.dir {
+                if dir == self.state.left.listing.dir {
                     // Local dir — also filter the listing.
-                    self.state.temp_filter = Some(format!("{file_prefix}*"));
+                    self.state.left.temp_filter = Some(format!("{file_prefix}*"));
                     self.state.rebuild_rows();
                 }
                 self.state.flash_info(cycle_hint(&matches));
@@ -400,8 +400,8 @@ impl App {
     /// rely on: if `tab_state` were nulled alone, the preview filter would
     /// outlive the cycle and leak into the listing behind the prompt.
     pub(crate) fn clear_tab_preview(&mut self) {
-        if self.view.tab_state.is_some() && self.state.temp_filter.is_some() {
-            self.state.temp_filter = None;
+        if self.view.tab_state.is_some() && self.state.left.temp_filter.is_some() {
+            self.state.left.temp_filter = None;
             self.state.rebuild_rows();
         }
         self.view.tab_state = None;
@@ -414,8 +414,8 @@ impl App {
             return;
         };
         if let PromptKind::Search { saved_cursor } = p.kind {
-            self.state.cursor.index = saved_cursor;
-            self.state.cursor.clamp(self.state.rows.len());
+            self.state.left.cursor.index = saved_cursor;
+            self.state.left.cursor.clamp(self.state.left.rows.len());
         }
         self.clear_tab_preview();
         // Clear any stashed state from the two-step new-tab prompt.
@@ -468,7 +468,7 @@ impl App {
                     self.effective_pane_pct(),
                     self.runtime.pane_tabs.is_some(),
                 );
-                let cwd = self.state.listing.dir.clone();
+                let cwd = self.state.left.listing.dir.clone();
                 let wake = self.make_pane_wake();
                 match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
                     Ok(p) => {
@@ -512,7 +512,7 @@ impl App {
                         self.state
                             .project_home
                             .clone()
-                            .unwrap_or_else(|| self.state.listing.dir.clone())
+                            .unwrap_or_else(|| self.state.left.listing.dir.clone())
                     } else if cwd.starts_with('~') {
                         let home = std::env::var("HOME").unwrap_or_default();
                         std::path::PathBuf::from(cwd.replacen('~', &home, 1))
@@ -541,7 +541,7 @@ impl App {
                 let resolved = if target.is_absolute() {
                     target
                 } else {
-                    self.state.listing.dir.join(&target)
+                    self.state.left.listing.dir.join(&target)
                 };
                 // Create parent dirs if needed, then touch the file.
                 if let Some(parent) = resolved.parent() {
@@ -588,7 +588,7 @@ impl App {
                     let resolved = if target.is_absolute() {
                         target
                     } else {
-                        self.state.listing.dir.join(&target)
+                        self.state.left.listing.dir.join(&target)
                     };
                     match std::fs::create_dir_all(&resolved) {
                         Ok(()) => self
@@ -606,7 +606,7 @@ impl App {
                 if branch.is_empty() {
                     return Vec::new();
                 }
-                match crate::git::worktree::add(&self.state.listing.dir, branch) {
+                match crate::git::worktree::add(&self.state.left.listing.dir, branch) {
                     Ok(path) => {
                         self.state
                             .flash_info(format!("created worktree: {}", path.display()));
@@ -617,7 +617,7 @@ impl App {
                             // (harpoon / grep / MCP context want the worktree
                             // root, not the parent repo); reconcile_harpoon
                             // below reloads the per-project harpoon list.
-                            self.state.project_home = Some(self.state.listing.dir.clone());
+                            self.state.project_home = Some(self.state.left.listing.dir.clone());
                         }
                     }
                     Err(e) => self.state.flash_error(format!("worktree add: {e}")),
@@ -630,7 +630,7 @@ impl App {
                 if !confirmed {
                     return Vec::new();
                 }
-                let dir = self.state.listing.dir.clone();
+                let dir = self.state.left.listing.dir.clone();
                 // Capture the main repo path *before* removing — once the
                 // worktree's directory is gone we can't `git worktree list`
                 // from inside it, and the chdir-to-parent below lands in a

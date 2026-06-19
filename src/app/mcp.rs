@@ -141,15 +141,16 @@ impl App {
     fn snapshot_context(&self) -> crate::context::SpycContext {
         let cursor_file = self
             .state
+            .left
             .rows
-            .get(self.state.cursor.index)
+            .get(self.state.left.cursor.index)
             .map(|r| r.display.clone());
         crate::context::SpycContext {
-            cwd: self.state.listing.dir.clone(),
+            cwd: self.state.left.listing.dir.clone(),
             cursor_file,
-            picks: self.state.picks.iter().cloned().collect(),
+            picks: self.state.left.picks.iter().cloned().collect(),
             inventory: self.state.inventory.paths().cloned().collect(),
-            filter: self.state.temp_filter.clone(),
+            filter: self.state.left.temp_filter.clone(),
             git_branch: self.state.git.info.clone(),
             project_home: self.state.project_home.clone(),
             session_name: self.state.session_name.clone().unwrap_or_default(),
@@ -193,7 +194,7 @@ impl App {
                     Ok(()) => {
                         self.state.flash_info(format!(
                             "[mcp] navigated to {}",
-                            self.state.listing.dir.display()
+                            self.state.left.listing.dir.display()
                         ));
                         // Write synchronously: an MCP client commonly
                         // calls get_spyc_context right after a mutation,
@@ -213,13 +214,18 @@ impl App {
             }
             McpCommand::SetFilter { pattern } => {
                 match pattern {
-                    Some(ref p) if p.is_empty() => self.state.temp_filter = None,
-                    Some(p) => self.state.temp_filter = Some(p),
-                    None => self.state.temp_filter = None,
+                    Some(ref p) if p.is_empty() => self.state.left.temp_filter = None,
+                    Some(p) => self.state.left.temp_filter = Some(p),
+                    None => self.state.left.temp_filter = None,
                 }
                 self.state.rebuild_rows();
-                let count = self.state.rows.len();
-                let label = self.state.temp_filter.as_deref().unwrap_or("(cleared)");
+                let count = self.state.left.rows.len();
+                let label = self
+                    .state
+                    .left
+                    .temp_filter
+                    .as_deref()
+                    .unwrap_or("(cleared)");
                 self.state.flash_info(format!("[mcp] filter: {label}"));
                 self.write_context();
                 McpResponse::Ok {
@@ -232,9 +238,9 @@ impl App {
                 for pat_str in &patterns {
                     match glob::Pattern::new(pat_str) {
                         Ok(pat) => {
-                            for e in &self.state.listing.entries {
+                            for e in &self.state.left.listing.entries {
                                 if pat.matches(&e.name) {
-                                    self.state.picks.insert(&e.path);
+                                    self.state.left.picks.insert(&e.path);
                                     total += 1;
                                 }
                             }
@@ -242,7 +248,7 @@ impl App {
                         Err(e) => errors.push(format!("{pat_str}: {e}")),
                     }
                 }
-                self.state.list_generation = self.state.list_generation.wrapping_add(1);
+                self.state.left.list_generation = self.state.left.list_generation.wrapping_add(1);
                 if !errors.is_empty() {
                     return McpResponse::Error {
                         message: format!("invalid patterns: {}", errors.join(", ")),
@@ -252,13 +258,16 @@ impl App {
                     .flash_info(format!("[mcp] picked {total} file(s)"));
                 self.write_context();
                 McpResponse::Ok {
-                    message: format!("picked {total} file(s), {} total", self.state.picks.len()),
+                    message: format!(
+                        "picked {total} file(s), {} total",
+                        self.state.left.picks.len()
+                    ),
                 }
             }
             McpCommand::ClearPicks => {
-                let count = self.state.picks.len();
-                self.state.picks.clear();
-                self.state.list_generation = self.state.list_generation.wrapping_add(1);
+                let count = self.state.left.picks.len();
+                self.state.left.picks.clear();
+                self.state.left.list_generation = self.state.left.list_generation.wrapping_add(1);
                 self.state.flash_info("[mcp] picks cleared");
                 self.write_context();
                 McpResponse::Ok {

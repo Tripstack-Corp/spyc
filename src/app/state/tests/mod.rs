@@ -21,7 +21,7 @@ fn test_state() -> AppState {
 /// Build a test state with named rows (simulating a directory listing).
 fn state_with_rows(names: &[&str]) -> AppState {
     let mut s = test_state();
-    s.rows = names
+    s.left.rows = names
         .iter()
         .map(|n| RowData {
             path: PathBuf::from(format!("/tmp/test/{n}")),
@@ -39,7 +39,7 @@ fn state_with_real_files(tmp: &std::path::Path, names: &[&str]) -> AppState {
     for name in names {
         std::fs::write(tmp.join(name), format!("content of {name}")).unwrap();
     }
-    s.rows = names
+    s.left.rows = names
         .iter()
         .map(|n| RowData {
             path: tmp.join(n),
@@ -182,8 +182,8 @@ fn selection_returns_cursor_item_when_no_picks() {
 #[test]
 fn selection_returns_picks_when_present() {
     let mut s = state_with_rows(&["a.txt", "b.txt", "c.txt"]);
-    s.picks.toggle(Path::new("/tmp/test/b.txt"));
-    s.picks.toggle(Path::new("/tmp/test/c.txt"));
+    s.left.picks.toggle(Path::new("/tmp/test/b.txt"));
+    s.left.picks.toggle(Path::new("/tmp/test/c.txt"));
     let paths = s.selection_paths();
     assert_eq!(paths.len(), 2);
 }
@@ -200,17 +200,17 @@ fn selection_empty_when_no_rows() {
 fn toggle_pick_adds_and_removes() {
     let mut s = state_with_rows(&["a.txt", "b.txt"]);
     s.toggle_pick_cursor();
-    assert!(s.picks.contains(Path::new("/tmp/test/a.txt")));
+    assert!(s.left.picks.contains(Path::new("/tmp/test/a.txt")));
     s.toggle_pick_cursor();
-    assert!(!s.picks.contains(Path::new("/tmp/test/a.txt")));
+    assert!(!s.left.picks.contains(Path::new("/tmp/test/a.txt")));
 }
 
 #[test]
 fn toggle_pick_noop_in_inventory_view() {
     let mut s = state_with_rows(&["a.txt"]);
-    s.view = View::Inventory;
+    s.left.view = View::Inventory;
     s.toggle_pick_cursor();
-    assert!(s.picks.is_empty());
+    assert!(s.left.picks.is_empty());
 }
 
 // ── toggle_all_picks ──────────────────────────────────────────
@@ -219,9 +219,9 @@ fn toggle_pick_noop_in_inventory_view() {
 fn toggle_all_picks_selects_then_clears() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.toggle_all_picks();
-    assert_eq!(s.picks.len(), 3);
+    assert_eq!(s.left.picks.len(), 3);
     s.toggle_all_picks();
-    assert!(s.picks.is_empty());
+    assert!(s.left.picks.is_empty());
 }
 
 // ── take / drop / inventory ───────────────────────────────────
@@ -242,8 +242,8 @@ fn take_picks_to_inventory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
-        s.picks.toggle(&tmp.path().join("a.txt"));
-        s.picks.toggle(&tmp.path().join("b.txt"));
+        s.left.picks.toggle(&tmp.path().join("a.txt"));
+        s.left.picks.toggle(&tmp.path().join("b.txt"));
         s.take();
         assert_eq!(s.inventory.len(), 2);
     });
@@ -268,11 +268,11 @@ fn drop_removes_from_inventory() {
 #[test]
 fn toggle_inventory_switches_view() {
     let mut s = test_state();
-    assert_eq!(s.view, View::Dir);
+    assert_eq!(s.left.view, View::Dir);
     s.toggle_inventory_view();
-    assert_eq!(s.view, View::Inventory);
+    assert_eq!(s.left.view, View::Inventory);
     s.toggle_inventory_view();
-    assert_eq!(s.view, View::Dir);
+    assert_eq!(s.left.view, View::Dir);
 }
 
 // ── focus_on_path ─────────────────────────────────────────────
@@ -281,15 +281,15 @@ fn toggle_inventory_switches_view() {
 fn focus_on_path_sets_cursor() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.focus_on_path(Path::new("/tmp/test/c"));
-    assert_eq!(s.cursor.index, 2);
+    assert_eq!(s.left.cursor.index, 2);
 }
 
 #[test]
 fn focus_on_missing_path_is_noop() {
     let mut s = state_with_rows(&["a", "b"]);
-    s.cursor.index = 1;
+    s.left.cursor.index = 1;
     s.focus_on_path(Path::new("/tmp/test/nope"));
-    assert_eq!(s.cursor.index, 1); // unchanged
+    assert_eq!(s.left.cursor.index, 1); // unchanged
 }
 
 // ── dispatch_command ──────────────────────────────────────────
@@ -297,10 +297,10 @@ fn focus_on_missing_path_is_noop() {
 #[test]
 fn climb_from_inventory_exits_to_dir_view_no_effect() {
     let mut s = test_state();
-    s.view = View::Inventory;
+    s.left.view = View::Inventory;
     let fx = s.climb();
     assert!(fx.is_empty(), "inventory exit emits no effect");
-    assert_eq!(s.view, View::Dir);
+    assert_eq!(s.left.view, View::Dir);
 }
 
 /// End-to-end-ish coverage of the git refresh pipeline. Edit a
@@ -340,7 +340,7 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.listing.dir = root.clone();
+    s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
     s.update_repo_root(&root);
     s.git.info = s.compute_git_info_fast();
@@ -408,7 +408,7 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.listing.dir = root.clone();
+    s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
     s.update_repo_root(&root);
     s.git.info = s.compute_git_info_fast();
@@ -491,7 +491,7 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.listing.dir = root.clone();
+    s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
     s.update_repo_root(&root); // sets current_repo_root
 
@@ -562,7 +562,7 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.listing.dir = root.clone();
+    s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
     s.update_repo_root(&root); // sets current_repo_root + current_gitdir
 

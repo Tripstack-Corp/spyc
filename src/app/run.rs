@@ -40,7 +40,7 @@ impl App {
         // Last listing dir we've asked the worker to watch (send-dedup key);
         // seed it by sending the initial watch command.
         let watched_listing = if let Some(tx) = watch_tx.as_ref() {
-            let dir = self.state.listing.dir.clone();
+            let dir = self.state.left.listing.dir.clone();
             let _ = tx.send(WatchCommand::SyncListing {
                 gitdir: self.state.git_cache.current_gitdir.clone(),
                 dir: dir.clone(),
@@ -727,12 +727,12 @@ impl App {
                 .as_ref()
                 .and_then(|v| v.source_path.clone());
             let listing_changed =
-                ctx.watched_listing.as_deref() != Some(self.state.listing.dir.as_path());
+                ctx.watched_listing.as_deref() != Some(self.state.left.listing.dir.as_path());
             let preview_changed = ctx.watched_preview != preview;
             if (listing_changed || preview_changed)
                 && let Some(tx) = ctx.watch_tx.as_ref()
             {
-                let dir = self.state.listing.dir.clone();
+                let dir = self.state.left.listing.dir.clone();
                 let _ = tx.send(WatchCommand::SyncListing {
                     gitdir: self.state.git_cache.current_gitdir.clone(),
                     dir: dir.clone(),
@@ -765,7 +765,7 @@ impl App {
         let title = crate::term_title::compose(
             self.state.project_home.as_deref(),
             self.state.session_name.as_deref(),
-            &self.state.listing.dir,
+            &self.state.left.listing.dir,
         );
         if self.view.last_term_title.as_deref() == Some(&title) {
             return None;

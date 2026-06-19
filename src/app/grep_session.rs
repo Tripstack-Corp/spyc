@@ -91,7 +91,7 @@ impl App {
             .state
             .project_home
             .clone()
-            .unwrap_or_else(|| self.state.listing.dir.clone());
+            .unwrap_or_else(|| self.state.left.listing.dir.clone());
         // Validate the pattern up-front so we can flash an error inline rather
         // than open an empty pager that silently produces zero results. The
         // worker re-compiles the same regex (trivial parse cost).

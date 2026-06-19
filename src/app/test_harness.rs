@@ -62,8 +62,8 @@ impl App {
     /// Seed the listing with fake file rows (no real fs), mirroring the
     /// `state_with_rows` pattern; clamps the cursor into range.
     pub(crate) fn seed_rows(&mut self, names: &[&str]) {
-        let dir = self.state.listing.dir.clone();
-        self.state.rows = names
+        let dir = self.state.left.listing.dir.clone();
+        self.state.left.rows = names
             .iter()
             .map(|n| RowData {
                 path: dir.join(n),
@@ -71,7 +71,7 @@ impl App {
                 kind: EntryKind::File,
             })
             .collect();
-        self.state.cursor.clamp(self.state.rows.len());
+        self.state.left.cursor.clamp(self.state.left.rows.len());
     }
 
     /// Flash message text, if any — compact assertion helper.

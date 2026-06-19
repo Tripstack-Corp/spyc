@@ -132,7 +132,7 @@ impl App {
     /// resolved command.
     pub fn start_capture(&mut self, expanded: &str, title_cmd: &str, cmd_display: &str) {
         let title = format!("! {title_cmd}");
-        match spawn_capture(expanded, &self.state.listing.dir) {
+        match spawn_capture(expanded, &self.state.left.listing.dir) {
             Ok(host) => {
                 // MVU Phase 3c: install the capture's channel wake (a generic
                 // SinkOutput edge — the loop re-scans on it). Survives the
@@ -391,7 +391,7 @@ impl App {
         // didn't save it); use current listing dir as a best-effort
         // tab-info field. The child is already running at its own
         // cwd regardless.
-        let cwd = self.state.listing.dir.clone();
+        let cwd = self.state.left.listing.dir.clone();
         let label = task.title.clone();
         let wake = self.make_pane_wake();
         // MVU Phase 3c: clear the task's reader-thread sink wake BEFORE adopt

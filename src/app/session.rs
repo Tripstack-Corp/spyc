@@ -387,11 +387,14 @@ impl App {
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!(
             "cwd      : {}",
-            crate::paths::display_tilde(&self.state.listing.dir)
+            crate::paths::display_tilde(&self.state.left.listing.dir)
         ));
-        lines.push(format!("entries  : {}", self.state.listing.entries.len()));
-        lines.push(format!("visible  : {}", self.state.rows.len()));
-        lines.push(format!("picks    : {}", self.state.picks.len()));
+        lines.push(format!(
+            "entries  : {}",
+            self.state.left.listing.entries.len()
+        ));
+        lines.push(format!("visible  : {}", self.state.left.rows.len()));
+        lines.push(format!("picks    : {}", self.state.left.picks.len()));
         lines.push(format!("inventory: {}", self.state.inventory.len()));
         lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));

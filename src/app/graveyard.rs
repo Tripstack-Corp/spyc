@@ -60,21 +60,21 @@ impl App {
                 // surprise purge), and `g` then `j` then `g` would jump to top.
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                let rpc = self.state.grid_dims.rows_per_col as usize;
+                let rpc = self.state.left.grid_dims.rows_per_col as usize;
                 self.state
-                    .cursor_move_vertical(1, rpc, self.state.rows.len());
+                    .cursor_move_vertical(1, rpc, self.state.left.rows.len());
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                let rpc = self.state.grid_dims.rows_per_col as usize;
+                let rpc = self.state.left.grid_dims.rows_per_col as usize;
                 self.state
-                    .cursor_move_vertical(-1, rpc, self.state.rows.len());
+                    .cursor_move_vertical(-1, rpc, self.state.left.rows.len());
             }
             KeyCode::Char('g') => {
                 self.view.graveyard_pending_d = false;
                 if self.view.graveyard_pending_g {
-                    self.state.cursor.index = 0;
+                    self.state.left.cursor.index = 0;
                     self.view.graveyard_pending_g = false;
                 } else {
                     self.view.graveyard_pending_g = true;
@@ -83,8 +83,8 @@ impl App {
             KeyCode::Char('G') => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                if !self.state.rows.is_empty() {
-                    self.state.cursor.index = self.state.rows.len() - 1;
+                if !self.state.left.rows.is_empty() {
+                    self.state.left.cursor.index = self.state.left.rows.len() - 1;
                 }
             }
             KeyCode::Char('p') if bare => {
@@ -131,7 +131,12 @@ impl App {
     /// = true means the original path (use `Graveyard::restore`
     /// with the orig dir as dest); false = current cwd.
     fn graveyard_restore(&mut self, to_original: bool) {
-        let Some(entry) = self.state.graveyard.get(self.state.cursor.index).cloned() else {
+        let Some(entry) = self
+            .state
+            .graveyard
+            .get(self.state.left.cursor.index)
+            .cloned()
+        else {
             self.state.flash_error("graveyard: no entry under cursor");
             return;
         };
@@ -141,7 +146,7 @@ impl App {
                 std::path::Path::to_path_buf,
             )
         } else {
-            self.state.listing.dir.clone()
+            self.state.left.listing.dir.clone()
         };
         match crate::state::graveyard::Graveyard::restore(&entry, &dest) {
             Ok(()) => {
@@ -152,7 +157,7 @@ impl App {
                 self.state
                     .flash_info(format!("restored {} ({where_})", entry.filename));
                 self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-                self.state.cursor.clamp(self.state.graveyard.len());
+                self.state.left.cursor.clamp(self.state.graveyard.len());
                 self.state.refresh_listing(); // dest may be cwd
                 self.state.rebuild_rows();
             }
@@ -165,7 +170,12 @@ impl App {
 
     /// Purge the cursor entry to system trash. Used by `dd` and `x`.
     fn graveyard_purge_cursor_entry(&mut self) {
-        let Some(entry) = self.state.graveyard.get(self.state.cursor.index).cloned() else {
+        let Some(entry) = self
+            .state
+            .graveyard
+            .get(self.state.left.cursor.index)
+            .cloned()
+        else {
             self.state.flash_error("graveyard: no entry under cursor");
             return;
         };
@@ -174,7 +184,7 @@ impl App {
                 self.state
                     .flash_info(format!("→ system trash: {}", entry.filename));
                 self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-                self.state.cursor.clamp(self.state.graveyard.len());
+                self.state.left.cursor.clamp(self.state.graveyard.len());
                 self.state.rebuild_rows();
             }
             Err(e) => self.state.flash_error(format!("purge failed: {e}")),

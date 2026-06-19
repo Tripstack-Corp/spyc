@@ -62,7 +62,7 @@ impl App {
         self.sync_harpoon_filter_set();
         // If `=h` was active, the now-stale set may render an empty
         // list silently; rebuild rows so the user sees the new state.
-        if matches!(self.state.temp_filter.as_deref(), Some("h")) {
+        if matches!(self.state.left.temp_filter.as_deref(), Some("h")) {
             self.state.rebuild_rows();
         }
     }
@@ -83,16 +83,16 @@ impl App {
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
-            self.state.cursor.index,
-            self.state.cursor.view_top,
-            self.state.grid_dims.cols,
-            self.state.grid_dims.rows_per_col,
-            self.state.grid_dims.items_per_page(),
-            self.state.rows.len(),
+            self.state.left.cursor.index,
+            self.state.left.cursor.view_top,
+            self.state.left.grid_dims.cols,
+            self.state.left.grid_dims.rows_per_col,
+            self.state.left.grid_dims.items_per_page(),
+            self.state.left.rows.len(),
         );
 
         // In dir view, `p` (Drop) means "put inventory to cwd".
-        if *action == Action::Drop && self.state.view == View::Dir {
+        if *action == Action::Drop && self.state.left.view == View::Dir {
             return Ok(self.put_inventory_to_cwd());
         }
 
@@ -185,12 +185,12 @@ impl App {
         match action {
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
-                self.state.cursor.clamp(self.state.rows.len());
+                self.state.left.cursor.clamp(self.state.left.rows.len());
                 return Ok(post);
             }
             Action::EnterOrEdit => {
                 let post = self.activate(ActivateIntent::Edit);
-                self.state.cursor.clamp(self.state.rows.len());
+                self.state.left.cursor.clamp(self.state.left.rows.len());
                 return Ok(post);
             }
             Action::EditInPane => {
@@ -223,33 +223,35 @@ impl App {
             Action::Help => self.open_help(),
 
             Action::SortCycle => {
-                self.state.sort_order = self.state.sort_order.cycle_next();
+                self.state.left.sort_order = self.state.left.sort_order.cycle_next();
                 self.state
+                    .left
                     .listing
-                    .sort(self.state.sort_order, self.state.sort_reversed);
+                    .sort(self.state.left.sort_order, self.state.left.sort_reversed);
                 self.state.rebuild_rows();
-                let suffix = if self.state.sort_reversed {
+                let suffix = if self.state.left.sort_reversed {
                     " (reversed)"
                 } else {
                     ""
                 };
                 self.state
-                    .flash_info(format!("sort: {}{}", self.state.sort_order, suffix));
+                    .flash_info(format!("sort: {}{}", self.state.left.sort_order, suffix));
             }
 
             Action::SortReverse => {
-                self.state.sort_reversed = !self.state.sort_reversed;
+                self.state.left.sort_reversed = !self.state.left.sort_reversed;
                 self.state
+                    .left
                     .listing
-                    .sort(self.state.sort_order, self.state.sort_reversed);
+                    .sort(self.state.left.sort_order, self.state.left.sort_reversed);
                 self.state.rebuild_rows();
-                let suffix = if self.state.sort_reversed {
+                let suffix = if self.state.left.sort_reversed {
                     " (reversed)"
                 } else {
                     ""
                 };
                 self.state
-                    .flash_info(format!("sort: {}{}", self.state.sort_order, suffix));
+                    .flash_info(format!("sort: {}{}", self.state.left.sort_order, suffix));
             }
 
             Action::OpenTaskViewer => self.open_task_viewer(None),
@@ -432,7 +434,7 @@ impl App {
                 // enter vs exit. Justin reported being unable to figure
                 // out the restore chord from inside the view; the flash
                 // surfaces the two main ones plus `?` for the rest.
-                if matches!(self.state.view, View::Graveyard) {
+                if matches!(self.state.left.view, View::Graveyard) {
                     self.state
                         .flash_info("graveyard: p restore here · P original · dd/x purge · ? help");
                 }
@@ -499,7 +501,7 @@ impl App {
             // All other actions were already handled by `self.state.apply()`.
             _ => {}
         }
-        self.state.cursor.clamp(self.state.rows.len());
+        self.state.left.cursor.clamp(self.state.left.rows.len());
         Ok(effects)
     }
 }

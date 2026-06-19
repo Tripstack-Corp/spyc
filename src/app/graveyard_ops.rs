@@ -106,7 +106,7 @@ impl App {
     /// refresh). Called every pre-recv scan, so the slot is ALWAYS emptied
     /// regardless of which wake survived coalescing. Returns whether anything
     /// was applied (the caller marks the frame dirty). View-dependent refreshes
-    /// re-derive `self.state.view` HERE — the view may have changed since the op
+    /// re-derive `self.state.left.view` HERE — the view may have changed since the op
     /// was kicked.
     pub(crate) fn apply_graveyard_outcomes(&mut self) -> bool {
         let landed: Vec<GraveyardOutcome> =
@@ -143,7 +143,7 @@ impl App {
                 Ok(()) => {
                     self.state
                         .flash_info(format!("undo: restored {filename} → {}", dest.display()));
-                    if matches!(self.state.view, View::Graveyard) {
+                    if matches!(self.state.left.view, View::Graveyard) {
                         self.reload_graveyard_rows();
                     }
                     self.state.refresh_listing();
@@ -169,7 +169,7 @@ impl App {
     /// rows so the open graveyard view reflects the mutation.
     fn reload_graveyard_rows(&mut self) {
         self.state.graveyard = Graveyard::load().entries;
-        self.state.cursor.clamp(self.state.graveyard.len());
+        self.state.left.cursor.clamp(self.state.graveyard.len());
         self.state.rebuild_rows();
     }
 }

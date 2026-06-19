@@ -485,12 +485,25 @@ pub struct PaneLayout {
     pub vsplit_left_was_pane: bool,
 }
 
-pub struct AppState {
+/// One file-commander's worth of pure Model state — the per-browser fields a
+/// vertical-split column owns: the directory it shows, the cursor in it, its
+/// picks/masks/filter/sort, and its display rows + grid geometry.
+///
+/// Extracted in PR A of the vsplit Stage 2 plan as a behavior-preserving move:
+/// `AppState.left` is the **sole** commander today, reached as `self.left.…`.
+/// Stage 2 PR C adds `right: Option<Commander>` plus an active-column accessor
+/// (`cur()`/`cur_mut()`) and the second-column machinery; this PR just draws the
+/// per-browser boundary. (`git`/`git_cache` stay on `AppState` for now — they
+/// move with the dual-git-worker PR, where the per-column status generation is
+/// designed.)
+pub struct Commander {
+    /// The directory this browser is showing + its entries.
     pub listing: Listing,
+    /// Multi-select set (keyed by path) scoped to this browser's listing.
     pub picks: Picks,
-    pub inventory: Inventory,
-    pub marks: Marks,
+    /// File-ignore toggles (`.`/`~`), applied during `rebuild_rows`.
     pub masks: IgnoreMasks,
+    /// The `:limit` / `=` filter pattern narrowing this browser's rows.
     pub temp_filter: Option<String>,
     pub sort_order: crate::fs::listing::SortMode,
     /// When true, invert the per-mode natural direction (Name/Ext
@@ -498,8 +511,23 @@ pub struct AppState {
     /// Toggled by `gs` and `:sort reverse`. Dirs-first grouping is
     /// always preserved regardless.
     pub sort_reversed: bool,
+    /// Which content this browser shows: `Dir` / `Inventory` / `Graveyard`.
     pub view: View,
+    /// Cursor index + viewport scroll (`view_top`) within this browser.
     pub cursor: Cursor,
+    /// The rendered display rows (derived from `listing` + filter + sort).
+    pub rows: Vec<RowData>,
+    /// The geometry slice of this browser's last rendered grid (cols ×
+    /// rows-per-col), written by render and read by cursor/page-math.
+    pub grid_dims: GridDims,
+    /// Monotonic counter bumped whenever this browser's display row list
+    /// changes. Used by App to skip redundant `build_rows()` calls.
+    pub list_generation: u64,
+}
+
+pub struct AppState {
+    pub inventory: Inventory,
+    pub marks: Marks,
     pub resolver: Resolver,
     pub user_keymap: UserKeymap,
     pub config: Config,
@@ -572,14 +600,9 @@ pub struct AppState {
     /// Which surface owns the keyboard. Replaces the old `pane_focused:
     /// bool`; read the derived bool via `self.pane_focused()`.
     pub focus: Focus,
-    pub rows: Vec<RowData>,
-    /// MVU Phase 5: the geometry slice of the last rendered grid (cols ×
-    /// rows-per-col), written by render and read by cursor/page-math. Was
-    /// `last_grid: Grid`; slimmed to drop the render-only `col_widths`.
-    pub grid_dims: GridDims,
-    /// Monotonic counter bumped whenever the display row list changes.
-    /// Used by App to skip redundant `build_rows()` calls.
-    pub list_generation: u64,
+    /// The sole file-commander's per-browser Model state (see [`Commander`]).
+    /// Stage 2 PR C adds a `right` companion + an active-column accessor.
+    pub left: Commander,
     /// Git status/worker plumbing (see [`GitCache`]).
     pub git_cache: GitCache,
     /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
@@ -749,16 +772,24 @@ impl AppState {
     /// `crate::state::with_state_root` for an isolated state dir.
     pub(crate) fn test_default(cwd: std::path::PathBuf) -> Self {
         Self {
-            listing: Listing::empty(cwd.clone()),
-            picks: Picks::new(),
+            left: Commander {
+                listing: Listing::empty(cwd.clone()),
+                picks: Picks::new(),
+                masks: IgnoreMasks::default(),
+                temp_filter: None,
+                sort_order: crate::fs::listing::SortMode::Name,
+                sort_reversed: false,
+                view: View::Dir,
+                cursor: Cursor::new(),
+                rows: Vec::new(),
+                grid_dims: GridDims {
+                    cols: 1,
+                    rows_per_col: 20,
+                },
+                list_generation: 0,
+            },
             inventory: Inventory::new(),
             marks: Marks::default(),
-            masks: IgnoreMasks::default(),
-            temp_filter: None,
-            sort_order: crate::fs::listing::SortMode::Name,
-            sort_reversed: false,
-            view: View::Dir,
-            cursor: Cursor::new(),
             resolver: Resolver::new(),
             user_keymap: UserKeymap::default(),
             config: Config::default(),
@@ -794,12 +825,6 @@ impl AppState {
                 ..Default::default()
             },
             vsplit: None,
-            rows: Vec::new(),
-            grid_dims: GridDims {
-                cols: 1,
-                rows_per_col: 20,
-            },
-            list_generation: 0,
         }
     }
 }

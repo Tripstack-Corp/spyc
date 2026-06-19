@@ -102,20 +102,28 @@ impl App {
         };
 
         let app_state = state::AppState {
-            listing,
-            picks: Picks::new(),
+            left: state::Commander {
+                listing,
+                picks: Picks::new(),
+                masks: {
+                    let mut m = IgnoreMasks::default();
+                    m.apply_config(&config.ignore_masks);
+                    m
+                },
+                temp_filter: None,
+                sort_order: crate::fs::listing::SortMode::Name,
+                sort_reversed: false,
+                view: View::Dir,
+                cursor: Cursor::new(),
+                rows: Vec::new(),
+                grid_dims: crate::ui::list_view::GridDims {
+                    cols: 1,
+                    rows_per_col: 1,
+                },
+                list_generation: 0,
+            },
             inventory: Inventory::load(),
             marks: Marks::load(),
-            masks: {
-                let mut m = IgnoreMasks::default();
-                m.apply_config(&config.ignore_masks);
-                m
-            },
-            temp_filter: None,
-            sort_order: crate::fs::listing::SortMode::Name,
-            sort_reversed: false,
-            view: View::Dir,
-            cursor: Cursor::new(),
             resolver: Resolver::new(),
             user_keymap,
             config,
@@ -166,12 +174,6 @@ impl App {
                 files: git_files,
             },
             should_quit: false,
-            rows: Vec::new(),
-            grid_dims: crate::ui::list_view::GridDims {
-                cols: 1,
-                rows_per_col: 1,
-            },
-            list_generation: 0,
         };
         let context_path = crate::context::context_path(&app_state.start_dir);
         // Reap orphaned artifacts left by instances that exited WITHOUT running
@@ -275,7 +277,7 @@ impl App {
         app.state.rebuild_rows();
         // Resolve + cache the repo root at startup so the first git read
         // (and the FSEvent exclude filter) have it before the user navigates.
-        let initial_cwd = app.state.listing.dir.clone();
+        let initial_cwd = app.state.left.listing.dir.clone();
         app.state.update_repo_root(&initial_cwd);
         // Now that the worker is wired and the repo root is cached,
         // kick off the first git read in the background. The branch

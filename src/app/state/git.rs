@@ -46,7 +46,7 @@ impl AppState {
         // through `git_file_statuses_cached`, which will re-spawn and
         // refill it on this dir.
         self.git_cache.git_status_cache = None;
-        let listing_dir = self.listing.dir.clone();
+        let listing_dir = self.left.listing.dir.clone();
         let new_git_files = self.git_file_statuses_cached(&listing_dir);
         let new_git_info = self.compute_git_info_fast();
         // Stash on success so the next idle poll skips the

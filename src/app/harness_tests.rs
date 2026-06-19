@@ -20,12 +20,12 @@ fn fresh_harness_is_deterministic() {
         assert_eq!(app.state.focus, state::Focus::FileList);
         assert!(!app.state.pane_focused());
         assert!(matches!(app.state.mode, Mode::Normal));
-        assert_eq!(app.state.cursor.index, 0);
+        assert_eq!(app.state.left.cursor.index, 0);
         assert!(app.runtime.pane_tabs.is_none());
         assert!(app.view.pager.is_none());
         assert!(app.flash_text().is_none());
         assert_eq!(
-            app.state.listing.dir,
+            app.state.left.listing.dir,
             std::path::PathBuf::from("/tmp/harness")
         );
     });
@@ -39,12 +39,12 @@ fn apply_action_moves_cursor() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
         app.seed_rows(&["a", "b", "c"]);
-        assert_eq!(app.state.cursor.index, 0);
+        assert_eq!(app.state.left.cursor.index, 0);
         let post = app.apply(&Action::Down(1)).unwrap();
-        assert_eq!(app.state.cursor.index, 1);
+        assert_eq!(app.state.left.cursor.index, 1);
         assert!(post.is_empty());
         app.apply(&Action::Up(1)).unwrap();
-        assert_eq!(app.state.cursor.index, 0);
+        assert_eq!(app.state.left.cursor.index, 0);
     });
 }
 
@@ -92,7 +92,10 @@ fn handle_key_routes_j_to_cursor_down() {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
         app.seed_rows(&["a", "b", "c"]);
         app.handle_key(key('j')).unwrap();
-        assert_eq!(app.state.cursor.index, 1, "j should move the cursor down");
+        assert_eq!(
+            app.state.left.cursor.index, 1,
+            "j should move the cursor down"
+        );
     });
 }
 
@@ -151,7 +154,7 @@ fn prompt_input_wins_over_list() {
         app.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump: "));
         app.handle_key(key('x')).unwrap();
         assert_eq!(
-            app.state.cursor.index, 0,
+            app.state.left.cursor.index, 0,
             "cursor must not move while prompting"
         );
         match &app.state.mode {
@@ -173,7 +176,7 @@ fn overlay_pager_consumes_keys_not_list() {
         app.view.pager = Some(PagerView::new_plain("t", lines));
         app.handle_key(key('j')).unwrap();
         assert_eq!(
-            app.state.cursor.index, 0,
+            app.state.left.cursor.index, 0,
             "list cursor must not move with a pager open"
         );
         assert!(app.view.pager.is_some(), "pager stays open on j");
@@ -246,7 +249,7 @@ fn open_pane_tab_spawns_in_listing_dir_and_focuses_pane() {
         assert!(app.runtime.pane_tabs.is_none());
         app.open_pane_tab("cat");
         let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
-        assert_eq!(tabs.active_info().cwd, app.state.listing.dir);
+        assert_eq!(tabs.active_info().cwd, app.state.left.listing.dir);
         assert_eq!(tabs.active_info().cwd, dir);
         assert_eq!(
             app.state.focus,
@@ -634,9 +637,12 @@ fn jump_to_pane_path_missing_flashes_not_found() {
         let start = tmp.path().join("start");
         std::fs::create_dir(&start).unwrap();
         let mut app = App::test_app(start);
-        let before = app.state.listing.dir.clone();
+        let before = app.state.left.listing.dir.clone();
         app.jump_to_pane_path("/no/such/path/xyz123");
-        assert_eq!(app.state.listing.dir, before, "missing path must not chdir");
+        assert_eq!(
+            app.state.left.listing.dir, before,
+            "missing path must not chdir"
+        );
         assert!(
             app.flash_text()
                 .unwrap_or_default()
@@ -671,11 +677,11 @@ fn quick_select_esc_closes_without_dispatch() {
         std::fs::create_dir(&start).unwrap();
         std::fs::create_dir(&target).unwrap();
         let mut app = App::test_app(start);
-        let before = app.state.listing.dir.clone();
+        let before = app.state.left.listing.dir.clone();
         app.view.quick_select = Some(qs_path_overlay(target.to_str().unwrap()));
         app.handle_key(esc()).unwrap();
         assert!(app.view.quick_select.is_none(), "Esc closes the overlay");
-        assert_eq!(app.state.listing.dir, before, "Esc dispatches nothing");
+        assert_eq!(app.state.left.listing.dir, before, "Esc dispatches nothing");
     });
 }
 
@@ -837,7 +843,7 @@ fn vsplit_cycle_swaps_preview_keeping_shape() {
             "preview starts on a.md"
         );
 
-        app.state.cursor.index = 1; // move to b.md
+        app.state.left.cursor.index = 1; // move to b.md
         app.apply(&Action::VsplitCycle).unwrap();
         assert_eq!(
             app.state.vsplit.map(|v| v.mode),
@@ -1070,12 +1076,12 @@ fn vsplit_cycle_on_directory_warns_and_stays_closed() {
         let dir = tmp.path().join("work");
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir.clone());
-        app.state.rows = vec![RowData {
+        app.state.left.rows = vec![RowData {
             path: dir.join("sub"),
             display: "sub".to_string(),
             kind: EntryKind::Dir,
         }];
-        app.state.cursor.index = 0;
+        app.state.left.cursor.index = 0;
 
         app.apply(&Action::VsplitCycle).unwrap();
         assert!(

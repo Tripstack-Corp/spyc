@@ -28,8 +28,8 @@ impl App {
                 // Reset to built-in mask defaults first, then apply config
                 // overrides — so removing `[[ignore_masks]]` entries from
                 // the rc file reverts the group to defaults on reload.
-                self.state.masks = IgnoreMasks::default();
-                self.state.masks.apply_config(&new_config.ignore_masks);
+                self.state.left.masks = IgnoreMasks::default();
+                self.state.left.masks.apply_config(&new_config.ignore_masks);
                 let count = new_config.sources.len();
                 let warnings = new_config.warnings.clone();
                 self.state.config = new_config;
@@ -93,7 +93,7 @@ impl App {
                 return false;
             }
         }
-        let dir = self.state.listing.dir.as_path();
+        let dir = self.state.left.listing.dir.as_path();
 
         // `.git/` filtering against the repo's *resolved* gitdir
         // (cached on chdir). For a normal repo that's `<root>/.git`;

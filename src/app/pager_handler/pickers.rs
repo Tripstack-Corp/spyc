@@ -132,7 +132,7 @@ impl App {
                 // internally). `reconcile_harpoon` saves the
                 // outgoing list and loads a fresh one keyed on
                 // the new project root.
-                let new_home = self.state.listing.dir.clone();
+                let new_home = self.state.left.listing.dir.clone();
                 self.state.project_home = Some(new_home.clone());
                 self.reconcile_harpoon();
                 self.state.flash_info(format!(

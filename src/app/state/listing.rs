@@ -16,20 +16,21 @@ use super::format_age;
 
 impl AppState {
     pub fn focus_on_path(&mut self, path: &Path) {
-        if let Some(i) = self.rows.iter().position(|r| r.path == path) {
-            self.cursor.index = i;
+        if let Some(i) = self.left.rows.iter().position(|r| r.path == path) {
+            self.left.cursor.index = i;
         }
     }
 
     pub fn rebuild_rows(&mut self) {
-        self.list_generation = self.list_generation.wrapping_add(1);
-        self.rows = match self.view {
+        self.left.list_generation = self.left.list_generation.wrapping_add(1);
+        self.left.rows = match self.left.view {
             View::Dir => {
                 let base: Vec<RowData> = self
+                    .left
                     .listing
                     .entries
                     .iter()
-                    .filter(|e| !self.masks.hides(&e.name))
+                    .filter(|e| !self.left.masks.hides(&e.name))
                     .map(row_from_entry)
                     .collect();
                 self.apply_temp_filter(base)
@@ -80,7 +81,7 @@ impl AppState {
                 })
                 .collect(),
         };
-        self.cursor.clamp(self.rows.len());
+        self.left.cursor.clamp(self.left.rows.len());
     }
 
     /// Re-sort the listing with the current `sort_order` / `sort_reversed` and
@@ -88,17 +89,19 @@ impl AppState {
     /// `:set sort=` command arms, which only differ in how they mutate the
     /// sort state and what they flash.
     pub fn apply_sort(&mut self) {
-        self.listing.sort(self.sort_order, self.sort_reversed);
+        self.left
+            .listing
+            .sort(self.left.sort_order, self.left.sort_reversed);
         self.rebuild_rows();
     }
 
     pub fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        let Some(ref pattern) = self.temp_filter else {
+        let Some(ref pattern) = self.left.temp_filter else {
             return rows;
         };
         if pattern == "!" {
             rows.into_iter()
-                .filter(|r| self.picks.contains(&r.path))
+                .filter(|r| self.left.picks.contains(&r.path))
                 .collect()
         } else if pattern == "h" {
             // Harpoon filter — keep entries whose absolute path is
@@ -131,9 +134,9 @@ impl AppState {
     }
 
     pub fn refresh_listing(&mut self) {
-        match Listing::read(&self.listing.dir) {
+        match Listing::read(&self.left.listing.dir) {
             Ok(new) => {
-                self.listing = new;
+                self.left.listing = new;
                 // Refresh the top-bar branch/dirty string too — without
                 // this the bar stays on `main` after edits and only
                 // updates when the user changes directories. Event-
@@ -168,14 +171,14 @@ impl AppState {
                     // on the next poll instead of dropping it.
                     self.git_cache.pending_worktree_rewalk = true;
                 }
-                let dir = self.listing.dir.clone();
+                let dir = self.left.listing.dir.clone();
                 let new_git_files = self.git_file_statuses_cached(&dir);
                 let new_git_info = self.compute_git_info_fast();
                 let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
                 new_keys.sort_unstable();
                 crate::spyc_debug!(
                     "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
-                    self.listing.dir.display(),
+                    self.left.listing.dir.display(),
                     self.git.info,
                     new_git_info,
                     self.git.files.len(),
@@ -188,7 +191,7 @@ impl AppState {
             Err(e) => {
                 crate::spyc_debug!(
                     "refresh_listing: Listing::read({}) failed: {e}",
-                    self.listing.dir.display(),
+                    self.left.listing.dir.display(),
                 );
             }
         }
@@ -197,8 +200,8 @@ impl AppState {
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
         let canonical = std::fs::canonicalize(path)?;
         let new_listing = Listing::read(&canonical)?;
-        if self.listing.dir != canonical {
-            self.prev_dir = Some(self.listing.dir.clone());
+        if self.left.listing.dir != canonical {
+            self.prev_dir = Some(self.left.listing.dir.clone());
         }
         let _ = std::env::set_current_dir(&canonical);
         // If the directory had more than `MAX_ENTRIES`, the read
@@ -212,8 +215,10 @@ impl AppState {
                 crate::fs::listing::MAX_ENTRIES
             ));
         }
-        self.listing = new_listing;
-        self.listing.sort(self.sort_order, self.sort_reversed);
+        self.left.listing = new_listing;
+        self.left
+            .listing
+            .sort(self.left.sort_order, self.left.sort_reversed);
         // Resolve + cache the repo root for the new dir *before* the git
         // calls below so they see the right root on the first run after chdir.
         self.update_repo_root(&canonical);
@@ -228,10 +233,10 @@ impl AppState {
         // different `.git/`, so seed the cache here rather than wait
         // for the next 1 Hz poll to detect the mismatch.
         self.git_cache.git_poll_cache = self.compute_git_mtime_key_fast();
-        self.picks.clear();
-        self.temp_filter = None;
-        self.cursor = Cursor::new();
-        self.view = View::Dir;
+        self.left.picks.clear();
+        self.left.temp_filter = None;
+        self.left.cursor = Cursor::new();
+        self.left.view = View::Dir;
         self.rebuild_rows();
         self.frecency.record(&canonical);
         Ok(())
@@ -274,14 +279,14 @@ impl AppState {
     /// IO and clamps the cursor itself (it previously relied on `apply()`'s
     /// trailing clamp, which the effect early-return now skips).
     pub fn climb(&mut self) -> Vec<Effect> {
-        if self.view == View::Inventory {
-            self.view = View::Dir;
+        if self.left.view == View::Inventory {
+            self.left.view = View::Dir;
             self.rebuild_rows();
-            self.cursor.clamp(self.rows.len());
+            self.left.cursor.clamp(self.left.rows.len());
             return Vec::new();
         }
-        if let Some(parent) = self.listing.dir.parent().map(Path::to_path_buf) {
-            let old_dir = self.listing.dir.clone();
+        if let Some(parent) = self.left.listing.dir.parent().map(Path::to_path_buf) {
+            let old_dir = self.left.listing.dir.clone();
             return vec![Effect::ChangeDir {
                 path: parent,
                 focus: Some(old_dir),
@@ -300,14 +305,14 @@ impl AppState {
     /// and non-existent paths with a descriptive error.
     pub fn resolve_dir_arg(&self, arg: &str) -> std::result::Result<PathBuf, String> {
         let target = if arg == "." {
-            self.listing.dir.clone()
+            self.left.listing.dir.clone()
         } else {
             crate::paths::expand(arg)
         };
         let abs = if target.is_absolute() {
             target
         } else {
-            self.listing.dir.join(&target)
+            self.left.listing.dir.join(&target)
         };
         let canon = std::fs::canonicalize(&abs).map_err(|e| e.to_string())?;
         if !canon.is_dir() {
