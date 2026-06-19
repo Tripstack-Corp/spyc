@@ -266,6 +266,7 @@ mod tasks;
 mod test_harness;
 mod update;
 mod util;
+mod vsplit;
 mod watch;
 
 use capture::PendingCapture;
@@ -547,6 +548,9 @@ pub struct ViewState {
     /// `layout.right`. `None` until the vsplit keys (PR4) open a split; it is
     /// re-read + re-rendered off-thread when its `source_path` changes (PR5).
     pub right_pager: Option<PagerView>,
+    /// Whether to fade the inactive split column / list (the focus dim). On by
+    /// default; toggled by `^a d` for users who prefer both columns bright.
+    pub dim_inactive: bool,
     /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
@@ -654,6 +658,7 @@ impl ViewState {
             pager: None,
             scroll_pager: None,
             right_pager: None,
+            dim_inactive: true,
             image_view: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,

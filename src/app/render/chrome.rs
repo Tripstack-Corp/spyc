@@ -300,7 +300,10 @@ impl App {
                     // zoom cue can't ride the pane divider like `BottomPane`'s
                     // does — surface it here, the same fallback the bg-task
                     // tag uses when there's no divider.
-                    if self.state.pane.zoom == state::ZoomTarget::TopList {
+                    if matches!(
+                        self.state.pane.zoom,
+                        state::ZoomTarget::TopList | state::ZoomTarget::RightColumn
+                    ) {
                         format!("{suffix} [ZOOM]")
                     } else {
                         suffix

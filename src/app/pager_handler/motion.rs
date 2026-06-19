@@ -19,6 +19,12 @@ impl App {
         };
         match key.code {
             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
+                // A focused right-split preview: q/Esc closes the whole split
+                // (drop the preview + clear the shape), not just the pager.
+                if self.right_column_focused() {
+                    self.close_vsplit();
+                    return Vec::new();
+                }
                 // v1.5 pane-scroll pager: snap the underlying pty
                 // back to live and clear the divider's [SCROLL]
                 // indicator. The pager is closed in the regular

@@ -293,6 +293,10 @@ impl App {
             | Action::HarpoonOpenMenu
             | Action::PanePipeContent
             | Action::PanePipeInventory
+            | Action::VsplitCycle
+            | Action::VsplitFocusLeft
+            | Action::VsplitFocusRight
+            | Action::ToggleDim
                 if matches!(
                     self.state.mode,
                     Mode::Prompting(Prompt {
@@ -312,8 +316,23 @@ impl App {
             Action::PaneFocusDown => self.set_pane_focus(true),
             Action::PaneFocusUp => self.set_pane_focus(false),
             Action::PaneSendSelection => effects = self.send_selection_to_pane(),
-            Action::PaneGrow => self.resize_pane(5),
-            Action::PaneShrink => self.resize_pane(-5),
+            // Context-sensitive: resize the split the focused pane belongs to
+            // — the vertical split's width when a column is focused, else the
+            // bottom pane's height.
+            Action::PaneGrow => self.resize_focused_split(5),
+            Action::PaneShrink => self.resize_focused_split(-5),
+            Action::VsplitCycle => self.cycle_vsplit(),
+            Action::VsplitFocusLeft => self.vsplit_focus(state::Side::Left),
+            Action::VsplitFocusRight => self.vsplit_focus(state::Side::Right),
+            Action::ToggleDim => {
+                self.view.dim_inactive = !self.view.dim_inactive;
+                self.view.needs_full_repaint = true;
+                self.state.flash_info(if self.view.dim_inactive {
+                    "dim: on"
+                } else {
+                    "dim: off"
+                });
+            }
             Action::TogglePaneZoom => self.toggle_pane_zoom(),
             Action::PaneScrollEnter => {
                 self.open_pane_scroll_pager();
@@ -332,26 +351,17 @@ impl App {
             Action::PaneNewTab => self.start_new_tab_prompt(),
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
-                // From a fullscreen list (`TopList` zoom), `^a <n>` fullscreens
-                // the chosen pane instead of dropping back to the split — the
-                // bottom tab bar makes the panes visible, and this navigates
-                // between fullscreen views. Otherwise it's a plain tab switch.
-                let from_list_zoom = self.state.pane.zoom == state::ZoomTarget::TopList;
+                // Switching tabs implies "I want to interact with this other
+                // tab" — pull focus into the pane. From a fullscreen list
+                // (`TopList` zoom), it instead fullscreens the chosen tab (see
+                // `fullscreen_tab_if_list_zoomed`), navigating between
+                // fullscreen views. Matches `^a c` (new tab).
                 self.stash_scrollback_pager_to_active_tab();
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
-                    // Switching tabs implies "I want to interact
-                    // with this other tab" — pull focus into the
-                    // pane so the next keystroke lands in the
-                    // child, not the file list. Matches the
-                    // behavior of `^a c` (new tab) which already
-                    // does this in `open_pane_tab_in`.
                     self.state.focus = state::Focus::Pane;
                 }
-                if from_list_zoom {
-                    self.state.pane.zoom = state::ZoomTarget::BottomPane;
-                    self.resize_panes_to_layout();
-                }
+                self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
                 self.view.needs_full_repaint = true;
             }
@@ -361,6 +371,7 @@ impl App {
                     tabs.next();
                     self.state.focus = state::Focus::Pane;
                 }
+                self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
                 self.view.needs_full_repaint = true;
             }
@@ -370,6 +381,7 @@ impl App {
                     tabs.prev();
                     self.state.focus = state::Focus::Pane;
                 }
+                self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
                 self.view.needs_full_repaint = true;
             }
@@ -385,6 +397,7 @@ impl App {
                     // means "interact with that tab", so pull focus
                     // into the pane.
                     self.state.focus = state::Focus::Pane;
+                    self.fullscreen_tab_if_list_zoomed();
                     self.view.needs_full_repaint = true;
                 } else {
                     self.state.flash_info("no previous tab");

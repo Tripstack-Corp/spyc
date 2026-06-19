@@ -150,12 +150,17 @@ impl Resolver {
         // PaneLastTab, so it never reaches the `'a' | 'A'` focus arm here.)
         if self.pending == PendingSeq::W {
             let out = match ev.code {
-                // Focus switching — vim-style j/J, plus plain `^a a`/`^a A`.
-                // Grouped to shut up clippy::match_same_arms.
-                KeyCode::Char('j' | 'J' | 'a' | 'A') => {
-                    ResolverOutcome::Action(Action::PaneFocusDown)
-                }
+                // Vertical focus — j/J down (to pane), k up (to list/spyc row).
+                // `a`/`A` used to alias `j` here; reclaimed below for the
+                // a/b file-pane axis (numbers = PTY tabs, letters = file panes).
+                KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
                 KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
+                // Horizontal file-pane focus (vertical split): a/h → left (a),
+                // b/l → right (b). `^a |` cycles the split open/mode/closed.
+                KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
+                KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
+                KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitCycle),
+                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
                 // Tab navigation (screen-style + vim bracket style).
                 KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
                 KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),

@@ -181,6 +181,7 @@ impl App {
                 crate::ui::pager::Mount::Overlay => "overlay",
                 crate::ui::pager::Mount::TopPane => "top",
                 crate::ui::pager::Mount::LowerPane => "lower",
+                crate::ui::pager::Mount::RightPane => "right",
             },
         };
         let git_last = if self.view.activity.git_last_ms == 0 {

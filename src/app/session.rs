@@ -17,7 +17,7 @@ use crate::state::sessions::AgentKind;
 use crate::ui::line_edit::LineEditor;
 use crate::ui::pager::{self, PagerView};
 
-use super::state::Focus;
+use super::state::{Focus, Side, VSplit, VsplitMode};
 use super::{App, RESTORE_BANNER_SETTLE};
 
 impl App {
@@ -115,6 +115,19 @@ impl App {
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
+            vsplit: self
+                .state
+                .vsplit
+                .map(|v| crate::state::sessions::SavedVsplit {
+                    width_pct: v.width_pct,
+                    full_height: matches!(v.mode, VsplitMode::FullHeight),
+                    focus_right: matches!(v.focus, Side::Right),
+                    preview_path: self
+                        .view
+                        .right_pager
+                        .as_ref()
+                        .and_then(|p| p.source_path.clone()),
+                }),
         };
         let save_result = crate::state::sessions::save_session(&session);
 
@@ -331,6 +344,29 @@ impl App {
             } else {
                 Focus::FileList
             };
+        }
+        // Restore the vertical split (shape + previewed file). Independent of
+        // the pane block above — a split can exist without a bottom pane.
+        if let Some(sv) = &session.vsplit {
+            self.state.vsplit = Some(VSplit {
+                // Clamp a hand-edited / older saved width into range.
+                width_pct: sv.width_pct.clamp(20, 80),
+                mode: if sv.full_height {
+                    VsplitMode::FullHeight
+                } else {
+                    VsplitMode::TopOnly
+                },
+                focus: if sv.focus_right {
+                    Side::Right
+                } else {
+                    Side::Left
+                },
+            });
+            // Re-load the previewed file if it still exists (wraps to the
+            // restored column width).
+            if let Some(path) = sv.preview_path.as_ref().filter(|p| p.exists()) {
+                self.load_right_preview(path);
+            }
         }
         self.state.flash_info("session restored");
     }

@@ -562,7 +562,8 @@ impl App {
                                 // `m`-toggle (the inline rebuild here used
                                 // `PagerView::new_plain` and skipped the
                                 // markdown / alt_lines branch entirely).
-                                if let Some(mut view) = self.build_pager_view_for_file(&path) {
+                                if let Some(mut view) = self.build_pager_view_for_file(&path, None)
+                                {
                                     // Override the position restored from
                                     // the per-file cache with the scroll
                                     // we explicitly stashed before

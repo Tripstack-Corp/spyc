@@ -159,6 +159,17 @@ spyc's workflow: browse files above, talk to Claude below.
   new pane reveals the split. Focus stays where it is, `^a j` / `^a k` are
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
+- **^a |** vertical (left/right) split of the file area. Opens (50/50) with a
+  **preview of the file under the cursor** (markdown rendered) in the right
+  column. Press it again **on a different file** to swap the preview to that
+  file, keeping the layout; **on the same file** it cycles the shape:
+  *top-only* (splits just the list; pane stays full-width below) → *full-height*
+  (divider runs the whole height; pane confined under the left column) → off. A
+  directory isn't previewable (it warns). `^a a` / `^a h` focus the left pane
+  (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
+  a column is focused. Opinionated: exactly two file panes, labelled a/b
+  (numbers stay for PTY tabs). *(Auto-reload of the preview when the file
+  changes on disk is coming next.)*
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager** (v1.5). All pager keys work: `/`
   search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual

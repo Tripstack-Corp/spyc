@@ -120,6 +120,10 @@ pub(super) struct RouteSnapshot {
     /// Chord resolver is mid-sequence (`^a` seen, waiting on
     /// second key — likewise for `m{a-z}`, `'{a-z}`, etc.).
     pub resolver_pending: bool,
+    /// The right (`b`) column of an open vertical split owns the keyboard
+    /// (file-pane row focused + `b` is the active column). Non-meta keys then
+    /// drive its preview pager; meta chords still escape to the resolver.
+    pub right_column_focused: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -215,6 +219,14 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         return InputSink::BottomPane;
     }
 
+    // 5b. Right column of a vertical split. When the file-pane row is focused
+    //     and the `b` column is active, non-meta keys drive its preview pager
+    //     (`active_pager_mut!` resolves `PagerKey` to `view.right_pager`);
+    //     meta chords escape to the resolver, and an open prompt still wins.
+    if snap.right_column_focused && !is_meta && !snap.is_prompting {
+        return InputSink::PagerKey;
+    }
+
     // 6. Prompt — file-list area is the active region; a prompt is
     //    up so feed the line editor.
     if snap.is_prompting {
@@ -249,6 +261,7 @@ impl App {
             pane_scrolling: self.state.pane.pane_snapshot.is_scrolling,
             pane_closed: self.state.pane.pane_snapshot.is_closed,
             resolver_pending: self.state.resolver.is_pending(),
+            right_column_focused: self.right_column_focused(),
         }
     }
 }
@@ -270,6 +283,7 @@ mod tests {
             pane_scrolling: false,
             pane_closed: false,
             resolver_pending: false,
+            right_column_focused: false,
         }
     }
 
@@ -746,7 +760,7 @@ mod tests {
             Focus::Pager(Mount::LowerPane),
         ];
         let plain = key('x'); // non-meta printable
-        // Sweep each modal × focus × pager mount × every combination of the 5
+        // Sweep each modal × focus × pager mount × every combination of the 6
         // remaining boolean bits (a flat bit-decode beats a deep `for` pyramid:
         // bit `i` of `bits` drives the i-th field). `resolver_pending` is held
         // false on purpose: with a chord pending, EVERY key (incl. `x`) is meta
@@ -756,7 +770,7 @@ mod tests {
         for &modal in &modals {
             for &focus in &focuses {
                 for &pager_mount in &mounts {
-                    for bits in 0..(1u32 << 5) {
+                    for bits in 0..(1u32 << 6) {
                         let snap = RouteSnapshot {
                             modal,
                             is_prompting: on(bits, 0),
@@ -767,6 +781,7 @@ mod tests {
                             pane_scrolling: on(bits, 3),
                             pane_closed: on(bits, 4),
                             resolver_pending: false,
+                            right_column_focused: on(bits, 5),
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

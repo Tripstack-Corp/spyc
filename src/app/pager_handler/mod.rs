@@ -27,7 +27,9 @@ use super::{App, Effect, EntryKind, PagerView, state};
 /// `?` or `let Some(view) = active_pager_mut!(self) else { … }`.
 macro_rules! active_pager_mut {
     ($self:ident) => {
-        if $self.state.pane_focused() && $self.view.scroll_pager.is_some() {
+        if $self.right_column_focused() {
+            $self.view.right_pager.as_mut()
+        } else if $self.state.pane_focused() && $self.view.scroll_pager.is_some() {
             $self.view.scroll_pager.as_mut()
         } else {
             $self.view.pager.as_mut()
@@ -344,8 +346,10 @@ impl App {
     /// fields (`pending_history_pick`, `state.config`) while
     /// holding the pager. The macro inlines the slot pick so the borrow stays
     /// field-level (`view.pager` / `view.scroll_pager` only).
-    pub(super) const fn active_pager_ref(&self) -> Option<&PagerView> {
-        if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+    pub(super) fn active_pager_ref(&self) -> Option<&PagerView> {
+        if self.right_column_focused() {
+            self.view.right_pager.as_ref()
+        } else if self.state.pane_focused() && self.view.scroll_pager.is_some() {
             self.view.scroll_pager.as_ref()
         } else {
             self.view.pager.as_ref()
@@ -423,7 +427,15 @@ impl App {
             self.spawn_pager_overlay_for_path(&path);
             return;
         }
-        let Some(mut view) = self.build_pager_view_for_file(&path) else {
+        // With a vertical split open, `D`'s pager renders in the LEFT column
+        // (the carve scopes `top_unit`), so wrap to that width — not the full
+        // terminal, or the markdown overflows the narrow column. Derived from
+        // the same width helper as the carve (`None` = full width).
+        let wrap = self.state.vsplit.and_then(|v| {
+            let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+            super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(|(left_w, _)| left_w)
+        });
+        let Some(mut view) = self.build_pager_view_for_file(&path, wrap) else {
             return;
         };
         view.mount = crate::ui::pager::Mount::TopPane;
@@ -436,6 +448,35 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
+    /// Load a one-shot preview of the file under the cursor into the right
+    /// column of a vertical split (`view.right_pager`, `Mount::RightPane`).
+    /// Mirrors `display_in_pane`'s dir/size checks; a directory or oversized
+    /// file leaves the right region blank (the split still opens). PR5 makes
+    /// this re-render automatically when the file changes on disk.
+    /// The path under the cursor if it's previewable in the right split — a
+    /// readable file, **not** a directory (huge files page truncated). `None`
+    /// for a directory (or no row); the caller flashes the warning.
+    pub(super) fn previewable_cursor_path(&self) -> Option<std::path::PathBuf> {
+        let row = self.state.rows.get(self.state.cursor.index)?;
+        let path = row.path.clone();
+        let is_dir = row.kind == EntryKind::Dir
+            || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path));
+        (!is_dir).then_some(path)
+    }
+
+    /// Load `path` into the right-split preview slot (`Mount::RightPane`),
+    /// wrapping markdown to the right column's width (not the full terminal,
+    /// or long lines overflow the narrow column). Caller has already checked
+    /// `previewable_cursor_path`.
+    pub(super) fn load_right_preview(&mut self, path: &std::path::Path) {
+        let wrap = self.right_preview_body_width();
+        if let Some(mut view) = self.build_pager_view_for_file(path, Some(wrap)) {
+            view.mount = crate::ui::pager::Mount::RightPane;
+            view.no_history = true;
+            self.view.right_pager = Some(view);
+        }
+    }
+
     /// Build a `PagerView` from a file on disk. Handles text (with
     /// markdown rendering / syntax highlighting / truncation banner
     /// for big files) and binary (hex dump). Flashes a read error
@@ -445,7 +486,11 @@ impl App {
     /// inline body of `ActivateIntent::Display` so both `Enter` /
     /// `d` (overlay) and `D` (top pane) share the same loading
     /// path.
-    pub fn build_pager_view_for_file(&mut self, path: &Path) -> Option<PagerView> {
+    pub fn build_pager_view_for_file(
+        &mut self,
+        path: &Path,
+        wrap_width: Option<u16>,
+    ) -> Option<PagerView> {
         let name = path
             .file_name()
             .unwrap_or_default()
@@ -548,7 +593,11 @@ impl App {
                 // conservative estimate, which buys ~1 digit of
                 // safety on the gutter.
                 let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                let body_w = crate::ui::pager::centered_body_width(term_w) as usize;
+                // A caller-supplied `wrap_width` (the right-split column) wins;
+                // otherwise wrap to the centered overlay body width.
+                let body_w = wrap_width
+                    .unwrap_or_else(|| crate::ui::pager::centered_body_width(term_w))
+                    as usize;
                 let source_line_count = content.lines().count().max(1);
                 let gutter_w = (source_line_count.saturating_mul(4)).max(1).ilog10() as usize + 2;
                 let pager_w = body_w.saturating_sub(2 + gutter_w);

@@ -303,15 +303,32 @@ impl App {
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
     pub fn set_pane_focus(&mut self, want_pane: bool) {
-        if self.runtime.pane_tabs.is_none() {
+        // While zoomed, focus is pinned to the zoomed region: the other
+        // region is collapsed/off-screen, so moving focus there is exactly the
+        // confusing case. Refuse with a hint (mirrors `resize_pane`).
+        if self.state.pane.zoom != state::ZoomTarget::None {
+            self.state.flash_info("zoomed (^a z to exit)");
             return;
         }
-        // While zoomed, focus is pinned to the zoomed region: the other
-        // region is collapsed (list → 0 rows) or off-screen (pane hidden),
-        // so moving focus there is exactly the confusing case. Refuse with a
-        // hint — you're zoomed, and that's that (mirrors `resize_pane`).
-        if self.state.pane.zoom != state::ZoomTarget::None {
-            self.state.flash_info("pane is zoomed (^a z to exit)");
+        // From the right split column, `^a j` descends to the bottom pane (when
+        // one's open) but *keeps* `vsplit.focus` on the right — so `^a k` from
+        // the pane climbs back to the right column it came from, not the left
+        // list (the generic path below restores it via `right_column_focused`).
+        // `^a k` has nothing above the top-right column → no-op.
+        if self.right_column_focused() {
+            if want_pane && self.runtime.pane_tabs.is_some() {
+                self.state.focus = state::Focus::Pane;
+                let label = self
+                    .runtime
+                    .pane_tabs
+                    .as_ref()
+                    .map_or("pane", |t| t.active_info().label.as_str());
+                self.state.flash_info(format!("focus: {label}"));
+                self.view.needs_full_repaint = true;
+            }
+            return;
+        }
+        if self.runtime.pane_tabs.is_none() {
             return;
         }
         if self.state.pane_focused() == want_pane {
@@ -335,6 +352,9 @@ impl App {
                 .as_ref()
                 .map_or("pane", |t| t.active_info().label.as_str());
             self.state.flash_info(format!("focus: {label}"));
+        } else if self.right_column_focused() {
+            // `^a k` from the pane climbed back to the remembered right column.
+            self.state.flash_info("focus: b (right)");
         } else {
             // When a `;cmd` overlay is showing the spyc-list slot, the
             // "non-pane" side is the overlay subprocess, not the file
@@ -433,6 +453,9 @@ impl App {
         let current = i32::from(self.state.pane.pane_height_pct);
         let new = (current + delta_pct).clamp(10, 90);
         self.state.pane.pane_height_pct = new as u16;
+        // Force a full clear+redraw: the divider moves, and dirty-frame
+        // rendering otherwise leaves a stale row at the old boundary.
+        self.view.needs_full_repaint = true;
     }
 
     /// The pane percentage to use for layout/sizing computations. Zoom drives
@@ -445,7 +468,9 @@ impl App {
     pub const fn effective_pane_pct(&self) -> u16 {
         match self.state.pane.zoom {
             state::ZoomTarget::BottomPane => 100,
-            state::ZoomTarget::TopList => 0,
+            // Both collapse the pane and fill the body: `TopList` renders the
+            // list there, `RightColumn` renders the preview (see `render_inner`).
+            state::ZoomTarget::TopList | state::ZoomTarget::RightColumn => 0,
             state::ZoomTarget::None => self.state.pane.pane_height_pct,
         }
     }
@@ -460,17 +485,23 @@ impl App {
     /// bottom pane" bug). The stored `pane_height_pct` is preserved across
     /// the round-trip. No-op (with a flash) when the pane is closed.
     pub fn toggle_pane_zoom(&mut self) {
-        if self.runtime.pane_tabs.is_none() {
-            self.state.flash_info("no pane open");
+        // Need *something* zoomable: a pane or a vertical split.
+        if self.runtime.pane_tabs.is_none() && self.state.vsplit.is_none() {
+            self.state.flash_info("nothing to zoom");
             return;
         }
         if self.state.pane.zoom != state::ZoomTarget::None {
             self.state.pane.zoom = state::ZoomTarget::None;
             self.state.flash_info("zoom: off");
+        } else if self.right_column_focused() {
+            // Right split column focused → fullscreen the preview.
+            self.state.pane.zoom = state::ZoomTarget::RightColumn;
+            self.state.flash_info("zoom: b (^a z to exit)");
         } else if self.state.pane_focused() {
             self.state.pane.zoom = state::ZoomTarget::BottomPane;
             self.state.flash_info("zoom: pane (^a z to exit)");
         } else {
+            // File list (or the left split column) focused.
             self.state.pane.zoom = state::ZoomTarget::TopList;
             self.state.flash_info("zoom: list (^a z to exit)");
         }
@@ -500,6 +531,17 @@ impl App {
             for entry in tabs.tabs_mut() {
                 let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
             }
+        }
+    }
+
+    /// After a tab switch from a fullscreen list (`TopList` zoom), fullscreen
+    /// the newly-active tab (flip to `BottomPane` zoom) — so `^a n`/`^a p`/`^a #`
+    /// navigate between fullscreen views instead of flipping a hidden pane.
+    /// No-op when not list-zoomed.
+    pub(super) fn fullscreen_tab_if_list_zoomed(&mut self) {
+        if self.state.pane.zoom == state::ZoomTarget::TopList {
+            self.state.pane.zoom = state::ZoomTarget::BottomPane;
+            self.resize_panes_to_layout();
         }
     }
 

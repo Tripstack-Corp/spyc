@@ -378,9 +378,27 @@ mod layout_tests {
         let right = l.right.unwrap();
         assert_eq!((right.x, right.width), (44, 36));
         assert_eq!(right.x + right.width, 80, "right column reaches the edge");
-        // Same vertical band as the list (TopOnly).
-        assert_eq!((right.y, right.height), (l.list.y, l.list.height));
-        // Everything else stays full-width.
+        // The right column + divider claim the prompt row and run down to the
+        // horizontal pane divider (the preview doesn't need the arming line).
+        let div = l.divider.unwrap();
+        assert_eq!(right.y, l.list.y);
+        assert_eq!(
+            right.y + right.height,
+            div.y,
+            "right reaches the pane divider"
+        );
+        assert_eq!(
+            vd.y + vd.height,
+            div.y,
+            "divider reaches the horizontal line"
+        );
+        assert!(
+            right.height > l.list.height,
+            "right is taller than the left list"
+        );
+        // The prompt (arming/flash) stays under the left column only; the pane
+        // stays full-width (TopOnly).
+        assert_eq!(l.prompt.width, 43);
         assert_eq!(l.status.width, 80);
         assert_eq!(l.pane.unwrap().width, 80);
     }

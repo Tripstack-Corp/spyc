@@ -132,6 +132,12 @@ pub enum Action {
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
+    // Vertical (left/right) split — file panes labelled a/b.
+    VsplitCycle,      // ^a | — cycle off → top-only → full-height → off (opens a preview)
+    VsplitFocusLeft,  // ^a a / ^a h — focus the left region (a)
+    VsplitFocusRight, // ^a b / ^a l — focus the right region (b)
+    ToggleDim,        // ^a d — toggle the focus-dim of the inactive column / list
+
     // Graveyard.
     OpenGraveyardView, // g y — open the graveyard viewer
 
@@ -266,6 +272,10 @@ impl Action {
             Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
+            Self::VsplitCycle => "vertical split: off / top-only / full-height",
+            Self::VsplitFocusLeft => "focus left pane (a)",
+            Self::VsplitFocusRight => "focus right pane (b)",
+            Self::ToggleDim => "toggle dimming of the inactive pane",
             Self::OpenGraveyardView => "open graveyard viewer (recover deleted)",
             Self::QuickSelectOpen => "quick select — pick URL/path/SHA/IP from pane",
             Self::HarpoonJump(_) => "jump to harpoon slot N",

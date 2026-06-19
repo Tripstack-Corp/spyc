@@ -136,14 +136,45 @@ fn ctrl_a_ctrl_a_is_last_tab() {
 }
 
 #[test]
-fn ctrl_a_plain_a_is_focus_down() {
+fn ctrl_a_plain_a_focuses_left_pane() {
     let mut r = Resolver::new();
     let user = empty_keymap();
-    // Plain `a` (no ctrl) after the prefix stays focus-down — only
-    // the ctrl-modified second key is last-tab.
+    // Plain `a` (no ctrl) after the prefix focuses the left file pane (a) —
+    // reclaimed from the old focus-down alias. `^a ^a` (ctrl-modified) is
+    // still last-tab, and `^a j` keeps focus-down.
     r.feed(ctrl('a'), &user);
-    let out = r.feed(key('a'), &user);
-    assert_eq!(out, ResolverOutcome::Action(Action::PaneFocusDown));
+    assert_eq!(
+        r.feed(key('a'), &user),
+        ResolverOutcome::Action(Action::VsplitFocusLeft)
+    );
+    r.feed(ctrl('a'), &user);
+    assert_eq!(
+        r.feed(key('j'), &user),
+        ResolverOutcome::Action(Action::PaneFocusDown)
+    );
+}
+
+/// The vertical-split chords: `|` cycles, `a`/`h` focus left, `b`/`l` right,
+/// `d` toggles the focus-dim.
+#[test]
+fn vsplit_chords_bind_to_their_actions() {
+    let mut r = Resolver::new();
+    let user = empty_keymap();
+    for (k, want) in [
+        ('|', Action::VsplitCycle),
+        ('a', Action::VsplitFocusLeft),
+        ('h', Action::VsplitFocusLeft),
+        ('b', Action::VsplitFocusRight),
+        ('l', Action::VsplitFocusRight),
+        ('d', Action::ToggleDim),
+    ] {
+        r.feed(ctrl('a'), &user);
+        assert_eq!(
+            r.feed(key(k), &user),
+            ResolverOutcome::Action(want.clone()),
+            "^a {k} should bind to {want:?}"
+        );
+    }
 }
 
 #[test]

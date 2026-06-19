@@ -399,7 +399,14 @@ pub enum ZoomTarget {
     BottomPane,
     /// The file list fills the frame; the pane collapses off-screen (like
     /// `pane_hidden`, but the pty stays alive and the prior split is kept).
+    /// Also the **left** column of a vertical split zoomed (the list is that
+    /// column's content).
     TopList,
+    /// The **right** column of a vertical split (the preview) fills the frame;
+    /// the left column + pane collapse. Like `TopList` for layout (pane
+    /// collapsed, body full), but the body renders `view.right_pager` instead
+    /// of the file list. The split is kept, so un-zoom restores it.
+    RightColumn,
 }
 
 // NOTE: `Side` / `VsplitMode` / `VSplit` are dormant scaffolding in this PR —
@@ -471,6 +478,11 @@ pub struct PaneLayout {
     /// second."  Explicit kill of a tab still goes through `^a-x`
     /// (`PaneCloseTab`).
     pub pane_hidden: bool,
+    /// In a vertical split, the left side's vertical position when focus last
+    /// left it for the right column — `true` = the bottom pane, `false` = the
+    /// file list. `^a h` (focus left) restores it, so returning from the right
+    /// doesn't always snap to the top list.
+    pub vsplit_left_was_pane: bool,
 }
 
 pub struct AppState {

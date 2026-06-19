@@ -90,6 +90,9 @@ impl App {
                 // cursor (the overlay's own cursor is suppressed the same way).
                 self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
             }
+            // The overlay (`top_unit`) is scoped to the left column when a
+            // vertical split is open; keep the right preview visible beside it.
+            self.render_right_split(frame, &layout);
             return;
         }
 
@@ -137,6 +140,9 @@ impl App {
             if let Some(rect) = layout.pane {
                 self.render_bottom_region(frame, rect, false);
             }
+            // The TopPane pager (`top_unit`) is scoped to the left column when
+            // a vertical split is open; keep the right preview visible beside it.
+            self.render_right_split(frame, &layout);
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
             // top of the just-drawn slot before returning. The
@@ -181,31 +187,40 @@ impl App {
         // The rows cache + view_top↔grid stabilization were settled in
         // `prepare_frame` (MVU Stage 2); read the results for the draw.
         let rows = &self.view.cached_rows;
-        let list_focused = !self.state.pane_focused();
+        // The left list is the bright/focused column only when the file-pane
+        // row owns the keyboard AND the right column isn't the active one;
+        // otherwise it dims (ListView fades on `!focused`). With dimming off
+        // (`^a d`) the list always renders bright.
+        let list_focused =
+            !self.view.dim_inactive || (!self.state.pane_focused() && !self.right_column_focused());
 
-        frame.render_widget(
-            ListView {
-                rows,
-                cursor: self.state.cursor.index,
-                view_top: self.state.cursor.view_top,
-                empty_marker: self.state.view == View::Dir,
-                focused: list_focused,
-                theme: &self.view.theme,
-            },
-            layout.list,
-        );
+        // When the right column is zoomed (`^a z` on the preview), the preview
+        // fills the body instead of the list — the pane is collapsed exactly
+        // like `TopList`, but the body renders `view.right_pager`.
+        if self.state.pane.zoom == state::ZoomTarget::RightColumn
+            && let Some(view) = self.view.right_pager.as_ref()
+        {
+            crate::ui::pager::render(frame, layout.list, view, &self.view.theme);
+        } else {
+            frame.render_widget(
+                ListView {
+                    rows,
+                    cursor: self.state.cursor.index,
+                    view_top: self.state.cursor.view_top,
+                    empty_marker: self.state.view == View::Dir,
+                    focused: list_focused,
+                    theme: &self.view.theme,
+                },
+                layout.list,
+            );
+        }
 
         // Right column of a vertical split (the live-reloading preview): its
         // own slot (`view.right_pager`) painted into `layout.right`, coexisting
         // with the top/bottom region pagers, plus the 1-column vertical
         // divider. Both are `None` until a split is open (PR4) — single-column
         // is a no-op here, so this stays byte-identical today.
-        if let (Some(rect), Some(view)) = (layout.right, self.view.right_pager.as_ref()) {
-            crate::ui::pager::render(frame, rect, view, &self.view.theme);
-        }
-        if let Some(vd) = layout.vdivider {
-            self.render_vsplit_divider(frame, vd);
-        }
+        self.render_right_split(frame, &layout);
 
         // v1.5 Phase 3: the bottom region is the `^a v` scrollback pager
         // (`view.scroll_pager`, a `LowerPane` snapshot) when one is open — it
@@ -318,6 +333,24 @@ impl App {
         }
     }
 
+    /// Paint the right column of a vertical split (the live preview) into
+    /// `layout.right` plus the vertical divider — shared by the default draw
+    /// path AND the `V`/`;cmd` overlay / `D` TopPane-pager paths (which scope
+    /// their own surface to the left column via `top_unit`), so the preview
+    /// stays visible beside an editor/pager. Fades the preview when its column
+    /// isn't the input target. No-op when no split is open (`right` is `None`).
+    fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
+        if let (Some(rect), Some(view)) = (layout.right, self.view.right_pager.as_ref()) {
+            crate::ui::pager::render(frame, rect, view, &self.view.theme);
+            if self.view.dim_inactive && !self.right_column_focused() {
+                self.dim_region(frame, rect);
+            }
+        }
+        if let Some(vd) = layout.vdivider {
+            self.render_vsplit_divider(frame, vd);
+        }
+    }
+
     /// Paint the 1-column vertical separator between the left and right columns
     /// of a vertical split — `│` down the column, muted like the horizontal
     /// pane divider's unfocused rule (`theme.status_suffix`). Cell-level paint
@@ -329,6 +362,22 @@ impl App {
         for y in rect.y..rect.y.saturating_add(rect.height) {
             if let Some(cell) = buf.cell_mut((rect.x, y)) {
                 cell.set_char('│').set_style(style);
+            }
+        }
+    }
+
+    /// Fade an already-painted region by OR-ing the `DIM` modifier into every
+    /// cell (SGR 2, ~50% lightness on modern terminals) — the same fade
+    /// ListView and PaneWidget use for an unfocused surface. Used to dim the
+    /// right preview column when it isn't the input target.
+    fn dim_region(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        let dim = ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM);
+        let buf = frame.buffer_mut();
+        for y in rect.y..rect.y.saturating_add(rect.height) {
+            for x in rect.x..rect.x.saturating_add(rect.width) {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_style(dim);
+                }
             }
         }
     }

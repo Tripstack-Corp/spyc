@@ -53,6 +53,9 @@ pub enum Mount {
     /// pane-scrollback view: the pty keeps running, we just stop
     /// drawing it while the pager is up.
     LowerPane,
+    /// The right column of a vertical split (the live-reloading preview).
+    /// Drawn into `layout.right`; held in its own `view.right_pager` slot.
+    RightPane,
 }
 
 /// What flavor of visual selection is active.

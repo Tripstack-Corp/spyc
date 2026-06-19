@@ -215,8 +215,18 @@ const SECTIONS: &[Section] = &[
             ("^a ^a", "jump to last-active tab"),
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
-            ("^a +  ^a -", "grow / shrink the pane"),
+            (
+                "^a +  ^a -",
+                "grow / shrink the focused split (pane height / vsplit width)",
+            ),
             ("^a z", "zoom the active region — list or bottom pane"),
+            (
+                "^a |",
+                "vertical split: cycle off / top-only / full-height (cursor-file preview)",
+            ),
+            ("^a a  ^a h", "focus the left file pane (a)"),
+            ("^a b  ^a l", "focus the right file pane (b)"),
+            ("^a d", "toggle dimming of the inactive pane / list"),
             (
                 "^a v",
                 "scroll pane history in the in-app pager (/, n/N, :N, V, ^v, y)",

@@ -88,6 +88,25 @@ pub struct Session {
     /// Auto-set at startup when launch dir contains `.git`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_home: Option<PathBuf>,
+    /// The vertical (left/right) split open at save time — its shape and the
+    /// previewed file — restored on `-r`. `None` when no split was open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vsplit: Option<SavedVsplit>,
+}
+
+/// Persisted vertical-split state for `-r` restore. Primitives only, so the
+/// `sessions` layer stays free of `app::state` types (the app layer converts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedVsplit {
+    /// The right column's width share (percent).
+    pub width_pct: u16,
+    /// `true` = full-height layout, `false` = top-only.
+    pub full_height: bool,
+    /// `true` = the right column (`b`) owned the keyboard.
+    pub focus_right: bool,
+    /// The previewed file, re-loaded into the right column on restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_path: Option<PathBuf>,
 }
 
 fn sessions_dir() -> Option<PathBuf> {

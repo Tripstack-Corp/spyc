@@ -267,7 +267,7 @@ pub(super) fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
                 centered_rect(area, CENTERED_W_PCT, 92)
             }
         }
-        Mount::TopPane | Mount::LowerPane => area,
+        Mount::TopPane | Mount::LowerPane | Mount::RightPane => area,
     }
 }
 

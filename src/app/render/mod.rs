@@ -281,40 +281,58 @@ impl App {
         area: ratatui::layout::Rect,
     ) -> FrameLayout {
         use ratatui::layout::Rect;
-        // Each column floors at MIN_COL; below `2*MIN_COL + 1` (the divider)
-        // there's no room, so stay single-column this frame.
-        const MIN_COL: u16 = 20;
+        // Column widths come from the shared, clamped helper (same source as
+        // the markdown wrap widths, so they can't drift). `None` = too narrow
+        // for two usable columns → stay single-column this frame.
         let w = area.width;
-        if w < MIN_COL * 2 + 1 {
+        let Some((left_w, right_w)) = super::vsplit::vsplit_column_widths(w, vsplit.width_pct)
+        else {
             return layout;
-        }
-        let pct = vsplit.width_pct.clamp(20, 80);
-        let right_w = ((u32::from(w) * u32::from(pct)) / 100) as u16;
-        let right_w = right_w.clamp(MIN_COL, w - MIN_COL - 1);
-        let left_w = w - right_w - 1; // 1 column for the vertical divider
-        let vdiv_x = area.x + left_w;
+        };
+        let vdiv_x = area.x + left_w; // 1 column for the vertical divider
         let right_x = vdiv_x + 1;
         let mut out = layout;
         match vsplit.mode {
             state::VsplitMode::TopOnly => {
-                // Split only the list region; status/divider/pane/prompt stay
-                // full-width.
+                // Split the list region into left | divider | right. The right
+                // column also claims the prompt row — the preview doesn't need
+                // the spyc arming/flash line (that's the left list's) — so it
+                // runs one row taller, with the divider all the way down to the
+                // horizontal pane divider. Only when the prompt sits in the top
+                // region (top-status / no pane); in bottom-status the prompt is
+                // below the pane, so the right column is just the list region.
                 let list = out.list;
                 out.list = Rect {
                     width: left_w,
                     ..list
                 };
+                // Scope the overlay/TopPane region (`top_unit`) to the left
+                // column too, so a `V` editor / `;cmd` / `D` pager occupies the
+                // left column and the right preview stays visible beside it.
+                out.top_unit.width = out.top_unit.width.min(left_w);
+                let pane_div_y = out.divider.map(|d| d.y);
+                let prompt_in_top = pane_div_y.is_none_or(|dy| out.prompt.y < dy);
+                let bottom = if prompt_in_top {
+                    pane_div_y.unwrap_or(out.prompt.y + out.prompt.height)
+                } else {
+                    list.y + list.height
+                };
+                if prompt_in_top {
+                    // Keep the arming/flash line under the left list only.
+                    out.prompt.width = out.prompt.width.min(left_w);
+                }
+                let height = bottom.saturating_sub(list.y);
                 out.vdivider = Some(Rect {
                     x: vdiv_x,
                     y: list.y,
                     width: 1,
-                    height: list.height,
+                    height,
                 });
                 out.right = Some(Rect {
                     x: right_x,
                     y: list.y,
                     width: right_w,
-                    height: list.height,
+                    height,
                 });
             }
             state::VsplitMode::FullHeight => {
@@ -388,11 +406,15 @@ impl App {
             self.state.config.layout.status_position,
         );
         // Carve the single-column layout into a left/right split when one is
-        // open. `None` (today's only runtime state until the vsplit keys land)
-        // returns the layout untouched — byte-identical single-column.
+        // open AND no zoom is active — a `^a z` zoom fills one region full-screen
+        // and takes precedence over the split (otherwise the zoomed pane would
+        // be clamped to the left column). The split state is kept, so un-zoom
+        // restores it.
         let layout = match self.state.vsplit {
-            Some(vsplit) => Self::carve_vsplit(layout, vsplit, area),
-            None => layout,
+            Some(vsplit) if self.state.pane.zoom == state::ZoomTarget::None => {
+                Self::carve_vsplit(layout, vsplit, area)
+            }
+            _ => layout,
         };
         if self.runtime.top_overlay.is_none() {
             self.settle_list_grid(&layout);

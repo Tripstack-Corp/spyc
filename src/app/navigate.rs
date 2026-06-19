@@ -232,7 +232,7 @@ impl App {
         // File: dispatch based on intent.
         match intent {
             ActivateIntent::Display => {
-                if let Some(view) = self.build_pager_view_for_file(&path) {
+                if let Some(view) = self.build_pager_view_for_file(&path, None) {
                     self.set_pager(view);
                 }
                 Vec::new()

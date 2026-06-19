@@ -432,6 +432,7 @@ fn save_load_prune_and_dedup() {
             pane_focused: false,
             name: "SAFFRON_CUMIN".to_string(),
             project_home: None,
+            vsplit: None,
         };
         save_session(&session).unwrap();
         let loaded = load_sessions();
@@ -466,6 +467,7 @@ fn save_load_prune_and_dedup() {
                 pane_focused: false,
                 name: String::new(),
                 project_home: None,
+                vsplit: None,
             };
             save_session(&s).unwrap();
         }
@@ -495,6 +497,7 @@ fn save_load_prune_and_dedup() {
                 pane_focused: false,
                 name: String::new(),
                 project_home: None,
+                vsplit: None,
             };
             save_session(&s).unwrap();
         }
@@ -541,6 +544,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
             pane_focused: true,
             name: "SAFFRON_PAPRIKA".into(),
             project_home: Some(PathBuf::from("/tmp/proj")),
+            vsplit: None,
         };
         save_session(&session).unwrap();
 
