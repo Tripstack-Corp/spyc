@@ -29,6 +29,30 @@ mod chrome;
 mod inner;
 mod overlays;
 
+/// What to do with the top overlay when its child has (or hasn't) exited.
+/// Editor/pager overlays auto-close; command overlays hold for a dismiss key.
+#[derive(Debug, PartialEq, Eq)]
+enum OverlayExit {
+    /// Child still running, or the exit frame is already being held — no change.
+    Hold,
+    /// Interactive overlay (editor / pager) exited — tear it down immediately.
+    AutoClose,
+    /// Command overlay exited — hold the "[process exited]" frame for a keypress.
+    AwaitDismiss,
+}
+
+/// Pure dismissal policy for a top overlay (see [`OverlayExit`]). Extracted so
+/// the editor-vs-command rule is unit-tested without spawning a pty.
+const fn overlay_exit(closed: bool, awaiting: bool, auto_dismiss: bool) -> OverlayExit {
+    if !closed || awaiting {
+        OverlayExit::Hold
+    } else if auto_dismiss {
+        OverlayExit::AutoClose
+    } else {
+        OverlayExit::AwaitDismiss
+    }
+}
+
 impl App {
     /// Partition the frame into status/list/prompt rects — plus, when
     /// the pane is open, a divider row and the pane rect below it.
@@ -481,7 +505,7 @@ impl App {
 
         // Top overlay (`;cmd`/`V`/`D`): resize to the spyc area, drain, and
         // flag dismissal once the child exits.
-        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+        let overlay_closed = if let Some(overlay) = self.runtime.top_overlay.as_mut() {
             // Resize to the region the overlay actually paints (`top_unit`),
             // so the pty's row count matches what render_inner draws under
             // both status positions.
@@ -489,7 +513,26 @@ impl App {
             let w = layout.top_unit.width;
             let _ = overlay.resize(h, w);
             overlay.drain_output();
-            if overlay.is_closed() && !self.view.overlay_awaiting_dismiss {
+            overlay.is_closed()
+        } else {
+            false
+        };
+        match overlay_exit(
+            overlay_closed,
+            self.view.overlay_awaiting_dismiss,
+            self.view.overlay_auto_dismiss,
+        ) {
+            OverlayExit::Hold => {}
+            OverlayExit::AutoClose => {
+                // Interactive overlay (editor / pager): no output to read, so
+                // return to spyc immediately rather than holding a "press any
+                // key" frame. `recompute_focus` at the next loop top drops the
+                // stale `Overlay` focus; this frame already redraws without it.
+                self.runtime.top_overlay = None;
+                self.view.overlay_auto_dismiss = false;
+                self.view.needs_full_repaint = true;
+            }
+            OverlayExit::AwaitDismiss => {
                 self.view.overlay_awaiting_dismiss = true;
             }
         }
@@ -847,5 +890,33 @@ mod purity_guard {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod overlay_exit_tests {
+    use super::{OverlayExit, overlay_exit};
+
+    #[test]
+    fn running_or_already_held_does_nothing() {
+        // Not closed yet → hold, regardless of the flags.
+        assert_eq!(overlay_exit(false, false, false), OverlayExit::Hold);
+        assert_eq!(overlay_exit(false, false, true), OverlayExit::Hold);
+        // Closed but already awaiting dismissal → hold (don't re-fire).
+        assert_eq!(overlay_exit(true, true, false), OverlayExit::Hold);
+        assert_eq!(overlay_exit(true, true, true), OverlayExit::Hold);
+    }
+
+    #[test]
+    fn closed_editor_overlay_auto_closes() {
+        // Interactive overlay (V editor / D pager): return to spyc immediately.
+        assert_eq!(overlay_exit(true, false, true), OverlayExit::AutoClose);
+    }
+
+    #[test]
+    fn closed_command_overlay_awaits_dismiss() {
+        // `;cmd` / `:`-spawned command: hold the exit frame so output (e.g.
+        // `;ls`) doesn't flash and vanish before the user reads it.
+        assert_eq!(overlay_exit(true, false, false), OverlayExit::AwaitDismiss);
     }
 }

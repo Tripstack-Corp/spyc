@@ -342,6 +342,7 @@ impl App {
     fn dismiss_overlay(&mut self) {
         self.runtime.top_overlay = None;
         self.view.overlay_awaiting_dismiss = false;
+        self.view.overlay_auto_dismiss = false;
         self.view.needs_full_repaint = true;
         // The overlay just closed — drop the stale `Overlay` focus this frame.
         self.recompute_focus();

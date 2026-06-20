@@ -618,6 +618,13 @@ pub struct ViewState {
     /// `gg` arming for the graveyard view (jump to top).
     pub graveyard_pending_g: bool,
     pub overlay_awaiting_dismiss: bool,
+    /// When the current top overlay's child exits, return to spyc **immediately**
+    /// instead of holding the "[process exited — press any key]" frame. Set for
+    /// interactive overlays — the `V` editor, the `D` huge-file `$PAGER`, the
+    /// in-pager editor — where there's no command output to linger on (you `:q`
+    /// and want straight back). Left `false` for `;cmd` / `:`-spawned commands,
+    /// whose output the await-dismiss preserves (so `;ls` doesn't flash + vanish).
+    pub overlay_auto_dismiss: bool,
     /// TTL cache for the active pane's status-line session short-id.
     // Module-private (type `AgentStatusCache` is module-private); the
     // `app::*` descendant modules still reach it via `self.view.…`.
@@ -706,6 +713,7 @@ impl ViewState {
             graveyard_pending_d: false,
             graveyard_pending_g: false,
             overlay_awaiting_dismiss: false,
+            overlay_auto_dismiss: false,
             agent_status_cache: None,
             pending_history_pick: None,
             pending_jump_history: None,

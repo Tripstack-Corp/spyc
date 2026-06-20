@@ -281,6 +281,8 @@ impl App {
                     match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
                         Ok(p) => {
                             self.runtime.top_overlay = Some(p);
+                            // Editor overlay: auto-return on exit (no dismiss key).
+                            self.view.overlay_auto_dismiss = true;
                             self.state.focus = Focus::Overlay;
                         }
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),

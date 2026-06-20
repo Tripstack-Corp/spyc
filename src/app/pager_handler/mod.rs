@@ -393,6 +393,9 @@ impl App {
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
                 self.runtime.top_overlay = Some(p);
+                // Interactive overlay (editor / pager): on exit, return to spyc
+                // immediately rather than holding a "press any key" frame.
+                self.view.overlay_auto_dismiss = true;
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
@@ -762,6 +765,9 @@ impl App {
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
                 self.runtime.top_overlay = Some(p);
+                // Interactive overlay (editor / pager): on exit, return to spyc
+                // immediately rather than holding a "press any key" frame.
+                self.view.overlay_auto_dismiss = true;
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
