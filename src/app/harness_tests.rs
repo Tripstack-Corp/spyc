@@ -1107,7 +1107,8 @@ fn second_commander_open_focus_and_close() {
         }
         let mut app = App::test_app(dir);
 
-        app.apply(&Action::OpenSecondCommander).unwrap();
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
         assert!(app.state.right.is_some(), "^z n opens a second commander");
         assert_eq!(
             app.state.vsplit.map(|v| v.focus),
@@ -1167,7 +1168,8 @@ fn vsplit_cycle_disabled_with_second_commander() {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
 
-        app.apply(&Action::OpenSecondCommander).unwrap();
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
         let shape = app.state.vsplit;
 
         app.apply(&Action::VsplitCycle).unwrap();
@@ -1196,7 +1198,8 @@ fn v_d_refused_from_second_commander() {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
 
-        app.apply(&Action::OpenSecondCommander).unwrap();
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
         assert!(app.right_column_focused(), "the new commander owns input");
 
         app.apply(&Action::EditInPane).unwrap();
@@ -1221,7 +1224,8 @@ fn session_does_not_persist_a_commander_split() {
         let mut app = App::test_app(dir);
         app.state.session_name = Some("vsplit-commander-test".to_string());
 
-        app.apply(&Action::OpenSecondCommander).unwrap();
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
         assert!(app.state.vsplit.is_some() && app.state.right.is_some());
 
         app.save_session();
@@ -1232,6 +1236,38 @@ fn session_does_not_persist_a_commander_split() {
         assert!(
             saved.vsplit.is_none(),
             "a commander split must not be persisted (would orphan on restore)"
+        );
+    });
+}
+
+/// `^z n` opens a cwd prompt prefilled with the focused column's directory —
+/// the second commander isn't created until the prompt is submitted (Enter
+/// routes to `open_second_commander_at`).
+#[test]
+fn ctrl_z_n_opens_a_prefilled_cwd_prompt() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+
+        app.apply(&Action::OpenSecondCommander).unwrap();
+        match &app.state.mode {
+            Mode::Prompting(p) => {
+                assert!(
+                    matches!(p.kind, PromptKind::SecondCommanderCwd),
+                    "^z n opens the cwd prompt"
+                );
+                assert!(
+                    !p.buffer.is_empty(),
+                    "prefilled with the focused dir default"
+                );
+            }
+            Mode::Normal => panic!("^z n should open a cwd prompt"),
+        }
+        assert!(
+            app.state.right.is_none(),
+            "no commander until the prompt submits"
         );
     });
 }

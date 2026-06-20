@@ -389,6 +389,7 @@ impl AppState {
             | PromptKind::PaneRenameTab
             | PromptKind::Command
             | PromptKind::Jump
+            | PromptKind::SecondCommanderCwd
             | PromptKind::MakeDir
             | PromptKind::WorktreeNewBranch
             | PromptKind::WorktreeDeleteConfirm => PromptResult::NotHandled,

@@ -5,7 +5,7 @@
 //! template). The cursor-file validation + preview load live with the other
 //! pager-build code (`pager_handler::{previewable_cursor_path, load_right_preview}`).
 
-use super::{App, state};
+use super::{App, Mode, Prompt, PromptKind, state};
 
 /// Default right-column width when a split opens (percent of the frame).
 const DEFAULT_VSPLIT_PCT: u16 = 50;
@@ -139,22 +139,29 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
-    /// `^z n` — open a second file-commander in the right column, rooted at
-    /// the focused column's current directory, and move focus to it. The right
-    /// region hosts a real commander (`state.right`) — mutually exclusive with
-    /// the `^a |` preview, so any open preview is dropped. No-op (with a hint)
-    /// if a second commander is already open.
-    ///
-    /// (C2a: the cwd is the focused column's dir; a cwd *prompt* — open it
-    /// somewhere else directly — lands in the follow-up. Navigate it with the
-    /// usual keys once open.)
+    /// `^z n` — prompt for the directory to root a second file-commander at,
+    /// prefilled (and editable) with the focused column's current dir. Enter
+    /// opens the right column there (see [`Self::open_second_commander_at`]);
+    /// editing the path opens it somewhere else. Works whether or not a second
+    /// commander is already open (it re-targets).
     pub(super) fn open_second_commander(&mut self) {
-        if self.state.right.is_some() {
-            self.state
-                .flash_info("second commander already open (^z x to close)");
-            return;
-        }
-        let dir = self.state.cur().listing.dir.clone();
+        let default = crate::paths::display_tilde(&self.state.cur().listing.dir);
+        let mut prompt = Prompt::simple(PromptKind::SecondCommanderCwd, "second commander cwd: ");
+        prompt.buffer = default;
+        self.state.mode = Mode::Prompting(prompt);
+    }
+
+    /// Open (or re-target) the second file-commander rooted at `dir` and focus
+    /// it. The right region hosts a real commander (`state.right`) — mutually
+    /// exclusive with the `^a |` preview, so any open preview is dropped.
+    /// Always **top-only**: full-height would clamp the bottom pane to the left
+    /// column (pane under `a` only), which makes no sense for two peer browsers
+    /// sharing one pane — the pane stays full-width below both columns and `b`
+    /// occupies the top-right region. Reached from the `^z n` cwd prompt.
+    pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
+        // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
+        // `cur().listing.dir` matches what later path comparisons expect).
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
         let commander = match state::Commander::for_dir(&dir, &self.state.config) {
             Ok(c) => c,
             Err(e) => {
@@ -162,13 +169,7 @@ impl App {
                 return;
             }
         };
-        // A second commander is ALWAYS top-only — unlike the preview, which can
-        // go full-height. Full-height clamps the bottom pane to the left column
-        // (pane under `a` only), which makes no sense for two peer browsers
-        // sharing one pane: the pane must stay full-width below both columns,
-        // and `b` occupies the top-right region (never the full frame height).
-        // The right region is a commander now, not a preview.
-        self.view.right_pager = None;
+        self.view.right_pager = None; // a commander and the preview are exclusive
         self.state.right = Some(commander);
         self.state.vsplit = Some(state::VSplit {
             width_pct: DEFAULT_VSPLIT_PCT,

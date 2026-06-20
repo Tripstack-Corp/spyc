@@ -60,6 +60,10 @@ pub enum PromptKind {
         saved_cursor: usize,
     },
     Jump,
+    /// `^z n` — the directory to root a second file-commander at (defaults to
+    /// the focused column's dir, prefilled and editable). Path-completes like
+    /// `Jump`; on submit opens the right column there.
+    SecondCommanderCwd,
     CopyTo,
     MoveTo,
     MakeDir,
@@ -579,6 +583,23 @@ impl App {
                     let _ = self.state.jump_to(trimmed);
                 }
                 self.reconcile_harpoon();
+                Vec::new()
+            }
+            PromptKind::SecondCommanderCwd => {
+                // Empty submit keeps the prefilled default (the focused dir);
+                // otherwise expand ~/$VARS and resolve relative to it.
+                let trimmed = prompt.buffer.trim();
+                let dir = if trimmed.is_empty() {
+                    self.state.cur().listing.dir.clone()
+                } else {
+                    let expanded = crate::paths::expand(trimmed);
+                    if expanded.is_absolute() {
+                        expanded
+                    } else {
+                        self.state.cur().listing.dir.join(expanded)
+                    }
+                };
+                self.open_second_commander_at(&dir);
                 Vec::new()
             }
             PromptKind::MakeDir => {
