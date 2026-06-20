@@ -739,6 +739,23 @@ impl AppState {
         self.active_sides().any(|s| self.col(s).git.info.is_some())
     }
 
+    /// The root that *project-scoped tools* (grep `F`, find, MCP search,
+    /// harpoon) walk/anchor on for a given column — the column's own
+    /// **worktree root** when it's inside a repo, else `PROJECT_HOME`, else its
+    /// listing dir. This is what makes those tools *follow the focused
+    /// worktree*: column `b` sitting in a separate worktree scopes its tools to
+    /// that worktree rather than the overall project anchor. In the common case
+    /// (launched at the repo root, `PROJECT_HOME == repo root == worktree
+    /// root`) all three agree, so single-column behavior is unchanged.
+    pub fn tool_root(&self, side: Side) -> std::path::PathBuf {
+        self.col(side)
+            .git_cache
+            .current_repo_root
+            .clone()
+            .or_else(|| self.project_home.clone())
+            .unwrap_or_else(|| self.col(side).listing.dir.clone())
+    }
+
     // --- Cursor/navigation (Phase 1) ---
 
     pub fn flash_info<S: Into<String>>(&mut self, text: S) {

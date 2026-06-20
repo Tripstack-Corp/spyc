@@ -98,11 +98,7 @@ impl App {
     /// in the background). Closing the picker drops the receiver,
     /// which makes the walker exit on its next `tx.send`.
     pub fn open_find_picker(&mut self) {
-        let root = self
-            .state
-            .project_home
-            .clone()
-            .unwrap_or_else(|| self.state.cur().listing.dir.clone());
+        let root = self.state.tool_root(self.state.focused_side());
         let (tx, rx) = std::sync::mpsc::channel();
         let walk_root = root.clone();
         // MVU Phase 3d: wake the loop on each candidate batch (via

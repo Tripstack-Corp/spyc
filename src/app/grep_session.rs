@@ -87,11 +87,7 @@ impl App {
     /// ticks (`drain_pager_stream` → `GrepStream::drain`) append rendered match
     /// lines until the worker disconnects or the pager is replaced.
     pub fn open_grep_pager(&mut self, pattern: &str) {
-        let root = self
-            .state
-            .project_home
-            .clone()
-            .unwrap_or_else(|| self.state.left.listing.dir.clone());
+        let root = self.state.tool_root(self.state.focused_side());
         // Validate the pattern up-front so we can flash an error inline rather
         // than open an empty pager that silently produces zero results. The
         // worker re-compiles the same regex (trivial parse cost).

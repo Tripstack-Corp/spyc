@@ -1773,3 +1773,42 @@ fn gw_targets_the_focused_columns_worktree_root() {
         );
     });
 }
+
+/// grep `F` / find walk the FOCUSED column's worktree root via `tool_root`:
+/// with `b` focused in a separate repo, the F-finder scopes to b's root — not
+/// a's, not PROJECT_HOME. (MCP search shares the same root, exercised in
+/// `mcp::tests::search_root_overrides_project_home`.)
+#[test]
+fn find_picker_walks_the_focused_columns_worktree_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir_a = tmp.path().join("a");
+        let dir_b = tmp.path().join("b");
+        std::fs::create_dir(&dir_a).unwrap();
+        std::fs::create_dir(&dir_b).unwrap();
+        let mut app = App::test_app(dir_a);
+        app.open_second_commander_at(&dir_b); // b focused
+
+        let root_a = tmp.path().join("repoA");
+        let root_b = tmp.path().join("repoB");
+        std::fs::create_dir(&root_a).unwrap();
+        std::fs::create_dir(&root_b).unwrap();
+        app.state.left.git_cache.current_repo_root = Some(root_a);
+        app.state
+            .right
+            .as_mut()
+            .unwrap()
+            .git_cache
+            .current_repo_root = Some(root_b.clone());
+
+        app.open_find_picker();
+        let root = app
+            .runtime
+            .find_picker
+            .as_ref()
+            .expect("finder open")
+            .root
+            .clone();
+        assert_eq!(root, root_b, "F walks b's (focused) worktree root");
+    });
+}

@@ -26,6 +26,12 @@ pub struct SpycContext {
     pub git_branch: Option<String>,
     /// Sticky project root (target of `gh`, default cwd for new panes).
     pub project_home: Option<PathBuf>,
+    /// Root that project-scoped MCP search tools (`search_paths` /
+    /// `search_content`) walk: the **focused column's worktree root** when it's
+    /// in a repo, else `project_home`, else `cwd`. Lets MCP search follow the
+    /// focused worktree the same way grep `F` / find / harpoon do. `None` when
+    /// no better root than `cwd` is known.
+    pub search_root: Option<PathBuf>,
     /// Spice-pair session name (e.g. `SAFFRON_CUMIN`).
     pub session_name: String,
 }
@@ -110,6 +116,7 @@ mod tests {
             filter: Some("*.rs".into()),
             git_branch: Some("main".into()),
             project_home: Some(PathBuf::from("/home/user/project")),
+            search_root: Some(PathBuf::from("/home/user/project")),
             session_name: "SAFFRON_CUMIN".into(),
         };
         write_context_file(&path, &ctx).unwrap();
@@ -137,6 +144,7 @@ mod tests {
             filter: None,
             git_branch: None,
             project_home: None,
+            search_root: None,
             session_name: String::new(),
         };
         write_context_file(&path, &ctx).unwrap();
@@ -195,6 +203,7 @@ mod tests {
             filter: None,
             git_branch: Some("main".into()),
             project_home: None,
+            search_root: None,
             session_name: "SAFFRON_CUMIN".into(),
         };
         let same = base.clone();

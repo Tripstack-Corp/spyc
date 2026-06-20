@@ -42,8 +42,9 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **~ / Home** jump to home (`H` is the harpoon prefix — see Harpoon)
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
   suggestions from visit history)
-- **F** project-wide fuzzy filename finder. Walks `PROJECT_HOME` (or
-  the current dir as fallback) honoring `.gitignore`, ranks
+- **F** project-wide fuzzy filename finder. Walks the focused
+  commander's worktree root (its repo root, else `PROJECT_HOME`,
+  else the current dir) honoring `.gitignore`, ranks
   candidates against typed input via nucleo-matcher (basename hits
   outrank parent-dir hits, fzf-style). Up/Down move selection,
   Enter chdirs to the matched file's parent and places the cursor
@@ -357,8 +358,9 @@ end).
 - **`:pause`** / **`:pause N`** — pause a backgrounded task (`SIGSTOP`)
 - **`:resume`** / **`:resume N`** — resume a paused task (`SIGCONT`)
 - **`:grep <pattern>`** — project-wide content search via embedded
-  ripgrep matcher (`grep-regex` + `grep-searcher`). Walks
-  `PROJECT_HOME` (or current dir) honoring `.gitignore`, smart-case
+  ripgrep matcher (`grep-regex` + `grep-searcher`). Walks the
+  focused commander's worktree root (its repo root, else
+  `PROJECT_HOME`, else current dir) honoring `.gitignore`, smart-case
   by default. Results stream into a pager as `path:line:col: text`,
   so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
   matches; refine the pattern if you hit it. Power users: `! rg foo`
@@ -730,7 +732,7 @@ Claude can query and control the workspace through these tools:
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
 
-**Search tools (gitignore-aware, PROJECT_HOME-scoped):**
+**Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
 - **`search_paths(query, [limit])`** -- fuzzy filename search
   (same `ignore` walker + nucleo ranking as the `F` picker).
   Returns repo-relative paths, fzf-style ranked.

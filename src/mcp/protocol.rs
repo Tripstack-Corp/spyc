@@ -203,7 +203,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "search_paths",
-                    "description": "Project-wide fuzzy filename search. Walks PROJECT_HOME (or cwd if no project root) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated.",
+                    "description": "Project-wide fuzzy filename search. Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -222,7 +222,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "search_content",
-                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks PROJECT_HOME (or cwd). Returns a JSON array of {path, line, col, text} match objects.",
+                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd). Returns a JSON array of {path, line, col, text} match objects.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -447,11 +447,10 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
     )
 }
 
-/// Pick the search root: prefer `project_home` from the context
-/// file (the spyc-blessed project root), fall back to `cwd`.
-/// Used by `search_paths` and `search_content` so the MCP tools
-/// scope themselves the same way the in-TUI `F` and `:grep`
-/// commands do.
+/// Pick the search root: prefer `search_root` from the context file (the
+/// focused commander's worktree root), then `project_home`, then `cwd`.
+/// Used by `search_paths` and `search_content` so the MCP tools scope
+/// themselves to the same worktree the in-TUI `F` and `:grep` commands do.
 /// Upper bound on a single MCP message body. The header's `Content-Length`
 /// is untrusted; we refuse anything larger rather than pre-allocate it.
 const MAX_LSP_MESSAGE_BYTES: usize = 64 * 1024 * 1024;

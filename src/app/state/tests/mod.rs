@@ -534,6 +534,29 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     );
 }
 
+/// `tool_root` — the shared root for grep `F` / find / MCP search / harpoon —
+/// resolves per column with three fallbacks: the column's own worktree root,
+/// then PROJECT_HOME, then its listing dir.
+#[test]
+fn tool_root_prefers_worktree_then_project_home_then_listing() {
+    use crate::app::state::Side;
+    let mut s = test_state();
+    s.left.listing.dir = PathBuf::from("/list/a");
+    s.project_home = None;
+    s.left.git_cache.current_repo_root = None;
+
+    // No repo, no PROJECT_HOME → the listing dir.
+    assert_eq!(s.tool_root(Side::Left), PathBuf::from("/list/a"));
+
+    // PROJECT_HOME set, still no repo → PROJECT_HOME.
+    s.project_home = Some(PathBuf::from("/proj"));
+    assert_eq!(s.tool_root(Side::Left), PathBuf::from("/proj"));
+
+    // Inside a repo → the worktree root wins over PROJECT_HOME.
+    s.left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
+    assert_eq!(s.tool_root(Side::Left), PathBuf::from("/repo/a"));
+}
+
 /// `compute_git_info_fast` memoizes the branch string by `HEAD`'s mtime:
 /// a matching `(repo_root, mtime)` key reuses the cached value WITHOUT
 /// re-opening gix, and a differing key re-resolves. Proven without relying

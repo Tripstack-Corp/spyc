@@ -75,6 +75,7 @@ fn resources_read_with_context_file() {
         filter: None,
         git_branch: Some("develop".into()),
         project_home: None,
+        search_root: None,
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -132,6 +133,7 @@ fn tools_call_returns_context() {
         filter: Some("*.rs".into()),
         git_branch: Some("feature".into()),
         project_home: None,
+        search_root: None,
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -201,6 +203,7 @@ fn search_paths_tool_walks_root() {
         filter: None,
         git_branch: None,
         project_home: Some(root.to_path_buf()),
+        search_root: Some(root.to_path_buf()),
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -229,6 +232,57 @@ fn search_paths_tool_walks_root() {
     assert!(!paths.contains(&"gamma.txt"));
 }
 
+/// `search_root` (the focused column's worktree root) takes precedence over
+/// `project_home`. With a context whose `project_home` points at one tree but
+/// `search_root` at a separate worktree, the walk scopes to `search_root` —
+/// this is what makes MCP search follow the focused worktree (column `b` in a
+/// different worktree searches its own tree, not the overall project anchor).
+#[test]
+fn search_root_overrides_project_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("main"); // PROJECT_HOME (column a)
+    let worktree = tmp.path().join("wt"); // focused column b's worktree
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(home.join("in_home.rs"), "").unwrap();
+    std::fs::write(worktree.join("in_worktree.rs"), "").unwrap();
+    let ctx = context::SpycContext {
+        cwd: worktree.clone(),
+        cursor_file: None,
+        picks: vec![],
+        inventory: vec![],
+        filter: None,
+        git_branch: None,
+        project_home: Some(home),
+        search_root: Some(worktree),
+        session_name: String::new(),
+    };
+    let ctx_path = context::context_path(tmp.path());
+    context::write_context_file(&ctx_path, &ctx).unwrap();
+
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &json!({"jsonrpc":"2.0","id":17,"method":"tools/call",
+                "params":{"name":"search_paths","arguments":{"query":"in_"}}})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let resp = parse_response(&output);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let arr: Value = serde_json::from_str(text).unwrap();
+    let paths: Vec<&str> = arr
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(paths.contains(&"in_worktree.rs"), "walks search_root");
+    assert!(!paths.contains(&"in_home.rs"), "ignores project_home");
+}
+
 #[test]
 fn search_content_tool_returns_matches() {
     let tmp = tempfile::tempdir().unwrap();
@@ -243,6 +297,7 @@ fn search_content_tool_returns_matches() {
         filter: None,
         git_branch: None,
         project_home: Some(root.to_path_buf()),
+        search_root: Some(root.to_path_buf()),
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -282,6 +337,7 @@ fn search_picks_tool_only_picked_files() {
         filter: None,
         git_branch: None,
         project_home: Some(root.to_path_buf()),
+        search_root: Some(root.to_path_buf()),
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -333,6 +389,7 @@ fn socket_server_responds() {
         filter: None,
         git_branch: None,
         project_home: None,
+        search_root: None,
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -374,6 +431,7 @@ fn disconnect_notification_routes_through_channel() {
         filter: None,
         git_branch: None,
         project_home: None,
+        search_root: None,
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
@@ -605,6 +663,7 @@ fn get_file_content_blocks_path_traversal() {
         filter: None,
         git_branch: None,
         project_home: None,
+        search_root: None,
         session_name: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());

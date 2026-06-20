@@ -8,6 +8,15 @@ pub(super) fn search_root(ctx_path: &Path) -> PathBuf {
     if let Ok(text) = std::fs::read_to_string(ctx_path)
         && let Ok(v) = serde_json::from_str::<Value>(&text)
     {
+        // `search_root` is the focused column's worktree root (spyc resolves
+        // it via `tool_root`), so MCP search follows the worktree the user is
+        // working in. Older context files predate the field — fall back to
+        // `project_home`, then `cwd`.
+        if let Some(root) = v["search_root"].as_str()
+            && !root.is_empty()
+        {
+            return PathBuf::from(root);
+        }
         if let Some(home) = v["project_home"].as_str()
             && !home.is_empty()
         {

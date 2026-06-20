@@ -157,6 +157,11 @@ impl App {
             filter: cur.temp_filter.clone(),
             git_branch: cur.git.info.clone(),
             project_home: self.state.project_home.clone(),
+            // Scope MCP search to the focused column's worktree root (falls back
+            // to PROJECT_HOME / cwd inside `tool_root`), so `search_paths` /
+            // `search_content` follow the column the user is working in — the
+            // same root grep `F` / find / harpoon use.
+            search_root: Some(self.state.tool_root(self.state.focused_side())),
             session_name: self.state.session_name.clone().unwrap_or_default(),
         }
     }
