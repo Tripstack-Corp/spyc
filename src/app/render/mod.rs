@@ -324,13 +324,11 @@ impl App {
         let mut out = layout;
         match vsplit.mode {
             state::VsplitMode::TopOnly => {
-                // Split the list region into left | divider | right. The right
-                // column also claims the prompt row — the preview doesn't need
-                // the spyc arming/flash line (that's the left list's) — so it
-                // runs one row taller, with the divider all the way down to the
-                // horizontal pane divider. Only when the prompt sits in the top
-                // region (top-status / no pane); in bottom-status the prompt is
-                // below the pane, so the right column is just the list region.
+                // Split the list region into left | divider | right. Both
+                // columns and the divider span exactly the left list's height,
+                // so they end on the same row — the prompt/arming row stays
+                // reserved as the spyc unit's shared lowest line (rendered under
+                // the left list only), keeping the two columns symmetrical.
                 let list = out.list;
                 out.list = Rect {
                     width: left_w,
@@ -338,16 +336,11 @@ impl App {
                 };
                 let pane_div_y = out.divider.map(|d| d.y);
                 let prompt_in_top = pane_div_y.is_none_or(|dy| out.prompt.y < dy);
-                let bottom = if prompt_in_top {
-                    pane_div_y.unwrap_or(out.prompt.y + out.prompt.height)
-                } else {
-                    list.y + list.height
-                };
                 if prompt_in_top {
                     // Keep the arming/flash line under the left list only.
                     out.prompt.width = out.prompt.width.min(left_w);
                 }
-                let height = bottom.saturating_sub(list.y);
+                let height = list.height;
                 out.vdivider = Some(Rect {
                     x: vdiv_x,
                     y: list.y,
