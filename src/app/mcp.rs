@@ -6,7 +6,9 @@
 //! `impl App` pattern. `ensure_agent_mcp_config` / `cleanup_written_mcp_configs`
 //! / `refresh_process_stats` / `write_context` / `execute_mcp_command` are
 //! `pub` (called from the pane-launch path / `run_teardown` / `loop_steps`);
-//! `snapshot_context` is internal to this module.
+//! `snapshot_context` is `pub(super)` (its own module + reachable by tests).
+//! All of these read/drive the FOCUSED commander via `cur()`, so the agent's
+//! view + writable tools follow the column the user is working in.
 
 use super::App;
 
@@ -138,19 +140,21 @@ impl App {
     }
 
     /// Build a context snapshot from the current state for MCP consumers.
-    fn snapshot_context(&self) -> crate::context::SpycContext {
-        let cursor_file = self
-            .state
-            .left
-            .rows
-            .get(self.state.left.cursor.index)
-            .map(|r| r.display.clone());
+    pub(super) fn snapshot_context(&self) -> crate::context::SpycContext {
+        // The FOCUSED commander (`cur()`): with a second commander open, the
+        // agent's context follows the column the user is working in — `cwd`,
+        // `cursor_file`, `picks`, `filter`. Since the read-side MCP tools
+        // (search_*, get_file_content) resolve relative paths against this
+        // file's `cwd`, they follow focus for free. (`git_branch` stays the flat
+        // primary git state until dual-git lands; `inventory` is global.)
+        let cur = self.state.cur();
+        let cursor_file = cur.rows.get(cur.cursor.index).map(|r| r.display.clone());
         crate::context::SpycContext {
-            cwd: self.state.left.listing.dir.clone(),
+            cwd: cur.listing.dir.clone(),
             cursor_file,
-            picks: self.state.left.picks.iter().cloned().collect(),
+            picks: cur.picks.iter().cloned().collect(),
             inventory: self.state.inventory.paths().cloned().collect(),
-            filter: self.state.left.temp_filter.clone(),
+            filter: cur.temp_filter.clone(),
             git_branch: self.state.git.info.clone(),
             project_home: self.state.project_home.clone(),
             session_name: self.state.session_name.clone().unwrap_or_default(),
@@ -194,7 +198,7 @@ impl App {
                     Ok(()) => {
                         self.state.flash_info(format!(
                             "[mcp] navigated to {}",
-                            self.state.left.listing.dir.display()
+                            self.state.cur().listing.dir.display()
                         ));
                         // Write synchronously: an MCP client commonly
                         // calls get_spyc_context right after a mutation,
@@ -214,15 +218,15 @@ impl App {
             }
             McpCommand::SetFilter { pattern } => {
                 match pattern {
-                    Some(ref p) if p.is_empty() => self.state.left.temp_filter = None,
-                    Some(p) => self.state.left.temp_filter = Some(p),
-                    None => self.state.left.temp_filter = None,
+                    Some(ref p) if p.is_empty() => self.state.cur_mut().temp_filter = None,
+                    Some(p) => self.state.cur_mut().temp_filter = Some(p),
+                    None => self.state.cur_mut().temp_filter = None,
                 }
                 self.state.rebuild_rows();
-                let count = self.state.left.rows.len();
+                let count = self.state.cur().rows.len();
                 let label = self
                     .state
-                    .left
+                    .cur()
                     .temp_filter
                     .as_deref()
                     .unwrap_or("(cleared)");
@@ -233,41 +237,50 @@ impl App {
                 }
             }
             McpCommand::PickFiles { patterns } => {
-                let mut total = 0usize;
+                // Collect matches first (immutable borrow of the focused
+                // commander's entries), then insert — `cur()`/`cur_mut()` borrow
+                // all of `state`, so iterating entries while inserting picks in
+                // the same loop would alias. Targets the FOCUSED column.
                 let mut errors = Vec::new();
+                let mut to_pick: Vec<std::path::PathBuf> = Vec::new();
                 for pat_str in &patterns {
                     match glob::Pattern::new(pat_str) {
                         Ok(pat) => {
-                            for e in &self.state.left.listing.entries {
+                            for e in &self.state.cur().listing.entries {
                                 if pat.matches(&e.name) {
-                                    self.state.left.picks.insert(&e.path);
-                                    total += 1;
+                                    to_pick.push(e.path.clone());
                                 }
                             }
                         }
                         Err(e) => errors.push(format!("{pat_str}: {e}")),
                     }
                 }
-                self.state.left.list_generation = self.state.left.list_generation.wrapping_add(1);
                 if !errors.is_empty() {
                     return McpResponse::Error {
                         message: format!("invalid patterns: {}", errors.join(", ")),
                     };
                 }
+                let total = to_pick.len();
+                for path in &to_pick {
+                    self.state.cur_mut().picks.insert(path);
+                }
+                let next_gen = self.state.cur().list_generation.wrapping_add(1);
+                self.state.cur_mut().list_generation = next_gen;
                 self.state
                     .flash_info(format!("[mcp] picked {total} file(s)"));
                 self.write_context();
                 McpResponse::Ok {
                     message: format!(
                         "picked {total} file(s), {} total",
-                        self.state.left.picks.len()
+                        self.state.cur().picks.len()
                     ),
                 }
             }
             McpCommand::ClearPicks => {
-                let count = self.state.left.picks.len();
-                self.state.left.picks.clear();
-                self.state.left.list_generation = self.state.left.list_generation.wrapping_add(1);
+                let count = self.state.cur().picks.len();
+                self.state.cur_mut().picks.clear();
+                let next_gen = self.state.cur().list_generation.wrapping_add(1);
+                self.state.cur_mut().list_generation = next_gen;
                 self.state.flash_info("[mcp] picks cleared");
                 self.write_context();
                 McpResponse::Ok {

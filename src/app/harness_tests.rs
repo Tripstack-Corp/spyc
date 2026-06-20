@@ -1554,3 +1554,87 @@ fn ctrl_d_closes_second_commander_then_quits() {
         assert!(app.state.should_quit, "second quit tap quits");
     });
 }
+
+/// MCP follows focus: with a second commander focused, the context snapshot
+/// the agent reads reports `b`'s cwd, and a mutating MCP command (set_filter)
+/// targets `b` — not the left/primary column. (PR F: MCP focus-aware.)
+#[test]
+fn mcp_context_and_mutations_follow_the_focused_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let left_dir = tmp.path().join("left");
+        let right_dir = tmp.path().join("right");
+        std::fs::create_dir(&left_dir).unwrap();
+        std::fs::create_dir(&right_dir).unwrap();
+        std::fs::write(right_dir.join("a.rs"), "").unwrap();
+        let mut app = App::test_app(left_dir);
+        app.open_second_commander_at(&right_dir); // b open + focused
+
+        // Read side: the snapshot the agent reads reports b's cwd.
+        let want = std::fs::canonicalize(&right_dir).unwrap();
+        assert_eq!(
+            app.snapshot_context().cwd,
+            want,
+            "get_spyc_context reports the focused (b) column's cwd"
+        );
+
+        // Mutate side: set_filter targets b, leaving a untouched.
+        app.execute_mcp_command(crate::mcp_cmd::McpCommand::SetFilter {
+            pattern: Some("*.rs".to_string()),
+        });
+        assert_eq!(
+            app.state.right.as_ref().unwrap().temp_filter.as_deref(),
+            Some("*.rs"),
+            "set_filter applies to the focused (b) column"
+        );
+        assert!(
+            app.state.left.temp_filter.is_none(),
+            "the left column's filter is untouched"
+        );
+    });
+}
+
+/// `/` incremental search moves the FOCUSED column's cursor — searching in `b`
+/// must not scroll `a`. Regression: the match application hardcoded `left`.
+#[test]
+fn slash_search_targets_the_focused_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let left_dir = tmp.path().join("left");
+        let right_dir = tmp.path().join("right");
+        std::fs::create_dir(&left_dir).unwrap();
+        std::fs::create_dir(&right_dir).unwrap();
+        let mut app = App::test_app(left_dir);
+        app.open_second_commander_at(&right_dir); // b focused
+
+        // Deterministic rows for b; a starts at cursor 0.
+        let r = app.state.right.as_mut().unwrap();
+        r.rows = vec![
+            RowData {
+                path: right_dir.join("alpha"),
+                display: "alpha".to_string(),
+                kind: EntryKind::File,
+            },
+            RowData {
+                path: right_dir.join("zebra"),
+                display: "zebra".to_string(),
+                kind: EntryKind::File,
+            },
+        ];
+        r.cursor.index = 0;
+
+        app.apply(&Action::SearchPrompt).unwrap(); // saves b's cursor (0)
+        for c in "zeb".chars() {
+            app.handle_key(key(c)).unwrap();
+        }
+        assert_eq!(
+            app.state.right.as_ref().unwrap().cursor.index,
+            1,
+            "/ moved b's cursor to the match"
+        );
+        assert_eq!(
+            app.state.left.cursor.index, 0,
+            "a's cursor is untouched by a search in b"
+        );
+    });
+}

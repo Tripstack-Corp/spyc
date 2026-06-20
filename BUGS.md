@@ -1,4 +1,48 @@
 ### SMALL ###
+- like we have :grep - what's our equivalent to find?
+- when you come back from EDITOR to the pager - it will turn on line number
+  display if they were turned off before entering into EDITOR
+- is using a Makefile frowned upon by the Rust community? should we adopt a
+  different workflow?
+- run :bprev which pop's up the buffer preview - the b[] commands are occulded
+  the pager window; these should be in the buffer view and we should be given
+  some sense of which buffer we're viewing and how many others there are i.e.
+  buffer navigation is clunky
+- do an audit of all code comments / carefully, some seem to have drifted
+  around and may no longer be relevant, etc.; probably a great multi-agent
+  exercise
+- we need to update our architecture and agent.md to reflect the new changes
+  and to enforce that we don't get back to a monolith and keep everything
+  nicely modularized going forward
+- clean up and consolidate all of the plan files into a single roadmap doc
+- do an extensive code review again; with a focus on maintainabiilty and clean
+  code e.g. have other examples crept in where we could do better by leveraging
+  a crate instead of handrolling functionality (e.g. what we cleaned up with ps
+  for the HUD)
+- from Spencer: codex scroll view getting stale aftee a while (cant see newer
+  messages)
+- from Spencer: codex history doesn't colour code diffs - we should probably
+  find a nice way to present those with appropriate synxtax highlighting by
+  document section?
+- man pages render seemingly terribly in our pager ... maybe we should include
+  a man->markdown transformer? does such a tool / library already exist?
+- ? in pager should search backwards
+- should g-d be showing unadded files?
+- should be able to "push" a pop-up into the top pane
+- worktree list should be navigatible with j/k/G/gg/ etc.
+- scrollback enabled in the lower pane and then switch to upper pane and enter
+  pager will release the pager in the lower pane which is not desirable
+- parsing a large Makefile with pager seems weirdly slow
+- are there features of ratatui we're not properly taking advantage of? are
+  there features in the roadmap we can plan around? this is our core technology
+  so we should have some alignment and syncronization with that
+- have we kept unsafe declarations from creeping in?
+- does the refactoring enable us to improve our tests?
+- 'A' monitoring should be omnipresent (i.e. when the pane is in use by EDITIOR
+  via 'V|D', etc. And all of the informational fields should be fully right
+  justified; it should also include the version number and git tag / hash and
+  perhaps something about the detected terminal capabilities
+- when a command finishes if the user hits a ^a|w arming key that should work
 - pasting into the pager for a search / the pasted content goes to the lower
   pane instead; do we need a better model in general for what activity is in
   "focus" - this has come up before as an issue; let's consider a refactor?
@@ -65,8 +109,18 @@
   disable masks and have an editable list of them
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
+- TUI snapshot/expect tests — render the pure MVU view into ratatui's
+  `TestBackend` buffer and snapshot the text grid with `insta`; diff on
+  change. Phase 5 made `update` pure, which is the precondition that
+  makes this cheap. Targets the render-visible class of the MVU
+  daily-driver regressions (typing jank, paste-needs-a-keypress) and
+  closes the SMALL "does the refactoring enable us to improve our
+  tests?" item. Modeled on Jane Street's "screenshot-style expect
+  tests," where the coding agent can read the output too:
+  https://blog.janestreet.com/strace-ui-bonsai-term-and-the-tui-renaissance/
 
 ### MAYBE ###
+- Consider embedding Roto in the project: https://codeberg.org/NLnetLabs/roto
 - alt-screen drain → coherent log. For panes running alt-screen
   TUIs (vim, htop, lazygit) the vt100 grid has no historical
   scrollback — `^a v` flashes "no scrollback" and points at the
@@ -113,6 +167,19 @@
   automatically instead of needing the manual `C` toggle. ~30 lines.
   Nice-to-have for users who switch between light shells during the
   day and dark at night; current `C` toggle works fine.
+- VHS (`charmbracelet/vhs`) for reproducible demos — scripted `.tape`
+  → GIF/MP4 of a real spyc pty session, for the README / LAUNCH_PREP
+  shots that don't drift on edits. Language-agnostic (drives a pty, no
+  Rust linkage). Speculative second use: recorded golden-frame
+  regression checks alongside the `insta` snapshots above.
+- thesis note (cite in DESIGN/ARCHITECTURE): the Jane Street "TUI
+  renaissance" post is good external validation for the MVU bet — two
+  teams converged on MVU-for-TUIs (their Bonsai = incremental MVU)
+  from OCaml and Rust, and the "TUI output lives in the agent's native
+  modality" argument is our MCP-bridge premise. Note where we go
+  further: their agent reads the rendered screen; spyc hands the agent
+  structured context over MCP.
+  https://news.ycombinator.com/item?id=48365904
 
 ### FIXED ###
 - (fixed, v1.55.2) git markers stale in worktrees (and, relatedly,

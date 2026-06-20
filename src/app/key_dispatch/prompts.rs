@@ -147,12 +147,15 @@ impl App {
             None
         };
         if let Some((saved, query)) = search_info {
+            // Move the FOCUSED column's cursor (`find_match` already searches
+            // `cur()`); hardcoding `left` made `/` in `b` scroll `a`.
             if query.is_empty() {
-                self.state.left.cursor.index = saved;
+                self.state.cur_mut().cursor.index = saved;
             } else if let Some(i) = self.state.find_match(&query, saved, false) {
-                self.state.left.cursor.index = i;
+                self.state.cur_mut().cursor.index = i;
             }
-            self.state.left.cursor.clamp(self.state.left.rows.len());
+            let len = self.state.cur().rows.len();
+            self.state.cur_mut().cursor.clamp(len);
         }
 
         Vec::new()

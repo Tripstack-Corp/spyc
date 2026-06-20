@@ -414,8 +414,10 @@ impl App {
             return;
         };
         if let PromptKind::Search { saved_cursor } = p.kind {
-            self.state.left.cursor.index = saved_cursor;
-            self.state.left.cursor.clamp(self.state.left.rows.len());
+            // Restore the FOCUSED column's cursor (search ran on `cur()`).
+            self.state.cur_mut().cursor.index = saved_cursor;
+            let len = self.state.cur().rows.len();
+            self.state.cur_mut().cursor.clamp(len);
         }
         self.clear_tab_preview();
         // Clear any stashed state from the two-step new-tab prompt.
