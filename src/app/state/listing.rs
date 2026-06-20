@@ -90,9 +90,8 @@ impl AppState {
     /// `:set sort=` command arms, which only differ in how they mutate the
     /// sort state and what they flash.
     pub fn apply_sort(&mut self) {
-        self.left
-            .listing
-            .sort(self.cur().sort_order, self.cur().sort_reversed);
+        let (order, reversed) = (self.cur().sort_order, self.cur().sort_reversed);
+        self.cur_mut().listing.sort(order, reversed);
         self.rebuild_rows();
     }
 
@@ -217,9 +216,8 @@ impl AppState {
             ));
         }
         self.cur_mut().listing = new_listing;
-        self.left
-            .listing
-            .sort(self.cur().sort_order, self.cur().sort_reversed);
+        let (order, reversed) = (self.cur().sort_order, self.cur().sort_reversed);
+        self.cur_mut().listing.sort(order, reversed);
         // Resolve + cache the repo root for the new dir *before* the git
         // calls below so they see the right root on the first run after chdir.
         self.update_repo_root(&canonical);

@@ -186,7 +186,7 @@ impl App {
     }
 
     pub(super) fn activate(&mut self, intent: ActivateIntent) -> Vec<Effect> {
-        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
+        let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
             return Vec::new();
         };
         let path = row.path.clone();
@@ -194,7 +194,7 @@ impl App {
 
         // Inventory view: enter drills down to the containing directory and
         // focuses on the item, then continues with the intent on that item.
-        if self.state.left.view == View::Inventory {
+        if self.state.cur().view == View::Inventory {
             let target_dir = if kind == EntryKind::Dir {
                 path.clone()
             } else {
@@ -205,7 +205,7 @@ impl App {
                 self.state.flash_error(format!("chdir: {e}"));
                 return Vec::new();
             }
-            self.state.left.view = View::Dir;
+            self.state.cur_mut().view = View::Dir;
             self.state.focus_on_path(&path);
             self.state.rebuild_rows();
             if kind == EntryKind::Dir {

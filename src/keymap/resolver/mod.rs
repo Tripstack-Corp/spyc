@@ -41,6 +41,9 @@ enum PendingSeq {
     /// Seen uppercase `Z`, waiting for the second `Z` of the
     /// vim-style `ZZ` quit chord. Cancels on any other key.
     Z,
+    /// Seen `Ctrl-z`, waiting for a second-commander sub-command:
+    /// `n` = open a second commander, `x` = close it.
+    CtrlZ,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -97,6 +100,7 @@ impl Resolver {
             PendingSeq::PrevBracket => "[-",
             PendingSeq::D => "d-",
             PendingSeq::Z => "Z-",
+            PendingSeq::CtrlZ => "^z-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -188,6 +192,20 @@ impl Resolver {
             return out;
         }
 
+        // Mid-sequence: `^z` (second-commander) prefix waiting for a sub-command.
+        // Matches on the key *code* regardless of Ctrl (so `^z ^n` fires the same
+        // as `^z n`), mirroring the `W` block above. Runs before the generic Ctrl
+        // block, which would otherwise eat a held-Ctrl second key.
+        if self.pending == PendingSeq::CtrlZ {
+            let out = match ev.code {
+                KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::OpenSecondCommander),
+                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::CloseSecondCommander),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
@@ -202,6 +220,11 @@ impl Resolver {
                 // pending sequence and falls through after resetting.
                 KeyCode::Char('w' | 'W' | 'a' | 'A') => {
                     self.pending = PendingSeq::W;
+                    return ResolverOutcome::Pending;
+                }
+                // Ctrl-z starts the second-commander prefix (^z n open, ^z x close).
+                KeyCode::Char('z' | 'Z') => {
+                    self.pending = PendingSeq::CtrlZ;
                     return ResolverOutcome::Pending;
                 }
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),

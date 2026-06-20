@@ -185,12 +185,14 @@ impl App {
         match action {
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
-                self.state.left.cursor.clamp(self.state.left.rows.len());
+                let n = self.state.cur().rows.len();
+                self.state.cur_mut().cursor.clamp(n);
                 return Ok(post);
             }
             Action::EnterOrEdit => {
                 let post = self.activate(ActivateIntent::Edit);
-                self.state.left.cursor.clamp(self.state.left.rows.len());
+                let n = self.state.cur().rows.len();
+                self.state.cur_mut().cursor.clamp(n);
                 return Ok(post);
             }
             Action::EditInPane => {
@@ -326,6 +328,8 @@ impl App {
             Action::VsplitCycle => self.cycle_vsplit(),
             Action::VsplitFocusLeft => self.vsplit_focus(state::Side::Left),
             Action::VsplitFocusRight => self.vsplit_focus(state::Side::Right),
+            Action::OpenSecondCommander => self.open_second_commander(),
+            Action::CloseSecondCommander => self.close_second_commander(),
             Action::ToggleDim => {
                 self.view.dim_inactive = !self.view.dim_inactive;
                 self.view.needs_full_repaint = true;

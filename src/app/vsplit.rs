@@ -58,6 +58,14 @@ impl App {
     /// - **Open, cursor on the same file (or not previewable):** cycle the
     ///   shape: top-only → full-height → off.
     pub(super) fn cycle_vsplit(&mut self) {
+        // The right region hosts EITHER a preview (`^a |`) or a second
+        // commander (`^z`) — never both. With a commander open, `^a |` is
+        // disabled (no nesting); close it with `^z x` first.
+        if self.state.right.is_some() {
+            self.state
+                .flash_info("right column has a commander (^z x to close)");
+            return;
+        }
         let cursor_file = self.previewable_cursor_path();
         if self.state.vsplit.is_none() {
             // Opening: require a previewable file under the cursor.
@@ -129,6 +137,63 @@ impl App {
             self.state.flash_info("vsplit: off");
         }
         self.view.needs_full_repaint = true;
+    }
+
+    /// `^z n` — open a second file-commander in the right column, rooted at
+    /// the focused column's current directory, and move focus to it. The right
+    /// region hosts a real commander (`state.right`) — mutually exclusive with
+    /// the `^a |` preview, so any open preview is dropped. No-op (with a hint)
+    /// if a second commander is already open.
+    ///
+    /// (C2a: the cwd is the focused column's dir; a cwd *prompt* — open it
+    /// somewhere else directly — lands in the follow-up. Navigate it with the
+    /// usual keys once open.)
+    pub(super) fn open_second_commander(&mut self) {
+        if self.state.right.is_some() {
+            self.state
+                .flash_info("second commander already open (^z x to close)");
+            return;
+        }
+        let dir = self.state.cur().listing.dir.clone();
+        let commander = match state::Commander::for_dir(&dir, &self.state.config) {
+            Ok(c) => c,
+            Err(e) => {
+                self.state.flash_error(format!("open: {e}"));
+                return;
+            }
+        };
+        // A second commander is ALWAYS top-only — unlike the preview, which can
+        // go full-height. Full-height clamps the bottom pane to the left column
+        // (pane under `a` only), which makes no sense for two peer browsers
+        // sharing one pane: the pane must stay full-width below both columns,
+        // and `b` occupies the top-right region (never the full frame height).
+        // The right region is a commander now, not a preview.
+        self.view.right_pager = None;
+        self.state.right = Some(commander);
+        self.state.vsplit = Some(state::VSplit {
+            width_pct: DEFAULT_VSPLIT_PCT,
+            mode: state::VsplitMode::TopOnly,
+            focus: state::Side::Right,
+        });
+        self.state.focus = state::Focus::FileList;
+        // Build the right column's rows — `cur()` now resolves to it.
+        self.state.rebuild_rows();
+        self.state.flash_info("second commander (^z x to close)");
+        self.view.needs_full_repaint = true;
+    }
+
+    /// `^z x` — close the second commander: drop `state.right` and the split,
+    /// returning to a single (left) column with focus on it.
+    pub(super) fn close_second_commander(&mut self) {
+        if self.state.right.is_none() {
+            self.state.flash_info("no second commander");
+            return;
+        }
+        self.state.right = None;
+        self.state.vsplit = None;
+        self.state.focus = state::Focus::FileList;
+        self.view.needs_full_repaint = true;
+        self.state.flash_info("second commander closed");
     }
 
     /// Close the vertical split: drop the preview and clear the shape. Focus

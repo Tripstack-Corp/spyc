@@ -597,6 +597,12 @@ pub struct ViewState {
     pub cached_rows_gen: u64,
     /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
     pub cached_grid_key: (u64, usize, usize, u16, u16),
+    /// The same row cache + grid key for the **right** column's second
+    /// commander (`state.right`), settled independently. Unused (empty / `MAX`
+    /// gen) while no second commander is open.
+    pub right_cached_rows: Vec<Row>,
+    pub right_cached_rows_gen: u64,
+    pub right_cached_grid_key: (u64, usize, usize, u16, u16),
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub last_term_title: Option<String>,
@@ -690,6 +696,9 @@ impl ViewState {
             cached_rows: Vec::new(),
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            right_cached_rows: Vec::new(),
+            right_cached_rows_gen: u64::MAX, // force first build
+            right_cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             last_term_title: None,
             harpoon_menu: None,
             quick_select: None,

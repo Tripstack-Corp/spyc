@@ -120,10 +120,12 @@ pub(super) struct RouteSnapshot {
     /// Chord resolver is mid-sequence (`^a` seen, waiting on
     /// second key — likewise for `m{a-z}`, `'{a-z}`, etc.).
     pub resolver_pending: bool,
-    /// The right (`b`) column of an open vertical split owns the keyboard
-    /// (file-pane row focused + `b` is the active column). Non-meta keys then
-    /// drive its preview pager; meta chords still escape to the resolver.
-    pub right_column_focused: bool,
+    /// The right (`b`) column owns the keyboard **and hosts a live preview**
+    /// (not a second commander). Non-meta keys then drive that preview pager;
+    /// meta chords still escape to the resolver. A focused right *commander*
+    /// leaves this `false` — its keys fall through to the resolver / file-list
+    /// nav, which operate on the focused column via `cur()`.
+    pub right_preview_focused: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -219,11 +221,13 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         return InputSink::BottomPane;
     }
 
-    // 5b. Right column of a vertical split. When the file-pane row is focused
-    //     and the `b` column is active, non-meta keys drive its preview pager
-    //     (`active_pager_mut!` resolves `PagerKey` to `view.right_pager`);
-    //     meta chords escape to the resolver, and an open prompt still wins.
-    if snap.right_column_focused && !is_meta && !snap.is_prompting {
+    // 5b. Right column of a vertical split, hosting a *preview*. When the
+    //     file-pane row is focused and the `b` preview is active, non-meta keys
+    //     drive its preview pager (`active_pager_mut!` resolves `PagerKey` to
+    //     `view.right_pager`); meta chords escape to the resolver, and an open
+    //     prompt still wins. A right *commander* sets this false and falls
+    //     through to the resolver (arm 7), where nav drives `cur()`.
+    if snap.right_preview_focused && !is_meta && !snap.is_prompting {
         return InputSink::PagerKey;
     }
 
@@ -261,7 +265,9 @@ impl App {
             pane_scrolling: self.state.pane.pane_snapshot.is_scrolling,
             pane_closed: self.state.pane.pane_snapshot.is_closed,
             resolver_pending: self.state.resolver.is_pending(),
-            right_column_focused: self.right_column_focused(),
+            // Preview-only: a focused right *commander* (state.right) routes
+            // through the resolver/file-list nav instead (driving `cur()`).
+            right_preview_focused: self.right_column_focused() && self.view.right_pager.is_some(),
         }
     }
 }
@@ -283,7 +289,7 @@ mod tests {
             pane_scrolling: false,
             pane_closed: false,
             resolver_pending: false,
-            right_column_focused: false,
+            right_preview_focused: false,
         }
     }
 
@@ -781,7 +787,7 @@ mod tests {
                             pane_scrolling: on(bits, 3),
                             pane_closed: on(bits, 4),
                             resolver_pending: false,
-                            right_column_focused: on(bits, 5),
+                            right_preview_focused: on(bits, 5),
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

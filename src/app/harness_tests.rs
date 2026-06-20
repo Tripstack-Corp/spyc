@@ -1091,3 +1091,147 @@ fn vsplit_cycle_on_directory_warns_and_stays_closed() {
         assert!(app.view.right_pager.is_none());
     });
 }
+
+/// `^z n` opens a second file-commander in the right column: `state.right` is
+/// populated (rows read from disk), the split focuses `b`, and `cur()` then
+/// resolves to the right commander — so `^a a` flips the focused column back to
+/// the left. `^z x` tears it down to a single column again.
+#[test]
+fn second_commander_open_focus_and_close() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        let mut app = App::test_app(dir);
+
+        app.apply(&Action::OpenSecondCommander).unwrap();
+        assert!(app.state.right.is_some(), "^z n opens a second commander");
+        assert_eq!(
+            app.state.vsplit.map(|v| v.focus),
+            Some(state::Side::Right),
+            "opening focuses the new (right) column"
+        );
+        assert_eq!(
+            app.state.vsplit.map(|v| v.mode),
+            Some(state::VsplitMode::TopOnly),
+            "a commander always opens top-only — never full-height (no pane under a only)"
+        );
+        assert_eq!(
+            app.state.right.as_ref().unwrap().rows.len(),
+            3,
+            "the right commander read + built its own rows"
+        );
+        assert!(
+            app.view.right_pager.is_none(),
+            "a commander and the preview are mutually exclusive"
+        );
+
+        // cur() follows focus: with `b` focused it is the right commander.
+        app.state.right.as_mut().unwrap().cursor.index = 2;
+        assert_eq!(
+            app.state.cur().cursor.index,
+            2,
+            "cur() == right when b focused"
+        );
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        assert_eq!(
+            app.state.cur().cursor.index,
+            0,
+            "^a a flips cur() back to the left column"
+        );
+
+        app.apply(&Action::CloseSecondCommander).unwrap();
+        assert!(
+            app.state.right.is_none(),
+            "^z x closes the second commander"
+        );
+        assert!(
+            app.state.vsplit.is_none(),
+            "closing returns to a single column"
+        );
+    });
+}
+
+/// `^a |` is disabled while a second commander occupies the right column —
+/// the two are mutually exclusive, so the cycle no-ops (no preview opens) and
+/// the commander stays put.
+#[test]
+fn vsplit_cycle_disabled_with_second_commander() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+
+        app.apply(&Action::OpenSecondCommander).unwrap();
+        let shape = app.state.vsplit;
+
+        app.apply(&Action::VsplitCycle).unwrap();
+        assert!(
+            app.state.right.is_some(),
+            "^a | must not tear down the commander"
+        );
+        assert!(
+            app.view.right_pager.is_none(),
+            "^a | must not open a preview over the commander"
+        );
+        assert_eq!(app.state.vsplit, shape, "the split shape is unchanged");
+    });
+}
+
+/// `V` / `D` from a focused second commander refuse (flash + no-op) rather than
+/// edit/page the wrong column — the overlay scopes to column `a` today, so
+/// driving it from `b` is deferred to C2b. Guards against silently operating on
+/// the left file.
+#[test]
+fn v_d_refused_from_second_commander() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+
+        app.apply(&Action::OpenSecondCommander).unwrap();
+        assert!(app.right_column_focused(), "the new commander owns input");
+
+        app.apply(&Action::EditInPane).unwrap();
+        assert!(
+            app.runtime.top_overlay.is_none(),
+            "V from the second commander must not spawn an editor overlay"
+        );
+        assert!(!matches!(app.state.focus, state::Focus::Overlay));
+    });
+}
+
+/// A session saved while a second commander is open must NOT persist the split
+/// shape — the commander can't be reconstructed on restore yet, so a saved
+/// shape would restore an empty divider with nothing in `b`.
+#[test]
+fn session_does_not_persist_a_commander_split() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        app.state.session_name = Some("vsplit-commander-test".to_string());
+
+        app.apply(&Action::OpenSecondCommander).unwrap();
+        assert!(app.state.vsplit.is_some() && app.state.right.is_some());
+
+        app.save_session();
+        let saved = crate::state::sessions::load_sessions()
+            .into_iter()
+            .find(|s| s.name == "vsplit-commander-test")
+            .expect("session was saved");
+        assert!(
+            saved.vsplit.is_none(),
+            "a commander split must not be persisted (would orphan on restore)"
+        );
+    });
+}

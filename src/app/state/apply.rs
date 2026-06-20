@@ -258,7 +258,7 @@ impl AppState {
                     // of list. No wrap. Ignores picks — the count
                     // is the user being explicit.
                     let start = self.cur().cursor.index;
-                    self.left
+                    self.cur()
                         .rows
                         .iter()
                         .skip(start)

@@ -357,6 +357,15 @@ impl App {
     }
 
     pub fn edit_in_pane(&mut self) {
+        // The V editor opens as a top overlay scoped to the LEFT column (the
+        // "edit in a, preview in b" model). Driving it from a focused right
+        // *commander* needs the overlay to scope to `b` — deferred to C2b. For
+        // now refuse rather than silently edit/show in the wrong column.
+        if self.right_column_focused() {
+            self.state
+                .flash_info("V/D land in column a — ^a a to switch (b support next)");
+            return;
+        }
         let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             return;
         };
@@ -409,6 +418,13 @@ impl App {
     /// truncated) buffer into memory. Streaming wins for multi-GB
     /// logs.
     pub fn display_in_pane(&mut self) {
+        // Same column-scoping limitation as `edit_in_pane` — the D pager mounts
+        // in the left column's `top_unit`; b support lands in C2b.
+        if self.right_column_focused() {
+            self.state
+                .flash_info("V/D land in column a — ^a a to switch (b support next)");
+            return;
+        }
         let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
             return;
         };

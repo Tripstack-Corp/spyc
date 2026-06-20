@@ -115,19 +115,26 @@ impl App {
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
-            vsplit: self
-                .state
-                .vsplit
-                .map(|v| crate::state::sessions::SavedVsplit {
-                    width_pct: v.width_pct,
-                    full_height: matches!(v.mode, VsplitMode::FullHeight),
-                    focus_right: matches!(v.focus, Side::Right),
-                    preview_path: self
-                        .view
-                        .right_pager
-                        .as_ref()
-                        .and_then(|p| p.source_path.clone()),
-                }),
+            // Only the Stage-1 *preview* split is session-restorable. A second
+            // *commander* (`state.right`) can't be reconstructed yet (its cwd
+            // restore is PR G), so don't persist its split shape — restoring it
+            // would show an empty divider with nothing in the right column.
+            vsplit: if self.state.right.is_some() {
+                None
+            } else {
+                self.state
+                    .vsplit
+                    .map(|v| crate::state::sessions::SavedVsplit {
+                        width_pct: v.width_pct,
+                        full_height: matches!(v.mode, VsplitMode::FullHeight),
+                        focus_right: matches!(v.focus, Side::Right),
+                        preview_path: self
+                            .view
+                            .right_pager
+                            .as_ref()
+                            .and_then(|p| p.source_path.clone()),
+                    })
+            },
         };
         let save_result = crate::state::sessions::save_session(&session);
 

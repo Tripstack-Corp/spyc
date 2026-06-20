@@ -340,10 +340,29 @@ impl App {
     /// stays visible beside an editor/pager. Fades the preview when its column
     /// isn't the input target. No-op when no split is open (`right` is `None`).
     fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
-        if let (Some(rect), Some(view)) = (layout.right, self.view.right_pager.as_ref()) {
-            crate::ui::pager::render(frame, rect, view, &self.view.theme);
-            if self.view.dim_inactive && !self.right_column_focused() {
-                self.dim_region(frame, rect);
+        if let Some(rect) = layout.right {
+            if let Some(right) = self.state.right.as_ref() {
+                // A second file-commander (`^z`): paint its list, rows + grid
+                // settled in `prepare_frame` against the right caches. The
+                // ListView fades itself on `!focused`, so no separate dim pass.
+                let focused = !self.view.dim_inactive || self.right_column_focused();
+                frame.render_widget(
+                    ListView {
+                        rows: &self.view.right_cached_rows,
+                        cursor: right.cursor.index,
+                        view_top: right.cursor.view_top,
+                        empty_marker: right.view == View::Dir,
+                        focused,
+                        theme: &self.view.theme,
+                    },
+                    rect,
+                );
+            } else if let Some(view) = self.view.right_pager.as_ref() {
+                // Otherwise the live-reloading preview (`^a |`).
+                crate::ui::pager::render(frame, rect, view, &self.view.theme);
+                if self.view.dim_inactive && !self.right_column_focused() {
+                    self.dim_region(frame, rect);
+                }
             }
         }
         if let Some(vd) = layout.vdivider {

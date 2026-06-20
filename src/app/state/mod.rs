@@ -527,6 +527,37 @@ pub struct Commander {
     pub list_generation: u64,
 }
 
+impl Commander {
+    /// Build a fresh commander rooted at `dir`: read + sort the listing and
+    /// seed masks from `config`, with empty picks/filter and the cursor at the
+    /// top. `rows` is left empty — the caller runs `rebuild_rows()` once this
+    /// is the focused commander (it builds rows through `cur()`). Used to open
+    /// the second (right) column; mirrors the `left` init in `bootstrap`.
+    pub fn for_dir(dir: &Path, config: &Config) -> anyhow::Result<Self> {
+        let sort_order = crate::fs::listing::SortMode::Name;
+        let mut listing = Listing::read(dir)?;
+        listing.sort(sort_order, false);
+        let mut masks = IgnoreMasks::default();
+        masks.apply_config(&config.ignore_masks);
+        Ok(Self {
+            listing,
+            picks: Picks::new(),
+            masks,
+            temp_filter: None,
+            sort_order,
+            sort_reversed: false,
+            view: View::Dir,
+            cursor: Cursor::new(),
+            rows: Vec::new(),
+            grid_dims: GridDims {
+                cols: 1,
+                rows_per_col: 1,
+            },
+            list_generation: 0,
+        })
+    }
+}
+
 pub struct AppState {
     pub inventory: Inventory,
     pub marks: Marks,

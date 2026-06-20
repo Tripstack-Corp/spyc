@@ -137,6 +137,9 @@ pub enum Action {
     VsplitFocusLeft,  // ^a a / ^a h — focus the left region (a)
     VsplitFocusRight, // ^a b / ^a l — focus the right region (b)
     ToggleDim,        // ^a d — toggle the focus-dim of the inactive column / list
+    // Second file-commander in the right column (^z chord family).
+    OpenSecondCommander,  // ^z n — open a second commander (prompts for cwd)
+    CloseSecondCommander, // ^z x — close the second commander
 
     // Graveyard.
     OpenGraveyardView, // g y — open the graveyard viewer
@@ -276,6 +279,8 @@ impl Action {
             Self::VsplitFocusLeft => "focus left pane (a)",
             Self::VsplitFocusRight => "focus right pane (b)",
             Self::ToggleDim => "toggle dimming of the inactive pane",
+            Self::OpenSecondCommander => "open a second file-commander (right column)",
+            Self::CloseSecondCommander => "close the second file-commander",
             Self::OpenGraveyardView => "open graveyard viewer (recover deleted)",
             Self::QuickSelectOpen => "quick select — pick URL/path/SHA/IP from pane",
             Self::HarpoonJump(_) => "jump to harpoon slot N",

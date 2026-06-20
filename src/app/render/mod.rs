@@ -521,6 +521,34 @@ impl App {
             &self.view.theme,
             &mut self.view.cached_grid_key,
         );
+
+        // The right column's second commander (`state.right`) settles the same
+        // way against its own row cache + grid key + rect. No-op until `^z`
+        // opens one.
+        if self.state.right.is_some() {
+            let right_focused = self.right_column_focused();
+            let right_gen = self
+                .state
+                .right
+                .as_ref()
+                .map_or(u64::MAX, |r| r.list_generation);
+            if self.view.right_cached_rows_gen != right_gen
+                && let Some(right) = self.state.right.as_ref()
+            {
+                self.view.right_cached_rows = self.build_rows_for(right);
+                self.view.right_cached_rows_gen = right_gen;
+            }
+            if let (Some(rect), Some(right)) = (layout.right, self.state.right.as_mut()) {
+                stabilize_grid(
+                    &self.view.right_cached_rows,
+                    right,
+                    rect,
+                    right_focused,
+                    &self.view.theme,
+                    &mut self.view.right_cached_grid_key,
+                );
+            }
+        }
     }
 }
 
