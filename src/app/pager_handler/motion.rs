@@ -8,7 +8,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::pane::Pane;
 use crate::shell;
 
-use crate::app::state::Focus;
 use crate::app::{App, Effect, PagerReturn, TaskStatus, sh_c};
 
 impl App {
@@ -58,7 +57,9 @@ impl App {
                 // exited (and the user has seen it), promote -- snapshot
                 // its rendered view into buffer history and drop the
                 // task from the bg list. Running tasks stay in bg.
-                let promote_task: Option<u32> = self.view.pager.as_ref().and_then(|v| {
+                // Reads the ACTIVE pager (the focused column's), not a hardcoded
+                // `view.pager` — else closing `b`'s pager would promote `a`'s task.
+                let promote_task: Option<u32> = self.active_pager_ref().and_then(|v| {
                     let id = v.task_id?;
                     let task = self
                         .runtime
@@ -86,28 +87,38 @@ impl App {
                     // Don't double-push the original viewer.
                     self.clear_pager();
                 } else {
-                    // Save eligible pagers to history before closing.
+                    // Save eligible pagers to history before closing. Operates
+                    // on the ACTIVE pager (the focused column's slot), so closing
+                    // `b`'s pager doesn't evict `a`'s — a hardcoded
+                    // `view.pager.take()` here closed both columns at once.
                     let is_picker = self.state.pending_worktrees.is_some()
                         || self.state.pending_sessions.is_some()
                         || self.view.pending_history_pick.is_some();
-                    if !is_picker
-                        && let Some(ref v) = self.view.pager
-                        && v.picker_cursor.is_none()
-                        && !v.streaming
-                    {
-                        // Persist scroll BEFORE the take —
-                        // otherwise the take leaves self.view.pager
-                        // None and the trailing clear_pager's
-                        // save call is a no-op. Without this,
-                        // file pagers closed via Esc/q never
-                        // got their scroll position saved to
-                        // disk (memory only, via history).
+                    let eligible = !is_picker
+                        && self
+                            .active_pager_ref()
+                            .is_some_and(|v| v.picker_cursor.is_none() && !v.streaming);
+                    if eligible {
+                        // Persist scroll BEFORE the take — otherwise the take
+                        // leaves the slot None and `remember_pager_position`'s
+                        // save is a no-op (file pagers closed via Esc/q would
+                        // never get their scroll saved to disk).
+                        let slot = self.active_pager_slot();
                         self.remember_pager_position();
-                        if let Some(v) = self.view.pager.take() {
+                        if let Some(v) = self.take_active_pager() {
                             self.view.pager_history.push(v);
                         }
+                        // The rest of `clear_pager`'s teardown (the slot is
+                        // already empty after the take). Only the left/single
+                        // slot uses `overlay_column`; closing `b`'s pager must
+                        // NOT unpin a still-open pager in `a`.
+                        if !matches!(slot, crate::app::pager_handler::PagerSlot::Right) {
+                            self.view.overlay_column = None;
+                        }
+                        self.recompute_focus();
+                    } else {
+                        self.clear_pager();
                     }
-                    self.clear_pager();
                 }
                 self.state.pending_worktrees = None;
                 self.state.pending_sessions = None;
@@ -279,14 +290,9 @@ impl App {
                     self.view.needs_full_repaint = true;
                     let wake = self.make_pane_wake();
                     match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-                        Ok(p) => {
-                            self.runtime.top_overlay = Some(p);
-                            // Editor overlay: auto-return on exit (no dismiss key).
-                            self.view.overlay_auto_dismiss = true;
-                            // Pin it to the column it opened from (None = no split).
-                            self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
-                            self.state.focus = Focus::Overlay;
-                        }
+                        // Routes to the focused column's overlay slot (`b` gets
+                        // its own), auto-dismiss on exit, focus the editor.
+                        Ok(p) => self.install_overlay_pty(p),
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),
                     }
                     return Vec::new();

@@ -27,12 +27,20 @@ use super::{App, Effect, EntryKind, PagerView, state};
 /// `?` or `let Some(view) = active_pager_mut!(self) else { … }`.
 macro_rules! active_pager_mut {
     ($self:ident) => {
-        if $self.right_column_focused() {
-            $self.view.right_pager.as_mut()
-        } else if $self.state.pane_focused() && $self.view.scroll_pager.is_some() {
-            $self.view.scroll_pager.as_mut()
-        } else {
-            $self.view.pager.as_mut()
+        // One decision ([`App::active_pager_slot`]) shared with `active_pager_ref`;
+        // this only maps the slot to its field (`&mut`). The slot pick is a
+        // separate `&self` call returning a `Copy` enum, so the borrow here stays
+        // field-level — a `fn(&mut self) -> &mut PagerView` would borrow all of
+        // `*self` and collide with handlers touching sibling fields.
+        match $self.active_pager_slot() {
+            $crate::app::pager_handler::PagerSlot::Modal
+            | $crate::app::pager_handler::PagerSlot::Top => $self.view.pager.as_mut(),
+            $crate::app::pager_handler::PagerSlot::Scrollback => $self.view.scroll_pager.as_mut(),
+            $crate::app::pager_handler::PagerSlot::Right => $self
+                .view
+                .pager_right
+                .as_mut()
+                .or($self.view.right_pager.as_mut()),
         }
     };
 }
@@ -40,6 +48,23 @@ macro_rules! active_pager_mut {
 mod modes;
 mod motion;
 mod pickers;
+
+/// Which pager slot currently owns input. Decided once by
+/// [`App::active_pager_slot`]; [`App::active_pager_ref`] and the
+/// `active_pager_mut!` macro each just map it to the backing field, so the
+/// (ref vs mut) pair can't drift.
+#[derive(Clone, Copy)]
+pub enum PagerSlot {
+    /// A full-frame modal — grep / git-view / help / `;cmd` output → `view.pager`.
+    Modal,
+    /// The bottom-pane `^a v` scrollback → `view.scroll_pager`.
+    Scrollback,
+    /// The focused right vsplit column → its `D` pager (`view.pager_right`),
+    /// else the live preview (`view.right_pager`).
+    Right,
+    /// The shared top / left pager → `view.pager`.
+    Top,
+}
 
 impl App {
     /// Route a key to the pager overlay. Also uses vi-like motion so the
@@ -281,10 +306,12 @@ impl App {
     /// output, help, picker UIs, etc. — those views intentionally
     /// don't carry a `source_path`.
     pub fn remember_pager_position(&mut self) {
-        if let Some(view) = self.view.pager.as_ref()
-            && let Some(path) = view.source_path.clone()
+        // The active pager (focused column's `D`, the modal, or the preview) —
+        // so a right-column `D`'s scroll survives close+reopen too.
+        if let Some((path, scroll)) = self
+            .active_pager_ref()
+            .and_then(|v| v.source_path.clone().map(|p| (p, v.scroll)))
         {
-            let scroll = view.scroll;
             self.view.pager_positions.record(&path, scroll);
         }
     }
@@ -295,10 +322,21 @@ impl App {
     /// + reopen.
     pub fn clear_pager(&mut self) {
         self.remember_pager_position();
-        self.view.pager = None;
-        // A column-scoped `D` pager just closed — unpin its column before the
-        // focus recompute so it resolves to the file list, not a stale pager.
-        self.view.overlay_column = None;
+        // Close whichever top pager the focused column owns: the right column's
+        // own `D` slot, else the shared (left / modal / no-split) slot.
+        if !self.state.pane_focused()
+            && self.focused_side() == state::Side::Right
+            && self.view.pager_right.is_some()
+        {
+            // `pager_right` doesn't use `overlay_column` (the right slot's column
+            // is implicit) — leave it alone so an OPEN left pager stays pinned.
+            self.view.pager_right = None;
+        } else {
+            self.view.pager = None;
+            // The left/single slot just closed — unpin its column before the
+            // focus recompute so it resolves to the file list, not a stale pager.
+            self.view.overlay_column = None;
+        }
         // The top pager just closed — drop any stale `Pager(_)` focus this
         // frame (the loop top would catch it next tick regardless).
         self.recompute_focus();
@@ -335,6 +373,48 @@ impl App {
         self.view.pager = Some(view);
     }
 
+    /// Install a freshly-spawned editor / `$PAGER` overlay PTY into the focused
+    /// column's slot, then focus it. The right column (`b`) gets its own
+    /// `top_overlay_right` slot — coexisting with a `V`/`D` in `a` and always
+    /// auto-dismissing on exit (`prepare_panes`). The left / single / no-split
+    /// case keeps the existing `top_overlay` slot with the auto-dismiss flag and
+    /// the column pin. Shared by `V` (`edit_in_pane`), `D`-on-a-huge-file
+    /// (`spawn_pager_overlay_for_path`), and the in-pager `v` editor handoff.
+    pub(super) fn install_overlay_pty(&mut self, p: Pane) {
+        if self.overlay_targets_right() {
+            self.runtime.top_overlay_right = Some(p);
+        } else {
+            self.runtime.top_overlay = Some(p);
+            // Interactive overlay (editor / pager): on exit, return to spyc
+            // immediately rather than holding a "press any key" frame.
+            self.view.overlay_auto_dismiss = true;
+            // This is the LEFT / single slot, so it scopes to the left column
+            // when split (`None` when no split). The right column uses its own
+            // slot above and never sets this.
+            self.view.overlay_column = self.state.vsplit.map(|_| state::Side::Left);
+        }
+        self.state.focus = state::Focus::Overlay;
+    }
+
+    /// Install a `D` `TopPane` pager into the focused column's slot, then focus
+    /// it. Right column (`b`) → its own `pager_right` slot (coexists with a
+    /// `V`/`D` in `a`); left / single / no-split → the shared `pager` slot with
+    /// the column pin. Mirrors [`Self::install_overlay_pty`] for the in-process
+    /// pager case.
+    pub(super) fn install_top_pager(&mut self, view: PagerView) {
+        if self.overlay_targets_right() {
+            self.remember_pager_position();
+            self.view.pager_right = Some(view);
+        } else {
+            self.set_pager(view);
+            // LEFT / single slot → scopes to the left column when split (`None`
+            // with no split). The right column uses its own `pager_right` slot.
+            self.view.overlay_column = self.state.vsplit.map(|_| state::Side::Left);
+        }
+        self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
+        self.view.needs_full_repaint = true;
+    }
+
     /// The pager the key handlers act on (read-only). The bottom pane-scrollback
     /// (`view.scroll_pager`) and the top/overlay pager (`view.pager`) live in
     /// separate region slots so a `D` top pager and a `^a v` bottom scrollback
@@ -350,19 +430,63 @@ impl App {
     /// holding the pager. The macro inlines the slot pick so the borrow stays
     /// field-level (`view.pager` / `view.scroll_pager` only).
     pub(super) fn active_pager_ref(&self) -> Option<&PagerView> {
-        if self.right_column_focused() {
-            self.view.right_pager.as_ref()
-        } else if self.state.pane_focused() && self.view.scroll_pager.is_some() {
-            self.view.scroll_pager.as_ref()
-        } else {
-            self.view.pager.as_ref()
+        match self.active_pager_slot() {
+            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_ref(),
+            PagerSlot::Scrollback => self.view.scroll_pager.as_ref(),
+            PagerSlot::Right => self
+                .view
+                .pager_right
+                .as_ref()
+                .or(self.view.right_pager.as_ref()),
         }
+    }
+
+    /// Decide which pager slot owns input — the single source of truth shared by
+    /// [`Self::active_pager_ref`] and the `active_pager_mut!` macro. A flat
+    /// priority ladder: a full-frame modal first, then the focused region (right
+    /// column / bottom-pane scrollback), else the shared top pager.
+    pub(super) fn active_pager_slot(&self) -> PagerSlot {
+        if self.modal_pager_open() {
+            PagerSlot::Modal
+        } else if !self.state.pane_focused() && self.focused_side() == state::Side::Right {
+            PagerSlot::Right
+        } else if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+            PagerSlot::Scrollback
+        } else {
+            PagerSlot::Top
+        }
+    }
+
+    /// Take (remove + return) the pager that currently owns input — the same
+    /// slot [`Self::active_pager_ref`] reads. Used by the `q`/Esc close path to
+    /// move the focused pager into history without disturbing the OTHER column's
+    /// pager (a hardcoded `view.pager.take()` would evict `a`'s pager while
+    /// closing `b`'s — both columns went dark).
+    pub(super) fn take_active_pager(&mut self) -> Option<PagerView> {
+        match self.active_pager_slot() {
+            PagerSlot::Modal | PagerSlot::Top => self.view.pager.take(),
+            PagerSlot::Scrollback => self.view.scroll_pager.take(),
+            PagerSlot::Right => self
+                .view
+                .pager_right
+                .take()
+                .or_else(|| self.view.right_pager.take()),
+        }
+    }
+
+    /// A full-frame modal pager (grep / git-view / help / `;cmd` output) is open
+    /// in the shared slot — it owns input regardless of which column is focused.
+    fn modal_pager_open(&self) -> bool {
+        matches!(
+            self.view.pager.as_ref().map(|v| v.mount),
+            Some(crate::ui::pager::Mount::Overlay)
+        )
     }
 
     pub fn edit_in_pane(&mut self) {
         // Edit the FOCUSED column's cursor file. From the right commander the
-        // overlay opens full-width (the carve leaves `top_unit` full when the
-        // right is focused), so it no longer lands in column `a`.
+        // editor opens INSIDE `b` (its own `top_overlay_right` slot), so it
+        // coexists with a `V`/`D` already open in `a` instead of evicting it.
         let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
             return;
         };
@@ -388,15 +512,7 @@ impl App {
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-            Ok(p) => {
-                self.runtime.top_overlay = Some(p);
-                // Interactive overlay (editor / pager): on exit, return to spyc
-                // immediately rather than holding a "press any key" frame.
-                self.view.overlay_auto_dismiss = true;
-                // Pin it to the column it opened from (None when no split).
-                self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
-                self.state.focus = state::Focus::Overlay;
-            }
+            Ok(p) => self.install_overlay_pty(p),
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
         }
     }
@@ -421,8 +537,8 @@ impl App {
     /// logs.
     pub fn display_in_pane(&mut self) {
         // Page the FOCUSED column's cursor file. From the right commander the
-        // pager opens full-width (the carve leaves `top_unit` full when the
-        // right is focused), so it no longer lands in column `a`.
+        // pager opens INSIDE `b` (its own `pager_right` slot), coexisting with a
+        // `V`/`D` already open in `a` instead of evicting it.
         let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
             return;
         };
@@ -462,11 +578,7 @@ impl App {
         // page the user navigated away from and might want to revisit
         // via `[b` / `]b`.
         view.no_history = true;
-        self.set_pager(view);
-        self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
-        // Pin the pager to the column it opened from (None when no split).
-        self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
-        self.view.needs_full_repaint = true;
+        self.install_top_pager(view);
     }
 
     /// Load a one-shot preview of the file under the cursor into the right
@@ -769,15 +881,7 @@ impl App {
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-            Ok(p) => {
-                self.runtime.top_overlay = Some(p);
-                // Interactive overlay (editor / pager): on exit, return to spyc
-                // immediately rather than holding a "press any key" frame.
-                self.view.overlay_auto_dismiss = true;
-                // Pin it to the column it opened from (None when no split).
-                self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
-                self.state.focus = state::Focus::Overlay;
-            }
+            Ok(p) => self.install_overlay_pty(p),
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
         }
     }

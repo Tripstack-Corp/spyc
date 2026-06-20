@@ -335,6 +335,17 @@ impl App {
                 pane_had_output = true;
             }
         }
+        // The right-column overlay (`b`'s `V`/`D`) has its own slot and reader,
+        // so it needs the same clear-wake + drain here — this is the SOLE
+        // clear_wake site. Without it `b`'s editor wake edge never re-arms: after
+        // its first output the reader stops pushing wakes, so the loop only
+        // redraws on the next keystroke (laggy editor + stale frames).
+        if let Some(overlay) = self.runtime.top_overlay_right.as_mut() {
+            overlay.clear_wake();
+            if overlay.drain_output() {
+                pane_had_output = true;
+            }
+        }
         if pane_had_output {
             needs_draw = true;
             draw_reason = 1;

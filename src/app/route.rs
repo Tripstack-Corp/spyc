@@ -126,11 +126,6 @@ pub(super) struct RouteSnapshot {
     /// leaves this `false` — its keys fall through to the resolver / file-list
     /// nav, which operate on the focused column via `cur()`.
     pub right_preview_focused: bool,
-    /// An open `V`/`D` overlay/pager is in the *focused* vsplit column (or it's
-    /// full-frame / there's no split). When a column-scoped `D` TopPane pager is
-    /// in the OTHER column, this is `false`: its keys don't reach the pager —
-    /// they drive the focused column's list instead.
-    pub overlay_in_focused_col: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -184,14 +179,13 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     //    bottom is focused (`bottom_typing`), and meta chords always escape to
     //    the resolver. `active_pager_mut!` resolves `PagerKey` to this pager
     //    (the top is focused, or it's a modal Overlay).
+    // `pager_mount` is already the FOCUSED column's pager (a `D` in the other
+    // column reads `None`), so a column-scoped pager only reaches here while its
+    // column is focused — the other column's keys fall through to its list.
     if let Some(mount) = snap.pager_mount {
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
         let escape_meta = matches!(mount, Mount::TopPane) && is_meta;
-        // A column-scoped TopPane pager (`D` in a vsplit) only owns input while
-        // ITS column is focused. With focus on the other column, fall through so
-        // the focused column's list/commander gets the keys — the pager keeps
-        // rendering beside it. (Overlay/full-frame pagers have this `true`.)
-        if snap.overlay_in_focused_col && !(bottom_typing || escape_meta) {
+        if !(bottom_typing || escape_meta) {
             return InputSink::PagerKey;
         }
         // else fall through to the scrollback / bottom-pane / resolver arms.
@@ -266,7 +260,11 @@ impl App {
             // The authoritative focus, recomputed at the loop top before this
             // read. Subsumes the old `has_top_overlay` + `pane_focused` reads.
             focus: self.state.focus,
-            pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+            // The focused column's top pager (a full-frame modal regardless of
+            // column, else `b`'s `D` pager / `a`'s pager). A column-scoped `D` in
+            // the OTHER column reads `None` here, so its keys go to the focused
+            // column's list — it keeps rendering beside it.
+            pager_mount: self.focused_top_pager_mount(),
             has_scroll_pager: self.view.scroll_pager.is_some(),
             has_pane_tabs: self.runtime.pane_tabs.is_some(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
@@ -277,7 +275,6 @@ impl App {
             // Preview-only: a focused right *commander* (state.right) routes
             // through the resolver/file-list nav instead (driving `cur()`).
             right_preview_focused: self.right_column_focused() && self.view.right_pager.is_some(),
-            overlay_in_focused_col: self.overlay_in_focused_col(),
         }
     }
 }
@@ -300,8 +297,6 @@ mod tests {
             pane_closed: false,
             resolver_pending: false,
             right_preview_focused: false,
-            // Quiescent: no overlay, so it's vacuously "in the focused column".
-            overlay_in_focused_col: true,
         }
     }
 
@@ -788,7 +783,7 @@ mod tests {
         for &modal in &modals {
             for &focus in &focuses {
                 for &pager_mount in &mounts {
-                    for bits in 0..(1u32 << 7) {
+                    for bits in 0..(1u32 << 6) {
                         let snap = RouteSnapshot {
                             modal,
                             is_prompting: on(bits, 0),
@@ -800,7 +795,6 @@ mod tests {
                             pane_closed: on(bits, 4),
                             resolver_pending: false,
                             right_preview_focused: on(bits, 5),
-                            overlay_in_focused_col: on(bits, 6),
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

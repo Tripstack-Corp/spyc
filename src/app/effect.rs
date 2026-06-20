@@ -422,11 +422,20 @@ impl App {
                             .pane_tabs
                             .as_mut()
                             .map(|t| input.send_to(t.active_mut())),
-                        PaneTarget::Overlay => self
-                            .runtime
-                            .top_overlay
-                            .as_mut()
-                            .map(|ov| input.send_to(ov)),
+                        PaneTarget::Overlay => {
+                            // Route to the focused column's overlay slot: `b`'s
+                            // own when the right column owns the keyboard, else
+                            // the left / single slot. (Focus is `Overlay` here,
+                            // so this is never pane-focused.)
+                            let slot = if self.focused_side() == crate::app::state::Side::Right
+                                && self.runtime.top_overlay_right.is_some()
+                            {
+                                self.runtime.top_overlay_right.as_mut()
+                            } else {
+                                self.runtime.top_overlay.as_mut()
+                            };
+                            slot.map(|ov| input.send_to(ov))
+                        }
                     };
                     match result {
                         Some(Ok(())) => {

@@ -457,8 +457,15 @@ struct Runtime {
     mcp_config_dirs: Vec<PathBuf>,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pane_tabs: Option<PaneTabs>,
-    /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`.
+    /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
+    /// column's (or single / no-split / full-frame `;cmd`) editor / `$PAGER`.
     top_overlay: Option<Pane>,
+    /// The RIGHT column's editor / huge-file `$PAGER` overlay PTY in a vertical
+    /// split — its own slot so a `V`/`D` in `b` coexists with one in `a` rather
+    /// than evicting it (the dual-overlay twin of [`Self::top_overlay`]). Only
+    /// ever holds an auto-dismiss editor/pager (never a `;cmd`), so it has no
+    /// await-dismiss state. `None` outside a split or when `b` has no overlay.
+    top_overlay_right: Option<Pane>,
     /// In-flight foreground `!` capture (owns a `PtyHost`).
     pending_capture: Option<PendingCapture>,
     /// Backgrounded `!` tasks (each owns a `PtyHost`).
@@ -556,6 +563,14 @@ pub struct ViewState {
     /// and must not evict each other. The focused-region pager is selected by
     /// [`App::active_pager_mut`]; render draws both independently.
     pub scroll_pager: Option<PagerView>,
+    /// The RIGHT column's top-region (`D`) pager in a vertical split: a
+    /// `Mount::TopPane` `PagerView`, the dual-overlay twin of [`Self::pager`]
+    /// for column `b`. Its own slot so a `D` in `b` coexists with a `D`/`V` in
+    /// `a` instead of evicting it. Rendered into `layout.right` by
+    /// `render_right_split`. `None` outside a split or when `b` has no `D` open.
+    /// (The full-frame modals — grep / git-view / help / `;cmd` output — stay in
+    /// the single [`Self::pager`] slot; only the column-scoped `D` mirrors here.)
+    pub pager_right: Option<PagerView>,
     /// The right-column pager of a vertical split (the live-reloading
     /// preview). Its **own** slot, like [`Self::scroll_pager`], so it coexists
     /// with the top and bottom region pagers — render draws it into
@@ -695,6 +710,7 @@ impl ViewState {
         Self {
             pager: None,
             scroll_pager: None,
+            pager_right: None,
             right_pager: None,
             dim_inactive: true,
             preview_dirty: false,

@@ -129,15 +129,16 @@ fn scroll_to_match_translates_to_chunk_local_offset_in_multi_col() {
 #[test]
 fn scroll_max_logical_when_no_wrap_or_no_body_w() {
     let mut view = PagerView::new_plain("test", vec!["x".repeat(60); 10]);
-    // wrap off → logical-line behavior
+    // wrap off → logical-line behavior. 10 - 4 = 6 pins the last line to the
+    // bottom; +1 reserves a row for the `[EOF]` marker (long-file end signal).
     view.wrap = false;
-    assert_eq!(view.scroll_max(4), 6); // 10 - 4
+    assert_eq!(view.scroll_max(4), 7);
     // wrap on but body_w = 0 (e.g. before first render) →
     // fall back to logical-line behavior so we don't return a
     // bogus value when the wrap-aware path can't compute.
     view.wrap = true;
     view.last_body_w.set(0);
-    assert_eq!(view.scroll_max(4), 6);
+    assert_eq!(view.scroll_max(4), 7);
 }
 
 #[test]
@@ -332,11 +333,12 @@ fn clamp_scroll_auto_pulls_scroll_back_from_past_end() {
     // blank viewport. clamp_scroll_auto (using the last render's viewport
     // height) must pull it back to scroll_max.
     let mut view = PagerView::new_plain("v", (0..5).map(|i| format!("line {i}")).collect());
-    view.last_viewport_h.set(3); // 5 lines in a 3-row viewport → scroll_max == 2
+    // 5 lines in a 3-row viewport: content-pin max 2, +1 for the [EOF] row → 3.
+    view.last_viewport_h.set(3);
     view.scroll = 999; // jumped well past the end
     view.clamp_scroll_auto();
     assert_eq!(
-        view.scroll, 2,
+        view.scroll, 3,
         "scroll must be clamped to scroll_max, not left past the end"
     );
 }
@@ -675,10 +677,11 @@ fn pending_scroll_to_bottom_default_is_false() {
 
 #[test]
 fn scroll_to_bottom_with_viewport_lands_in_bottom_window() {
-    // 20 lines, viewport=5 → scroll_max = 15 (last 5 lines visible).
+    // 20 lines, viewport=5: content-pin max 15, +1 for the [EOF] row → 16
+    // (last line visible one row up, end marker on the bottom row).
     let mut view = sample_view();
     view.scroll_to_bottom(5);
-    assert_eq!(view.scroll, 15);
+    assert_eq!(view.scroll, 16);
 }
 
 #[test]
@@ -937,4 +940,35 @@ fn toggle_markdown_no_alt_returns_false() {
     let mut v = PagerView::new_plain("plain.txt", vec!["hi".into()]);
     assert!(!v.toggle_markdown());
     assert_eq!(v.scroll, 0);
+}
+
+/// A file taller than the viewport can now scroll one row past the last line
+/// so the `[EOF]` end marker renders at the true bottom (it used to only show
+/// for files that fit the viewport). The last content line stays visible.
+#[test]
+fn long_file_shows_eof_marker_at_bottom() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
+    let mut view = PagerView::new_plain("long.txt", lines);
+    let theme = Theme::default();
+    let mut term = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    term.draw(|f| render(f, f.area(), &view, &theme)).unwrap(); // sets last_viewport_h
+    view.scroll_to_bottom_auto();
+    term.draw(|f| render(f, f.area(), &view, &theme)).unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut text = String::new();
+    for y in 0..20 {
+        for x in 0..40 {
+            text.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+        text.push('\n');
+    }
+    assert!(
+        text.contains("[EOF]"),
+        "the [EOF] marker renders at the bottom:\n{text}"
+    );
+    assert!(
+        text.contains("line 99"),
+        "the last content line stays visible:\n{text}"
+    );
 }

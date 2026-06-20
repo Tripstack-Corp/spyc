@@ -550,6 +550,26 @@ impl App {
             }
         }
 
+        // Right-column overlay (`b`'s `V` / `D`-on-a-huge-file): resize to its
+        // column rect (`layout.right`, where `render_right_split` paints it),
+        // drain, and auto-close on exit. It only ever holds an interactive
+        // editor/pager (never a `;cmd`), so there's no await-dismiss frame — it
+        // returns straight to the commander, the dual-overlay twin of the
+        // `AutoClose` arm above.
+        let right_overlay_closed = if let Some(overlay) = self.runtime.top_overlay_right.as_mut() {
+            if let Some(rect) = layout.right {
+                let _ = overlay.resize(rect.height, rect.width);
+            }
+            overlay.drain_output();
+            overlay.is_closed()
+        } else {
+            false
+        };
+        if right_overlay_closed {
+            self.runtime.top_overlay_right = None;
+            self.view.needs_full_repaint = true;
+        }
+
         // Bottom pane: resize to its rect + drain (uniform across the overlay,
         // TopPane-pager, and default draw paths). `output_dirty` is cleared
         // only on the non-overlay paths, matching `render_inner`.

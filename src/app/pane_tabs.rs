@@ -340,9 +340,8 @@ impl App {
         // tests there.
         self.state.focus = super::focus::decide_focus(
             super::focus::FocusSnapshot {
-                has_top_overlay: self.runtime.top_overlay.is_some(),
-                pager_mount: self.view.pager.as_ref().map(|v| v.mount),
-                overlay_in_focused_col: self.overlay_in_focused_col(),
+                has_top_overlay: self.focused_col_has_overlay(),
+                pager_mount: self.focused_top_pager_mount(),
             },
             want_pane,
         );
@@ -353,8 +352,9 @@ impl App {
                 .as_ref()
                 .map_or("pane", |t| t.active_info().label.as_str());
             self.state.flash_info(format!("focus: {label}"));
-        } else if self.right_column_focused() {
-            // `^a k` from the pane climbed back to the remembered right column.
+        } else if self.column_focused(state::Side::Right) {
+            // The right column owns the keyboard — its list, preview, or its own
+            // `V`/`D` overlay (any surface in `b`).
             self.state.flash_info("focus: b (right)");
         } else {
             // When a `;cmd` overlay is showing the spyc-list slot, the
@@ -383,23 +383,44 @@ impl App {
     /// focus, and closes left a stale `Overlay`/`Pager` behind. Behavior-
     /// preserving while routing/render still read only `pane_focused()`: this
     /// only refines the non-`Pane` discriminant, which `pane_focused()` ignores.
-    /// Whether an open `V`/`D` overlay/pager is in the focused vsplit column
-    /// (or there's no split). False when a column-scoped overlay is open in the
-    /// OTHER column — then focus belongs to the focused column's list, so
-    /// `^a l`/`^a h` can drive the commander beside an open editor/pager.
-    pub(super) fn overlay_in_focused_col(&self) -> bool {
-        self.view
-            .overlay_column
-            .is_none_or(|c| self.state.vsplit.map(|v| v.focus) == Some(c))
+    /// Does the FOCUSED vsplit column host a `V`/`D`/`;cmd` overlay PTY? Reads
+    /// that column's own slot (`b` → `top_overlay_right`, else `top_overlay`), so
+    /// an overlay open only in the OTHER column reads `false` — focus then
+    /// belongs to the focused column's list, and `^a l`/`^a h` can move to the
+    /// commander beside an open editor/pager.
+    pub(super) fn focused_col_has_overlay(&self) -> bool {
+        match self.focused_side() {
+            state::Side::Right => self.runtime.top_overlay_right.is_some(),
+            state::Side::Left => self.runtime.top_overlay.is_some(),
+        }
+    }
+
+    /// The top-region pager mount that currently owns focus: a full-frame modal
+    /// (grep / git-view / help / `;cmd` output) regardless of column, else the
+    /// focused column's own `D` pager (`b` → `pager_right`, else `pager`). `None`
+    /// when the focused column has no top pager. The right-column *preview* is
+    /// deliberately excluded — it routes via `right_preview_focused`, keeping
+    /// `Focus::FileList`.
+    pub(super) fn focused_top_pager_mount(&self) -> Option<crate::ui::pager::Mount> {
+        use crate::ui::pager::Mount;
+        if matches!(
+            self.view.pager.as_ref().map(|v| v.mount),
+            Some(Mount::Overlay)
+        ) {
+            return Some(Mount::Overlay);
+        }
+        match self.focused_side() {
+            state::Side::Right => self.view.pager_right.as_ref().map(|v| v.mount),
+            state::Side::Left => self.view.pager.as_ref().map(|v| v.mount),
+        }
     }
 
     pub(super) fn recompute_focus(&mut self) {
         let want_pane = matches!(self.state.focus, state::Focus::Pane);
         self.state.focus = super::focus::decide_focus(
             super::focus::FocusSnapshot {
-                has_top_overlay: self.runtime.top_overlay.is_some(),
-                pager_mount: self.view.pager.as_ref().map(|v| v.mount),
-                overlay_in_focused_col: self.overlay_in_focused_col(),
+                has_top_overlay: self.focused_col_has_overlay(),
+                pager_mount: self.focused_top_pager_mount(),
             },
             want_pane,
         );

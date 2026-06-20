@@ -16,15 +16,16 @@ use super::state::Focus;
 /// inline.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FocusSnapshot {
-    /// A top overlay (`V` editor / `;cmd`) pty is alive.
+    /// The FOCUSED column hosts a top overlay (`V` editor / `;cmd` / `$PAGER`)
+    /// pty. Already column-scoped by the caller: a `V`/`D` open only in the
+    /// OTHER column reads `false` here, so focus belongs to the focused
+    /// column's file list (and `^a l`/`^a h` can move to the commander beside an
+    /// open editor/pager).
     pub has_top_overlay: bool,
-    /// The in-app pager's mount slot, if a pager is open.
+    /// The focused column's top-region pager mount, if one is open there — or a
+    /// full-frame modal (grep / git-view / help / `;cmd` output), which owns
+    /// focus regardless of column. `None` when the focused column has no pager.
     pub pager_mount: Option<Mount>,
-    /// Whether an open overlay/pager is in the *focused* vsplit column (or there
-    /// is no split). When a column-scoped `V`/`D` is open in the OTHER column,
-    /// this is false: focus belongs to the focused column's file list, not the
-    /// overlay (so `^a l`/`^a h` can move to the commander beside the overlay).
-    pub overlay_in_focused_col: bool,
 }
 
 /// Decide the [`Focus`] for a directional focus change. **Pure** — no mutation,
@@ -39,15 +40,13 @@ pub(super) struct FocusSnapshot {
 pub(super) const fn decide_focus(snap: FocusSnapshot, want_pane: bool) -> Focus {
     if want_pane {
         Focus::Pane
-    } else if snap.has_top_overlay && snap.overlay_in_focused_col {
+    } else if snap.has_top_overlay {
         Focus::Overlay
-    } else if let Some(mount) = snap.pager_mount
-        && snap.overlay_in_focused_col
-    {
+    } else if let Some(mount) = snap.pager_mount {
         Focus::Pager(mount)
     } else {
-        // No overlay, or it's pinned to the *other* column — the focused
-        // column's file list / commander owns input.
+        // No overlay/pager in the focused column — its file list / commander
+        // owns input. (A `V`/`D` in the OTHER column keeps rendering beside it.)
         Focus::FileList
     }
 }
@@ -60,8 +59,6 @@ mod tests {
         FocusSnapshot {
             has_top_overlay,
             pager_mount,
-            // Default: the overlay (if any) is in the focused column / no split.
-            overlay_in_focused_col: true,
         }
     }
 

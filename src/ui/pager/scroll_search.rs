@@ -81,16 +81,34 @@ impl PagerView {
     /// end summing visual rows; max_scroll = the highest logical line
     /// index whose inclusion still fits the viewport.
     pub fn scroll_max(&self, viewport_height: u16) -> u16 {
-        let ncols = self.columns.max(1) as usize;
-        if ncols > 1 {
+        if self.columns.max(1) as usize > 1 {
             // Multi-col: bound by the longest column chunk. Wrap is irrelevant
             // here because multi-col is only used for pickers (find finder,
-            // task viewer) where wrap is off.
+            // task viewer) where wrap is off. No EOF reservation (per-column
+            // `[EOF]` is handled in the multi-col render).
             return Self::multi_col_max_scroll(
-                &partition_lines_static(&self.lines, ncols),
+                &partition_lines_static(&self.lines, self.columns.max(1) as usize),
                 viewport_height,
             );
         }
+        let base = self.scroll_max_content(viewport_height);
+        // Reserve one extra row at the true bottom so the `[EOF]` / `~` end
+        // marker is reachable for files TALLER than the viewport — short files
+        // (`base == 0`) already show it because there's spare room; this gives
+        // long files the same end-of-file signal (the doc scrolls one row past
+        // the last line, like vim/less). Skipped while streaming (no marker
+        // yet) or when `[EOF]` is already a content line (`eof_in_content`).
+        if base > 0 && !self.streaming && !self.eof_in_content {
+            base.saturating_add(1)
+        } else {
+            base
+        }
+    }
+
+    /// The greatest scroll that pins the last line to the bottom row (the
+    /// viewport fills exactly, no room for an end marker). [`Self::scroll_max`]
+    /// adds the `[EOF]` reservation on top of this.
+    fn scroll_max_content(&self, viewport_height: u16) -> u16 {
         let logical_max = u16::try_from(self.lines.len().saturating_sub(viewport_height.into()))
             .unwrap_or(u16::MAX);
         let body_w = self.last_body_w.get() as usize;

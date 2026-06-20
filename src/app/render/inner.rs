@@ -39,8 +39,10 @@ impl App {
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
             // The overlay is bright only when it actually owns the keyboard: not
             // the bottom pane, AND (in a vsplit) its own column is focused — so a
-            // `V` in `a` dims when `^a l` moves focus to `b`.
-            let overlay_focused = !self.state.pane_focused() && self.overlay_in_focused_col();
+            // `V` in `a` dims when `^a l` moves focus to `b`. This is the LEFT /
+            // single / no-split overlay slot; the right column's overlay is drawn
+            // (and focus-tracked) in `render_right_split`.
+            let overlay_focused = self.column_focused(state::Side::Left);
             let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
             overlay.with_screen(|screen| {
                 frame.render_widget(
@@ -134,6 +136,16 @@ impl App {
             };
             if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.view.theme);
+                // In a vsplit this pager lives in the left/single column
+                // (`overlay_column`); dim it when its column isn't focused, so a
+                // `D` in `a` fades on `^a l` to `b` — mirroring the list/right
+                // dim. (No split → full-frame → never dims.)
+                if self.state.vsplit.is_some()
+                    && self.view.dim_inactive
+                    && !self.column_focused(state::Side::Left)
+                {
+                    self.dim_region(frame, top_area);
+                }
             }
             // Divider + bottom region render normally below. The bottom region
             // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
@@ -327,8 +339,11 @@ impl App {
     /// dimming off (`^a d`). Shared by the default draw and the "overlay in the
     /// right column" path (which keeps the left list visible beside it).
     fn render_left_list(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
-        let list_focused =
-            !self.view.dim_inactive || (!self.state.pane_focused() && !self.right_column_focused());
+        // Bright only when dimming is off, or the LEFT column owns the keyboard.
+        // `column_focused` (not `right_column_focused`) so opening a pager/editor
+        // in `b` — which makes focus `Pager`/`Overlay`, not `FileList` — still
+        // dims `a`. (Regression: `a` un-dimmed the moment `b` opened a pager.)
+        let list_focused = !self.view.dim_inactive || self.column_focused(state::Side::Left);
         frame.render_widget(
             ListView {
                 rows: &self.view.cached_rows,
@@ -354,19 +369,12 @@ impl App {
             return;
         }
         // A column-scoped overlay sits below the shared status row, so keep the
-        // status bar visible above both columns.
+        // status bar visible above both columns. This path runs for the LEFT /
+        // single overlay slot (`top_overlay` / `view.pager`), which always scopes
+        // to the left column — so the RIGHT column shows beside it (its list /
+        // preview, or its OWN `V`/`D` overlay when both columns have one).
         self.render_status_bar(frame, layout.status);
-        let overlay_in_right = self.view.overlay_column == Some(state::Side::Right);
-        if overlay_in_right {
-            // Overlay is in the right column → show the left list beside it.
-            self.render_left_list(frame, layout.list);
-            if let Some(vd) = layout.vdivider {
-                self.render_vsplit_divider(frame, vd);
-            }
-        } else {
-            // Overlay is in the left column → show the right column beside it.
-            self.render_right_split(frame, layout);
-        }
+        self.render_right_split(frame, layout);
     }
 
     /// Paint the right column of a vertical split (a second commander or the
@@ -377,7 +385,32 @@ impl App {
     /// split is open (`right` is `None`).
     fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
         if let Some(rect) = layout.right {
-            if let Some(right) = self.state.right.as_ref() {
+            let right_focused = self.column_focused(state::Side::Right);
+            if let Some(overlay) = self.runtime.top_overlay_right.as_ref() {
+                // `b`'s own editor / `$PAGER` overlay PTY (`V`/`D`-huge) — covers
+                // the column, coexisting with whatever `a` is doing. Bright only
+                // when `b` owns the keyboard (dims on `^a h` to `a`). Always
+                // auto-dismisses on exit (no "press any key" frame), so no
+                // dismiss-prompt branch here.
+                overlay.with_screen(|screen| {
+                    frame.render_widget(
+                        PaneWidget {
+                            screen,
+                            focused: right_focused,
+                        },
+                        rect,
+                    );
+                    if right_focused {
+                        place_pty_cursor_from_screen(frame, screen, rect);
+                    }
+                });
+            } else if let Some(view) = self.view.pager_right.as_ref() {
+                // `b`'s own `D` TopPane pager.
+                crate::ui::pager::render(frame, rect, view, &self.view.theme);
+                if self.view.dim_inactive && !right_focused {
+                    self.dim_region(frame, rect);
+                }
+            } else if let Some(right) = self.state.right.as_ref() {
                 // A second file-commander (`^z`): paint its list, rows + grid
                 // settled in `prepare_frame` against the right caches. The
                 // ListView fades itself on `!focused`, so no separate dim pass.

@@ -251,6 +251,7 @@ impl App {
                 mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
+                top_overlay_right: None,
                 pending_capture: None,
                 background_tasks: BackgroundTasks::new(),
                 find_picker: None,

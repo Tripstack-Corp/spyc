@@ -1315,3 +1315,206 @@ fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
         );
     });
 }
+
+/// Dual overlay slots: a `D` pager open in BOTH columns coexists (neither
+/// evicts the other), and input routes to the FOCUSED column's pager.
+/// Regression: a single slot meant opening `b`'s pager closed `a`'s.
+#[test]
+fn d_pagers_in_both_columns_coexist_and_route_to_the_focused_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d); // b open + focused
+
+        // A `D` TopPane pager in each column, open at the same time.
+        let mut la = PagerView::new_plain("a", vec!["left".to_string()]);
+        la.mount = crate::ui::pager::Mount::TopPane;
+        app.view.pager = Some(la);
+        let mut rb = PagerView::new_plain("b", vec!["right".to_string()]);
+        rb.mount = crate::ui::pager::Mount::TopPane;
+        app.view.pager_right = Some(rb);
+        app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::TopPane);
+
+        // b focused → its own pager owns input.
+        assert_eq!(app.focused_side(), state::Side::Right);
+        assert_eq!(app.active_pager_ref().map(|v| v.title.as_str()), Some("b"));
+
+        // Switch focus to a → a's pager owns input; b's survives untouched.
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        assert_eq!(app.active_pager_ref().map(|v| v.title.as_str()), Some("a"));
+        assert!(
+            app.view.pager_right.is_some(),
+            "b's pager isn't evicted by a's — they have separate slots"
+        );
+        assert!(app.view.pager.is_some());
+    });
+}
+
+/// A full-frame modal pager (grep / git-view / help / `;cmd`) owns input
+/// regardless of which column is focused — the column-scoped slots yield to it.
+#[test]
+fn modal_pager_owns_input_even_with_right_column_focused() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d); // b open + focused
+
+        // b has a `D` pager, but a full-frame grep (Overlay mount) is also up.
+        let mut rb = PagerView::new_plain("b", vec!["x".to_string()]);
+        rb.mount = crate::ui::pager::Mount::TopPane;
+        app.view.pager_right = Some(rb);
+        let mut grep = PagerView::new_plain("grep", vec!["hit".to_string()]);
+        grep.mount = crate::ui::pager::Mount::Overlay;
+        app.view.pager = Some(grep);
+        app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::Overlay);
+
+        assert_eq!(
+            app.active_pager_ref().map(|v| v.title.as_str()),
+            Some("grep"),
+            "the modal wins over b's column-scoped pager"
+        );
+    });
+}
+
+/// Closing the second commander (`^z x`) drops any overlay/pager open in `b`
+/// along with the column — no orphaned editor PTY / pager left behind.
+#[test]
+fn closing_b_drops_its_pager() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
+        let mut rb = PagerView::new_plain("b", vec!["x".to_string()]);
+        rb.mount = crate::ui::pager::Mount::TopPane;
+        app.view.pager_right = Some(rb);
+
+        app.close_second_commander();
+        assert!(app.state.right.is_none());
+        assert!(
+            app.view.pager_right.is_none(),
+            "b's pager is dropped when its column closes"
+        );
+    });
+}
+
+/// Closing `b`'s pager with `q` closes ONLY `b`'s — `a`'s pager in the other
+/// column survives. Regression: the `q`-close hardcoded `view.pager.take()`, so
+/// it evicted `a`'s pager while `clear_pager` closed `b`'s — both went dark.
+#[test]
+fn q_on_b_pager_leaves_a_pager_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d); // b focused
+
+        // A `D` pager in each column.
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        let mut pa = PagerView::new_plain("a-pager", vec!["x".to_string()]);
+        pa.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pa);
+        app.apply(&Action::VsplitFocusRight).unwrap();
+        let mut pb = PagerView::new_plain("b-pager", vec!["y".to_string()]);
+        pb.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pb);
+        app.recompute_focus();
+        assert!(app.view.pager.is_some() && app.view.pager_right.is_some());
+
+        // q closes b's pager (the focused one) and leaves a's intact.
+        app.handle_key(key('q')).unwrap();
+        assert!(
+            app.view.pager_right.is_none(),
+            "q closes the focused column's (b's) pager"
+        );
+        assert!(
+            app.view.pager.is_some(),
+            "a's pager in the other column survives"
+        );
+        // …and a's pager stays PINNED to the left column — closing b's pager
+        // must not clear `overlay_column`, or the carve would shove a's pager
+        // into the (now focused) right column and blank the left (image: A
+        // blank, B's list + A's pager overlapping).
+        assert_eq!(
+            app.view.overlay_column,
+            Some(state::Side::Left),
+            "a's pager stays pinned to the left column"
+        );
+    });
+}
+
+/// `q` from a focused `b` *commander* (no pager in `b`) does NOT close `a`'s
+/// pager — it falls through to the resolver (b's file-list owns the key).
+#[test]
+fn q_from_b_commander_does_not_close_a_pager() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        let mut pv = PagerView::new_plain("a-pager", vec!["x".to_string()]);
+        pv.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pv);
+        app.apply(&Action::VsplitFocusRight).unwrap(); // focus b's commander
+        app.recompute_focus();
+
+        app.handle_key(key('q')).unwrap();
+        assert!(
+            app.view.pager.is_some(),
+            "q from b's commander leaves a's pager open"
+        );
+    });
+}
+
+/// `column_focused` tracks the keyboard-owning column regardless of surface
+/// type — so opening a pager in `b` (focus becomes `Pager`, not `FileList`)
+/// still reports `b` focused / `a` not, which is what dims `a`. Regression:
+/// `render_left_list` used `right_column_focused` (FileList-only), so `a`
+/// un-dimmed the instant `b` opened a pager/editor.
+#[test]
+fn column_focused_tracks_any_surface_in_b() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d); // b focused
+        let mut pb = PagerView::new_plain("b-pager", vec!["y".to_string()]);
+        pb.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pb); // focus is now Pager(TopPane) in b
+        app.recompute_focus();
+
+        assert!(
+            !app.right_column_focused(),
+            "right_column_focused is FileList-only — false with b's pager up"
+        );
+        assert!(
+            app.column_focused(state::Side::Right),
+            "but b's column still owns the keyboard"
+        );
+        assert!(
+            !app.column_focused(state::Side::Left),
+            "a is not focused → it stays dimmed"
+        );
+    });
+}

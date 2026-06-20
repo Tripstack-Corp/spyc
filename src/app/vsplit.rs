@@ -195,6 +195,10 @@ impl App {
         }
         self.state.right = None;
         self.state.vsplit = None;
+        // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
+        // the editor PTY / pager would linger with no column to render into.
+        self.runtime.top_overlay_right = None;
+        self.view.pager_right = None;
         self.state.focus = state::Focus::FileList;
         self.view.needs_full_repaint = true;
         self.state.flash_info("second commander closed");
@@ -277,6 +281,31 @@ impl App {
                 .state
                 .vsplit
                 .is_some_and(|v| v.focus == state::Side::Right)
+    }
+
+    /// The vsplit column input is currently directed at, ignoring the surface
+    /// type (list / overlay / pager). `Left` with no split (the single column)
+    /// or when the left column is focused; `Right` when `b` is. Independent of
+    /// the pane-vs-not axis — use [`Self::column_focused`] when that matters.
+    /// Drives per-column slot selection (which `top_overlay*` / pager a key or a
+    /// spawn targets).
+    pub(super) fn focused_side(&self) -> state::Side {
+        self.state.vsplit.map_or(state::Side::Left, |v| v.focus)
+    }
+
+    /// Does `side`'s column currently own the keyboard? True only when the
+    /// bottom pane is NOT focused and `side` is the active column (treating the
+    /// no-split single column as `Left`). Drives the bright/dim render of each
+    /// column's overlay/list.
+    pub(super) fn column_focused(&self, side: state::Side) -> bool {
+        !self.state.pane_focused() && self.focused_side() == side
+    }
+
+    /// True when a column-scoped `V`/`D` opened from the focused commander
+    /// should target the RIGHT column's slots: `b` exists and is the focused
+    /// column. (The left/single/no-split case targets the existing slots.)
+    pub(super) fn overlay_targets_right(&self) -> bool {
+        self.state.right.is_some() && self.focused_side() == state::Side::Right
     }
 
     /// Context-sensitive `^a +`/`^a -`: resize the vertical split's width when
