@@ -1214,34 +1214,31 @@ fn session_does_not_persist_a_commander_split() {
     });
 }
 
-/// `^z n` opens a cwd prompt prefilled with the focused column's directory —
-/// the second commander isn't created until the prompt is submitted (Enter
-/// routes to `open_second_commander_at`).
+/// `^z n` opens the second commander directly at PROJECT_HOME (no prompt) —
+/// `b` is a second view into the same project, so its start dir is the shared
+/// project home, not a chosen path.
 #[test]
-fn ctrl_z_n_opens_a_prefilled_cwd_prompt() {
+fn ctrl_z_n_opens_at_project_home() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().join("work");
-        std::fs::create_dir(&dir).unwrap();
-        let mut app = App::test_app(dir);
+        let home = tmp.path().join("proj");
+        let sub = home.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(home.join("root.txt"), "x").unwrap();
+        // Focused column sits in a subdir; PROJECT_HOME is the project root.
+        let mut app = App::test_app(sub);
+        app.state.project_home = Some(std::fs::canonicalize(&home).unwrap());
 
         app.apply(&Action::OpenSecondCommander).unwrap();
-        match &app.state.mode {
-            Mode::Prompting(p) => {
-                assert!(
-                    matches!(p.kind, PromptKind::SecondCommanderCwd),
-                    "^z n opens the cwd prompt"
-                );
-                assert!(
-                    !p.buffer.is_empty(),
-                    "prefilled with the focused dir default"
-                );
-            }
-            Mode::Normal => panic!("^z n should open a cwd prompt"),
-        }
         assert!(
-            app.state.right.is_none(),
-            "no commander until the prompt submits"
+            matches!(app.state.mode, Mode::Normal),
+            "no prompt — opens directly"
+        );
+        let right = app.state.right.as_ref().expect("second commander opened");
+        assert_eq!(
+            right.listing.dir,
+            std::fs::canonicalize(&home).unwrap(),
+            "b opens at PROJECT_HOME, not the focused subdir"
         );
     });
 }

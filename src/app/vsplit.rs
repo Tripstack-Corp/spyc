@@ -5,7 +5,7 @@
 //! template). The cursor-file validation + preview load live with the other
 //! pager-build code (`pager_handler::{previewable_cursor_path, load_right_preview}`).
 
-use super::{App, Mode, Prompt, PromptKind, state};
+use super::{App, state};
 
 /// Default right-column width when a split opens (percent of the frame).
 const DEFAULT_VSPLIT_PCT: u16 = 50;
@@ -139,16 +139,19 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
-    /// `^z n` — prompt for the directory to root a second file-commander at,
-    /// prefilled (and editable) with the focused column's current dir. Enter
-    /// opens the right column there (see [`Self::open_second_commander_at`]);
-    /// editing the path opens it somewhere else. Works whether or not a second
-    /// commander is already open (it re-targets).
+    /// `^z n` — open a second file-commander in the right column. `b` is a
+    /// second view into the SAME project (it shares PROJECT_HOME and the rest of
+    /// the global state), so it opens at **PROJECT_HOME** rather than prompting
+    /// for a directory — navigate it from there. Falls back to the focused
+    /// column's current dir when no PROJECT_HOME is set. Re-targets if `b` is
+    /// already open.
     pub(super) fn open_second_commander(&mut self) {
-        let default = crate::paths::display_tilde(&self.state.cur().listing.dir);
-        let mut prompt = Prompt::simple(PromptKind::SecondCommanderCwd, "second commander cwd: ");
-        prompt.buffer = default;
-        self.state.mode = Mode::Prompting(prompt);
+        let dir = self
+            .state
+            .project_home
+            .clone()
+            .unwrap_or_else(|| self.state.cur().listing.dir.clone());
+        self.open_second_commander_at(&dir);
     }
 
     /// Open (or re-target) the second file-commander rooted at `dir` and focus

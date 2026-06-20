@@ -387,8 +387,7 @@ const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
     match kind {
         Some(PromptKind::PaneNewTabCmd) => HistoryBucket::PaneCmd,
         Some(PromptKind::PaneNewTabCwd) => HistoryBucket::PaneCwd,
-        // The `^z n` cwd prompt recalls directories like `J` does.
-        Some(PromptKind::Jump | PromptKind::SecondCommanderCwd) => HistoryBucket::Jump,
+        Some(PromptKind::Jump) => HistoryBucket::Jump,
         Some(PromptKind::Command) => HistoryBucket::Command,
         _ => HistoryBucket::Shell,
     }
