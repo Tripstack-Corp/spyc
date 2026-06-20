@@ -1245,3 +1245,34 @@ fn ctrl_z_n_opens_a_prefilled_cwd_prompt() {
         );
     });
 }
+
+/// App-side actions operate on the FOCUSED column: `SortCycle` driven while the
+/// second commander (`b`) is focused changes `b`'s sort order, not the left's.
+/// (The App-side `actions.rs` sort arm reads/writes `cur()`, not `self.left`.)
+#[test]
+fn app_side_sort_targets_the_focused_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
+        assert!(app.right_column_focused(), "b is focused after open");
+
+        let left_before = app.state.left.sort_order;
+        let right_before = app.state.right.as_ref().unwrap().sort_order;
+        app.apply(&Action::SortCycle).unwrap();
+
+        assert_eq!(
+            app.state.left.sort_order, left_before,
+            "the left column's sort is untouched"
+        );
+        assert_ne!(
+            app.state.right.as_ref().unwrap().sort_order,
+            right_before,
+            "SortCycle cycled the focused (right) column"
+        );
+    });
+}

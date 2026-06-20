@@ -37,7 +37,7 @@ impl App {
             let candidate = tab_cwd.as_ref().map(|c| c.join(&path));
             match candidate {
                 Some(p) if p.exists() => p,
-                _ => self.state.left.listing.dir.join(&path),
+                _ => self.state.cur().listing.dir.join(&path),
             }
         };
         if !resolved.exists() {
@@ -84,7 +84,7 @@ impl App {
         // Also try resolving against the spyc cwd (project root), not just
         // the pane tab's cwd — Claude often prints paths relative to the
         // project root regardless of the shell's cwd.
-        let spyc_cwd = self.state.left.listing.dir.clone();
+        let spyc_cwd = self.state.cur().listing.dir.clone();
 
         // Debug: dump visible lines to the debug log so we can see what
         // the vt100 screen actually contains.
@@ -141,7 +141,7 @@ impl App {
         }
 
         if let Some(parent) = path.parent() {
-            if parent != self.state.left.listing.dir
+            if parent != self.state.cur().listing.dir
                 && let Err(e) = self.state.chdir(parent)
             {
                 self.state.flash_error(format!("gf: {e}"));

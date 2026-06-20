@@ -53,7 +53,7 @@ impl App {
     /// Picked items only if any picks exist, else all.
     /// Items are removed from inventory after successful put.
     pub fn put_inventory_to_cwd(&mut self) -> Vec<Effect> {
-        let dest = self.state.left.listing.dir.clone();
+        let dest = self.state.cur().listing.dir.clone();
         let item_count = if self.state.inventory.picks.is_empty() {
             self.state.inventory.len()
         } else {
@@ -244,14 +244,14 @@ impl App {
         let dest = if expanded.is_absolute() {
             expanded
         } else {
-            self.state.left.listing.dir.join(&expanded)
+            self.state.cur().listing.dir.join(&expanded)
         };
         self.run_and_flash(
             op(&paths, &dest),
             format!("{verb} {count} item(s) to {}", dest.display()),
         );
         // Picks point at paths that may no longer exist after a move.
-        self.state.left.picks.clear();
+        self.state.cur_mut().picks.clear();
         self.state.refresh_listing();
     }
 

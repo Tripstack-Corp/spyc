@@ -16,9 +16,9 @@ impl App {
     /// the focused row, or `None` if the listing is empty.
     fn harpoon_cursor_path(&self) -> Option<PathBuf> {
         self.state
-            .left
+            .cur()
             .rows
-            .get(self.state.left.cursor.index)
+            .get(self.state.cur().cursor.index)
             .map(|r| r.path.clone())
     }
 
@@ -52,7 +52,7 @@ impl App {
                     return;
                 }
                 self.sync_harpoon_filter_set();
-                if matches!(self.state.left.temp_filter.as_deref(), Some("h")) {
+                if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {
                     self.state.rebuild_rows();
                 }
                 self.state.flash_info(format!("harpoon[{slot}] {label}"));
@@ -98,7 +98,7 @@ impl App {
                     return;
                 }
                 self.sync_harpoon_filter_set();
-                if matches!(self.state.left.temp_filter.as_deref(), Some("h")) {
+                if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {
                     self.state.rebuild_rows();
                 }
                 self.state
@@ -255,7 +255,7 @@ impl App {
                         self.state.flash_error(format!("harpoon save failed: {e}"));
                     }
                     self.sync_harpoon_filter_set();
-                    if matches!(self.state.left.temp_filter.as_deref(), Some("h")) {
+                    if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {
                         self.state.rebuild_rows();
                     }
                     // Re-fetch menu since filter sync invalidates `menu` borrow

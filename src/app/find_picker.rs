@@ -102,7 +102,7 @@ impl App {
             .state
             .project_home
             .clone()
-            .unwrap_or_else(|| self.state.left.listing.dir.clone());
+            .unwrap_or_else(|| self.state.cur().listing.dir.clone());
         let (tx, rx) = std::sync::mpsc::channel();
         let walk_root = root.clone();
         // MVU Phase 3d: wake the loop on each candidate batch (via
@@ -207,10 +207,11 @@ impl App {
                         if let Err(e) = self.state.chdir(parent) {
                             self.state.flash_error(format!("chdir: {e}"));
                         } else if let Some(idx) =
-                            self.state.left.rows.iter().position(|r| r.path == abs)
+                            self.state.cur().rows.iter().position(|r| r.path == abs)
                         {
-                            self.state.left.cursor.index = idx;
-                            self.state.left.cursor.clamp(self.state.left.rows.len());
+                            self.state.cur_mut().cursor.index = idx;
+                            let row_count = self.state.cur().rows.len();
+                            self.state.cur_mut().cursor.clamp(row_count);
                         }
                     }
                 }
