@@ -410,17 +410,53 @@ impl App {
         // and takes precedence over the split (otherwise the zoomed pane would
         // be clamped to the left column). The split state is kept, so un-zoom
         // restores it.
-        let layout = match self.state.vsplit {
+        let mut layout = match self.state.vsplit {
             Some(vsplit) if self.state.pane.zoom == state::ZoomTarget::None => {
                 Self::carve_vsplit(layout, vsplit, area)
             }
             _ => layout,
         };
+        // Grow the prompt upward to fit a long, wrapped command line (runs after
+        // the carve so it uses the final, possibly column-scoped, prompt width).
+        self.grow_prompt_for_wrap(&mut layout, area);
         if self.runtime.top_overlay.is_none() {
             self.settle_list_grid(&layout);
         }
         self.prepare_panes(&layout);
         layout
+    }
+
+    /// While a prompt is open, expand `layout.prompt` upward so a command line
+    /// too wide for one row **wraps** across multiple rows instead of being
+    /// truncated at the edge. The extra rows are drawn over the bottom of the
+    /// list/pane — transient, only while typing — so no other rect is resized.
+    /// Capped at half the frame and never grows over the top status/header row.
+    /// The wrapped height comes from the same `PromptLine` the draw renders, so
+    /// the reserved rows match the drawn rows exactly.
+    fn grow_prompt_for_wrap(&self, layout: &mut FrameLayout, area: ratatui::layout::Rect) {
+        let crate::app::Mode::Prompting(p) = &self.state.mode else {
+            return;
+        };
+        if layout.prompt.width == 0 || layout.prompt.height == 0 {
+            return;
+        }
+        let pl = crate::ui::prompt::PromptLine {
+            prefix: &p.prefix,
+            buffer: &p.buffer,
+            theme: &self.view.theme,
+            cursor_pos: p.editor.as_ref().map(|e| e.cursor),
+            vi_mode: p.editor.as_ref().map(|e| e.mode),
+        };
+        let cap = (area.height / 2).max(1);
+        let lines = pl.line_count(layout.prompt.width).min(cap);
+        if lines <= layout.prompt.height {
+            return;
+        }
+        let bottom = layout.prompt.y + layout.prompt.height;
+        let min_y = area.y.saturating_add(1); // keep the top row (status/header)
+        let new_y = bottom.saturating_sub(lines).max(min_y);
+        layout.prompt.y = new_y;
+        layout.prompt.height = bottom.saturating_sub(new_y);
     }
 
     /// Settle the Runtime-owned pane/overlay state for this frame BEFORE the
