@@ -29,9 +29,9 @@ impl AppState {
     /// or `ApplyResult::NotHandled` when the caller must handle the action
     /// (terminal-touching: pager, pane, theme, redraw, etc.).
     pub fn apply(&mut self, action: &Action) -> ApplyResult {
-        let len = self.left.rows.len();
-        let rows_per_col = self.left.grid_dims.rows_per_col as usize;
-        let per_page = self.left.grid_dims.items_per_page();
+        let len = self.cur().rows.len();
+        let rows_per_col = self.cur().grid_dims.rows_per_col as usize;
+        let per_page = self.cur().grid_dims.items_per_page();
 
         match action {
             // -- Cursor motion --
@@ -94,7 +94,7 @@ impl AppState {
             // -- Picks --
             Action::TogglePick => self.toggle_pick_cursor(),
             Action::PickPatternPrompt => {
-                if self.left.view == View::Dir {
+                if self.cur().view == View::Dir {
                     self.mode =
                         Mode::Prompting(Prompt::simple(PromptKind::PatternPick, "pick pattern: "));
                 }
@@ -108,10 +108,10 @@ impl AppState {
                 TakeOutcome::Noop => {}
             },
             Action::Untake => {
-                if self.left.view != View::Dir {
+                if self.cur().view != View::Dir {
                     return ApplyResult::Handled;
                 }
-                if let Some(row) = self.left.rows.get(self.left.cursor.index) {
+                if let Some(row) = self.cur().rows.get(self.cur().cursor.index) {
                     let path = row.path.clone();
                     if self.inventory.contains(&path) {
                         // Find and remove by original path.
@@ -144,14 +144,14 @@ impl AppState {
             // -- Masks & filtering --
             Action::ToggleMask(n) => {
                 if *n == 1 {
-                    self.left.masks.toggle_mask1();
+                    self.cur_mut().masks.toggle_mask1();
                 } else if *n == 2 {
-                    self.left.masks.toggle_mask2();
+                    self.cur_mut().masks.toggle_mask2();
                 }
                 self.rebuild_rows();
             }
             Action::LimitPrompt => {
-                let prefix = if self.left.temp_filter.is_some() {
+                let prefix = if self.cur().temp_filter.is_some() {
                     "limit (active)="
                 } else {
                     "limit="
@@ -185,33 +185,33 @@ impl AppState {
             Action::SearchPrompt => {
                 self.mode = Mode::Prompting(Prompt::simple(
                     PromptKind::Search {
-                        saved_cursor: self.left.cursor.index,
+                        saved_cursor: self.cur().cursor.index,
                     },
                     "/",
                 ));
             }
             Action::SearchNext => {
                 if let Some(term) = self.last_search.clone() {
-                    let n = self.left.rows.len();
+                    let n = self.cur().rows.len();
                     if n > 0 {
-                        let start = (self.left.cursor.index + 1) % n;
+                        let start = (self.cur().cursor.index + 1) % n;
                         if let Some(i) = self.find_match(&term, start, false) {
-                            self.left.cursor.index = i;
+                            self.cur_mut().cursor.index = i;
                         }
                     }
                 }
             }
             Action::SearchPrev => {
                 if let Some(term) = self.last_search.clone() {
-                    let n = self.left.rows.len();
+                    let n = self.cur().rows.len();
                     if n > 0 {
-                        let start = if self.left.cursor.index == 0 {
+                        let start = if self.cur().cursor.index == 0 {
                             n - 1
                         } else {
-                            self.left.cursor.index - 1
+                            self.cur().cursor.index - 1
                         };
                         if let Some(i) = self.find_match(&term, start, true) {
-                            self.left.cursor.index = i;
+                            self.cur_mut().cursor.index = i;
                         }
                     }
                 }
@@ -257,7 +257,7 @@ impl AppState {
                     // Cursor + (n-1) entries below, clamped at end
                     // of list. No wrap. Ignores picks — the count
                     // is the user being explicit.
-                    let start = self.left.cursor.index;
+                    let start = self.cur().cursor.index;
                     self.left
                         .rows
                         .iter()
@@ -330,7 +330,7 @@ impl AppState {
                 let owned: Vec<PathBuf>;
                 let paths: Vec<&Path> = if self.selection_paths().is_empty() {
                     owned = self
-                        .left
+                        .cur()
                         .listing
                         .entries
                         .iter()
@@ -341,8 +341,9 @@ impl AppState {
                     self.selection_paths()
                 };
                 let lines = fs::long_listing::format_long_listing(&paths);
-                let title = format!("long listing — {}", self.left.listing.dir.display());
-                self.left.cursor.clamp(self.left.rows.len());
+                let title = format!("long listing — {}", self.cur().listing.dir.display());
+                let row_count = self.cur().rows.len();
+                self.cur_mut().cursor.clamp(row_count);
                 return ApplyResult::OpenPager(PagerRequest {
                     title,
                     lines,
@@ -355,7 +356,8 @@ impl AppState {
             Action::FileType => {
                 let paths = self.selection_paths();
                 if paths.is_empty() {
-                    self.left.cursor.clamp(self.left.rows.len());
+                    let row_count = self.cur().rows.len();
+                    self.cur_mut().cursor.clamp(row_count);
                     return ApplyResult::Post(Vec::new());
                 }
                 if paths.len() == 1 {
@@ -376,7 +378,8 @@ impl AppState {
                             format!("{name}: {}", fs::ops::file_type_label(p))
                         })
                         .collect();
-                    self.left.cursor.clamp(self.left.rows.len());
+                    let row_count = self.cur().rows.len();
+                    self.cur_mut().cursor.clamp(row_count);
                     return ApplyResult::OpenPager(PagerRequest {
                         title: "file types".to_string(),
                         lines,
@@ -409,12 +412,12 @@ impl AppState {
                 None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
             },
             Action::SetProjectHomeHere => {
-                let dir = self.left.listing.dir.clone();
+                let dir = self.cur().listing.dir.clone();
                 self.flash_info(format!("PROJECT_HOME: {}", dir.display()));
                 self.project_home = Some(dir);
             }
             Action::SetStartDirHere => {
-                let dir = self.left.listing.dir.clone();
+                let dir = self.cur().listing.dir.clone();
                 self.flash_info(format!("start dir: {}", dir.display()));
                 self.start_dir = dir;
             }
@@ -457,7 +460,7 @@ impl AppState {
                 if self.git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else {
-                    let dir = self.left.listing.dir.display().to_string();
+                    let dir = self.cur().listing.dir.display().to_string();
                     self.mode = Mode::Prompting(Prompt::simple(
                         PromptKind::WorktreeDeleteConfirm,
                         format!("remove worktree {dir}? (y/N): "),
@@ -478,7 +481,8 @@ impl AppState {
             _ => return ApplyResult::NotHandled,
         }
 
-        self.left.cursor.clamp(self.left.rows.len());
+        let row_count = self.cur().rows.len();
+        self.cur_mut().cursor.clamp(row_count);
         ApplyResult::Handled
     }
 

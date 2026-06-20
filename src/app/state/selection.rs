@@ -11,9 +11,9 @@ use super::AppState;
 
 impl AppState {
     pub fn selection_paths(&self) -> Vec<&Path> {
-        if self.left.view == View::Dir && !self.left.picks.is_empty() {
-            self.left.picks.iter().map(PathBuf::as_path).collect()
-        } else if let Some(row) = self.left.rows.get(self.left.cursor.index) {
+        if self.cur().view == View::Dir && !self.cur().picks.is_empty() {
+            self.cur().picks.iter().map(PathBuf::as_path).collect()
+        } else if let Some(row) = self.cur().rows.get(self.cur().cursor.index) {
             vec![row.path.as_path()]
         } else {
             Vec::new()
@@ -22,14 +22,14 @@ impl AppState {
 
     pub fn set_mark(&mut self, letter: char) {
         let focus = self
-            .left
+            .cur()
             .rows
-            .get(self.left.cursor.index)
+            .get(self.cur().cursor.index)
             .map(|r| r.path.clone());
         self.marks.set(
             letter,
             Mark {
-                dir: self.left.listing.dir.clone(),
+                dir: self.cur().listing.dir.clone(),
                 focus,
             },
         );
@@ -40,44 +40,49 @@ impl AppState {
     }
 
     pub fn toggle_pick_cursor(&mut self) {
-        if self.left.view != View::Dir {
+        if self.cur().view != View::Dir {
             return;
         }
-        if let Some(row) = self.left.rows.get(self.left.cursor.index) {
-            self.left.picks.toggle(&row.path);
-            self.left.list_generation = self.left.list_generation.wrapping_add(1);
+        let idx = self.cur().cursor.index;
+        // Lift the path out before the `cur_mut()` toggle so the `rows` read
+        // borrow ends first.
+        if let Some(path) = self.cur().rows.get(idx).map(|r| r.path.clone()) {
+            self.cur_mut().picks.toggle(&path);
+            self.cur_mut().list_generation = self.cur().list_generation.wrapping_add(1);
         }
     }
 
     pub fn toggle_all_picks(&mut self) {
-        if self.left.view != View::Dir {
+        if self.cur().view != View::Dir {
             return;
         }
         let any_unpicked = self
-            .left
+            .cur()
             .rows
             .iter()
-            .any(|r| !self.left.picks.contains(&r.path));
+            .any(|r| !self.cur().picks.contains(&r.path));
         if any_unpicked {
-            for r in &self.left.rows {
-                self.left.picks.insert(&r.path);
+            let paths: Vec<std::path::PathBuf> =
+                self.cur().rows.iter().map(|r| r.path.clone()).collect();
+            for path in &paths {
+                self.cur_mut().picks.insert(path);
             }
         } else {
-            self.left.picks.clear();
+            self.cur_mut().picks.clear();
         }
-        self.left.list_generation = self.left.list_generation.wrapping_add(1);
+        self.cur_mut().list_generation = self.cur().list_generation.wrapping_add(1);
     }
 
     /// Yank files into the inventory cache. Takes picks if any, else
     /// cursor item. Only regular files are accepted.
     pub fn take(&mut self) -> super::TakeOutcome {
         use super::TakeOutcome;
-        if self.left.view != View::Dir {
+        if self.cur().view != View::Dir {
             return TakeOutcome::Noop;
         }
-        let to_take: Vec<PathBuf> = if !self.left.picks.is_empty() {
-            self.left.picks.iter().cloned().collect()
-        } else if let Some(row) = self.left.rows.get(self.left.cursor.index) {
+        let to_take: Vec<PathBuf> = if !self.cur().picks.is_empty() {
+            self.cur().picks.iter().cloned().collect()
+        } else if let Some(row) = self.cur().rows.get(self.cur().cursor.index) {
             vec![row.path.clone()]
         } else {
             vec![]
@@ -102,34 +107,35 @@ impl AppState {
 
     /// Remove the cursor item from inventory (move to graveyard).
     pub fn drop_cursor(&mut self) {
-        self.inventory.remove_at(self.left.cursor.index);
+        self.inventory.remove_at(self.cur().cursor.index);
         self.rebuild_rows();
-        self.left.cursor.clamp(self.left.rows.len());
+        let row_count = self.cur().rows.len();
+        self.cur_mut().cursor.clamp(row_count);
     }
 
     pub fn toggle_inventory_view(&mut self) {
-        self.left.view = match self.left.view {
+        self.cur_mut().view = match self.cur().view {
             View::Dir | View::Graveyard => View::Inventory,
             View::Inventory => View::Dir,
         };
         // Leaving graveyard view drops the snapshot so a stale set
         // of entries can't bleed into a later open.
         self.graveyard.clear();
-        self.left.cursor = Cursor::new();
+        self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }
 
     /// Open the graveyard view: load a fresh snapshot from disk
     /// and switch the visible list. Toggle on second call.
     pub fn open_graveyard_view(&mut self) {
-        if matches!(self.left.view, View::Graveyard) {
+        if matches!(self.cur().view, View::Graveyard) {
             self.graveyard.clear();
-            self.left.view = View::Dir;
+            self.cur_mut().view = View::Dir;
         } else {
             self.graveyard = crate::state::graveyard::Graveyard::load().entries;
-            self.left.view = View::Graveyard;
+            self.cur_mut().view = View::Graveyard;
         }
-        self.left.cursor = Cursor::new();
+        self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }
 }

@@ -32,35 +32,35 @@ impl AppState {
             return false;
         }
         let rows_per_col = rows_per_col.max(1);
-        let col_start = (self.left.cursor.index / rows_per_col) * rows_per_col;
+        let col_start = (self.cur().cursor.index / rows_per_col) * rows_per_col;
         let col_end = (col_start + rows_per_col).min(len);
         let col_len = col_end - col_start;
         if col_len <= 1 {
             return false; // single-item column — flash
         }
-        let row_in_col = self.left.cursor.index - col_start;
+        let row_in_col = self.cur().cursor.index - col_start;
         let new_row = (row_in_col as isize + delta).rem_euclid(col_len as isize) as usize;
-        self.left.cursor.index = col_start + new_row;
+        self.cur_mut().cursor.index = col_start + new_row;
         true
     }
 
     /// Move across the entire list (PageUp/PageDown). Wraps globally.
-    pub const fn cursor_move_global(&mut self, delta: isize, len: usize) {
+    pub fn cursor_move_global(&mut self, delta: isize, len: usize) {
         if len == 0 {
             return;
         }
-        let new_idx = (self.left.cursor.index as isize + delta).rem_euclid(len as isize);
-        self.left.cursor.index = new_idx as usize;
+        let new_idx = (self.cur().cursor.index as isize + delta).rem_euclid(len as isize);
+        self.cur_mut().cursor.index = new_idx as usize;
     }
 
     /// `gg` — jump to the first entry of the current column.
-    pub const fn goto_col_top(&mut self, rows_per_col: usize) {
+    pub fn goto_col_top(&mut self, rows_per_col: usize) {
         if rows_per_col == 0 {
-            self.left.cursor.index = 0;
+            self.cur_mut().cursor.index = 0;
             return;
         }
-        let current_col = self.left.cursor.index / rows_per_col;
-        self.left.cursor.index = current_col * rows_per_col;
+        let current_col = self.cur().cursor.index / rows_per_col;
+        self.cur_mut().cursor.index = current_col * rows_per_col;
     }
 
     /// `G` — jump to the last entry of the current column.
@@ -69,12 +69,12 @@ impl AppState {
             return;
         }
         if rows_per_col == 0 {
-            self.left.cursor.index = len - 1;
+            self.cur_mut().cursor.index = len - 1;
             return;
         }
-        let current_col = self.left.cursor.index / rows_per_col;
+        let current_col = self.cur().cursor.index / rows_per_col;
         let col_end = ((current_col + 1) * rows_per_col).min(len);
-        self.left.cursor.index = col_end - 1;
+        self.cur_mut().cursor.index = col_end - 1;
     }
 
     /// Move the cursor to the next (or previous) row whose git status
@@ -84,13 +84,13 @@ impl AppState {
     /// Returns `false` when no row in the listing has a git change,
     /// so the caller can flash an empty-search message.
     pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
-        let len = self.left.rows.len();
+        let len = self.cur().rows.len();
         if len == 0 || self.git.files.is_empty() {
             return false;
         }
-        let cur = self.left.cursor.index.min(len.saturating_sub(1));
+        let cur = self.cur().cursor.index.min(len.saturating_sub(1));
         let is_changed = |idx: usize| -> bool {
-            self.left.rows.get(idx).is_some_and(|r| {
+            self.cur().rows.get(idx).is_some_and(|r| {
                 self.git
                     .files
                     .get(&r.display)
@@ -109,7 +109,7 @@ impl AppState {
                 (cur + len - (n % len)) % len
             };
             if is_changed(idx) {
-                self.left.cursor.index = idx;
+                self.cur_mut().cursor.index = idx;
                 return true;
             }
         }
@@ -124,8 +124,8 @@ impl AppState {
             return false;
         }
         let num_cols = len.div_ceil(rows_per_col);
-        let current_col = self.left.cursor.index / rows_per_col;
-        let current_row = self.left.cursor.index % rows_per_col;
+        let current_col = self.cur().cursor.index / rows_per_col;
+        let current_row = self.cur().cursor.index % rows_per_col;
         // Count how many columns actually have an item on this row.
         let cols_on_row = {
             let mut n = 0usize;
@@ -165,24 +165,24 @@ impl AppState {
         }
         let target_idx = target_col * rows_per_col + current_row;
         if target_idx < len {
-            self.left.cursor.index = target_idx;
+            self.cur_mut().cursor.index = target_idx;
         }
         true
     }
 
     pub fn find_match(&self, query: &str, from: usize, backward: bool) -> Option<usize> {
-        if self.left.rows.is_empty() {
+        if self.cur().rows.is_empty() {
             return None;
         }
         let matcher = Matcher::build(query);
-        let n = self.left.rows.len();
+        let n = self.cur().rows.len();
         for step in 0..n {
             let i = if backward {
                 (from + n - step) % n
             } else {
                 (from + step) % n
             };
-            if matcher.matches(&self.left.rows[i].display) {
+            if matcher.matches(&self.cur().rows[i].display) {
                 return Some(i);
             }
         }
@@ -214,7 +214,7 @@ impl AppState {
         let abs = if expanded.is_absolute() {
             expanded
         } else {
-            self.left.listing.dir.join(&expanded)
+            self.cur().listing.dir.join(&expanded)
         };
         let canonical = std::fs::canonicalize(&abs)?;
         let md = std::fs::metadata(&canonical)?;

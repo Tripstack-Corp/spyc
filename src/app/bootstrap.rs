@@ -122,6 +122,7 @@ impl App {
                 },
                 list_generation: 0,
             },
+            right: None,
             inventory: Inventory::load(),
             marks: Marks::load(),
             resolver: Resolver::new(),

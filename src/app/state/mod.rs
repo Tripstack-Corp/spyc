@@ -489,13 +489,15 @@ pub struct PaneLayout {
 /// vertical-split column owns: the directory it shows, the cursor in it, its
 /// picks/masks/filter/sort, and its display rows + grid geometry.
 ///
-/// Extracted in PR A of the vsplit Stage 2 plan as a behavior-preserving move:
-/// `AppState.left` is the **sole** commander today, reached as `self.left.…`.
-/// Stage 2 PR C adds `right: Option<Commander>` plus an active-column accessor
-/// (`cur()`/`cur_mut()`) and the second-column machinery; this PR just draws the
-/// per-browser boundary. (`git`/`git_cache` stay on `AppState` for now — they
-/// move with the dual-git-worker PR, where the per-column status generation is
-/// designed.)
+/// Extracted in PR A of the vsplit Stage 2 plan as a behavior-preserving move.
+/// `left` is always present; `right` is `None` until a second column is opened
+/// (Stage 2 PR C, the feature). The pure-Model **update** path
+/// (`AppState::apply` / `dispatch_*` / cursor / selection / listing) reaches the
+/// **focused** column through [`AppState::cur`] / [`AppState::cur_mut`] — while
+/// `right` is `None` that always resolves to `left`, so the accessor is
+/// behavior-preserving. Render addresses `left` / `right` explicitly (it draws
+/// both columns). (`git`/`git_cache` stay on `AppState` for now — they move with
+/// the dual-git-worker PR, where the per-column status generation is designed.)
 pub struct Commander {
     /// The directory this browser is showing + its entries.
     pub listing: Listing,
@@ -600,9 +602,17 @@ pub struct AppState {
     /// Which surface owns the keyboard. Replaces the old `pane_focused:
     /// bool`; read the derived bool via `self.pane_focused()`.
     pub focus: Focus,
-    /// The sole file-commander's per-browser Model state (see [`Commander`]).
-    /// Stage 2 PR C adds a `right` companion + an active-column accessor.
+    /// The left (primary) file-commander's per-browser Model state (see
+    /// [`Commander`]). Always present — the single-column default *is* the left
+    /// commander. Action handlers reach the **focused** column via
+    /// [`Self::cur`] / [`Self::cur_mut`]; render draws `left`/`right` explicitly.
     pub left: Commander,
+    /// The right (secondary) file-commander, when a second column is open.
+    /// `None` is the single-column default (Stage 1) — while `None`, `cur()` /
+    /// `cur_mut()` always resolve to `left`, so the accessor conversion is
+    /// behavior-preserving. Populated by `^z` (Stage 2 PR C). The vsplit's
+    /// *preview* pager (Stage 1) is a separate `ViewState` slot, not this.
+    pub right: Option<Commander>,
     /// Git status/worker plumbing (see [`GitCache`]).
     pub git_cache: GitCache,
     /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
@@ -622,6 +632,30 @@ impl AppState {
     /// only ever consumed the bool, never the non-Pane discriminant.
     pub const fn pane_focused(&self) -> bool {
         matches!(self.focus, Focus::Pane)
+    }
+
+    /// The **focused** file-commander — the column action handlers operate on.
+    /// Resolves to `right` only when a right column exists *and* the vsplit
+    /// focus is on it; otherwise `left`. While `right` is `None` (the
+    /// single-column default, and all of Stage 1) this is always `left`, which
+    /// is what makes the `self.left.…` → `self.cur().…` conversion
+    /// behavior-preserving. Render does **not** use this — it draws `left` /
+    /// `right` explicitly as fixed visual identities.
+    pub fn cur(&self) -> &Commander {
+        match self.right.as_ref() {
+            Some(right) if matches!(self.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
+            _ => &self.left,
+        }
+    }
+
+    /// Mutable [`Self::cur`]. Note this borrows all of `self`, so a handler that
+    /// also touches a global field while holding `cur_mut()` must sequence the
+    /// reads first (evaluate the RHS, then assign through `cur_mut()`).
+    pub fn cur_mut(&mut self) -> &mut Commander {
+        match self.right.as_mut() {
+            Some(right) if matches!(self.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
+            _ => &mut self.left,
+        }
     }
 
     // --- Cursor/navigation (Phase 1) ---
@@ -788,6 +822,7 @@ impl AppState {
                 },
                 list_generation: 0,
             },
+            right: None,
             inventory: Inventory::new(),
             marks: Marks::default(),
             resolver: Resolver::new(),

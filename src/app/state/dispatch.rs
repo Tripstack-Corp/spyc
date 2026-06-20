@@ -37,7 +37,7 @@ impl AppState {
 
         // :limit [pattern]
         if input == "limit" {
-            self.left.temp_filter = None;
+            self.cur_mut().temp_filter = None;
             self.flash_info("limit cleared");
             self.rebuild_rows();
             return CommandResult::Handled;
@@ -45,13 +45,13 @@ impl AppState {
         if let Some(pat) = input.strip_prefix("limit ") {
             let pat = pat.trim();
             if pat.is_empty() {
-                self.left.temp_filter = None;
+                self.cur_mut().temp_filter = None;
                 self.flash_info("limit cleared");
             } else if pat == "!" {
-                self.left.temp_filter = Some("!".to_string());
+                self.cur_mut().temp_filter = Some("!".to_string());
                 self.flash_info("limit: picks only");
             } else {
-                self.left.temp_filter = Some(pat.to_string());
+                self.cur_mut().temp_filter = Some(pat.to_string());
                 self.flash_info(format!("limit: {pat}"));
             }
             self.rebuild_rows();
@@ -89,19 +89,19 @@ impl AppState {
 
         // :sort [mode]
         if input == "sort" {
-            self.flash_info(format!("sort: {}", self.left.sort_order));
+            self.flash_info(format!("sort: {}", self.cur().sort_order));
             return CommandResult::Handled;
         }
         if let Some(rest) = input.strip_prefix("sort ") {
             let rest = rest.trim();
             // `:sort reverse` / `:sort -` toggles direction.
             if rest == "reverse" || rest == "-" {
-                self.left.sort_reversed = !self.left.sort_reversed;
+                self.cur_mut().sort_reversed = !self.cur().sort_reversed;
                 self.apply_sort();
                 self.flash_info(format!(
                     "sort: {}{}",
-                    self.left.sort_order,
-                    if self.left.sort_reversed {
+                    self.cur().sort_order,
+                    if self.cur().sort_reversed {
                         " (reversed)"
                     } else {
                         ""
@@ -111,11 +111,11 @@ impl AppState {
             }
             match crate::fs::listing::SortMode::parse(rest) {
                 Some(mode) => {
-                    self.left.sort_order = mode;
+                    self.cur_mut().sort_order = mode;
                     self.apply_sort();
                     self.flash_info(format!(
                         "sort: {mode}{}",
-                        if self.left.sort_reversed {
+                        if self.cur().sort_reversed {
                             " (reversed)"
                         } else {
                             ""
@@ -235,7 +235,7 @@ impl AppState {
                 match key {
                     "sort" => match crate::fs::listing::SortMode::parse(value) {
                         Some(mode) => {
-                            self.left.sort_order = mode;
+                            self.cur_mut().sort_order = mode;
                             self.apply_sort();
                             self.flash_info(format!("sort={mode}"));
                         }
@@ -278,12 +278,20 @@ impl AppState {
             PromptKind::PatternPick => {
                 match glob::Pattern::new(buffer) {
                     Ok(pat) => {
-                        for e in &self.left.listing.entries {
-                            if pat.matches(&e.name) {
-                                self.left.picks.insert(&e.path);
-                            }
+                        // Collect first: the entries read borrows `cur()`, which
+                        // would clash with the `cur_mut()` insert in the loop body.
+                        let matched: Vec<std::path::PathBuf> = self
+                            .cur()
+                            .listing
+                            .entries
+                            .iter()
+                            .filter(|e| pat.matches(&e.name))
+                            .map(|e| e.path.clone())
+                            .collect();
+                        for path in &matched {
+                            self.cur_mut().picks.insert(path);
                         }
-                        self.left.list_generation = self.left.list_generation.wrapping_add(1);
+                        self.cur_mut().list_generation = self.cur().list_generation.wrapping_add(1);
                     }
                     // Don't swallow an invalid glob — tell the user why nothing
                     // got picked instead of silently no-op'ing.
@@ -320,10 +328,10 @@ impl AppState {
             PromptKind::Limit => {
                 let pattern = buffer.trim();
                 if pattern.is_empty() {
-                    self.left.temp_filter = None;
+                    self.cur_mut().temp_filter = None;
                     self.flash_info("limit cleared");
                 } else if pattern == "!" {
-                    self.left.temp_filter = Some("!".to_string());
+                    self.cur_mut().temp_filter = Some("!".to_string());
                     self.flash_info("limit: picks only");
                 } else if pattern == "h" || pattern == "harpoon" {
                     if self.harpoon_filter_set.is_empty() {
@@ -332,17 +340,17 @@ impl AppState {
                         );
                         return PromptResult::Handled;
                     }
-                    self.left.temp_filter = Some("h".to_string());
+                    self.cur_mut().temp_filter = Some("h".to_string());
                     self.flash_info("limit: harpoon");
                 } else if pattern == "git" || pattern == "g" {
                     if self.git.files.is_empty() {
                         self.flash_error("not in a git repo (or no changes)");
                         return PromptResult::Handled;
                     }
-                    self.left.temp_filter = Some("git".to_string());
+                    self.cur_mut().temp_filter = Some("git".to_string());
                     self.flash_info("limit: git changes");
                 } else {
-                    self.left.temp_filter = Some(pattern.to_string());
+                    self.cur_mut().temp_filter = Some(pattern.to_string());
                     self.flash_info(format!("limit: {pattern}"));
                 }
                 self.rebuild_rows();
@@ -354,7 +362,7 @@ impl AppState {
                     return PromptResult::Handled;
                 }
                 self.pending_new_tab_cmd = Some(cmd);
-                let cwd_default = self.left.listing.dir.display().to_string();
+                let cwd_default = self.cur().listing.dir.display().to_string();
                 let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
                 p.buffer.clone_from(&cwd_default);
                 if let Some(ed) = p.editor.as_mut() {
