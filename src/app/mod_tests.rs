@@ -403,6 +403,30 @@ mod layout_tests {
         assert_eq!(l.pane.unwrap().width, 80);
     }
 
+    /// `top_unit` (the V/D overlay + TopPane-pager region) follows the focused
+    /// column: scoped to the left when the left is focused (so a V/D there
+    /// leaves the right preview visible), full-width when the right is focused
+    /// (a V/D from the right commander fills the frame — no preview to keep
+    /// beside it). This is what stops a `V` from `b` rendering "in column a".
+    #[test]
+    fn carve_vsplit_top_unit_follows_focus() {
+        let mk = |focus| {
+            App::carve_vsplit(
+                App::compute_layout(area(80, 24), true, 50, StatusPosition::Top),
+                VSplit {
+                    width_pct: 45,
+                    mode: VsplitMode::TopOnly,
+                    focus,
+                },
+                area(80, 24),
+            )
+        };
+        // Left focused → overlay scoped to the left column (43).
+        assert_eq!(mk(Side::Left).top_unit.width, 43);
+        // Right focused → overlay spans the full frame width (80).
+        assert_eq!(mk(Side::Right).top_unit.width, 80);
+    }
+
     /// `carve_vsplit` FullHeight: the divider runs the whole frame height, the
     /// left-column chrome (incl. the PTY pane) is clamped to the left width,
     /// and the right column spans the full frame height.

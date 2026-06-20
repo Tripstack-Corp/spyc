@@ -330,10 +330,17 @@ impl App {
                     width: left_w,
                     ..list
                 };
-                // Scope the overlay/TopPane region (`top_unit`) to the left
-                // column too, so a `V` editor / `;cmd` / `D` pager occupies the
-                // left column and the right preview stays visible beside it.
-                out.top_unit.width = out.top_unit.width.min(left_w);
+                // Scope the overlay/TopPane region (`top_unit`) to the LEFT
+                // column when the left is focused, so a `V` editor / `;cmd` / `D`
+                // pager occupies the left and the right preview stays visible
+                // beside it. When the RIGHT column is focused, a `V`/`D` from it
+                // fills the full width instead — there's no preview to keep
+                // beside it (the left is just another list), and full-width gives
+                // the editor room. `render_right_split` skips the right column
+                // while that full-width overlay is up.
+                if vsplit.focus == state::Side::Left {
+                    out.top_unit.width = out.top_unit.width.min(left_w);
+                }
                 let pane_div_y = out.divider.map(|d| d.y);
                 let prompt_in_top = pane_div_y.is_none_or(|dy| out.prompt.y < dy);
                 let bottom = if prompt_in_top {

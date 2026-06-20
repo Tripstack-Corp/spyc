@@ -357,16 +357,10 @@ impl App {
     }
 
     pub fn edit_in_pane(&mut self) {
-        // The V editor opens as a top overlay scoped to the LEFT column (the
-        // "edit in a, preview in b" model). Driving it from a focused right
-        // *commander* needs the overlay to scope to `b` — deferred to C2b. For
-        // now refuse rather than silently edit/show in the wrong column.
-        if self.right_column_focused() {
-            self.state
-                .flash_info("V/D land in column a — ^a a to switch (b support next)");
-            return;
-        }
-        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
+        // Edit the FOCUSED column's cursor file. From the right commander the
+        // overlay opens full-width (the carve leaves `top_unit` full when the
+        // right is focused), so it no longer lands in column `a`.
+        let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
             return;
         };
         let path = row.path.clone();
@@ -388,7 +382,7 @@ impl App {
         );
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.left.listing.dir.clone();
+        let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
@@ -421,14 +415,10 @@ impl App {
     /// truncated) buffer into memory. Streaming wins for multi-GB
     /// logs.
     pub fn display_in_pane(&mut self) {
-        // Same column-scoping limitation as `edit_in_pane` — the D pager mounts
-        // in the left column's `top_unit`; b support lands in C2b.
-        if self.right_column_focused() {
-            self.state
-                .flash_info("V/D land in column a — ^a a to switch (b support next)");
-            return;
-        }
-        let Some(row) = self.state.left.rows.get(self.state.left.cursor.index) else {
+        // Page the FOCUSED column's cursor file. From the right commander the
+        // pager opens full-width (the carve leaves `top_unit` full when the
+        // right is focused), so it no longer lands in column `a`.
+        let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
             return;
         };
         let path = row.path.clone();
@@ -446,14 +436,19 @@ impl App {
             self.spawn_pager_overlay_for_path(&path);
             return;
         }
-        // With a vertical split open, `D`'s pager renders in the LEFT column
-        // (the carve scopes `top_unit`), so wrap to that width — not the full
-        // terminal, or the markdown overflows the narrow column. Derived from
-        // the same width helper as the carve (`None` = full width).
-        let wrap = self.state.vsplit.and_then(|v| {
-            let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-            super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(|(left_w, _)| left_w)
-        });
+        // With a vertical split open and the LEFT column focused, `D`'s pager
+        // renders in the left column (the carve scopes `top_unit`), so wrap to
+        // that width — not the full terminal, or the markdown overflows the
+        // narrow column. From the RIGHT column the pager is full-width, so wrap
+        // to the full terminal (`None`). (`None` = full width.)
+        let wrap = self
+            .state
+            .vsplit
+            .filter(|v| v.focus == state::Side::Left)
+            .and_then(|v| {
+                let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+                super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(|(left_w, _)| left_w)
+            });
         let Some(mut view) = self.build_pager_view_for_file(&path, wrap) else {
             return;
         };
@@ -760,7 +755,7 @@ impl App {
         );
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.left.listing.dir.clone();
+        let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {

@@ -340,6 +340,24 @@ impl App {
     /// stays visible beside an editor/pager. Fades the preview when its column
     /// isn't the input target. No-op when no split is open (`right` is `None`).
     fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
+        // A `V`/`D` launched from the focused RIGHT column fills the full width
+        // (the carve leaves `top_unit` full-width when the right is focused), so
+        // there's no right column to paint beside it — the overlay/TopPane pager
+        // covers it. Skip the right column + divider entirely while it's up.
+        let right_focused = self
+            .state
+            .vsplit
+            .is_some_and(|v| v.focus == state::Side::Right);
+        let overlay_covers = right_focused
+            && (self.runtime.top_overlay.is_some()
+                || self
+                    .view
+                    .pager
+                    .as_ref()
+                    .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane)));
+        if overlay_covers {
+            return;
+        }
         if let Some(rect) = layout.right {
             if let Some(right) = self.state.right.as_ref() {
                 // A second file-commander (`^z`): paint its list, rows + grid

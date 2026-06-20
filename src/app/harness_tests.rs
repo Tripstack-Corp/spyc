@@ -1185,32 +1185,6 @@ fn vsplit_cycle_disabled_with_second_commander() {
     });
 }
 
-/// `V` / `D` from a focused second commander refuse (flash + no-op) rather than
-/// edit/page the wrong column — the overlay scopes to column `a` today, so
-/// driving it from `b` is deferred to C2b. Guards against silently operating on
-/// the left file.
-#[test]
-fn v_d_refused_from_second_commander() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().join("work");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(dir.join("a.txt"), "x").unwrap();
-        let mut app = App::test_app(dir);
-
-        let d = app.state.left.listing.dir.clone();
-        app.open_second_commander_at(&d);
-        assert!(app.right_column_focused(), "the new commander owns input");
-
-        app.apply(&Action::EditInPane).unwrap();
-        assert!(
-            app.runtime.top_overlay.is_none(),
-            "V from the second commander must not spawn an editor overlay"
-        );
-        assert!(!matches!(app.state.focus, state::Focus::Overlay));
-    });
-}
-
 /// A session saved while a second commander is open must NOT persist the split
 /// shape — the commander can't be reconstructed on restore yet, so a saved
 /// shape would restore an empty divider with nothing in `b`.
