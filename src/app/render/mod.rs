@@ -303,6 +303,12 @@ impl App {
         layout: FrameLayout,
         vsplit: state::VSplit,
         area: ratatui::layout::Rect,
+        // The column hosting an open V/D overlay/pager, if any. `top_unit`
+        // (the overlay region) scopes to it so the overlay stays in the column
+        // it opened from even when `^a l`/`^a h` moves focus to the other one.
+        // `None` (no overlay) leaves `top_unit` on the focused column — unused
+        // then, since nothing paints into it.
+        overlay_side: Option<state::Side>,
     ) -> FrameLayout {
         use ratatui::layout::Rect;
         // Column widths come from the shared, clamped helper (same source as
@@ -330,17 +336,6 @@ impl App {
                     width: left_w,
                     ..list
                 };
-                // Scope the overlay/TopPane region (`top_unit`) to the LEFT
-                // column when the left is focused, so a `V` editor / `;cmd` / `D`
-                // pager occupies the left and the right preview stays visible
-                // beside it. When the RIGHT column is focused, a `V`/`D` from it
-                // fills the full width instead — there's no preview to keep
-                // beside it (the left is just another list), and full-width gives
-                // the editor room. `render_right_split` skips the right column
-                // while that full-width overlay is up.
-                if vsplit.focus == state::Side::Left {
-                    out.top_unit.width = out.top_unit.width.min(left_w);
-                }
                 let pane_div_y = out.divider.map(|d| d.y);
                 let prompt_in_top = pane_div_y.is_none_or(|dy| out.prompt.y < dy);
                 let bottom = if prompt_in_top {
@@ -359,12 +354,29 @@ impl App {
                     width: 1,
                     height,
                 });
-                out.right = Some(Rect {
+                let right_rect = Rect {
                     x: right_x,
                     y: list.y,
                     width: right_w,
                     height,
-                });
+                };
+                out.right = Some(right_rect);
+                // The V/D overlay + TopPane-pager region (`top_unit`) follows the
+                // focused column, so a V/D opens *inside* that column. It sits
+                // BELOW the shared status row (occupying the column's list
+                // region, mirroring `right`), so the top status bar stays
+                // visible whichever column a V/D is open in. The other column
+                // keeps rendering its list/preview beside it.
+                let left_rect = Rect {
+                    x: area.x,
+                    y: list.y,
+                    width: left_w,
+                    height,
+                };
+                out.top_unit = match overlay_side.unwrap_or(vsplit.focus) {
+                    state::Side::Left => left_rect,
+                    state::Side::Right => right_rect,
+                };
             }
             state::VsplitMode::FullHeight => {
                 // Divider runs the full frame height; clamp every left-column
@@ -443,7 +455,7 @@ impl App {
         // restores it.
         let mut layout = match self.state.vsplit {
             Some(vsplit) if self.state.pane.zoom == state::ZoomTarget::None => {
-                Self::carve_vsplit(layout, vsplit, area)
+                Self::carve_vsplit(layout, vsplit, area, self.view.overlay_column)
             }
             _ => layout,
         };
@@ -537,6 +549,7 @@ impl App {
                 // stale `Overlay` focus; this frame already redraws without it.
                 self.runtime.top_overlay = None;
                 self.view.overlay_auto_dismiss = false;
+                self.view.overlay_column = None;
                 self.view.needs_full_repaint = true;
             }
             OverlayExit::AwaitDismiss => {

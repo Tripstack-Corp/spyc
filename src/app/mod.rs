@@ -624,6 +624,12 @@ pub struct ViewState {
     /// and want straight back). Left `false` for `;cmd` / `:`-spawned commands,
     /// whose output the await-dismiss preserves (so `;ls` doesn't flash + vanish).
     pub overlay_auto_dismiss: bool,
+    /// Which vsplit column the current `V`/`D` overlay/TopPane-pager lives in
+    /// (`None` when no split, or no overlay). The overlay is pinned to the
+    /// column it opened from: `top_unit` scopes to it and it stays there even
+    /// when `^a l`/`^a h` moves keyboard focus to the other column. Set at open,
+    /// cleared at teardown.
+    pub overlay_column: Option<state::Side>,
     /// TTL cache for the active pane's status-line session short-id.
     // Module-private (type `AgentStatusCache` is module-private); the
     // `app::*` descendant modules still reach it via `self.view.…`.
@@ -713,6 +719,7 @@ impl ViewState {
             graveyard_pending_g: false,
             overlay_awaiting_dismiss: false,
             overlay_auto_dismiss: false,
+            overlay_column: None,
             agent_status_cache: None,
             pending_history_pick: None,
             pending_jump_history: None,

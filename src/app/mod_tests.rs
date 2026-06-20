@@ -368,6 +368,7 @@ mod layout_tests {
                 focus: Side::Right,
             },
             area(80, 24),
+            None,
         );
         // List shrinks to the left column.
         assert_eq!(l.list.x, 0);
@@ -403,28 +404,42 @@ mod layout_tests {
         assert_eq!(l.pane.unwrap().width, 80);
     }
 
-    /// `top_unit` (the V/D overlay + TopPane-pager region) follows the focused
-    /// column: scoped to the left when the left is focused (so a V/D there
-    /// leaves the right preview visible), full-width when the right is focused
-    /// (a V/D from the right commander fills the frame — no preview to keep
-    /// beside it). This is what stops a `V` from `b` rendering "in column a".
+    /// `top_unit` (the V/D overlay + TopPane-pager region) follows the column
+    /// the overlay opened in — not the current focus — so a V/D stays *inside*
+    /// its column even when `^a l`/`^a h` moves focus to the other one. Scoped to
+    /// the left column for an overlay in `a`, the right column's rect for `b`.
+    /// Both sit below the shared status row (`y == list.y`), so the status bar
+    /// stays visible.
     #[test]
-    fn carve_vsplit_top_unit_follows_focus() {
-        let mk = |focus| {
+    fn carve_vsplit_top_unit_follows_overlay_column() {
+        let mk = |overlay_side| {
             App::carve_vsplit(
                 App::compute_layout(area(80, 24), true, 50, StatusPosition::Top),
                 VSplit {
                     width_pct: 45,
                     mode: VsplitMode::TopOnly,
-                    focus,
+                    // Focus deliberately opposite the overlay column, to prove
+                    // `top_unit` tracks the overlay, not focus.
+                    focus: Side::Left,
                 },
                 area(80, 24),
+                overlay_side,
             )
         };
-        // Left focused → overlay scoped to the left column (43).
-        assert_eq!(mk(Side::Left).top_unit.width, 43);
-        // Right focused → overlay spans the full frame width (80).
-        assert_eq!(mk(Side::Right).top_unit.width, 80);
+        // Overlay in the left column → scoped to the left (width 43, at x 0).
+        let l = mk(Some(Side::Left));
+        assert_eq!((l.top_unit.x, l.top_unit.width), (0, 43));
+        // Overlay in the right column (focus still Left) → top_unit is the right
+        // column's rect — the overlay stayed in `b`.
+        let r = mk(Some(Side::Right));
+        assert_eq!((r.top_unit.x, r.top_unit.width), (44, 36));
+        assert_eq!(
+            Some(r.top_unit),
+            r.right,
+            "top_unit == the right column rect"
+        );
+        // Both sit below the status row (row 0) so the status bar still renders.
+        assert!(l.top_unit.y >= 1 && r.top_unit.y >= 1);
     }
 
     /// `carve_vsplit` FullHeight: the divider runs the whole frame height, the
@@ -441,6 +456,7 @@ mod layout_tests {
                 focus: Side::Right,
             },
             area(80, 24),
+            None,
         );
         assert_eq!(l.status.width, 43, "status clamped to left column");
         assert_eq!(l.list.width, 43);
@@ -469,6 +485,7 @@ mod layout_tests {
                 focus: Side::Left,
             },
             area(30, 24),
+            None,
         );
         assert!(l.right.is_none(), "no right column when too narrow");
         assert!(l.vdivider.is_none());

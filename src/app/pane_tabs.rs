@@ -342,6 +342,7 @@ impl App {
             super::focus::FocusSnapshot {
                 has_top_overlay: self.runtime.top_overlay.is_some(),
                 pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+                overlay_in_focused_col: self.overlay_in_focused_col(),
             },
             want_pane,
         );
@@ -382,12 +383,23 @@ impl App {
     /// focus, and closes left a stale `Overlay`/`Pager` behind. Behavior-
     /// preserving while routing/render still read only `pane_focused()`: this
     /// only refines the non-`Pane` discriminant, which `pane_focused()` ignores.
+    /// Whether an open `V`/`D` overlay/pager is in the focused vsplit column
+    /// (or there's no split). False when a column-scoped overlay is open in the
+    /// OTHER column — then focus belongs to the focused column's list, so
+    /// `^a l`/`^a h` can drive the commander beside an open editor/pager.
+    pub(super) fn overlay_in_focused_col(&self) -> bool {
+        self.view
+            .overlay_column
+            .is_none_or(|c| self.state.vsplit.map(|v| v.focus) == Some(c))
+    }
+
     pub(super) fn recompute_focus(&mut self) {
         let want_pane = matches!(self.state.focus, state::Focus::Pane);
         self.state.focus = super::focus::decide_focus(
             super::focus::FocusSnapshot {
                 has_top_overlay: self.runtime.top_overlay.is_some(),
                 pager_mount: self.view.pager.as_ref().map(|v| v.mount),
+                overlay_in_focused_col: self.overlay_in_focused_col(),
             },
             want_pane,
         );

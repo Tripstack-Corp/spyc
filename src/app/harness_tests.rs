@@ -1273,3 +1273,45 @@ fn app_side_sort_targets_the_focused_column() {
         );
     });
 }
+
+/// `^a l`/`^a h` switch columns freely with a `D` TopPane pager open in `a`:
+/// the pager stays pinned to its column (`overlay_column`) and keeps rendering
+/// there, while focus moves to `b`'s commander (so you can drive `b` beside an
+/// open pager). `^a h` returns focus to the pager. (Regression: this used to be
+/// blocked / dragged the pager onto `b`.)
+#[test]
+fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d); // b open + focused
+        // Focus the left column, then open a `D` pager there (pinned to `a`).
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        app.view.overlay_column = Some(state::Side::Left);
+        let mut pv = PagerView::new_plain("t", vec!["a".to_string()]);
+        pv.mount = crate::ui::pager::Mount::TopPane;
+        app.view.pager = Some(pv);
+
+        // `^a l` moves focus to `b`; the pager stays pinned to `a`.
+        app.apply(&Action::VsplitFocusRight).unwrap();
+        assert_eq!(
+            app.state.vsplit.map(|v| v.focus),
+            Some(state::Side::Right),
+            "^a l switches focus to b even with a pager open"
+        );
+        assert_eq!(
+            app.view.overlay_column,
+            Some(state::Side::Left),
+            "the pager stays pinned to its own column"
+        );
+        app.recompute_focus();
+        assert!(
+            app.right_column_focused(),
+            "focus is on b's commander, not the pager in a"
+        );
+    });
+}

@@ -126,6 +126,11 @@ pub(super) struct RouteSnapshot {
     /// leaves this `false` — its keys fall through to the resolver / file-list
     /// nav, which operate on the focused column via `cur()`.
     pub right_preview_focused: bool,
+    /// An open `V`/`D` overlay/pager is in the *focused* vsplit column (or it's
+    /// full-frame / there's no split). When a column-scoped `D` TopPane pager is
+    /// in the OTHER column, this is `false`: its keys don't reach the pager —
+    /// they drive the focused column's list instead.
+    pub overlay_in_focused_col: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -182,7 +187,11 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     if let Some(mount) = snap.pager_mount {
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
         let escape_meta = matches!(mount, Mount::TopPane) && is_meta;
-        if !(bottom_typing || escape_meta) {
+        // A column-scoped TopPane pager (`D` in a vsplit) only owns input while
+        // ITS column is focused. With focus on the other column, fall through so
+        // the focused column's list/commander gets the keys — the pager keeps
+        // rendering beside it. (Overlay/full-frame pagers have this `true`.)
+        if snap.overlay_in_focused_col && !(bottom_typing || escape_meta) {
             return InputSink::PagerKey;
         }
         // else fall through to the scrollback / bottom-pane / resolver arms.
@@ -268,6 +277,7 @@ impl App {
             // Preview-only: a focused right *commander* (state.right) routes
             // through the resolver/file-list nav instead (driving `cur()`).
             right_preview_focused: self.right_column_focused() && self.view.right_pager.is_some(),
+            overlay_in_focused_col: self.overlay_in_focused_col(),
         }
     }
 }
@@ -290,6 +300,8 @@ mod tests {
             pane_closed: false,
             resolver_pending: false,
             right_preview_focused: false,
+            // Quiescent: no overlay, so it's vacuously "in the focused column".
+            overlay_in_focused_col: true,
         }
     }
 
@@ -776,7 +788,7 @@ mod tests {
         for &modal in &modals {
             for &focus in &focuses {
                 for &pager_mount in &mounts {
-                    for bits in 0..(1u32 << 6) {
+                    for bits in 0..(1u32 << 7) {
                         let snap = RouteSnapshot {
                             modal,
                             is_prompting: on(bits, 0),
@@ -788,6 +800,7 @@ mod tests {
                             pane_closed: on(bits, 4),
                             resolver_pending: false,
                             right_preview_focused: on(bits, 5),
+                            overlay_in_focused_col: on(bits, 6),
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

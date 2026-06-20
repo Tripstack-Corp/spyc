@@ -221,6 +221,8 @@ impl App {
         let Some(mode) = self.state.vsplit.map(|v| v.mode) else {
             return; // no split: nothing to switch
         };
+        // A `V`/`D` overlay/pager stays pinned to its own column (`overlay_column`),
+        // so switching focus to the other column is fine — it keeps running there.
         if self.state.pane_focused()
             && !(mode == state::VsplitMode::FullHeight && side == state::Side::Right)
         {

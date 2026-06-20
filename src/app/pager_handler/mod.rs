@@ -296,6 +296,9 @@ impl App {
     pub fn clear_pager(&mut self) {
         self.remember_pager_position();
         self.view.pager = None;
+        // A column-scoped `D` pager just closed — unpin its column before the
+        // focus recompute so it resolves to the file list, not a stale pager.
+        self.view.overlay_column = None;
         // The top pager just closed — drop any stale `Pager(_)` focus this
         // frame (the loop top would catch it next tick regardless).
         self.recompute_focus();
@@ -390,6 +393,8 @@ impl App {
                 // Interactive overlay (editor / pager): on exit, return to spyc
                 // immediately rather than holding a "press any key" frame.
                 self.view.overlay_auto_dismiss = true;
+                // Pin it to the column it opened from (None when no split).
+                self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),
@@ -436,19 +441,19 @@ impl App {
             self.spawn_pager_overlay_for_path(&path);
             return;
         }
-        // With a vertical split open and the LEFT column focused, `D`'s pager
-        // renders in the left column (the carve scopes `top_unit`), so wrap to
-        // that width — not the full terminal, or the markdown overflows the
-        // narrow column. From the RIGHT column the pager is full-width, so wrap
-        // to the full terminal (`None`). (`None` = full width.)
-        let wrap = self
-            .state
-            .vsplit
-            .filter(|v| v.focus == state::Side::Left)
-            .and_then(|v| {
-                let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(|(left_w, _)| left_w)
-            });
+        // With a vertical split open, `D`'s pager renders inside the focused
+        // column (the carve scopes `top_unit` to it), so wrap to that column's
+        // width — not the full terminal, or the markdown overflows the narrow
+        // column. (`None` = full width, used when there's no split.)
+        let wrap = self.state.vsplit.and_then(|v| {
+            let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+            super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(
+                |(left_w, right_w)| match v.focus {
+                    state::Side::Left => left_w,
+                    state::Side::Right => right_w,
+                },
+            )
+        });
         let Some(mut view) = self.build_pager_view_for_file(&path, wrap) else {
             return;
         };
@@ -459,6 +464,8 @@ impl App {
         view.no_history = true;
         self.set_pager(view);
         self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
+        // Pin the pager to the column it opened from (None when no split).
+        self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
         self.view.needs_full_repaint = true;
     }
 
@@ -518,13 +525,17 @@ impl App {
             wrap_width,
         ) {
             Ok(mut view) => {
-                // Restore the scroll position from the previous visit (if
-                // any). Clamp to `lines.len() - 1` so a saved row that's now
-                // past the end (file shrank) lands at the new last line rather
-                // than blanking the viewport.
+                // Restore the scroll position from the previous visit (if any).
                 if let Some(saved) = self.view.pager_positions.get(path) {
                     let last = view.lines.len().saturating_sub(1);
                     view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
+                    // Then clamp to the document END for the viewport, not just
+                    // the last line — a saved row near the bottom (e.g. from a
+                    // taller/wider column) would otherwise sit at the viewport
+                    // TOP with everything below EOF blank. Uses the last rendered
+                    // height (or a 40-row guess on the first frame). Keeps EOF
+                    // pinned to the bottom so the last page fills the view.
+                    view.clamp_scroll_auto();
                 }
                 Some(view)
             }
@@ -763,6 +774,8 @@ impl App {
                 // Interactive overlay (editor / pager): on exit, return to spyc
                 // immediately rather than holding a "press any key" frame.
                 self.view.overlay_auto_dismiss = true;
+                // Pin it to the column it opened from (None when no split).
+                self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
                 self.state.focus = state::Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e}")),

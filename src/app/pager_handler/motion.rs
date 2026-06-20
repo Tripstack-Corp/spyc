@@ -283,6 +283,8 @@ impl App {
                             self.runtime.top_overlay = Some(p);
                             // Editor overlay: auto-return on exit (no dismiss key).
                             self.view.overlay_auto_dismiss = true;
+                            // Pin it to the column it opened from (None = no split).
+                            self.view.overlay_column = self.state.vsplit.map(|v| v.focus);
                             self.state.focus = Focus::Overlay;
                         }
                         Err(e) => self.state.flash_error(format!("spawn: {e}")),

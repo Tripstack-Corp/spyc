@@ -20,6 +20,11 @@ pub(super) struct FocusSnapshot {
     pub has_top_overlay: bool,
     /// The in-app pager's mount slot, if a pager is open.
     pub pager_mount: Option<Mount>,
+    /// Whether an open overlay/pager is in the *focused* vsplit column (or there
+    /// is no split). When a column-scoped `V`/`D` is open in the OTHER column,
+    /// this is false: focus belongs to the focused column's file list, not the
+    /// overlay (so `^a l`/`^a h` can move to the commander beside the overlay).
+    pub overlay_in_focused_col: bool,
 }
 
 /// Decide the [`Focus`] for a directional focus change. **Pure** — no mutation,
@@ -34,11 +39,15 @@ pub(super) struct FocusSnapshot {
 pub(super) const fn decide_focus(snap: FocusSnapshot, want_pane: bool) -> Focus {
     if want_pane {
         Focus::Pane
-    } else if snap.has_top_overlay {
+    } else if snap.has_top_overlay && snap.overlay_in_focused_col {
         Focus::Overlay
-    } else if let Some(mount) = snap.pager_mount {
+    } else if let Some(mount) = snap.pager_mount
+        && snap.overlay_in_focused_col
+    {
         Focus::Pager(mount)
     } else {
+        // No overlay, or it's pinned to the *other* column — the focused
+        // column's file list / commander owns input.
         Focus::FileList
     }
 }
@@ -51,6 +60,8 @@ mod tests {
         FocusSnapshot {
             has_top_overlay,
             pager_mount,
+            // Default: the overlay (if any) is in the focused column / no split.
+            overlay_in_focused_col: true,
         }
     }
 

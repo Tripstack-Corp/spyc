@@ -37,7 +37,10 @@ impl App {
             // overlay focused (cursor block, full color); true ⇒
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
-            let overlay_focused = !self.state.pane_focused();
+            // The overlay is bright only when it actually owns the keyboard: not
+            // the bottom pane, AND (in a vsplit) its own column is focused — so a
+            // `V` in `a` dims when `^a l` moves focus to `b`.
+            let overlay_focused = !self.state.pane_focused() && self.overlay_in_focused_col();
             let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
             overlay.with_screen(|screen| {
                 frame.render_widget(
@@ -90,9 +93,10 @@ impl App {
                 // cursor (the overlay's own cursor is suppressed the same way).
                 self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
             }
-            // The overlay (`top_unit`) is scoped to the left column when a
-            // vertical split is open; keep the right preview visible beside it.
-            self.render_right_split(frame, &layout);
+            // The overlay (`top_unit`) is scoped to the focused column when a
+            // vertical split is open; keep the OTHER column (its list / the
+            // preview) visible beside it.
+            self.render_column_beside_overlay(frame, &layout);
             return;
         }
 
@@ -140,9 +144,10 @@ impl App {
             if let Some(rect) = layout.pane {
                 self.render_bottom_region(frame, rect, false);
             }
-            // The TopPane pager (`top_unit`) is scoped to the left column when
-            // a vertical split is open; keep the right preview visible beside it.
-            self.render_right_split(frame, &layout);
+            // The TopPane pager (`top_unit`) is scoped to the focused column
+            // when a vertical split is open; keep the OTHER column visible
+            // beside it.
+            self.render_column_beside_overlay(frame, &layout);
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
             // top of the just-drawn slot before returning. The
@@ -154,45 +159,7 @@ impl App {
             return;
         }
 
-        // While the bottom pane is zoomed, the status bar and the
-        // prompt/flash/arming line share the single top row (see
-        // `compute_layout`'s `pane_pct >= 100` branch). Yield that row to the
-        // prompt/flash/arming when one is active, so a zoomed session still
-        // shows arming + messages; otherwise the status bar owns it.
-        let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
-            || self.state.flash.is_some()
-            || self.state.resolver.pending_display().is_some();
-        let yield_top_row_to_prompt =
-            self.state.pane.zoom == state::ZoomTarget::BottomPane && prompt_row_occupied;
-        if !yield_top_row_to_prompt {
-            let (path, suffix) = self.header_parts();
-            let project_label = self
-                .state
-                .project_home
-                .as_deref()
-                .map(path_basename_display);
-            let agent_info = self.active_agent_status();
-            StatusBar {
-                project_home: project_label.as_deref(),
-                session_name: self.state.session_name.as_deref(),
-                path: &path,
-                suffix: &suffix,
-                git_info: self.state.git.info.as_deref(),
-                agent_info: agent_info.as_deref(),
-                theme: &self.view.theme,
-            }
-            .render(frame, layout.status);
-        }
-
-        // The rows cache + view_top↔grid stabilization were settled in
-        // `prepare_frame` (MVU Stage 2); read the results for the draw.
-        let rows = &self.view.cached_rows;
-        // The left list is the bright/focused column only when the file-pane
-        // row owns the keyboard AND the right column isn't the active one;
-        // otherwise it dims (ListView fades on `!focused`). With dimming off
-        // (`^a d`) the list always renders bright.
-        let list_focused =
-            !self.view.dim_inactive || (!self.state.pane_focused() && !self.right_column_focused());
+        self.render_status_bar(frame, layout.status);
 
         // When the right column is zoomed (`^a z` on the preview), the preview
         // fills the body instead of the list — the pane is collapsed exactly
@@ -202,17 +169,7 @@ impl App {
         {
             crate::ui::pager::render(frame, layout.list, view, &self.view.theme);
         } else {
-            frame.render_widget(
-                ListView {
-                    rows,
-                    cursor: self.state.left.cursor.index,
-                    view_top: self.state.left.cursor.view_top,
-                    empty_marker: self.state.left.view == View::Dir,
-                    focused: list_focused,
-                    theme: &self.view.theme,
-                },
-                layout.list,
-            );
+            self.render_left_list(frame, layout.list);
         }
 
         // Right column of a vertical split (the live-reloading preview): its
@@ -333,31 +290,92 @@ impl App {
         }
     }
 
-    /// Paint the right column of a vertical split (the live preview) into
-    /// `layout.right` plus the vertical divider — shared by the default draw
-    /// path AND the `V`/`;cmd` overlay / `D` TopPane-pager paths (which scope
-    /// their own surface to the left column via `top_unit`), so the preview
-    /// stays visible beside an editor/pager. Fades the preview when its column
-    /// isn't the input target. No-op when no split is open (`right` is `None`).
-    fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
-        // A `V`/`D` launched from the focused RIGHT column fills the full width
-        // (the carve leaves `top_unit` full-width when the right is focused), so
-        // there's no right column to paint beside it — the overlay/TopPane pager
-        // covers it. Skip the right column + divider entirely while it's up.
-        let right_focused = self
-            .state
-            .vsplit
-            .is_some_and(|v| v.focus == state::Side::Right);
-        let overlay_covers = right_focused
-            && (self.runtime.top_overlay.is_some()
-                || self
-                    .view
-                    .pager
-                    .as_ref()
-                    .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane)));
-        if overlay_covers {
+    /// Paint the top status bar into `rect`. Yields the row to the
+    /// prompt/flash/arming line when the bottom pane is zoomed (they share the
+    /// single top row, per `compute_layout`'s `pane_pct >= 100` branch). Called
+    /// by the default draw and — when a vsplit keeps the status row free above a
+    /// column-scoped overlay — by the overlay / TopPane-pager branches.
+    fn render_status_bar(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
+            || self.state.flash.is_some()
+            || self.state.resolver.pending_display().is_some();
+        if self.state.pane.zoom == state::ZoomTarget::BottomPane && prompt_row_occupied {
             return;
         }
+        let (path, suffix) = self.header_parts();
+        let project_label = self
+            .state
+            .project_home
+            .as_deref()
+            .map(path_basename_display);
+        let agent_info = self.active_agent_status();
+        StatusBar {
+            project_home: project_label.as_deref(),
+            session_name: self.state.session_name.as_deref(),
+            path: &path,
+            suffix: &suffix,
+            git_info: self.state.git.info.as_deref(),
+            agent_info: agent_info.as_deref(),
+            theme: &self.view.theme,
+        }
+        .render(frame, rect);
+    }
+
+    /// Paint the left column's file list into `rect`. The bright/focused column
+    /// only when the file-pane row owns the keyboard and the right column isn't
+    /// the active one (the `ListView` fades on `!focused`); always bright with
+    /// dimming off (`^a d`). Shared by the default draw and the "overlay in the
+    /// right column" path (which keeps the left list visible beside it).
+    fn render_left_list(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        let list_focused =
+            !self.view.dim_inactive || (!self.state.pane_focused() && !self.right_column_focused());
+        frame.render_widget(
+            ListView {
+                rows: &self.view.cached_rows,
+                cursor: self.state.left.cursor.index,
+                view_top: self.state.left.cursor.view_top,
+                empty_marker: self.state.left.view == View::Dir,
+                focused: list_focused,
+                theme: &self.view.theme,
+            },
+            rect,
+        );
+    }
+
+    /// Paint the column NOT covered by an open `V`/`D` overlay/pager — which
+    /// occupies the *focused* column's `top_unit` — plus the divider. Overlay in
+    /// the left column → the right column (commander/preview) shows beside it;
+    /// overlay in the right → the left list shows beside it. So a `V`/`D` from
+    /// `b` opens inside `b` with `a` still visible (symmetric to editing in `a`).
+    fn render_column_beside_overlay(&self, frame: &mut Frame, layout: &FrameLayout) {
+        // No split → the overlay is full-width; nothing renders beside it and
+        // the status row is part of the overlay region (no status bar).
+        if self.state.vsplit.is_none() {
+            return;
+        }
+        // A column-scoped overlay sits below the shared status row, so keep the
+        // status bar visible above both columns.
+        self.render_status_bar(frame, layout.status);
+        let overlay_in_right = self.view.overlay_column == Some(state::Side::Right);
+        if overlay_in_right {
+            // Overlay is in the right column → show the left list beside it.
+            self.render_left_list(frame, layout.list);
+            if let Some(vd) = layout.vdivider {
+                self.render_vsplit_divider(frame, vd);
+            }
+        } else {
+            // Overlay is in the left column → show the right column beside it.
+            self.render_right_split(frame, layout);
+        }
+    }
+
+    /// Paint the right column of a vertical split (a second commander or the
+    /// live preview) into `layout.right` plus the vertical divider — the default
+    /// draw path, and (via [`Self::render_column_beside_overlay`]) the path where
+    /// a left-column `V`/`;cmd`/`D` keeps the right column visible beside it.
+    /// Fades the right when its column isn't the input target. No-op when no
+    /// split is open (`right` is `None`).
+    fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
         if let Some(rect) = layout.right {
             if let Some(right) = self.state.right.as_ref() {
                 // A second file-commander (`^z`): paint its list, rows + grid
@@ -394,7 +412,12 @@ impl App {
     /// (the rect is 1 col wide) via the same `cell_mut` API the pane widget
     /// uses. (PR4 can make it focus-aware.)
     fn render_vsplit_divider(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
-        let style = ratatui::style::Style::default().fg(self.view.theme.status_suffix);
+        // Use the accent (prompt-prefix) color, bold, so the column boundary
+        // reads as a deliberate divider and doesn't blend with muted content
+        // lines / gaps (e.g. a side-by-side diff's own separators).
+        let style = ratatui::style::Style::default()
+            .fg(self.view.theme.prompt_prefix)
+            .add_modifier(ratatui::style::Modifier::BOLD);
         let buf = frame.buffer_mut();
         for y in rect.y..rect.y.saturating_add(rect.height) {
             if let Some(cell) = buf.cell_mut((rect.x, y)) {
