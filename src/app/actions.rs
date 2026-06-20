@@ -324,6 +324,17 @@ impl App {
             Action::VsplitFocusRight => self.vsplit_focus(state::Side::Right),
             Action::OpenSecondCommander => self.open_second_commander(),
             Action::CloseSecondCommander => self.close_second_commander(),
+            // `^d`: close the second commander if one is open, else quit. The
+            // no-split quit path (`request_quit`) keeps its own two-tap "press
+            // again to quit" confirm — so quitting is still `^d^d` with a
+            // warning, while closing the split is a single `^d`.
+            Action::QuitOrCloseCommander => {
+                if self.state.right.is_some() {
+                    self.close_second_commander();
+                } else {
+                    self.request_quit();
+                }
+            }
             Action::ToggleDim => {
                 self.view.dim_inactive = !self.view.dim_inactive;
                 self.view.needs_full_repaint = true;

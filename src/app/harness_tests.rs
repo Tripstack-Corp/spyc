@@ -1092,10 +1092,10 @@ fn vsplit_cycle_on_directory_warns_and_stays_closed() {
     });
 }
 
-/// `^z n` opens a second file-commander in the right column: `state.right` is
+/// `^s n` opens a second file-commander in the right column: `state.right` is
 /// populated (rows read from disk), the split focuses `b`, and `cur()` then
 /// resolves to the right commander — so `^a a` flips the focused column back to
-/// the left. `^z x` tears it down to a single column again.
+/// the left. `^s x` tears it down to a single column again.
 #[test]
 fn second_commander_open_focus_and_close() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1109,7 +1109,7 @@ fn second_commander_open_focus_and_close() {
 
         let d = app.state.left.listing.dir.clone();
         app.open_second_commander_at(&d);
-        assert!(app.state.right.is_some(), "^z n opens a second commander");
+        assert!(app.state.right.is_some(), "^s n opens a second commander");
         assert_eq!(
             app.state.vsplit.map(|v| v.focus),
             Some(state::Side::Right),
@@ -1147,7 +1147,7 @@ fn second_commander_open_focus_and_close() {
         app.apply(&Action::CloseSecondCommander).unwrap();
         assert!(
             app.state.right.is_none(),
-            "^z x closes the second commander"
+            "^s x closes the second commander"
         );
         assert!(
             app.state.vsplit.is_none(),
@@ -1214,11 +1214,11 @@ fn session_does_not_persist_a_commander_split() {
     });
 }
 
-/// `^z n` opens the second commander directly at PROJECT_HOME (no prompt) —
+/// `^s n` opens the second commander directly at PROJECT_HOME (no prompt) —
 /// `b` is a second view into the same project, so its start dir is the shared
 /// project home, not a chosen path.
 #[test]
-fn ctrl_z_n_opens_at_project_home() {
+fn ctrl_s_n_opens_at_project_home() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let home = tmp.path().join("proj");
@@ -1384,7 +1384,7 @@ fn modal_pager_owns_input_even_with_right_column_focused() {
     });
 }
 
-/// Closing the second commander (`^z x`) drops any overlay/pager open in `b`
+/// Closing the second commander (`^s x`) drops any overlay/pager open in `b`
 /// along with the column — no orphaned editor PTY / pager left behind.
 #[test]
 fn closing_b_drops_its_pager() {
@@ -1516,5 +1516,41 @@ fn column_focused_tracks_any_surface_in_b() {
             !app.column_focused(state::Side::Left),
             "a is not focused → it stays dimmed"
         );
+    });
+}
+
+/// `^d` (Action::QuitOrCloseCommander) is contextual: it closes the second
+/// commander when one is open, otherwise quits — and the no-split quit keeps
+/// its existing two-tap "press again to quit" confirm.
+#[test]
+fn ctrl_d_closes_second_commander_then_quits() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let mut app = App::test_app(dir);
+        let d = app.state.left.listing.dir.clone();
+        app.open_second_commander_at(&d);
+        assert!(app.state.right.is_some());
+
+        // With a commander open, `^d` closes it (does NOT quit).
+        app.apply(&Action::QuitOrCloseCommander).unwrap();
+        assert!(app.state.right.is_none(), "^d closes the second commander");
+        assert!(
+            !app.state.should_quit,
+            "^d must not quit while a commander is open"
+        );
+
+        // No commander now → `^d` is the first quit tap (arms the confirm only).
+        app.apply(&Action::QuitOrCloseCommander).unwrap();
+        assert!(
+            !app.state.should_quit,
+            "first quit tap only arms the confirm"
+        );
+
+        // Second tap quits.
+        app.apply(&Action::QuitOrCloseCommander).unwrap();
+        assert!(app.state.should_quit, "second quit tap quits");
     });
 }

@@ -59,11 +59,11 @@ impl App {
     ///   shape: top-only → full-height → off.
     pub(super) fn cycle_vsplit(&mut self) {
         // The right region hosts EITHER a preview (`^a |`) or a second
-        // commander (`^z`) — never both. With a commander open, `^a |` is
-        // disabled (no nesting); close it with `^z x` first.
+        // commander (`^s`) — never both. With a commander open, `^a |` is
+        // disabled (no nesting); close it with `^s x` first.
         if self.state.right.is_some() {
             self.state
-                .flash_info("right column has a commander (^z x to close)");
+                .flash_info("right column has a commander (^s x to close)");
             return;
         }
         let cursor_file = self.previewable_cursor_path();
@@ -139,7 +139,7 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
-    /// `^z n` — open a second file-commander in the right column. `b` is a
+    /// `^s n` — open a second file-commander in the right column. `b` is a
     /// second view into the SAME project (it shares PROJECT_HOME and the rest of
     /// the global state), so it opens at **PROJECT_HOME** rather than prompting
     /// for a directory — navigate it from there. Falls back to the focused
@@ -160,7 +160,7 @@ impl App {
     /// Always **top-only**: full-height would clamp the bottom pane to the left
     /// column (pane under `a` only), which makes no sense for two peer browsers
     /// sharing one pane — the pane stays full-width below both columns and `b`
-    /// occupies the top-right region. Reached from the `^z n` cwd prompt.
+    /// occupies the top-right region. Reached from `^s n`.
     pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
@@ -182,11 +182,12 @@ impl App {
         self.state.focus = state::Focus::FileList;
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
-        self.state.flash_info("second commander (^z x to close)");
+        self.state
+            .flash_info("second commander (^s x / ^d to close)");
         self.view.needs_full_repaint = true;
     }
 
-    /// `^z x` — close the second commander: drop `state.right` and the split,
+    /// `^s x` — close the second commander: drop `state.right` and the split,
     /// returning to a single (left) column with focus on it.
     pub(super) fn close_second_commander(&mut self) {
         if self.state.right.is_none() {

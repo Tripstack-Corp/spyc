@@ -41,9 +41,10 @@ enum PendingSeq {
     /// Seen uppercase `Z`, waiting for the second `Z` of the
     /// vim-style `ZZ` quit chord. Cancels on any other key.
     Z,
-    /// Seen `Ctrl-z`, waiting for a second-commander sub-command:
-    /// `n` = open a second commander, `x` = close it.
-    CtrlZ,
+    /// Seen `Ctrl-s`, waiting for a second-commander sub-command:
+    /// `n` = open a second commander, `x` = close it. (Was `^z`; moved to `^s`
+    /// so the commander chord doesn't SIGTSTP a focused shell pane.)
+    CtrlS,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -100,7 +101,7 @@ impl Resolver {
             PendingSeq::PrevBracket => "[-",
             PendingSeq::D => "d-",
             PendingSeq::Z => "Z-",
-            PendingSeq::CtrlZ => "^z-",
+            PendingSeq::CtrlS => "^s-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -192,11 +193,11 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: `^z` (second-commander) prefix waiting for a sub-command.
-        // Matches on the key *code* regardless of Ctrl (so `^z ^n` fires the same
-        // as `^z n`), mirroring the `W` block above. Runs before the generic Ctrl
+        // Mid-sequence: `^s` (second-commander) prefix waiting for a sub-command.
+        // Matches on the key *code* regardless of Ctrl (so `^s ^n` fires the same
+        // as `^s n`), mirroring the `W` block above. Runs before the generic Ctrl
         // block, which would otherwise eat a held-Ctrl second key.
-        if self.pending == PendingSeq::CtrlZ {
+        if self.pending == PendingSeq::CtrlS {
             let out = match ev.code {
                 KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::OpenSecondCommander),
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::CloseSecondCommander),
@@ -209,7 +210,11 @@ impl Resolver {
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
-                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::Quit),
+                // `^d`: close the second commander if one is open, else quit
+                // (contextual, decided in the handler). The no-split quit keeps
+                // its existing two-tap "press again to quit" confirm
+                // (`request_quit`); closing the split is a single press.
+                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::QuitOrCloseCommander),
                 KeyCode::Char('l' | 'L') => ResolverOutcome::Action(Action::Redraw),
                 KeyCode::Char('b' | 'B') => ResolverOutcome::Action(Action::PageUp),
                 KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::PageDown),
@@ -222,9 +227,13 @@ impl Resolver {
                     self.pending = PendingSeq::W;
                     return ResolverOutcome::Pending;
                 }
-                // Ctrl-z starts the second-commander prefix (^z n open, ^z x close).
-                KeyCode::Char('z' | 'Z') => {
-                    self.pending = PendingSeq::CtrlZ;
+                // Ctrl-s starts the second-commander prefix (^s n open, ^s x
+                // close). Chosen over ^z: ^z to the lower pane is SIGTSTP, so
+                // reaching for the commander chord while the shell pane is
+                // focused would background a running process — ^s is at worst
+                // XOFF (recoverable), and frees ^z for real shell suspend.
+                KeyCode::Char('s' | 'S') => {
+                    self.pending = PendingSeq::CtrlS;
                     return ResolverOutcome::Pending;
                 }
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),

@@ -153,19 +153,19 @@ fn quote_nonletter_is_ignored() {
 
 // ── Ctrl-W pane commands ──────────────────────────────────────
 
-// ── Ctrl-z second-commander chord ─────────────────────────────
+// ── Ctrl-s second-commander chord ─────────────────────────────
 
 #[test]
-fn ctrl_z_enters_pending() {
+fn ctrl_s_enters_pending() {
     let mut r = Resolver::new();
-    assert_eq!(feed(&mut r, ctrl('z')), ResolverOutcome::Pending);
+    assert_eq!(feed(&mut r, ctrl('s')), ResolverOutcome::Pending);
     assert!(r.is_pending());
 }
 
 #[test]
-fn ctrl_z_n_opens_second_commander() {
+fn ctrl_s_n_opens_second_commander() {
     let mut r = Resolver::new();
-    feed(&mut r, ctrl('z'));
+    feed(&mut r, ctrl('s'));
     assert_eq!(
         feed(&mut r, key('n')),
         ResolverOutcome::Action(Action::OpenSecondCommander)
@@ -173,9 +173,9 @@ fn ctrl_z_n_opens_second_commander() {
 }
 
 #[test]
-fn ctrl_z_x_closes_second_commander() {
+fn ctrl_s_x_closes_second_commander() {
     let mut r = Resolver::new();
-    feed(&mut r, ctrl('z'));
+    feed(&mut r, ctrl('s'));
     assert_eq!(
         feed(&mut r, key('x')),
         ResolverOutcome::Action(Action::CloseSecondCommander)
@@ -183,9 +183,9 @@ fn ctrl_z_x_closes_second_commander() {
 }
 
 #[test]
-fn ctrl_z_unknown_key_is_ignored() {
+fn ctrl_s_unknown_key_is_ignored() {
     let mut r = Resolver::new();
-    feed(&mut r, ctrl('z'));
+    feed(&mut r, ctrl('s'));
     assert_eq!(feed(&mut r, key('q')), ResolverOutcome::Ignored);
     assert!(!r.is_pending(), "the chord resets after an unknown key");
 }

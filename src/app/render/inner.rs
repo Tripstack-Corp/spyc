@@ -411,7 +411,7 @@ impl App {
                     self.dim_region(frame, rect);
                 }
             } else if let Some(right) = self.state.right.as_ref() {
-                // A second file-commander (`^z`): paint its list, rows + grid
+                // A second file-commander (`^s`): paint its list, rows + grid
                 // settled in `prepare_frame` against the right caches. The
                 // ListView fades itself on `!focused`, so no separate dim pass.
                 let focused = !self.view.dim_inactive || self.right_column_focused();

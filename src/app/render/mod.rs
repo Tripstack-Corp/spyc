@@ -635,7 +635,7 @@ impl App {
         );
 
         // The right column's second commander (`state.right`) settles the same
-        // way against its own row cache + grid key + rect. No-op until `^z`
+        // way against its own row cache + grid key + rect. No-op until `^s`
         // opens one.
         if self.state.right.is_some() {
             let right_focused = self.right_column_focused();

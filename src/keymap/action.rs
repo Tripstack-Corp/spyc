@@ -137,9 +137,12 @@ pub enum Action {
     VsplitFocusLeft,  // ^a a / ^a h — focus the left region (a)
     VsplitFocusRight, // ^a b / ^a l — focus the right region (b)
     ToggleDim,        // ^a d — toggle the focus-dim of the inactive column / list
-    // Second file-commander in the right column (^z chord family).
-    OpenSecondCommander,  // ^z n — open a second commander (prompts for cwd)
-    CloseSecondCommander, // ^z x — close the second commander
+    // Second file-commander in the right column (^s chord family).
+    OpenSecondCommander,  // ^s n — open a second commander (at PROJECT_HOME)
+    CloseSecondCommander, // ^s x — close the second commander
+    // `^d` — close the second commander if one is open, else quit (the
+    // no-split quit keeps its own "press again to quit" confirm).
+    QuitOrCloseCommander,
 
     // Graveyard.
     OpenGraveyardView, // g y — open the graveyard viewer
@@ -311,6 +314,7 @@ impl Action {
             Self::ToggleActivity => "toggle activity monitor",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
+            Self::QuitOrCloseCommander => "close the second commander, else quit",
             Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
             Self::ReopenLastBuffer => "reopen the most-recent closed pager buffer",

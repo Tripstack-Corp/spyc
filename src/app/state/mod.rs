@@ -641,7 +641,7 @@ pub struct AppState {
     /// The right (secondary) file-commander, when a second column is open.
     /// `None` is the single-column default (Stage 1) — while `None`, `cur()` /
     /// `cur_mut()` always resolve to `left`, so the accessor conversion is
-    /// behavior-preserving. Populated by `^z` (Stage 2 PR C). The vsplit's
+    /// behavior-preserving. Populated by `^s` (Stage 2 PR C). The vsplit's
     /// *preview* pager (Stage 1) is a separate `ViewState` slot, not this.
     pub right: Option<Commander>,
     /// Git status/worker plumbing (see [`GitCache`]).
