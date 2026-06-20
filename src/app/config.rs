@@ -106,7 +106,7 @@ impl App {
         // status) or `HEAD` (branch switch) -- everything else (objects,
         // packs, lockfiles, gc activity, refs/, logs/) is rejected so
         // background git housekeeping doesn't cascade.
-        if let Some(git_dir) = self.state.git_cache.current_gitdir.as_deref() {
+        if let Some(git_dir) = self.state.left.git_cache.current_gitdir.as_deref() {
             if path == git_dir {
                 return true;
             }
@@ -149,7 +149,7 @@ impl App {
     /// refresh immediately. Subset of `is_listing_path`'s gitdir arm; kept
     /// separate so the caller can give git-state events a no-debounce path.
     pub fn is_gitdir_status_path(&self, path: &Path) -> bool {
-        let Some(git_dir) = self.state.git_cache.current_gitdir.as_deref() else {
+        let Some(git_dir) = self.state.left.git_cache.current_gitdir.as_deref() else {
             return false;
         };
         if path == git_dir {
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn gitdir_status_path_matches_index_head_and_dir_only() {
         let mut app = App::test_app(PathBuf::from("/repo"));
-        app.state.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
+        app.state.left.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
 
         // The discrete-operation signals.
         assert!(app.is_gitdir_status_path(Path::new("/repo/.git/index")));
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn gitdir_status_path_false_without_gitdir() {
         let app = App::test_app(PathBuf::from("/repo"));
-        assert!(app.state.git_cache.current_gitdir.is_none());
+        assert!(app.state.left.git_cache.current_gitdir.is_none());
         assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/index")));
     }
 

@@ -271,7 +271,7 @@ fn apply_worktree_new_sets_prompt_or_errors() {
 
     // With git info → prompt
     s.flash = None;
-    s.git.info = Some("main".to_string());
+    s.left.git.info = Some("main".to_string());
     s.apply(&Action::WorktreeNew);
     assert!(matches!(s.mode, Mode::Prompting(_)));
 }

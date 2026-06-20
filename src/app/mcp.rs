@@ -155,7 +155,7 @@ impl App {
             picks: cur.picks.iter().cloned().collect(),
             inventory: self.state.inventory.paths().cloned().collect(),
             filter: cur.temp_filter.clone(),
-            git_branch: self.state.git.info.clone(),
+            git_branch: cur.git.info.clone(),
             project_home: self.state.project_home.clone(),
             session_name: self.state.session_name.clone().unwrap_or_default(),
         }

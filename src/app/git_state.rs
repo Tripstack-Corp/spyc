@@ -23,11 +23,23 @@ impl App {
     /// queued request with no sender.
     pub(super) fn flush_git_requests(&mut self) {
         let Some(tx) = self.runtime.git_worker_tx.as_ref() else {
-            self.state.git_cache.pending_git_requests.clear();
+            // No worker (test harness): the outboxes stay empty
+            // (`git_worker_available` gates the push), so just defensively clear.
+            self.state.left.git_cache.pending_git_requests.clear();
+            if let Some(r) = self.state.right.as_mut() {
+                r.git_cache.pending_git_requests.clear();
+            }
             return;
         };
-        for req in self.state.git_cache.pending_git_requests.drain(..) {
+        // Both columns share the one worker channel; each request carries its
+        // `side` so the result routes back to the right column.
+        for req in self.state.left.git_cache.pending_git_requests.drain(..) {
             let _ = tx.send(req);
+        }
+        if let Some(r) = self.state.right.as_mut() {
+            for req in r.git_cache.pending_git_requests.drain(..) {
+                let _ = tx.send(req);
+            }
         }
     }
 
@@ -36,15 +48,17 @@ impl App {
     /// the generation + repo-root drop gates. Moved verbatim from the run
     /// loop (MVU Phase 5 PR 0).
     pub(super) fn apply_git_worker_result(&mut self, result: state::GitWorkerResult) -> bool {
-        // Generation gate: the user has navigated past this request.
-        if result.generation != self.state.git_cache.git_generation {
+        // Route to the column that requested this (the worker echoed its side).
+        let side = result.side;
+        // Generation gate (per-column): that column navigated past this request.
+        if result.generation != self.state.col(side).git_cache.git_generation {
             return false;
         }
-        // Relevance gate: even at the same generation, the result is
-        // for a specific repo. If the repo root no longer matches the
-        // current state, discard. (Unusual — generation bumps cover
-        // most of this.)
-        if self.state.git_cache.current_repo_root.as_deref() != Some(result.repo_root.as_path()) {
+        // Relevance gate: even at the same generation, the result is for a
+        // specific repo. If the column's repo root no longer matches, discard.
+        if self.state.col(side).git_cache.current_repo_root.as_deref()
+            != Some(result.repo_root.as_path())
+        {
             return false;
         }
         let Some(entries) = result.entries else {
@@ -55,7 +69,7 @@ impl App {
         let (Some(index_mtime), Some(head_mtime)) = (result.index_mtime, result.head_mtime) else {
             return false;
         };
-        self.state.git_cache.git_status_cache = Some(state::GitStatusCache {
+        self.state.col_mut(side).git_cache.git_status_cache = Some(state::GitStatusCache {
             repo_root: result.repo_root.clone(),
             index_mtime,
             head_mtime,
@@ -63,14 +77,14 @@ impl App {
         });
         // Seed the 1 Hz poll cache too — without this the next safety
         // poll would observe a None cache and re-fire the status walk.
-        self.state.git_cache.git_poll_cache = Some((index_mtime, head_mtime));
-        // Re-filter against the current listing dir's prefix and refresh
-        // the display string. `compute_git_info_fast` reads the cache
-        // we just stored for its dirty flag.
-        let listing_dir = self.state.left.listing.dir.clone();
+        self.state.col_mut(side).git_cache.git_poll_cache = Some((index_mtime, head_mtime));
+        // Re-filter against that column's listing dir prefix and refresh its
+        // display string. `compute_git_info_fast` reads the cache just stored.
+        let listing_dir = self.state.col(side).listing.dir.clone();
         let new_files = {
             let cache = self
                 .state
+                .col(side)
                 .git_cache
                 .git_status_cache
                 .as_ref()
@@ -82,9 +96,10 @@ impl App {
                 .into_owned();
             crate::git::status::map_to_listing(&cache.entries, &prefix)
         };
-        let new_info = self.state.compute_git_info_fast();
-        let changed = new_files != self.state.git.files || new_info != self.state.git.info;
-        self.state.git.set(new_info, new_files);
+        let new_info = self.state.compute_git_info_fast(side);
+        let changed = new_files != self.state.col(side).git.files
+            || new_info != self.state.col(side).git.info;
+        self.state.col_mut(side).git.set(new_info, new_files);
         if changed {
             self.state.rebuild_rows();
         }
@@ -96,7 +111,7 @@ impl App {
     /// commit-discussion workflow. PR 8b: builds the structured model
     /// off-thread (gix) and renders it in-house via the git-view session.
     pub fn open_git_show_pager(&mut self, sha: &str) {
-        let Some(root) = self.state.git_cache.current_repo_root.clone() else {
+        let Some(root) = self.state.cur().git_cache.current_repo_root.clone() else {
             self.state.flash_error("git show: not a git repository");
             return;
         };
@@ -122,7 +137,7 @@ impl App {
         if paths.is_empty() {
             return;
         }
-        let Some(root) = self.state.git_cache.current_repo_root.clone() else {
+        let Some(root) = self.state.cur().git_cache.current_repo_root.clone() else {
             self.state.flash_error("git diff: not a git repository");
             return;
         };
@@ -162,7 +177,7 @@ impl App {
             self.state.flash_error("git blame: cursor is a directory");
             return;
         }
-        let Some(root) = self.state.git_cache.current_repo_root.clone() else {
+        let Some(root) = self.state.cur().git_cache.current_repo_root.clone() else {
             self.state.flash_error("git blame: not a git repository");
             return;
         };

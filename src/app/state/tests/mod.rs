@@ -54,7 +54,7 @@ fn dirty_state(names: &[&str], dirty: &[&str]) -> AppState {
     use crate::ui::list_view::{GitChange, GitFileStatus};
     let mut s = state_with_rows(names);
     for d in dirty {
-        s.git.files.insert(
+        s.left.git.files.insert(
             (*d).to_string(),
             GitFileStatus::unstaged(GitChange::Modified),
         );
@@ -342,39 +342,39 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     let mut s = test_state();
     s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_repo_root(&root);
-    s.git.info = s.compute_git_info_fast();
+    s.update_repo_root(crate::app::state::Side::Left, &root);
+    s.left.git.info = s.compute_git_info_fast(crate::app::state::Side::Left);
 
     // Clean repo: refresh sees no modifications.
     s.refresh_listing();
     assert!(
-        s.git.files.is_empty(),
+        s.left.git.files.is_empty(),
         "clean repo: no markers (got {:?})",
-        s.git.files
+        s.left.git.files
     );
 
     // Working-tree edit → `M file.txt` should surface on next refresh.
     std::fs::write(root.join("file.txt"), "v2\n").unwrap();
     // Bypass the in-state 1 s invalidation throttle so this call
     // re-fetches instead of reusing the cached clean snapshot.
-    s.git_cache.last_git_invalidation = None;
+    s.left.git_cache.last_git_invalidation = None;
     s.refresh_listing();
     assert!(
-        s.git.files.contains_key("file.txt"),
+        s.left.git.files.contains_key("file.txt"),
         "expected M marker for file.txt after edit; got {:?}",
-        s.git.files
+        s.left.git.files
     );
 
     // Commit it → marker should clear (`.git/index` mtime moves, so
     // the mtime-cache invalidates on its own).
     run_git(&["add", "file.txt"]);
     run_git(&["commit", "-q", "-m", "v2"]);
-    s.git_cache.last_git_invalidation = None;
+    s.left.git_cache.last_git_invalidation = None;
     s.refresh_listing();
     assert!(
-        !s.git.files.contains_key("file.txt"),
+        !s.left.git.files.contains_key("file.txt"),
         "expected marker to clear after commit; got {:?}",
-        s.git.files
+        s.left.git.files
     );
 }
 
@@ -410,28 +410,28 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     let mut s = test_state();
     s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_repo_root(&root);
-    s.git.info = s.compute_git_info_fast();
+    s.update_repo_root(crate::app::state::Side::Left, &root);
+    s.left.git.info = s.compute_git_info_fast(crate::app::state::Side::Left);
 
     // Walk once (clean) to seed git_poll_cache with the current index/HEAD
     // mtimes — this is what the poll short-circuits against.
     s.refresh_git_state();
-    assert!(s.git.files.is_empty(), "clean baseline");
+    assert!(s.left.git.files.is_empty(), "clean baseline");
 
     // Working-tree edit — moves the file's mtime, NOT .git/index/HEAD.
     std::fs::write(root.join("file.txt"), "v2\n").unwrap();
 
     // Simulate the fs-event landing inside the 1 s throttle window: a recent
     // invalidation means refresh_listing skips the re-walk this round.
-    s.git_cache.last_git_invalidation = Some(std::time::Instant::now());
+    s.left.git_cache.last_git_invalidation = Some(std::time::Instant::now());
     s.refresh_listing();
     assert!(
-        s.git.files.is_empty(),
+        s.left.git.files.is_empty(),
         "throttled: marker not surfaced yet (got {:?})",
-        s.git.files
+        s.left.git.files
     );
     assert!(
-        s.git_cache.pending_worktree_rewalk,
+        s.left.git_cache.pending_worktree_rewalk,
         "throttle-skip must defer a re-walk"
     );
 
@@ -440,12 +440,12 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     let changed = s.refresh_git_state();
     assert!(changed, "forced re-walk should report a change");
     assert!(
-        s.git.files.contains_key("file.txt"),
+        s.left.git.files.contains_key("file.txt"),
         "deferred re-walk must surface the M marker; got {:?}",
-        s.git.files
+        s.left.git.files
     );
     assert!(
-        !s.git_cache.pending_worktree_rewalk,
+        !s.left.git_cache.pending_worktree_rewalk,
         "flag cleared after the forced re-walk"
     );
 
@@ -493,43 +493,43 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     let mut s = test_state();
     s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_repo_root(&root); // sets current_repo_root
+    s.update_repo_root(crate::app::state::Side::Left, &root); // sets current_repo_root
 
     // Wire the "worker" and force a clean cache-miss baseline so the
     // asserted call takes the enqueue branch deterministically.
-    s.git_cache.git_worker_available = true;
-    s.git_cache.git_status_cache = None;
-    s.git_cache.pending_git_requests.clear();
-    let gen_before = s.git_cache.git_generation;
+    s.left.git_cache.git_worker_available = true;
+    s.left.git_cache.git_status_cache = None;
+    s.left.git_cache.pending_git_requests.clear();
+    let gen_before = s.left.git_cache.git_generation;
 
-    let map = s.git_file_statuses_cached(&root);
+    let map = s.git_file_statuses_cached(crate::app::state::Side::Left, &root);
 
     assert!(
         map.is_empty(),
         "worker path returns an empty map this frame (markers arrive async)"
     );
     assert_eq!(
-        s.git_cache.pending_git_requests.len(),
+        s.left.git_cache.pending_git_requests.len(),
         1,
         "exactly one request enqueued for the run loop to flush"
     );
-    let req = &s.git_cache.pending_git_requests[0];
+    let req = &s.left.git_cache.pending_git_requests[0];
     assert_eq!(
-        s.git_cache.current_repo_root.as_deref(),
+        s.left.git_cache.current_repo_root.as_deref(),
         Some(req.repo_root.as_path()),
         "request carries the current repo root"
     );
     assert_eq!(
-        s.git_cache.git_generation,
+        s.left.git_cache.git_generation,
         gen_before.wrapping_add(1),
         "generation bumped once"
     );
     assert_eq!(
-        req.generation, s.git_cache.git_generation,
+        req.generation, s.left.git_cache.git_generation,
         "enqueued request stamped with the bumped generation"
     );
     assert!(
-        s.git_cache.last_git_request_at.is_some(),
+        s.left.git_cache.last_git_request_at.is_some(),
         "request-sent timestamp stamped for the activity overlay"
     );
 }
@@ -564,11 +564,16 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     let mut s = test_state();
     s.left.listing.dir = root.clone();
     s.start_dir = root.clone();
-    s.update_repo_root(&root); // sets current_repo_root + current_gitdir
+    s.update_repo_root(crate::app::state::Side::Left, &root); // sets current_repo_root + current_gitdir
 
     // First resolve opens gix and seeds the cache.
-    assert_eq!(s.compute_git_info_fast().as_deref(), Some("main"));
+    assert_eq!(
+        s.compute_git_info_fast(crate::app::state::Side::Left)
+            .as_deref(),
+        Some("main")
+    );
     let (cached_root, cached_mtime, _) = s
+        .left
         .git_cache
         .head_branch_cache
         .clone()
@@ -577,25 +582,28 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
 
     // Cache HIT: poison the stored string but keep the (root, mtime) key.
     // A matching key must reuse the poisoned value — proving no gix re-open.
-    s.git_cache.head_branch_cache =
+    s.left.git_cache.head_branch_cache =
         Some((cached_root.clone(), cached_mtime, "POISONED".to_string()));
     assert_eq!(
-        s.compute_git_info_fast().as_deref(),
+        s.compute_git_info_fast(crate::app::state::Side::Left)
+            .as_deref(),
         Some("POISONED"),
         "matching HEAD mtime must reuse the cached branch without re-resolving"
     );
 
     // Cache MISS: force the stored mtime stale. A differing key must
     // re-resolve via gix, recover the real branch, and re-cache.
-    s.git_cache.head_branch_cache =
+    s.left.git_cache.head_branch_cache =
         Some((cached_root, std::time::UNIX_EPOCH, "POISONED".to_string()));
     assert_eq!(
-        s.compute_git_info_fast().as_deref(),
+        s.compute_git_info_fast(crate::app::state::Side::Left)
+            .as_deref(),
         Some("main"),
         "stale HEAD mtime must re-resolve the branch"
     );
     assert_eq!(
-        s.git_cache
+        s.left
+            .git_cache
             .head_branch_cache
             .as_ref()
             .map(|(_, _, b)| b.as_str()),

@@ -291,6 +291,7 @@ impl Resolver {
                 KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
                 KeyCode::Char('V') => ResolverOutcome::Action(Action::Version),
                 KeyCode::Char('h') => ResolverOutcome::Action(Action::JumpProjectHome),
+                KeyCode::Char('w') => ResolverOutcome::Action(Action::JumpWorktreeRoot),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
                 KeyCode::Char('s') => ResolverOutcome::Action(Action::SortReverse),

@@ -343,7 +343,7 @@ impl AppState {
                     self.cur_mut().temp_filter = Some("h".to_string());
                     self.flash_info("limit: harpoon");
                 } else if pattern == "git" || pattern == "g" {
-                    if self.git.files.is_empty() {
+                    if self.cur().git.files.is_empty() {
                         self.flash_error("not in a git repo (or no changes)");
                         return PromptResult::Handled;
                     }

@@ -349,8 +349,9 @@ impl App {
         c.rows
             .iter()
             .map(|rd| {
-                let git_status = self
-                    .state
+                // Per-column git: read THIS commander's markers, so `b` shows
+                // its own repo's status, not `a`'s.
+                let git_status = c
                     .git
                     .files
                     .get(&rd.display)

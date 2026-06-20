@@ -85,13 +85,14 @@ impl AppState {
     /// so the caller can flash an empty-search message.
     pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
         let len = self.cur().rows.len();
-        if len == 0 || self.git.files.is_empty() {
+        if len == 0 || self.cur().git.files.is_empty() {
             return false;
         }
         let cur = self.cur().cursor.index.min(len.saturating_sub(1));
         let is_changed = |idx: usize| -> bool {
             self.cur().rows.get(idx).is_some_and(|r| {
-                self.git
+                self.cur()
+                    .git
                     .files
                     .get(&r.display)
                     .copied()

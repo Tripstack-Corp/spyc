@@ -865,6 +865,37 @@ mod render_tests {
         app.state.flash_info("yanked 3 paths");
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
+
+    /// A prompt opened from `b` must still render when `a` has a `D` TopPane
+    /// pager filling its column — the pager branch returns early, so the prompt
+    /// is painted into its reserved bottom row rather than swallowed. (Reported:
+    /// `O` from `b` with a pager in `a` showed no input line.)
+    #[test]
+    fn prompt_shows_below_a_column_pager_in_a_split() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.seed_rows(&["a.txt", "b.txt"]);
+            // a (left) has a D TopPane pager pinned to its column.
+            let mut pv = crate::ui::pager::PagerView::new_plain(
+                "doc",
+                (0..40).map(|i| format!("line {i}")).collect(),
+            );
+            pv.mount = crate::ui::pager::Mount::TopPane;
+            app.view.pager = Some(pv);
+            app.view.overlay_column = Some(state::Side::Left);
+            // open b (right), focused.
+            app.open_second_commander_at(tmp.path());
+            // open a prompt (as `O` would) from the focused column.
+            app.state.mode = Mode::Prompting(Prompt::simple(PromptKind::NewFile, "new file: "));
+
+            let out = render_to_string(&mut app, 80, 24);
+            assert!(
+                out.contains("new file:"),
+                "prompt must show below a's column pager:\n{out}"
+            );
+        });
+    }
 }
 
 #[cfg(test)]

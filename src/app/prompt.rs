@@ -161,17 +161,17 @@ impl App {
         let input_str = input.to_string_lossy().to_string();
         let (dir, file_prefix) = if input_str.ends_with('/') || input_str.is_empty() {
             let dir = if input_str.is_empty() {
-                self.state.left.listing.dir.clone()
+                self.state.cur().listing.dir.clone()
             } else {
                 input
             };
             (dir, String::new())
         } else {
             let dir = input.parent().map_or_else(
-                || self.state.left.listing.dir.clone(),
+                || self.state.cur().listing.dir.clone(),
                 |p| {
                     if p.as_os_str().is_empty() {
-                        self.state.left.listing.dir.clone()
+                        self.state.cur().listing.dir.clone()
                     } else {
                         p.to_path_buf()
                     }
@@ -227,9 +227,9 @@ impl App {
                 (format!("{word_base}{common}"), Some(msg))
             } else {
                 // No text progress — show matches and set up cycle state.
-                if dir == self.state.left.listing.dir {
+                if dir == self.state.cur().listing.dir {
                     // Local dir — also filter the listing.
-                    self.state.left.temp_filter = Some(format!("{file_prefix}*"));
+                    self.state.cur_mut().temp_filter = Some(format!("{file_prefix}*"));
                     self.state.rebuild_rows();
                 }
                 self.state.flash_info(cycle_hint(&matches));
@@ -400,8 +400,8 @@ impl App {
     /// rely on: if `tab_state` were nulled alone, the preview filter would
     /// outlive the cycle and leak into the listing behind the prompt.
     pub(crate) fn clear_tab_preview(&mut self) {
-        if self.view.tab_state.is_some() && self.state.left.temp_filter.is_some() {
-            self.state.left.temp_filter = None;
+        if self.view.tab_state.is_some() && self.state.cur().temp_filter.is_some() {
+            self.state.cur_mut().temp_filter = None;
             self.state.rebuild_rows();
         }
         self.view.tab_state = None;
@@ -470,7 +470,7 @@ impl App {
                     self.effective_pane_pct(),
                     self.runtime.pane_tabs.is_some(),
                 );
-                let cwd = self.state.left.listing.dir.clone();
+                let cwd = self.state.cur().listing.dir.clone();
                 let wake = self.make_pane_wake();
                 match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
                     Ok(p) => {
@@ -514,7 +514,7 @@ impl App {
                         self.state
                             .project_home
                             .clone()
-                            .unwrap_or_else(|| self.state.left.listing.dir.clone())
+                            .unwrap_or_else(|| self.state.cur().listing.dir.clone())
                     } else if cwd.starts_with('~') {
                         let home = std::env::var("HOME").unwrap_or_default();
                         std::path::PathBuf::from(cwd.replacen('~', &home, 1))
@@ -543,7 +543,7 @@ impl App {
                 let resolved = if target.is_absolute() {
                     target
                 } else {
-                    self.state.left.listing.dir.join(&target)
+                    self.state.cur().listing.dir.join(&target)
                 };
                 // Create parent dirs if needed, then touch the file.
                 if let Some(parent) = resolved.parent() {
@@ -590,7 +590,7 @@ impl App {
                     let resolved = if target.is_absolute() {
                         target
                     } else {
-                        self.state.left.listing.dir.join(&target)
+                        self.state.cur().listing.dir.join(&target)
                     };
                     match std::fs::create_dir_all(&resolved) {
                         Ok(()) => self
@@ -608,18 +608,17 @@ impl App {
                 if branch.is_empty() {
                     return Vec::new();
                 }
-                match crate::git::worktree::add(&self.state.left.listing.dir, branch) {
+                match crate::git::worktree::add(&self.state.cur().listing.dir, branch) {
                     Ok(path) => {
                         self.state
                             .flash_info(format!("created worktree: {}", path.display()));
+                        // chdir the focused column INTO the new worktree so you
+                        // can work there now. PROJECT_HOME stays the overall
+                        // project anchor — `g w` jumps to this worktree's root,
+                        // `g h` to PROJECT_HOME. (Per-column git tracks the
+                        // worktree's own markers via PR E.)
                         if let Err(e) = self.state.chdir(&path) {
                             self.state.flash_error(format!("chdir: {e}"));
-                        } else {
-                            // Re-anchor PROJECT_HOME on the new worktree
-                            // (harpoon / grep / MCP context want the worktree
-                            // root, not the parent repo); reconcile_harpoon
-                            // below reloads the per-project harpoon list.
-                            self.state.project_home = Some(self.state.left.listing.dir.clone());
                         }
                     }
                     Err(e) => self.state.flash_error(format!("worktree add: {e}")),
@@ -632,28 +631,17 @@ impl App {
                 if !confirmed {
                     return Vec::new();
                 }
-                let dir = self.state.left.listing.dir.clone();
-                // Capture the main repo path *before* removing — once the
-                // worktree's directory is gone we can't `git worktree list`
-                // from inside it, and the chdir-to-parent below lands in a
-                // non-git dir, so PROJECT_HOME would have nothing to reanchor
-                // on. The main worktree is the first `git worktree list
-                // --porcelain` entry.
-                let main_repo = crate::git::worktree::list(&dir)
-                    .and_then(|wts| wts.into_iter().next().map(|wt| wt.path));
+                let dir = self.state.cur().listing.dir.clone();
                 match crate::git::worktree::remove(&dir) {
                     Ok(()) => {
                         self.state
                             .flash_info(format!("removed worktree: {}", dir.display()));
+                        // chdir the focused column to the parent (the deleted
+                        // dir is gone). PROJECT_HOME is left untouched — it's the
+                        // overall project anchor, not tied to a worktree.
                         if let Some(parent) = dir.parent() {
                             let _ = self.state.chdir(parent);
                         }
-                        // Re-anchor PROJECT_HOME on the main repo so harpoon /
-                        // MCP context / `gh` don't keep pointing at the
-                        // just-deleted directory. The chdir target stays the
-                        // parent (the user may be browsing sibling worktrees);
-                        // listing.dir and project_home can differ, that's normal.
-                        self.state.project_home = main_repo;
                     }
                     Err(e) => self.state.flash_error(format!("worktree remove: {e}")),
                 }

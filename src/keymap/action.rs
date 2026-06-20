@@ -83,7 +83,8 @@ pub enum Action {
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
     // Project home (sticky project root).
-    JumpProjectHome,    // gh — jump to PROJECT_HOME
+    JumpProjectHome,    // gh — jump to PROJECT_HOME (the overall project)
+    JumpWorktreeRoot,   // gw — jump the focused column to ITS repo/worktree root
     SetProjectHomeHere, // gP — set PROJECT_HOME to current directory
 
     // Start dir (target of backtick `).
@@ -303,6 +304,7 @@ impl Action {
             Self::JumpPrevDir => "jump to previous directory",
             Self::JumpStartDir => "jump to starting directory",
             Self::JumpProjectHome => "jump to PROJECT_HOME",
+            Self::JumpWorktreeRoot => "jump the focused column to its worktree/repo root",
             Self::SetProjectHomeHere => "set PROJECT_HOME to current dir",
             Self::SetStartDirHere => "set start dir to current dir (target of `)",
             Self::ShowUserHost => "flash user@host",

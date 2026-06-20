@@ -143,7 +143,8 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Project home & session",
         rows: &[
-            ("g h", "jump to PROJECT_HOME"),
+            ("g h", "jump to PROJECT_HOME (overall project)"),
+            ("g w", "jump the focused column to its worktree / repo root"),
             ("g P", "set PROJECT_HOME to current directory"),
             ("g S", "set start dir (target of `) to current directory"),
             ("g U", "flash user@host in status line"),

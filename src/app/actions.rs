@@ -457,14 +457,14 @@ impl App {
 
             Action::GitDiff | Action::GitDiffCached => {
                 let cached = matches!(action, Action::GitDiffCached);
-                if self.state.git.info.is_none() {
+                if self.state.cur().git.info.is_none() {
                     self.state.flash_error("not in a git repository");
                 } else {
                     self.open_git_diff(cached);
                 }
             }
             Action::GitBlame => {
-                if self.state.git.info.is_none() {
+                if self.state.cur().git.info.is_none() {
                     self.state.flash_error("not in a git repository");
                 } else {
                     self.open_git_blame();

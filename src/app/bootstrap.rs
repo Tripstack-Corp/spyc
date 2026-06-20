@@ -121,6 +121,14 @@ impl App {
                     rows_per_col: 1,
                 },
                 list_generation: 0,
+                // Per-column git: the startup branch string + (empty) markers,
+                // and empty cache/worker plumbing until the first chdir +
+                // `refresh_git_state` populate it. See [`state::GitCache`].
+                git: state::GitState {
+                    info: git_info,
+                    files: git_files,
+                },
+                git_cache: state::GitCache::default(),
             },
             right: None,
             inventory: Inventory::load(),
@@ -148,9 +156,6 @@ impl App {
             // borrowed it just above.
             harpoon,
             pending_delete_preview: None,
-            // Git cache/worker plumbing — all empty until the first chdir +
-            // `refresh_git_state` populate it. See [`state::GitCache`].
-            git_cache: state::GitCache::default(),
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
@@ -170,10 +175,6 @@ impl App {
                 kind: FlashKind::Error,
             }),
             user_host: user_host_string(),
-            git: state::GitState {
-                info: git_info,
-                files: git_files,
-            },
             should_quit: false,
         };
         let context_path = crate::context::context_path(&app_state.start_dir);
@@ -228,6 +229,8 @@ impl App {
                 let _ = git_res_tx.send(state::GitWorkerResult {
                     generation: req.generation,
                     repo_root: req.repo_root,
+                    // Echo the requesting column so the result routes back to it.
+                    side: req.side,
                     entries,
                     index_mtime,
                     head_mtime,
@@ -235,7 +238,9 @@ impl App {
             }
         });
         let mut app_state = app_state;
-        app_state.git_cache.git_worker_available = true;
+        // Per-column flag — only `left` exists at bootstrap. A second commander
+        // copies this from `left` when it opens (`open_second_commander_at`).
+        app_state.left.git_cache.git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state
@@ -280,14 +285,16 @@ impl App {
         // Resolve + cache the repo root at startup so the first git read
         // (and the FSEvent exclude filter) have it before the user navigates.
         let initial_cwd = app.state.left.listing.dir.clone();
-        app.state.update_repo_root(&initial_cwd);
+        app.state.update_repo_root(state::Side::Left, &initial_cwd);
         // Now that the worker is wired and the repo root is cached,
         // kick off the first git read in the background. The branch
         // string is computed sync via gix (compute_git_info_fast ->
         // discovery::head_branch) so it's available on the first paint;
         // only the per-file markers and dirty flag wait for the worker.
-        app.state.git.info = app.state.compute_git_info_fast();
-        let _ = app.state.git_file_statuses_cached(&initial_cwd);
+        app.state.left.git.info = app.state.compute_git_info_fast(state::Side::Left);
+        let _ = app
+            .state
+            .git_file_statuses_cached(state::Side::Left, &initial_cwd);
         // The bootstrap cache-miss queued a request into the Model's
         // outbox (git_worker_available is now true); flush it onto the
         // worker channel so the first per-file markers land as early as

@@ -283,7 +283,7 @@ impl App {
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
-        if let Some(root) = self.state.git_cache.current_repo_root.clone() {
+        if let Some(root) = self.state.left.git_cache.current_repo_root.clone() {
             let listing_dir = self.state.left.listing.dir.clone();
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 ctx.fs_pending.retain_mut(|ev| {
@@ -402,9 +402,15 @@ impl App {
     /// drain.
     pub fn ingest_git_result(&mut self, result: state::GitWorkerResult) -> bool {
         self.view.activity.live.git_results = self.view.activity.live.git_results.saturating_add(1);
-        // Roundtrip duration: when the request was sent (set by
+        // Roundtrip duration: when the requesting column sent it (set by
         // `git_file_statuses_cached`) vs. now.
-        if let Some(sent) = self.state.git_cache.last_git_request_at.take() {
+        if let Some(sent) = self
+            .state
+            .col_mut(result.side)
+            .git_cache
+            .last_git_request_at
+            .take()
+        {
             self.view.activity.git_last_ms =
                 u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
         }
@@ -449,6 +455,7 @@ mod tests {
         state::GitWorkerResult {
             generation,
             repo_root: PathBuf::from("/no/such/repo"),
+            side: state::Side::Left,
             entries: None,
             index_mtime: None,
             head_mtime: None,
@@ -606,13 +613,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.state.git_cache.last_git_request_at = Some(std::time::Instant::now());
+            app.state.left.git_cache.last_git_request_at = Some(std::time::Instant::now());
             app.ingest_git_result(git_result(99));
             // Recorded + cleared on the first result; a second doesn't panic
             // or re-take.
-            assert!(app.state.git_cache.last_git_request_at.is_none());
+            assert!(app.state.left.git_cache.last_git_request_at.is_none());
             app.ingest_git_result(git_result(99));
-            assert!(app.state.git_cache.last_git_request_at.is_none());
+            assert!(app.state.left.git_cache.last_git_request_at.is_none());
         });
     }
 }

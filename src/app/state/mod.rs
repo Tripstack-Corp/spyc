@@ -170,6 +170,10 @@ pub struct PagerRequest {
 pub struct GitWorkerRequest {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
+    /// Which column requested this — the worker echoes it back so the result
+    /// routes to that column's git state + generation gate (no cross-column
+    /// collision).
+    pub side: Side,
 }
 
 /// Worker reply. `generation` lets the main thread discard results
@@ -181,6 +185,9 @@ pub struct GitWorkerRequest {
 pub struct GitWorkerResult {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
+    /// The column this result is for (echoed from the request) — routes it to
+    /// that column's git state + generation gate.
+    pub side: Side,
     pub entries: Option<Vec<crate::git::status::StatusEntry>>,
     pub index_mtime: Option<std::time::SystemTime>,
     pub head_mtime: Option<std::time::SystemTime>,
@@ -525,6 +532,14 @@ pub struct Commander {
     /// Monotonic counter bumped whenever this browser's display row list
     /// changes. Used by App to skip redundant `build_rows()` calls.
     pub list_generation: u64,
+    /// Per-column git display pair (branch + per-file markers) for THIS
+    /// browser's repo/worktree. Per-column so `b` in a different worktree
+    /// shows its own markers, not `a`'s. (Moved off `AppState` for dual git.)
+    pub git: GitState,
+    /// Per-column git cache + worker plumbing (repo root/gitdir, status cache,
+    /// the per-column generation gate, the worker outbox). Per-column so two
+    /// columns in different repos can't collide on a single generation.
+    pub git_cache: GitCache,
 }
 
 impl Commander {
@@ -554,6 +569,8 @@ impl Commander {
                 rows_per_col: 1,
             },
             list_generation: 0,
+            git: GitState::default(),
+            git_cache: GitCache::default(),
         })
     }
 }
@@ -595,10 +612,6 @@ pub struct AppState {
     pub flash: Option<FlashMessage>,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
-    /// MVU Phase 5: the git display pair (top-bar string + per-file
-    /// status map), written only together via [`GitState::set`]. See
-    /// [`GitState`].
-    pub git: GitState,
     /// Snapshot of the active harpoon ancestor-set (slot paths plus
     /// every parent directory of every slot). App refreshes this
     /// whenever the harpoon list mutates so `apply_temp_filter`
@@ -644,8 +657,6 @@ pub struct AppState {
     /// behavior-preserving. Populated by `^s` (Stage 2 PR C). The vsplit's
     /// *preview* pager (Stage 1) is a separate `ViewState` slot, not this.
     pub right: Option<Commander>,
-    /// Git status/worker plumbing (see [`GitCache`]).
-    pub git_cache: GitCache,
     /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
     pub pane: PaneLayout,
     /// The vertical (left/right) split, when open (see [`VSplit`]). `None`
@@ -687,6 +698,45 @@ impl AppState {
             Some(right) if matches!(self.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
             _ => &mut self.left,
         }
+    }
+
+    /// The commander for an EXPLICIT column (not focus-based, unlike `cur`).
+    /// `Right` with no second commander falls back to `left` (safe no-op for
+    /// the per-column git refresh loop). Used to drive git per-Side.
+    pub fn col(&self, side: Side) -> &Commander {
+        match side {
+            Side::Right => self.right.as_ref().unwrap_or(&self.left),
+            Side::Left => &self.left,
+        }
+    }
+
+    pub fn col_mut(&mut self, side: Side) -> &mut Commander {
+        match side {
+            Side::Right => self.right.as_mut().unwrap_or(&mut self.left),
+            Side::Left => &mut self.left,
+        }
+    }
+
+    /// The `Side` `cur()` resolves to — `Right` iff a second commander is open
+    /// AND focused, else `Left`. The side whose git a focus-scoped op targets.
+    pub fn focused_side(&self) -> Side {
+        match (self.right.is_some(), self.vsplit.map(|v| v.focus)) {
+            (true, Some(Side::Right)) => Side::Right,
+            _ => Side::Left,
+        }
+    }
+
+    /// The sides with a live commander: always `Left`, plus `Right` when a
+    /// second commander is open. Drives per-column git refresh (poll + chdir).
+    pub fn active_sides(&self) -> impl Iterator<Item = Side> {
+        std::iter::once(Side::Left).chain(self.right.is_some().then_some(Side::Right))
+    }
+
+    /// True when ANY active column is inside a git repo — gates the 1 Hz git
+    /// poll (per-column git, so either column being in a repo means polling is
+    /// worthwhile).
+    pub fn any_git_repo(&self) -> bool {
+        self.active_sides().any(|s| self.col(s).git.info.is_some())
     }
 
     // --- Cursor/navigation (Phase 1) ---
@@ -852,6 +902,8 @@ impl AppState {
                     rows_per_col: 20,
                 },
                 list_generation: 0,
+                git: GitState::default(),
+                git_cache: GitCache::default(),
             },
             right: None,
             inventory: Inventory::new(),
@@ -874,8 +926,6 @@ impl AppState {
             flash: None,
             should_quit: false,
             quit_pending: None,
-            git: GitState::default(),
-            git_cache: GitCache::default(),
             harpoon_filter_set: std::collections::HashSet::new(),
             harpoon: None,
             pending_delete_preview: None,

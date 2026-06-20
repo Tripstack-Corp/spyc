@@ -99,6 +99,12 @@ impl App {
             // vertical split is open; keep the OTHER column (its list / the
             // preview) visible beside it.
             self.render_column_beside_overlay(frame, &layout);
+            // A prompt opened from the OTHER (focused) column must still show —
+            // this branch returns early, so paint the prompt line into its
+            // reserved bottom row (split only; full-screen overlay has none).
+            if self.state.vsplit.is_some() {
+                self.render_prompt_line(frame, layout.prompt);
+            }
             return;
         }
 
@@ -160,6 +166,12 @@ impl App {
             // when a vertical split is open; keep the OTHER column visible
             // beside it.
             self.render_column_beside_overlay(frame, &layout);
+            // A prompt opened from the OTHER (focused) column must still show —
+            // this branch returns early, so paint the prompt line into its
+            // reserved bottom row (split only).
+            if self.state.vsplit.is_some() {
+                self.render_prompt_line(frame, layout.prompt);
+            }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
             // top of the just-drawn slot before returning. The
@@ -215,44 +227,7 @@ impl App {
             self.render_pane_status_line(frame, divider_rect);
         }
 
-        if let Mode::Prompting(p) = &self.state.mode {
-            PromptLine {
-                prefix: &p.prefix,
-                buffer: &p.buffer,
-                theme: &self.view.theme,
-                cursor_pos: p.editor.as_ref().map(|e| e.cursor),
-                vi_mode: p.editor.as_ref().map(|e| e.mode),
-            }
-            .render(frame, layout.prompt);
-        } else if let Some(flash) = &self.state.flash {
-            use ratatui::{
-                style::{Modifier, Style},
-                text::{Line, Span},
-                widgets::Paragraph,
-            };
-            let color = match flash.kind {
-                FlashKind::Info => self.view.theme.take,
-                FlashKind::Error => self.view.theme.cursor_bg,
-            };
-            let line = Line::from(Span::styled(
-                flash.text.clone(),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
-            frame.render_widget(Paragraph::new(line), layout.prompt);
-        } else if let Some(pending) = self.state.resolver.pending_display() {
-            use ratatui::{
-                style::{Modifier, Style},
-                text::{Line, Span},
-                widgets::Paragraph,
-            };
-            let line = Line::from(Span::styled(
-                pending,
-                Style::default()
-                    .fg(self.view.theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            frame.render_widget(Paragraph::new(line), layout.prompt);
-        }
+        self.render_prompt_line(frame, layout.prompt);
 
         // Pager comes after list but before help (help always wins).
         // `LowerPane` and `TopPane` mounts already rendered into
@@ -302,6 +277,47 @@ impl App {
         }
     }
 
+    /// Paint the bottom prompt/flash/arming line into `rect` (the spyc command
+    /// line). Renders the active prompt's `PromptLine`, else a flash, else the
+    /// chord-arming hint — or nothing when idle. Called by the default draw and
+    /// (in a vsplit) by the overlay / `D`-pager branches, which return early but
+    /// must still surface a prompt opened from the OTHER column.
+    fn render_prompt_line(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
+        use ratatui::{
+            style::{Modifier, Style},
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+        if let Mode::Prompting(p) = &self.state.mode {
+            PromptLine {
+                prefix: &p.prefix,
+                buffer: &p.buffer,
+                theme: &self.view.theme,
+                cursor_pos: p.editor.as_ref().map(|e| e.cursor),
+                vi_mode: p.editor.as_ref().map(|e| e.mode),
+            }
+            .render(frame, rect);
+        } else if let Some(flash) = &self.state.flash {
+            let color = match flash.kind {
+                FlashKind::Info => self.view.theme.take,
+                FlashKind::Error => self.view.theme.cursor_bg,
+            };
+            let line = Line::from(Span::styled(
+                flash.text.clone(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(line), rect);
+        } else if let Some(pending) = self.state.resolver.pending_display() {
+            let line = Line::from(Span::styled(
+                pending,
+                Style::default()
+                    .fg(self.view.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            frame.render_widget(Paragraph::new(line), rect);
+        }
+    }
+
     /// Paint the top status bar into `rect`. Yields the row to the
     /// prompt/flash/arming line when the bottom pane is zoomed (they share the
     /// single top row, per `compute_layout`'s `pane_pct >= 100` branch). Called
@@ -326,7 +342,7 @@ impl App {
             session_name: self.state.session_name.as_deref(),
             path: &path,
             suffix: &suffix,
-            git_info: self.state.git.info.as_deref(),
+            git_info: self.state.cur().git.info.as_deref(),
             agent_info: agent_info.as_deref(),
             theme: &self.view.theme,
         }

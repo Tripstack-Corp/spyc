@@ -165,13 +165,17 @@ impl App {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let commander = match state::Commander::for_dir(&dir, &self.state.config) {
+        let mut commander = match state::Commander::for_dir(&dir, &self.state.config) {
             Ok(c) => c,
             Err(e) => {
                 self.state.flash_error(format!("open: {e}"));
                 return;
             }
         };
+        // Inherit the worker-available flag from `left` (set at bootstrap) so
+        // `b`'s git cache-misses go to the background worker, not a blocking
+        // synchronous walk. `Commander::for_dir` defaults it `false`.
+        commander.git_cache.git_worker_available = self.state.left.git_cache.git_worker_available;
         self.view.right_pager = None; // a commander and the preview are exclusive
         self.state.right = Some(commander);
         self.state.vsplit = Some(state::VSplit {
@@ -180,6 +184,12 @@ impl App {
             focus: state::Side::Right,
         });
         self.state.focus = state::Focus::FileList;
+        // Resolve `b`'s own repo root + populate its git markers now (per-column
+        // git — `b` may be a different repo/worktree than `a`). The 1 Hz poll
+        // keeps it fresh thereafter; without this its `current_repo_root` stays
+        // `None` and the poll's per-column walk would no-op.
+        self.state.update_repo_root(state::Side::Right, &dir);
+        self.state.refresh_git_state();
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
         self.state

@@ -1638,3 +1638,138 @@ fn slash_search_targets_the_focused_column() {
         );
     });
 }
+
+/// Dual git (PR E): each column resolves + shows its OWN repo's markers and
+/// branch — `b` in a different repo doesn't inherit `a`'s state, and the two
+/// don't collide on a single generation. (Sync walk: test harness has no
+/// worker, so `git_file_statuses_cached` runs inline.)
+#[test]
+fn dual_git_each_column_shows_its_own_repo() {
+    use std::path::Path;
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &Path, args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed in {dir:?}");
+    };
+    let mk_repo = |name: &str| {
+        let d = std::fs::canonicalize(tmp.path()).unwrap().join(name);
+        std::fs::create_dir(&d).unwrap();
+        run_git(&d, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(d.join("file.txt"), "v1\n").unwrap();
+        run_git(&d, &["add", "file.txt"]);
+        run_git(&d, &["commit", "-q", "-m", "v1"]);
+        d
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo_a = mk_repo("a"); // stays clean
+        let repo_b = mk_repo("b");
+        std::fs::write(repo_b.join("file.txt"), "v2\n").unwrap(); // b is dirty
+
+        let mut app = App::test_app(repo_a.clone());
+        app.state.update_repo_root(state::Side::Left, &repo_a);
+        app.state.refresh_git_state(); // a: clean
+        app.open_second_commander_at(&repo_b); // resolves + refreshes b (dirty)
+
+        assert!(
+            app.state.left.git.files.is_empty(),
+            "a (clean) has no markers: {:?}",
+            app.state.left.git.files
+        );
+        assert_eq!(
+            app.state.left.git.info.as_deref(),
+            Some("main"),
+            "a clean branch"
+        );
+        let b = app.state.right.as_ref().expect("b open");
+        assert!(
+            b.git.files.contains_key("file.txt"),
+            "b shows ITS own M marker, not a's: {:?}",
+            b.git.files
+        );
+        assert!(
+            b.git.info.as_deref().is_some_and(|s| s.ends_with('*')),
+            "b's branch shows dirty: {:?}",
+            b.git.info
+        );
+    });
+}
+
+/// `O` (new file) creates the file in the FOCUSED column's dir — so a worktree
+/// in `b` gets the file, not `a`'s dir. Regression: the create path joined
+/// `state.left.listing.dir`.
+#[test]
+fn new_file_creates_in_the_focused_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let mut app = App::test_app(a.clone());
+        app.open_second_commander_at(&b); // b focused
+        assert_eq!(app.focused_side(), state::Side::Right);
+
+        // O → NewFile prompt, type a name, submit.
+        let mut p = Prompt::simple(PromptKind::NewFile, "new file: ");
+        p.buffer = "made_in_b.txt".to_string();
+        app.state.mode = Mode::Prompting(p);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()))
+            .unwrap();
+
+        assert!(
+            std::fs::canonicalize(&b)
+                .unwrap()
+                .join("made_in_b.txt")
+                .exists(),
+            "O creates the file in b (the focused column)"
+        );
+        assert!(
+            !a.join("made_in_b.txt").exists(),
+            "the file is NOT created in a"
+        );
+    });
+}
+
+/// `g w` (JumpWorktreeRoot) targets the FOCUSED column's own repo/worktree
+/// root — `b` jumps to b's root, not a's. (PROJECT_HOME, jumped by `g h`,
+/// stays the overall anchor.)
+#[test]
+fn gw_targets_the_focused_columns_worktree_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir_a = tmp.path().join("a");
+        let dir_b = tmp.path().join("b");
+        std::fs::create_dir(&dir_a).unwrap();
+        std::fs::create_dir(&dir_b).unwrap();
+        let mut app = App::test_app(dir_a);
+        app.open_second_commander_at(&dir_b); // b focused
+
+        let root_a = tmp.path().join("repoA");
+        let root_b = tmp.path().join("repoB");
+        app.state.left.git_cache.current_repo_root = Some(root_a);
+        app.state
+            .right
+            .as_mut()
+            .unwrap()
+            .git_cache
+            .current_repo_root = Some(root_b.clone());
+
+        let fx = app.apply(&Action::JumpWorktreeRoot).unwrap();
+        assert!(
+            fx.iter()
+                .any(|e| matches!(e, Effect::ChangeDir { path, .. } if *path == root_b)),
+            "g w targets b's (focused) worktree root, not a's: {fx:?}"
+        );
+    });
+}

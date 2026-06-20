@@ -118,7 +118,8 @@ impl AppState {
             // useful for navigating into a subtree with edits.
             rows.into_iter()
                 .filter(|r| {
-                    self.git
+                    self.cur()
+                        .git
                         .files
                         .get(&r.display)
                         .copied()
@@ -137,6 +138,9 @@ impl AppState {
         match Listing::read(&self.cur().listing.dir) {
             Ok(new) => {
                 self.cur_mut().listing = new;
+                // Event-driven refresh touches the FOCUSED column's git (the
+                // 1 Hz poll sweeps both columns; dual fs-watch is deferred).
+                let side = self.focused_side();
                 // Refresh the top-bar branch/dirty string too — without
                 // this the bar stays on `main` after edits and only
                 // updates when the user changes directories. Event-
@@ -154,38 +158,40 @@ impl AppState {
                 // working-tree ` M` markers for edits within the window.
                 let throttle = std::time::Duration::from_secs(1);
                 let should_invalidate = self
+                    .col(side)
                     .git_cache
                     .last_git_invalidation
                     .is_none_or(|t| t.elapsed() >= throttle);
                 if should_invalidate {
-                    self.git_cache.git_status_cache = None;
-                    self.git_cache.last_git_invalidation = Some(std::time::Instant::now());
+                    self.col_mut(side).git_cache.git_status_cache = None;
+                    self.col_mut(side).git_cache.last_git_invalidation =
+                        Some(std::time::Instant::now());
                     // This walk reflects the current worktree, so any earlier
                     // deferred re-walk is now satisfied.
-                    self.git_cache.pending_worktree_rewalk = false;
+                    self.col_mut(side).git_cache.pending_worktree_rewalk = false;
                 } else {
                     // Throttled this round — defer the re-walk so the working-tree
                     // change can't stay stale. The 1 Hz git poll's mtime
                     // short-circuit won't catch it (an unstaged edit moves no
                     // `.git/index`/`HEAD` mtime), so flag it for a forced re-walk
                     // on the next poll instead of dropping it.
-                    self.git_cache.pending_worktree_rewalk = true;
+                    self.col_mut(side).git_cache.pending_worktree_rewalk = true;
                 }
-                let dir = self.cur().listing.dir.clone();
-                let new_git_files = self.git_file_statuses_cached(&dir);
-                let new_git_info = self.compute_git_info_fast();
+                let dir = self.col(side).listing.dir.clone();
+                let new_git_files = self.git_file_statuses_cached(side, &dir);
+                let new_git_info = self.compute_git_info_fast(side);
                 let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
                 new_keys.sort_unstable();
                 crate::spyc_debug!(
                     "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
-                    self.cur().listing.dir.display(),
-                    self.git.info,
+                    self.col(side).listing.dir.display(),
+                    self.col(side).git.info,
                     new_git_info,
-                    self.git.files.len(),
+                    self.col(side).git.files.len(),
                     new_git_files.len(),
                     new_keys,
                 );
-                self.git.set(new_git_info, new_git_files);
+                self.col_mut(side).git.set(new_git_info, new_git_files);
                 self.rebuild_rows();
             }
             Err(e) => {
@@ -218,20 +224,23 @@ impl AppState {
         self.cur_mut().listing = new_listing;
         let (order, reversed) = (self.cur().sort_order, self.cur().sort_reversed);
         self.cur_mut().listing.sort(order, reversed);
+        // chdir is the FOCUSED column's navigation — refresh that column's git.
+        let side = self.focused_side();
         // Resolve + cache the repo root for the new dir *before* the git
         // calls below so they see the right root on the first run after chdir.
-        self.update_repo_root(&canonical);
+        self.update_repo_root(side, &canonical);
         // Refill the raw-status cache (if needed) before computing
         // branch/dirty — `compute_git_info_fast` reads `dirty` off
         // the cached raw output, so it must be current.
-        let files = self.git_file_statuses_cached(&canonical);
-        let info = self.compute_git_info_fast();
-        self.git.set(info, files);
+        let files = self.git_file_statuses_cached(side, &canonical);
+        let info = self.compute_git_info_fast(side);
+        self.col_mut(side).git.set(info, files);
         // Cache key from the cached repo root — no subprocess. The
         // chdir implicitly switched repos if the new tree has a
         // different `.git/`, so seed the cache here rather than wait
         // for the next 1 Hz poll to detect the mismatch.
-        self.git_cache.git_poll_cache = self.compute_git_mtime_key_fast();
+        let key = self.compute_git_mtime_key_fast(side);
+        self.col_mut(side).git_cache.git_poll_cache = key;
         self.cur_mut().picks.clear();
         self.cur_mut().temp_filter = None;
         self.cur_mut().cursor = Cursor::new();

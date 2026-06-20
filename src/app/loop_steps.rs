@@ -65,7 +65,7 @@ impl App {
     pub(crate) fn poll_git_cadence(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
         let git_poll_interval = Duration::from_secs(1);
-        if self.state.git.info.is_some()
+        if self.state.any_git_repo()
             && now_pre.duration_since(ctx.last_git_poll) >= git_poll_interval
         {
             ctx.last_git_poll = now_pre;
@@ -75,7 +75,7 @@ impl App {
         }
         // Arm/disarm GitPoll to reflect git_info presence (advisory — the
         // predicate above fires it against now_pre).
-        if self.state.git.info.is_some() {
+        if self.state.any_git_repo() {
             ctx.scheduler
                 .arm(Deadline::GitPoll, ctx.last_git_poll + git_poll_interval);
         } else {
@@ -303,7 +303,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            assert!(app.state.git.info.is_none(), "tmpdir is not a git repo");
+            assert!(
+                app.state.left.git.info.is_none(),
+                "tmpdir is not a git repo"
+            );
             let mut ctx = RunCtx::for_test();
             let needs = app.poll_git_cadence(Instant::now(), &mut ctx);
             assert!(!needs, "no git → no redraw");

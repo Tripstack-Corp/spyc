@@ -411,6 +411,20 @@ impl AppState {
                 }
                 None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
             },
+            // `g w` — jump the FOCUSED column to its OWN repo/worktree root
+            // (per-column, from PR E's `current_repo_root`). `g h` jumps to the
+            // overall PROJECT_HOME; this is the column-bound worktree home.
+            Action::JumpWorktreeRoot => match self.cur().git_cache.current_repo_root.clone() {
+                Some(root) => {
+                    return ApplyResult::Post(vec![Effect::ChangeDir {
+                        path: root,
+                        focus: None,
+                        on_ok: None,
+                        err_prefix: "jump to worktree root failed",
+                    }]);
+                }
+                None => self.flash_error("not in a git repository"),
+            },
             Action::SetProjectHomeHere => {
                 let dir = self.cur().listing.dir.clone();
                 self.flash_info(format!("PROJECT_HOME: {}", dir.display()));
@@ -449,7 +463,7 @@ impl AppState {
 
             // -- Worktree prompts (pure state: just set mode) --
             Action::WorktreeNew => {
-                if self.git.info.is_none() {
+                if self.cur().git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else {
                     let p = Prompt::shell(PromptKind::WorktreeNewBranch, "worktree branch: ");
@@ -457,7 +471,7 @@ impl AppState {
                 }
             }
             Action::WorktreeDelete => {
-                if self.git.info.is_none() {
+                if self.cur().git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else {
                     let dir = self.cur().listing.dir.display().to_string();

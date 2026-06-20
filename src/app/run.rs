@@ -42,7 +42,7 @@ impl App {
         let watched_listing = if let Some(tx) = watch_tx.as_ref() {
             let dir = self.state.left.listing.dir.clone();
             let _ = tx.send(WatchCommand::SyncListing {
-                gitdir: self.state.git_cache.current_gitdir.clone(),
+                gitdir: self.state.left.git_cache.current_gitdir.clone(),
                 dir: dir.clone(),
                 // No vertical-split preview can be open at startup.
                 preview: None,
@@ -734,7 +734,7 @@ impl App {
             {
                 let dir = self.state.left.listing.dir.clone();
                 let _ = tx.send(WatchCommand::SyncListing {
-                    gitdir: self.state.git_cache.current_gitdir.clone(),
+                    gitdir: self.state.left.git_cache.current_gitdir.clone(),
                     dir: dir.clone(),
                     preview: preview.clone(),
                 });
