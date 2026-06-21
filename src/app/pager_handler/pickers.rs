@@ -99,10 +99,9 @@ impl App {
         None
     }
 
-    /// Worktree picker: 1-9 selects a worktree, chdirs, re-anchors PROJECT_HOME.
+    /// Worktree picker: 1-9 switches the **focused** column to the chosen
+    /// worktree (focus `a` → switch `a`; focus `b` → switch `b`).
     pub(super) fn handle_pager_worktree_pick(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
-        // Worktree picker: 1-9 selects a worktree, chdirs, and
-        // re-anchors PROJECT_HOME on the worktree root.
         if let Some(ref worktrees) = self.state.pending_worktrees
             && let KeyCode::Char(c @ '1'..='9') = key.code
         {
@@ -111,34 +110,19 @@ impl App {
                 self.clear_pager();
                 self.state.pending_worktrees = None;
                 self.view.needs_full_repaint = true;
+                // Switch the FOCUSED column (`chdir` targets `cur()`). To put a
+                // worktree in `b`, focus it (or open it with `^s n`) first. The
+                // per-column tools follow this column's `current_repo_root`, so
+                // PROJECT_HOME is NOT re-anchored — it stays the overall anchor
+                // (`g h`). (`g w` jumps to this column's worktree root.)
                 if let Err(e) = self.state.chdir(&path) {
                     self.state.flash_error(format!("chdir: {e}"));
                     return Some(Vec::new());
                 }
-                // Worktrees are independent project roots — point
-                // PROJECT_HOME at the worktree so harpoon, MCP
-                // context (and therefore search_paths /
-                // search_content / claude's grep), status bar,
-                // and `gh` (jump-home) all anchor on the worktree
-                // instead of the parent repo. The original
-                // behavior left PROJECT_HOME pointing at the main
-                // repo, so a user driving an agent inside a
-                // worktree got search results from the wrong
-                // tree (reported by a daily-driver after a
-                // confusing afternoon).
-                //
-                // `listing.dir` is the canonical worktree path
-                // after `state.chdir` (which canonicalizes
-                // internally). `reconcile_harpoon` saves the
-                // outgoing list and loads a fresh one keyed on
-                // the new project root.
-                let new_home = self.state.left.listing.dir.clone();
-                self.state.project_home = Some(new_home.clone());
+                // Re-key the focused column's harpoon to the new worktree root.
                 self.reconcile_harpoon();
-                self.state.flash_info(format!(
-                    "worktree: {} (PROJECT_HOME updated)",
-                    crate::paths::display_tilde(&new_home),
-                ));
+                self.state
+                    .flash_info(format!("worktree: {}", crate::paths::display_tilde(&path)));
                 return Some(Vec::new());
             }
         }

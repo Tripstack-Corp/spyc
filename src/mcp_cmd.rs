@@ -41,6 +41,10 @@ pub enum McpCommand {
     /// in it or there are uncommitted changes to *tracked* files. Like
     /// `RemoveWorktree` but doesn't choke on untracked junk — it preserves it.
     CleanWorktree { path: String },
+    /// Open the second commander (column `b`) at `path` — typically the worktree
+    /// `CreateWorktree` returned — so a skill can work in it while `a` stays put.
+    /// Re-targets `b` if it's already open. The "work in it in b" step.
+    OpenWorktree { path: String },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },

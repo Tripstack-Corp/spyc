@@ -751,6 +751,10 @@ Claude can query and control the workspace through these tools:
   into the graveyard (recoverable, under `<worktree>-<timestamp>`) and
   then removes it. Still refuses uncommitted changes to *tracked* files
   (commit/stash first) and a column-occupied worktree.
+- **`open_worktree(path)`** -- open the second spyc column (column `b`)
+  at the worktree (re-targets `b` if already open), so the agent can
+  work in it while the main column stays put. After this,
+  `navigate_to` / search / `pick_files` act on `b`.
 
 **Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
 - **`search_paths(query, [limit])`** -- fuzzy filename search

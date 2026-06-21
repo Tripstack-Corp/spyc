@@ -222,7 +222,7 @@ impl App {
                     })
                     .collect();
                 let view = pager::PagerView::new_plain(
-                    "git worktrees — press 1-9 to switch, q to close",
+                    "git worktrees — press 1-9 to switch the focused column, q to close",
                     lines,
                 );
                 self.set_pager(view);

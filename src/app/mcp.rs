@@ -416,6 +416,34 @@ impl App {
                     },
                 }
             }
+            McpCommand::OpenWorktree { path } => {
+                let path = path.trim();
+                if path.is_empty() {
+                    return McpResponse::Error {
+                        message: "missing required parameter: path".into(),
+                    };
+                }
+                let raw = std::path::PathBuf::from(path);
+                let target = if raw.is_relative() {
+                    self.state.cur().listing.dir.join(&raw)
+                } else {
+                    raw
+                };
+                if !target.is_dir() {
+                    return McpResponse::Error {
+                        message: format!("not a directory: {}", target.display()),
+                    };
+                }
+                // Open (or re-target) column `b` at the worktree. `cur()` now
+                // resolves to `b`, so a follow-up navigate_to/search/pick lands
+                // there while `a` stays put.
+                self.open_second_commander_at(&target);
+                let opened = self.state.cur().listing.dir.clone();
+                self.write_context();
+                McpResponse::Ok {
+                    message: format!("opened column b at {}", opened.display()),
+                }
+            }
             McpCommand::Disconnected { new_pid } => {
                 self.view.mcp_running = false;
                 self.state.flash_error(format!(

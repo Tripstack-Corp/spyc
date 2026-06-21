@@ -44,7 +44,8 @@ gitignore-aware and scoped to the focused worktree.\n\
 - `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
 their selection; `get_file_content` to read what they're viewing.\n\
 - `create_worktree` / `remove_worktree` instead of `git worktree add` / \
-`remove`.\n\
+`remove`; `open_worktree` to work in one in column b while the user's column \
+stays put.\n\
 If a tool you expect is missing, the running spyc is older than this repo — \
 tell the user to restart it (compare `version`'s git SHA to the repo HEAD).";
 const CONTEXT_URI: &str = "spyc://context";

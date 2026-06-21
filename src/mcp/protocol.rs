@@ -231,6 +231,20 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                     }
                 },
                 {
+                    "name": "open_worktree",
+                    "description": "Open the second spyc column (column 'b') at the given worktree path (as returned by create_worktree) — so you can work in the worktree while the main column stays where the user left it. Re-targets column b if it's already open. After this, navigate_to / search / pick_files act on column b.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path of the worktree (or any directory) to open in column b."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
                     "name": "get_file_content",
                     "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
                     "inputSchema": {
@@ -439,7 +453,7 @@ fn handle_tools_call(
             }
         }
         "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
-        | "remove_worktree" | "clean_worktree" => {
+        | "remove_worktree" | "clean_worktree" | "open_worktree" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
@@ -490,6 +504,13 @@ fn handle_tools_call(
                         return send_tool_error(w, id, "missing required parameter: path");
                     }
                     McpCommand::CleanWorktree { path }
+                }
+                "open_worktree" => {
+                    let path = args["path"].as_str().unwrap_or("").to_string();
+                    if path.trim().is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: path");
+                    }
+                    McpCommand::OpenWorktree { path }
                 }
                 _ => unreachable!(),
             };

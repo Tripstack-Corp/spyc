@@ -1775,6 +1775,46 @@ fn mcp_remove_worktree_tears_down_and_guards_occupied() {
     });
 }
 
+/// MCP `open_worktree` opens column `b` at the given dir (the "work in it in b"
+/// step), so `cur()` then resolves to `b`.
+#[test]
+fn mcp_open_worktree_opens_column_b() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let a = std::fs::canonicalize(tmp.path()).unwrap().join("a");
+        let wt = std::fs::canonicalize(tmp.path()).unwrap().join("wt");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&wt).unwrap();
+        let mut app = App::test_app(a);
+        assert!(app.state.right.is_none(), "single column to start");
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::OpenWorktree {
+            path: wt.display().to_string(),
+        });
+        assert!(
+            matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }),
+            "open ok: {resp:?}"
+        );
+        let b = app.state.right.as_ref().expect("column b opened");
+        assert_eq!(b.listing.dir, wt, "b opened at the worktree");
+        assert_eq!(app.focused_side(), state::Side::Right, "focus moved to b");
+    });
+}
+
+/// A non-directory path is an error and leaves the layout unchanged.
+#[test]
+fn mcp_open_worktree_rejects_non_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::OpenWorktree {
+            path: tmp.path().join("does-not-exist").display().to_string(),
+        });
+        assert!(matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }));
+        assert!(app.state.right.is_none(), "b not opened on error");
+    });
+}
+
 /// `/` incremental search moves the FOCUSED column's cursor — searching in `b`
 /// must not scroll `a`. Regression: the match application hardcoded `left`.
 #[test]
