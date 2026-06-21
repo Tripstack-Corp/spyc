@@ -218,6 +218,26 @@ once we've daily-driven our own builds for a few days.
   Scoped conservatively: the common case (local NVMe, <1K entries)
   stays synchronous-fast; the spinner only appears past ~50ms. (Only
   the 50k-entry cap mitigation exists today.)
+- **Incremental / lazy row rebuild.** `rebuild_rows()` re-clones
+  `entry.path` (and reformats `display`) for every visible row on every
+  chdir/sort/filter/view change; a wide-open listing near the 50k cap
+  clones tens of thousands of `PathBuf`s per rebuild. Two independent
+  wins: (1) diff the new listing against the old and skip the rebuild
+  (or rebuild only changed rows) when nothing moved, and (2) compute
+  `RowData.display` lazily for visible rows only. **Profile first** —
+  the `list_generation`-gated render cache already avoids re-cloning
+  *across frames*, so the cost is confined to the rebuild itself;
+  confirm it's a real hotspot before optimizing.
+- **Cursor-by-path across rebuilds.** The file-list cursor is a flat
+  `usize` index into `rows`, clamped after every rebuild — so on a
+  listing change the selection can jump to a different file than the
+  one it was on. Remember the cursor's *path* and re-find it after a
+  rebuild (fall back to the clamped index when it's gone). A
+  UX/correctness win, not a perf one; pairs with the incremental-rebuild
+  item above. (Both items fell out of a 2026-06 investigation into
+  arena/slotmap/ECS adoption, which concluded none are warranted —
+  spyc's state is flat, path-keyed, and cycle-free; these are the
+  domain-level wins that remained.)
 - **Cwd export on quit** (Yazi-inspired). `--cwd-file <path>` flag (or
   `$SPYC_CWD_FILE`); on quit, write the file-list cwd; document a tiny
   zsh/bash wrapper that `cd`s the parent shell on exit. `q` becomes
