@@ -274,6 +274,7 @@ mod update;
 mod util;
 mod vsplit;
 mod watch;
+mod worktree_clean;
 
 use capture::PendingCapture;
 #[cfg(unix)]

@@ -743,6 +743,14 @@ Claude can query and control the workspace through these tools:
   in a sibling `<repo>.worktrees/<branch>/` dir; returns `{branch,
   path}`. Lets a skill spin up a worktree to work in a second column
   while the first stays on its branch.
+- **`remove_worktree(path)`** -- tear down a worktree by the path
+  `create_worktree` returned. Refuses a dirty/locked worktree or one a
+  column is currently open in; leaves the branch ref intact.
+- **`clean_worktree(path)`** -- like `remove_worktree`, but instead of
+  choking on untracked junk it archives the worktree's untracked files
+  into the graveyard (recoverable, under `<worktree>-<timestamp>`) and
+  then removes it. Still refuses uncommitted changes to *tracked* files
+  (commit/stash first) and a column-occupied worktree.
 
 **Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
 - **`search_paths(query, [limit])`** -- fuzzy filename search

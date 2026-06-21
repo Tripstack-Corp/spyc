@@ -202,6 +202,34 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                     }
                 },
                 {
+                    "name": "remove_worktree",
+                    "description": "Tear down a git worktree by path (the path create_worktree returned). Refuses a worktree with uncommitted/untracked changes, a locked one, or one a spyc column is currently open in; the branch ref is left intact. The teardown half of the worktree flow.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path of the worktree to remove (as returned by create_worktree)."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "clean_worktree",
+                    "description": "Clean out and remove a worktree by path: archive its UNTRACKED files into spyc's graveyard (recoverable, under '<worktree>-<timestamp>'), then remove it. Unlike remove_worktree this doesn't choke on untracked junk — it preserves it. Still refuses if a column is open in it or there are uncommitted changes to TRACKED files (commit/stash those first; only untracked files are preserved). The branch ref is left intact.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path of the worktree to clean out and remove (as returned by create_worktree)."
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
                     "name": "get_file_content",
                     "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
                     "inputSchema": {
@@ -392,7 +420,8 @@ fn handle_tools_call(
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
-        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree" => {
+        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
+        | "remove_worktree" | "clean_worktree" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
@@ -429,6 +458,20 @@ fn handle_tools_call(
                         return send_tool_error(w, id, "missing required parameter: branch");
                     }
                     McpCommand::CreateWorktree { branch }
+                }
+                "remove_worktree" => {
+                    let path = args["path"].as_str().unwrap_or("").to_string();
+                    if path.trim().is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: path");
+                    }
+                    McpCommand::RemoveWorktree { path }
+                }
+                "clean_worktree" => {
+                    let path = args["path"].as_str().unwrap_or("").to_string();
+                    if path.trim().is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: path");
+                    }
+                    McpCommand::CleanWorktree { path }
                 }
                 _ => unreachable!(),
             };

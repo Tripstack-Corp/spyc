@@ -194,6 +194,37 @@ impl App {
         }
     }
 
+    /// Resolve an MCP worktree-path argument and guard it: trim/require it,
+    /// resolve a relative path against the focused column's dir (create_worktree
+    /// hands back an absolute path, but be lenient), then refuse if a column is
+    /// currently open inside it — removing/cleaning it would strand that column
+    /// on a deleted dir (mirrors git refusing to touch the current worktree).
+    /// `Err` is a ready-to-send reason. Shared by RemoveWorktree + CleanWorktree.
+    fn resolve_worktree_arg(&self, path: &str) -> Result<std::path::PathBuf, String> {
+        let path = path.trim();
+        if path.is_empty() {
+            return Err("missing required parameter: path".into());
+        }
+        let raw = std::path::PathBuf::from(path);
+        let target = if raw.is_relative() {
+            self.state.cur().listing.dir.join(&raw)
+        } else {
+            raw
+        };
+        // Compare canonical paths; `listing.dir` is already canonical (set on chdir).
+        let canon = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+        let occupied = std::iter::once(&self.state.left)
+            .chain(self.state.right.as_ref())
+            .any(|c| c.listing.dir.starts_with(&canon));
+        if occupied {
+            return Err(format!(
+                "a column is open inside {} — navigate it away first",
+                canon.display()
+            ));
+        }
+        Ok(target)
+    }
+
     /// Execute a writable MCP command from Claude. Runs on the main
     /// thread with full access to `AppState`. Returns a response that
     /// the MCP server thread forwards to Claude.
@@ -329,6 +360,59 @@ impl App {
                     }
                     Err(e) => McpResponse::Error {
                         message: format!("worktree add: {e}"),
+                    },
+                }
+            }
+            McpCommand::RemoveWorktree { path } => {
+                let target = match self.resolve_worktree_arg(&path) {
+                    Ok(t) => t,
+                    Err(message) => return McpResponse::Error { message },
+                };
+                // `worktree::remove` refuses a dirty/locked worktree and leaves
+                // the branch ref intact.
+                match crate::git::worktree::remove(&target) {
+                    Ok(()) => {
+                        self.state
+                            .flash_info(format!("[mcp] removed worktree {}", target.display()));
+                        self.state.refresh_listing();
+                        self.write_context();
+                        McpResponse::Ok {
+                            message: format!("removed worktree {}", target.display()),
+                        }
+                    }
+                    Err(e) => McpResponse::Error {
+                        message: format!("worktree remove: {e}"),
+                    },
+                }
+            }
+            McpCommand::CleanWorktree { path } => {
+                let target = match self.resolve_worktree_arg(&path) {
+                    Ok(t) => t,
+                    Err(message) => return McpResponse::Error { message },
+                };
+                // Archives untracked files to the graveyard, then removes;
+                // refuses uncommitted changes to tracked files.
+                match crate::app::worktree_clean::clean_worktree(&target) {
+                    Ok(report) => {
+                        let message = match &report.label {
+                            Some(label) => format!(
+                                "cleaned worktree {} — archived {} untracked entr{} to the graveyard as '{label}'",
+                                target.display(),
+                                report.archived,
+                                if report.archived == 1 { "y" } else { "ies" },
+                            ),
+                            None => format!(
+                                "cleaned worktree {} (no untracked files to archive)",
+                                target.display()
+                            ),
+                        };
+                        self.state.flash_info(format!("[mcp] {message}"));
+                        self.state.refresh_listing();
+                        self.write_context();
+                        McpResponse::Ok { message }
+                    }
+                    Err(e) => McpResponse::Error {
+                        message: format!("worktree clean: {e}"),
                     },
                 }
             }

@@ -32,6 +32,15 @@ pub enum McpCommand {
     /// worktree to work in `b` while `a` stays on its branch. Replies with
     /// the new worktree's path.
     CreateWorktree { branch: String },
+    /// Tear down a worktree by path (the path `CreateWorktree` returned).
+    /// Refuses a dirty/locked worktree or one a column is currently in; the
+    /// branch ref is left intact. The teardown half of the skill flow.
+    RemoveWorktree { path: String },
+    /// Clean out a worktree: archive its untracked files into the graveyard
+    /// (under `<worktree>-<timestamp>`), then remove it. Refuses if a column is
+    /// in it or there are uncommitted changes to *tracked* files. Like
+    /// `RemoveWorktree` but doesn't choke on untracked junk — it preserves it.
+    CleanWorktree { path: String },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },

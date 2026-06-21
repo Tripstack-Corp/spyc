@@ -187,9 +187,12 @@ You are expected to be running inside spyc's split pane. If the
 - **When the user asks you to organize files:** use `set_filter`,
   `pick_files`, `clear_picks`, and `navigate_to` to update the TUI
   directly rather than giving instructions for the user to do manually.
-- **To spin up a git worktree:** `create_worktree(branch)` makes one
+- **To spin up / tear down a git worktree:** `create_worktree(branch)` makes one
   off the focused commander's repo (sibling `<repo>.worktrees/<branch>/`)
-  and returns its path — point a second column / `navigate_to` there.
+  and returns its path — point a second column / `navigate_to` there;
+  `remove_worktree(path)` tears it down (refuses a dirty one or one a column is in);
+  `clean_worktree(path)` archives untracked files to the graveyard first, then removes
+  (still refuses uncommitted *tracked* changes).
 - **To read a file the user is viewing:** use `get_file_content`
   with relative paths (resolved against spyc's cwd).
 - **For project-wide search:** prefer `search_paths` (fuzzy

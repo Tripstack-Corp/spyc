@@ -1683,6 +1683,75 @@ fn mcp_create_worktree_rejects_empty_branch() {
     });
 }
 
+/// MCP `remove_worktree` tears down a clean worktree — but refuses one a column
+/// is currently open in (removing it would strand the column on a deleted dir).
+#[test]
+fn mcp_remove_worktree_tears_down_and_guards_occupied() {
+    use crate::mcp_cmd::{McpCommand, McpResponse};
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed");
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+
+        // Create, then capture its path.
+        let created = app.execute_mcp_command(McpCommand::CreateWorktree {
+            branch: "teardown-wt".to_string(),
+        });
+        let path = match created {
+            McpResponse::Ok { message } => {
+                let v: serde_json::Value = serde_json::from_str(&message).unwrap();
+                std::path::PathBuf::from(v["path"].as_str().unwrap().to_string())
+            }
+            McpResponse::Error { message } => panic!("create failed: {message}"),
+        };
+        assert!(path.is_dir(), "worktree created");
+
+        // Open `b` inside it → remove must refuse (would strand b).
+        app.open_second_commander_at(&path);
+        let occ = app.execute_mcp_command(McpCommand::RemoveWorktree {
+            path: path.display().to_string(),
+        });
+        assert!(
+            matches!(occ, McpResponse::Error { .. }),
+            "refuses to remove a worktree a column is open in"
+        );
+        assert!(path.is_dir(), "still there while occupied");
+
+        // Close `b`, then removal succeeds and the dir is gone.
+        app.close_second_commander();
+        let ok = app.execute_mcp_command(McpCommand::RemoveWorktree {
+            path: path.display().to_string(),
+        });
+        assert!(
+            matches!(ok, McpResponse::Ok { .. }),
+            "removes a clean, unoccupied worktree: {ok:?}"
+        );
+        assert!(!path.exists(), "worktree dir removed");
+    });
+}
+
 /// `/` incremental search moves the FOCUSED column's cursor — searching in `b`
 /// must not scroll `a`. Regression: the match application hardcoded `left`.
 #[test]
