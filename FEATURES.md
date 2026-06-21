@@ -173,6 +173,30 @@ spyc's workflow: browse files above, talk to Claude below.
   (in spyc's editor, an agent pane, or any external editor) and the rendered
   markdown updates on save — the re-render runs off-thread, preserving your
   scroll position, and re-wraps when you resize the column.
+- **^s n** open a **second full file-commander** in the right column
+  (`b`) — a complete browser, not just a preview: its own cwd, listing,
+  picks, filter, sort, git markers, and harpoon. **^s x** (or **^d**,
+  which closes the commander when one is open, else quits) closes it.
+  `^a a`/`^a h` focus the left commander (a), `^a b`/`^a l` the right
+  (b). Everything follows the focused column: navigation, `V`/`D`
+  overlays, file ops (`O`/`+`/`W`), `!`/`;`/`$` shell cwd, the MCP
+  context, and the per-column tools — **grep `F`**, **find**, **MCP
+  search**, and **harpoon** all scope to the focused column's *worktree
+  root* (so `b` in a separate worktree searches its own tree, with its
+  own pinned harpoon list). **g w** jumps the focused column to its
+  worktree / repo root; `PROJECT_HOME` (jumped by `g h`) stays the
+  overall anchor. Git markers in each column refresh on filesystem
+  events independently. (The second-commander chord is `^s`, not `^z`:
+  `^z` to a shell in the bottom pane is SIGTSTP — it'd background a
+  running job. `^s` is at worst terminal flow-control XOFF, which spyc's
+  raw mode clears; over a flow-control-sensitive SSH/serial link it may
+  still be intercepted.)
+- **W l** opens a **worktree picker** — pick a git worktree and the
+  *focused* column switches to it (focus `b` first to put a worktree
+  there). With the MCP tools (`create_worktree` / `open_worktree` /
+  `remove_worktree` / `clean_worktree`) an agent can spin up a worktree,
+  open it in `b`, work, and tear it down — while `a` stays on the main
+  branch.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager** (v1.5). All pager keys work: `/`
   search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual
