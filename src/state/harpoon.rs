@@ -1,4 +1,4 @@
-//! Harpoon — a small, hand-curated, project-scoped list of file
+//! Harpoon — a small, hand-curated, worktree-scoped list of file
 //! pointers for muscle-memory navigation.
 //!
 //! The model is borrowed directly from ThePrimeagen's neovim plugin:
@@ -18,17 +18,20 @@
 //!     `^a s`) to the user. Spyc is "navigate first, decide second."
 //!
 //! Persistence: `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`,
-//! one file per project keyed by `PROJECT_HOME`. Auto-saved on every
-//! mutation. The hash component is a 64-bit `DefaultHasher` digest of
-//! the absolute project path, hex-encoded; the `<basename>` prefix is
-//! a human-readable disambiguator. If `DefaultHasher` ever changes
-//! across Rust versions, users will see a fresh empty list rather
-//! than a corrupt one — the old file becomes an orphan.
+//! one file per worktree keyed by the column's worktree root (the App
+//! layer picks the key via `AppState::harpoon_root` — repo root, else
+//! `PROJECT_HOME`). Auto-saved on every mutation. The hash component is a
+//! 64-bit `DefaultHasher` digest of the absolute key path, hex-encoded; the
+//! `<basename>` prefix is a human-readable disambiguator. If `DefaultHasher`
+//! ever changes across Rust versions, users will see a fresh empty list
+//! rather than a corrupt one — the old file becomes an orphan.
 //!
-//! Cleared/swapped at chdir time when `PROJECT_HOME` changes; missing
-//! files in the list are *not* auto-pruned (the user may have just
-//! reverted a deletion). `Hjump` flashes "gone" if the path no longer
-//! resolves and bails.
+//! This struct is key-agnostic: it persists keyed by whatever `project` path
+//! it's handed. `App::reconcile_harpoon` swaps a column's list (per-column,
+//! on `Commander`) whenever that column's worktree root shifts — so `b` in a
+//! separate worktree gets its own bookmarks, never `a`'s. Missing files are
+//! *not* auto-pruned (the user may have just reverted a deletion); `Hjump`
+//! flashes "gone" if the path no longer resolves and bails.
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};

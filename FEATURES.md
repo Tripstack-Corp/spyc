@@ -540,9 +540,13 @@ muscle-memory navigation. Up to 9 slots. Persisted on disk per
   `foo/` shows up so you can drill in.
 
 Persistence: `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`
-(one file per project, keyed by an absolute-path hash so two
-projects with the same basename can't collide). Outside a
-`PROJECT_HOME`, the H-prefix bindings flash a hint and bail.
+(one file per **worktree**, keyed by an absolute-path hash so two
+worktrees with the same basename can't collide). The key is the
+focused column's worktree root (else `PROJECT_HOME`), so a second
+column in a different worktree keeps its own bookmarks — harpoon
+stores absolute paths, so a shared list would jump you into the
+wrong worktree's copy. Outside a repo with no `PROJECT_HOME`, the
+H-prefix bindings flash a hint and bail.
 
 Note: `H` was previously an alias for "jump to `$HOME`"; it's now
 the harpoon chord prefix. The `~` key and the Home key still jump

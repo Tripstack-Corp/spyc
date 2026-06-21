@@ -190,6 +190,10 @@ impl App {
         // `None` and the poll's per-column walk would no-op.
         self.state.update_repo_root(state::Side::Right, &dir);
         self.state.refresh_git_state();
+        // Load `b`'s harpoon for its own worktree root (per-column harpoon —
+        // its absolute-path bookmarks pin to this worktree, not `a`'s). The
+        // repo root is resolved just above, so its `harpoon_root` is ready.
+        self.reconcile_harpoon();
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
         self.state

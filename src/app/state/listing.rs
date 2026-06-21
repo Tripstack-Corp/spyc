@@ -108,7 +108,7 @@ impl AppState {
             // in the project's harpoon set (slot paths plus all
             // their ancestor directories). Empty set → empty list.
             rows.into_iter()
-                .filter(|r| self.harpoon_filter_set.contains(&r.path))
+                .filter(|r| self.cur().harpoon_filter_set.contains(&r.path))
                 .collect()
         } else if pattern == "git" {
             // Show only entries that appear in `git status` with a

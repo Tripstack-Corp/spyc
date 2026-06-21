@@ -21,7 +21,7 @@ impl App {
         let Some(menu) = self.view.harpoon_menu.as_ref() else {
             return;
         };
-        let Some(h) = self.state.harpoon.as_ref() else {
+        let Some(h) = self.state.cur().harpoon.as_ref() else {
             return;
         };
 

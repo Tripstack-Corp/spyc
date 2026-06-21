@@ -301,10 +301,12 @@ back to it later.
 | `o` | Toggle build artifact filter |
 | `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git, `=h` harpoon) |
 
-### Harpoon (per-project pinned files)
+### Harpoon (per-worktree pinned files)
 
 A small ordered list (max 9 slots) of files / dirs you're cycling
-between. Persists per `PROJECT_HOME`.
+between. Persists per worktree (the focused column's repo root,
+else `PROJECT_HOME`), so a second column in another worktree keeps
+its own list.
 
 | Key | Action |
 |-----|--------|

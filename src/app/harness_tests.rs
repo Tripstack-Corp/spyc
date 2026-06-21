@@ -1812,3 +1812,75 @@ fn find_picker_walks_the_focused_columns_worktree_root() {
         assert_eq!(root, root_b, "F walks b's (focused) worktree root");
     });
 }
+
+/// Harpoon is per-column, pinned to each column's worktree: an entry appended
+/// in `a` does NOT bleed into `b`'s list when `b` is a different worktree, and
+/// vice versa. Harpoon stores ABSOLUTE paths, so a shared list would jump `b`
+/// into `a`'s copy of a file — the wrong worktree/branch. Each column keeps
+/// its own bookmarks keyed by `harpoon_root`.
+#[test]
+fn harpoon_is_per_column_pinned_to_each_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir_a = std::fs::canonicalize(tmp.path()).unwrap().join("a");
+        let dir_b = std::fs::canonicalize(tmp.path()).unwrap().join("b");
+        std::fs::create_dir(&dir_a).unwrap();
+        std::fs::create_dir(&dir_b).unwrap();
+        let fa = dir_a.join("fa.txt");
+        let fb = dir_b.join("fb.txt");
+        std::fs::write(&fa, "").unwrap();
+        std::fs::write(&fb, "").unwrap();
+
+        let mut app = App::test_app(dir_a.clone());
+        // `a`'s worktree root enables + keys its harpoon.
+        app.state.left.git_cache.current_repo_root = Some(dir_a);
+        app.reconcile_harpoon();
+        // Cursor on fa.txt → Ha appends it to a's list.
+        app.state.left.rows = vec![RowData {
+            path: fa.clone(),
+            display: "fa.txt".into(),
+            kind: EntryKind::File,
+        }];
+        app.state.left.cursor.index = 0;
+        app.harpoon_append();
+
+        // Open `b` in its own worktree, harpoon fb.txt there.
+        app.open_second_commander_at(&dir_b);
+        app.state
+            .right
+            .as_mut()
+            .unwrap()
+            .git_cache
+            .current_repo_root = Some(dir_b.clone());
+        app.reconcile_harpoon();
+        app.state.right.as_mut().unwrap().rows = vec![RowData {
+            path: fb.clone(),
+            display: "fb.txt".into(),
+            kind: EntryKind::File,
+        }];
+        app.state.right.as_mut().unwrap().cursor.index = 0;
+        app.harpoon_append();
+
+        let a = app.state.left.harpoon.as_ref().expect("a harpoon loaded");
+        let b = app
+            .state
+            .right
+            .as_ref()
+            .unwrap()
+            .harpoon
+            .as_ref()
+            .expect("b harpoon loaded");
+        assert!(
+            a.contains(&fa) && !a.contains(&fb),
+            "a's list = a's file only"
+        );
+        assert!(
+            b.contains(&fb) && !b.contains(&fa),
+            "b's list = b's file only — no cross-worktree bleed"
+        );
+        assert_ne!(
+            a.project, b.project,
+            "each column's harpoon keys to its OWN worktree root"
+        );
+    });
+}

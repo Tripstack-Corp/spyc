@@ -30,53 +30,79 @@ use super::{
 };
 
 impl App {
-    /// Wrapper around the action dispatcher that reconciles
-    /// project-scoped state (currently just the harpoon list) after
-    /// each action. Cheap: a no-op when `state.project_home` matches
-    /// the loaded harpoon's project field.
+    /// Wrapper around the action dispatcher that reconciles each column's
+    /// per-worktree harpoon list after every action. Cheap: a no-op for a
+    /// column whose [`AppState::harpoon_root`] matches its loaded list.
     pub fn apply(&mut self, action: &Action) -> Result<Vec<Effect>> {
         let result = self.apply_inner(action);
         self.reconcile_harpoon();
         result
     }
 
-    /// Save the current harpoon (if any) and load a fresh one when
-    /// `state.project_home` has shifted. Also flips `harpoon` on/off
-    /// when `PROJECT_HOME` is set/unset.
+    /// Reconcile every active column's harpoon list: save + reload a column's
+    /// list when its [`AppState::harpoon_root`] has shifted (chdir into a
+    /// different worktree, or `PROJECT_HOME` set/unset). Per-column so `b` in a
+    /// separate worktree keeps its own bookmarks. Cheap: a no-op for each
+    /// column whose root is unchanged (the common case every frame). A
+    /// focus switch needs no reload — each column's list is already loaded for
+    /// its own worktree, so `cur().harpoon` just resolves to the right one.
     pub fn reconcile_harpoon(&mut self) {
-        let want = self.state.project_home.as_deref();
-        let have = self.state.harpoon.as_ref().map(|h| h.project.as_path());
+        // Explicit Left + conditional Right (not `active_sides()`) so the
+        // immutable iterator borrow doesn't collide with the `&mut self` loop
+        // body — same shape as `refresh_git_state`.
+        self.reconcile_harpoon_for(state::Side::Left);
+        if self.state.right.is_some() {
+            self.reconcile_harpoon_for(state::Side::Right);
+        }
+    }
+
+    fn reconcile_harpoon_for(&mut self, side: state::Side) {
+        let want = self.state.harpoon_root(side);
+        let have = self
+            .state
+            .col(side)
+            .harpoon
+            .as_ref()
+            .map(|h| h.project.clone());
         if want == have {
             return;
         }
         // Save the outgoing list before we drop it.
-        if let Some(h) = self.state.harpoon.as_ref()
+        if let Some(h) = self.state.col(side).harpoon.as_ref()
             && let Err(e) = h.save()
         {
-            spyc_debug!("harpoon save on PROJECT_HOME swap failed: {e}");
+            spyc_debug!("harpoon save on root swap failed: {e}");
         }
-        self.state.harpoon = want.map(Harpoon::load);
-        // Close the menu if it's open — its cursor referenced the old
-        // list and would point at stale rows.
-        self.view.harpoon_menu = None;
-        self.sync_harpoon_filter_set();
-        // If `=h` was active, the now-stale set may render an empty
-        // list silently; rebuild rows so the user sees the new state.
-        if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {
-            self.state.rebuild_rows();
+        self.state.col_mut(side).harpoon = want.as_deref().map(Harpoon::load);
+        self.sync_harpoon_filter_set_for(side);
+        if side == self.state.focused_side() {
+            // The menu's cursor referenced the old list — close it.
+            self.view.harpoon_menu = None;
+            // If `=h` was active, the now-stale set may render an empty list
+            // silently; rebuild rows so the user sees the new state. Only the
+            // focused column's rows are rebuilt by `rebuild_rows`.
+            if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {
+                self.state.rebuild_rows();
+            }
         }
     }
 
-    /// Refresh `state.harpoon_filter_set` from the active harpoon.
-    /// Call after any list mutation (append/remove/swap/delete) so
-    /// `=h` reflects the new state on the next `rebuild_rows`.
+    /// Refresh the focused column's `harpoon_filter_set` from its harpoon.
+    /// Call after any list mutation (append/remove/swap/delete) so `=h`
+    /// reflects the new state on the next `rebuild_rows`.
     pub fn sync_harpoon_filter_set(&mut self) {
-        self.state.harpoon_filter_set = self
+        self.sync_harpoon_filter_set_for(self.state.focused_side());
+    }
+
+    fn sync_harpoon_filter_set_for(&mut self, side: state::Side) {
+        let set = self
             .state
+            .col(side)
             .harpoon
             .as_ref()
             .map(|h| h.ancestor_set().clone())
             .unwrap_or_default();
+        self.state.col_mut(side).harpoon_filter_set = set;
     }
 
     fn apply_inner(&mut self, action: &Action) -> Result<Vec<Effect>> {

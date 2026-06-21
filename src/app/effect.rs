@@ -470,6 +470,12 @@ impl App {
                 } => {
                     self.state
                         .change_dir(&path, focus.as_deref(), on_ok.as_deref(), err_prefix);
+                    // The chdir may have moved the focused column into a
+                    // different worktree → re-key its harpoon. This effect runs
+                    // in the executor AFTER `apply`'s reconcile, so without this
+                    // the swap would lag a frame (synchronous chdirs inside
+                    // `apply_inner` are already covered by that reconcile).
+                    self.reconcile_harpoon();
                 }
                 // A-class: signal the group, then (on success) toggle the
                 // task's paused flag — re-found by id, same tick — and

@@ -540,6 +540,18 @@ pub struct Commander {
     /// the per-column generation gate, the worker outbox). Per-column so two
     /// columns in different repos can't collide on a single generation.
     pub git_cache: GitCache,
+    /// This column's harpoon list — pinned per-**worktree** file pointers
+    /// (`None` outside a repo with no `PROJECT_HOME`). Per-column so `b` in a
+    /// separate worktree gets its own bookmarks: harpoon stores absolute paths,
+    /// so a shared list would jump `b` into `a`'s copy (wrong worktree/branch).
+    /// Keyed by [`AppState::harpoon_root`]; `App::reconcile_harpoon` swaps it
+    /// when that root shifts.
+    pub harpoon: Option<crate::state::Harpoon>,
+    /// Snapshot of [`Self::harpoon`]'s ancestor-set (slot paths plus every
+    /// parent directory of every slot). Refreshed whenever the list mutates so
+    /// `apply_temp_filter` (`=h`) stays pure-domain. Empty when `harpoon` is
+    /// `None`.
+    pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
 }
 
 impl Commander {
@@ -571,6 +583,10 @@ impl Commander {
             list_generation: 0,
             git: GitState::default(),
             git_cache: GitCache::default(),
+            // Populated by `App::reconcile_harpoon` once this column's repo
+            // root / PROJECT_HOME is known (a fresh commander has no root yet).
+            harpoon: None,
+            harpoon_filter_set: std::collections::HashSet::new(),
         })
     }
 }
@@ -612,18 +628,6 @@ pub struct AppState {
     pub flash: Option<FlashMessage>,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
-    /// Snapshot of the active harpoon ancestor-set (slot paths plus
-    /// every parent directory of every slot). App refreshes this
-    /// whenever the harpoon list mutates so `apply_temp_filter`
-    /// remains pure-domain. Empty when no `PROJECT_HOME` is active.
-    pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
-    /// MVU Phase 5: domain fields relocated from `App` (Model
-    /// consolidation). The active harpoon list (pinned per-project file
-    /// pointers; `None` when `PROJECT_HOME` is unset); the bottom-pane
-    /// prompt-echo buffer being tracked for `yP`; and the last typed pane
-    /// prompt. (`pager_positions` is deferred — its `::load()` ctor does
-    /// disk IO unwanted in `test_default`.)
-    pub harpoon: Option<crate::state::Harpoon>,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
     /// prompt is active. Drives the warning-color row highlight in
     /// the list view: the user sees exactly which files the `y` /
@@ -739,14 +743,16 @@ impl AppState {
         self.active_sides().any(|s| self.col(s).git.info.is_some())
     }
 
-    /// The root that *project-scoped tools* (grep `F`, find, MCP search,
-    /// harpoon) walk/anchor on for a given column — the column's own
-    /// **worktree root** when it's inside a repo, else `PROJECT_HOME`, else its
-    /// listing dir. This is what makes those tools *follow the focused
-    /// worktree*: column `b` sitting in a separate worktree scopes its tools to
-    /// that worktree rather than the overall project anchor. In the common case
-    /// (launched at the repo root, `PROJECT_HOME == repo root == worktree
-    /// root`) all three agree, so single-column behavior is unchanged.
+    /// The root that *project-scoped search tools* (grep `F`, find, MCP search)
+    /// walk for a given column — the column's own **worktree root** when it's
+    /// inside a repo, else `PROJECT_HOME`, else its listing dir. This is what
+    /// makes those tools *follow the focused worktree*: column `b` sitting in a
+    /// separate worktree scopes its tools to that worktree rather than the
+    /// overall project anchor. In the common case (launched at the repo root,
+    /// `PROJECT_HOME == repo root == worktree root`) all three agree, so
+    /// single-column behavior is unchanged. Always returns *some* dir (search
+    /// of the current dir is always sensible); harpoon, which needs a stable
+    /// anchor, uses the fallible [`Self::harpoon_root`] instead.
     pub fn tool_root(&self, side: Side) -> std::path::PathBuf {
         self.col(side)
             .git_cache
@@ -754,6 +760,20 @@ impl AppState {
             .clone()
             .or_else(|| self.project_home.clone())
             .unwrap_or_else(|| self.col(side).listing.dir.clone())
+    }
+
+    /// The anchor a column's **harpoon** list keys off: its worktree root when
+    /// in a repo, else `PROJECT_HOME`. Unlike [`Self::tool_root`] there is *no*
+    /// listing-dir fallback — harpoon stays disabled (`None`) outside a repo
+    /// with no project, rather than spawning a bookmark file per random dir.
+    /// `b` in a separate worktree keys off that worktree, so its absolute-path
+    /// bookmarks never jump into `a`'s copy of a file.
+    pub fn harpoon_root(&self, side: Side) -> Option<std::path::PathBuf> {
+        self.col(side)
+            .git_cache
+            .current_repo_root
+            .clone()
+            .or_else(|| self.project_home.clone())
     }
 
     // --- Cursor/navigation (Phase 1) ---
@@ -921,6 +941,8 @@ impl AppState {
                 list_generation: 0,
                 git: GitState::default(),
                 git_cache: GitCache::default(),
+                harpoon: None,
+                harpoon_filter_set: std::collections::HashSet::new(),
             },
             right: None,
             inventory: Inventory::new(),
@@ -943,8 +965,6 @@ impl AppState {
             flash: None,
             should_quit: false,
             quit_pending: None,
-            harpoon_filter_set: std::collections::HashSet::new(),
-            harpoon: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
             user_host: "test@host".to_string(),

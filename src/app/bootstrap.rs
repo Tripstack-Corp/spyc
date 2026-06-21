@@ -83,10 +83,11 @@ impl App {
         let project_home = Some(cwd.clone());
         let session_name = Some(crate::state::session_names::generate());
 
-        // Load the harpoon list for the active project (if any). When
-        // `PROJECT_HOME` is unset, harpoon stays `None` and all H-prefix
-        // bindings flash a hint. Loaded once at startup; reloaded on
-        // chdir into a different `PROJECT_HOME`.
+        // Seed the left column's harpoon from `PROJECT_HOME` (if any). When
+        // `PROJECT_HOME` is unset and we're not in a repo, harpoon stays `None`
+        // and all H-prefix bindings flash a hint. `reconcile_harpoon` re-keys it
+        // to the worktree root once the first chdir resolves the repo root, and
+        // swaps it whenever a column's `harpoon_root` shifts.
         let harpoon = project_home.as_ref().map(|p| Harpoon::load(p));
 
         // Run health check before loading state — cleans up orphaned
@@ -129,6 +130,15 @@ impl App {
                     files: git_files,
                 },
                 git_cache: state::GitCache::default(),
+                // Per-column harpoon, keyed by the column's `harpoon_root`
+                // (worktree root, else PROJECT_HOME). Seeded from PROJECT_HOME
+                // here; `reconcile_harpoon` re-keys it to the repo/worktree root
+                // once the first chdir resolves `current_repo_root`.
+                harpoon_filter_set: harpoon
+                    .as_ref()
+                    .map(|h| h.ancestor_set().clone())
+                    .unwrap_or_default(),
+                harpoon,
             },
             right: None,
             inventory: Inventory::load(),
@@ -147,14 +157,6 @@ impl App {
                 ..Default::default()
             },
             vsplit: None,
-            harpoon_filter_set: harpoon
-                .as_ref()
-                .map(|h| h.ancestor_set().clone())
-                .unwrap_or_default(),
-            // MVU Phase 5: domain fields relocated from `App`. Note
-            // `harpoon` is moved (consumed) AFTER `harpoon_filter_set`
-            // borrowed it just above.
-            harpoon,
             pending_delete_preview: None,
             graveyard: Vec::new(),
             pending_new_tab_cmd: None,
@@ -286,6 +288,10 @@ impl App {
         // (and the FSEvent exclude filter) have it before the user navigates.
         let initial_cwd = app.state.left.listing.dir.clone();
         app.state.update_repo_root(state::Side::Left, &initial_cwd);
+        // Re-key the seeded harpoon to the resolved worktree root (the seed
+        // above used PROJECT_HOME, which differs when launched in a subdir of
+        // the repo) so the first `Ha` lands in the right per-worktree list.
+        app.reconcile_harpoon();
         // Now that the worker is wired and the repo root is cached,
         // kick off the first git read in the background. The branch
         // string is computed sync via gix (compute_git_info_fast ->

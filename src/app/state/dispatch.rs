@@ -334,9 +334,9 @@ impl AppState {
                     self.cur_mut().temp_filter = Some("!".to_string());
                     self.flash_info("limit: picks only");
                 } else if pattern == "h" || pattern == "harpoon" {
-                    if self.harpoon_filter_set.is_empty() {
+                    if self.cur().harpoon_filter_set.is_empty() {
                         self.flash_error(
-                            "harpoon empty (or PROJECT_HOME unset) — nothing to filter",
+                            "harpoon empty (no repo/PROJECT_HOME) — nothing to filter",
                         );
                         return PromptResult::Handled;
                     }

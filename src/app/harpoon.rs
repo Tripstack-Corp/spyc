@@ -27,9 +27,9 @@ impl App {
     /// hard-capped at `MAX_SLOTS`. Saves the list immediately so a
     /// crash before the next mutation doesn't lose the entry.
     pub fn harpoon_append(&mut self) {
-        if self.state.harpoon.is_none() {
+        if self.state.cur().harpoon.is_none() {
             self.state
-                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+                .flash_error("harpoon: open a repo or set PROJECT_HOME (gP)");
             return;
         }
         let Some(path) = self.harpoon_cursor_path() else {
@@ -42,6 +42,7 @@ impl App {
         );
         let h = self
             .state
+            .cur_mut()
             .harpoon
             .as_mut()
             .expect("guarded by is_none check above");
@@ -73,9 +74,9 @@ impl App {
     /// `Hx` — remove the cursor file from the harpoon list (any
     /// slot). No-op + flash if it isn't harpooned.
     pub fn harpoon_remove(&mut self) {
-        if self.state.harpoon.is_none() {
+        if self.state.cur().harpoon.is_none() {
             self.state
-                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+                .flash_error("harpoon: open a repo or set PROJECT_HOME (gP)");
             return;
         }
         let Some(path) = self.harpoon_cursor_path() else {
@@ -88,6 +89,7 @@ impl App {
         );
         let h = self
             .state
+            .cur_mut()
             .harpoon
             .as_mut()
             .expect("guarded by is_none check above");
@@ -116,9 +118,9 @@ impl App {
     /// the verb (Enter, V, ^a s) afterwards. Missing-on-disk → flash
     /// and bail; we don't auto-prune (the user might be mid-rebase).
     pub fn harpoon_jump(&mut self, slot: u8) {
-        let Some(h) = self.state.harpoon.as_ref() else {
+        let Some(h) = self.state.cur().harpoon.as_ref() else {
             self.state
-                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+                .flash_error("harpoon: open a repo or set PROJECT_HOME (gP)");
             return;
         };
         let Some(target) = h.get(slot).map(Path::to_path_buf) else {
@@ -158,9 +160,9 @@ impl App {
     /// intercepts subsequent keys until closed (Esc/q). No-op when
     /// the list is unset (no PROJECT_HOME).
     pub fn harpoon_open_menu(&mut self) {
-        if self.state.harpoon.is_none() {
+        if self.state.cur().harpoon.is_none() {
             self.state
-                .flash_error("harpoon: set PROJECT_HOME first (gP)");
+                .flash_error("harpoon: open a repo or set PROJECT_HOME (gP)");
             return;
         }
         self.view.harpoon_menu = Some(HarpoonMenu {
@@ -185,7 +187,7 @@ impl App {
         let Some(menu) = self.view.harpoon_menu.as_mut() else {
             return Vec::new();
         };
-        let Some(h) = self.state.harpoon.as_mut() else {
+        let Some(h) = self.state.cur_mut().harpoon.as_mut() else {
             self.view.harpoon_menu = None;
             self.view.needs_full_repaint = true;
             return Vec::new();
@@ -260,7 +262,12 @@ impl App {
                     }
                     // Re-fetch menu since filter sync invalidates `menu` borrow
                     if let Some(m) = self.view.harpoon_menu.as_mut() {
-                        let new_len = self.state.harpoon.as_ref().map_or(0, |hh| hh.slots.len());
+                        let new_len = self
+                            .state
+                            .cur()
+                            .harpoon
+                            .as_ref()
+                            .map_or(0, |hh| hh.slots.len());
                         if new_len == 0 {
                             m.cursor = 0;
                         } else {
