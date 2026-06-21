@@ -222,8 +222,9 @@ file-commander* on the right — has since landed: a second cwd + per-column git
 the watch worker (`watch.rs`) re-points a second recursive-tree + non-recursive
 gitdir watch onto column `b`, and the fs-event predicates (`config::
 is_listing_path` / `is_gitdir_status_path`) accept either column, so `b`'s
-markers refresh on edits, not just the 1 Hz poll. Session restore of two cwds
-remains deferred — see ROADMAP.md.
+markers refresh on edits, not just the 1 Hz poll. Session restore reopens both
+columns: the saved split persists `b`'s cwd (`SavedVsplit::right_cwd`) and `-r`
+reopens the second commander there.
 
 ## Process & TTY ownership
 

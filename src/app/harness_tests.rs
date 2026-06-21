@@ -1185,31 +1185,48 @@ fn vsplit_cycle_disabled_with_second_commander() {
     });
 }
 
-/// A session saved while a second commander is open must NOT persist the split
-/// shape — the commander can't be reconstructed on restore yet, so a saved
-/// shape would restore an empty divider with nothing in `b`.
+/// PR G: a session saved with a second commander open persists its cwd
+/// (`right_cwd`) + split shape, and restore reopens column `b` there — the
+/// left column returns to the anchor, `b` to its own saved dir.
 #[test]
-fn session_does_not_persist_a_commander_split() {
+fn session_persists_and_restores_a_commander_split() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().join("work");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(dir.join("a.txt"), "x").unwrap();
-        let mut app = App::test_app(dir);
+        let left = std::fs::canonicalize(tmp.path()).unwrap().join("left");
+        let right = std::fs::canonicalize(tmp.path()).unwrap().join("right");
+        std::fs::create_dir(&left).unwrap();
+        std::fs::create_dir(&right).unwrap();
+        let mut app = App::test_app(left.clone());
         app.state.session_name = Some("vsplit-commander-test".to_string());
-
-        let d = app.state.left.listing.dir.clone();
-        app.open_second_commander_at(&d);
-        assert!(app.state.vsplit.is_some() && app.state.right.is_some());
+        app.open_second_commander_at(&right);
+        if let Some(v) = app.state.vsplit.as_mut() {
+            v.width_pct = 42; // non-default → proves the shape round-trips
+        }
 
         app.save_session();
         let saved = crate::state::sessions::load_sessions()
             .into_iter()
             .find(|s| s.name == "vsplit-commander-test")
-            .expect("session was saved");
-        assert!(
-            saved.vsplit.is_none(),
-            "a commander split must not be persisted (would orphan on restore)"
+            .expect("session saved");
+        let sv = saved.vsplit.as_ref().expect("commander split persisted");
+        assert_eq!(
+            sv.right_cwd.as_deref(),
+            Some(right.as_path()),
+            "b's cwd is saved"
+        );
+        assert_eq!(sv.width_pct, 42, "split shape saved");
+
+        // Restore the split into a fresh app via the chdir-free helper (calling
+        // restore_session would set_current_dir and race the parallel runner) →
+        // b reopens at its saved cwd with the saved shape.
+        let mut fresh = App::test_app(left);
+        fresh.restore_vsplit(sv, false);
+        let b = fresh.state.right.as_ref().expect("b reopened on restore");
+        assert_eq!(b.listing.dir, right, "b restored at its saved cwd");
+        assert_eq!(
+            fresh.state.vsplit.map(|v| v.width_pct),
+            Some(42),
+            "split width restored"
         );
     });
 }

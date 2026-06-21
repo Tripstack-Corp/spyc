@@ -115,26 +115,24 @@ impl App {
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
             project_home: self.state.project_home.clone(),
-            // Only the Stage-1 *preview* split is session-restorable. A second
-            // *commander* (`state.right`) can't be reconstructed yet (its cwd
-            // restore is PR G), so don't persist its split shape — restoring it
-            // would show an empty divider with nothing in the right column.
-            vsplit: if self.state.right.is_some() {
-                None
-            } else {
-                self.state
-                    .vsplit
-                    .map(|v| crate::state::sessions::SavedVsplit {
-                        width_pct: v.width_pct,
-                        full_height: matches!(v.mode, VsplitMode::FullHeight),
-                        focus_right: matches!(v.focus, Side::Right),
-                        preview_path: self
-                            .view
-                            .right_pager
-                            .as_ref()
-                            .and_then(|p| p.source_path.clone()),
-                    })
-            },
+            // Persist the open vertical split's shape + its content key: a
+            // second *commander*'s cwd (`right_cwd`, reopened on restore — PR G)
+            // or a Stage-1 *preview* file (`preview_path`). The two are mutually
+            // exclusive (a commander clears `right_pager`).
+            vsplit: self
+                .state
+                .vsplit
+                .map(|v| crate::state::sessions::SavedVsplit {
+                    width_pct: v.width_pct,
+                    full_height: matches!(v.mode, VsplitMode::FullHeight),
+                    focus_right: matches!(v.focus, Side::Right),
+                    preview_path: self
+                        .view
+                        .right_pager
+                        .as_ref()
+                        .and_then(|p| p.source_path.clone()),
+                    right_cwd: self.state.right.as_ref().map(|c| c.listing.dir.clone()),
+                }),
         };
         let save_result = crate::state::sessions::save_session(&session);
 
@@ -355,19 +353,56 @@ impl App {
         // Restore the vertical split (shape + previewed file). Independent of
         // the pane block above — a split can exist without a bottom pane.
         if let Some(sv) = &session.vsplit {
+            self.restore_vsplit(sv, session.pane_focused);
+        }
+        self.state.flash_info("session restored");
+    }
+
+    /// Restore a saved vertical split: reopen the second commander at its saved
+    /// cwd (PR G) or re-load the Stage-1 preview file, then apply the saved
+    /// shape. Split out of `restore_session` so it's unit-testable WITHOUT the
+    /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
+    /// test runner) — `open_second_commander_at` / `load_right_preview` don't
+    /// touch the process cwd.
+    pub(super) fn restore_vsplit(
+        &mut self,
+        sv: &crate::state::sessions::SavedVsplit,
+        pane_focused: bool,
+    ) {
+        let mode = if sv.full_height {
+            VsplitMode::FullHeight
+        } else {
+            VsplitMode::TopOnly
+        };
+        let focus = if sv.focus_right {
+            Side::Right
+        } else {
+            Side::Left
+        };
+        let width_pct = sv.width_pct.clamp(20, 80); // clamp a hand-edited / older width
+        if let Some(right_cwd) = sv.right_cwd.as_ref().filter(|p| p.is_dir()) {
+            // PR G: reopen the second commander at its saved cwd (this sets
+            // `state.right` + `vsplit` + git/harpoon + rows), then override the
+            // split shape with the saved one (open_* uses defaults).
+            self.open_second_commander_at(right_cwd);
+            if let Some(v) = self.state.vsplit.as_mut() {
+                v.width_pct = width_pct;
+                v.mode = mode;
+                v.focus = focus;
+            }
+            // `open_second_commander_at` forces `state.focus = FileList`;
+            // re-apply the saved region focus (the pane block may have wanted
+            // `Pane`).
+            self.state.focus = if pane_focused {
+                Focus::Pane
+            } else {
+                Focus::FileList
+            };
+        } else {
             self.state.vsplit = Some(VSplit {
-                // Clamp a hand-edited / older saved width into range.
-                width_pct: sv.width_pct.clamp(20, 80),
-                mode: if sv.full_height {
-                    VsplitMode::FullHeight
-                } else {
-                    VsplitMode::TopOnly
-                },
-                focus: if sv.focus_right {
-                    Side::Right
-                } else {
-                    Side::Left
-                },
+                width_pct,
+                mode,
+                focus,
             });
             // Re-load the previewed file if it still exists (wraps to the
             // restored column width).
@@ -375,7 +410,6 @@ impl App {
                 self.load_right_preview(path);
             }
         }
-        self.state.flash_info("session restored");
     }
 
     pub fn show_session_info(&mut self) {

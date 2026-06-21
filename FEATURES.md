@@ -674,7 +674,9 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 
 - **Auto-save** — on quit, spyc saves the current directory, all pane
   tabs (command, label, cwd), active tab, pane height, focus state,
-  the spice-themed session name, and `PROJECT_HOME`.
+  the spice-themed session name, `PROJECT_HOME`, and the vertical split
+  (its shape plus the second commander's cwd, or the preview file) —
+  restored on `-r`, reopening column `b` where you left it.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
   ("just now", "2 hours ago", "3 days ago"), and the cwd.

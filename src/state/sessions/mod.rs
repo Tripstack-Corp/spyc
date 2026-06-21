@@ -104,9 +104,14 @@ pub struct SavedVsplit {
     pub full_height: bool,
     /// `true` = the right column (`b`) owned the keyboard.
     pub focus_right: bool,
-    /// The previewed file, re-loaded into the right column on restore.
+    /// The previewed file, re-loaded into the right column on restore (Stage-1
+    /// preview split). Mutually exclusive with `right_cwd`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_path: Option<PathBuf>,
+    /// The second *commander*'s (column `b`) cwd, reopened on restore (PR G).
+    /// `None` for a preview split; `Some` for a full second commander.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_cwd: Option<PathBuf>,
 }
 
 fn sessions_dir() -> Option<PathBuf> {
