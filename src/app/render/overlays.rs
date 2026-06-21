@@ -149,9 +149,12 @@ impl App {
         // headline is the at-a-glance idle indicator and reads better
         // de-emphasized, while the `[p e o]` reason breakdown and the timings
         // stay sharp. Only the head carries `Modifier::DIM` (see the render loop).
-        let l1_head = format!(" {} dps", self.view.activity.snap.draws);
+        // Fixed-width count/timing fields so the line — and thus the whole
+        // block, since line 1 is the longest — keeps a constant width instead
+        // of bouncing as throughput and latency rise and fall.
+        let l1_head = format!(" {:>4} dps", self.view.activity.snap.draws);
         let l1_tail = format!(
-            " [p:{} e:{} o:{}]  {} cells/s  pk {:.1}ms r{:.1}ms echo {:.1}ms ",
+            " [p:{:>3} e:{:>3} o:{:>3}]  {:>6} cells/s  pk {:>5.1}ms r{:>5.1}ms echo {:>5.1}ms ",
             self.view.activity.snap.reason_pane,
             self.view.activity.snap.reason_event,
             self.view.activity.snap.reason_other,
@@ -232,19 +235,55 @@ impl App {
             frame_area.height,
         );
 
-        // Pad every row to one common display width → a clean flush-right
-        // block (straight left edge), content right-justified.
-        let rows: [(&str, Color); 4] = [
-            (l1.as_str(), Color::Yellow),
-            (l2.as_str(), self.view.theme.take),
-            (l3.as_str(), self.view.theme.status_user),
-            (l4.as_str(), self.view.theme.dir),
+        // The four base rows. Line 1 is fixed-width and the longest, so the
+        // block width it sets is constant — the HUD no longer bounces.
+        let mut rows: Vec<(String, Color)> = vec![
+            (l1, Color::Yellow),
+            (l2, self.view.theme.take),
+            (l3, self.view.theme.status_user),
+            (l4, self.view.theme.dir),
         ];
         let maxw = rows
             .iter()
             .map(|(s, _)| crate::ui::display_width(s))
             .max()
             .unwrap_or(0);
+
+        // Extended section: cumulative per-tool MCP call counts (every agent
+        // tools/call, read tools included). Greedy-wrapped to the base block
+        // width so it never widens the HUD; stable name-sorted order.
+        let calls = &self.view.activity.mcp_tool_calls;
+        let entries: Vec<String> = calls
+            .iter()
+            .filter(|(_, c)| **c > 0)
+            .map(|(name, c)| format!("{name}:{c}"))
+            .collect();
+        let mcp_color = self.view.theme.take;
+        if entries.is_empty() {
+            rows.push((" mcp  (no tool calls yet) ".to_string(), mcp_color));
+        } else {
+            let total: u64 = calls.values().sum();
+            let cont_prefix = "        "; // continuation lines indent under the tokens
+            let avail = maxw.saturating_sub(2); // keep a trailing space inside the block
+            let mut cur = format!(" mcp \u{2211}{total} ");
+            let mut prefix_w = crate::ui::display_width(&cur); // this line's indent width
+            let mut cur_w = prefix_w;
+            for tok in &entries {
+                let tok_w = tok.len() + 1; // a leading space + the "name:count" (ASCII)
+                // Wrap when this line already holds a token and the next won't fit.
+                if cur_w > prefix_w && cur_w + tok_w > avail {
+                    rows.push((format!("{cur} "), mcp_color));
+                    cur = cont_prefix.to_string();
+                    prefix_w = crate::ui::display_width(cont_prefix);
+                    cur_w = prefix_w;
+                }
+                cur.push(' ');
+                cur.push_str(tok);
+                cur_w += tok_w;
+            }
+            rows.push((format!("{cur} "), mcp_color));
+        }
+
         let block_w = u16::try_from(maxw).unwrap_or(u16::MAX);
         // Need the block plus a 1-col right margin.
         if block_w == 0 || frame_area.width <= block_w + 1 {

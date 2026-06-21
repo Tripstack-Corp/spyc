@@ -779,7 +779,11 @@ jump from Claude's output back to the file list.
 - **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
 - **A** activity monitor: live draws/sec, cells/sec, draw reason
-  breakdown (pane/event/other), and poll interval
+  breakdown (pane/event/other), frame/render/echo peak latencies,
+  bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
+  fixed-width so it doesn't bounce as rates rise and fall — plus an
+  extended section tallying cumulative per-tool **MCP call counts**
+  (every agent `tools/call`, read tools included)
 - **C** toggle between color and mono themes
 - **s** set an environment variable (`NAME=VALUE`)
 - **:dump-scrollback** write the active pane's scrollback snapshot

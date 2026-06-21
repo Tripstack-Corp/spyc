@@ -93,7 +93,10 @@ impl App {
     pub(crate) fn drain_mcp_pending(&mut self, ctx: &mut RunCtx) -> bool {
         let mut needs_draw = false;
         for req in std::mem::take(&mut ctx.mcp_pending) {
-            self.view.activity.live.mcp_reqs = self.view.activity.live.mcp_reqs.saturating_add(1);
+            // `mcp_reqs` is bumped per-tool in the `ToolCalled` arm (one is sent
+            // for every tools/call), so it's not counted here — that would
+            // double-count writable commands, which arrive as their own command
+            // *in addition to* a `ToolCalled`.
             let resp = self.execute_mcp_command(req.command);
             let _ = req.reply.send(resp);
             needs_draw = true;

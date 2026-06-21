@@ -175,6 +175,27 @@ fn tools_call_returns_context() {
     assert_eq!(inner["filter"], "*.rs");
 }
 
+/// Every `tools/call` forwards a fire-and-forget `ToolCalled{name}` down the
+/// command channel (when a live spyc is connected) so the `A` overlay can tally
+/// per-tool usage — even for read tools the socket thread serves inline.
+#[test]
+fn tools_call_forwards_tool_called_telemetry() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_spyc_context","arguments":{}}}).to_string(),
+        Path::new("/tmp"),
+        Some(&tx),
+    )
+    .unwrap();
+    let req = rx.try_recv().expect("a ToolCalled was forwarded");
+    match req.command {
+        McpCommand::ToolCalled { name } => assert_eq!(name, "get_spyc_context"),
+        other => panic!("expected ToolCalled, got {other:?}"),
+    }
+}
+
 #[test]
 fn unknown_resource_returns_error() {
     let mut output = Vec::new();

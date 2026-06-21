@@ -44,6 +44,12 @@ pub enum McpCommand {
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },
+    /// Fire-and-forget telemetry: an agent invoked the named MCP tool. Sent by
+    /// the socket dispatch for EVERY `tools/call` (read tools included, which
+    /// are otherwise served on the socket thread and never reach the main
+    /// loop), so the `A` overlay can show cumulative per-tool call counts. The
+    /// reply is ignored.
+    ToolCalled { name: String },
 }
 
 /// Response sent back to the MCP thread after command execution.

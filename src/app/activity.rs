@@ -68,6 +68,14 @@ pub struct ActivityMonitor {
     pub proc_rss_kb: u64,
     /// Cached thread count, refreshed once per 1 s tick.
     pub proc_threads: u32,
+    /// **Cumulative** per-tool MCP call counts (this session), keyed by tool
+    /// name. Bumped on every `tools/call` an agent makes (every call forwards a
+    /// `McpCommand::ToolCalled` down the socket → main loop), so it counts the
+    /// read tools served on the socket thread too, not just writable commands.
+    /// Rendered as the `A` overlay's extended MCP section. NOT part of the 1 Hz
+    /// `roll()` — it accumulates for the session. `BTreeMap` for a stable
+    /// (name-sorted) display order.
+    pub mcp_tool_calls: std::collections::BTreeMap<String, u64>,
 }
 
 impl ActivityMonitor {
@@ -82,6 +90,7 @@ impl ActivityMonitor {
             git_last_ms: 0,
             proc_rss_kb: 0,
             proc_threads: 0,
+            mcp_tool_calls: std::collections::BTreeMap::new(),
         }
     }
 

@@ -425,6 +425,19 @@ impl App {
                     message: "acknowledged".into(),
                 }
             }
+            McpCommand::ToolCalled { name } => {
+                // Telemetry only: bump the cumulative per-tool tally (for the `A`
+                // overlay) + the 1 Hz aggregate `mcp:N/s` rate. Sent for every
+                // tools/call (reads included), so this is the SOLE `mcp_reqs`
+                // bump — the writable commands no longer count themselves. No
+                // context write; the reply is discarded.
+                *self.view.activity.mcp_tool_calls.entry(name).or_insert(0) += 1;
+                self.view.activity.live.mcp_reqs =
+                    self.view.activity.live.mcp_reqs.saturating_add(1);
+                McpResponse::Ok {
+                    message: "ok".into(),
+                }
+            }
         }
     }
 }

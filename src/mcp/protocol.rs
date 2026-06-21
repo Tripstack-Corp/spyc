@@ -335,6 +335,23 @@ fn handle_tools_call(
     let name = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
 
+    // Telemetry: tell the live spyc which tool was called so the `A` overlay
+    // can tally per-tool usage. Fire-and-forget (dummy reply) and only when a
+    // command channel exists (i.e. served by a running TUI, not the read-only
+    // stdio fallback) — read tools serve on the socket thread and would
+    // otherwise be invisible to the main-loop counters.
+    if let Some(tx) = cmd_tx
+        && !name.is_empty()
+    {
+        let (reply_tx, _) = std::sync::mpsc::channel();
+        let _ = tx.send(McpRequest {
+            command: McpCommand::ToolCalled {
+                name: name.to_string(),
+            },
+            reply: reply_tx,
+        });
+    }
+
     match name {
         "get_spyc_context" => {
             let text = read_context_or_empty(ctx_path);

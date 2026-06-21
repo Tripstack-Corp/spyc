@@ -1578,6 +1578,29 @@ fn snapshot_context_announces_pid_and_version() {
     });
 }
 
+/// MCP telemetry: each `ToolCalled` bumps the cumulative per-tool tally the
+/// `A` overlay renders, plus the aggregate `mcp:N/s` rate. A read tool the
+/// socket thread serves still flows through here, so reads are counted too.
+#[test]
+fn mcp_tool_called_tallies_per_tool_counts() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        for name in ["search_content", "search_content", "navigate_to"] {
+            app.execute_mcp_command(crate::mcp_cmd::McpCommand::ToolCalled {
+                name: name.to_string(),
+            });
+        }
+        let calls = &app.view.activity.mcp_tool_calls;
+        assert_eq!(calls.get("search_content"), Some(&2), "per-tool count");
+        assert_eq!(calls.get("navigate_to"), Some(&1));
+        assert_eq!(
+            app.view.activity.live.mcp_reqs, 3,
+            "aggregate rate counts every tools/call"
+        );
+    });
+}
+
 /// MCP follows focus: with a second commander focused, the context snapshot
 /// the agent reads reports `b`'s cwd, and a mutating MCP command (set_filter)
 /// targets `b` — not the left/primary column. (PR F: MCP focus-aware.)
